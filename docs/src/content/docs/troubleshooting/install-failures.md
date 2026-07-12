@@ -110,7 +110,7 @@ For end-to-end auth setup see [Authentication](../getting-started/authentication
 [!] TLS verification failed
 ```
 
-Behind a corporate proxy, set `REQUESTS_CA_BUNDLE` to your org's CA bundle (PEM file). Full walkthrough: [SSL / TLS issues](./ssl-issues/).
+APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell override, set `REQUESTS_CA_BUNDLE` to a readable PEM bundle. Full walkthrough: [SSL / TLS issues](./ssl-issues/).
 
 ### Timeouts and proxies
 
@@ -219,6 +219,8 @@ apm install
 ```
 
 The cache short-circuits already-downloaded packages and the integrate phase overwrites partially-deployed files.
+
+If resolution rejects a cyclic dependency graph, fix the package manifests and run `apm install` again. APM rolls back only the package snapshots staged by the rejected resolution, so no manual `apm_modules/` deletion is required.
 
 If files in `apm_modules/` or under target harness directories look corrupt, force a fresh deploy by combining cache bypass with overwrite:
 

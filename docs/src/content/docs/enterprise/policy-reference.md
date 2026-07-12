@@ -100,7 +100,7 @@ Inherit from a parent policy. See [Inheritance](#inheritance).
 
 | Value | Source |
 |-------|--------|
-| `org` | Parent org's `.github/apm-policy.yml` |
+| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`) |
 | `owner/repo` | Cross-org policy from a specific repository |
 | `https://...` | Direct URL to a policy file |
 
@@ -614,7 +614,7 @@ The `--policy <override>` flag is **audit-only today** — it works on `apm audi
 
 Policy resolves through the chain documented in [Inheritance](#inheritance) above: enterprise hub -> org -> repo override. The merge is **tighten-only**: a child can narrow allow lists, add deny entries, and escalate enforcement, but never relax a parent constraint. The full merge rule table is in [Tighten-only merge rules](#tighten-only-merge-rules).
 
-Install-time enforcement and `apm audit --ci` both resolve the **full multi-level `extends:` chain** (enterprise hub -> org -> repo, or any depth up to `MAX_CHAIN_DEPTH = 5`). The walker fetches each parent via the same single-policy fetcher used for direct discovery, so caching, retries, and source-prefix handling are consistent across levels. Cycles (`A extends B`, `B extends A`) are detected by tracking visited refs and abort the walk with a clear error. If a parent fetch fails midway, APM merges the policies it already resolved and emits a `[!] Policy chain incomplete: <ref> unreachable, using <N> of <M> policies` warning so the operator learns that an upstream policy was unreachable.
+Install-time enforcement and `apm audit --ci` both resolve the **full multi-level `extends:` chain** (enterprise hub -> org -> repo, or any depth up to `MAX_CHAIN_DEPTH = 5`). The walker fetches each parent via the same single-policy fetcher used for direct discovery, so caching, retries, and source-prefix handling are consistent across levels. Cycles (`A extends B`, `B extends A`) abort the walk. If any parent is unreachable, APM rejects the incomplete chain instead of enforcing a weaker subset.
 
 ### 4. What gets enforced
 
@@ -943,7 +943,7 @@ All violation messages above flow through `InstallLogger.policy_violation`; unde
 
 Checklist to publish a policy:
 
-1. Create `<org>/.github/apm-policy.yml` in the org's `.github` repository.
+1. Create `<org>/.github-private/apm-policy.yml` (or `<org>/.github/apm-policy.yml`) in the org's policy repository.
 2. Start from the [Standard org policy](#standard-org-policy) example above and trim it to the minimum that reflects your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming repos for one cycle without breaking installs.
 4. When the warn-cycle is clean, switch to `enforcement: block`. Communicate the change in your org's CHANGELOG/announcements channel — `apm install` will start failing for any non-compliant repo.

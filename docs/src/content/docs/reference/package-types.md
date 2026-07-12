@@ -211,6 +211,13 @@ the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
 to cherry-pick plugin skills by leaf name or manifest path, such as
 `skills/productivity/grill-me`.
 
+Declared component paths are requirements, not hints. If an `agents`,
+`skills`, `commands`, or `hooks` entry is missing or escapes the plugin
+root, install exits non-zero before deployment or lockfile commit. Likewise,
+`--skill` exits non-zero when none of the manifest-declared skills match.
+Omit an optional field or use an empty list when the plugin has no component
+of that type.
+
 **When to choose:** you already have a Claude plugin and want APM to
 consume it without restructuring.
 

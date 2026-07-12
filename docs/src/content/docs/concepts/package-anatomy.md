@@ -29,7 +29,8 @@ name: my-pkg
 version: 1.0.0
 ```
 
-`name` and `version` are the only required fields.
+`name` and `version` are the only required fields. Both must be non-empty
+strings; quote a numeric version so YAML does not parse it as a number.
 `apm install` will validate the manifest, generate `apm.lock.yaml`, and
 deploy `hello` to whatever harnesses you target.
 
@@ -101,8 +102,8 @@ targets:
   - copilot
   - claude
 
-# Optional. "auto" auto-publishes every primitive under .apm/, or list
-# explicit repo paths to publish a subset.
+# Optional. "auto" publishes the authoritative local source layout, or list
+# explicit repo paths to define the complete publication set.
 includes: auto
 
 # Optional. Runtime dependencies, grouped by kind.

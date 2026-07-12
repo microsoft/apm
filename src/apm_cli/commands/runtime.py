@@ -6,6 +6,7 @@ import sys
 import click
 
 from ..core.command_logger import CommandLogger
+from ..runtime.registry import runtime_names
 from ..utils.console import (
     STATUS_SYMBOLS,
     _rich_panel,
@@ -23,7 +24,7 @@ def runtime():
 
 
 @runtime.command(help="Set up a runtime")
-@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm", "gemini"]))
+@click.argument("runtime_name", type=click.Choice(runtime_names()))
 @click.option("--version", help="Specific version to install")
 @click.option(
     "--vanilla",
@@ -119,7 +120,7 @@ def list():  # noqa: F811
 
 
 @runtime.command(help="Remove an installed runtime")
-@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm", "gemini"]))
+@click.argument("runtime_name", type=click.Choice(runtime_names()))
 @click.confirmation_option(
     "--yes",
     "-y",

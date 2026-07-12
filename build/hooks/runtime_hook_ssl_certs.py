@@ -32,6 +32,11 @@ def _configure_ssl_certs() -> None:
         ca_bundle = certifi.where()
         if os.path.isfile(ca_bundle):
             os.environ["SSL_CERT_FILE"] = ca_bundle
+            # Marker: record that WE set this default (vs a genuine user
+            # SSL_CERT_FILE). apm_cli.core.tls_trust reads this to know it may
+            # pop SSL_CERT_FILE before truststore injection so the OS store is
+            # used, restoring it only if injection fails (certifi fallback).
+            os.environ["APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT"] = "1"
     except Exception:
         # certifi unavailable or broken -- fall through to system defaults.
         pass

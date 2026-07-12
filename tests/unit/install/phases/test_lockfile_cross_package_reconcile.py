@@ -9,13 +9,14 @@ wrote this path" at the moment it ran. Without reconciliation, BOTH entries
 end up claiming ``deployed_files`` for a path only one of them actually
 owns on disk -- a lockfile integrity bug: a future ``apm uninstall`` or
 ``apm audit`` on the "losing" package would act on a file it does not
-control. See ``LockfileBuilder._reconcile_cross_package_deployed_files``.
+control. The claim decision belongs to ``DeploymentReconciler``.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
+from apm_cli.core.deployment_state import DeploymentReconciler
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
 
@@ -33,37 +34,41 @@ def _ctx(*, package_deployed_files, existing_lockfile=None, targets=None, projec
     )
 
 
+def _reconciled_current(package_deployed_files: dict[str, list[str]]) -> dict[str, list[str]]:
+    claims = DeploymentReconciler.reconcile_package_claims(
+        package_keys=package_deployed_files,
+        current_claims=package_deployed_files,
+        prior_files={},
+        prior_hashes={},
+    )
+    return {owner: list(claim.current_files) for owner, claim in claims.items()}
+
+
 class TestReconcileCrossPackageDeployedFiles:
-    def test_colliding_path_kept_only_on_last_writer(self, tmp_path) -> None:
+    def test_colliding_path_kept_only_on_last_writer(self) -> None:
         """Two dep_keys both report the same path; only the last (the actual
         on-disk owner, under sequential integration order) keeps it."""
         package_deployed_files = {
             "orga/shared-skill": [".claude/skills/shared-topic/SKILL.md"],
             "orgb/shared-skill": [".claude/skills/shared-topic/SKILL.md"],
         }
-        ctx = _ctx(package_deployed_files=package_deployed_files, project_root=tmp_path)
+        reconciled = _reconciled_current(package_deployed_files)
 
-        LockfileBuilder(ctx)._reconcile_cross_package_deployed_files()
+        assert reconciled["orga/shared-skill"] == []
+        assert reconciled["orgb/shared-skill"] == [".claude/skills/shared-topic/SKILL.md"]
 
-        assert package_deployed_files["orga/shared-skill"] == []
-        assert package_deployed_files["orgb/shared-skill"] == [
-            ".claude/skills/shared-topic/SKILL.md"
-        ]
-
-    def test_non_colliding_paths_are_untouched(self, tmp_path) -> None:
+    def test_non_colliding_paths_are_untouched(self) -> None:
         """Normal case: no two dep_keys share a path -- nothing is stripped."""
         package_deployed_files = {
             "orga/repo-a": [".claude/skills/topic-a/SKILL.md"],
             "orgb/repo-b": [".claude/skills/topic-b/SKILL.md"],
         }
-        ctx = _ctx(package_deployed_files=package_deployed_files, project_root=tmp_path)
+        reconciled = _reconciled_current(package_deployed_files)
 
-        LockfileBuilder(ctx)._reconcile_cross_package_deployed_files()
+        assert reconciled["orga/repo-a"] == [".claude/skills/topic-a/SKILL.md"]
+        assert reconciled["orgb/repo-b"] == [".claude/skills/topic-b/SKILL.md"]
 
-        assert package_deployed_files["orga/repo-a"] == [".claude/skills/topic-a/SKILL.md"]
-        assert package_deployed_files["orgb/repo-b"] == [".claude/skills/topic-b/SKILL.md"]
-
-    def test_partial_collision_only_strips_the_shared_path(self, tmp_path) -> None:
+    def test_partial_collision_only_strips_the_shared_path(self) -> None:
         """A dep_key with multiple deployed files only loses the ONE path
         another dep_key also claims -- its other files are untouched."""
         package_deployed_files = {
@@ -73,16 +78,10 @@ class TestReconcileCrossPackageDeployedFiles:
             ],
             "orgb/shared-skill": [".claude/skills/shared-topic/SKILL.md"],
         }
-        ctx = _ctx(package_deployed_files=package_deployed_files, project_root=tmp_path)
+        reconciled = _reconciled_current(package_deployed_files)
 
-        LockfileBuilder(ctx)._reconcile_cross_package_deployed_files()
-
-        assert package_deployed_files["orga/shared-skill"] == [
-            ".claude/skills/unique-to-a/SKILL.md"
-        ]
-        assert package_deployed_files["orgb/shared-skill"] == [
-            ".claude/skills/shared-topic/SKILL.md"
-        ]
+        assert reconciled["orga/shared-skill"] == [".claude/skills/unique-to-a/SKILL.md"]
+        assert reconciled["orgb/shared-skill"] == [".claude/skills/shared-topic/SKILL.md"]
 
     def test_attach_deployed_files_end_to_end_only_winner_recorded(self, tmp_path) -> None:
         """End-to-end through _attach_deployed_files: the lockfile entry for

@@ -20,6 +20,7 @@ Covers error/edge branches not exercised by the parallel-BFS test suite:
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -642,3 +643,80 @@ class TestTryLoadDependencyPackage:
         resolver = APMDependencyResolver(apm_modules_dir=mods, download_callback=legacy_cb)
         resolver._try_load_dependency_package(ref)
         assert len(call_log) == 1
+
+
+# ---------------------------------------------------------------------------
+# Anchored-local-path portability (committable, cross-machine lockfile)
+# ---------------------------------------------------------------------------
+
+
+class TestPortableAnchorIdentity:
+    """`_portable_anchor_identity` is the single owner of the identity string
+    persisted for a resolved transitive local dependency. That identity feeds
+    the lockfile `dependencies[].anchored_local_path` field and, via the
+    `local:` owner identity, the deployment-ledger owner rows. A lockfile is a
+    committed cross-machine artifact, so an in-project package MUST serialize
+    to a project-root-relative POSIX path -- never an absolute path carrying a
+    developer home directory, which would make a regenerated lockfile
+    non-portable and non-deterministic across machines and CI.
+    """
+
+    def test_in_project_dep_is_root_relative_posix(self, tmp_path: Path) -> None:
+        base = tmp_path / "proj"
+        anchored = base / "packages" / "child"
+        identity = APMDependencyResolver._portable_anchor_identity(anchored, base)
+        assert identity == "packages/child"
+        assert not Path(identity).is_absolute()
+        assert str(tmp_path) not in identity
+        assert "\\" not in identity
+
+    def test_nested_transitive_dep_is_root_relative(self, tmp_path: Path) -> None:
+        base = tmp_path / "proj"
+        anchored = base / "child" / "grandchild"
+        identity = APMDependencyResolver._portable_anchor_identity(anchored, base)
+        assert identity == "child/grandchild"
+
+    def test_out_of_project_dep_falls_back_to_absolute_posix(self, tmp_path: Path) -> None:
+        base = tmp_path / "proj"
+        base.mkdir()
+        outside = tmp_path / "elsewhere" / "pkg"
+        identity = APMDependencyResolver._portable_anchor_identity(outside, base)
+        # Out-of-project local deps cannot be committed portably; a stable
+        # absolute POSIX identity is the honest fallback, not a fabricated one.
+        assert identity == outside.resolve().as_posix()
+
+    def test_unknown_base_falls_back_to_absolute_posix(self, tmp_path: Path) -> None:
+        anchored = tmp_path / "child"
+        identity = APMDependencyResolver._portable_anchor_identity(anchored, None)
+        assert identity == anchored.resolve().as_posix()
+
+
+def _repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "apm.lock.yaml").exists() and (parent / "pyproject.toml").exists():
+            return parent
+    raise AssertionError("could not locate repo root with apm.lock.yaml")
+
+
+class TestCommittedLockfilePortability:
+    """The committed `apm.lock.yaml` is a cross-machine artifact. This guard
+    fails if any identity field ever regenerates with an absolute machine path
+    -- the exact regression the resolver anchoring fix prevents. It scans the
+    real committed lockfile, so it bites regardless of who regenerates it.
+    """
+
+    def test_no_absolute_anchor_or_owner_identity(self) -> None:
+        text = (_repo_root() / "apm.lock.yaml").read_text(encoding="utf-8")
+        # Absolute anchored_local_path (POSIX or Windows drive form).
+        assert not re.search(r"anchored_local_path:\s*(/|[A-Za-z]:\\)", text), (
+            "anchored_local_path leaked an absolute path into the committed lockfile"
+        )
+        # Absolute local: owner identity (declaring_parent + ledger owner rows).
+        assert "local:/" not in text, (
+            "an absolute local: owner identity leaked into the committed lockfile"
+        )
+        # No developer home directory prefix anywhere in the artifact.
+        assert "/Users/" not in text and "/home/" not in text, (
+            "a developer home directory leaked into the committed lockfile"
+        )

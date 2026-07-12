@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.atomic_io import write_text_lf
@@ -60,6 +61,7 @@ class SkillIntegrationResult:
     # layer can surface an actionable hint: "project_scope" | "no_claude_target".
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None  # All deployed directories (for deployed_files manifest)
+    materializations: tuple[MaterializationResult, ...] = ()
 
     def __post_init__(self):
         if self.target_paths is None:
@@ -616,6 +618,34 @@ class SkillIntegrator(BaseIntegrator):
             if leaf_name:
                 name_filter.add(leaf_name)
         return name_filter or None
+
+    @staticmethod
+    def available_skill_names(package_info) -> frozenset[str] | None:
+        """Return names selectable through ``--skill`` for one package."""
+        package_path = package_info.install_path
+        if (package_path / "SKILL.md").is_file():
+            return None
+
+        from apm_cli.models.validation import PackageType
+
+        normalized = package_path / ".apm" / "skills"
+        root_bundle = package_path / "skills"
+        if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
+            skills_dir = normalized
+        elif root_bundle.is_dir() and any(
+            (child / "SKILL.md").is_file() for child in root_bundle.iterdir() if child.is_dir()
+        ):
+            skills_dir = root_bundle
+        else:
+            skills_dir = normalized
+
+        if not skills_dir.is_dir():
+            return frozenset()
+        return frozenset(
+            child.name
+            for child in skills_dir.iterdir()
+            if child.is_dir() and (child / "SKILL.md").is_file()
+        )
 
     @staticmethod
     def _promote_sub_skills(

@@ -3,6 +3,8 @@
 Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 """
 
+# ruff: noqa: E402
+
 import ctypes
 import logging
 import os
@@ -10,6 +12,10 @@ import sys
 import warnings
 
 import click
+
+from apm_cli.core.tls_trust import configure_process_tls_trust, log_tls_trust_status
+
+configure_process_tls_trust()
 
 from apm_cli.commands._helpers import (
     ERROR,
@@ -64,6 +70,14 @@ _CLI_EPILOG = (
 )
 
 
+class _OutputModeGroup(click.Group):
+    """Capture full argv so root output mode precedes subcommand callbacks."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        ctx.meta["apm_raw_args"] = tuple(args)
+        return super().parse_args(ctx, args)
+
+
 def _configure_logging(verbose: bool = False) -> None:
     """Configure stdlib logging for the ``apm_cli`` package.
 
@@ -102,11 +116,17 @@ def _configure_logging(verbose: bool = False) -> None:
     # Install secret-redaction filter (idempotent: skip if already present).
     from apm_cli.core.auth import SecretRedactionFilter
 
-    if not any(isinstance(f, SecretRedactionFilter) for f in apm_logger.filters):
-        apm_logger.addFilter(SecretRedactionFilter())
+    handlers = {
+        *logging.getLogger().handlers,
+        *apm_logger.handlers,
+    }
+    for handler in handlers:
+        if not any(isinstance(f, SecretRedactionFilter) for f in handler.filters):
+            handler.addFilter(SecretRedactionFilter())
 
 
 @click.group(
+    cls=_OutputModeGroup,
     help="Agent Package Manager (APM): The package manager for AI-Native Development",
     epilog=_CLI_EPILOG,
 )
@@ -130,10 +150,16 @@ def cli(ctx, verbose: bool) -> None:
     """Main entry point for the APM CLI."""
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
+    from apm_cli.core.output_mode import configure_output_mode, detect_output_mode
+
+    output_mode = detect_output_mode(ctx.meta.get("apm_raw_args", sys.argv[1:]))
+    configure_output_mode(output_mode)
+    ctx.obj["output_mode"] = output_mode
 
     if verbose:
         # Upgrade to DEBUG when the flag is set; env-var path runs in main().
         _configure_logging(verbose=True)
+    log_tls_trust_status()
 
     # Suppress only the agents-target deprecation warning so CLI users see
     # the formatted logger.warning() in the install phase, not a double print.
@@ -333,6 +359,7 @@ def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
+    configure_process_tls_trust()
     try:
         cli(obj={})
     except Exception as e:

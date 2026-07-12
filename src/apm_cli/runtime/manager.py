@@ -3,6 +3,7 @@ Runtime management functionality for APM CLI.
 Handles installation, configuration, and management of AI runtimes.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -13,7 +14,11 @@ from pathlib import Path
 import click
 from colorama import Fore, Style
 
+from ..core.tls_trust import build_child_tls_env, ensure_child_tls_bootstrap
 from ..core.token_manager import setup_runtime_environment
+from .registry import get_runtime_descriptor, runtime_descriptors
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeManager:
@@ -27,26 +32,12 @@ class RuntimeManager:
         self.runtime_dir = Path.home() / ".apm" / "runtimes"
         ext = ".ps1" if sys.platform == "win32" else ".sh"
         self.supported_runtimes = {
-            "copilot": {
-                "script": f"setup-copilot{ext}",
-                "description": "GitHub Copilot CLI with native MCP integration",
-                "binary": "copilot",
-            },
-            "codex": {
-                "script": f"setup-codex{ext}",
-                "description": "OpenAI Codex CLI with GitHub Models support",
-                "binary": "codex",
-            },
-            "llm": {
-                "script": f"setup-llm{ext}",
-                "description": "Simon Willison's LLM library with multiple providers",
-                "binary": "llm",
-            },
-            "gemini": {
-                "script": f"setup-gemini{ext}",
-                "description": "Google Gemini CLI with MCP integration",
-                "binary": "gemini",
-            },
+            descriptor.name: {
+                "script": f"{descriptor.setup_script}{ext}",
+                "description": descriptor.description,
+                "binary": descriptor.binary,
+            }
+            for descriptor in runtime_descriptors()
         }
 
     def get_embedded_script(self, script_name: str) -> str:
@@ -184,6 +175,10 @@ class RuntimeManager:
                 # Setup GitHub tokens using centralized manager
                 env = setup_runtime_environment(env)  # Pass env to preserve CI tokens
 
+                # Wire OS-trust child shim so the setup subprocess (and any
+                # Python runtime it spawns) verifies HTTPS against the OS store.
+                env = build_child_tls_env(env)
+
                 result = subprocess.run(
                     cmd,
                     cwd=temp_dir,
@@ -249,6 +244,14 @@ class RuntimeManager:
             success = self.run_embedded_script(script_content, common_content, script_args)
 
             if success:
+                # Deliver the self-contained OS-trust bootstrap into the llm
+                # runtime venv so its interpreter (which has neither apm_cli nor
+                # truststore on PYTHONPATH) verifies HTTPS against the OS store.
+                # Done in Python -- not the shell script -- so the shipped
+                # bootstrap files resolve identically for source and frozen apm.
+                if runtime_name == "llm":
+                    self._install_llm_tls_bootstrap()
+
                 click.echo(
                     f"{Fore.GREEN}[+] Successfully set up {runtime_name} runtime{Style.RESET_ALL}"
                 )
@@ -265,6 +268,28 @@ class RuntimeManager:
                 f"{Fore.RED}[x] Error setting up {runtime_name}: {e}{Style.RESET_ALL}", err=True
             )
             return False
+
+    def _install_llm_tls_bootstrap(self) -> None:
+        """Drop the OS-trust bootstrap into the llm runtime venv (best-effort).
+
+        The llm venv is created by ``setup-llm.sh`` with ``truststore``
+        installed; this generates the ``.pth`` and copies the bootstrap module
+        into its site-packages so the child interpreter injects the OS trust
+        store at startup. Silent and non-fatal -- a bootstrap failure must not
+        fail runtime setup.
+        """
+        venv_path = self.runtime_dir / "llm-venv"
+        try:
+            if not ensure_child_tls_bootstrap(venv_path):
+                click.echo(
+                    f"{Fore.YELLOW}[!]  Could not install OS-trust bootstrap into the llm venv; "
+                    "use Python 3.10+ or set PIP_CERT to your proxy CA bundle, then re-run "
+                    "`apm runtime setup llm`. See: "
+                    "https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+                    f"{Style.RESET_ALL}"
+                )
+        except Exception as exc:
+            logger.debug("TLS bootstrap installation raised unexpectedly: %s", exc)
 
     def list_runtimes(self) -> dict[str, dict[str, str]]:
         """List available and installed runtimes."""
@@ -327,15 +352,11 @@ class RuntimeManager:
             click.echo(f"{Fore.RED}[x] Unknown runtime: {runtime_name}{Style.RESET_ALL}", err=True)
             return False
 
-        # Handle npm-based runtimes (copilot, gemini)
-        _npm_packages = {
-            "copilot": "@github/copilot",
-            "gemini": "@google/gemini-cli",
-        }
-        if runtime_name in _npm_packages:
+        descriptor = get_runtime_descriptor(runtime_name)
+        if descriptor.npm_package:
             try:
                 result = subprocess.run(
-                    ["npm", "uninstall", "-g", _npm_packages[runtime_name]],
+                    ["npm", "uninstall", "-g", descriptor.npm_package],
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
@@ -392,7 +413,7 @@ class RuntimeManager:
 
     def get_runtime_preference(self) -> list[str]:
         """Get the runtime preference order."""
-        return ["copilot", "codex", "gemini", "llm"]
+        return [descriptor.name for descriptor in runtime_descriptors()]
 
     def get_available_runtime(self) -> str | None:
         """Get the first available runtime based on preference."""

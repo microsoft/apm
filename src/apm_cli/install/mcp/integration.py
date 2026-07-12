@@ -21,6 +21,8 @@ def run_mcp_integration(  # noqa: PLR0913
     old_mcp_servers: builtins.set,
     old_mcp_configs: builtins.dict,
     old_mcp_provenance: builtins.dict,
+    old_mcp_target_servers: builtins.dict | None = None,
+    old_mcp_target_servers_present: bool = True,
     project_root: Path,
     user_scope: bool,
     should_install: bool,
@@ -54,6 +56,7 @@ def run_mcp_integration(  # noqa: PLR0913
         old_mcp_configs: MCP server configs from the lockfile before this run.
         old_mcp_provenance: Transitive MCP provenance from the lockfile before
             this run.
+        old_mcp_target_servers: APM-owned server names previously written per target.
         project_root: Project root directory.
         user_scope: If True, write to user-scope runtime config paths.
         should_install: Whether MCP integration should run.
@@ -79,20 +82,26 @@ def run_mcp_integration(  # noqa: PLR0913
             report the violation, and exit non-zero; already-installed APM
             packages are left in place.
     """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.policy.install_preflight import run_policy_preflight
 
-    # Collect transitive MCP deps from installed packages
-    if should_install and apm_modules_path.exists():
-        transitive_mcp = MCPIntegrator.collect_transitive(
+    current_view = None
+    if should_install:
+        lockfile = LockFile.read(lock_path) if lock_path.exists() else None
+        current_view = CurrentMcpConfigView.derive(
+            apm_package,
+            lockfile,
             apm_modules_path,
-            lock_path,
-            trust_transitive_mcp,
+            trust_transitive_self_defined=trust_transitive_mcp,
             diagnostics=diagnostics,
         )
-        if transitive_mcp:
-            logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
-            mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
+        root_count = len(apm_package.get_all_mcp_dependencies())
+        transitive_count = max(0, len(current_view.dependencies) - root_count)
+        if transitive_count:
+            logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
+        mcp_deps = list(current_view.dependencies)
 
     # allowExecutables MCP gate.
     from apm_cli.security.executables import filter_mcp_by_allow_executables
@@ -120,20 +129,25 @@ def run_mcp_integration(  # noqa: PLR0913
 
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
-    # Forward only the targets-key the user actually declared so parse_targets_field
-    # in the gate sees the same dict shape it sees from raw apm.yml. Including a
-    # `targets: None` placeholder when the user wrote `target:` (singular) would
-    # falsely trip the conflict-mutex check (see core.apm_yml.parse_targets_field).
-    # This restores parity with `apm install` for users on the modern `targets:`
-    # plural form -- without this, `targets:` was silently dropped at the call
-    # site and the gate fell back to permissive directory detection (#1335).
     mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
-    if apm_package.targets is not None:
-        mcp_apm_config["targets"] = apm_package.targets
-    elif apm_package.target is not None:
-        mcp_apm_config["target"] = apm_package.target
+    from apm_cli.models.apm_package import canonical_package_target_config
+
+    mcp_apm_config.update(canonical_package_target_config(apm_package))
 
     if should_install and mcp_deps:
+        old_mcp_target_servers = old_mcp_target_servers or {}
+        if not old_mcp_target_servers_present and old_mcp_servers and old_mcp_configs:
+            from apm_cli.install.mcp.ownership import adopt_legacy_mcp_target_servers
+
+            old_mcp_target_servers = adopt_legacy_mcp_target_servers(
+                server_names=builtins.set(old_mcp_servers),
+                stored_configs=old_mcp_configs,
+                project_root=project_root,
+                user_scope=user_scope,
+            )
+        managed_target_servers = {
+            target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
+        }
         mcp_count = MCPIntegrator.install(
             mcp_deps,
             runtime,
@@ -146,10 +160,22 @@ def run_mcp_integration(  # noqa: PLR0913
             explicit_target=explicit_target,
             diagnostics=diagnostics,
             scope=scope,
+            managed_target_servers=managed_target_servers,
         )
         new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
-        new_mcp_configs = MCPIntegrator.get_server_configs(mcp_deps)
-        new_mcp_provenance = MCPIntegrator.get_server_provenance(mcp_deps)
+        new_mcp_configs = dict(current_view.configs) if current_view is not None else {}
+        new_mcp_provenance = dict(current_view.provenance) if current_view is not None else {}
+
+        for removed_target in sorted(
+            builtins.set(old_mcp_target_servers) - builtins.set(managed_target_servers)
+        ):
+            MCPIntegrator.remove_stale(
+                builtins.set(old_mcp_target_servers[removed_target]),
+                runtime=removed_target,
+                project_root=project_root,
+                user_scope=user_scope,
+                scope=scope,
+            )
 
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers
@@ -168,6 +194,7 @@ def run_mcp_integration(  # noqa: PLR0913
             new_mcp_servers,
             lock_path,
             mcp_configs=new_mcp_configs,
+            mcp_target_servers=managed_target_servers,
             mcp_config_provenance=new_mcp_provenance,
         )
     elif should_install and not mcp_deps:
@@ -182,7 +209,11 @@ def run_mcp_integration(  # noqa: PLR0913
                 scope=scope,
             )
             MCPIntegrator.update_lockfile(
-                builtins.set(), lock_path, mcp_configs={}, mcp_config_provenance={}
+                builtins.set(),
+                lock_path,
+                mcp_configs={},
+                mcp_target_servers={},
+                mcp_config_provenance={},
             )
         logger.verbose_detail("No MCP dependencies found in apm.yml")
     elif not should_install and old_mcp_servers:
@@ -192,6 +223,7 @@ def run_mcp_integration(  # noqa: PLR0913
             old_mcp_servers,
             lock_path,
             mcp_configs=old_mcp_configs,
+            mcp_target_servers=old_mcp_target_servers,
             mcp_config_provenance=old_mcp_provenance,
         )
 

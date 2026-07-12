@@ -6,15 +6,86 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-  
+
 ### Fixed
 
-- Fresh checkouts with declared consumer targets no longer remain
-  `apm audit --ci`-red for files those targets cannot restore: `apm install`
-  now removes stale `deployed_files` entries outside the legitimate target
-  set. The [OpenAPM v0.1 specification](docs/src/content/docs/specs/openapm-v0.1.md)
-  now defines the same fail-safe reconciliation contract. (by @edenfunf;
-  closes #2059) (#2114)
+- `apm update` now re-checks a transitive dependency's own semver range
+  against the remote at any depth, not just for direct dependencies.
+  Previously, `download_callback` only ran for a dependency whose install
+  path didn't already exist, so a transitive dependency already present on
+  disk (e.g. `pkg1 -> pkg2 -> pkg3`, all constrained by `^1.0.0`) never had
+  its own range re-evaluated -- publishing a new matching version of `pkg3`
+  was silently ignored by `apm update` in `pkg1` even though `pkg2`'s
+  manifest allowed it. (by @nadav-y)
+  
+### Added
+
+- Corporate proxy and internal-CA users can now use Python-based APM HTTPS paths
+  without per-shell TLS setup. APM verifies against the OS trust store through
+  `truststore` for `apm install`, the Python `llm` child runtime, and the frozen
+  binary, with `certifi` as fallback. `REQUESTS_CA_BUNDLE` /
+  `CURL_CA_BUNDLE` still wins, and `APM_DISABLE_TRUSTSTORE=1` restores
+  certifi-only behavior. Node (Copilot) and Rust (Codex) children are not yet covered
+  and retain their own trust configuration; tracked in #2034.
+  (closes #2004) (#2005)
+
+## [0.25.0] - 2026-07-12
+
+### Added
+
+- The Contributor Dashboard now includes triaged-issue views, inline comments,
+  bulk pull-request actions, and direct navigation to active Copilot sessions.
+  (by @sergio-sisternes-epam, #2043)
+- GitHub policy discovery now checks `.github-private` before `.github`, so
+  organizations can keep `apm-policy.yml` private without changing existing
+  fallbacks. (by @sergio-sisternes-epam, #2058)
+
+### Changed
+
+- `apm compile --target`, compile help and errors, and `apm init --target`
+  now use one canonical target catalog, so every advertised target is accepted
+  consistently. (closes #2138, #2147; #2155)
+- Generated hooks now use canonical upstream contracts: Claude matcher/hooks
+  nesting, Kiro v1 schema, Copilot's required top-level version, and provenance
+  outside vendor payloads. (closes #2062, #2071, #2128, #2157; #2155)
+- Homebrew formula updates now use the tap's daily poller instead of an obsolete
+  PAT-backed dispatch, restoring release propagation without cross-repository
+  credentials. (#2088)
+
+### Fixed
+
+- `apm install` now fails before commit when declared plugin components or a
+  requested `--skill` are missing, and total positional-URL failure exits `1`.
+  (closes #2103, #2116, #2126; #2155)
+- Failed global Claude installs now clean up bootstrap state, corrected cyclic
+  dependency graphs resume without deleting `apm_modules`, and exception output
+  routes through the command logger. (closes #2129, #2140, #2161; #2155)
+- `apm audit --ci` now detects both changed and removed MCP declarations from
+  local-path sub-packages. (closes #2127, #2136; #2155)
+- Contracting the target set now reconciles `deployed_files`, removes
+  APM-managed MCP servers from dropped targets, and safely adopts exact matches
+  from legacy lockfiles. (closes #2139, #2149, #2158; #2155)
+- Manifest and policy parsers now reject invalid identity values and unknown
+  policy keys. Migration: quote numeric manifest versions and use the declared
+  mapping/list types for policy blocks. (closes #2137; #2155)
+- `apm compile --clean` now removes the stale context artifact when the final
+  primitive is removed. (closes #2130; #2155)
+- `apm uninstall` now transfers shared deployed-file ownership to a surviving
+  package and persists deployment state atomically. (closes #2148, #2160; #2155)
+- Semver install and update now preserve Azure DevOps bearer authentication and
+  retry a stale PAT `401` with the Azure CLI bearer. (closes #2150, #2156; #2155)
+- `apm prune` and `apm deps list` now treat nested `apm.yml` files as part of
+  their installed parent package instead of exposing or deleting them as
+  top-level orphans. (#2092)
+- `apm pack` now selects `.apm/` as the authoritative source only when it exists,
+  preserves root plugin directories after `apm init`, and fails closed on invalid
+  explicit `includes:` paths. (#2122)
+- Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
+  and pass Azure CLI bearer authentication through to `git ls-remote`.
+  (closes #2119, #2121)
+- `apm install` now removes stale deployment records for inactive targets, so
+  fresh checkouts can return `apm audit --ci` to green. (by @edenfunf, closes
+  #2059, #2114)
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
   (by @sergio-sisternes-epam; closes #1957) (#2041)
@@ -24,6 +95,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve `apm` without `cmd.exe` PATHEXT expansion. (closes #2076) (#2094)
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
+  (by @sergio-sisternes-epam, closes #1957, #2041)
+
+### Performance
+
+- Deployment-ledger reconciliation now uses indexed mutation paths, avoiding
+  quadratic scans as deployment history grows. (closes #2159; #2155)
+- Dependency lookup, HTTP cache enforcement, marketplace ref selection, and
+  host classification now use indexed or cached paths, avoiding repeated linear
+  scans at scale. (by @sergio-sisternes-epam, #2124)
 
 ## [0.24.1] - 2026-07-10
 

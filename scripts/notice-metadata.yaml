@@ -288,3 +288,9 @@ components:
     spdx: BSD-3-Clause
     copyright_snippet: Copyright (c) Aymeric Augustin and contributors
     notes: Used by the copilot-app integrator to nudge the Copilot desktop App over its local WebSocket IPC channel after writing workflows to the App DB.
+  - name: truststore
+    pyproject_name: truststore
+    upstream: https://github.com/sethmlarson/truststore
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2022 Seth Michael Larson
+    notes: Verifies HTTPS against the operating-system trust store by default so `apm` works behind a corporate CA / TLS-inspecting proxy.

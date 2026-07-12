@@ -3,13 +3,14 @@
 Discovery flow:
 1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
 2. Determine host profile (default or ado) to select candidate repos
-3. Try candidate repos in precedence order (.github > .apm > _apm)
+3. Try candidate repos in precedence order (.github-private > .github > .apm > _apm)
 4. Fetch apm-policy.yml via GitHub Contents API or ADO Items API
 5. Resolve inheritance chain via resolve_policy_chain
 6. Cache the **merged effective policy** with chain metadata
 7. Parse and return ApmPolicy
 
 Candidate repo precedence:
+- .github-private -- private org-wide config (preferred; skipped on ADO)
 - .github  -- GitHub convention (skipped on ADO)
 - .apm     -- cross-platform convention (skipped on ADO)
 - _apm     -- universal fallback (valid on every git host)
@@ -68,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 # Candidate repo names in precedence order (first valid policy wins).
 # Host profiles select which candidates are valid for a given git host.
-_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github", ".apm", "_apm")
+_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
 _ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
 
 # ADO project name for the policy repo (ADO requires a project container).
@@ -196,7 +197,7 @@ def _verify_hash_pin(
 POLICY_CACHE_DIR = ".policy-cache"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "3"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "4"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -229,6 +230,7 @@ class PolicyFetchResult:
     cache_stale: bool = False  # True if cache was served past TTL
     fetch_error: str | None = None  # Network/parse error on refresh attempt
     outcome: str = ""  # See docstring for valid values
+    warnings: list[str] = field(default_factory=list)
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
@@ -246,6 +248,8 @@ def discover_policy_with_chain(
     project_root: Path,
     *,
     expected_hash: str | None = None,
+    policy_override: str | None = None,
+    no_cache: bool = False,
 ) -> PolicyFetchResult:
     """Discover policy with full inheritance chain resolution.
 
@@ -306,7 +310,12 @@ def discover_policy_with_chain(
             expected_hash = pin.normalized
 
     # -- Base discovery ------------------------------------------------
-    fetch_result = discover_policy(project_root, expected_hash=expected_hash)
+    fetch_result = discover_policy(
+        project_root,
+        policy_override=policy_override,
+        no_cache=no_cache,
+        expected_hash=expected_hash,
+    )
 
     # -- Chain resolution if leaf has extends: -------------------------
     if (
@@ -443,15 +452,13 @@ def _resolve_and_persist_chain(
     refs and ``MAX_CHAIN_DEPTH`` enforcement protect against runaway or
     self-referential chains.
 
-    Partial-chain policy: if any parent fetch fails, emit a warning via
-    ``_rich_warning`` and merge whatever was resolved so far -- never
-    silently drop ancestors.
+    If any parent fetch fails, mark the chain incomplete and clear the
+    partial policy so enforcement cannot proceed with weaker constraints.
 
     Mutates *fetch_result*.policy in-place with the merged effective policy.
     Called by :func:`discover_policy_with_chain` -- not intended for direct
     use.
     """
-    from ..utils.console import _rich_warning
     from . import inheritance as _inheritance_mod
 
     leaf_policy = fetch_result.policy
@@ -473,7 +480,7 @@ def _resolve_and_persist_chain(
     visited: list[str] = [_strip_source_prefix(leaf_source)] if leaf_source else []
 
     current = leaf_policy
-    partial_warning: tuple[str, int, int] | None = None
+    incomplete_chain: tuple[str, int, int] | None = None
 
     while current.extends:
         next_ref = current.extends
@@ -502,12 +509,13 @@ def _resolve_and_persist_chain(
             policy_override=next_ref,
             no_cache=False,
         )
+        fetch_result.warnings.extend(parent_result.warnings)
 
         if parent_result.policy is None:
-            # Parent fetch failed -- merge what we have so far and warn.
+            # Parent fetch failed -- never enforce the weaker partial chain.
             attempted = len(chain_policies) + 1
             resolved = len(chain_policies)
-            partial_warning = (next_ref, resolved, attempted)
+            incomplete_chain = (next_ref, resolved, attempted)
             break
 
         chain_policies.append(parent_result.policy)
@@ -517,13 +525,14 @@ def _resolve_and_persist_chain(
 
     # No actual ancestors fetched -- nothing to merge or re-cache.
     if len(chain_policies) == 1:
-        if partial_warning is not None:
-            ref, resolved, attempted = partial_warning
-            _rich_warning(
-                f"Policy chain incomplete: {ref} unreachable, "
-                f"using {resolved} of {attempted} policies",
-                symbol="warning",
+        if incomplete_chain is not None:
+            ref, resolved, attempted = incomplete_chain
+            fetch_result.outcome = "incomplete_chain"
+            fetch_result.error = (
+                f"Policy chain incomplete: {ref} unreachable "
+                f"({resolved} of {attempted} policies resolved)"
             )
+            fetch_result.policy = None
         return
 
     # Merge in [root, ..., leaf] order.  We collected leaf-first, so reverse.
@@ -540,17 +549,26 @@ def _resolve_and_persist_chain(
     chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
 
     cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
-    if cache_key:
-        _write_cache(cache_key, merged, project_root, chain_refs=chain_refs)
+    if cache_key and incomplete_chain is None:
+        _write_cache(
+            cache_key,
+            merged,
+            project_root,
+            chain_refs=chain_refs,
+            warnings=fetch_result.warnings,
+        )
+
+    if incomplete_chain is not None:
+        ref, resolved, attempted = incomplete_chain
+        fetch_result.outcome = "incomplete_chain"
+        fetch_result.error = (
+            f"Policy chain incomplete: {ref} unreachable "
+            f"({resolved} of {attempted} policies resolved)"
+        )
+        fetch_result.policy = None
+        return
 
     fetch_result.policy = merged
-
-    if partial_warning is not None:
-        ref, resolved, attempted = partial_warning
-        _rich_warning(
-            f"Policy chain incomplete: {ref} unreachable, using {resolved} of {attempted} policies",
-            symbol="warning",
-        )
 
 
 def discover_policy(
@@ -628,7 +646,7 @@ def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFe
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
         outcome = "empty" if _is_policy_empty(policy) else "found"
         actual_hash = (
             _compute_hash_normalized(content, expected_hash) if expected_hash is not None else None
@@ -639,9 +657,14 @@ def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFe
             outcome=outcome,
             raw_bytes_hash=actual_hash,
             expected_hash=expected_hash,
+            warnings=warnings,
         )
     except PolicyValidationError as e:
-        return PolicyFetchResult(error=f"Invalid policy file {path}: {e}", outcome="malformed")
+        return PolicyFetchResult(
+            error=f"Invalid policy file {path}: {e}",
+            outcome="malformed",
+            warnings=e.warnings,
+        )
 
 
 def _auto_discover(
@@ -655,7 +678,7 @@ def _auto_discover(
     1. Run git remote get-url origin
     2. Parse org + host from URL
     3. Select host profile to determine candidate repos
-    4. Try each candidate in precedence order (.github > .apm > _apm)
+    4. Try each candidate in precedence order (.github-private > .github > .apm > _apm)
        - 404/absent -> continue to next candidate
        - Error (auth, timeout, malformed) -> fail-closed immediately
        - Found -> return (first match wins)
@@ -699,6 +722,17 @@ def _auto_discover(
                 candidate_repo,
                 host,
             )
+            # Warn when .github-private is absent on a GitHub host -- GitHub
+            # returns 404 (not 403) when the token lacks private-repo scope,
+            # so an absent result may mask a token-permission problem.
+            if candidate_repo == ".github-private" and _is_github_host(host):
+                logger.warning(
+                    "Policy repo %s/%s not found (or token lacks private-repo "
+                    "read scope). If your org publishes policy in .github-private, "
+                    "ensure the token has Contents:read permission on that repo.",
+                    org,
+                    candidate_repo,
+                )
             continue
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
@@ -811,6 +845,7 @@ def _fetch_from_url(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
 
     fetch_error: str | None = None
@@ -860,12 +895,13 @@ def _fetch_from_url(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy from {url}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [url]
@@ -876,6 +912,7 @@ def _fetch_from_url(
         project_root,
         chain_refs=chain_refs,
         raw_bytes_hash=actual_hash,
+        warnings=warnings,
     )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -884,6 +921,7 @@ def _fetch_from_url(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -913,6 +951,7 @@ def _fetch_from_repo(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
 
     content, error = _fetch_github_contents(repo_ref, "apm-policy.yml")
@@ -938,12 +977,13 @@ def _fetch_from_repo(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy in {repo_ref}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [repo_ref]
@@ -954,6 +994,7 @@ def _fetch_from_repo(
         project_root,
         chain_refs=chain_refs,
         raw_bytes_hash=actual_hash,
+        warnings=warnings,
     )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -962,6 +1003,7 @@ def _fetch_from_repo(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -1063,6 +1105,7 @@ def _fetch_from_ado_repo(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
 
     content, error = _fetch_ado_contents(org, project, repo, "apm-policy.yml", host=host)
@@ -1084,12 +1127,13 @@ def _fetch_from_ado_repo(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy in {repo_ref}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [repo_ref]
@@ -1100,6 +1144,7 @@ def _fetch_from_ado_repo(
         project_root,
         chain_refs=chain_refs,
         raw_bytes_hash=actual_hash,
+        warnings=warnings,
     )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1108,6 +1153,7 @@ def _fetch_from_ado_repo(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -1211,6 +1257,7 @@ class _CacheEntry:
     age_seconds: int
     stale: bool  # True if past TTL (but within MAX_STALE_TTL)
     chain_refs: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     fingerprint: str = ""
     raw_bytes_hash: str = ""  # "<algo>:<hex>" of leaf bytes off wire (#827)
 
@@ -1350,6 +1397,7 @@ def _stale_fallback_or_error(
             cache_age_seconds=cache_entry.age_seconds,
             fetch_error=fetch_error_msg,
             outcome="cached_stale",
+            warnings=cache_entry.warnings,
         )
     return PolicyFetchResult(
         error=fetch_error_msg,
@@ -1386,6 +1434,7 @@ def _detect_garbage(
                 cache_age_seconds=cache_entry.age_seconds,
                 fetch_error=msg,
                 outcome="cached_stale",
+                warnings=cache_entry.warnings,
             )
         return PolicyFetchResult(
             error=msg + " (possible captive portal or redirect)",
@@ -1405,6 +1454,7 @@ def _detect_garbage(
                 cache_age_seconds=cache_entry.age_seconds,
                 fetch_error=msg,
                 outcome="cached_stale",
+                warnings=cache_entry.warnings,
             )
         return PolicyFetchResult(
             error=msg,
@@ -1473,6 +1523,11 @@ def _read_cache_entry(
                 return None
 
         policy, _warnings = load_policy(policy_file)
+        cached_warnings = meta.get("warnings", [])
+        if not isinstance(cached_warnings, list):
+            cached_warnings = []
+        else:
+            cached_warnings = [str(warning) for warning in cached_warnings]
 
         # Determine source label
         if repo_ref.startswith("http://") or repo_ref.startswith("https://"):
@@ -1486,6 +1541,7 @@ def _read_cache_entry(
             age_seconds=age,
             stale=age > ttl,
             chain_refs=meta.get("chain_refs", [repo_ref]),
+            warnings=cached_warnings,
             fingerprint=meta.get("fingerprint", ""),
             raw_bytes_hash=raw_bytes_hash,
         )
@@ -1513,6 +1569,7 @@ def _read_cache(
         cached=True,
         cache_age_seconds=entry.age_seconds,
         outcome=outcome,
+        warnings=entry.warnings,
     )
 
 
@@ -1523,6 +1580,7 @@ def _write_cache(
     *,
     chain_refs: list[str] | None = None,
     raw_bytes_hash: str | None = None,
+    warnings: list[str] | None = None,
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
@@ -1566,6 +1624,7 @@ def _write_cache(
         "repo_ref": repo_ref,
         "cached_at": time.time(),
         "chain_refs": chain_refs if chain_refs is not None else [repo_ref],
+        "warnings": warnings or [],
         "schema_version": CACHE_SCHEMA_VERSION,
         "fingerprint": fingerprint,
         "raw_bytes_hash": raw_bytes_hash or "",

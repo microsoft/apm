@@ -3,20 +3,22 @@
 from typing import Any
 
 from .base import RuntimeAdapter
-from .codex_runtime import CodexRuntime
-from .copilot_runtime import CopilotRuntime
-from .llm_runtime import LLMRuntime
+from .registry import adapter_descriptors
 
 
 class RuntimeFactory:
     """Factory for creating runtime adapters with auto-detection."""
 
-    # Registry of available runtime adapters in order of preference
+    # Compatibility projection for callers that patch the old test seam.
+    # The canonical authority is runtime.registry.RUNTIME_DESCRIPTORS.
     _RUNTIME_ADAPTERS: list[type[RuntimeAdapter]] = [  # noqa: RUF012
-        CopilotRuntime,  # Prefer Copilot CLI for its native MCP and advanced features
-        CodexRuntime,  # Fallback to Codex for its native MCP support
-        LLMRuntime,  # Final fallback to LLM library
+        descriptor.adapter for descriptor in adapter_descriptors() if descriptor.adapter is not None
     ]
+
+    @classmethod
+    def adapter_classes(cls) -> tuple[type[RuntimeAdapter], ...]:
+        """Return runtime adapters in canonical preference order."""
+        return tuple(cls._RUNTIME_ADAPTERS)
 
     @classmethod
     def get_available_runtimes(cls) -> list[dict[str, Any]]:
@@ -27,7 +29,7 @@ class RuntimeFactory:
         """
         available = []
 
-        for adapter_class in cls._RUNTIME_ADAPTERS:
+        for adapter_class in cls.adapter_classes():
             if adapter_class.is_available():
                 try:
                     # Create a temporary instance to get runtime info
@@ -63,7 +65,7 @@ class RuntimeFactory:
         Raises:
             ValueError: If runtime not found or not available
         """
-        for adapter_class in cls._RUNTIME_ADAPTERS:
+        for adapter_class in cls.adapter_classes():
             if adapter_class.get_runtime_name() == runtime_name:
                 if not adapter_class.is_available():
                     raise ValueError(f"Runtime '{runtime_name}' is not available on this system")
@@ -88,7 +90,7 @@ class RuntimeFactory:
         Raises:
             RuntimeError: If no runtimes are available
         """
-        for adapter_class in cls._RUNTIME_ADAPTERS:
+        for adapter_class in cls.adapter_classes():
             if adapter_class.is_available():
                 try:
                     if model_name:

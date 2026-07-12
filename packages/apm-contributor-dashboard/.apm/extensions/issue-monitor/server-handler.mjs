@@ -19,6 +19,24 @@ function sanitizeForPrompt(str) {
     return str.replace(/[`<>]/g, "").slice(0, 200);
 }
 
+// Validate that a model identifier is safe for interpolation inside a double-quoted string.
+// Accepts alphanumeric chars, dots, dashes, underscores, forward slashes, and colons --
+// covering IDs like "claude-opus-4.6", "org/model:tag", "gpt-5.4-mini".
+// Rejects anything containing whitespace, quotes, or other shell-significant characters.
+// Returns empty string for any value that does not match, suppressing the model clause.
+function sanitizeModel(str) {
+    if (typeof str !== "string" || !str) return "";
+    return /^[\w.\-/:]{1,100}$/.test(str) ? str : "";
+}
+
+// Validate that a value is a well-formed UUID before embedding it in a prompt.
+// Session IDs from the Copilot app are always UUIDs; anything else is rejected
+// to prevent prompt injection via a malicious or corrupted persisted session ID.
+function isValidSessionId(id) {
+    return typeof id === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 const MIME_TYPES = {
     ".html": "text/html",
     ".js": "text/javascript",
@@ -67,6 +85,7 @@ function readBody(req) {
  * @param {function} deps.ghExec - async (args: string[]) => string
  * @param {object}  deps.session - { send(payload) }
  * @param {Set}     deps.startedSessions - Set<number>
+ * @param {Map}     deps.sessionIds - Map<number, string> issue number -> project_session_id
  * @param {function} deps.saveSessions - () => void
  * @param {function} deps.getIssueData - () => array
  * @param {function} deps.getPrData - () => array
@@ -76,7 +95,7 @@ function readBody(req) {
  * @param {string}  deps.distDir - absolute path to dist/ folder
  */
 export function createHandler(deps) {
-    const { ghExec, session, startedSessions, saveSessions, getIssueData, getPrData, getLastUpdated, getLastError, repo, distDir } = deps;
+    const { ghExec, session, startedSessions, sessionIds = new Map(), saveSessions, getIssueData, getPrData, getLastUpdated, getLastError, repo, distDir } = deps;
 
     // CSRF token -- generated once per server lifetime, embedded in index.html
     const csrfToken = deps.csrfToken || randomBytes(32).toString("hex");
@@ -109,15 +128,17 @@ export function createHandler(deps) {
         if (req.method === "POST" && req.url === "/start-session") {
             const raw = await readBody(req);
             try {
-                const { number, title } = JSON.parse(raw);
+                const { number, title, model } = JSON.parse(raw);
                 startedSessions.add(number);
                 saveSessions();
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: true }));
                 const safeTitle = sanitizeForPrompt(title);
+                const safeModel = sanitizeModel(model);
+                const modelClause = safeModel ? ` Use model "${safeModel}".` : "";
                 setTimeout(() => {
                     session.send({
-                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan". The session should plan the implementation of this issue.`,
+                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan".${modelClause} The session should plan the implementation of this issue. After the session is created, immediately call the register_session canvas action with the new session's project_session_id and issue_number ${number} so the dashboard can navigate directly next time.`,
                     });
                 }, 0);
             } catch (e) {
@@ -136,9 +157,16 @@ export function createHandler(deps) {
                 res.end(JSON.stringify({ ok: true }));
                 const safeTitle = sanitizeForPrompt(title);
                 setTimeout(() => {
-                    session.send({
-                        prompt: `Navigate to the existing session for issue #${number} ("${safeTitle}") in ${repo}. Use the list_sessions_and_chats tool to find a session linked to issue #${number}, then use navigate_to with its project_session_id to open it.`,
-                    });
+                    const knownId = sessionIds.get(number);
+                    if (knownId && isValidSessionId(knownId)) {
+                        // Direct navigate -- no session lookup needed, single tool call
+                        session.send({ prompt: `Call navigate_to with id="${knownId}". No other response needed.` });
+                    } else {
+                        // Fallback: search and navigate, then register for next time
+                        session.send({
+                            prompt: `Navigate to the existing session for issue #${number} ("${safeTitle}") in ${repo}. Use the list_sessions_and_chats tool to find a session linked to issue #${number}, then use navigate_to with its project_session_id to open it. After navigating, call the register_session canvas action with that project_session_id and issue_number ${number}.`,
+                        });
+                    }
                 }, 0);
             } catch (e) {
                 res.setHeader("Content-Type", "application/json");
@@ -174,6 +202,16 @@ export function createHandler(deps) {
                     "--json", "number,title,body,author,labels,state,createdAt,updatedAt,comments",
                 ]);
                 const data = JSON.parse(out);
+                const rawComments = Array.isArray(data.comments) ? data.comments : [];
+                const commentList = rawComments.map(c => ({
+                    id: c.url || c.id || "",
+                    author: c.author?.login || "unknown",
+                    body: c.body || "",
+                    createdAt: c.createdAt || "",
+                    url: c.url || "",
+                    isBot: /\[bot\]/.test(c.author?.login || ""),
+                    isTriagePanel: (c.body || "").includes("```json triage-decision"),
+                }));
                 res.end(JSON.stringify({
                     number: data.number,
                     title: data.title,
@@ -183,7 +221,8 @@ export function createHandler(deps) {
                     state: data.state,
                     createdAt: data.createdAt,
                     updatedAt: data.updatedAt,
-                    comments: Array.isArray(data.comments) ? data.comments.length : (data.comments || 0),
+                    comments: rawComments.length,
+                    commentList,
                 }));
             } catch (e) {
                 res.end(JSON.stringify({ error: String(e.message || e) }));
@@ -426,6 +465,110 @@ export function createHandler(deps) {
                 res.end(JSON.stringify({ ok: true, created }));
             } catch (e) {
                 res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+            }
+            return;
+        }
+
+        // GET /api/triage -- fetch issues with triage-decision comments (lazy, cached)
+        // Performance: single GraphQL query fetches all open issues + their recent comments
+        // in one round trip (vs the old N+1 approach of one gh-issue-view call per issue).
+        if (req.url === "/api/triage") {
+            res.setHeader("Content-Type", "application/json");
+            const TRIAGE_TTL_MS = 5 * 60 * 1000;
+            const cache = handler._triageCache;
+            if (cache && (Date.now() - cache.fetchedAt) < TRIAGE_TTL_MS) {
+                const items = cache.items.map(i => ({ ...i, hasSession: startedSessions.has(i.number) }));
+                res.end(JSON.stringify({ items, lastUpdated: cache.lastUpdated, total: items.length }));
+                return;
+            }
+            try {
+                const [owner, repoName] = repo.split("/");
+                // Paginate: GitHub GraphQL returns max 100 issues per page.
+                // Two pages covers up to 200 open issues which is more than enough.
+                const gql = `
+query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    issues(first: 100, states: [OPEN], after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number
+        title
+        url
+      body
+      labels(first: 10) { nodes { name } }
+      comments(last: 20) {
+        nodes {
+          body
+          createdAt
+          author { login avatarUrl }
+          isMinimized
+        }
+      }
+      }
+    }
+  }
+}`.trim();
+                const triageItems = [];
+                let cursor = null;
+                let pages = 0;
+                while (pages < 2) {
+                    const args = ["api", "graphql", "-f", `query=${gql}`, "-F", `owner=${owner}`, "-F", `repo=${repoName}`];
+                    if (cursor) args.push("-F", `cursor=${cursor}`);
+                    const gqlOut = await ghExec(args);
+                    const gqlData = JSON.parse(gqlOut);
+                    const issuesPage = gqlData?.data?.repository?.issues;
+                    if (!issuesPage) break;
+                    for (const issue of issuesPage.nodes) {
+                        const comments = issue.comments?.nodes || [];
+                        let triageComment = null;
+                        for (const c of comments) {
+                            const body = c.body || "";
+                            const m = body.match(/```json\s+triage-decision\s*\n([\s\S]*?)\n```/);
+                            if (!m) continue;
+                            try {
+                                const td = JSON.parse(m[1]);
+                                triageComment = { comment: c, td };
+                                break;
+                            } catch (_) { /* malformed JSON */ }
+                        }
+                        if (!triageComment) continue;
+                        const { comment: c, td } = triageComment;
+                        const nonTriageComments = comments
+                            .filter(x => x !== c && !x.isMinimized)
+                            .map(x => ({ author: x.author?.login || "ghost", createdAt: x.createdAt, body: x.body || "" }));
+                        triageItems.push({
+                            number: issue.number,
+                            title: (issue.title || "").slice(0, 90),
+                            url: issue.url || "",
+                            issueBody: issue.body || "",
+                            labels: (issue.labels?.nodes || []).map(l => l.name),
+                            triageAuthor: c.author?.login || "unknown",
+                            triageCreatedAt: c.createdAt || "",
+                            commentBody: c.body,
+                            commentMarkdown: td.comment_markdown || "",
+                            nonTriageComments,
+                            decision: td.decision || "",
+                            decisionDetail: td.decision_detail || "",
+                            theme: td.theme || "",
+                            areas: Array.isArray(td.areas) ? td.areas : [],
+                            type: td.type || "",
+                            status: td.status || "",
+                            priority: td.priority || "",
+                            milestone: td.milestone || "",
+                            nextAction: td.next_action || "",
+                            preservedLabels: Array.isArray(td.preserved_labels) ? td.preserved_labels : [],
+                        });
+                    }
+                    if (!issuesPage.pageInfo.hasNextPage) break;
+                    cursor = issuesPage.pageInfo.endCursor;
+                    pages++;
+                }
+                const lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                handler._triageCache = { items: triageItems, fetchedAt: Date.now(), lastUpdated };
+                const enriched = triageItems.map(i => ({ ...i, hasSession: startedSessions.has(i.number) }));
+                res.end(JSON.stringify({ items: enriched, lastUpdated, total: enriched.length }));
+            } catch (e) {
+                res.end(JSON.stringify({ items: [], error: String(e.message || e) }));
             }
             return;
         }

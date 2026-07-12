@@ -1,8 +1,10 @@
 """APM dependency management CLI commands."""
 
+import re
 import shutil
 import sys
-from pathlib import Path
+from collections.abc import Iterator
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import click
 
@@ -10,6 +12,7 @@ import click
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
+from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
 from .._helpers import (
     UnknownPackageError,
@@ -58,9 +61,70 @@ def _deps_list_source_label(
     return "github"
 
 
-def _dep_display_name(dep) -> str:
-    """Get display name for a locked dependency (key@version)."""
-    key = dep.get_unique_key()
+_LOCAL_HASH_SLOT_RE = re.compile(r"^(_local)/[0-9a-f]{12}/(.+)$")
+
+
+def _is_absolute_local_path(path: str) -> bool:
+    """True if a declared local path embeds host filesystem structure.
+
+    Absolute POSIX paths (``/Users/...``), home-relative paths (``~/...``), and
+    Windows drive/UNC paths (``C:\\...``, ``\\\\server\\share``) all leak the
+    author's machine layout and must not reach user-facing output. Relative
+    declared paths (``../pkg``, ``./packages/foo``) are portable and safe.
+    """
+    if not path:
+        return False
+    if path.startswith("~"):
+        return True
+    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
+
+
+def _absolute_local_display(path: str, fallback: str) -> str:
+    """Return a portable logical name for an absolute local dependency."""
+    windows_path = PureWindowsPath(path)
+    parsed_path = (
+        windows_path
+        if windows_path.is_absolute() or path.startswith("~\\")
+        else PurePosixPath(path)
+    )
+    return f"_local/{parsed_path.name}" if parsed_path.name else fallback
+
+
+def _logical_local_display(physical_name: str) -> str:
+    """Strip the physical hash segment from an unmapped local slot.
+
+    Orphaned local transitive slots (``_local/<12hex>/pkg``) have no lockfile
+    entry, so ``physical_to_logical`` cannot resolve them. Orphan *detection*
+    keeps the raw physical identity, but the name shown to the user must be the
+    hash-free logical form (``_local/pkg``). Non-local names pass through.
+    """
+    match = _LOCAL_HASH_SLOT_RE.match(physical_name)
+    if match:
+        return f"{match.group(1)}/{match.group(2)}"
+    return physical_name
+
+
+def _dep_display_name(dep: LockedDependency) -> str:
+    """Get display name for a locked dependency (key@version).
+
+    Local deps render a logical, portable identity instead of the lockfile
+    unique key. For anchored transitive local deps the unique key is an
+    absolute ``local:/...`` slot (see build_dependency_unique_key), which would
+    leak the host filesystem path into user-facing tree output. Prefer the
+    declared relative ``local_path`` (``../pkg``); fall back to the logical
+    ``repo_url`` (``_local/pkg``) when the path is absent or itself absolute
+    (``/Users/...``, ``~/...``, ``C:\\...``). Remote deps keep their canonical
+    unique key.
+    """
+    if dep.source == "local":
+        if dep.local_path and not _is_absolute_local_path(dep.local_path):
+            key = dep.local_path
+        elif dep.local_path:
+            key = _absolute_local_display(dep.local_path, dep.repo_url)
+        else:
+            key = dep.repo_url
+    else:
+        key = dep.get_unique_key()
     version = (
         dep.version
         or (dep.resolved_commit[:7] if dep.resolved_commit else None)
@@ -70,42 +134,71 @@ def _dep_display_name(dep) -> str:
     return f"{key}@{version}"
 
 
-def _add_tree_children(parent_branch, parent_key, children_map, has_rich, depth=0):
-    """Recursively add transitive deps as nested children of a tree node."""
-    kids = children_map.get(parent_key, [])
-    for child_dep in kids:
-        child_name = _dep_display_name(child_dep)
-        child_branch = parent_branch.add(f"[dim]{child_name}[/dim]") if has_rich else child_name
-        if depth < 5:  # Prevent infinite recursion
-            _add_tree_children(
-                child_branch,
-                child_dep.get_unique_key(),
-                children_map,
-                has_rich,
-                depth + 1,
+def _walk_tree_children(
+    parent_key: str,
+    children_map: dict[str, list[LockedDependency]],
+) -> Iterator[tuple[LockedDependency, tuple[int, ...], tuple[bool, ...], bool]]:
+    """Yield dependency-tree descendants depth-first without Python recursion."""
+    ancestors = frozenset({parent_key})
+    children = children_map.get(parent_key, [])
+    stack: list[tuple[LockedDependency, tuple[int, ...], tuple[bool, ...], frozenset[str]]] = []
+    for index in range(len(children) - 1, -1, -1):
+        stack.append(
+            (
+                children[index],
+                (index,),
+                (index == len(children) - 1,),
+                ancestors,
             )
+        )
+
+    while stack:
+        child_dep, path, last_flags, parent_ancestors = stack.pop()
+        child_key = child_dep.get_unique_key()
+        is_circular = child_key in parent_ancestors
+        yield child_dep, path, last_flags, is_circular
+        if is_circular:
+            continue
+
+        child_ancestors = parent_ancestors | {child_key}
+        grandchildren = children_map.get(child_key, [])
+        for index in range(len(grandchildren) - 1, -1, -1):
+            stack.append(
+                (
+                    grandchildren[index],
+                    (*path, index),
+                    (*last_flags, index == len(grandchildren) - 1),
+                    child_ancestors,
+                )
+            )
+
+
+def _add_tree_children(
+    parent_branch,
+    parent_key: str,
+    children_map: dict[str, list[LockedDependency]],
+) -> None:
+    """Add every transitive dependency to a Rich tree without a depth limit."""
+    branches = {(): parent_branch}
+    for child_dep, path, _, is_circular in _walk_tree_children(parent_key, children_map):
+        child_name = _dep_display_name(child_dep)
+        suffix = " (circular)" if is_circular else ""
+        child_branch = branches[path[:-1]].add(f"[dim]{child_name}{suffix}[/dim]")
+        if not is_circular:
+            branches[path] = child_branch
 
 
 def _echo_tree_children(
     parent_key: str,
-    children_map: dict[str, list],
+    children_map: dict[str, list[LockedDependency]],
     prefix: str = "",
-    depth: int = 0,
 ) -> None:
-    """Render transitive dependencies recursively without Rich."""
-    kids = children_map.get(parent_key, [])
-    for index, child_dep in enumerate(kids):
-        is_last = index == len(kids) - 1
-        child_prefix = "+-- " if is_last else "|-- "
-        click.echo(f"{prefix}{child_prefix}{_dep_display_name(child_dep)}")
-        if depth < 5:
-            continuation = "    " if is_last else "|   "
-            _echo_tree_children(
-                child_dep.get_unique_key(),
-                children_map,
-                prefix + continuation,
-                depth + 1,
-            )
+    """Render every transitive dependency without Rich or a depth limit."""
+    for child_dep, _, last_flags, is_circular in _walk_tree_children(parent_key, children_map):
+        indentation = "".join("    " if is_last else "|   " for is_last in last_flags[:-1])
+        child_prefix = "+-- " if last_flags[-1] else "|-- "
+        suffix = " (circular)" if is_circular else ""
+        click.echo(f"{prefix}{indentation}{child_prefix}{_dep_display_name(child_dep)}{suffix}")
 
 
 # ---------------------------------------------------------------------------
@@ -178,18 +271,26 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
 
-    # Also load lockfile deps to avoid false orphan flags on transitive deps
+    # Also load lockfile deps to avoid false orphan flags on transitive deps.
+    # Local transitive deps are installed into hashed physical slots
+    # (``_local/<hash>/pkg``) to prevent sibling collisions (#2155), but their
+    # logical identity is the un-hashed lockfile ``repo_url`` (``_local/pkg``).
+    # Key orphan/insecure state on the logical id and remember each physical
+    # slot -> logical id so the scan below can report the logical name instead
+    # of leaking the hash slot into user-facing output.
+    physical_to_logical: dict[str, str] = {}
     try:
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
-                # Match the host-blind apm_modules/ layout. Local dependency
-                # identity retains its source-relative path, so derive its key
-                # from the canonical install path instead.
+                # Local deps: key on the logical lockfile identity
+                # (``repo_url``) and map the physical install slot back to it.
                 if dep.source == "local":
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
-                    dep_key = install_path.relative_to(apm_modules_path).as_posix()
+                    physical_key = install_path.relative_to(apm_modules_path).as_posix()
+                    dep_key = dep.repo_url
+                    physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
                 if dep_key and dep_key not in declared_sources:
@@ -221,13 +322,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         if ".apm" in rel_parts:
             continue
 
-        # Skip skill sub-dirs nested inside another package (e.g. plugin
-        # skills/ directories that are deployment artifacts, not packages).
-        if (
-            has_skill_md
-            and not has_apm_yml
-            and _is_nested_under_package(candidate, apm_modules_path)
-        ):
+        # Nested manifests are deployment artifacts owned by the parent package.
+        if _is_nested_under_package(candidate, apm_modules_path):
             continue
         scanned_candidates.append((candidate, "/".join(rel_parts), has_apm_yml, has_skill_md))
 
@@ -257,6 +353,16 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     installed_packages = []
     orphaned_packages = []
     for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
+        # Local transitive deps are scanned at their physical hash slot
+        # (``_local/<hash>/pkg``); report and orphan-check against the
+        # logical lockfile key (``_local/pkg``) instead of leaking the slot.
+        # A genuinely orphaned slot has no lockfile entry, so it stays keyed by
+        # its raw physical identity for correct detection. Only confirmed
+        # orphans have their physical hash redacted; declared remote identities
+        # that happen to match the slot shape remain unchanged.
+        logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
+        is_orphaned = logical_name not in declared_with_ancestors
+        display_name = _logical_local_display(logical_name) if is_orphaned else logical_name
         try:
             version = "unknown"
             if has_apm_yml:
@@ -264,18 +370,17 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = org_repo_name not in declared_with_ancestors
             if is_orphaned:
-                orphaned_packages.append(org_repo_name)
+                orphaned_packages.append(display_name)
 
-            locked_dep = insecure_lock_deps.get(org_repo_name)
+            locked_dep = insecure_lock_deps.get(logical_name)
             installed_packages.append(
                 {
-                    "name": org_repo_name,
+                    "name": display_name,
                     "version": version,
                     "source": "orphaned"
                     if is_orphaned
-                    else declared_sources.get(org_repo_name, "github"),
+                    else declared_sources.get(logical_name, "github"),
                     "primitives": primitives,
                     "path": str(candidate),
                     "is_orphaned": is_orphaned,
@@ -287,8 +392,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     ),
                 }
             )
-        except Exception as e:
-            logger.warning(f"Failed to read package {org_repo_name}: {e}")
+        except Exception:
+            # The raised error (e.g. malformed-YAML ValueError) embeds the
+            # absolute apm.yml path; never forward it. Emit a stable, actionable
+            # public warning keyed on the hash-free display name.
+            logger.warning(
+                f"Failed to inspect package {display_name}. Check its package files and rerun."
+            )
 
     if insecure_only:
         installed_packages = [pkg for pkg in installed_packages if pkg["is_insecure"]]
@@ -368,7 +478,10 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         # (no raw `[!]` literal that Rich would parse as markup) and so
         # behaviour is consistent with prune.py.
         if orphaned_packages:
-            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
+            logger.warning(
+                f"{len(orphaned_packages)} orphaned package(s) found "
+                "(not in resolved dependency graph):"
+            )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
             logger.info("Run 'apm prune' to remove orphaned packages")
@@ -412,13 +525,16 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         # Show orphaned packages warning -- route through CommandLogger
         # for consistency with the rich branch above and with prune.py.
         if orphaned_packages:
-            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
+            logger.warning(
+                f"{len(orphaned_packages)} orphaned package(s) found "
+                "(not in resolved dependency graph):"
+            )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
             logger.info("Run 'apm prune' to remove orphaned packages")
 
 
-@deps.command(name="list", help="List installed APM dependencies")
+@deps.command(name="list", help="List installed APM dependencies and their primitives")
 @click.option(
     "--global",
     "-g",
@@ -561,10 +677,10 @@ def _build_dep_tree(apm_dir):
                     result["source"] = "lockfile"
                     result["direct"] = [d for d in lockfile_deps if d.depth <= 1]
                     transitive = [d for d in lockfile_deps if d.depth > 1]
-                    children_map: dict[str, list] = {}
+                    children_map: dict[str, list[LockedDependency]] = {}
                     unresolved = []
-                    parents_by_unique_key: dict[tuple[int, str], list] = {}
-                    parents_by_repo_url: dict[tuple[int, str], list] = {}
+                    parents_by_unique_key: dict[tuple[int, str], list[LockedDependency]] = {}
+                    parents_by_repo_url: dict[tuple[int, str], list[LockedDependency]] = {}
                     for candidate in lockfile_deps:
                         parents_by_unique_key.setdefault(
                             (candidate.depth, candidate.get_unique_key()), []
@@ -613,7 +729,7 @@ def _build_dep_tree(apm_dir):
             continue
         if ".apm" in rel_parts:
             continue
-        if has_skill and not has_apm and _is_nested_under_package(candidate, apm_modules_path):
+        if _is_nested_under_package(candidate, apm_modules_path):
             continue
         info = _get_package_display_info(candidate)
         primitives = _count_primitives(candidate)
@@ -627,7 +743,7 @@ def _build_dep_tree(apm_dir):
     return result
 
 
-@deps.command(help="Show dependency tree structure")
+@deps.command(help="Show the full dependency tree")
 @click.option(
     "--global",
     "-g",
@@ -680,13 +796,14 @@ def tree(global_):
                             prim_summary = _format_primitive_counts(_count_primitives(install_path))
                             if prim_summary:
                                 branch.add(f"[dim]{prim_summary}[/dim]")
-                        _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
+                        _add_tree_children(branch, dep.get_unique_key(), children_map)
                     for dep in unresolved:
                         display = _dep_display_name(dep)
                         branch = root_tree.add(
-                            f"[yellow]{display} (could not determine parent)[/yellow]"
+                            f"[yellow]{display} (could not place in tree; "
+                            "run apm install to resolve)[/yellow]"
                         )
-                        _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
+                        _add_tree_children(branch, dep.get_unique_key(), children_map)
                 console.print(root_tree)
             else:
                 click.echo(f"{project_name} (local)")
@@ -703,7 +820,11 @@ def tree(global_):
                     for i, dep in enumerate(unresolved):
                         is_last = i == len(unresolved) - 1
                         prefix = "+-- " if is_last else "|-- "
-                        click.echo(f"{prefix}{_dep_display_name(dep)} (could not determine parent)")
+                        click.echo(
+                            f"{prefix}{_dep_display_name(dep)} "
+                            "(could not place in tree; "
+                            "run apm install to resolve)"
+                        )
                         sub_prefix = "    " if is_last else "|   "
                         _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
         # Fallback: scan apm_modules directory (no lockfile)

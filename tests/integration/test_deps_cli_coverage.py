@@ -189,13 +189,13 @@ class TestDepDisplayName:
 class TestAddTreeChildren:
     """Tests for _add_tree_children helper."""
 
-    def test_add_children_no_rich(self):
-        """Add children without Rich console."""
+    def test_add_children_empty_map(self):
+        """An empty child map leaves the Rich branch unchanged."""
         parent_branch = MagicMock()
         parent_repo_url = "https://github.com/owner/parent"
         children_map = {}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, False)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         # No children, so parent_branch.add should not be called
         parent_branch.add.assert_not_called()
@@ -217,7 +217,7 @@ class TestAddTreeChildren:
 
         children_map = {parent_repo_url: [mock_child]}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, True)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         # Parent should have added child
         parent_branch.add.assert_called_once()
@@ -247,17 +247,18 @@ class TestAddTreeChildren:
 
         children_map = {parent_repo_url: [mock_child1, mock_child2]}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, True)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         # Parent should have added both children
         assert parent_branch.add.call_count == 2
 
-    def test_add_children_respects_depth_limit(self):
-        """Recursive depth is limited to 5."""
+    def test_add_children_stops_at_cycle(self):
+        """Recursive rendering stops when a dependency repeats an ancestor."""
         parent_branch = MagicMock()
+        child_branch = MagicMock()
+        parent_branch.add.return_value = child_branch
         parent_repo_url = "https://github.com/owner/parent"
 
-        # Create a chain of dependencies beyond depth limit
         mock_child = MagicMock()
         mock_child.get_unique_key.return_value = "owner/child"
         mock_child.version = "1.0.0"
@@ -265,19 +266,22 @@ class TestAddTreeChildren:
         mock_child.resolved_ref = None
         mock_child.repo_url = "https://github.com/owner/child"
 
-        children_map = {parent_repo_url: [mock_child]}
+        repeated_parent = MagicMock()
+        repeated_parent.get_unique_key.return_value = parent_repo_url
+        repeated_parent.version = "1.0.0"
+        repeated_parent.resolved_commit = None
+        repeated_parent.resolved_ref = None
+        repeated_parent.repo_url = parent_repo_url
+        children_map = {
+            parent_repo_url: [mock_child],
+            "owner/child": [repeated_parent],
+        }
 
-        # Call at depth 5 (max allowed)
-        _add_tree_children(
-            parent_branch,
-            parent_repo_url,
-            children_map,
-            True,
-            depth=5,
-        )
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
-        # At max depth, children should not be added recursively
-        # (but the initial child is still added)
+        parent_branch.add.assert_called_once()
+        child_branch.add.assert_called_once()
+        assert "(circular)" in child_branch.add.call_args.args[0]
 
     def test_add_children_with_no_children_map_entry(self):
         """No children for parent means nothing is added."""
@@ -285,7 +289,7 @@ class TestAddTreeChildren:
         parent_repo_url = "https://github.com/owner/parent"
         children_map = {}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, True)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         parent_branch.add.assert_not_called()
 

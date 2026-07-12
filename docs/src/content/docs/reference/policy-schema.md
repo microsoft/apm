@@ -67,7 +67,10 @@ The `<ref>` accepts:
 | `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
 
-Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
+Unknown top-level keys produce a warning, never an error -- so newer policy
+files load on older clients. `apm policy status --json` returns these in the
+`warnings` array. Known fields with the wrong native YAML type are rejected
+instead of being silently replaced by defaults.
 
 ## Enforcement modes
 
@@ -265,6 +268,8 @@ turned them on.
 - `https://...` -- a direct URL.
 
 For supply-chain safety, `extends:` references are pinned to the **leaf policy's host** -- a policy fetched from `github.com` cannot extend one on `evil.example.com`.
+If any parent is unreachable, the chain is incomplete and enforcement fails
+closed. APM never applies the weaker subset that happened to resolve.
 
 ### Merge rules
 
@@ -280,6 +285,7 @@ inherited list (see the tri-state table below).
 | `*.allow` lists             | Set intersection. `null` is transparent (no opinion).                            |
 | `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
+| `manifest.require_explicit_includes` | Logical OR; once enabled, descendants cannot relax it.                 |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
 | `dependencies.require_pinned_constraint` | Logical OR -- once a parent enables it, child cannot relax.            |
 | `mcp.self_defined`          | Stricter wins (`deny` > `warn` > `allow`).                                       |

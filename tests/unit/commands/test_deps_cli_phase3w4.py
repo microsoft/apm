@@ -398,6 +398,22 @@ class TestBuildDepTree:
         names = [p["display_name"] for p in result["scanned_packages"]]
         assert not any(".apm" in n for n in names)
 
+    def test_nested_package_manifest_skipped(self, tmp_path: Path) -> None:
+        """A nested apm.yml is owned by its parent and omitted from the tree."""
+        modules = tmp_path / APM_MODULES_DIR
+        parent = modules / "_local" / "package"
+        nested = parent / "sub-package"
+        nested.mkdir(parents=True)
+        (parent / APM_YML_FILENAME).write_text("name: package\nversion: 1.0.0\n", encoding="utf-8")
+        (nested / APM_YML_FILENAME).write_text(
+            "name: sub-package\nversion: 1.0.0\n", encoding="utf-8"
+        )
+
+        result = _build_dep_tree(tmp_path)
+
+        names = [package["display_name"] for package in result["scanned_packages"]]
+        assert names == ["package@1.0.0"]
+
 
 # ---------------------------------------------------------------------------
 # deps tree command -- non-rich lockfile source (lines 612-627)

@@ -98,6 +98,11 @@ Cite the principle by name in every recommendation. Never appeal to
   trigger -- too noisy.
 - New YAML manifests, new tools, or new dispatcher sub-agents when
   wording changes would suffice.
+- One capability split across two primitives (two skills, or a skill
+  and an agent, owning the same decision) -- duplication equals drift.
+  Give each capability one owning primitive; the same single-canonical
+  -owner rule that governs the Python codebase (see
+  architecture.instructions.md) governs primitive design.
 
 ## Scope boundaries
 

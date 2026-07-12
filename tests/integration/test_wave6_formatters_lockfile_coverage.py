@@ -183,13 +183,12 @@ class TestLockFile:
         assert result is None
 
     def test_read_empty_file(self, tmp_path: Path) -> None:
-        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.deps.lockfile import LockFile, LockfileFormatError
 
         f = tmp_path / "apm.lock.yaml"
         f.write_text("")
-        result = LockFile.read(f)
-        # May return None or empty lockfile
-        assert result is None or isinstance(result, LockFile)
+        with pytest.raises(LockfileFormatError):
+            LockFile.read(f)
 
     def test_read_valid_lockfile(self, tmp_path: Path) -> None:
         from apm_cli.deps.lockfile import LockFile

@@ -34,9 +34,11 @@ from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_MAP,
     HookIntegrationResult,
     HookIntegrator,
-    _copilot_keys_to_gemini,
     _filter_hook_files_for_target,
     _reinject_apm_source_from_sidecar,
+)
+from apm_cli.integration.hook_native_formats import (
+    _copilot_keys_to_gemini,
     _to_gemini_hook_entries,
 )
 from apm_cli.integration.mcp_integrator import MCPIntegrator

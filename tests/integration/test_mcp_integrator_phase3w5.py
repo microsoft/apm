@@ -84,263 +84,33 @@ class TestIsVscodeAvailable:
 
 
 class TestCollectTransitive:
-    def test_returns_empty_when_modules_dir_missing(self, tmp_path: Path) -> None:
-        result = MCPIntegrator.collect_transitive(tmp_path / "apm_modules")
-
-        assert result == []
-
-    def test_falls_back_to_scan_when_no_lockfile(self, tmp_path: Path) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        package_dir = apm_modules / "owner" / "repo"
-        (package_dir / "apm.yml").parent.mkdir(parents=True)
-        (package_dir / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
-        dep = _make_dep(name="scan-server")
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
-
-        with patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls:
-            mock_pkg_cls.from_apm_yml.return_value = pkg
-            result = MCPIntegrator.collect_transitive(apm_modules)
-
-        assert result == [dep]
-        mock_pkg_cls.from_apm_yml.assert_called_once_with(package_dir / "apm.yml")
-
-    def test_falls_back_to_scan_when_lock_read_returns_none(self, tmp_path: Path) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        package_dir = apm_modules / "owner" / "repo"
-        (package_dir / "apm.yml").parent.mkdir(parents=True)
-        (package_dir / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
+    def test_delegates_to_current_config_owner(self, tmp_path: Path) -> None:
+        expected = [_make_dep(name="server")]
+        modules_root = tmp_path / "apm_modules"
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
-        dep = _make_dep(name="scan-server")
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
-
-        with (
-            patch("apm_cli.integration.mcp_integrator.LockFile.read", return_value=None),
-            patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls,
-        ):
-            mock_pkg_cls.from_apm_yml.return_value = pkg
-            result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
-
-        assert result == [dep]
-        mock_pkg_cls.from_apm_yml.assert_called_once_with(package_dir / "apm.yml")
-
-    def test_uses_lockfile_paths_and_skips_missing_apm_yml(self, tmp_path: Path) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        existing_dir = apm_modules / "owner" / "repo"
-        (existing_dir / "apm.yml").parent.mkdir(parents=True)
-        (existing_dir / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
-        lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
-        lockfile = MagicMock()
-        lockfile.get_package_dependencies.return_value = [
-            _make_lock_dep("owner/repo", depth=1),
-            _make_lock_dep("owner/missing", depth=1),
-        ]
-        dep = _make_dep(name="locked-server")
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
-
-        with (
-            patch("apm_cli.integration.mcp_integrator.LockFile.read", return_value=lockfile),
-            patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls,
-        ):
-            mock_pkg_cls.from_apm_yml.return_value = pkg
-            result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
-
-        assert result == [dep]
-        mock_pkg_cls.from_apm_yml.assert_called_once_with(existing_dir / "apm.yml")
-
-    def test_trusts_direct_self_defined_dependency(self, tmp_path: Path) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        package_dir = apm_modules / "owner" / "repo"
-        (package_dir / "apm.yml").parent.mkdir(parents=True)
-        yml_path = package_dir / "apm.yml"
-        yml_path.write_text("name: pkg\n", encoding="utf-8")
-        lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
-        lockfile = MagicMock()
-        lockfile.get_package_dependencies.return_value = [_make_lock_dep("owner/repo", depth=1)]
-        dep = _make_dep(name="direct-private", is_self_defined=True)
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
         logger = MagicMock()
-
-        with (
-            patch("apm_cli.integration.mcp_integrator.LockFile.read", return_value=lockfile),
-            patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls,
-        ):
-            mock_pkg_cls.from_apm_yml.return_value = pkg
-            result = MCPIntegrator.collect_transitive(apm_modules, lock_path, logger=logger)
-
-        assert result == [dep]
-        logger.progress.assert_called_once()
-        assert "Trusting direct dependency MCP" in logger.progress.call_args.args[0]
-        mock_pkg_cls.from_apm_yml.assert_called_once_with(yml_path)
-
-    def test_skips_untrusted_transitive_self_defined_dependency_with_diagnostics(
-        self, tmp_path: Path
-    ) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        package_dir = apm_modules / "owner" / "repo"
-        (package_dir / "apm.yml").parent.mkdir(parents=True)
-        (package_dir / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
-        lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
-        lockfile = MagicMock()
-        lockfile.get_package_dependencies.return_value = [_make_lock_dep("owner/repo", depth=2)]
-        dep = _make_dep(name="transitive-private", is_self_defined=True)
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
         diagnostics = MagicMock()
-        logger = MagicMock()
 
-        with (
-            patch("apm_cli.integration.mcp_integrator.LockFile.read", return_value=lockfile),
-            patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls,
-        ):
-            mock_pkg_cls.from_apm_yml.return_value = pkg
+        with patch(
+            "apm_cli.integration.mcp_integrator._collect_transitive_compat",
+            return_value=expected,
+        ) as collect:
             result = MCPIntegrator.collect_transitive(
-                apm_modules,
+                modules_root,
                 lock_path,
-                trust_private=False,
+                trust_private=True,
                 logger=logger,
                 diagnostics=diagnostics,
             )
 
-        assert result == []
-        diagnostics.warn.assert_called_once()
-        logger.warning.assert_not_called()
-        assert "Re-declare it in your apm.yml" in diagnostics.warn.call_args.args[0]
-
-    def test_skips_untrusted_transitive_self_defined_dependency_with_logger(
-        self, tmp_path: Path
-    ) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        package_dir = apm_modules / "owner" / "repo"
-        (package_dir / "apm.yml").parent.mkdir(parents=True)
-        (package_dir / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
-        lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
-        lockfile = MagicMock()
-        lockfile.get_package_dependencies.return_value = [_make_lock_dep("owner/repo", depth=2)]
-        dep = _make_dep(name="transitive-private", is_self_defined=True)
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
-        logger = MagicMock()
-
-        with (
-            patch("apm_cli.integration.mcp_integrator.LockFile.read", return_value=lockfile),
-            patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls,
-        ):
-            mock_pkg_cls.from_apm_yml.return_value = pkg
-            result = MCPIntegrator.collect_transitive(
-                apm_modules,
-                lock_path,
-                trust_private=False,
-                logger=logger,
-            )
-
-        assert result == []
-        logger.warning.assert_called_once()
-        assert "registry: false" in logger.warning.call_args.args[0]
-
-    def test_trusts_transitive_self_defined_dependency_when_enabled(self, tmp_path: Path) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        package_dir = apm_modules / "owner" / "repo"
-        (package_dir / "apm.yml").parent.mkdir(parents=True)
-        (package_dir / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
-        lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
-        lockfile = MagicMock()
-        lockfile.get_package_dependencies.return_value = [_make_lock_dep("owner/repo", depth=2)]
-        dep = _make_dep(name="transitive-private", is_self_defined=True)
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
-        logger = MagicMock()
-
-        with (
-            patch("apm_cli.integration.mcp_integrator.LockFile.read", return_value=lockfile),
-            patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls,
-        ):
-            mock_pkg_cls.from_apm_yml.return_value = pkg
-            result = MCPIntegrator.collect_transitive(
-                apm_modules,
-                lock_path,
-                trust_private=True,
-                logger=logger,
-            )
-
-        assert result == [dep]
-        logger.progress.assert_called_once()
-        assert "--trust-transitive-mcp" in logger.progress.call_args.args[0]
-
-    def test_skips_parse_errors_and_continues(self, tmp_path: Path) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        broken_dir = apm_modules / "owner" / "broken"
-        good_dir = apm_modules / "owner" / "good"
-        for package_dir in (broken_dir, good_dir):
-            (package_dir / "apm.yml").parent.mkdir(parents=True)
-            (package_dir / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
-        first = broken_dir / "apm.yml"
-        second = good_dir / "apm.yml"
-        dep = _make_dep(name="good-server")
-        pkg = MagicMock()
-        pkg.name = "good"
-        pkg.get_mcp_dependencies.return_value = [dep]
-
-        # Side-effect order must follow the filesystem-discovery order of
-        # apm.yml files (which Path.iterdir does not guarantee to be
-        # alphabetic across OSes/filesystems). Determine the order
-        # lazily so the bad-then-good (ValueError-then-pkg) sequence
-        # always lines up with whichever directory is enumerated first.
-        def _from_apm_yml(path, *_args, **_kw):
-            if path == first:
-                raise ValueError("bad")
-            return pkg
-
-        with patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls:
-            mock_pkg_cls.from_apm_yml.side_effect = _from_apm_yml
-            result = MCPIntegrator.collect_transitive(apm_modules)
-
-        assert result == [dep]
-        called_paths = {call.args[0] for call in mock_pkg_cls.from_apm_yml.call_args_list}
-        assert called_paths == {first, second}
-
-    def test_supports_lock_entries_with_virtual_path(self, tmp_path: Path) -> None:
-        apm_modules = tmp_path / "apm_modules"
-        package_dir = apm_modules / "owner" / "repo" / "subpkg"
-        (package_dir / "apm.yml").parent.mkdir(parents=True)
-        yml_path = package_dir / "apm.yml"
-        yml_path.write_text("name: pkg\n", encoding="utf-8")
-        lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
-        lockfile = MagicMock()
-        lockfile.get_package_dependencies.return_value = [
-            _make_lock_dep("owner/repo", depth=1, virtual_path="subpkg")
-        ]
-        dep = _make_dep(name="virtual-server")
-        pkg = MagicMock()
-        pkg.name = "pkg"
-        pkg.get_mcp_dependencies.return_value = [dep]
-
-        with (
-            patch("apm_cli.integration.mcp_integrator.LockFile.read", return_value=lockfile),
-            patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls,
-        ):
-            mock_pkg_cls.from_apm_yml.return_value = pkg
-            result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
-
-        assert result == [dep]
-        mock_pkg_cls.from_apm_yml.assert_called_once_with(yml_path)
+        assert result == expected
+        collect.assert_called_once_with(
+            modules_root,
+            lock_path,
+            True,
+            logger=logger,
+            diagnostics=diagnostics,
+        )
 
 
 class TestDeduplicate:

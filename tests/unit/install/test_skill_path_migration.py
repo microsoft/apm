@@ -42,6 +42,18 @@ class _StubLockFile:
     def get_dependency(self, key: str) -> _StubDep | None:
         return self.dependencies.get(key)
 
+    def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
+        if old_value not in self.local_deployed_files:
+            return
+        self.local_deployed_files = [
+            value for value in self.local_deployed_files if value != old_value
+        ]
+        if new_value not in self.local_deployed_files:
+            self.local_deployed_files.append(new_value)
+        if old_value in self.local_deployed_file_hashes:
+            old_hash = self.local_deployed_file_hashes.pop(old_value)
+            self.local_deployed_file_hashes.setdefault(new_value, old_hash)
+
 
 # ===================================================================
 # _LEGACY_SKILL_PATTERN regex tests

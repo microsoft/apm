@@ -94,7 +94,9 @@ class TestLogTlsFailure:
         exc = RuntimeError("TLS verification failed")
         _log_tls_failure("example.com", exc, verbose_log=None, logger=logger)
         logger.warning.assert_called_once()
-        assert "REQUESTS_CA_BUNDLE" in logger.warning.call_args[0][0]
+        message = logger.warning.call_args[0][0]
+        assert "system trust store" in message
+        assert "REQUESTS_CA_BUNDLE" in message
 
     def test_verbose_log_called_with_host_and_exc(self) -> None:
         from apm_cli.install.validation import _log_tls_failure

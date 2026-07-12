@@ -474,7 +474,7 @@ def _check_and_notify_updates():
             _rich_echo(get_update_hint_message(), color="yellow", bold=True)
 
             # Add a blank line for visual separation
-            click.echo()
+            _rich_echo("")
     except Exception:
         # Silently fail - version checking should never block CLI usage
         pass
@@ -706,12 +706,14 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
     content = out_file.read_text(encoding="utf-8")
 
     if "targets" in apm_yml_data:
+        from apm_cli.core.target_catalog import manifest_target_names
+
         # Insert comment before the targets: line
+        accepted_targets = ", ".join(sorted(manifest_target_names()))
         targets_comment = (
             "# Which agent platforms to deploy to.\n"
             "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"
-            "# Accepted values: vscode, agents, copilot, claude, cursor, opencode, codex,\n"
-            "# gemini, antigravity, windsurf, kiro, agent-skills, all\n"
+            f"# Accepted values: {accepted_targets}\n"
         )
         content = content.replace("targets:", targets_comment + "targets:", 1)
     else:

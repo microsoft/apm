@@ -267,12 +267,9 @@ def detect_config_drift(
     Returns:
         A set of names (strings) whose configuration has drifted.
     """
-    drifted: builtins.set = builtins.set()
-    for name, current in current_configs.items():
-        stored = stored_configs.get(name)
-        if stored is not None and stored != current:
-            drifted.add(name)
-    return drifted
+    from apm_cli.integration.mcp_config_view import McpConfigDiff
+
+    return builtins.set(McpConfigDiff.between(current_configs, stored_configs).changed)
 
 
 # ---------------------------------------------------------------------------
