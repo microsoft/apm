@@ -80,6 +80,7 @@ class APMDependencyResolver:
         download_callback: DownloadCallback | None = None,
         max_parallel: int | None = None,
         auth_resolver: object | None = None,
+        update_refs: bool = False,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -97,11 +98,18 @@ class APMDependencyResolver:
                 for parity-testing against the legacy sequential path
                 -- this is a diagnostic knob, not a user toggle.
             auth_resolver: Optional auth resolver for marketplace dependency resolution.
+            update_refs: True for ``apm update`` / ``--refresh``. When set,
+                ``_should_force_recheck`` gives ``download_callback`` a
+                chance to run for a semver-ranged dep even when its
+                install path already exists, at any depth -- see that
+                method's docstring for why this can't be scoped to direct
+                deps only.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
         self._download_callback = download_callback
+        self._update_refs = update_refs
         # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
         # Detected once via signature inspection so legacy callbacks that
         # predate the field still work without raising a silent TypeError
@@ -944,6 +952,42 @@ class APMDependencyResolver:
         except (ValueError, FileNotFoundError) as exc:
             return (item, None, exc)
 
+    def _should_force_recheck(self, dep_ref: DependencyReference) -> bool:
+        """True when *dep_ref* must be given a chance to call ``download_callback``
+        even though its install path already exists on disk.
+
+        ``download_callback`` (see ``resolve.py``) already contains a
+        ``_force_semver_resolve`` fallthrough for exactly this case ("Bug 1
+        fix on #1496"), but it's unreachable in practice: this method's
+        caller, ``_try_load_dependency_package``, only invokes
+        ``download_callback`` at all when ``not install_path.exists()`` --
+        so by the time the callback runs, the path is already known not to
+        exist, and its own internal check can never fire. The existing
+        pre-purge (``_purge_cached_semver_paths_for_update``) works around
+        this for **direct** deps only, by deleting their install path
+        before resolution starts so this gate's ``exists()`` check is
+        already false. A transitive dependency's install path is never
+        pre-purged (its existence isn't known until its parent's manifest
+        is read, which happens during resolution, not before it) --
+        it's own semver range is therefore never re-evaluated against the
+        remote during ``apm update``, no matter how many newer matching
+        versions have been published.
+
+        Widening this gate (rather than the pre-purge) covers any depth:
+        this method is consulted for every dependency the BFS resolver
+        reaches, direct or transitive, so a dependency several levels deep
+        gets exactly the same forced recheck as a direct one.
+
+        Mirrors ``download_callback``'s own ``_force_semver_resolve``
+        predicate exactly -- kept in sync deliberately.
+        """
+        return (
+            self._update_refs
+            and not dep_ref.is_local
+            and not getattr(dep_ref, "artifactory_prefix", None)
+            and getattr(dep_ref, "ref_kind", None) == "semver"
+        )
+
     def _try_load_dependency_package(
         self,
         dep_ref: DependencyReference,
@@ -996,8 +1040,12 @@ class APMDependencyResolver:
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
-        # If package doesn't exist locally, try to download it
-        if not install_path.exists():
+        # If package doesn't exist locally, try to download it. Also fall
+        # through when it exists but needs a forced semver re-check (see
+        # _should_force_recheck) -- this is what lets a transitive
+        # dependency's own range get re-evaluated during apm update, not
+        # just direct dependencies.
+        if not install_path.exists() or self._should_force_recheck(dep_ref):
             if self._download_callback is not None:
                 unique_key = self._download_dedup_key(dep_ref, parent_pkg)
                 # Avoid re-downloading the same logical (dep_ref, anchor) pair

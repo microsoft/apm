@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm update` now re-checks a transitive dependency's own semver range
+  against the remote at any depth, not just for direct dependencies.
+  Previously, `download_callback` only ran for a dependency whose install
+  path didn't already exist, so a transitive dependency already present on
+  disk (e.g. `pkg1 -> pkg2 -> pkg3`, all constrained by `^1.0.0`) never had
+  its own range re-evaluated -- publishing a new matching version of `pkg3`
+  was silently ignored by `apm update` in `pkg1` even though `pkg2`'s
+  manifest allowed it. (by @nadav-y)
+
 ## [0.25.0] - 2026-07-12
 
 ### Added
