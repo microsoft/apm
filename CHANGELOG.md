@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm update` now converges for git-source semver dependencies already at
   their locked tag instead of reporting a spurious update on every run. Branch
   dependencies remain unaffected. (by @srobroek, #2165)
+- `apm audit` no longer reports drift for skills intentionally excluded by a
+  dependency's `skills:` subset filter. (#2177)
 - `apm update` now re-checks a transitive dependency's own semver range
   against the remote at any depth, not just for direct dependencies.
   Previously, `download_callback` only ran for a dependency whose install
