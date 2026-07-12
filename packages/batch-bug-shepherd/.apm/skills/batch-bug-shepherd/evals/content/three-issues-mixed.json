@@ -122,6 +122,24 @@
       "pattern": "(?is)(strategic[- ]?alignment|phase\\s*1\\.5|apm-ceo[^.\\n]{0,60}principles|PRINCIPLES\\.md)",
       "weight": 2,
       "description": "Phase 1.5 strategic-alignment gate is named: apm-ceo subagent checks each LEGIT row against PRINCIPLES.md before shepherd / fix work."
+    },
+    {
+      "id": "architecture-classification-gate",
+      "pattern": "(?is)(canonical[- ]owner|architecture)[^\\n]{0,120}(ordinary-fix|owner-extension|new-owner|split-authority)",
+      "weight": 2,
+      "description": "Every shepherded PR records an architecture classification (canonical-owner gate)."
+    },
+    {
+      "id": "dual-guardrail-evidence",
+      "pattern": "(?is)behavioral[^\\n]{0,100}static[^\\n]{0,100}architecture",
+      "weight": 2,
+      "description": "Authority-affecting fixes require both guardrail halves: behavioral regression + static boundary + architecture assertion."
+    },
+    {
+      "id": "architecture-fail-closed",
+      "pattern": "(?is)(blocked|cannot[^\\n]{0,40}ready)[^\\n]{0,120}(owner|guardrail|architecture)",
+      "weight": 2,
+      "description": "Missing architecture / canonical-owner evidence fails closed rather than reaching ready-to-merge."
     }
   ]
 }
