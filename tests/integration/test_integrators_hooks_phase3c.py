@@ -1413,7 +1413,18 @@ class TestSkillIntegratorPromoteSubSkillsForce:
 class TestSkillIntegratorIntegrateSkillBundle:
     """_integrate_skill_bundle: skill subset filtering."""
 
-    def test_skill_subset_filters_to_named_skills_only(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "skill_subset",
+        [
+            pytest.param(("skill-alpha",), id="leaf"),
+            pytest.param(("category/skill-alpha",), id="source-prefixed"),
+        ],
+    )
+    def test_skill_subset_filters_to_named_skills_only(
+        self,
+        tmp_path: Path,
+        skill_subset: tuple[str, ...],
+    ) -> None:
         project_root = _make_copilot_project(tmp_path)
         _make_lockfile(project_root)
 
@@ -1428,7 +1439,7 @@ class TestSkillIntegratorIntegrateSkillBundle:
 
         integrator = SkillIntegrator()
         result = integrator.integrate_package_skill(
-            pkg_info, project_root, skill_subset=("skill-alpha",)
+            pkg_info, project_root, skill_subset=skill_subset
         )
         assert isinstance(result, SkillIntegrationResult)
         # Only skill-alpha should be deployed

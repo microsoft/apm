@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm pack` now matches source-relative skill selectors such as
+  `productivity/grill-me` against flattened deployed skill names. (closes
+  #2171; #2176)
 - `apm update` now re-checks a transitive dependency's own semver range
   against the remote at any depth, not just for direct dependencies.
   Previously, `download_callback` only ran for a dependency whose install

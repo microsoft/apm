@@ -15,6 +15,39 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+
+
+class TestSkillSubsetFilterTokens:
+    """Canonical matching tokens for declared and flattened skill names."""
+
+    @pytest.mark.parametrize(
+        ("skill_subset", "expected"),
+        [
+            pytest.param(None, None, id="none"),
+            pytest.param([], None, id="empty"),
+            pytest.param(["   "], None, id="blank"),
+            pytest.param(
+                [" category\\grill-me "],
+                {"category\\grill-me", "category/grill-me", "grill-me"},
+                id="backslash-prefixed",
+            ),
+        ],
+    )
+    def test_normalizes_subset_tokens(
+        self,
+        skill_subset: list[str] | None,
+        expected: set[str] | None,
+    ) -> None:
+        assert skill_subset_filter_tokens(skill_subset) == expected
+
+    def test_shared_leaf_name_is_one_flattened_token(self) -> None:
+        assert skill_subset_filter_tokens(["one/foo", "two/foo"]) == {
+            "one/foo",
+            "two/foo",
+            "foo",
+        }
+
 
 # ============================================================================
 # DependencyReference — parse_from_dict with skills: field
