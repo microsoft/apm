@@ -48,20 +48,6 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     return out
 
 
-def reconcile_cross_package_deployed_files(
-    package_deployed_files: dict[str, list[str]],
-) -> None:
-    """Keep each deployed path on only its last reporting package."""
-    last_owner: dict[str, str] = {}
-    for dep_key, files in package_deployed_files.items():
-        for deployed_file in files:
-            last_owner[deployed_file] = dep_key
-    for dep_key, files in package_deployed_files.items():
-        package_deployed_files[dep_key] = [
-            deployed_file for deployed_file in files if last_owner[deployed_file] == dep_key
-        ]
-
-
 class LockfileBuilder:
     """Assembles a ``LockFile`` from :class:`InstallContext` state.
 
@@ -192,28 +178,6 @@ class LockfileBuilder:
         intended = self.ctx.intended_dep_keys or set()
         return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
 
-    def _reconcile_cross_package_deployed_files(self) -> None:
-        """Strip a stale ownership claim when two dep_keys report the same path.
-
-        ``ctx.package_deployed_files`` is populated once per dep_key,
-        independently, by that dep's own integration call (see
-        ``install/template.py``). When two different packages' primitives
-        resolve to the same on-disk path -- a name collision, e.g. two repos
-        both shipping a skill called ``shared-topic`` -- each package's own
-        integration call correctly and independently reports "I wrote this
-        path" at the moment it ran. Under sequential integration
-        (``install_order``), a later dep_key's write physically overwrites an
-        earlier one's at the same path, so only the last dep_key to claim a
-        given path is telling the truth by the time the lockfile is written.
-
-        Without this pass, every dep_key that ever claimed a colliding path
-        keeps it in the final lockfile, even though only one of them actually
-        owns it on disk -- a lockfile integrity bug: a future
-        ``apm uninstall``/``apm audit`` on a "losing" dep would act on a file
-        it does not control.
-        """
-        reconcile_cross_package_deployed_files(self.ctx.package_deployed_files)
-
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
 
@@ -227,13 +191,25 @@ class LockfileBuilder:
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block
         from apm_cli.install.phases.targets import declared_target_profiles
 
-        self._reconcile_cross_package_deployed_files()
-
-        all_current_deployed: set[str] = set()
-        for _dep_files in self.ctx.package_deployed_files.values():
-            all_current_deployed.update(_dep_files)
-
         existing = self.ctx.existing_lockfile
+        prior_files_by_package: dict[str, list[str]] = {}
+        prior_hashes_by_package: dict[str, dict[str, str]] = {}
+        for dep_key in lockfile.dependencies:
+            previous = existing.get_dependency(dep_key) if existing is not None else None
+            prior_files_by_package[dep_key] = (
+                previous.deployed_files if previous is not None else []
+            )
+            prior_hashes_by_package[dep_key] = (
+                previous.deployed_file_hashes if previous is not None else {}
+            )
+        from apm_cli.core.deployment_state import DeploymentReconciler
+
+        package_claims = DeploymentReconciler.reconcile_package_claims(
+            package_keys=lockfile.dependencies,
+            current_claims=self.ctx.package_deployed_files,
+            prior_files=prior_files_by_package,
+            prior_hashes=prior_hashes_by_package,
+        )
         declared = declared_target_profiles(self.ctx)
         diagnostics = getattr(self.ctx, "diagnostics", None)
         if diagnostics is None:
@@ -242,17 +218,11 @@ class LockfileBuilder:
             diagnostics = DiagnosticCollector()
         ghost_count = 0
         for dep_key in lockfile.dependencies:
-            current = list(self.ctx.package_deployed_files.get(dep_key, []))
+            claim = package_claims[dep_key]
+            current = list(claim.current_files)
             current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
-            prev = existing.get_dependency(dep_key) if existing is not None else None
-            prior_files = prev.deployed_files if prev is not None else []
-            prior_hashes = prev.deployed_file_hashes if prev is not None else {}
-
-            # Ownership transfer is not a stale-file deletion.
-            other_current = all_current_deployed - set(current)
-            if other_current:
-                prior_files = [p for p in prior_files if p not in other_current]
-                prior_hashes = {k: v for k, v in prior_hashes.items() if k not in other_current}
+            prior_files = list(claim.prior_files)
+            prior_hashes = claim.prior_hashes
 
             def _log_ghost_drop(path: str, package_key: str = dep_key) -> None:
                 nonlocal ghost_count

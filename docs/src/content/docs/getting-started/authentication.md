@@ -270,7 +270,7 @@ APM must classify a host as GitLab to use **GitLab REST v4** (for example `marke
 |--------|---------|
 | `GITLAB_HOST` | Environment variable for one self-managed GitLab FQDN (e.g. `git.company.com`) |
 | `APM_GITLAB_HOSTS` | Environment variable for several self-managed GitLab FQDNs, comma-separated |
-| `type: gitlab` | Manifest object-form hint for one bespoke GitLab host |
+| `type: gitlab` | Backend/API routing hint for one dependency; does not authorize global GitLab tokens |
 
 `gitlab.com` is detected automatically. For a single dependency on a bespoke
 hostname, use object form instead of a hostname convention:
@@ -280,7 +280,7 @@ hostname, use object form instead of a hostname convention:
   type: gitlab
 ```
 
-For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
+For `gitlab.com` and hosts explicitly trusted through `GITLAB_HOST` or `APM_GITLAB_HOSTS`, credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). `type: gitlab` selects backend/API routing only; other hinted hosts use host-scoped `git credential fill` or anonymous access and do not receive global GitLab tokens. GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
 
 ### REST headers (GitLab vs GitHub)
 

@@ -39,9 +39,12 @@ object-form dependency with `type: gitlab`:
   type: gitlab
 ```
 
-GitLab credentials use `GITLAB_APM_PAT`, then `GITLAB_TOKEN`, then host
-credentials. GitHub PAT variables are not used for GitLab-class hosts. See the
-main [authentication guide](https://microsoft.github.io/apm/getting-started/authentication/)
+`GITLAB_APM_PAT` and `GITLAB_TOKEN` apply only to `gitlab.com` and hosts trusted
+through `GITLAB_HOST` or `APM_GITLAB_HOSTS`. `type: gitlab` selects backend/API
+routing only; other hinted hosts use host-scoped `git credential fill` or
+public access and do not receive global GitLab tokens. GitHub PAT variables are
+not used for GitLab-class hosts.
+See the main [authentication guide](https://microsoft.github.io/apm/getting-started/authentication/)
 for the full host-class precedence rules.
 
 ## Per-org setup

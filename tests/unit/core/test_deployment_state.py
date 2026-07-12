@@ -111,6 +111,29 @@ def _intent(
     )
 
 
+def test_legacy_package_claims_share_one_handoff_decision() -> None:
+    """Current ownership and prior eligibility must come from one owner."""
+    shared = ".claude/skills/shared/SKILL.md"
+    unique = ".claude/skills/loser-only/SKILL.md"
+    reconcile = getattr(DeploymentReconciler, "reconcile_package_claims", None)
+
+    assert callable(reconcile)
+    claims = reconcile(
+        package_keys=("loser", "winner"),
+        current_claims={"loser": [shared, unique], "winner": [shared]},
+        prior_files={"loser": [shared, unique], "winner": []},
+        prior_hashes={
+            "loser": {shared: "sha256:shared", unique: "sha256:unique"},
+            "winner": {},
+        },
+    )
+
+    assert claims["loser"].current_files == (unique,)
+    assert claims["loser"].prior_files == (unique,)
+    assert claims["loser"].prior_hashes == {unique: "sha256:unique"}
+    assert claims["winner"].current_files == (shared,)
+
+
 def test_last_successful_writer_is_active_and_order_is_deterministic(tmp_path: Path) -> None:
     locator = _locator()
     results = [

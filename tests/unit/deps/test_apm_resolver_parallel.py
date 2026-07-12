@@ -26,7 +26,10 @@ from pathlib import Path
 
 import yaml
 
+from apm_cli.deps import apm_resolver
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.dependency_graph import DependencyNode
+from apm_cli.models.apm_package import APMPackage, DependencyReference
 
 
 def _write_pkg(root: Path, name: str, deps: list[str] | None = None) -> Path:
@@ -87,6 +90,38 @@ def _make_tree(tmp_path: Path) -> Path:
 def _resolved_node_keys(graph) -> list[str]:
     """Return tree node keys in deterministic insertion order."""
     return list(graph.dependency_tree.nodes.keys())
+
+
+def test_dependency_winner_selector_matches_flattening_precedence() -> None:
+    """Earliest depth and lowest node ID must select one shared winner."""
+    selector = getattr(apm_resolver, "_select_dependency_winners", None)
+    nodes = [
+        DependencyNode(
+            package=APMPackage(name="shared", version="v0"),
+            dependency_ref=DependencyReference(repo_url="org/shared", reference="v0"),
+            depth=2,
+        ),
+        DependencyNode(
+            package=APMPackage(name="shared", version="v2"),
+            dependency_ref=DependencyReference(repo_url="org/shared", reference="v2"),
+            depth=1,
+        ),
+        DependencyNode(
+            package=APMPackage(name="shared", version="v1"),
+            dependency_ref=DependencyReference(repo_url="org/shared", reference="v1"),
+            depth=1,
+        ),
+    ]
+
+    assert callable(selector)
+    ordered, winner_ids = selector(nodes)
+
+    assert [node.get_id() for node in ordered] == [
+        "org/shared#v1",
+        "org/shared#v2",
+        "org/shared#v0",
+    ]
+    assert winner_ids == {"org/shared": "org/shared#v1"}
 
 
 def test_max_parallel_one_matches_default_resolver(tmp_path):

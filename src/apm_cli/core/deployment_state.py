@@ -113,6 +113,15 @@ class DeploymentReconcileResult:
     changed: bool
 
 
+@dataclass(frozen=True)
+class PackageDeploymentClaims:
+    """Legacy per-package claims after deterministic ownership handoff."""
+
+    current_files: tuple[str, ...]
+    prior_files: tuple[str, ...]
+    prior_hashes: dict[str, str]
+
+
 _SUCCESS_STATUSES = frozenset(
     {
         MaterializationStatus.WRITTEN,
@@ -135,6 +144,41 @@ class DeploymentReconciler:
         self.project_root = project_root
         self.target_profiles = target_profiles
         self.diagnostics = diagnostics
+
+    @staticmethod
+    def reconcile_package_claims(
+        *,
+        package_keys: Iterable[str],
+        current_claims: Mapping[str, Iterable[str]],
+        prior_files: Mapping[str, Iterable[str]],
+        prior_hashes: Mapping[str, Mapping[str, str]],
+    ) -> dict[str, PackageDeploymentClaims]:
+        """Resolve legacy last-writer claims and prior carry-forward eligibility."""
+        normalized_current = {owner: tuple(paths) for owner, paths in current_claims.items()}
+        last_owner: dict[str, str] = {}
+        for owner, paths in normalized_current.items():
+            for path in paths:
+                last_owner[path] = owner
+
+        claims: dict[str, PackageDeploymentClaims] = {}
+        for owner in package_keys:
+            current = tuple(
+                path for path in normalized_current.get(owner, ()) if last_owner[path] == owner
+            )
+            eligible_prior = tuple(
+                path for path in prior_files.get(owner, ()) if last_owner.get(path, owner) == owner
+            )
+            eligible_prior_set = set(eligible_prior)
+            claims[owner] = PackageDeploymentClaims(
+                current_files=current,
+                prior_files=eligible_prior,
+                prior_hashes={
+                    path: content_hash
+                    for path, content_hash in prior_hashes.get(owner, {}).items()
+                    if path in eligible_prior_set
+                },
+            )
+        return claims
 
     def reconcile(
         self,

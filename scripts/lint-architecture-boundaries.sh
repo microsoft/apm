@@ -101,6 +101,24 @@ fi
 
 echo "[*] AC4: declared-intent preservation"
 check_pattern \
+    "Deployment claim handoff belongs to DeploymentReconciler" \
+    'def reconcile_cross_package_deployed_files|all_current_deployed|other_current' \
+    src/apm_cli/install/phases/lockfile.py
+if ! grep -q 'DeploymentReconciler.reconcile_package_claims' \
+    src/apm_cli/install/phases/lockfile.py; then
+    echo "[x] LockfileBuilder must consume DeploymentReconciler package claims"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "Dependency ref winner selection must use one helper" \
+    'download_winners|level_winners|seen_keys|nodes_at_depth\.sort' \
+    src/apm_cli/deps/apm_resolver.py
+winner_selector_calls=$(grep -c '_select_dependency_winners(' src/apm_cli/deps/apm_resolver.py)
+if [ "$winner_selector_calls" -ne 3 ]; then
+    echo "[x] Dependency dispatch and flattening must share _select_dependency_winners"
+    violations=$((violations + 1))
+fi
+check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
     src/apm_cli/deps/apm_resolver.py

@@ -166,3 +166,36 @@ def test_target_profile_owns_external_locator_encoding(tmp_path: Path) -> None:
     )
     _, schemes = install_governance([target])
     assert schemes == {"cowork://"}
+
+
+def test_lockfile_builder_delegates_package_claim_policy() -> None:
+    """Lockfile assembly must consume the deployment owner's decision."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/install/phases/lockfile.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "DeploymentReconciler.reconcile_package_claims" in source
+    assert "Deployment claim handoff belongs to DeploymentReconciler" in guard
+    for duplicate in (
+        "def reconcile_cross_package_deployed_files",
+        "all_current_deployed",
+        "other_current",
+    ):
+        assert duplicate not in source
+
+
+def test_dependency_winner_selection_has_one_algorithm() -> None:
+    """Dispatch and flattening must consume one deterministic selector."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/deps/apm_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert source.count("_select_dependency_winners(") == 3
+    assert "Dependency ref winner selection must use one helper" in guard
+    for duplicate in (
+        "download_winners",
+        "level_winners",
+        "seen_keys",
+        "nodes_at_depth.sort",
+    ):
+        assert duplicate not in source

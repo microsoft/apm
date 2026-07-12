@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 from collections import deque
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path, PureWindowsPath
@@ -31,6 +32,20 @@ _logger = logging.getLogger(__name__)
 # reproduce legacy sequential ordering for diff-debugging).  It is NOT
 # a user-facing feature toggle.
 _DEFAULT_RESOLVE_PARALLEL = 4
+
+
+def _select_dependency_winners(
+    nodes: Iterable[DependencyNode],
+) -> tuple[tuple[DependencyNode, ...], dict[str, str]]:
+    """Return canonical dependency order and first-wins node IDs."""
+    ordered = tuple(sorted(nodes, key=lambda node: (node.depth, node.get_id())))
+    winner_ids: dict[str, str] = {}
+    for node in ordered:
+        winner_ids.setdefault(
+            node.dependency_ref.get_unique_key(),
+            node.get_id(),
+        )
+    return ordered, winner_ids
 
 
 # Type alias for the download callback.
@@ -562,7 +577,7 @@ class APMDependencyResolver:
         # refs for one package must survive until the flattening phase reports
         # the conflict.
         queued_keys: set[str] = set()
-        download_winners: dict[str, str] = {}
+        winner_candidates: list[DependencyNode] = []
 
         # Add root dependencies to queue
         root_deps = root_package.get_apm_dependencies()
@@ -680,23 +695,12 @@ class APMDependencyResolver:
 
                 work_items.append((node, dep_ref, parent_node, is_dev))
 
-            # Conflicting refs share one physical install path. Pick the same
-            # deterministic first-wins ref used by flatten_dependencies before
-            # any worker can write that path; loser nodes remain for reporting.
-            level_winners: dict[str, str] = {}
-            for node, dep_ref, _parent_node, _is_dev in work_items:
-                unique_key = dep_ref.get_unique_key()
-                if unique_key in download_winners:
-                    continue
-                node_id = node.get_id()
-                previous = level_winners.get(unique_key)
-                if previous is None or node_id < previous:
-                    level_winners[unique_key] = node_id
-            download_winners.update(level_winners)
+            winner_candidates.extend(item[0] for item in work_items)
+            _, winner_ids = _select_dependency_winners(winner_candidates)
             work_items = [
                 item
                 for item in work_items
-                if download_winners[item[1].get_unique_key()] == item[0].get_id()
+                if winner_ids[item[1].get_unique_key()] == item[0].get_id()
             ]
 
             # --- Phase B (workers): load packages ---
@@ -885,27 +889,15 @@ class APMDependencyResolver:
             FlatDependencyMap: Flattened dependencies ready for installation
         """
         flat_map = FlatDependencyMap()
-        seen_keys: set[str] = set()
-
-        # Process dependencies level by level (breadth-first)
-        # This ensures that dependencies declared earlier in the tree get priority
-        for depth in range(1, tree.max_depth + 1):
-            nodes_at_depth = tree.get_nodes_at_depth(depth)
-
-            # Sort nodes by their position in the tree to ensure deterministic ordering
-            # In a real implementation, this would be based on declaration order
-            nodes_at_depth.sort(key=lambda node: node.get_id())
-
-            for node in nodes_at_depth:
-                unique_key = node.dependency_ref.get_unique_key()
-
-                if unique_key not in seen_keys:
-                    # First occurrence - add without conflict
-                    flat_map.add_dependency(node.dependency_ref, is_conflict=False)
-                    seen_keys.add(unique_key)
-                else:
-                    # Conflict - record it but keep the first one
-                    flat_map.add_dependency(node.dependency_ref, is_conflict=True)
+        ordered, winner_ids = _select_dependency_winners(
+            node for node in tree.nodes.values() if node.depth >= 1
+        )
+        for node in ordered:
+            unique_key = node.dependency_ref.get_unique_key()
+            flat_map.add_dependency(
+                node.dependency_ref,
+                is_conflict=winner_ids[unique_key] != node.get_id(),
+            )
 
         return flat_map
 
