@@ -83,9 +83,9 @@ export function resolveHref(href, pageUrlPath) {
 /** Checks whether a resolved site path exists in dist as a file/.html/index.html. */
 export function targetExistsInDist(distDir, resolvedPathname, base) {
 	const normalizedBase = base.endsWith('/') ? base : `${base}/`;
-	let rel = resolvedPathname.startsWith(normalizedBase)
-		? resolvedPathname.slice(normalizedBase.length)
-		: resolvedPathname.replace(/^\//, '');
+	if (!resolvedPathname.startsWith(normalizedBase)) return false;
+
+	let rel = resolvedPathname.slice(normalizedBase.length);
 	rel = rel.replace(/\/+$/, '');
 
 	const candidates =

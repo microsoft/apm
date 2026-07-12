@@ -136,6 +136,22 @@ test('findBrokenLinks reports a missing target with actionable diagnostics', () 
 	}
 });
 
+test('findBrokenLinks rejects relative links that escape the configured base', () => {
+	const dist = makeFixtureDist({
+		'producer/author-primitives/hooks-and-commands/index.html':
+			'<a href="../../../../enterprise/security/">Security</a>',
+		'enterprise/security/index.html': '<p>ok</p>',
+	});
+	try {
+		const { errors } = findBrokenLinks(dist, { base: '/apm/' });
+		assert.equal(errors.length, 1);
+		assert.equal(errors[0].href, '../../../../enterprise/security/');
+		assert.equal(errors[0].resolvedPath, '/enterprise/security/');
+	} finally {
+		cleanup(dist);
+	}
+});
+
 test('findBrokenLinks ignores anchors, root-absolute, external, mailto, and query-only links', () => {
 	const dist = makeFixtureDist({
 		'index.html': [
