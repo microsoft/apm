@@ -93,6 +93,20 @@ def _logical_local_display(physical_name: str) -> str:
     return physical_name
 
 
+def _local_basename(path: str) -> str:
+    """Cross-platform basename of a local dependency path.
+
+    A Windows-form path parsed on POSIX (``C:\\packages\\pkg``) is opaque to
+    ``PurePosixPath`` -- the backslashes are ordinary characters, so ``.name``
+    returns the whole string and the drive leaks. Route drive/UNC/backslash
+    paths through ``PureWindowsPath`` and everything else through
+    ``PurePosixPath`` so the leaf name is recovered on either host.
+    """
+    if "\\" in path or PureWindowsPath(path).drive:
+        return PureWindowsPath(path).name
+    return PurePosixPath(path).name
+
+
 def _dep_display_name(dep: LockedDependency) -> str:
     """Get display name for a locked dependency (key@version).
 
@@ -100,16 +114,20 @@ def _dep_display_name(dep: LockedDependency) -> str:
     unique key. For anchored transitive local deps the unique key is an
     absolute ``local:/...`` slot (see build_dependency_unique_key), which would
     leak the host filesystem path into user-facing tree output. Prefer the
-    declared relative ``local_path`` (``../pkg``); fall back to the logical
-    ``repo_url`` (``_local/pkg``) when the path is absent or itself absolute
-    (``/Users/...``, ``~/...``, ``C:\\...``). Remote deps keep their canonical
-    unique key.
+    declared relative ``local_path`` (``../pkg``). For an absolute declared path
+    (``/Users/...``, ``~/...``, ``C:\\...``) derive a hash-free logical
+    ``_local/<basename>`` from ``local_path`` -- never the ``repo_url``, which a
+    Windows-form path can pollute with the drive and backslashes
+    (``_local/C:\\packages\\pkg``). Fall back to ``repo_url`` only when
+    ``local_path`` is absent. Remote deps keep their canonical unique key.
     """
     if dep.source == "local":
-        if dep.local_path and not _is_absolute_local_path(dep.local_path):
-            key = dep.local_path
-        else:
+        if not dep.local_path:
             key = dep.repo_url
+        elif _is_absolute_local_path(dep.local_path):
+            key = f"_local/{_local_basename(dep.local_path)}"
+        else:
+            key = dep.local_path
     else:
         key = dep.get_unique_key()
     version = (
@@ -344,10 +362,15 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         # (``_local/<hash>/pkg``); report and orphan-check against the
         # logical lockfile key (``_local/pkg``) instead of leaking the slot.
         # A genuinely orphaned slot has no lockfile entry, so it stays keyed by
-        # its raw physical identity for correct detection -- but its displayed
-        # name is always the hash-free logical form.
+        # its raw physical identity for correct detection -- and only then is
+        # its displayed name reduced to the hash-free logical form.
         logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
-        display_name = _logical_local_display(logical_name)
+        is_orphaned = logical_name not in declared_with_ancestors
+        # Hash-stripping is reserved for a CONFIRMED orphan: a slot with no
+        # lockfile mapping to a logical key. A declared/mapped slot keeps its
+        # logical name verbatim so a legitimately hashed logical identity
+        # (``_local/<12hex>/pkg``) is not corrupted into ``_local/pkg``.
+        display_name = _logical_local_display(logical_name) if is_orphaned else logical_name
         try:
             version = "unknown"
             if has_apm_yml:
@@ -355,7 +378,6 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = logical_name not in declared_with_ancestors
             if is_orphaned:
                 orphaned_packages.append(display_name)
 

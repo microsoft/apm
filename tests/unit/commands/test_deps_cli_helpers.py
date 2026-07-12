@@ -137,6 +137,31 @@ class TestDepDisplayNameLocal:
         assert result == "_local/pkg@latest"
         assert "~" not in result
 
+    def test_local_dep_windows_path_repo_url_pollution_renders_clean_basename(self):
+        """A Windows-form path parsed on POSIX leaves the drive and backslashes
+        embedded in ``repo_url`` (``_local/C:\\packages\\pkg``). Falling back to
+        that polluted ``repo_url`` would leak host structure, so the display must
+        derive a clean cross-platform basename from ``local_path`` instead.
+
+        Exercises the real parse -> LockedDependency -> display chain.
+        """
+        from apm_cli.deps.lockfile import LockedDependency
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        ref = DependencyReference.parse(r"C:\packages\pkg")
+        # Guard the precondition: repo_url is genuinely polluted by the parse.
+        assert "C:" in ref.repo_url
+        dep = LockedDependency(
+            repo_url=ref.repo_url,
+            source="local",
+            local_path=ref.local_path,
+            version="1.0.0",
+        )
+        result = _dep_display_name(dep)
+        assert result == "_local/pkg@1.0.0"
+        assert "C:" not in result
+        assert "\\" not in result
+
 
 # ---------------------------------------------------------------------------
 # _resolve_scope_deps - filesystem paths
@@ -259,6 +284,45 @@ class TestResolveScopeDepsOrphanHashSlot:
         # The raw physical hash slot must never surface in user-facing output.
         for name in names + orphaned:
             assert _HASH_SLOT not in name
+
+
+class TestResolveScopeDepsDeclaredHashSlot:
+    """Hash-stripping is a *last resort* reserved for confirmed unmapped
+    orphans. A declared/locked local slot whose logical key legitimately looks
+    like ``_local/<12hex>/pkg`` must be preserved verbatim -- stripping it would
+    corrupt a real identity and mask a mapped dependency as if it were orphaned.
+    """
+
+    def test_declared_hashed_local_slot_is_preserved_not_stripped(self, tmp_path):
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+
+        modules_dir = tmp_path / APM_MODULES_DIR
+        slot = modules_dir / "_local" / _HASH_SLOT / "pkg"
+        slot.mkdir(parents=True)
+        (slot / APM_YML_FILENAME).write_text("name: pkg\nversion: 1.0.0\n")
+
+        # Declare the slot in the lockfile with a 3-part hashed logical
+        # ``repo_url``. Its install slot maps elsewhere (``_local/pkg``), so the
+        # scanned slot stays UNMAPPED yet DECLARED -> not an orphan.
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url=f"_local/{_HASH_SLOT}/pkg",
+                source="local",
+                local_path="../pkg",
+                version="1.0.0",
+            )
+        )
+        lockfile.write(get_lockfile_path(tmp_path))
+
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+
+        assert installed is not None
+        names = [package["name"] for package in installed]
+        # Declared, non-orphan slot: logical name is preserved verbatim.
+        assert names == [f"_local/{_HASH_SLOT}/pkg"]
+        assert orphaned == []
+        assert installed[0]["is_orphaned"] is False
 
 
 class TestResolveScopeDepsReadFailure:
