@@ -20,17 +20,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Core install, uninstall, audit, compile, policy, MCP, hook, lockfile, and target
-  lifecycle paths now fail closed and reconcile through canonical owners,
-  preventing partial state and drift across repeated operations. `apm compile
-  --target` also accepts every canonical project target and treats targets
-  without compile output as successful no-ops. (#2155)
+- `apm compile --target`, compile help and errors, and `apm init --target`
+  now use one canonical target catalog, so every advertised target is accepted
+  consistently. (closes #2138, #2147; #2155)
+- Generated hooks now use canonical upstream contracts: Claude matcher/hooks
+  nesting, Kiro v1 schema, Copilot's required top-level version, and provenance
+  outside vendor payloads. (closes #2062, #2071, #2128, #2157; #2155)
 - Homebrew formula updates now use the tap's daily poller instead of an obsolete
   PAT-backed dispatch, restoring release propagation without cross-repository
   credentials. (#2088)
 
 ### Fixed
 
+- `apm install` now fails before commit when declared plugin components or a
+  requested `--skill` are missing, and total positional-URL failure exits `1`.
+  (closes #2103, #2116, #2126; #2155)
+- Failed global Claude installs now clean up bootstrap state, corrected cyclic
+  dependency graphs resume without deleting `apm_modules`, and exception output
+  routes through the command logger. (closes #2129, #2140, #2161; #2155)
+- `apm audit --ci` now detects both changed and removed MCP declarations from
+  local-path sub-packages. (closes #2127, #2136; #2155)
+- Contracting the target set now reconciles `deployed_files`, removes
+  APM-managed MCP servers from dropped targets, and safely adopts exact matches
+  from legacy lockfiles. (closes #2139, #2149, #2158; #2155)
+- Manifest and policy parsers now reject invalid identity values and unknown
+  policy keys. Migration: quote numeric manifest versions and use the declared
+  mapping/list types for policy blocks. (closes #2137; #2155)
+- `apm compile --clean` now removes the stale context artifact when the final
+  primitive is removed. (closes #2130; #2155)
+- `apm uninstall` now transfers shared deployed-file ownership to a surviving
+  package and persists deployment state atomically. (closes #2148, #2160; #2155)
+- Semver install and update now preserve Azure DevOps bearer authentication and
+  retry a stale PAT `401` with the Azure CLI bearer. (closes #2150, #2156; #2155)
 - `apm prune` and `apm deps list` now treat nested `apm.yml` files as part of
   their installed parent package instead of exposing or deleting them as
   top-level orphans. (#2092)
@@ -49,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- Deployment-ledger reconciliation now uses indexed mutation paths, avoiding
+  quadratic scans as deployment history grows. (closes #2159; #2155)
 - Dependency lookup, HTTP cache enforcement, marketplace ref selection, and
   host classification now use indexed or cached paths, avoiding repeated linear
   scans at scale. (by @sergio-sisternes-epam, #2124)
