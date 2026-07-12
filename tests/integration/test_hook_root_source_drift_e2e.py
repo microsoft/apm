@@ -24,11 +24,10 @@ def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
 
 # Per-target on-disk layout descriptors:
 #   - settings_rel: path (relative to project root) of the merged hook config
-#   - sidecar_rel:  path of the apm-hooks.json sidecar (schema-strict targets only)
+#   - sidecar_rel:  path of the APM-owned apm-hooks.json ownership sidecar
 #   - event_key:    event key under which PreToolUse entries land for the target
 #
-# Sidecar-bearing targets (currently Claude) keep _apm_source in the sidecar
-# rather than in settings.json; the heal assertion reads from there.
+# Every merged target keeps ownership outside its native configuration.
 _HARNESS_CASES = [
     pytest.param(
         "claude",
@@ -40,28 +39,28 @@ _HARNESS_CASES = [
     pytest.param(
         "codex",
         ".codex/hooks.json",
-        None,
+        ".codex/apm-hooks.json",
         "PreToolUse",
         id="codex",
     ),
     pytest.param(
         "cursor",
         ".cursor/hooks.json",
-        None,
+        ".cursor/apm-hooks.json",
         "PreToolUse",
         id="cursor",
     ),
     pytest.param(
         "gemini",
         ".gemini/settings.json",
-        None,
+        ".gemini/apm-hooks.json",
         "BeforeTool",
         id="gemini",
     ),
     pytest.param(
         "windsurf",
         ".windsurf/hooks.json",
-        None,
+        ".windsurf/apm-hooks.json",
         "PreToolUse",
         id="windsurf",
     ),

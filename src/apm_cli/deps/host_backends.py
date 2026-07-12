@@ -10,9 +10,8 @@ right backend by consulting :meth:`AuthResolver.classify_host`.
 Pattern: Strategy via Protocol + dispatch dict. The three GitHub-family
 backends (GitHub, GHE Cloud, GHES) share URL builders through a small
 ``_GitHubFamilyBase`` to avoid copy/paste; ADO and Generic stand alone.
-There is no runtime registry. Adding a new vendor is one new class plus
-one new entry in ``_BACKEND_BY_KIND``, never a new branch in an
-``if/elif`` ladder.
+Adding a new vendor registers one backend with the canonical provider
+registry, never a new branch in an ``if/elif`` ladder.
 
 Design constraints (see plan in WIP/host-backends-refactor):
 
@@ -39,6 +38,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..core.auth import HostInfo
+from ..core.host_providers import (
+    classify_host_provider,
+    host_backend_factory,
+    register_host_backend,
+)
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
@@ -46,7 +50,6 @@ from ..utils.github_host import (
     build_https_clone_url,
     build_ssh_url,
     default_host,
-    is_github_hostname,
 )
 
 if TYPE_CHECKING:
@@ -512,14 +515,12 @@ class GenericGitBackend:
 # ---------------------------------------------------------------------------
 
 
-_BACKEND_BY_KIND: dict[str, type] = {
-    "github": GitHubBackend,
-    "ghe_cloud": GHECloudBackend,
-    "ghes": GHESBackend,
-    "ado": ADOBackend,
-    "gitlab": GitLabBackend,
-    "generic": GenericGitBackend,
-}
+register_host_backend("github", GitHubBackend)
+register_host_backend("ghe_cloud", GHECloudBackend)
+register_host_backend("ghes", GHESBackend)
+register_host_backend("ado", ADOBackend)
+register_host_backend("gitlab", GitLabBackend)
+register_host_backend("generic", GenericGitBackend)
 
 
 def _host_type_for_backend_dispatch(dep_ref: DependencyReference | None) -> str | None:
@@ -560,72 +561,22 @@ def backend_for(
         host = fallback_host or default_host()
         port = None
 
-    # ADO short-circuit: when ``dep_ref`` itself reports Azure DevOps the
-    # backend is unambiguous regardless of ``classify_host`` (which may be
-    # mocked or defective in tests/diagnostic paths).
-    if dep_ref is not None:
-        try:
-            if dep_ref.is_azure_devops():
-                info = auth_resolver.classify_host(
-                    host,
-                    port=port,
-                    host_type=host_type,
-                )
-                if not isinstance(info, HostInfo):
-                    info = HostInfo(
-                        host=host,
-                        kind="ado",
-                        has_public_repos=False,
-                        api_base=f"https://{host}",
-                        port=port,
-                    )
-                return ADOBackend(host_info=info)
-        except (AttributeError, TypeError):
-            pass
-
     info = auth_resolver.classify_host(
         host,
         port=port,
         host_type=host_type,
     )
-    cls: type | None = None
-    if isinstance(info, HostInfo):
-        cls = _BACKEND_BY_KIND.get(info.kind)
-    if cls is None:
-        # Defensive fallback path for mocked / future ``classify_host``
-        # results: route by hostname so callers that wire only a partial
-        # mock (typical in unit tests) still get the right backend.
-        host_lower = (host or "").lower()
-        if is_github_hostname(host):
-            if host_lower == "github.com":
-                cls = GitHubBackend
-                kind = "github"
-                api_base = "https://api.github.com"
-            elif host_lower.endswith(".ghe.com"):
-                cls = GHECloudBackend
-                kind = "ghe_cloud"
-                api_base = f"https://{host}/api/v3"
-            else:
-                cls = GHESBackend
-                kind = "ghes"
-                api_base = f"https://{host}/api/v3"
-            info = HostInfo(
-                host=host,
-                kind=kind,
-                has_public_repos=host_lower == "github.com",
-                api_base=api_base,
-                port=port,
-            )
-        else:
-            cls = GenericGitBackend
-            if not isinstance(info, HostInfo):
-                info = HostInfo(
-                    host=host,
-                    kind="generic",
-                    has_public_repos=False,
-                    api_base=f"https://{host}",
-                    port=port,
-                )
+    if not isinstance(info, HostInfo):
+        provider = classify_host_provider(host, host_type=host_type)
+        info = HostInfo(
+            host=host,
+            kind=provider.kind,
+            has_public_repos=provider.has_public_repos,
+            api_base=provider.api_base(host.lower()),
+            port=port,
+            credential_purpose=provider.credential_purpose,
+        )
+    cls = host_backend_factory(info.kind)
     return cls(host_info=info)
 
 
@@ -642,5 +593,5 @@ def backend_for_host(
     builder).
     """
     info = auth_resolver.classify_host(host, port=port)
-    cls = _BACKEND_BY_KIND.get(info.kind, GenericGitBackend)
+    cls = host_backend_factory(info.kind)
     return cls(host_info=info)

@@ -38,7 +38,6 @@ from ...deps.why_walker import (
     compute_why,
     resolve_package_query,
 )
-from ...utils.console import set_console_stderr
 
 # Exit codes
 _EXIT_OK = 0
@@ -195,13 +194,6 @@ _HELP = (
 )
 def why(package: str, global_: bool, as_json: bool) -> None:
     """Entry point for ``apm deps why <pkg>``."""
-    # Stream discipline: under --json, route ALL human-facing output to
-    # stderr so that downstream tools (jq, scripts) can consume stdout
-    # as a clean JSON document. Mirrors the convention established by
-    # `apm pack --json` (commands/pack.py) and by npm / yarn / cargo.
-    if as_json:
-        set_console_stderr(True)
-
     logger = CommandLogger("deps-why")
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     apm_dir = get_apm_dir(scope)

@@ -7,7 +7,7 @@ from typing import Any, Optional
 from ..models.apm_package import APMPackage, DependencyReference
 
 
-@dataclass
+@dataclass(eq=False)
 class DependencyNode:
     """Represents a single dependency node in the dependency graph."""
 

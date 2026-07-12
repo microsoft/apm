@@ -614,7 +614,7 @@ The `--policy <override>` flag is **audit-only today** — it works on `apm audi
 
 Policy resolves through the chain documented in [Inheritance](#inheritance) above: enterprise hub -> org -> repo override. The merge is **tighten-only**: a child can narrow allow lists, add deny entries, and escalate enforcement, but never relax a parent constraint. The full merge rule table is in [Tighten-only merge rules](#tighten-only-merge-rules).
 
-Install-time enforcement and `apm audit --ci` both resolve the **full multi-level `extends:` chain** (enterprise hub -> org -> repo, or any depth up to `MAX_CHAIN_DEPTH = 5`). The walker fetches each parent via the same single-policy fetcher used for direct discovery, so caching, retries, and source-prefix handling are consistent across levels. Cycles (`A extends B`, `B extends A`) are detected by tracking visited refs and abort the walk with a clear error. If a parent fetch fails midway, APM merges the policies it already resolved and emits a `[!] Policy chain incomplete: <ref> unreachable, using <N> of <M> policies` warning so the operator learns that an upstream policy was unreachable.
+Install-time enforcement and `apm audit --ci` both resolve the **full multi-level `extends:` chain** (enterprise hub -> org -> repo, or any depth up to `MAX_CHAIN_DEPTH = 5`). The walker fetches each parent via the same single-policy fetcher used for direct discovery, so caching, retries, and source-prefix handling are consistent across levels. Cycles (`A extends B`, `B extends A`) abort the walk. If any parent is unreachable, APM rejects the incomplete chain instead of enforcing a weaker subset.
 
 ### 4. What gets enforced
 

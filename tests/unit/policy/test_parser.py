@@ -118,6 +118,43 @@ class TestValidatePolicy(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn("custom_field", warnings[0])
 
+    def test_typo_and_wrong_typed_native_values_are_diagnosed(self):
+        errors, warnings = validate_policy(
+            {
+                "version": "1.0",
+                "enforcment": True,
+                "cache": [],
+                "dependencies": {"allow": ""},
+            }
+        )
+
+        self.assertEqual(warnings, ["Unknown top-level policy key: 'enforcment'"])
+        self.assertEqual(
+            errors,
+            [
+                "cache must be a YAML mapping",
+                "dependencies.allow must be a YAML list of package patterns",
+            ],
+        )
+
+    def test_known_policy_blocks_and_pattern_items_use_native_schema_types(self):
+        errors, _ = validate_policy(
+            {
+                "mcp": [],
+                "manifest": [],
+                "dependencies": {"allow": [123]},
+            }
+        )
+
+        self.assertEqual(
+            errors,
+            [
+                "mcp must be a YAML mapping",
+                "manifest must be a YAML mapping",
+                "dependencies.allow must be a YAML list of package patterns",
+            ],
+        )
+
     def test_non_dict_input(self):
         errors, warnings = validate_policy("not a dict")  # type: ignore[arg-type]  # noqa: RUF059
         self.assertEqual(len(errors), 1)

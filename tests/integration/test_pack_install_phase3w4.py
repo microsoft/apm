@@ -14,8 +14,6 @@ from click.testing import CliRunner
 
 from apm_cli.commands.install import (
     _check_package_conflicts,
-    _maybe_rollback_manifest,
-    _restore_manifest_from_snapshot,
     _split_argv_at_double_dash,
     _validate_and_add_packages_to_apm_yml,
 )
@@ -25,6 +23,10 @@ from apm_cli.commands.pack import (
     _render_marketplace_catalog,
     _render_marketplace_result,
     pack_cmd,
+)
+from apm_cli.install.transaction import (
+    _maybe_rollback_manifest,
+    _restore_manifest_from_snapshot,
 )
 
 # ---------------------------------------------------------------------------

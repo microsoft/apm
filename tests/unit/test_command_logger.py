@@ -62,6 +62,31 @@ class TestCommandLogger:
         logger.error("Failed!")
         mock_error.assert_called_once_with("Failed!", symbol="error")
 
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_error_detail_is_always_visible(self, mock_echo):
+        logger = CommandLogger("test")
+        logger.error_detail("Try: az login")
+        mock_echo.assert_called_once_with("Try: az login")
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_exception_adds_verbose_hint_when_details_are_hidden(self, mock_error, mock_info):
+        logger = CommandLogger("test", verbose=False)
+        logger.exception("Failed!")
+        mock_error.assert_called_once_with("Failed!", symbol="error")
+        mock_info.assert_called_once_with(
+            "Run with --verbose for detailed diagnostics",
+            symbol="info",
+        )
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_exception_omits_verbose_hint_when_verbose(self, mock_error, mock_info):
+        logger = CommandLogger("test", verbose=True)
+        logger.exception("Failed!")
+        mock_error.assert_called_once_with("Failed!", symbol="error")
+        mock_info.assert_not_called()
+
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_warning(self, mock_warning):
         logger = CommandLogger("test")

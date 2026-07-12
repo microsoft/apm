@@ -37,10 +37,9 @@ Flags
 * ``--force`` -- overwrite locally-authored files on collision.
 * ``--parallel-downloads`` -- max concurrent package downloads
   (0 disables parallelism).
-* ``--target``/``-t`` -- agent harness(es) to deploy to (e.g.
-  ``claude``, ``copilot``, ``cursor``, ``windsurf``, ``kiro``,
-  ``codex``, ``opencode``, ``gemini``); comma-separated for multiple targets.
-  Overrides ``apm.yml targets:`` and auto-detection.
+* ``--target``/``-t`` -- agent harness(es) to deploy to; comma-separated
+  for multiple targets. The generated command help lists every accepted
+  value. Overrides ``apm.yml targets:`` and auto-detection.
 
 These flags make ``apm update`` a strict superset of the deprecated
 ``apm deps update`` (issue #1525). ``apm install --update`` remains the
@@ -60,6 +59,7 @@ from git.exc import GitCommandError
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
+from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
 from ..deps.revision_pins import (
@@ -224,10 +224,12 @@ def _run_mcp_lsp_integration(
     old_mcp_servers: set = set()
     old_mcp_configs: dict = {}
     old_mcp_provenance: dict = {}
+    old_mcp_target_servers: dict = {}
     if existing_lock:
         old_mcp_servers = set(existing_lock.mcp_servers)
         old_mcp_configs = dict(existing_lock.mcp_configs)
         old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
+        old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
 
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
@@ -241,6 +243,7 @@ def _run_mcp_lsp_integration(
             old_mcp_servers=old_mcp_servers,
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
+            old_mcp_target_servers=old_mcp_target_servers,
             project_root=project_root,
             user_scope=user_scope,
             should_install=True,
@@ -333,8 +336,7 @@ def _run_mcp_lsp_integration(
     type=TargetParamType(),
     default=None,
     help=(
-        "Agent target(s) to update for "
-        "(e.g. claude, copilot, cursor, windsurf, kiro, codex, opencode, gemini). "
+        f"Agent target(s) to update for. {target_help_fragment('update')} "
         "Comma-separated for multiple: --target claude,cursor. "
         "Highest-priority entry in the resolution chain "
         "(--target > apm.yml targets: > auto-detect)."
@@ -674,6 +676,19 @@ def _run_dep_update(
     plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return
+
+    reconcile_noop = not dry_run and not plan.has_changes and not revision_pin_updates
+    if plan_state.proceeded or reconcile_noop:
+        from apm_cli.install.manifest_reconcile import reconcile_project_deployed_state
+
+        reconcile_project_deployed_state(
+            Path.cwd(),
+            explicit_target=target,
+            deploy_root=_mcp_lsp_project_root,
+            lock_root=_apm_dir,
+            user_scope=scope is InstallScope.USER,
+            verbose=verbose,
+        )
 
     if plan_state.proceeded:
         if revision_pin_updates:

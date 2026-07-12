@@ -28,8 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..utils.atomic_io import write_text_lf
-
 if TYPE_CHECKING:
     import logging as _logging_module
 
@@ -186,6 +184,7 @@ def compile_user_root_contexts(
     log = logger or logging.getLogger(__name__)
 
     results: list[UserRootCompileResult] = []
+    pending: list[tuple[int, str, Path, str]] = []
 
     apm_modules = source_root / "apm_modules"
     if not apm_modules.is_dir():
@@ -264,42 +263,41 @@ def compile_user_root_contexts(
             results.append(UserRootCompileResult(scoped.name, output_path, "would-write"))
             continue
 
-        try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            from ..security.gate import BLOCK_POLICY, SecurityGate
+        index = len(results)
+        results.append(UserRootCompileResult(scoped.name, output_path, "pending"))
+        pending.append((index, scoped.name, output_path, content))
 
-            verdict = SecurityGate.scan_text(content, str(output_path), policy=BLOCK_POLICY)
-            actionable = verdict.critical_count + verdict.warning_count
-            if actionable:
-                log.warning(
-                    "user_root_context: %s contains %s hidden character(s) "
-                    "-- run 'apm audit --file %s' to inspect",
-                    output_path,
-                    actionable,
-                    output_path,
-                )
-            if verdict.should_block:
-                results.append(
-                    UserRootCompileResult(
-                        scoped.name,
-                        output_path,
-                        "error:critical hidden characters in compiled output",
-                        has_critical_security=True,
-                    )
-                )
-                continue
-            write_text_lf(output_path, content)
-            log.debug("user_root_context: wrote %s", output_path)
-            results.append(
-                UserRootCompileResult(
-                    scoped.name,
-                    output_path,
-                    "written",
-                    has_critical_security=verdict.has_critical,
-                )
+    if pending:
+        from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
+
+        try:
+            verdict = CompiledOutputWriter().write_many(
+                {path: content for _, _, path, content in pending}
             )
+        except CompiledOutputPolicyError:
+            for index, name, path, _ in pending:
+                results[index] = UserRootCompileResult(
+                    name,
+                    path,
+                    "error:critical hidden characters in compiled output",
+                    has_critical_security=True,
+                )
         except OSError as exc:
-            log.warning("user_root_context: failed to write %s: %s", output_path, exc)
-            results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))
+            log.warning("user_root_context: failed to write output batch: %s", exc)
+            for index, name, path, _ in pending:
+                results[index] = UserRootCompileResult(name, path, f"error:{exc}")
+        else:
+            for index, name, path, _ in pending:
+                findings = verdict.findings_by_file.get(str(path), [])
+                if findings:
+                    log.warning(
+                        "user_root_context: %s contains %s hidden character(s) "
+                        "-- run 'apm audit --file %s' to inspect",
+                        path,
+                        len(findings),
+                        path,
+                    )
+                log.debug("user_root_context: wrote %s", path)
+                results[index] = UserRootCompileResult(name, path, "written")
 
     return results

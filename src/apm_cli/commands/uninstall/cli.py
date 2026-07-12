@@ -206,9 +206,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
         )
 
-        # Step 8: Update lockfile
+        # Step 8: Mutate dependency state in memory. Persistence happens once
+        # after survivor ownership, hashes, ledger, and MCP state agree.
+        lockfile_updated = False
         if lockfile:
-            lockfile_updated = False
             for pkg in packages_to_remove:
                 try:
                     ref = _parse_dependency_entry(pkg)
@@ -222,16 +223,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 if orphan_key in lockfile.dependencies:
                     del lockfile.dependencies[orphan_key]
                     lockfile_updated = True
-            if lockfile_updated:
-                try:
-                    if lockfile.dependencies:
-                        lockfile.write(lockfile_path)
-                    else:
-                        lockfile_path.unlink(missing_ok=True)
-                except Exception:
-                    logger.warning(
-                        "Failed to update lockfile -- it may be out of sync with uninstalled packages."
-                    )
 
         # Step 9: Sync integrations
         cleaned = {
@@ -242,9 +233,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             "hooks": 0,
             "instructions": 0,
         }
+        surviving_deployed_files = {}
+        lockfile_ready = True
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
-            cleaned = _sync_integrations_after_uninstall(
+            cleaned, surviving_deployed_files = _sync_integrations_after_uninstall(
                 apm_package,
                 deploy_root,
                 all_deployed_files,
@@ -264,6 +257,27 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 "Some integrated files may remain. Run `apm install --force` to resync."
             )
 
+        if lockfile:
+            try:
+                from .lockfile_state import reconcile_uninstall_deployment_state
+
+                lockfile_updated = (
+                    reconcile_uninstall_deployment_state(
+                        lockfile,
+                        deploy_root=deploy_root,
+                        all_deployed_files=all_deployed_files,
+                        surviving_deployed_files=surviving_deployed_files,
+                    )
+                    or lockfile_updated
+                )
+            except Exception as state_err:
+                lockfile_ready = False
+                logger.warning(
+                    "Lockfile state could not be reconciled. "
+                    "Run 'apm install --force' to resync before retrying."
+                )
+                logger.verbose_detail(f"Lockfile reconciliation error: {state_err}")
+
         for label, count in cleaned.items():
             if count > 0:
                 logger.progress(f"Cleaned up {count} integrated {label}", symbol="check")
@@ -281,9 +295,23 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 project_root=deploy_root,
                 user_scope=scope is InstallScope.USER,
                 scope=scope,
+                persist=False,
             )
         except Exception:
             logger.warning("MCP cleanup during uninstall failed")
+
+        if lockfile and lockfile_updated and lockfile_ready:
+            try:
+                from .lockfile_state import lockfile_has_persisted_state
+
+                if lockfile_has_persisted_state(lockfile):
+                    lockfile.write(lockfile_path)
+                else:
+                    lockfile_path.unlink(missing_ok=True)
+            except Exception:
+                logger.warning(
+                    "Failed to update lockfile -- it may be out of sync with uninstalled packages."
+                )
 
         # Final summary
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]

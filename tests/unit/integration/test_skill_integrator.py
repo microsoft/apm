@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -4234,7 +4235,7 @@ class TestCopySkillToTargetSymlinkContainment:
         from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
         target = TargetProfile(
-            name="agent-skills",
+            capability=TARGET_CAPABILITIES["agent-skills"],
             root_dir=".agents",
             auto_create=True,
             primitives={

@@ -43,6 +43,7 @@ A conforming manifest MUST be a YAML mapping at the top level with the following
 
 ```yaml
 # apm.yml
+$schema:       <uri>                     # OPTIONAL contract selector
 name:          <string>                  # REQUIRED
 version:       <string>                  # REQUIRED
 description:   <string>
@@ -67,6 +68,14 @@ marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
 ```
 
 Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. Unknown top-level keys MUST be preserved by writers but MAY be ignored by resolvers.
+
+The standard `$schema` key negotiates the manifest contract. Omit it for the
+current APM working draft. Set it to
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json` for
+the normative OpenAPM v0.1 shape. Unknown schema identities fail closed; APM
+does not interpret a working-draft manifest as v0.1. Under explicit v0.1,
+`registries` follows the normative string-or-object registry map rather than
+the working draft's named map plus `default` selector.
 
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 
@@ -228,11 +237,24 @@ scripts:
 | **Default** | Undeclared (legacy implicit auto-publish; flagged by `apm audit`). |
 | **Allowed values** | `auto` or a list of paths relative to the project root. |
 
-Declares which local `.apm/` content the project consents to publish when packing or deploying. Three forms are supported:
+Records consent to publish local content during deployment and controls local
+content selection when producing plugin bundles with `apm pack`. This field
+does not select the source layout: `.apm/` presence makes the APM-native layout
+authoritative, while its absence preserves supported plugin-native root
+sources. Three forms are supported:
 
-1. **Undeclared** (field omitted). Legacy behaviour: all local `.apm/` content is published as if `auto` were set. `apm audit` emits an `includes-consent` advisory whenever local content is deployed under this form.
-2. **`includes: auto`**. Explicit consent to publish all local `.apm/` content via the file scanner. No path enumeration required. Default for newly initialised projects.
-3. **`includes: [<path>, ...]`**. Explicit allow-list of paths the project consents to publish. Strongest governance form; changes are reviewable in PR diffs.
+1. **Undeclared** (field omitted). Legacy implicit consent for content in the
+   selected source layout. `apm audit` emits an `includes-consent` advisory
+   whenever local content is deployed under this form.
+2. **`includes: auto`**. Explicit consent to publish all local content from the
+   selected source layout. No path enumeration required. Default for newly
+   initialised projects.
+3. **`includes: [<path>, ...]`**. Explicit consent list for deployment and the
+   exhaustive allow-list for plugin packing. Listed paths may be under `.apm/`
+   or a plugin-native root directory. Missing, unsafe, symlinked, or unpackable
+   paths stop `apm pack`; no implicit source fallback occurs. During
+   `apm install`, the list satisfies explicit-consent policy but does not filter
+   integrator discovery.
 
 ```yaml
 # Form 1: undeclared (legacy; audit advisory)
@@ -247,7 +269,10 @@ includes: auto
 #   - .apm/skills/my-skill/
 ```
 
-`includes:` is allow-list only. There is no `exclude:` form. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
+For plugin packing, `includes:` is allow-list only. There is no `exclude:`
+form. To keep maintainer-only primitives out of shipped artifacts, author them
+outside the selected source layout and reference them via a local-path
+devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
 When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
@@ -457,7 +482,7 @@ Marketplace dependency (resolved at install time):
 | `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
 | `version` | `string` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`) | Version constraint resolved against git tags on the marketplace repository. When omitted the marketplace entry's default ref is used. |
 
-The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()` to look up the plugin in the marketplace's `marketplace.json` and replace the entry with a concrete git reference (owner/repo, ref, and optional virtual path).
+The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
 
 When `version` is specified and is a semver range or bare version number (e.g. `~2.1.0`, `^2.0`, `2.1.0`), the resolver lists git tags on the marketplace repository matching the `{name}--v{version}` convention, filters to those satisfying the constraint, and resolves to the highest matching tag. If no tag satisfies an explicit semver range, resolution fails with a `NoMatchingVersionError`. A bare version with no matching tag falls back to using the value as a raw git ref. Pre-release versions (e.g. `2.0.0-beta.1`) are excluded from semver-range resolution; target them explicitly as raw git refs. When `version` is a raw git ref (e.g. `v2.0.0`, `main`, or a commit SHA), it is used as a direct ref override without tag resolution.
 
@@ -713,7 +738,14 @@ Created automatically by [`apm plugin init`](./cli/plugin/). Use [`apm install -
 apm install --dev owner/test-helpers
 ```
 
-Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
+Plain `apm install` (no flag) deploys both `dependencies` and
+`devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation
+kicks in at `apm pack` (plugin format, the default). The local-content scanner
+uses `.apm/` when present, otherwise supported plugin-native root directories;
+it does not consult the devDep marker. To keep maintainer-only primitives out
+of shipped artifacts, author them outside the selected source layout and
+reference them via a local-path devDependency. See [Dev-only
+Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
 Local-path devDependency example:
 

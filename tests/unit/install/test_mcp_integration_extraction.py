@@ -37,12 +37,16 @@ MCP_POLICY_FIXTURE = FIXTURE_DIR / "apm-policy-mcp.yml"
 _PATCH_TARGET = "apm_cli.integration.mcp_integrator.MCPIntegrator"
 
 
-def _make_apm_package(*, scripts=None, targets=None, target=None, allow_executables=None):
+def _make_apm_package(
+    *, scripts=None, targets=None, target=None, allow_executables=None, mcp_deps=None
+):
     pkg = MagicMock()
     pkg.scripts = scripts
     pkg.targets = targets
     pkg.target = target
     pkg.allow_executables = allow_executables
+    pkg.package_path = Path("/fake/project")
+    pkg.get_all_mcp_dependencies.return_value = list(mcp_deps or [])
     return pkg
 
 
@@ -59,12 +63,17 @@ def _base_kwargs(**overrides):
         old_mcp_servers=set(),
         old_mcp_configs={},
         old_mcp_provenance={},
+        old_mcp_target_servers={},
         project_root=Path("/fake/project"),
         user_scope=False,
         should_install=True,
         logger=_make_logger(),
     )
     kwargs.update(overrides)
+    if "apm_package" not in overrides:
+        kwargs["apm_package"] = _make_apm_package(mcp_deps=kwargs["mcp_deps"])
+    elif "mcp_deps" in overrides:
+        kwargs["apm_package"].get_all_mcp_dependencies.return_value = list(kwargs["mcp_deps"])
     return kwargs
 
 
@@ -77,10 +86,7 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/server"}
-        mock_mcp.get_server_configs.return_value = {"io.github.acme/server": {"name": "x"}}
-        mock_mcp.get_server_provenance.return_value = {
-            "io.github.acme/server": "io.github.acme/package"
-        }
+        dep.resolved_by = "io.github.acme/package"
 
         count, apm_config = run_mcp_integration(
             **_base_kwargs(mcp_deps=[dep], project_root=tmp_path)
@@ -94,7 +100,8 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.update_lockfile.assert_called_once_with(
             {"io.github.acme/server"},
             Path("/nonexistent/apm.lock.yaml"),
-            mcp_configs={"io.github.acme/server": {"name": "x"}},
+            mcp_configs={"io.github.acme/server": dep.to_dict()},
+            mcp_target_servers={},
             mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
         )
         mock_mcp.remove_stale.assert_not_called()
@@ -189,6 +196,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
             set(),
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={},
+            mcp_target_servers={},
             mcp_config_provenance={},
         )
 
@@ -205,6 +213,7 @@ class TestRunMcpIntegrationRestoreBranch:
                 old_mcp_servers={"io.github.acme/kept"},
                 old_mcp_configs={"io.github.acme/kept": {"name": "kept"}},
                 old_mcp_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
+                old_mcp_target_servers={"copilot": ["io.github.acme/kept"]},
             )
         )
 
@@ -212,6 +221,7 @@ class TestRunMcpIntegrationRestoreBranch:
             {"io.github.acme/kept"},
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={"io.github.acme/kept": {"name": "kept"}},
+            mcp_target_servers={"copilot": ["io.github.acme/kept"]},
             mcp_config_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
         )
         mock_mcp.install.assert_not_called()

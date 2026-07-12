@@ -98,6 +98,7 @@ apm update
 - **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the manifest, lockfile, and workspace are untouched.
 - **No partial consent.** A single prompt covers both revision-pin manifest rewrites and the normal update plan; declining leaves everything unchanged.
 - **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
+- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files and lockfile ownership for targets no longer declared in `apm.yml`, even when no dependency ref changes.
 
 ## Back-compat: `apm update` used to be the self-updater
 

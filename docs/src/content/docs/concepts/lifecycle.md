@@ -55,7 +55,7 @@ Order of operations is deterministic and worth memorizing:
 4. **Integrate** -- write primitives into each target harness's native directory (`.github/`, `.claude/`, etc.) and merge MCP server configs into the harness-specific config files.
 5. **Lockfile** -- write `apm.lock.yaml` with pinned versions, content hashes, and the resolved MCP server set.
 
-`apm install` with no arguments installs from the existing manifest. `apm install <package>` adds a new dependency, re-runs the full pipeline, and updates both `apm.yml` and `apm.lock.yaml`. `--dry-run` runs steps 1 and 2 only and prints the plan.
+`apm install` with no arguments installs from the existing manifest. `apm install <package>` adds a new dependency, re-runs the full pipeline, and updates both `apm.yml` and `apm.lock.yaml`. `--dry-run` runs steps 1 and 2 only and prints the plan. If that command bootstraps a new project, it keeps the generated `apm.yml` and explicit target selection while rolling back package and deployment writes.
 
 :::note[Coming from npm?]
 `apm install` mirrors `npm install` deliberately. The big difference: APM also runs a security scan and, if present, an org policy gate before writing deployed files.
@@ -76,7 +76,11 @@ apm compile [--target <list>]
 
 Transforms the primitives in `.apm/` (and dependencies under `apm_modules/`) into harness-native files: `AGENTS.md` for Codex, `GEMINI.md` for Gemini, populated `.cursor/`, `.opencode/`, `.windsurf/`, `.kiro/` directories, and so on.
 
-Most users never call `apm compile` directly. `apm install` runs it as part of the integrate phase, and `apm run` auto-compiles any `.prompt.md` files referenced by a script just before execution. Reach for `apm compile` when you want to inspect what will be deployed without changing dependencies, when you are iterating on local primitives between installs, or when you only need output for one harness.
+`apm install` deploys individual primitives but does not run aggregate
+compilation. Run `apm compile` explicitly to generate root or distributed
+context files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`. `apm run`
+still compiles any `.prompt.md` files referenced by a script immediately
+before execution.
 
 The `--target` flag accepts a comma-separated list (`copilot,claude,cursor,opencode,codex,gemini,windsurf,kiro,agent-skills`) or `all`. `--dry-run` prints placement decisions without writing files. `--validate` checks primitive frontmatter and structure without producing output. `--watch` re-runs compilation on every change.
 

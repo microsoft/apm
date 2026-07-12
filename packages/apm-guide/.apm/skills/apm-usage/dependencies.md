@@ -209,6 +209,12 @@ resolution and override the source ref directly. The lockfile records the
 resolved ref, not the marketplace placeholder. Unknown keys in a marketplace
 entry are rejected.
 
+If the marketplace plugin entry declares `registry`, APM creates a
+registry-sourced dependency instead of Git coordinates. Enable registry support
+with `apm experimental enable registries` and configure the named registry.
+The entry must also declare a valid semver `version`; malformed or unresolvable
+registry intent fails closed and never falls back to Git.
+
 ```yaml
 - name: sec-check
   marketplace: acme-plugins

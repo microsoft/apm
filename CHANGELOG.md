@@ -7,8 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Hardened command behavior: invalid lockfiles and incomplete policy chains
+  fail closed before mutation; failed installs skip post-install hooks;
+  registry routes do not fall back to Git; machine output keeps notices on
+  stderr; unauthenticated Git retries scrub inherited credentials; `$schema`
+  selects the manifest contract; and timed-out runtimes are reaped. (#2155)
+- MCP audit, install, and uninstall now share one lockfile-bounded current-source
+  view, so `config-consistency` detects changed or removed transitive declarations
+  and fails on unreadable package manifests. (#2155)
+- `apm compile --target <target>` now accepts every project target from the
+  canonical catalog, emits its native context artifact when applicable, and
+  treats targets without compile output as successful no-ops. (#2155)
+- Merged hook configs now contain only each target's native upstream fields;
+  APM keeps reconciliation ownership in an external `apm-hooks.json` sidecar.
+  (#2155)
+
 ### Fixed
 
+- Regenerating the lockfile now records each transitive local dependency's
+  identity as a project-root-relative POSIX path instead of an absolute machine
+  path, so a committed `apm.lock.yaml` stays portable and deterministic across
+  machines and CI. (#2155)
+- Positional `apm install <url>` now exits non-zero when all packages fail
+  validation, matching manifest installs for reliable CI scripting. (#2131)
+- A failed first `apm install` no longer leaves behind an `apm.yml` it created,
+  and the final completion summary now reflects the committed outcome instead of
+  rendering before commit or rollback. Successful dry-run bootstrap keeps the
+  generated manifest and explicit targets for the next run. (#2155)
+- Manifest and policy parsers now reject wrong-typed native schema values and
+  report unknown policy keys. Migration: quote numeric `apm.yml` versions, use
+  non-empty string identities, and use mappings/lists for policy blocks. (closes #2137) (#2143)
+- `apm uninstall` now transfers shared deployed-file ownership to a surviving
+  package, preserving lockfile content-integrity coverage. (#2148)
+- Semver resolution now preserves each dependency's authentication scheme, so
+  Azure DevOps bearer credentials are used consistently for tag listing, and a
+  rejected `ADO_APM_PAT` retries ref resolution with the Azure CLI bearer. (#2155)
+- Contracting the active target set now removes APM-managed MCP server
+  entries from dropped targets while preserving user-authored servers and
+  unrelated native config, including safe adoption of self-defined servers from
+  legacy lockfiles when the native entry exactly matches its stored baseline.
+  (#2155)
+- `apm uninstall` now reconciles dependency removal, survivor ownership, hashes,
+  MCP state, and the deployment ledger before one atomic lockfile write. (#2155)
+- `apm install` exception and rollback diagnostics now render through the
+  `CommandLogger` owner, keeping recovery hints and warning severity consistent.
+  (#2155)
 - Fresh checkouts with declared consumer targets no longer remain
   `apm audit --ci`-red for files those targets cannot restore: `apm install`
   now removes stale `deployed_files` entries outside the legitimate target
@@ -18,12 +63,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
   (by @sergio-sisternes-epam; closes #1957) (#2041)
+- Global Claude installs now support an absolute `CLAUDE_CONFIG_DIR` outside
+  `HOME` without leaving a partial deployment. (closes #2129) (#2135)
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
-- Nested manifests inside an installed dependency are no longer falsely
-  reported or pruned as independent orphans. (closes #2067) (#2092)
-- `apm deps tree` now renders every lockfile-resolved depth and marks circular
-  relationships with a `(circular)` suffix. (#2092)
+- `apm pack` now treats `.apm/` as the authoritative local source, warns on
+  mixed layouts, and enforces explicit `includes:` lists exhaustively while
+  preserving root-only Claude plugin directories, including after `apm init`.
+  (#2122)
+
+### Performance
+
+- Deployment manifest reconciliation and uninstall ownership handoff now use
+  precomputed path indexes, avoiding quadratic scans on large deployment
+  ledgers. (#2155)
 
 ## [0.24.1] - 2026-07-10
 

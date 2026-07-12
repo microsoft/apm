@@ -337,6 +337,18 @@ class TestInstallCommandAutoBootstrap:
                 assert "description" in config
                 assert "APM project" in config["description"]
 
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_install_positional_url_total_validation_failure_exits_one(self, mock_validate):
+        """A positional URL that cannot be validated must fail the command."""
+        with self._chdir_tmp():
+            result = self.runner.invoke(cli, ["install", "https://127.0.0.1:1/org/repo.git"])
+
+            assert result.exit_code == 1
+            assert "All packages failed validation" in result.output
+            assert "Install interrupted" not in result.output
+            assert not Path("apm.yml").exists()
+            mock_validate.assert_called()
+
     @patch("apm_cli.commands.install._validate_package_exists")
     def test_install_invalid_package_format_with_no_apm_yml(self, mock_validate):
         """Test that invalid package format fails gracefully even with auto-bootstrap."""
@@ -344,8 +356,8 @@ class TestInstallCommandAutoBootstrap:
             # Don't mock validation - let it handle invalid format
             result = self.runner.invoke(cli, ["install", "invalid-package"])
 
-            # Should create apm.yml but fail to add invalid package
-            assert Path("apm.yml").exists()
+            # Failed first installs must not leave the bootstrap manifest.
+            assert not Path("apm.yml").exists()
             assert "invalid format" in result.output
 
     @patch("apm_cli.commands.install._validate_package_exists")
@@ -390,7 +402,7 @@ class TestInstallCommandAutoBootstrap:
             # Should show what would be added
             assert result.exit_code == 0
             assert "Would add" in result.output or "Dry run" in result.output
-            # apm.yml should still be created (for dry-run to work)
+            # Dry-run preserves the bootstrap configuration for the next run.
             assert Path("apm.yml").exists()
 
 

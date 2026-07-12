@@ -53,9 +53,22 @@ from typing import Any
 
 import yaml
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import (
+    MaterializationResult,
+    MaterializationStatus,
+    NativePayloadValidation,
+)
+from apm_cli.core.scope import InstallScope
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.hook_bundle import copy_deployed_hook_bundle
 from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
+from apm_cli.integration.hook_native_formats import (
+    _to_antigravity_hook_entries,
+    _to_claude_hook_entries,
+    _to_gemini_hook_entries,
+)
+from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -98,7 +111,7 @@ class _MergeHookConfig:
     config_filename: str  # e.g. "settings.json" or "hooks.json"
     target_key: str  # target name passed to _rewrite_hooks_data
     require_dir: bool  # True = skip if target dir doesn't exist
-    schema_strict: bool = False  # True = strip _apm_source before writing to disk
+    schema_strict: bool = True  # Ownership always lives outside native files.
     # Top-level JSON key the merged event map lives under.  Defaults to
     # "hooks" (Claude/Cursor/Codex/Gemini/Windsurf).  Antigravity's native
     # schema keys hooks by an arbitrary hook *name*, so APM reserves the
@@ -148,22 +161,29 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "Stop": "SessionEnd",
     },
     "kiro": {
-        # Copilot / Claude -> Kiro camelCase events
-        "PreToolUse": "preToolUse",
-        "preToolUse": "preToolUse",
-        "PostToolUse": "postToolUse",
-        "postToolUse": "postToolUse",
-        "UserPromptSubmit": "promptSubmit",
-        "userPromptSubmit": "promptSubmit",
-        "promptSubmit": "promptSubmit",
-        "Stop": "agentStop",
-        "stop": "agentStop",
-        "AgentStop": "agentStop",
-        "agentStop": "agentStop",
-        "PreTaskExecution": "preTaskExecution",
-        "preTaskExecution": "preTaskExecution",
-        "PostTaskExecution": "postTaskExecution",
-        "postTaskExecution": "postTaskExecution",
+        # Portable and legacy spellings -> Kiro v1 PascalCase triggers.
+        "PreToolUse": "PreToolUse",
+        "preToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "postToolUse": "PostToolUse",
+        "UserPromptSubmit": "UserPromptSubmit",
+        "userPromptSubmit": "UserPromptSubmit",
+        "promptSubmit": "UserPromptSubmit",
+        "Stop": "Stop",
+        "stop": "Stop",
+        "AgentStop": "Stop",
+        "agentStop": "Stop",
+        "SessionStart": "SessionStart",
+        "sessionStart": "SessionStart",
+        "PreTaskExecution": "PreTaskExec",
+        "preTaskExecution": "PreTaskExec",
+        "PreTaskExec": "PreTaskExec",
+        "PostTaskExecution": "PostTaskExec",
+        "postTaskExecution": "PostTaskExec",
+        "PostTaskExec": "PostTaskExec",
+        "PostFileCreate": "PostFileCreate",
+        "PostFileSave": "PostFileSave",
+        "PostFileDelete": "PostFileDelete",
     },
 }
 
@@ -179,7 +199,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "gemini": "PascalCase",
     "antigravity": "PascalCase",
     "windsurf": "PascalCase",
-    "kiro": "camelCase",
+    "kiro": "PascalCase",
 }
 
 
@@ -243,114 +263,29 @@ def _emit_hook_event_diagnostics(
         )
 
 
-def _to_nested_hook_entries(entries: list, key_fixer) -> list:
-    """Wrap flat Copilot hook entries in the ``{"hooks": [...]}`` nesting.
-
-    Shared by the Gemini and Antigravity transforms (both use the Claude
-    nested matcher shape for tool events).  *key_fixer* renames the inner
-    command/timeout keys in place for the specific target.  Entries already
-    in nested form have only their inner keys fixed.
-    """
-    result = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            result.append(entry)
+def _validate_copilot_payload(payload: dict) -> list[str]:
+    """Return native payload shape errors before any filesystem mutation."""
+    errors: list[str] = []
+    if payload.get("version") != 1:
+        errors.append("top-level version must equal 1")
+    hooks = payload.get("hooks")
+    if not isinstance(hooks, dict):
+        return [*errors, "top-level hooks must be an object"]
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            errors.append(f"hook event {event!r} must contain a list")
             continue
-        # Already nested (Claude / Gemini format) -- just fix inner keys
-        if "hooks" in entry and isinstance(entry["hooks"], list):
-            for hook in entry["hooks"]:
-                key_fixer(hook)
-            result.append(entry)
-            continue
-        # Flat Copilot entry -- wrap in nested format
-        inner = dict(entry)
-        key_fixer(inner)
-        apm_source = inner.pop("_apm_source", None)
-        outer: dict = {"hooks": [inner]}
-        if apm_source:
-            outer["_apm_source"] = apm_source
-        result.append(outer)
-    return result
-
-
-def _to_gemini_hook_entries(entries: list) -> list:
-    """Transform hook entries into Gemini CLI format.
-
-    Gemini requires ``{"hooks": [...]}`` nesting, uses ``command`` (not
-    ``bash``), and ``timeout`` in milliseconds (not ``timeoutSec`` in
-    seconds).  Entries already in Claude/Gemini nested format are left
-    unchanged.
-    """
-    return _to_nested_hook_entries(entries, _copilot_keys_to_gemini)
-
-
-def _copilot_keys_to_gemini(hook: dict) -> None:
-    """Rename Copilot hook keys to Gemini equivalents in-place."""
-    # bash / powershell -> command
-    if "command" not in hook:
-        for key in ("bash", "powershell", "windows"):
-            if key in hook:
-                hook["command"] = hook.pop(key)
-                break
-    # timeoutSec (seconds) -> timeout (milliseconds)
-    if "timeoutSec" in hook:
-        hook["timeout"] = hook.pop("timeoutSec") * 1000
-
-
-# Antigravity events that use the nested ``{matcher, hooks:[...]}`` matcher
-# shape.  All other events (PreInvocation/PostInvocation/Stop) take a flat
-# list of handler dicts; matcher has no meaning there.
-_ANTIGRAVITY_NESTED_EVENTS: frozenset[str] = frozenset({"PreToolUse", "PostToolUse"})
-
-
-def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
-    """Transform hook entries into Antigravity CLI native format.
-
-    Antigravity's ``hooks.json`` uses TWO entry shapes:
-
-    * ``PreToolUse`` / ``PostToolUse`` -- nested
-      ``[{"matcher": "*", "hooks": [handler, ...]}]``.
-    * ``PreInvocation`` / ``PostInvocation`` / ``Stop`` -- a flat list of
-      handler dicts (``matcher`` is ignored).
-
-    A handler is ``{"type": "command", "command": ..., "timeout": <sec>}``.
-    Unlike Gemini, ``timeout`` stays in SECONDS (no ms conversion).
-    """
-    if event_name in _ANTIGRAVITY_NESTED_EVENTS:
-        return _to_nested_hook_entries(entries, _copilot_keys_to_antigravity)
-    # Flat handler list -- fix inner keys without wrapping.
-    result = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            result.append(entry)
-            continue
-        # A pre-nested entry (matcher + hooks[]) is flattened to its handlers.
-        if "hooks" in entry and isinstance(entry["hooks"], list):
-            apm_source = entry.get("_apm_source")
-            for hook in entry["hooks"]:
-                if isinstance(hook, dict):
-                    _copilot_keys_to_antigravity(hook)
-                    if apm_source and "_apm_source" not in hook:
-                        hook["_apm_source"] = apm_source
-                result.append(hook)
-            continue
-        handler = dict(entry)
-        _copilot_keys_to_antigravity(handler)
-        result.append(handler)
-    return result
-
-
-def _copilot_keys_to_antigravity(hook: dict) -> None:
-    """Rename Copilot hook keys to Antigravity equivalents in-place."""
-    # bash / powershell -> command
-    if "command" not in hook:
-        for key in ("bash", "powershell", "windows"):
-            if key in hook:
-                hook["command"] = hook.pop(key)
-                break
-    # timeoutSec (seconds) -> timeout (SECONDS -- Antigravity uses seconds)
-    if "timeoutSec" in hook:
-        hook["timeout"] = hook.pop("timeoutSec")
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                errors.append(f"hook event {event!r} entry {index} must be an object")
+                continue
+            handlers = entry.get("hooks")
+            if handlers is not None and (
+                not isinstance(handlers, list)
+                or not all(isinstance(handler, dict) for handler in handlers)
+            ):
+                errors.append(f"hook event {event!r} entry {index} handlers must be objects")
+    return errors
 
 
 _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
@@ -1242,6 +1177,7 @@ class HookIntegrator(BaseIntegrator):
         scripts_adopted = 0
         target_paths: list[Path] = []
         display_payloads: list = []
+        materializations: list[MaterializationResult] = []
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
@@ -1283,6 +1219,38 @@ class HookIntegrator(BaseIntegrator):
                     renamed_hooks[event_name] = entries
                 rewritten["hooks"] = renamed_hooks
 
+            rewritten.setdefault("version", 1)
+            errors = _validate_copilot_payload(rewritten)
+            validation = NativePayloadValidation(
+                valid=not errors,
+                contract="copilot-hooks-v1",
+                errors=tuple(errors),
+            )
+            if not validation.valid:
+                if diagnostics is not None:
+                    diagnostics.error(
+                        f"Invalid Copilot hook payload for {rel_path}",
+                        package=package_name,
+                        detail="; ".join(validation.errors),
+                    )
+                from apm_cli.integration.targets import KNOWN_TARGETS
+
+                materializations.append(
+                    MaterializationResult(
+                        locator=DeploymentLedgerCodec.locator_for_path(
+                            target_path,
+                            project_root=project_root,
+                            target=KNOWN_TARGETS["copilot"],
+                            scope=InstallScope.PROJECT,
+                        ),
+                        owners=frozenset({package_info.get_canonical_dependency_string()}),
+                        status=MaterializationStatus.FAILED,
+                        content_hash=None,
+                        validation=validation,
+                    )
+                )
+                continue
+
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:
                 json.dump(rewritten, f, indent=2)
@@ -1290,6 +1258,27 @@ class HookIntegrator(BaseIntegrator):
 
             hooks_integrated += 1
             target_paths.append(target_path)
+            from apm_cli.integration.targets import KNOWN_TARGETS
+            from apm_cli.utils.content_hash import compute_file_hash
+
+            materializations.append(
+                MaterializationResult(
+                    locator=DeploymentLedgerCodec.locator_for_path(
+                        target_path,
+                        project_root=project_root,
+                        target=KNOWN_TARGETS["copilot"],
+                        scope=InstallScope.PROJECT,
+                    ),
+                    owners=frozenset({package_info.get_canonical_dependency_string()}),
+                    status=(
+                        MaterializationStatus.WRITTEN
+                        if validation.valid
+                        else MaterializationStatus.FAILED
+                    ),
+                    content_hash=compute_file_hash(target_path),
+                    validation=validation,
+                )
+            )
             display_payloads.append(
                 self._build_display_payload(
                     f"{root_dir}/hooks/",
@@ -1322,6 +1311,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied=scripts_copied,
             files_adopted=scripts_adopted,
             display_payloads=display_payloads,
+            materializations=tuple(materializations),
         )
 
     # ------------------------------------------------------------------
@@ -1356,6 +1346,7 @@ class HookIntegrator(BaseIntegrator):
 
         root_dir = target.root_dir if target else f".{config.target_key}"
         target_dir = project_root / root_dir
+        container = config.event_container_key
 
         # Opt-in check: some targets only deploy when their dir exists
         if config.require_dir and not target_dir.exists():
@@ -1418,7 +1409,7 @@ class HookIntegrator(BaseIntegrator):
             except (json.JSONDecodeError, OSError):
                 json_config = {}
 
-        # Load sidecar ownership metadata (schema-strict targets)
+        # Load external ownership metadata before reconciling native entries.
         sidecar_path = target_dir / _APM_HOOKS_SIDECAR
         sidecar_data: dict = {}
         if config.schema_strict and sidecar_path.exists():
@@ -1438,15 +1429,14 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_data = {}
 
             # Re-inject _apm_source from sidecar into matching in-memory entries
-            if sidecar_data and "hooks" in json_config:
-                _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
+            if sidecar_data and container in json_config:
+                _reinject_apm_source_from_sidecar(json_config[container], sidecar_data)
 
         # Top-level container key for the merged event map.  Most targets
         # use "hooks"; Antigravity nests its events under the reserved
         # hook-name "apm" so sibling user hook-names are preserved.  Only
         # the container key is created so non-"hooks" targets never gain a
         # stray empty "hooks" object in their native file.
-        container = config.event_container_key
         if container not in json_config:
             json_config[container] = {}
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
@@ -1504,7 +1494,9 @@ class HookIntegrator(BaseIntegrator):
 
                 # Transform flat Copilot entries to the target's nested /
                 # native hook shape.
-                if config.target_key == "gemini":
+                if config.target_key == "claude":
+                    entries = _to_claude_hook_entries(entries)
+                elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
                 elif config.target_key == "antigravity":
                     entries = _to_antigravity_hook_entries(entries, event_name)
@@ -1670,7 +1662,7 @@ class HookIntegrator(BaseIntegrator):
         if config.schema_strict:
             # Build sidecar from entries that have _apm_source
             sidecar_out: dict = {}
-            for event_name, entries_list in json_config.get("hooks", {}).items():
+            for event_name, entries_list in json_config.get(container, {}).items():
                 if not isinstance(entries_list, list):
                     continue
                 owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
@@ -1678,7 +1670,7 @@ class HookIntegrator(BaseIntegrator):
                     sidecar_out[event_name] = [dict(e) for e in owned]
 
             # Strip _apm_source from entries before writing to disk
-            for entries_list in json_config.get("hooks", {}).values():
+            for entries_list in json_config.get(container, {}).values():
                 if isinstance(entries_list, list):
                     for entry in entries_list:
                         if isinstance(entry, dict):
@@ -1687,12 +1679,10 @@ class HookIntegrator(BaseIntegrator):
             # Write sidecar
             sidecar_path = target_dir / _APM_HOOKS_SIDECAR
             if sidecar_out:
-                try:
-                    with open(sidecar_path, "w", encoding="utf-8") as f:
-                        json.dump(sidecar_out, f, indent=2)
-                        f.write("\n")
-                except OSError as exc:
-                    _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
+                atomic_write_text(
+                    sidecar_path,
+                    json.dumps(sidecar_out, indent=2) + "\n",
+                )
             elif sidecar_path.exists():
                 sidecar_path.unlink()
 
@@ -1939,91 +1929,28 @@ class HookIntegrator(BaseIntegrator):
                     except Exception:
                         stats["errors"] += 1
 
-        # Clean APM entries from merged-hook JSON configs (uses _apm_source marker)
+        # Clean APM entries from merged-hook JSON configs using external ownership.
         for t in source:
             config = _MERGE_HOOK_TARGETS.get(t.name)
             if config is not None:
                 json_path = project_root / t.root_dir / config.config_filename
-                if t.name == "claude":
-                    # Claude uses settings.json with special structure
-                    if json_path.exists():
-                        try:
-                            with open(json_path, encoding="utf-8") as f:
-                                settings = json.load(f)
-
-                            # Load sidecar to restore _apm_source markers
-                            sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
-                            sidecar_data: dict = {}
-                            if sidecar_path.exists():
-                                try:
-                                    with open(sidecar_path, encoding="utf-8") as sf:
-                                        _raw = json.load(sf)
-                                    if isinstance(_raw, dict):
-                                        sidecar_data = _raw
-                                    else:
-                                        _log.warning(
-                                            "Sidecar file %s contains non-dict JSON; treating as empty.",
-                                            sidecar_path,
-                                        )
-                                        sidecar_data = {}
-                                except (json.JSONDecodeError, OSError) as exc:
-                                    _log.warning(
-                                        "Failed to read sidecar %s: %s; treating as empty.",
-                                        sidecar_path,
-                                        exc,
-                                    )
-                                    sidecar_data = {}
-
-                            # Re-inject _apm_source from sidecar
-                            if sidecar_data and "hooks" in settings:
-                                _reinject_apm_source_from_sidecar(settings["hooks"], sidecar_data)
-
-                            if "hooks" in settings:
-                                modified = False
-                                for event_name in list(settings["hooks"].keys()):
-                                    matchers = settings["hooks"][event_name]
-                                    if isinstance(matchers, list):
-                                        filtered = [
-                                            m
-                                            for m in matchers
-                                            if not (isinstance(m, dict) and "_apm_source" in m)
-                                        ]
-                                        if len(filtered) != len(matchers):
-                                            modified = True
-                                        settings["hooks"][event_name] = filtered
-                                        if not filtered:
-                                            del settings["hooks"][event_name]
-
-                                if not settings["hooks"]:
-                                    del settings["hooks"]
-
-                                if modified:
-                                    with open(json_path, "w", encoding="utf-8") as f:
-                                        json.dump(settings, f, indent=2)
-                                        f.write("\n")
-                                    stats["files_removed"] += 1
-
-                                    # Clean up sidecar
-                                    if sidecar_path.exists():
-                                        sidecar_path.unlink()
-
-                                # Remove stale sidecar when no hooks section remains
-                                if sidecar_path.exists() and "hooks" not in settings:
-                                    sidecar_path.unlink()
-                        except (json.JSONDecodeError, OSError):
-                            stats["errors"] += 1
-                else:
-                    self._clean_apm_entries_from_json(
-                        json_path, stats, container=config.event_container_key
-                    )
+                self._clean_apm_entries_from_json(
+                    json_path,
+                    stats,
+                    container=config.event_container_key,
+                    sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+                )
 
         return stats
 
     @staticmethod
     def _clean_apm_entries_from_json(
-        json_path: Path, stats: dict[str, int], container: str = "hooks"
+        json_path: Path,
+        stats: dict[str, int],
+        container: str = "hooks",
+        sidecar_path: Path | None = None,
     ) -> None:
-        """Remove APM-tagged entries from a hooks JSON file.
+        """Remove externally-owned entries from a native hooks JSON file.
 
         Filters out entries with ``_apm_source`` markers and cleans up
         empty event arrays and the *container* key itself.  *container*
@@ -2037,7 +1964,15 @@ class HookIntegrator(BaseIntegrator):
                 data = json.load(f)
 
             if container not in data:
+                if sidecar_path is not None and sidecar_path.exists():
+                    sidecar_path.unlink()
                 return
+
+            if sidecar_path is not None and sidecar_path.exists():
+                with open(sidecar_path, encoding="utf-8") as f:
+                    sidecar_data = json.load(f)
+                if isinstance(sidecar_data, dict):
+                    _reinject_apm_source_from_sidecar(data[container], sidecar_data)
 
             modified = False
             for event_name in list(data[container].keys()):
@@ -2060,5 +1995,7 @@ class HookIntegrator(BaseIntegrator):
                     json.dump(data, f, indent=2)
                     f.write("\n")
                 stats["files_removed"] += 1
+            if sidecar_path is not None and sidecar_path.exists():
+                sidecar_path.unlink()
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1

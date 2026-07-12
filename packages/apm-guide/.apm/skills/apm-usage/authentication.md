@@ -16,6 +16,9 @@ APM checks these sources in order, using the first valid token found:
 
 APM checks the active `gh` CLI account before invoking OS credential helpers. This reduces ambiguous multi-account prompts on hosts like github.com. If the `gh` CLI is not installed or no account is active, APM skips this step silently and continues to `git credential fill`.
 
+Unauthenticated public-repository retries use a fresh Git environment with
+inherited token and authorization-header settings removed.
+
 For multi-account Git Credential Manager setups, see the [Multi-account Git Credential Manager](https://microsoft.github.io/apm/getting-started/authentication/#multi-account-git-credential-manager) section in the main authentication guide.
 
 ## Marketplace transport
@@ -36,9 +39,12 @@ object-form dependency with `type: gitlab`:
   type: gitlab
 ```
 
-GitLab credentials use `GITLAB_APM_PAT`, then `GITLAB_TOKEN`, then host
-credentials. GitHub PAT variables are not used for GitLab-class hosts. See the
-main [authentication guide](https://microsoft.github.io/apm/getting-started/authentication/)
+`GITLAB_APM_PAT` and `GITLAB_TOKEN` apply only to `gitlab.com` and hosts trusted
+through `GITLAB_HOST` or `APM_GITLAB_HOSTS`. `type: gitlab` selects backend/API
+routing only; other hinted hosts use host-scoped `git credential fill` or
+public access and do not receive global GitLab tokens. GitHub PAT variables are
+not used for GitLab-class hosts.
+See the main [authentication guide](https://microsoft.github.io/apm/getting-started/authentication/)
 for the full host-class precedence rules.
 
 ## Per-org setup
@@ -95,7 +101,8 @@ ADO marketplace URL authoring.
 **Finding your tenant ID:** visit `https://dev.azure.com/{org}/_settings/organizationAad`,
 or run `az login` and inspect `az account show --query tenantId -o tsv`.
 
-If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` bearer and warns:
+If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az`
+bearer for clone, preflight, semver tag, and marketplace ref resolution, then warns:
 `[!] ADO_APM_PAT was rejected for {host} (HTTP 401); fell back to az cli bearer.`
 
 When auth fails entirely, APM prints a targeted diagnostic (not a generic "not accessible"

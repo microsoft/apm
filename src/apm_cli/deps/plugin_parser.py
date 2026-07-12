@@ -67,6 +67,10 @@ class PluginIntegrityError(RuntimeError):
     """
 
 
+class DeclaredPluginComponentError(PluginIntegrityError):
+    """Raised when a plugin explicitly declares an unsatisfied component path."""
+
+
 def _assert_no_symlink_descendants(target: Path) -> None:
     """Refuse to copy when *target* or any of its descendants is a symlink.
 
@@ -193,6 +197,42 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     return synthesize_apm_yml_from_plugin(plugin_path, manifest)
 
 
+def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, Any]) -> None:
+    """Fail when a plugin manifest declares a component that cannot be resolved."""
+    plugin_name = str(manifest.get("name") or plugin_path.name)
+    for field in ("agents", "skills", "commands", "hooks"):
+        declared = manifest.get(field)
+        if declared is None or declared == [] or (field == "hooks" and isinstance(declared, dict)):
+            continue
+        values = declared if isinstance(declared, list) else [declared]
+        for value in values:
+            declared_path = str(value)
+            if not declared_path.strip():
+                raise DeclaredPluginComponentError(
+                    f"Plugin '{plugin_name}' declares an empty '{field}' component path "
+                    f"in plugin root '{plugin_path}'. Remove the empty declaration "
+                    "from plugin.json, then reinstall."
+                )
+            candidate = plugin_path / declared_path
+            try:
+                ensure_path_within(candidate, plugin_path)
+                resolved = candidate.resolve()
+            except (OSError, PathTraversalError, ValueError) as exc:
+                raise DeclaredPluginComponentError(
+                    f"Plugin '{plugin_name}' declares an invalid '{field}' component path "
+                    f"'{declared_path}' outside plugin root '{plugin_path}'. "
+                    "Move the component inside the plugin root or remove the declaration "
+                    "from plugin.json, then reinstall."
+                ) from exc
+            if resolved.exists() and not candidate.is_symlink():
+                continue
+            raise DeclaredPluginComponentError(
+                f"Plugin '{plugin_name}' declares missing '{field}' component path "
+                f"'{declared_path}' in plugin root '{plugin_path}'. "
+                "Add the component or remove the declaration from plugin.json, then reinstall."
+            )
+
+
 def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) -> Path:
     """Synthesize apm.yml from plugin metadata.
 
@@ -216,6 +256,8 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     """
     if not manifest.get("name"):
         manifest["name"] = plugin_path.name
+
+    _validate_declared_component_paths(plugin_path, manifest)
 
     # Create .apm directory structure
     apm_dir = plugin_path / ".apm"

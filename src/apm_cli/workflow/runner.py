@@ -154,7 +154,7 @@ def run_workflow(workflow_name, params=None, base_dir=None):
                 # Invalid runtime name - fail with clear error message
                 available_runtimes = [
                     adapter.get_runtime_name()
-                    for adapter in RuntimeFactory._RUNTIME_ADAPTERS
+                    for adapter in RuntimeFactory.adapter_classes()
                     if adapter.is_available()
                 ]
                 return (

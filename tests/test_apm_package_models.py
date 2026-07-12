@@ -617,6 +617,24 @@ class TestAPMPackage:
 
         Path(f.name).unlink()
 
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("name", "", "'name' must be a non-empty string"),
+            ("name", ["a", "b"], "'name' must be a non-empty string"),
+            ("version", 123, "'version' must be a non-empty string"),
+        ],
+    )
+    def test_from_apm_yml_rejects_invalid_identity(self, tmp_path, field, value, message):
+        """Manifest identity fields reject empty and wrong-typed native values."""
+        apm_yml = tmp_path / "apm.yml"
+        manifest = {"name": "valid-pkg", "version": "1.0.0"}
+        manifest[field] = value
+        apm_yml.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+        with pytest.raises(ValueError, match=message):
+            APMPackage.from_apm_yml(apm_yml)
+
     def test_from_apm_yml_invalid_yaml(self):
         """Test loading invalid YAML."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:

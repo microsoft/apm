@@ -24,11 +24,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.install.resolution_staging import ResolutionStagingSession
     from apm_cli.models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
@@ -103,15 +105,12 @@ def _maybe_resolve_git_semver(
     Auth
     ----
     When ``auth_resolver`` is supplied, the per-dep ``AuthContext`` is
-    resolved before constructing :class:`RefResolver` and its token is
-    embedded in the ``https://`` URL used by ``git ls-remote``. This
-    mirrors the auth path used by the clone step downstream, so a
-    private-repo semver dep that clones successfully also enumerates
-    its tags successfully in CI environments where ``GITHUB_APM_PAT`` /
-    ``ADO_APM_PAT`` are the only credential source (no system
-    credential helper available). Passing ``auth_resolver=None`` (the
-    legacy path) preserves the previous unauthenticated behaviour for
-    public repos and for callers that intentionally skip auth.
+    resolved before constructing :class:`RefResolver`; its token and
+    authentication scheme are forwarded to ``git ls-remote``, mirroring
+    the clone step downstream. A private-repo semver dep that clones
+    successfully then also enumerates its tags in CI environments where
+    ``GITHUB_APM_PAT`` / ``ADO_APM_PAT`` are the only credential source.
+    ``auth_resolver=None`` preserves unauthenticated public-repo behavior.
     """
     # Only git-source deps with a semver-range reference are eligible.
     if dep_ref.is_local:
@@ -153,18 +152,23 @@ def _maybe_resolve_git_semver(
                 resolved_at=locked.resolved_at or "",
             )
 
-    # Fresh resolution: call git ls-remote and pick the highest matching tag.
     from apm_cli.deps.git_semver_resolver import GitSemverResolver
     from apm_cli.install.helpers.ref_reuse import (
         get_shared_ref_resolver,
-        resolve_dep_token,
+        resolve_dep_auth,
     )
 
-    # Reuse one RefResolver per (host, token) so same-repo deps share a
-    # single ls-remote tag listing (see helpers.ref_reuse for rationale).
-    token = resolve_dep_token(dep_ref, auth_resolver)
+    # Reuse one resolver per auth context so same-repo deps share tag listing.
+    token, auth_scheme, git_env = resolve_dep_auth(dep_ref, auth_resolver)
     ref_resolver = get_shared_ref_resolver(
-        dep_ref.host, token, ref_resolver_cache, ref_resolver_cache_lock
+        dep_ref.host,
+        token,
+        ref_resolver_cache,
+        ref_resolver_cache_lock,
+        auth_scheme=auth_scheme,
+        git_env=git_env,
+        auth_resolver=auth_resolver,
+        auth_target=dep_ref.host,
     )
     resolver = GitSemverResolver(ref_resolver)
     return resolver.resolve(
@@ -179,6 +183,7 @@ def _purge_cached_semver_paths_for_update(
     all_apm_deps,
     apm_modules_dir,
     logger,
+    staging_session: ResolutionStagingSession,
 ) -> None:
     """Pre-purge on-disk install paths for direct git-source and registry semver deps
     when ``--update`` / ``--refresh`` is set.
@@ -215,6 +220,7 @@ def _purge_cached_semver_paths_for_update(
             # here -- the resolver will surface a real error downstream.
             continue
         if _ip.exists():
+            staging_session.prepare_path(_ip)
             with suppress(Exception):
                 _rrm(_ip, ignore_errors=True)
             if logger:
@@ -374,13 +380,8 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
-def _resolve_dependencies(ctx: InstallContext) -> None:
-    """Run ``APMDependencyResolver``, handle errors; populate ``ctx.deps_to_install`` and ``ctx.dependency_graph``.
-
-    Also wires the download callback (which handles transitive package fetching),
-    builds ``ctx.dep_base_dirs``, writes ancillary state to ``ctx``, and cleans up
-    the shared clone cache.
-    """
+def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagingSession) -> None:
+    """Resolve dependencies and populate the resolution fields on ``ctx``."""
     import threading as _threading
 
     from apm_cli.core.scope import InstallScope
@@ -499,6 +500,7 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
             )
             if not _force_semver_resolve:
                 return install_path
+        staging_session.prepare_path(install_path)
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
         # users see the install advancing past silent transitive lookups.
         # Under F7's parallel BFS this callback may run on a worker
@@ -761,6 +763,7 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
             all_apm_deps=ctx.all_apm_deps,
             apm_modules_dir=ctx.apm_modules_dir,
             logger=ctx.logger,
+            staging_session=staging_session,
         )
 
     resolver = APMDependencyResolver(
@@ -991,7 +994,7 @@ def run(ctx: InstallContext) -> None:
     _ensure_modules_dir(ctx)
     _setup_downloader(ctx)
     seed_ref_resolver_from_lockfile(ctx)
-    _resolve_dependencies(ctx)
+    _resolve_dependencies(ctx, resolution_for_context(ctx))
     if ctx.only_packages:
         _apply_only_filter(ctx)
     _compute_intended_dep_keys(ctx)

@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import threading
+from contextlib import contextmanager
+from pathlib import Path
 
 from .errors import MarketplaceNotFoundError
 from .models import MarketplaceSource
@@ -15,6 +17,7 @@ _MARKETPLACES_FILENAME = "marketplaces.json"
 # Process-lifetime cache --------------------------------------------------
 _registry_cache: list[MarketplaceSource] | None = None
 _registry_lock = threading.Lock()
+_mutation_lock = threading.Lock()
 
 
 def _marketplaces_path() -> str:
@@ -40,6 +43,19 @@ def _invalidate_cache() -> None:
     global _registry_cache
     with _registry_lock:
         _registry_cache = None
+
+
+@contextmanager
+def _marketplace_mutation():
+    """Lock the complete cross-process load-modify-save transaction."""
+    from ..cache.locking import shard_lock
+    from ..config import ensure_config_exists
+
+    ensure_config_exists()
+    path = Path(_marketplaces_path())
+    with _mutation_lock, shard_lock(path):
+        _invalidate_cache()
+        yield
 
 
 def _load() -> list[MarketplaceSource]:
@@ -103,9 +119,10 @@ def get_marketplace_by_name(name: str) -> MarketplaceSource:
 
 def add_marketplace(source: MarketplaceSource) -> None:
     """Register a marketplace (replaces if same name exists)."""
-    sources = [s for s in _load() if s.name.lower() != source.name.lower()]
-    sources.append(source)
-    _save(sources)
+    with _marketplace_mutation():
+        sources = [s for s in _load() if s.name.lower() != source.name.lower()]
+        sources.append(source)
+        _save(sources)
     logger.debug("Registered marketplace '%s'", source.name)
 
 
@@ -115,13 +132,14 @@ def remove_marketplace(name: str) -> None:
     Raises:
         MarketplaceNotFoundError: If not found.
     """
-    before = _load()
-    after = [s for s in before if s.name.lower() != name.lower()]
-    if len(after) == len(before):
-        from ..utils.github_host import default_host
+    with _marketplace_mutation():
+        before = _load()
+        after = [s for s in before if s.name.lower() != name.lower()]
+        if len(after) == len(before):
+            from ..utils.github_host import default_host
 
-        raise MarketplaceNotFoundError(name, host=default_host())
-    _save(after)
+            raise MarketplaceNotFoundError(name, host=default_host())
+        _save(after)
     logger.debug("Removed marketplace '%s'", name)
 
 
