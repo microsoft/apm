@@ -48,7 +48,7 @@ APM keeps certificate verification enabled for every HTTPS request. Python-based
 - If `truststore` is unavailable or injection fails, APM falls back to `certifi`; it does not disable verification.
 - The Python-based `llm` runtime receives a shipped, self-contained `.pth` bootstrap in its managed virtual environment. The bootstrap imports only `truststore`; it does not execute dependency-provided package content.
 
-Node-based (Copilot) and Rust-based (Codex) child runtimes retain their own trust configuration for now. See [SSL / TLS issues](../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
+Node-based (Copilot) and Rust-based (Codex) child runtimes retain their own trust configuration for now. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
 
 ## Dependency provenance
 

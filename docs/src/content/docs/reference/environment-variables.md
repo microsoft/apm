@@ -42,7 +42,7 @@ Controls how APM clones packages from Git hosts. These settings can also be pers
 
 ## TLS trust
 
-APM verifies HTTPS against the operating-system trust store by default. For the full troubleshooting flow, see [SSL / TLS issues](../troubleshooting/ssl-issues/).
+APM verifies HTTPS against the operating-system trust store by default. For the full troubleshooting flow, see [SSL / TLS issues](../../troubleshooting/ssl-issues/).
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|

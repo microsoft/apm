@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "astro build && npm run check:links",
+    "check:links": "node scripts/check-links.mjs",
+    "test:links": "node --test scripts/check-links.test.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },
