@@ -85,13 +85,13 @@ def _conftest_marker_names() -> set[str]:
 
 
 def _gating_markers_in_pyproject() -> set[str]:
-    """Subset of pyproject markers that gate execution (requires_* + live).
+    """Subset of pyproject markers that gate execution.
 
     ``integration``, ``slow``, ``benchmark`` are taxonomy markers, not
     gates, and are intentionally excluded from the docs registry.
     """
     names = _pyproject_marker_names()
-    return {n for n in names if n.startswith("requires_") or n == "live"}
+    return {n for n in names if n.startswith("requires_") or n in {"live", "live_generic"}}
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +191,7 @@ def test_integration_tests_use_pytestmark_not_runtime_self_skip() -> None:
     """
     gate_env_vars = (
         "APM_E2E_TESTS",
+        "APM_LIVE_GENERIC_PACKAGE",
         "APM_RUN_INTEGRATION_TESTS",
         "APM_RUN_INFERENCE_TESTS",
         "APM_TEST_ADO_BEARER",
