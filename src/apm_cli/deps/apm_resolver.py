@@ -953,33 +953,20 @@ class APMDependencyResolver:
             return (item, None, exc)
 
     def _should_force_recheck(self, dep_ref: DependencyReference) -> bool:
-        """True when *dep_ref* must be given a chance to call ``download_callback``
-        even though its install path already exists on disk.
+        """True when *dep_ref* must reach ``download_callback`` even though
+        its install path already exists on disk.
 
-        ``download_callback`` (see ``resolve.py``) already contains a
-        ``_force_semver_resolve`` fallthrough for exactly this case ("Bug 1
-        fix on #1496"), but it's unreachable in practice: this method's
-        caller, ``_try_load_dependency_package``, only invokes
-        ``download_callback`` at all when ``not install_path.exists()`` --
-        so by the time the callback runs, the path is already known not to
-        exist, and its own internal check can never fire. The existing
+        ``download_callback`` (resolve.py) already has a
+        ``_force_semver_resolve`` fallthrough for this case, but this
+        method's caller (``_try_load_dependency_package``) only invokes the
+        callback when ``not install_path.exists()`` -- so that fallthrough
+        never fires for a dep whose path is already there. The existing
         pre-purge (``_purge_cached_semver_paths_for_update``) works around
-        this for **direct** deps only, by deleting their install path
-        before resolution starts so this gate's ``exists()`` check is
-        already false. A transitive dependency's install path is never
-        pre-purged (its existence isn't known until its parent's manifest
-        is read, which happens during resolution, not before it) --
-        it's own semver range is therefore never re-evaluated against the
-        remote during ``apm update``, no matter how many newer matching
-        versions have been published.
-
-        Widening this gate (rather than the pre-purge) covers any depth:
-        this method is consulted for every dependency the BFS resolver
-        reaches, direct or transitive, so a dependency several levels deep
-        gets exactly the same forced recheck as a direct one.
-
-        Mirrors ``download_callback``'s own ``_force_semver_resolve``
-        predicate exactly -- kept in sync deliberately.
+        this for **direct** deps by deleting their install path up front,
+        but a transitive dep's path can't be pre-purged (its existence
+        isn't known until its parent's manifest is read, mid-resolution).
+        Widening this gate instead covers any depth uniformly. Mirrors
+        ``_force_semver_resolve`` exactly -- keep the two in sync.
         """
         return (
             self._update_refs
@@ -1041,10 +1028,7 @@ class APMDependencyResolver:
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
         # If package doesn't exist locally, try to download it. Also fall
-        # through when it exists but needs a forced semver re-check (see
-        # _should_force_recheck) -- this is what lets a transitive
-        # dependency's own range get re-evaluated during apm update, not
-        # just direct dependencies.
+        # through for a forced semver re-check (see _should_force_recheck).
         if not install_path.exists() or self._should_force_recheck(dep_ref):
             if self._download_callback is not None:
                 unique_key = self._download_dedup_key(dep_ref, parent_pkg)
