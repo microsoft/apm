@@ -2,11 +2,32 @@
 
 from __future__ import annotations
 
-import re
+import importlib.util
+import sys
 from dataclasses import replace
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+
+
+def _load_windows_stable_path_checker(root: Path) -> ModuleType:
+    """Import scripts/check_windows_stable_path_owner.py as a module.
+
+    This is the single scan owner for the Windows stable executable
+    path boundary (owner presence + duplicate-derivation detection).
+    Both this test and scripts/lint-architecture-boundaries.sh (AC8)
+    consume it directly instead of re-implementing its regexes, globs,
+    or exemption handling.
+    """
+    module_name = "check_windows_stable_path_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
@@ -203,39 +224,25 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
 
 
 def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
-    """install.ps1 alone may define the stable current/apm.exe location."""
+    """install.ps1 alone may define the stable current/apm.exe location.
+
+    The Windows stable-path boundary (owner presence + duplicate
+    derivation) is scanned by exactly one checker,
+    scripts/check_windows_stable_path_owner.py. This test imports and
+    calls that checker directly -- it must not re-implement its
+    regexes, globs, or exemption handling -- and separately asserts
+    that the Bash AC8 guard actually shells out to it rather than
+    retaining a parallel scan.
+    """
     root = Path(__file__).parents[2]
-    installer = (root / "install.ps1").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
-    assert '$currentDir = Join-Path $installRoot "current"' in installer
-    assert '$currentExe = Join-Path $currentDir "apm.exe"' in installer
-    assert "Add-ToUserPath -PathEntry $currentDir" in installer
     assert "Windows stable executable path belongs to install.ps1" in guard
+    assert "check_windows_stable_path_owner.py" in guard
 
-    join_path_current = re.compile(r'Join-Path\s+\S+\s+["\']current["\']')
-    literal_stable_exe = re.compile(r"current[\\/]apm\.exe")
+    checker = _load_windows_stable_path_checker(root)
 
-    def derives_stable_path(text: str) -> bool:
-        return bool(join_path_current.search(text) or literal_stable_exe.search(text))
-
-    guarded_windows_scripts = [
-        path
-        for path in (root / "scripts/windows").glob("*.ps1")
-        if not path.name.startswith("test-")
-    ]
-    guarded_python_files = list((root / "src/apm_cli").rglob("*.py"))
-    guarded_workflow_files = list((root / ".github/workflows").glob("*.yml")) + list(
-        (root / ".github/workflows").glob("*.yaml")
-    )
-
-    duplicate_owners = [
-        path.relative_to(root).as_posix()
-        for path in (*guarded_windows_scripts, *guarded_python_files, *guarded_workflow_files)
-        if derives_stable_path(path.read_text(encoding="utf-8"))
-    ]
-
-    assert duplicate_owners == []
+    assert checker.check(root) == []
 
 
 def test_tls_injection_has_one_canonical_authority() -> None:
