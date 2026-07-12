@@ -17,77 +17,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   certifi-only behavior. Node (Copilot) and Rust (Codex) children are not yet covered
   and retain their own trust configuration; tracked in #2034.
   (closes #2004) (#2005)
+## [0.25.0] - 2026-07-12
+
+### Added
+
+- The Contributor Dashboard now includes triaged-issue views, inline comments,
+  bulk pull-request actions, and direct navigation to active Copilot sessions.
+  (by @sergio-sisternes-epam, #2043)
+- GitHub policy discovery now checks `.github-private` before `.github`, so
+  organizations can keep `apm-policy.yml` private without changing existing
+  fallbacks. (by @sergio-sisternes-epam, #2058)
 
 ### Changed
 
-- Hardened command behavior: invalid lockfiles and incomplete policy chains
-  fail closed before mutation; failed installs skip post-install hooks;
-  registry routes do not fall back to Git; machine output keeps notices on
-  stderr; unauthenticated Git retries scrub inherited credentials; `$schema`
-  selects the manifest contract; and timed-out runtimes are reaped. (#2155)
-- MCP audit, install, and uninstall now share one lockfile-bounded current-source
-  view, so `config-consistency` detects changed or removed transitive declarations
-  and fails on unreadable package manifests. (#2155)
-- `apm compile --target <target>` now accepts every project target from the
-  canonical catalog, emits its native context artifact when applicable, and
-  treats targets without compile output as successful no-ops. (#2155)
-- Merged hook configs now contain only each target's native upstream fields;
-  APM keeps reconciliation ownership in an external `apm-hooks.json` sidecar.
-  (#2155)
+- `apm compile --target`, compile help and errors, and `apm init --target`
+  now use one canonical target catalog, so every advertised target is accepted
+  consistently. (closes #2138, #2147; #2155)
+- Generated hooks now use canonical upstream contracts: Claude matcher/hooks
+  nesting, Kiro v1 schema, Copilot's required top-level version, and provenance
+  outside vendor payloads. (closes #2062, #2071, #2128, #2157; #2155)
+- Homebrew formula updates now use the tap's daily poller instead of an obsolete
+  PAT-backed dispatch, restoring release propagation without cross-repository
+  credentials. (#2088)
 
 ### Fixed
 
-- Regenerating the lockfile now records each transitive local dependency's
-  identity as a project-root-relative POSIX path instead of an absolute machine
-  path, so a committed `apm.lock.yaml` stays portable and deterministic across
-  machines and CI. (#2155)
-- Positional `apm install <url>` now exits non-zero when all packages fail
-  validation, matching manifest installs for reliable CI scripting. (#2131)
-- A failed first `apm install` no longer leaves behind an `apm.yml` it created,
-  and the final completion summary now reflects the committed outcome instead of
-  rendering before commit or rollback. Successful dry-run bootstrap keeps the
-  generated manifest and explicit targets for the next run. (#2155)
-- Manifest and policy parsers now reject wrong-typed native schema values and
-  report unknown policy keys. Migration: quote numeric `apm.yml` versions, use
-  non-empty string identities, and use mappings/lists for policy blocks. (closes #2137) (#2143)
+- `apm install` now fails before commit when declared plugin components or a
+  requested `--skill` are missing, and total positional-URL failure exits `1`.
+  (closes #2103, #2116, #2126; #2155)
+- Failed global Claude installs now clean up bootstrap state, corrected cyclic
+  dependency graphs resume without deleting `apm_modules`, and exception output
+  routes through the command logger. (closes #2129, #2140, #2161; #2155)
+- `apm audit --ci` now detects both changed and removed MCP declarations from
+  local-path sub-packages. (closes #2127, #2136; #2155)
+- Contracting the target set now reconciles `deployed_files`, removes
+  APM-managed MCP servers from dropped targets, and safely adopts exact matches
+  from legacy lockfiles. (closes #2139, #2149, #2158; #2155)
+- Manifest and policy parsers now reject invalid identity values and unknown
+  policy keys. Migration: quote numeric manifest versions and use the declared
+  mapping/list types for policy blocks. (closes #2137; #2155)
+- `apm compile --clean` now removes the stale context artifact when the final
+  primitive is removed. (closes #2130; #2155)
 - `apm uninstall` now transfers shared deployed-file ownership to a surviving
-  package, preserving lockfile content-integrity coverage. (#2148)
-- Semver resolution now preserves each dependency's authentication scheme, so
-  Azure DevOps bearer credentials are used consistently for tag listing, and a
-  rejected `ADO_APM_PAT` retries ref resolution with the Azure CLI bearer. (#2155)
-- Contracting the active target set now removes APM-managed MCP server
-  entries from dropped targets while preserving user-authored servers and
-  unrelated native config, including safe adoption of self-defined servers from
-  legacy lockfiles when the native entry exactly matches its stored baseline.
-  (#2155)
-- `apm uninstall` now reconciles dependency removal, survivor ownership, hashes,
-  MCP state, and the deployment ledger before one atomic lockfile write. (#2155)
-- `apm install` exception and rollback diagnostics now render through the
-  `CommandLogger` owner, keeping recovery hints and warning severity consistent.
-  (#2155)
-- Fresh checkouts with declared consumer targets no longer remain
-  `apm audit --ci`-red for files those targets cannot restore: `apm install`
-  now removes stale `deployed_files` entries outside the legitimate target
-  set. The [OpenAPM v0.1 specification](docs/src/content/docs/specs/openapm-v0.1.md)
-  now defines the same fail-safe reconciliation contract. (by @edenfunf;
-  closes #2059) (#2114)
+  package and persists deployment state atomically. (closes #2148, #2160; #2155)
+- Semver install and update now preserve Azure DevOps bearer authentication and
+  retry a stale PAT `401` with the Azure CLI bearer. (closes #2150, #2156; #2155)
+- `apm prune` and `apm deps list` now treat nested `apm.yml` files as part of
+  their installed parent package instead of exposing or deleting them as
+  top-level orphans. (#2092)
+- `apm pack` now selects `.apm/` as the authoritative source only when it exists,
+  preserves root plugin directories after `apm init`, and fails closed on invalid
+  explicit `includes:` paths. (#2122)
+- Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
+  and pass Azure CLI bearer authentication through to `git ls-remote`.
+  (closes #2119, #2121)
+- `apm install` now removes stale deployment records for inactive targets, so
+  fresh checkouts can return `apm audit --ci` to green. (by @edenfunf, closes
+  #2059, #2114)
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
-  (by @sergio-sisternes-epam; closes #1957) (#2041)
-- Global Claude installs now support an absolute `CLAUDE_CONFIG_DIR` outside
-  `HOME` without leaving a partial deployment. (closes #2129) (#2135)
-- Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
-  and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
-- `apm pack` now treats `.apm/` as the authoritative local source, warns on
-  mixed layouts, and enforces explicit `includes:` lists exhaustively while
-  preserving root-only Claude plugin directories, including after `apm init`.
-  (#2122)
+  (by @sergio-sisternes-epam, closes #1957, #2041)
 
 ### Performance
 
-- Deployment manifest reconciliation and uninstall ownership handoff now use
-  precomputed path indexes, avoiding quadratic scans on large deployment
-  ledgers. (#2155)
+- Deployment-ledger reconciliation now uses indexed mutation paths, avoiding
+  quadratic scans as deployment history grows. (closes #2159; #2155)
+- Dependency lookup, HTTP cache enforcement, marketplace ref selection, and
+  host classification now use indexed or cached paths, avoiding repeated linear
+  scans at scale. (by @sergio-sisternes-epam, #2124)
 
 ## [0.24.1] - 2026-07-10
 
