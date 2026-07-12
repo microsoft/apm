@@ -242,15 +242,19 @@ def test_v2_build_child_env_drops_bundled_certifi():
     assert marker not in user
 
 
-def test_v2_build_child_env_drops_frozen_certifi_shape():
-    from apm_cli.core.tls_trust import build_child_tls_env
+def test_v2_build_child_env_drops_recorded_frozen_certifi_path(monkeypatch):
+    from apm_cli.core import tls_trust
 
     # The frozen hook sets SSL_CERT_FILE to a certifi/cacert.pem path under
-    # _MEIPASS whose prefix differs from the live certifi.where(); the tail
-    # match must still classify it as bundled and drop it. Cover both slashes.
-    posix = build_child_tls_env({"SSL_CERT_FILE": "/var/_MEIabc/certifi/cacert.pem"})
+    # _MEIPASS. The parent records that exact path before clearing its internal
+    # marker, so unrelated user paths with the same suffix remain untouched.
+    posix_path = "/var/_MEIabc/certifi/cacert.pem"
+    monkeypatch.setattr(tls_trust, "_KNOWN_BUNDLED_CERT_FILE", posix_path)
+    posix = tls_trust.build_child_tls_env({"SSL_CERT_FILE": posix_path})
     assert "SSL_CERT_FILE" not in posix
-    windows = build_child_tls_env({"SSL_CERT_FILE": "C:\\Temp\\_MEI9\\certifi\\cacert.pem"})
+    windows_path = "C:\\Temp\\_MEI9\\certifi\\cacert.pem"
+    monkeypatch.setattr(tls_trust, "_KNOWN_BUNDLED_CERT_FILE", windows_path)
+    windows = tls_trust.build_child_tls_env({"SSL_CERT_FILE": windows_path})
     assert "SSL_CERT_FILE" not in windows
 
 

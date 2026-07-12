@@ -34,6 +34,8 @@ import tempfile
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
+from ..utils.path_security import PathTraversalError, ensure_path_within
+
 logger = logging.getLogger(__name__)
 
 # The CA-bundle env vars ``requests`` honours (via merge_environment_settings);
@@ -76,6 +78,7 @@ _PTH_CONTENT = f"import {_BOOTSTRAP_MODULE_NAME}\n"
 
 _TRUTHY = {"1", "true", "yes", "on"}
 _LAST_TLS_STATUS: tuple[str, tuple[object, ...]] | None = None
+_KNOWN_BUNDLED_CERT_FILE: str | None = None
 
 
 def _record_tls_trust_status(message: str, *args: object) -> None:
@@ -136,6 +139,7 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
     ``certifi`` behaviour was left in place (explicit override, opt-out,
     ``truststore`` missing, or injection failure). Never raises.
     """
+    global _KNOWN_BUNDLED_CERT_FILE
     environ = _mutable_environ(env)
 
     # Clear the bundled-default marker unconditionally, up-front, so it can
@@ -145,6 +149,8 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
     # to know whether the current SSL_CERT_FILE was OUR bundled default.
     had_bundled_marker = _env_flag(_BUNDLED_CERT_MARKER, env)
     environ.pop(_BUNDLED_CERT_MARKER, None)
+    if had_bundled_marker and environ.get(_SSL_CERT_FILE_VAR):
+        _KNOWN_BUNDLED_CERT_FILE = os.path.abspath(environ[_SSL_CERT_FILE_VAR])
 
     if _env_flag(_DISABLE_ENV_VAR, env):
         _record_tls_trust_status("TLS: OS trust-store injection disabled (%s)", _DISABLE_ENV_VAR)
@@ -219,7 +225,10 @@ def _venv_site_packages(venv_path: Path) -> Path | None:
     candidates.extend(venv_path.glob("Lib/site-packages"))
     for candidate in candidates:
         if candidate.is_dir():
-            return candidate
+            try:
+                return ensure_path_within(candidate, venv_path)
+            except (OSError, PathTraversalError):
+                continue
     return None
 
 
@@ -289,20 +298,20 @@ def _is_bundled_certifi(path: str) -> bool:
 
     The frozen runtime hook (build/hooks/runtime_hook_ssl_certs.py) sets
     ``SSL_CERT_FILE`` to ``certifi.where()``. A genuine user-set ``SSL_CERT_FILE``
-    must NEVER match. We compare against ``certifi.where()`` and, as a
-    frozen-safe fallback, the ``certifi/cacert.pem`` path tail (the frozen
-    ``_MEIPASS`` path may differ from the live dev ``certifi.where()``).
+    must NEVER match. Compare exact normalized paths against the path captured
+    from the internal marker and against ``certifi.where()``.
     """
     if not path:
         return False
-    # Match on path COMPONENTS, not a raw suffix: a genuine user bundle at
-    # e.g. /opt/mycertifi/cacert.pem must NOT be treated as APM's bundled set.
-    if path.replace("\\", "/").split("/")[-2:] == ["certifi", "cacert.pem"]:
+    normalized = os.path.normcase(os.path.abspath(path))
+    if _KNOWN_BUNDLED_CERT_FILE and normalized == os.path.normcase(
+        os.path.abspath(_KNOWN_BUNDLED_CERT_FILE)
+    ):
         return True
     try:
         import certifi
 
-        return os.path.abspath(path) == os.path.abspath(certifi.where())
+        return normalized == os.path.normcase(os.path.abspath(certifi.where()))
     except Exception:
         return False
 

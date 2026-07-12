@@ -1,10 +1,8 @@
 """Codex runtime adapter for APM."""
 
-import os
 import subprocess
 from typing import Any
 
-from ..core.tls_trust import build_child_tls_env
 from .base import RuntimeAdapter, _stream_subprocess_output
 from .utils import find_runtime_binary
 
@@ -42,7 +40,6 @@ class CodexRuntime(RuntimeAdapter):
             codex_binary = find_runtime_binary("codex") or "codex"
             output_lines, return_code = _stream_subprocess_output(
                 [codex_binary, "exec", "--skip-git-repo-check", prompt_content],
-                env=build_child_tls_env(os.environ),
                 timeout=300,
             )
 

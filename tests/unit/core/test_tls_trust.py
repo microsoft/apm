@@ -410,6 +410,22 @@ def test_ensure_child_tls_bootstrap_returns_false_for_missing_site_packages(tmp_
     assert ensure_child_tls_bootstrap(tmp_path / "does-not-exist") is False
 
 
+def test_ensure_child_tls_bootstrap_rejects_site_packages_symlink_escape(tmp_path):
+    venv = tmp_path / "venv"
+    python_dir = venv / "lib" / "python3.12"
+    python_dir.mkdir(parents=True)
+    outside = tmp_path / "shared-site-packages"
+    outside.mkdir()
+    try:
+        (python_dir / "site-packages").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+
+    assert ensure_child_tls_bootstrap(venv) is False
+    assert not (outside / "_apm_tls_bootstrap.py").exists()
+    assert not (outside / "_apm_tls.pth").exists()
+
+
 # ---------------------------------------------------------------------------
 # T2 (H1) -- the .pth is GENERATED inline, so delivery does not depend on the
 # source .pth being packaged into the wheel (setuptools' packages.find drops
@@ -488,10 +504,13 @@ def test_build_child_tls_env_drops_bundled_certifi_ssl_cert_file():
     assert child["PATH"] == "/usr/bin"
 
 
-def test_build_child_tls_env_drops_frozen_meipass_certifi_tail(tmp_path):
-    # A frozen _MEIPASS path won't equal the live certifi.where(); the
-    # certifi/cacert.pem tail match must still catch it.
+def test_build_child_tls_env_drops_recorded_frozen_certifi_path(monkeypatch):
+    import apm_cli.core.tls_trust as tls
+
+    # The frozen hook path is recorded while its internal marker is present.
+    # Exact matching avoids classifying an unrelated user path by suffix.
     frozen = "/tmp/_MEIabc123/certifi/cacert.pem"
+    monkeypatch.setattr(tls, "_KNOWN_BUNDLED_CERT_FILE", frozen)
     child = build_child_tls_env({_BUNDLED_CERT_MARKER: "1", "SSL_CERT_FILE": frozen})
     assert "SSL_CERT_FILE" not in child
 
@@ -506,7 +525,9 @@ def test_build_child_tls_env_preserves_genuine_user_ssl_cert_file(tmp_path):
     assert child["SSL_CERT_FILE"] == str(user_ca)
 
 
-def test_build_child_tls_env_preserves_certifi_lookalike_dir():
+def test_build_child_tls_env_preserves_certifi_lookalike_dir(monkeypatch):
+    import apm_cli.core.tls_trust as tls
+
     # F1 (round-4): the match is on path COMPONENTS, not a raw suffix. A user
     # bundle under a directory that merely ENDS in "certifi" (e.g. a corporate
     # "mycertifi/") must be preserved, not mistaken for APM's bundled set.
@@ -517,11 +538,18 @@ def test_build_child_tls_env_preserves_certifi_lookalike_dir():
     ):
         child = build_child_tls_env({_BUNDLED_CERT_MARKER: "1", "SSL_CERT_FILE": lookalike})
         assert child.get("SSL_CERT_FILE") == lookalike, f"lookalike {lookalike} was wrongly dropped"
-    # The genuine component boundary still matches.
-    child = build_child_tls_env(
-        {_BUNDLED_CERT_MARKER: "1", "SSL_CERT_FILE": "/x/certifi/cacert.pem"}
-    )
+    # Only the exact path recorded from the frozen hook matches.
+    frozen = "/x/certifi/cacert.pem"
+    monkeypatch.setattr(tls, "_KNOWN_BUNDLED_CERT_FILE", frozen)
+    child = build_child_tls_env({_BUNDLED_CERT_MARKER: "1", "SSL_CERT_FILE": frozen})
     assert "SSL_CERT_FILE" not in child
+
+
+def test_build_child_tls_env_preserves_user_certifi_component_path():
+    user_bundle = "/opt/certifi/cacert.pem"
+    child = build_child_tls_env({"SSL_CERT_FILE": user_bundle})
+
+    assert child["SSL_CERT_FILE"] == user_bundle
 
 
 # ---------------------------------------------------------------------------

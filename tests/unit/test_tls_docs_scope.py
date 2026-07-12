@@ -112,3 +112,14 @@ def test_enterprise_security_docs_transport_trust_model():
     assert ".pth" in security
     assert "Node" in security
     assert "Rust" in security
+
+
+def test_ssl_docs_verify_apm_path_and_mark_planned_scope():
+    docs = (
+        _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
+    ).read_text(encoding="utf-8")
+
+    assert ":::note[Planned]" in docs
+    assert 'python -c "import requests' not in docs
+    assert "APM_LOG_LEVEL=DEBUG apm install" in docs
+    assert "schannel" not in docs.lower()

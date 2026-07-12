@@ -58,9 +58,11 @@ apm install --verbose
 
 **Fastest fix:** install your corporate CA in the OS trust store and retry. APM picks it up automatically on the covered Python paths.
 
-APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. This covers in-process commands such as `apm install` and the standalone frozen binary, with bundled `certifi` as a fallback.
-
+:::note[Planned]
 **Scope caveat:** only the Python-based paths are covered. The Node-based (Copilot) and Rust-based (Codex) child runtimes are **not yet covered** by OS-store propagation (tracked in #2034). Behind a TLS-proxy today, export `NODE_EXTRA_CA_CERTS=/path/to/org-ca-bundle.pem` for the Node runtime and configure the Codex/Rust runtime's own trust.
+:::
+
+APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. This covers in-process commands such as `apm install` and the standalone frozen binary, with bundled `certifi` as a fallback.
 
 For the Python-based `llm` child runtime, `apm runtime setup llm` installs `truststore` in its virtual environment and adds a self-contained bootstrap. Corporate CAs installed in Keychain on macOS, through `update-ca-certificates`/`update-ca-trust` on Linux, or in the Windows Trusted Root store then work without APM-specific configuration.
 
@@ -75,7 +77,6 @@ You only need the steps below when the CA is *not* in the OS store, or you want 
 - The `llm` child runtime's OS-trust bootstrap needs the runtime venv's interpreter to be **Python 3.10+** (the `truststore` library requires 3.10). On systems where `apm runtime setup llm` builds the venv from a stock **Python 3.9** (for example Apple's `/usr/bin/python3`), `truststore` cannot install and the `llm` child silently falls back to its bundled `certifi` set behind a proxy. Use a Python 3.10+ `python3` on your `PATH` before running setup.
 - The initial `pip install` run *during* `apm runtime setup llm` uses pip's **own** certificate resolution, not APM's OS-trust path. Behind a MITM proxy, `pip` may fail to fetch `llm`/`truststore` before the bootstrap is even in place. Export `PIP_CERT=/path/to/org-ca-bundle.pem` (or run `pip config set global.cert /path/to/org-ca-bundle.pem`) before running setup so pip trusts your proxy CA.
 - APM cannot currently combine the OS store with an additional PEM bundle. Use `REQUESTS_CA_BUNDLE` to pin a single bundle instead.
-- On Windows, the `schannel` backend has trust caveats.
 
 ## Configure trust
 
@@ -155,17 +156,14 @@ If the proxy performs TLS interception, you also need the proxy's signing CA in 
 ## Verify the fix
 
 ```bash
-# Python side
-python -c "import requests; print(requests.get('https://api.github.com').status_code)"
+# APM Python HTTPS path
+APM_LOG_LEVEL=DEBUG apm install
 
 # Git side
 GIT_CURL_VERBOSE=1 git ls-remote https://github.example.com/org/repo.git 2>&1 | grep -i 'ssl\|cert'
-
-# APM end-to-end
-apm install --verbose
 ```
 
-A `200` from `requests`, a successful `ls-remote`, and a clean install confirm trust is wired through every layer APM uses.
+Look for `TLS: verifying against OS trust store (truststore)` in the debug output. That line plus a clean install confirms APM's in-process Python path; a successful `ls-remote` confirms Git trust separately. Verify the managed `llm` child with its normal HTTPS-backed command after `apm runtime setup llm`.
 
 ## Development-only escape hatches
 
