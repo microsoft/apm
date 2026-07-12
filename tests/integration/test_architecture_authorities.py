@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -199,6 +200,42 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
         "nodes_at_depth.sort",
     ):
         assert duplicate not in source
+
+
+def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
+    """install.ps1 alone may define the stable current/apm.exe location."""
+    root = Path(__file__).parents[2]
+    installer = (root / "install.ps1").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert '$currentDir = Join-Path $installRoot "current"' in installer
+    assert '$currentExe = Join-Path $currentDir "apm.exe"' in installer
+    assert "Add-ToUserPath -PathEntry $currentDir" in installer
+    assert "Windows stable executable path belongs to install.ps1" in guard
+
+    join_path_current = re.compile(r'Join-Path\s+\S+\s+["\']current["\']')
+    literal_stable_exe = re.compile(r"current[\\/]apm\.exe")
+
+    def derives_stable_path(text: str) -> bool:
+        return bool(join_path_current.search(text) or literal_stable_exe.search(text))
+
+    guarded_windows_scripts = [
+        path
+        for path in (root / "scripts/windows").glob("*.ps1")
+        if not path.name.startswith("test-")
+    ]
+    guarded_python_files = list((root / "src/apm_cli").rglob("*.py"))
+    guarded_workflow_files = list((root / ".github/workflows").glob("*.yml")) + list(
+        (root / ".github/workflows").glob("*.yaml")
+    )
+
+    duplicate_owners = [
+        path.relative_to(root).as_posix()
+        for path in (*guarded_windows_scripts, *guarded_python_files, *guarded_workflow_files)
+        if derives_stable_path(path.read_text(encoding="utf-8"))
+    ]
+
+    assert duplicate_owners == []
 
 
 def test_tls_injection_has_one_canonical_authority() -> None:

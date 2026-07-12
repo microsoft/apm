@@ -195,6 +195,42 @@ if ! grep -A8 'def add_marketplace' src/apm_cli/marketplace/registry.py \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC8: Windows installer authorities"
+windows_owner_ok=1
+if ! grep -qF '$currentDir = Join-Path $installRoot "current"' install.ps1; then
+    windows_owner_ok=0
+fi
+if ! grep -qF '$currentExe = Join-Path $currentDir "apm.exe"' install.ps1; then
+    windows_owner_ok=0
+fi
+if ! grep -qF 'Add-ToUserPath -PathEntry $currentDir' install.ps1; then
+    windows_owner_ok=0
+fi
+windows_guarded_files=$(
+    {
+        find scripts/windows -maxdepth 1 -name '*.ps1' ! -name 'test-*.ps1'
+        find src/apm_cli -name '*.py'
+        find .github/workflows -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \)
+    } 2>/dev/null
+)
+windows_dup_hits=$(
+    grep -EnH \
+        'Join-Path[[:space:]]+\S+[[:space:]]+["'\'']current["'\'']|current[\\/]apm\.exe' \
+        $windows_guarded_files 2>/dev/null \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$windows_owner_ok" -eq 0 ] || [ -n "$windows_dup_hits" ]; then
+    echo "[x] Windows stable executable path belongs to install.ps1"
+    if [ "$windows_owner_ok" -eq 0 ]; then
+        echo "  install.ps1 is missing one or more canonical owner statements"
+    fi
+    if [ -n "$windows_dup_hits" ]; then
+        echo "$windows_dup_hits"
+    fi
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1
