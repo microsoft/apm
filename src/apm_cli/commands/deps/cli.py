@@ -1,9 +1,10 @@
 """APM dependency management CLI commands."""
 
+import re
 import shutil
 import sys
 from collections.abc import Iterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import click
 
@@ -60,9 +61,70 @@ def _deps_list_source_label(
     return "github"
 
 
-def _dep_display_name(dep) -> str:
-    """Get display name for a locked dependency (key@version)."""
-    key = dep.get_unique_key()
+_LOCAL_HASH_SLOT_RE = re.compile(r"^(_local)/[0-9a-f]{12}/(.+)$")
+
+
+def _is_absolute_local_path(path: str) -> bool:
+    """True if a declared local path embeds host filesystem structure.
+
+    Absolute POSIX paths (``/Users/...``), home-relative paths (``~/...``), and
+    Windows drive/UNC paths (``C:\\...``, ``\\\\server\\share``) all leak the
+    author's machine layout and must not reach user-facing output. Relative
+    declared paths (``../pkg``, ``./packages/foo``) are portable and safe.
+    """
+    if not path:
+        return False
+    if path.startswith("~"):
+        return True
+    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
+
+
+def _absolute_local_display(path: str, fallback: str) -> str:
+    """Return a portable logical name for an absolute local dependency."""
+    windows_path = PureWindowsPath(path)
+    parsed_path = (
+        windows_path
+        if windows_path.is_absolute() or path.startswith("~\\")
+        else PurePosixPath(path)
+    )
+    return f"_local/{parsed_path.name}" if parsed_path.name else fallback
+
+
+def _logical_local_display(physical_name: str) -> str:
+    """Strip the physical hash segment from an unmapped local slot.
+
+    Orphaned local transitive slots (``_local/<12hex>/pkg``) have no lockfile
+    entry, so ``physical_to_logical`` cannot resolve them. Orphan *detection*
+    keeps the raw physical identity, but the name shown to the user must be the
+    hash-free logical form (``_local/pkg``). Non-local names pass through.
+    """
+    match = _LOCAL_HASH_SLOT_RE.match(physical_name)
+    if match:
+        return f"{match.group(1)}/{match.group(2)}"
+    return physical_name
+
+
+def _dep_display_name(dep: LockedDependency) -> str:
+    """Get display name for a locked dependency (key@version).
+
+    Local deps render a logical, portable identity instead of the lockfile
+    unique key. For anchored transitive local deps the unique key is an
+    absolute ``local:/...`` slot (see build_dependency_unique_key), which would
+    leak the host filesystem path into user-facing tree output. Prefer the
+    declared relative ``local_path`` (``../pkg``); fall back to the logical
+    ``repo_url`` (``_local/pkg``) when the path is absent or itself absolute
+    (``/Users/...``, ``~/...``, ``C:\\...``). Remote deps keep their canonical
+    unique key.
+    """
+    if dep.source == "local":
+        if dep.local_path and not _is_absolute_local_path(dep.local_path):
+            key = dep.local_path
+        elif dep.local_path:
+            key = _absolute_local_display(dep.local_path, dep.repo_url)
+        else:
+            key = dep.repo_url
+    else:
+        key = dep.get_unique_key()
     version = (
         dep.version
         or (dep.resolved_commit[:7] if dep.resolved_commit else None)
@@ -209,18 +271,26 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
 
-    # Also load lockfile deps to avoid false orphan flags on transitive deps
+    # Also load lockfile deps to avoid false orphan flags on transitive deps.
+    # Local transitive deps are installed into hashed physical slots
+    # (``_local/<hash>/pkg``) to prevent sibling collisions (#2155), but their
+    # logical identity is the un-hashed lockfile ``repo_url`` (``_local/pkg``).
+    # Key orphan/insecure state on the logical id and remember each physical
+    # slot -> logical id so the scan below can report the logical name instead
+    # of leaking the hash slot into user-facing output.
+    physical_to_logical: dict[str, str] = {}
     try:
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
-                # Match the host-blind apm_modules/ layout. Local dependency
-                # identity retains its source-relative path, so derive its key
-                # from the canonical install path instead.
+                # Local deps: key on the logical lockfile identity
+                # (``repo_url``) and map the physical install slot back to it.
                 if dep.source == "local":
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
-                    dep_key = install_path.relative_to(apm_modules_path).as_posix()
+                    physical_key = install_path.relative_to(apm_modules_path).as_posix()
+                    dep_key = dep.repo_url
+                    physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
                 if dep_key and dep_key not in declared_sources:
@@ -283,6 +353,16 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     installed_packages = []
     orphaned_packages = []
     for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
+        # Local transitive deps are scanned at their physical hash slot
+        # (``_local/<hash>/pkg``); report and orphan-check against the
+        # logical lockfile key (``_local/pkg``) instead of leaking the slot.
+        # A genuinely orphaned slot has no lockfile entry, so it stays keyed by
+        # its raw physical identity for correct detection. Only confirmed
+        # orphans have their physical hash redacted; declared remote identities
+        # that happen to match the slot shape remain unchanged.
+        logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
+        is_orphaned = logical_name not in declared_with_ancestors
+        display_name = _logical_local_display(logical_name) if is_orphaned else logical_name
         try:
             version = "unknown"
             if has_apm_yml:
@@ -290,18 +370,17 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = org_repo_name not in declared_with_ancestors
             if is_orphaned:
-                orphaned_packages.append(org_repo_name)
+                orphaned_packages.append(display_name)
 
-            locked_dep = insecure_lock_deps.get(org_repo_name)
+            locked_dep = insecure_lock_deps.get(logical_name)
             installed_packages.append(
                 {
-                    "name": org_repo_name,
+                    "name": display_name,
                     "version": version,
                     "source": "orphaned"
                     if is_orphaned
-                    else declared_sources.get(org_repo_name, "github"),
+                    else declared_sources.get(logical_name, "github"),
                     "primitives": primitives,
                     "path": str(candidate),
                     "is_orphaned": is_orphaned,
@@ -313,8 +392,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     ),
                 }
             )
-        except Exception as e:
-            logger.warning(f"Failed to read package {org_repo_name}: {e}")
+        except Exception:
+            # The raised error (e.g. malformed-YAML ValueError) embeds the
+            # absolute apm.yml path; never forward it. Emit a stable, actionable
+            # public warning keyed on the hash-free display name.
+            logger.warning(
+                f"Failed to inspect package {display_name}. Check its package files and rerun."
+            )
 
     if insecure_only:
         installed_packages = [pkg for pkg in installed_packages if pkg["is_insecure"]]

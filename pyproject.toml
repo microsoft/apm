@@ -26,6 +26,7 @@ dependencies = [
     "colorama>=0.4.6",
     "pyyaml>=6.0.0",
     "requests>=2.31.0",
+    "truststore>=0.10.0",
     "python-frontmatter>=1.0.0",
     "llm>=0.28",
     "llm-github-models>=0.18.0",
@@ -62,6 +63,12 @@ apm = "apm_cli.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["apm_cli*"]
+
+[tool.setuptools.package-data]
+# Belt-and-suspenders: ship the child-TLS .pth alongside the bootstrap module.
+# Delivery no longer depends on this (ensure_child_tls_bootstrap generates the
+# .pth inline), but packaging it keeps the source tree and wheel in sync.
+"apm_cli.core._child_tls" = ["*.pth"]
 
 [tool.ruff]
 line-length = 100

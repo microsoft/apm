@@ -199,3 +199,21 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
         "nodes_at_depth.sort",
     ):
         assert duplicate not in source
+
+
+def test_tls_injection_has_one_canonical_authority() -> None:
+    """Only the parent TLS owner and standalone child bootstrap may inject."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    allowed = {
+        root / "src/apm_cli/core/tls_trust.py",
+        root / "src/apm_cli/core/_child_tls/_apm_tls_bootstrap.py",
+    }
+    duplicate_owners = [
+        path.relative_to(root).as_posix()
+        for path in (root / "src/apm_cli").rglob("*.py")
+        if path not in allowed and "truststore.inject_into_ssl(" in path.read_text()
+    ]
+
+    assert "TLS trust injection belongs to canonical owners" in guard
+    assert duplicate_owners == []

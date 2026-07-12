@@ -1,5 +1,6 @@
 """Test LLM runtime integration."""
 
+import os
 from unittest.mock import Mock, patch
 
 import pytest
@@ -10,8 +11,9 @@ from apm_cli.runtime.llm_runtime import LLMRuntime
 class TestLLMRuntime:
     """Test LLM runtime adapter."""
 
+    @patch("apm_cli.runtime.llm_runtime.build_child_tls_env", return_value={"PATH": "clean"})
     @patch("apm_cli.runtime.llm_runtime.subprocess.run")
-    def test_init_success(self, mock_run):
+    def test_init_success(self, mock_run, mock_child_env):
         """Test successful initialization."""
         # Mock the --version check
         mock_run.return_value = Mock(returncode=0, stdout="llm 0.17.0")
@@ -20,8 +22,14 @@ class TestLLMRuntime:
 
         assert runtime.model_name == "gpt-4o-mini"
         mock_run.assert_called_once_with(
-            ["llm", "--version"], capture_output=True, text=True, encoding="utf-8", check=True
+            ["llm", "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+            env={"PATH": "clean"},
         )
+        mock_child_env.assert_called_once_with(os.environ)
 
     @patch("apm_cli.runtime.llm_runtime.subprocess.run")
     def test_init_fallback(self, mock_run):
@@ -81,3 +89,19 @@ class TestLLMRuntime:
         runtime = LLMRuntime("claude-3-sonnet")
 
         assert str(runtime) == "LLMRuntime(model=claude-3-sonnet)"
+
+    @patch("apm_cli.runtime.llm_runtime.build_child_tls_env", return_value={"PATH": "clean"})
+    @patch("apm_cli.runtime.llm_runtime.subprocess.run")
+    def test_is_available_uses_child_tls_env(self, mock_run, mock_child_env):
+        mock_run.return_value = Mock(returncode=0)
+
+        assert LLMRuntime.is_available() is True
+        mock_run.assert_called_once_with(
+            ["llm", "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+            env={"PATH": "clean"},
+        )
+        mock_child_env.assert_called_once_with(os.environ)
