@@ -427,6 +427,43 @@ class TestObjectFormRegistry:
             "alias": "x",
         }
 
+    def test_with_targets(self):
+        d = DependencyReference.parse_from_dict(
+            {
+                "registry": "corp",
+                "id": "a/b",
+                "version": "1.0.0",
+                "targets": ["codex", "claude"],
+            }
+        )
+        assert d.target_subset == ["claude", "codex"]
+
+    def test_targets_and_skills_round_trip(self):
+        entry = {
+            "registry": "corp",
+            "id": "a/b",
+            "version": "1.0.0",
+            "skills": ["alpha"],
+            "targets": ["claude"],
+        }
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+        assert emitted == {
+            "id": "a/b",
+            "registry": "corp",
+            "version": "1.0.0",
+            "skills": ["alpha"],
+            "targets": ["claude"],
+        }
+        d2 = DependencyReference.parse_from_dict(emitted)
+        assert d2.skill_subset == ["alpha"]
+        assert d2.target_subset == ["claude"]
+
+    def test_unknown_target_rejected(self):
+        with pytest.raises(ValueError, match="Unknown target"):
+            DependencyReference.parse_from_dict(
+                {"registry": "corp", "id": "a/b", "version": "1.0.0", "targets": ["not-a-target"]}
+            )
+
 
 @pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
 class TestRegistryFieldsRoundTrip:
