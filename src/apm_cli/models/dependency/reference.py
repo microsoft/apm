@@ -45,7 +45,7 @@ from .object_fields import (
     reject_unknown_git_fields,
 )
 from .provider_coordinates import ProviderCoordinateMixin
-from .subsets import parse_skill_subset
+from .subsets import parse_skill_subset, parse_target_subset
 from .types import VirtualPackageType
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
@@ -1162,6 +1162,7 @@ class DependencyReference(ProviderCoordinateMixin):
             path:     prompts/foo.md   # virtual sub-path; omit to install the whole package
             alias:    <name>           # same meaning as in other object forms
             skills:   [x, y, z]        # same meaning as in other object forms
+            targets:  [x, y, z]        # same meaning as in other object forms
         """
         from ...deps.registry.feature_gate import require_package_registry_enabled
 
@@ -1219,8 +1220,11 @@ class DependencyReference(ProviderCoordinateMixin):
         skills_raw = entry.get("skills")
         skill_subset = parse_skill_subset(skills_raw) if skills_raw is not None else None
 
+        targets_raw = entry.get("targets")
+        target_subset = parse_target_subset(targets_raw) if targets_raw is not None else None
+
         # Reject any unknown keys to catch typos early.
-        known = {"registry", "id", "path", "version", "alias", "skills"}
+        known = {"registry", "id", "path", "version", "alias", "skills", "targets"}
         unknown = set(entry.keys()) - known
         if unknown:
             raise ValueError(
@@ -1244,6 +1248,7 @@ class DependencyReference(ProviderCoordinateMixin):
             source="registry",
             registry_name=registry_name,
             skill_subset=skill_subset,
+            target_subset=target_subset,
         )
 
     @classmethod
@@ -2025,6 +2030,8 @@ class DependencyReference(ProviderCoordinateMixin):
                 entry["alias"] = self.alias
             if self.skill_subset:
                 entry["skills"] = sorted(self.skill_subset)
+            if self.target_subset:
+                entry["targets"] = sorted(self.target_subset)
             return entry
         if self.is_local and self.local_path:
             if self.skill_subset or self.target_subset or self.alias:
