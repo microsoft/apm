@@ -7,7 +7,7 @@ sidebar:
 
 `apm install` and `apm audit` reach out to GitHub, GHES, GitLab, Azure DevOps, and package archives over HTTPS. When the system can't verify the server certificate, the operation fails. This page maps the failure modes to fixes.
 
-Related: [environment variables](../reference/environment-variables/), [install failures](./install-failures/), [security model](../enterprise/security/), [authentication](../getting-started/authentication/).
+Related: [environment variables](../../reference/environment-variables/), [install failures](../install-failures/), [security model](../../enterprise/security/), [authentication](../../getting-started/authentication/).
 
 ## Symptoms
 
@@ -116,7 +116,7 @@ export GITLAB_APM_PAT=<token>
 export GIT_SSL_CAINFO=/path/to/internal-ca.pem
 ```
 
-See [environment variables](../reference/environment-variables/) for the full list and [authentication](../getting-started/authentication/) for token scopes.
+See [environment variables](../../reference/environment-variables/) for the full list and [authentication](../../getting-started/authentication/) for token scopes.
 
 ## Proxies
 
@@ -158,7 +158,7 @@ export GIT_SSL_NO_VERIFY=true       # git only
 export PYTHONHTTPSVERIFY=0          # Python stdlib only; requests ignores this
 ```
 
-What you lose: any guarantee that the host you reached is the host you intended to reach. Tokens you send may be captured. Packages you download may be tampered with - APM's [built-in security scanning](../enterprise/security/) still runs on the bytes received, but it cannot detect substitution upstream of itself.
+What you lose: any guarantee that the host you reached is the host you intended to reach. Tokens you send may be captured. Packages you download may be tampered with - APM's [built-in security scanning](../../enterprise/security/) still runs on the bytes received, but it cannot detect substitution upstream of itself.
 
 Unset both as soon as you are done:
 
@@ -172,4 +172,4 @@ unset GIT_SSL_NO_VERIFY PYTHONHTTPSVERIFY
 [>] Check `curl -v https://<host>` from the same shell - if it fails, the problem is the system trust store, not APM.
 [>] Confirm `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` point at a readable PEM file (`openssl x509 -in $REQUESTS_CA_BUNDLE -noout -subject` should print a subject line).
 [>] If only one host fails, see [GHES and GitLab self-managed](#ghes-and-gitlab-self-managed) and the per-host `git config` recipe above.
-[>] If the install proceeds past TLS but then fails, continue at [install failures](./install-failures/).
+[>] If the install proceeds past TLS but then fails, continue at [install failures](../install-failures/).

@@ -11,8 +11,8 @@ pull request itself. That is defence in depth: a developer can pass
 `--no-policy`, `--force`, or `APM_POLICY_DISABLE=1` locally; CI cannot.
 
 This page is the recipe set. For the full schema and the rollout
-playbook, see [Governance deep-dive](./governance-guide/) and
-[apm-policy getting started](./apm-policy/).
+playbook, see [Governance deep-dive](../governance-guide/) and
+[apm-policy getting started](../apm-policy/).
 
 ## The gate
 
@@ -75,7 +75,7 @@ jobs:
 `microsoft/apm-action@v1` runs `apm install` by default, so by the time
 `apm audit --ci` runs, the lockfile and deployed files are present.
 Make this job a required status check via
-[GitHub Rulesets](./github-rulesets/) and a violating PR cannot merge.
+[GitHub Rulesets](../github-rulesets/) and a violating PR cannot merge.
 
 ## Audit-only CI pattern
 
@@ -183,7 +183,7 @@ jobs:
 ```
 
 `--no-fail-fast` lets the sweep report every finding rather than the
-first one. See [drift detection](./drift-detection/) for what the
+first one. See [drift detection](../drift-detection/) for what the
 replay actually checks and how to debug a finding locally.
 
 ## When the gate blocks a PR
@@ -216,12 +216,12 @@ must be visible in the policy file's history.
 
 ## Next steps
 
-- [drift detection](./drift-detection/) -- what the replay actually
+- [drift detection](../drift-detection/) -- what the replay actually
   catches and how to read its output.
-- [security model](./security/) -- the
+- [security model](../security/) -- the
   built-in install-time scan that complements the CI gate.
-- [github rulesets](./github-rulesets/) -- make the audit job a
+- [github rulesets](../github-rulesets/) -- make the audit job a
   required status check across an org.
-- [APM in CI/CD](../integrations/ci-cd/) -- deeper patterns for
+- [APM in CI/CD](../../integrations/ci-cd/) -- deeper patterns for
   Azure Pipelines, GitLab, Jenkins, air-gapped runners, and bundle
   caching across jobs.

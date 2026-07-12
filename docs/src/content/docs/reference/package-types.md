@@ -223,8 +223,8 @@ consume it without restructuring.
 
 ## See also
 
-- [Your First Package](../getting-started/first-package/) -- hands-on
+- [Your First Package](../../getting-started/first-package/) -- hands-on
   walkthrough for scaffolding and publishing.
-- [`apm install`](./cli/install/) and [`apm pack`](./cli/pack/) -- install,
+- [`apm install`](../cli/install/) and [`apm pack`](../cli/pack/) -- install,
   package, and validation options.
-- [Manifest Schema](./manifest-schema/) -- full `apm.yml` field reference.
+- [Manifest Schema](../manifest-schema/) -- full `apm.yml` field reference.

@@ -10,10 +10,10 @@ harness. Use this page to choose a target, debug an unexpected deploy
 location, or confirm whether a primitive is supported on a given tool.
 
 For background on the target model, see
-[Primitives and targets](../concepts/primitives-and-targets/). For
-the runtime CLI surface, see [`apm targets`](./cli/targets/) and
-[`apm compile`](./cli/compile/). For the primitive types themselves,
-see [Primitive types](./primitive-types/).
+[Primitives and targets](../../concepts/primitives-and-targets/). For
+the runtime CLI surface, see [`apm targets`](../cli/targets/) and
+[`apm compile`](../cli/compile/). For the primitive types themselves,
+see [Primitive types](../primitive-types/).
 
 ## Summary
 
@@ -42,7 +42,7 @@ instructions, prompts, agents, and hooks use `.github/`, while skills use
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
 Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
 gated behind experimental flags and not listed above. See
-[Experimental](./experimental/).
+[Experimental](../experimental/).
 
 ## Detection and resolution
 
@@ -54,7 +54,7 @@ priority:
 3. Auto-detection from filesystem signals (table below).
 
 If none of the above produce a target, the command falls back to
-`copilot`. Use [`apm targets`](./cli/targets/) to preview the resolved
+`copilot`. Use [`apm targets`](../cli/targets/) to preview the resolved
 list before `compile` or `install`.
 
 ### Detection signal whitelist
@@ -231,7 +231,7 @@ GitHub Copilot for JetBrains IDEs.
   `github-copilot/intellij/` config directory. It does not auto-select a
   file-primitive target.
 - **Deploy directory.** User-scope `mcp.json`; see the
-  [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
+  [JetBrains integration guide](../../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
   for OS-specific paths.
 - **Supported primitives.** The IntelliJ-specific adapter supports MCP.
   Instructions, prompts, agents, and hooks deploy through the Copilot profile
@@ -286,12 +286,12 @@ targets: Y)` line so the gate decision is observable. The matrix
 above marks `mcp` supported when an adapter exists; whether the
 config gets written on a given install is a function of the active
 target set, not just adapter availability. See
-[Install MCP servers](../consumer/install-mcp-servers/) for the
-gate behavior and [`apm mcp`](./cli/mcp/) for the runtime surface.
+[Install MCP servers](../../consumer/install-mcp-servers/) for the
+gate behavior and [`apm mcp`](../cli/mcp/) for the runtime surface.
 
 ## See also
 
-- [`apm targets`](./cli/targets/) - inspect resolved targets at runtime.
-- [`apm compile`](./cli/compile/) - target selection and compile flags.
-- [Primitive types](./primitive-types/) - what each primitive is.
-- [Primitives and targets](../concepts/primitives-and-targets/) - conceptual model.
+- [`apm targets`](../cli/targets/) - inspect resolved targets at runtime.
+- [`apm compile`](../cli/compile/) - target selection and compile flags.
+- [Primitive types](../primitive-types/) - what each primitive is.
+- [Primitives and targets](../../concepts/primitives-and-targets/) - conceptual model.

@@ -349,7 +349,7 @@ pip install --user apm-cli
 
 ### Authentication errors when installing packages
 
-See [Authentication -- Troubleshooting](./authentication/#troubleshooting) for token setup, SSO authorization, and diagnosing auth failures.
+See [Authentication -- Troubleshooting](../authentication/#troubleshooting) for token setup, SSO authorization, and diagnosing auth failures.
 
 ### File access errors on Windows (antivirus / endpoint protection)
 

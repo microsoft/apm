@@ -8,7 +8,7 @@ based on its `description`, reads `SKILL.md`, and follows the body to
 do a focused task. The format is the cross-tool agent-skills standard
 (SKILL.md plus optional bundled resources). APM is the package manager
 for skills, not the spec; for the full primitive matrix see
-[Primitives and targets](../../concepts/primitives-and-targets/).
+[Primitives and targets](../../../concepts/primitives-and-targets/).
 
 ## Folder layout
 
@@ -138,9 +138,9 @@ apm audit --file .apm/skills/<name>/SKILL.md
 `apm install --dry-run` shows the routing table for the current set
 of detected harnesses. Targeting a single harness lets you inspect the
 actual file APM would deploy without touching the others. See
-[Compile](../compile/) and
-[Preview and validate](../preview-and-validate/) for the broader
-flow, and [Lifecycle](../../concepts/lifecycle/) for where
+[Compile](../../compile/) and
+[Preview and validate](../../preview-and-validate/) for the broader
+flow, and [Lifecycle](../../../concepts/lifecycle/) for where
 compile sits between install and run.
 
 ## Common pitfalls

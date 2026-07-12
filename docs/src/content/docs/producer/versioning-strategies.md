@@ -118,5 +118,5 @@ Use per_package when:
 apm pack --check-versions --dry-run
 ```
 
-See [Releasing from any CI](./releasing-from-any-ci/) for the full
+See [Releasing from any CI](../releasing-from-any-ci/) for the full
 release pipeline that runs both gates.

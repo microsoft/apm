@@ -15,7 +15,7 @@ Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](./installation/).
+- APM installed -- see [Installation](../installation/).
 - A GitHub account and an empty repo for publishing (step 5).
 - A runtime where you can try the result: GitHub Copilot, Claude Code, Kiro,
   or Cursor.
@@ -324,7 +324,7 @@ APM recognizes three layouts. Pick the one that matches what you are shipping:
   it directly without restructuring.
 
 For the full comparison and metadata precedence rules, see
-[Package Types](../reference/package-types/).
+[Package Types](../../reference/package-types/).
 
 ## Next steps
 

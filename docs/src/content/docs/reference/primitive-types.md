@@ -4,7 +4,7 @@ sidebar:
   order: 3
 ---
 
-This legacy note describes an earlier primitive discovery design. For current deployable primitive contracts, use [Package types](./package-types/) and [Targets matrix](./targets-matrix/).
+This legacy note describes an earlier primitive discovery design. For current deployable primitive contracts, use [Package types](../package-types/) and [Targets matrix](../targets-matrix/).
 
 ## Overview
 

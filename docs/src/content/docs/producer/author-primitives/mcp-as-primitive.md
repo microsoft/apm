@@ -6,7 +6,7 @@ description: "Ship MCP server configuration with your APM package so consumers g
 When a consumer runs `apm install` against your package, the
 `dependencies.mcp:` block in your `apm.yml` becomes their MCP server
 config. No README copy-paste, no per-harness JSON. This page is the producer side of
-[Install MCP servers](../../consumer/install-mcp-servers/).
+[Install MCP servers](../../../consumer/install-mcp-servers/).
 
 ## One-line answer
 
@@ -23,13 +23,13 @@ into every detected harness's MCP config file.
 
 ## What "MCP as a primitive" means here
 
-[Primitives and targets](../../concepts/primitives-and-targets/)
+[Primitives and targets](../../../concepts/primitives-and-targets/)
 lists MCP servers as a primitive APM routes per target. Unlike
 `.apm/skills/` or `.apm/prompts/`, MCP servers do not live as files in
 your package -- they live as **declarations** in `apm.yml`. APM
 materialises them at install time into the harness-specific config
 file (see the per-harness map in
-[Install MCP servers](../../consumer/install-mcp-servers/#what-apm-install-writes-to-disk)).
+[Install MCP servers](../../../consumer/install-mcp-servers/#what-apm-install-writes-to-disk)).
 
 You declare once. At project scope, APM writes `.vscode/mcp.json`,
 `.cursor/mcp.json`, `.mcp.json` for Claude, `.codex/config.toml`, and the
@@ -83,7 +83,7 @@ dependencies:
 
 For each detected harness, APM writes the relevant MCP config file.
 The full mapping (file path, scope, JSON/TOML schema) is in
-[Install MCP servers](../../consumer/install-mcp-servers/#what-apm-install-writes-to-disk).
+[Install MCP servers](../../../consumer/install-mcp-servers/#what-apm-install-writes-to-disk).
 You do not need to know it to author -- APM handles the per-target
 translation.
 
@@ -126,12 +126,12 @@ real secret in the consumer's environment (or their secret manager).
 The `github-mcp-server` is a special case: APM injects an
 `Authorization: Bearer <token>` header automatically when it writes
 the Copilot CLI config. See
-[Token injection](../../consumer/install-mcp-servers/#token-injection-github-mcp-server).
+[Token injection](../../../consumer/install-mcp-servers/#token-injection-github-mcp-server).
 
 When a registry server marks an env/input variable optional, APM does
 not generate a prompt or runtime config entry unless a value is already
 available. See the
-[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+[manifest schema reference](../../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
 for the canonical per-target and required-vs-optional rules.
 
 ## Direct vs transitive: the trust boundary
@@ -154,8 +154,8 @@ Implications for producers:
   consumer knows what they would be trusting.
 
 For the full trust model, see
-[Lifecycle](../../concepts/lifecycle/) and
-[Security](../../enterprise/security/).
+[Lifecycle](../../../concepts/lifecycle/) and
+[Security](../../../enterprise/security/).
 
 ## Pitfalls
 
@@ -173,11 +173,11 @@ For the full trust model, see
   for development (a local mock, a debug bridge) belongs in
   `devDependencies.mcp:`. `apm pack` excludes it; consumers do not
   get it. See
-  [dev-only primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
+  [dev-only primitives](../../../concepts/primitives-and-targets/#dev-only-primitives).
 
 ## Next
 
 - Bundle other primitives alongside MCP servers --
-  [skills](./skills/), [prompts](./prompts/),
-  [hooks and commands](./hooks-and-commands/).
-- Pack and ship -- [Pack a bundle](../pack-a-bundle/).
+  [skills](../skills/), [prompts](../prompts/),
+  [hooks and commands](../hooks-and-commands/).
+- Pack and ship -- [Pack a bundle](../../pack-a-bundle/).

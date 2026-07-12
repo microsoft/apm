@@ -213,4 +213,4 @@ executables:
 
 - [`apm install`](../install/) -- the install command that enforces the gate
 - [`apm audit`](../audit/) -- audit installed packages
-- [apm-policy.yml schema](../policy-schema/) -- the org `executables:` ceiling
+- [apm-policy.yml schema](../../policy-schema/) -- the org `executables:` ceiling

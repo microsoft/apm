@@ -53,7 +53,7 @@ For Artifactory registry proxies, use `PROXY_REGISTRY_TOKEN`. See [Registry prox
 
 For dedicated APM registries (`registries:` block in `apm.yml`), use `APM_REGISTRY_TOKEN_{NAME}`. See [Registry tokens](#registry-tokens) below.
 
-For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentication (consumer ramp)](../consumer/authentication/).
+For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentication (consumer ramp)](../../consumer/authentication/).
 
 ### Configuration variables
 
@@ -254,7 +254,7 @@ This confirms both paths were attempted and neither succeeded, so the fix is eit
 [i] dev.azure.com -- token from ADO_APM_PAT
 ```
 
-Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../enterprise/security/#token-handling) for the full posture.
+Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../../enterprise/security/#token-handling) for the full posture.
 
 ### Auth-failure diagnostics
 
@@ -364,7 +364,7 @@ Package registries are experimental. Run `apm experimental enable registries` be
 `{NAME}` is the registry name, uppercased, with `-` and `.` mapped to `_` (e.g. `jf-skills` -> `JF_SKILLS`). When both forms are set, Bearer wins. When neither is set, APM tries the request anonymously and surfaces a remediation message on `401`/`403`.
 
 :::caution[Silent auth failures]
-A misspelled env var is indistinguishable from a missing token — APM attempts anonymous access and only reports auth failure from the server. Names `corp-main` and `corp.main` map to the same `APM_REGISTRY_TOKEN_CORP_MAIN`; do not register both. See [Registries guide — pitfalls](../guides/registries/#pitfalls).
+A misspelled env var is indistinguishable from a missing token — APM attempts anonymous access and only reports auth failure from the server. Names `corp-main` and `corp.main` map to the same `APM_REGISTRY_TOKEN_CORP_MAIN`; do not register both. See [Registries guide — pitfalls](../../guides/registries/#pitfalls).
 :::
 
 Token precedence (highest wins): `APM_REGISTRY_TOKEN_{NAME}` env var → `registry.<name>.token` in `~/.apm/config.json`.
@@ -376,7 +376,7 @@ apm config set registry.jf-skills.token eyJ...
 apm install
 ```
 
-For the full registry workflow — declaring registries, scoping dependencies, and lockfile semantics — see the [Registries guide](../guides/registries/).
+For the full registry workflow — declaring registries, scoping dependencies, and lockfile semantics — see the [Registries guide](../../guides/registries/).
 
 ## Troubleshooting
 
@@ -509,7 +509,7 @@ apm config set prefer-ssh false   # explicit: never prefer SSH for shorthand dep
 # export APM_GIT_PROTOCOL=https   # process-scoped; add to shell profile for persistence
 ```
 
-See [apm config](../reference/cli/config/) for the full transport-preference config surface.
+See [apm config](../../reference/cli/config/) for the full transport-preference config surface.
 
 ## Choosing transport (SSH vs HTTPS)
 
@@ -526,7 +526,7 @@ URL scheme honored exactly; shorthand uses HTTPS unless
 `git config url.<base>.insteadOf` rewrites it to SSH). For the full
 selection matrix, the `--ssh` / `--https` flags, the `APM_GIT_PROTOCOL`
 env var, and the `--allow-protocol-fallback` escape hatch, see
-[Manage dependencies: Transport selection](../consumer/manage-dependencies/).
+[Manage dependencies: Transport selection](../../consumer/manage-dependencies/).
 
 :::caution[Custom ports and cross-protocol fallback]
 When `--allow-protocol-fallback` is in effect, APM reuses the

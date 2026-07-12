@@ -14,7 +14,7 @@ pins every file by SHA-256. Build it with one command from a project that has
 apm pack
 ```
 
-This is the producer side of [Deploy a local bundle](../consumer/deploy-a-bundle/).
+This is the producer side of [Deploy a local bundle](../../consumer/deploy-a-bundle/).
 Consumers who receive the artifact run `apm install ./your-bundle` and skip
 the registry resolver entirely.
 
@@ -91,7 +91,7 @@ author:
 Author your own `plugin.json` at the project root (or under `.github/plugin/`,
 `.claude-plugin/`, or `.cursor-plugin/`) when you need fields APM does not
 synthesise -- otherwise leave it to `apm pack` and keep `apm.yml` as the
-source of truth. See [Package anatomy](../concepts/package-anatomy/) for
+source of truth. See [Package anatomy](../../concepts/package-anatomy/) for
 the full schema.
 
 ## Integrity: how install verifies the bundle
@@ -120,10 +120,10 @@ Three common ways to hand off a bundle:
   `apm install ./<pkg>-<version>.zip`.
 - **Marketplace entry.** If your project also has a `marketplace:` block in
   `apm.yml`, `apm pack` builds `marketplace.json` alongside the bundle. See
-  [Publish to a marketplace](./publish-to-a-marketplace/).
+  [Publish to a marketplace](../publish-to-a-marketplace/).
 
 For the consumer flags that apply (`--target`, `--global`, `--force`,
-`--dry-run`), see [Deploy a local bundle](../consumer/deploy-a-bundle/).
+`--dry-run`), see [Deploy a local bundle](../../consumer/deploy-a-bundle/).
 
 ## Source layout and install-time discovery
 
@@ -154,7 +154,7 @@ its recorded `deployed_file_hashes` SHA-256 before it is included; a file
 whose bytes no longer match its recorded hash fails the pack. (Files from
 an older lockfile that predates `deployed_file_hashes` have no recorded
 hash and pack without verification.) If a dependency declares
-[`skills:`](../reference/package-types/#skill-collection-skillsnameskillmd),
+[`skills:`](../../reference/package-types/#skill-collection-skillsnameskillmd),
 only the named deployed skills are included. If a dependency has cached
 primitives but no `deployed_files` (a stale or partial install), `apm
 pack` fails and tells you to run `apm install` to record provenance.
@@ -197,7 +197,7 @@ Source: `src/apm_cli/integration/instruction_integrator.py`,
 When `.apm/` exists, it is the authoritative local source. Without `.apm/`,
 supported plugin-native root directories remain pack sources, including after
 `apm init` writes `includes: auto`. An explicit [`includes`
-list](../reference/manifest-schema/#39-includes) is exhaustive regardless
+list](../../reference/manifest-schema/#39-includes) is exhaustive regardless
 of layout.
 `apm install` does NOT discover instructions, commands, or prompts placed
 in root convention directories. Packages that rely on these primitives for
@@ -264,7 +264,7 @@ my-publisher-repo/
 
 Per-plugin `apm pack` (run from each plugin directory) emits the plugin
 bundle. The root `apm pack` builds the marketplace index. See
-[Repo shapes](./repo-shapes/) for the full layout options.
+[Repo shapes](../repo-shapes/) for the full layout options.
 
 ## Pitfalls
 
@@ -302,9 +302,9 @@ full file list (and any path remappings) without writing anything.
 
 ## What to read next
 
-- [Deploy a local bundle](../consumer/deploy-a-bundle/) -- the consumer
+- [Deploy a local bundle](../../consumer/deploy-a-bundle/) -- the consumer
   side of this hand-off.
-- [Publish to a marketplace](./publish-to-a-marketplace/) -- when a registry
+- [Publish to a marketplace](../publish-to-a-marketplace/) -- when a registry
   entry is a better fit than a bundle.
-- [Package anatomy](../concepts/package-anatomy/) -- the file layout and
+- [Package anatomy](../../concepts/package-anatomy/) -- the file layout and
   schema reference.

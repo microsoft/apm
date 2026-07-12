@@ -118,4 +118,4 @@ The rewritten paths should point into `apm_modules/<owner>/my-pkg/`
 and the targets should exist.
 
 For the full reach map of which primitive lands where on each harness,
-see [Primitives and targets](../concepts/primitives-and-targets/).
+see [Primitives and targets](../../concepts/primitives-and-targets/).

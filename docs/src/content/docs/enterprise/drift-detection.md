@@ -23,7 +23,7 @@ Four concrete categories. Each has a different signal and a different fix.
 
 Marketplace-shadow drift -- the same plugin name appearing under more than
 one registered marketplace -- is reported inline by `apm install` when it
-happens; see [security model](./security/).
+happens; see [security model](../security/).
 
 ## The local commands
 
@@ -128,7 +128,7 @@ change to a deployed file since the last install is caught by this check
 (line-ending-only differences are normalized away per req-lk-012, so a
 CRLF/LF flip alone is not flagged).
 
-See [Enforce in CI](./enforce-in-ci/#audit-only-ci-pattern) for the full
+See [Enforce in CI](../enforce-in-ci/#audit-only-ci-pattern) for the full
 recipe and a comparison table of the two patterns.
 
 ## Org-wide sweeps
@@ -193,12 +193,12 @@ non-CI `apm audit` also accepts `markdown`.
 
 Once drift is detected, remediation routes back to two pages:
 
-- [Enforce in CI](./enforce-in-ci/) -- wire `apm audit --ci` into branch
+- [Enforce in CI](../enforce-in-ci/) -- wire `apm audit --ci` into branch
   protection so future drift cannot land. The same command that detects
   drift here is the one that gates merges.
-- [Security model](./security/) -- scope
+- [Security model](../security/) -- scope
   tokens, lock the registry proxy, and tighten `apm-policy.yml` so the
   drift you cleaned up cannot reappear from a new source.
 
 For the consumer-side view of what these checks protect against on a
-single workstation, see [drift and secure by default](../consumer/drift-and-secure-by-default/).
+single workstation, see [drift and secure by default](../../consumer/drift-and-secure-by-default/).

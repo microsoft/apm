@@ -7,7 +7,7 @@ sidebar:
 
 When `apm install` fails, work through these sections in order. Most failures fall into one of five buckets: auth, network/TLS, lockfile, cache, or a partial install left behind by a previous crash.
 
-For TLS-specific failures see [SSL / TLS issues](./ssl-issues/). For the full flag reference see [`apm install`](../reference/cli/install/). For env-var precedence see [Environment variables](../reference/environment-variables/).
+For TLS-specific failures see [SSL / TLS issues](../ssl-issues/). For the full flag reference see [`apm install`](../../reference/cli/install/). For env-var precedence see [Environment variables](../../reference/environment-variables/).
 
 ## 1. Authentication failures
 
@@ -21,7 +21,7 @@ APM resolves a token per host class. For `github.com`, GHE Cloud, and GHES the o
 GITHUB_APM_PAT_<ORG>   ->   GITHUB_APM_PAT   ->   GITHUB_TOKEN   ->   GH_TOKEN   ->   gh auth token   ->   git credential helper
 ```
 
-`<ORG>` is the package owner uppercased with non-alphanumeric chars replaced by `_` (so `my-org/pkg` -> `GITHUB_APM_PAT_MY_ORG`). Per-org PATs win over the global `GITHUB_APM_PAT`. See [Environment variables](../reference/environment-variables/) for the full table.
+`<ORG>` is the package owner uppercased with non-alphanumeric chars replaced by `_` (so `my-org/pkg` -> `GITHUB_APM_PAT_MY_ORG`). Per-org PATs win over the global `GITHUB_APM_PAT`. See [Environment variables](../../reference/environment-variables/) for the full table.
 
 Common fixes:
 
@@ -100,7 +100,7 @@ curl -u ":${ADO_APM_PAT}" \
 
 A `200` here with a failing `apm install` points at precedence (a higher-priority var is set to a different token). Run `apm install --verbose` to see which source APM picked.
 
-For end-to-end auth setup see [Authentication](../getting-started/authentication/).
+For end-to-end auth setup see [Authentication](../../getting-started/authentication/).
 
 ## 2. Network and TLS
 
@@ -110,7 +110,7 @@ For end-to-end auth setup see [Authentication](../getting-started/authentication
 [!] TLS verification failed
 ```
 
-Behind a corporate proxy, set `REQUESTS_CA_BUNDLE` to your org's CA bundle (PEM file). Full walkthrough: [SSL / TLS issues](./ssl-issues/).
+Behind a corporate proxy, set `REQUESTS_CA_BUNDLE` to your org's CA bundle (PEM file). Full walkthrough: [SSL / TLS issues](../ssl-issues/).
 
 ### Timeouts and proxies
 
@@ -132,7 +132,7 @@ export PROXY_REGISTRY_URL=https://artifactory.example.com/apm
 export PROXY_REGISTRY_TOKEN=xxx
 ```
 
-See [Registry proxy](../enterprise/registry-proxy/) for setup, including `PROXY_REGISTRY_ALLOW_HTTP` for development environments.
+See [Registry proxy](../../enterprise/registry-proxy/) for setup, including `PROXY_REGISTRY_ALLOW_HTTP` for development environments.
 
 ## 3. Lockfile mismatches
 
@@ -166,7 +166,7 @@ apm audit --ci
 
 A non-zero exit means the working tree has diverged from `apm.lock.yaml` -- either re-run `apm install` to restore parity, or commit the new lockfile if the drift was intentional.
 
-For the full flag list see [`apm install`](../reference/cli/install/).
+For the full flag list see [`apm install`](../../reference/cli/install/).
 
 ## 4. Cache problems
 
@@ -208,7 +208,7 @@ Or drop only stale entries:
 apm cache prune --days 30
 ```
 
-See [`apm cache`](../reference/cli/cache/) for the full subcommand reference.
+See [`apm cache`](../../reference/cli/cache/) for the full subcommand reference.
 
 ## 5. Partial install recovery
 
@@ -228,7 +228,7 @@ If files in `apm_modules/` or under target harness directories look corrupt, for
 apm install --refresh --force
 ```
 
-`--force` overwrites locally-authored files on collision **and** bypasses the security scan's critical-finding block -- use it only after you've inspected the diff. See [`apm install`](../reference/cli/install/#policy-and-trust).
+`--force` overwrites locally-authored files on collision **and** bypasses the security scan's critical-finding block -- use it only after you've inspected the diff. See [`apm install`](../../reference/cli/install/#policy-and-trust).
 
 To wipe everything and start clean:
 
