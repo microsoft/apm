@@ -209,6 +209,18 @@ if ! grep -A8 'def add_marketplace' src/apm_cli/marketplace/registry.py \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC8: Windows installer authorities"
+# Owner presence + duplicate-derivation scanning both live in the single
+# canonical checker so this guard and the architecture test suite cannot
+# drift apart. See scripts/check_windows_stable_path_owner.py.
+windows_owner_output=$(python3 scripts/check_windows_stable_path_owner.py --root "$ROOT" 2>&1)
+windows_owner_status=$?
+if [ "$windows_owner_status" -ne 0 ]; then
+    echo "[x] Windows stable executable path belongs to install.ps1"
+    echo "$windows_owner_output"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

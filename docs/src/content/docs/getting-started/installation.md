@@ -29,6 +29,8 @@ irm https://aka.ms/apm-windows | iex
 
 The installer automatically detects your platform (macOS/Linux/Windows, Intel/ARM), downloads the latest binary, and adds `apm` to your `PATH`.
 
+On Windows, the installer adds both `current` and `bin` to `PATH`, with the stable `current\apm.exe` first. Bare `apm` calls therefore resolve the real executable in native shells, Git Bash, and process APIs such as Python `subprocess.run(["apm", ...])`; `bin\apm.cmd` remains available for compatibility.
+
 ### Installer options
 
 **macOS / Linux (`install.sh`):**
@@ -57,7 +59,8 @@ $env:VERSION = "v1.2.3"; irm https://aka.ms/apm-windows | iex
 # Saved script: pass -SkipChecksum only when the release has no .sha256 sidecar (not recommended).
 # .\install.ps1 v1.2.3 -SkipChecksum
 
-# Custom directory for apm.cmd (default: %LOCALAPPDATA%\Programs\apm\bin)
+# Custom directory for apm.cmd (default: %LOCALAPPDATA%\Programs\apm\bin).
+# The installer also adds the sibling current directory containing apm.exe.
 $env:APM_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\apm\bin"; irm https://aka.ms/apm-windows | iex
 
 # Fork, enterprise host, or internal mirror (GITHUB_URL must be https://)
@@ -88,7 +91,7 @@ jobs:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APM_INSTALL_DIR` | `/usr/local/bin` (Unix) / `%LOCALAPPDATA%\Programs\apm\bin` (Windows) | Directory for the `apm` symlink / `apm.cmd` shim |
+| `APM_INSTALL_DIR` | `/usr/local/bin` (Unix) / `%LOCALAPPDATA%\Programs\apm\bin` (Windows) | Directory for the Unix `apm` symlink or Windows `apm.cmd` shim. On Windows, the installer also adds the sibling `current` junction containing `apm.exe` to `PATH`. |
 | `APM_LIB_DIR` | `$(dirname APM_INSTALL_DIR)/lib/apm` | *(Unix only)* Directory for the full binary bundle. Must end with `/apm` (for example, `/lib/apm`). The installer rejects shared directories (e.g. `$HOME/.local/share`) to prevent accidental data loss. |
 | `GITHUB_URL` | `https://github.com` | Base GitHub URL (asset downloads **and** API host: `api.github.com` on github.com, `{GITHUB_URL}/api/v3` on GHES). Must be `https://` on Windows. |
 | `APM_REPO` | `microsoft/apm` | Repository as `owner/name` |
