@@ -442,8 +442,8 @@ first-match-wins ladder (org deny > user deny > project deny > project allow >
 user allow > org recommend > default-deny). Each locked dependency records the
 resolved state in the `exec_status` field of `apm.lock.yaml` (one of
 `deployed`, `gated_pending_approval`, `denied`, `absent`). For the consumer-side
-commands that write project and personal trust, see [apm approve / apm
-deny](./cli/approve/).
+commands that write project and personal trust, see
+[`apm approve`](./cli/approve/) and [`apm deny`](./cli/deny/).
 
 There is no `enforce` mandate runtime, no cryptographic signing, and no
 content-hash binding in this release: an `executables.enforce` rung is accepted

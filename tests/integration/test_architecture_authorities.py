@@ -29,6 +29,25 @@ def _load_skill_subset_owner_checker() -> ModuleType:
     return module
 
 
+def _load_windows_stable_path_checker(root: Path) -> ModuleType:
+    """Import scripts/check_windows_stable_path_owner.py as a module.
+
+    This is the single scan owner for the Windows stable executable
+    path boundary (owner presence + duplicate-derivation detection).
+    Both this test and scripts/lint-architecture-boundaries.sh (AC8)
+    consume it directly instead of re-implementing its regexes, globs,
+    or exemption handling.
+    """
+    module_name = "check_windows_stable_path_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
     """The canonical manifest target list must control bundle packing."""
     from apm_cli.bundle.packer import pack_bundle
@@ -270,6 +289,69 @@ def test_skill_subset_ast_checker_passes_on_real_consumers() -> None:
     assert violations == []
 
 
+def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
+    """install.ps1 alone may define the stable current/apm.exe location.
+
+    The Windows stable-path boundary (owner presence + duplicate
+    derivation) is scanned by exactly one checker,
+    scripts/check_windows_stable_path_owner.py. This test imports and
+    calls that checker directly -- it must not re-implement its
+    regexes, globs, or exemption handling -- and separately asserts
+    that the Bash AC8 guard actually shells out to it rather than
+    retaining a parallel scan.
+    """
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "Windows stable executable path belongs to install.ps1" in guard
+    assert "check_windows_stable_path_owner.py" in guard
+
+    checker = _load_windows_stable_path_checker(root)
+
+    assert checker.check(root) == []
+
+
+def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
+    """The new owner-table row must not silently drop on the next deploy.
+
+    ``.github/instructions/architecture.instructions.md`` is a compiled
+    artifact: ``.apm/instructions/architecture.instructions.md`` is its
+    canonical compile source (see docs/src/content/docs/producer/compile.md),
+    and apm.lock.yaml records a content hash of the deployed copy. If the
+    deployed file gains a row that the source lacks, the next
+    ``apm compile`` / ``apm install`` would regenerate the deployed file
+    from the (stale) source and silently remove the row; a stale lockfile
+    hash would additionally make ``apm audit`` report drift. This guards
+    all three legs of that contract using the project's own lockfile codec
+    and content-hash function rather than a bespoke comparison.
+    """
+    root = Path(__file__).parents[2]
+    source = root / ".apm/instructions/architecture.instructions.md"
+    deployed = root / ".github/instructions/architecture.instructions.md"
+
+    owner_row = "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |"
+    assert owner_row in source.read_text(encoding="utf-8")
+
+    # Source and deployed must be byte-identical: the deployed file is a
+    # compiled copy of the source, not an independently edited artifact.
+    assert source.read_bytes() == deployed.read_bytes()
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    lockfile = LockFile.load_or_create(root / "apm.lock.yaml")
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    locator_key = "copilot||project|.github/instructions/architecture.instructions.md"
+    record = ledger.records.get(locator_key)
+
+    assert record is not None, "lockfile must track the deployed architecture instruction"
+    assert record.content_hash == compute_file_hash(deployed), (
+        "apm.lock.yaml content_hash is stale relative to the deployed file; "
+        "the next 'apm audit' would report hash drift"
+    )
+
+
 def test_tls_injection_has_one_canonical_authority() -> None:
     """Only the parent TLS owner and standalone child bootstrap may inject."""
     root = Path(__file__).parents[2]
@@ -286,3 +368,13 @@ def test_tls_injection_has_one_canonical_authority() -> None:
 
     assert "TLS trust injection belongs to canonical owners" in guard
     assert duplicate_owners == []
+
+
+def test_link_resolver_owns_dependency_deployment_frame_mapping() -> None:
+    """Dependency asset links must use the canonical resolver frame mapping."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/compilation/link_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "candidate_in_deployment = ctx.deployment_package_root / package_relative" in source
+    assert "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" in guard

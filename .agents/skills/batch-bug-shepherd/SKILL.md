@@ -45,7 +45,7 @@ execute + verify (A9 SUPERVISED EXECUTION).
 
 ## Architecture invariants
 
-These 17 rules bind every wave. The one-line essence is below; the
+These 18 rules bind every wave. The one-line essence is below; the
 FULL binding text (rationale, edge cases, inherited-from-driver
 detail) lives in `references/invariants.md`. **Load
 `references/invariants.md` before planning Phase 0** -- the summaries
@@ -63,6 +63,13 @@ here are dispatch anchors, not the complete contract.
   waves.
 - **Mutation-break gate.** A regression trap is real only if deleting
   the production guard makes the test FAIL.
+- **Canonical-owner gate (driver-enforced).** Every fix gets one
+  architecture classification vs
+  `.github/instructions/architecture.instructions.md`; a new owner,
+  centralization, or split-authority repair needs the full dual
+  guardrail (behavioral + static + `test_architecture_*` + mutation
+  break) before `ready-to-merge`. shepherd-driver enforces and returns
+  it; the orchestrator only records the evidence.
 - **Superseding-PR fallback (inherited).** On contributor-fork push
   failure the driver opens an authorship-preserving PR under
   `microsoft/apm` and returns `superseded`.
@@ -381,7 +388,7 @@ duplicated here.
   step-by-step (external-dep probes, fail-open semantics,
   deferred-PR strategic-rejection subagent). Load WHEN ENTERING
   PHASE 1.5.
-- `references/invariants.md` -- full binding text of the 17
+- `references/invariants.md` -- full binding text of the 18
   architecture invariants. Load BEFORE PLANNING PHASE 0.
 
 Composed from shepherd-driver (loaded by relative path, NOT bundled):

@@ -729,6 +729,7 @@ class PackageInfo:
     )
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
     root_local_project_root: Path | None = None
+    deployment_package_root: Path | None = None  # Source root in the deployment output frame
 
     def get_canonical_dependency_string(self) -> str:
         """Get the canonical dependency string for this package.

@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)
+- `apm update` now converges for git-source semver dependencies already at
+  their locked tag instead of reporting a spurious update on every run. Branch
+  dependencies remain unaffected. (by @srobroek, #2165)
 - `apm update` now re-checks a transitive dependency's own semver range
   against the remote at any depth, not just for direct dependencies.
   Previously, `download_callback` only ran for a dependency whose install
@@ -91,7 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   #2059, #2114)
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
-  (by @sergio-sisternes-epam, closes #1957, #2041)
+  (by @sergio-sisternes-epam; closes #1957) (#2041)
+- The Windows installer now exposes a version-stable `current\apm.exe` on
+  `PATH` (via a junction to the active release bundle) alongside the existing
+  `bin\apm.cmd` shim, so Git Bash and Python `subprocess.run(["apm", ...])`
+  resolve `apm` without `cmd.exe` PATHEXT expansion. (closes #2076) (#2094)
 
 ### Performance
 

@@ -41,6 +41,7 @@ are part of your contract:
 - `copilot-classification-prompt.md`  -- Phase X.0 template
 - `ci-recovery-checklist.md`          -- post-push watch contract
 - `.apm/instructions/linting.instructions.md` -- the push gate
+- `.github/instructions/architecture.instructions.md` -- the canonical-owner gate (Step X.2.5)
 - `../apm-review-panel/SKILL.md`      -- panel composition contract
 - `../pr-description-skill/SKILL.md`   -- superseding-PR body author (Path B)
 
@@ -52,6 +53,7 @@ Up to FOUR outer iterations. Each iteration:
 X.0 fetch + classify Copilot
 X.1 invoke apm-review-panel skill
 X.2 merge follow-ups, apply fold-vs-defer rubric
+X.2.5 canonical-owner gate (classify + evidence, FAIL CLOSED)
 X.3 edit code, fold foldable items
 X.4 lint contract (silent)
 X.5 push (author fork or superseding PR)
@@ -225,6 +227,73 @@ and goes into the final return / advisory comment.
 NEVER a fold/defer axis (severity-blocking on an out-of-scope theme
 defers; severity-recommended on the in-scope surface folds).
 
+### Step X.2.5 -- canonical-owner gate (FAIL CLOSED)
+
+This gate runs every iteration, after fold/defer classification and
+before the lint/push terminal path. It is mandatory and fails closed:
+missing or uncertain evidence keeps the PR in the convergence loop or
+returns `blocked`; it is NEVER deferred as out of scope when the PR
+itself changes an authority.
+
+1. Read `.github/instructions/architecture.instructions.md` and the
+   full PR diff (the author's fix plus any folds applied this run).
+
+2. Classify the PR as EXACTLY ONE of:
+   - `ordinary-fix` -- behavioral change that re-owns no durable
+     decision; existing owners and guards already cover it.
+   - `owner-extension` -- an existing canonical owner gains a case.
+   - `new-owner` -- a durable decision gets its first canonical owner.
+   - `split-authority-repair` -- a decision computed/enforced in more
+     than one place is collapsed back to one owner.
+   - `not-applicable` -- no `src/apm_cli/**` decision surface is
+     touched (e.g. docs-only, tooling-only). Record why in
+     `rationale`.
+
+3. For EVERY durable decision the PR touches, record the decision, its
+   one canonical owner, and the evidence that each consumer routes
+   THROUGH that owner instead of re-deriving locally. These become the
+   `architecture_evidence.decisions[]` entries.
+
+4. Decide `dual_guardrail_required`:
+   - `new-owner` and `split-authority-repair` ALWAYS set it `true`.
+   - `owner-extension` sets it `true` when the change centralizes
+     routing or repairs a split; otherwise `false` with a `rationale`
+     naming the existing guard that already covers the new case.
+   - `ordinary-fix` and `not-applicable` set it `false`.
+
+5. Run the boundary lint on the exact head and record the result in
+   `boundary_lint`:
+
+   ```
+   bash scripts/lint-architecture-boundaries.sh
+   ```
+
+   When no `src/apm_cli/**` decision surface is touched, record the
+   explicit rationale (e.g. `not-applicable: docs-only, no src/ change`)
+   in `boundary_lint` instead of a run result.
+
+6. When `dual_guardrail_required` is true, do NOT push and do NOT
+   return a terminal status until ALL FOUR exist -- and fold the
+   missing halves as in-scope work in Step X.3 if they do not yet:
+   - a behavioral **regression test** (hermetic, under `tests/`) that
+     encodes the symptom and fails before / passes after
+     (`behavioral_test`);
+   - a **static boundary guard** added to
+     `scripts/lint-architecture-boundaries.sh` (`static_guard`);
+   - a matching `tests/integration/test_architecture_*.py` assertion
+     (`architecture_test`);
+   - **mutation-break** evidence: remove the guard, confirm the
+     behavioral AND architecture tests fail, restore it
+     (`mutation_break`). Append the removed-guard entry to
+     `mutation_break_evidence` too.
+
+7. Record the whole result in the `architecture_evidence` object of the
+   completion return. `ready-to-merge` and `advisory-with-deferred`
+   returns are schema-INVALID without it. If the required dual-guardrail
+   halves cannot be produced this run, stay in the loop; on cap, return
+   `blocked` with a `blocker` naming the missing half -- never
+   `ready-to-merge`.
+
 ### Step X.3 -- edit code, fold foldable items
 
 For each FOLD item:
@@ -347,6 +416,12 @@ On cap hit: `status: blocked` with failing job + log excerpt in
   items this iteration, OR every FOLD item was applied).
 - Copilot is drained (round cap hit OR zero new comments this
   iteration).
+- The canonical-owner gate (Step X.2.5) passed: the PR carries exactly
+  one classification, every touched decision has a recorded owner and
+  consumer-routing evidence, `bash scripts/lint-architecture-boundaries.sh`
+  is clean on the head, and -- when `dual_guardrail_required` is true --
+  all four dual-guardrail halves exist. Missing evidence is NOT a
+  ready-to-merge state.
 - CEO stance is `ship_now`, OR `ship_with_followups` where all
   remaining followups are tagged DEFER with valid scope-boundary
   notes.
@@ -471,6 +546,19 @@ most one short clause (e.g. `pending required review`,
   "ci_evidence": "string (required for ready-to-merge or advisory-with-deferred)",
   "lint_evidence": "string (required when status=ready-to-merge)",
   "mutation_break_evidence": [...],
+  "architecture_evidence": {
+    "classification": "ordinary-fix|owner-extension|new-owner|split-authority-repair|not-applicable",
+    "decisions": [
+      { "decision": "the durable decision", "owner": "canonical owner", "consumer_routing": "each consumer routes through the owner" }
+    ],
+    "dual_guardrail_required": false,
+    "boundary_lint": "bash scripts/lint-architecture-boundaries.sh exit 0",
+    "rationale": "why no dual guardrail is needed, OR why the classification holds",
+    "behavioral_test": "required when dual_guardrail_required=true",
+    "static_guard": "required when dual_guardrail_required=true",
+    "architecture_test": "required when dual_guardrail_required=true",
+    "mutation_break": "required when dual_guardrail_required=true"
+  },
   "superseded_by": <int (required when status=superseded)>,
   "blocker": "string (required when status=blocked)",
   "head_sha": "40-char sha of the last-pushed commit",
@@ -498,6 +586,10 @@ two observed drift aliases are wrong:
 Use `status` (NOT `terminal_state`) and `pr` (NOT `pr_number`).
 `panel_execution`, `panel_personas`, and `routing_receipt` are optional
 (parent-audit observability) but, when present, must match the schema.
+`architecture_evidence` is REQUIRED for `ready-to-merge` and
+`advisory-with-deferred`: a terminal return without schema-valid
+canonical-owner evidence (Step X.2.5) fails validation and forces a
+re-spawn, exactly like a missing `ci_evidence`.
 
 ## Hard rules
 
@@ -510,6 +602,12 @@ Use `status` (NOT `terminal_state`) and `pr` (NOT `pr_number`).
 - Never claim ready-to-merge without observed-green CI on the
   latest push.
 - Never add a regression-trap test without the mutation-break gate.
+- Never return `ready-to-merge` or `advisory-with-deferred` without a
+  schema-valid `architecture_evidence` from the canonical-owner gate
+  (Step X.2.5). A `new-owner`, `split-authority-repair`, or
+  centralizing `owner-extension` cannot be terminal without all four
+  dual-guardrail halves; missing evidence stays in the loop or returns
+  `blocked`, never deferred.
 - Honor the `status/shepherding` label removal -- but the
   orchestrator owns the label, NOT you. Just signal terminal state
   in the return and the orchestrator strips it.

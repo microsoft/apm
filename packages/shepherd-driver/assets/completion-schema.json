@@ -160,16 +160,95 @@
             "brief_mode": { "type": "string", "enum": ["normal", "caveman_full"] },
             "child_echo_model": { "type": "string", "description": "Model the child self-reports; advisory only (a child cannot prove the SKU it ran under)." }
           }
+        },
+        "architecture_evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Canonical-owner gate result (shepherd-driver-prompt.md Step X.2.5). Required when status in {ready-to-merge, advisory-with-deferred}. Every PR carries exactly one classification. When dual_guardrail_required=true, the behavioral test, static guard, matching architecture test, and mutation-break evidence are ALL required and the change cannot become terminal without them.",
+          "required": [
+            "classification",
+            "decisions",
+            "dual_guardrail_required",
+            "boundary_lint"
+          ],
+          "properties": {
+            "classification": {
+              "type": "string",
+              "enum": [
+                "ordinary-fix",
+                "owner-extension",
+                "new-owner",
+                "split-authority-repair",
+                "not-applicable"
+              ],
+              "description": "The single architecture classification for this PR per .github/instructions/architecture.instructions.md."
+            },
+            "decisions": {
+              "type": "array",
+              "description": "Every durable decision the PR touches, with its canonical owner and the evidence that each consumer routes through that owner. Empty array is legal for ordinary-fix / not-applicable.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["decision", "owner", "consumer_routing"],
+                "properties": {
+                  "decision": { "type": "string", "minLength": 1, "description": "The durable decision / vocabulary / outcome / contract." },
+                  "owner": { "type": "string", "minLength": 1, "description": "The one canonical owner (file or symbol) for that decision." },
+                  "consumer_routing": { "type": "string", "minLength": 1, "description": "Evidence that every consumer routes THROUGH the owner rather than re-deriving locally." }
+                }
+              }
+            },
+            "dual_guardrail_required": {
+              "type": "boolean",
+              "description": "True for new-owner and split-authority-repair always, and for owner-extension when the change centralizes or repairs routing."
+            },
+            "behavioral_test": { "type": "string", "minLength": 1, "description": "Behavioral regression test that encodes the symptom (fails before / passes after). Required when dual_guardrail_required=true." },
+            "static_guard": { "type": "string", "minLength": 1, "description": "The scripts/lint-architecture-boundaries.sh check that forbids a second owner. Required when dual_guardrail_required=true." },
+            "architecture_test": { "type": "string", "minLength": 1, "description": "Matching tests/integration/test_architecture_*.py assertion. Required when dual_guardrail_required=true." },
+            "mutation_break": { "type": "string", "minLength": 1, "description": "Evidence that removing the guard makes the behavioral and architecture tests fail. Required when dual_guardrail_required=true." },
+            "boundary_lint": { "type": "string", "minLength": 1, "description": "Result of running bash scripts/lint-architecture-boundaries.sh on the exact head, OR an explicit rationale (e.g. no src/ change) when the boundary script does not apply." },
+            "rationale": { "type": "string", "minLength": 1, "description": "Why the classification is correct and, for non-dual-guardrail cases, why existing guards already cover the change." }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "classification": {
+                    "enum": ["new-owner", "split-authority-repair"]
+                  }
+                },
+                "required": ["classification"]
+              },
+              "then": {
+                "properties": {
+                  "dual_guardrail_required": { "const": true }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "dual_guardrail_required": { "const": true } },
+                "required": ["dual_guardrail_required"]
+              },
+              "then": {
+                "required": [
+                  "behavioral_test",
+                  "static_guard",
+                  "architecture_test",
+                  "mutation_break"
+                ]
+              }
+            }
+          ]
         }
       },
       "allOf": [
         {
           "if": { "properties": { "status": { "const": "ready-to-merge" } } },
-          "then": { "required": ["ci_evidence", "lint_evidence", "head_sha", "mergeable", "merge_state_status", "ci_status"] }
+          "then": { "required": ["ci_evidence", "lint_evidence", "head_sha", "mergeable", "merge_state_status", "ci_status", "architecture_evidence"] }
         },
         {
           "if": { "properties": { "status": { "const": "advisory-with-deferred" } } },
-          "then": { "required": ["ci_evidence", "deferred_items", "head_sha", "mergeable", "merge_state_status", "ci_status"] }
+          "then": { "required": ["ci_evidence", "deferred_items", "head_sha", "mergeable", "merge_state_status", "ci_status", "architecture_evidence"] }
         },
         {
           "if": { "properties": { "status": { "const": "blocked" } } },

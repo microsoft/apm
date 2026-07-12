@@ -291,6 +291,16 @@ Returns: 10 PRs return `completion_return.status = ready-to-merge` or
 deferred_items linked to tracking issues; 1 PR stays blocked in the
 driver session on flaky CI. Cross-session-message only on green.
 
+Each driver ran the canonical-owner gate (Step X.2.5) and returned
+`architecture_evidence` in its `completion_return` before any terminal
+status:
+
+- 3 PRs -> canonical-owner gate: architecture classification new-owner / split-authority-repair.
+  Dual guardrail proven per PR: behavioral regression test + static boundary guard in scripts/lint-architecture-boundaries.sh + architecture assertion tests/integration/test_architecture_authorities.py, confirmed by mutation-break.
+- 7 PRs -> canonical-owner gate: architecture classification ordinary-fix / not-applicable; no durable decision re-owned, so no dual guardrail; boundary lint clean.
+
+Fail-closed rule honored: 1 driver with missing owner evidence cannot return ready-to-merge and stays blocked on the canonical-owner guardrail rather than deferring it.
+
 ## Progress (Phase 5 - mergeability gate)
 
 ```mermaid

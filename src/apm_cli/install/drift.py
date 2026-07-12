@@ -494,6 +494,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                 package_info = _build_package_info(lock_dep, install_path)
                 if lock_dep.local_path == _SELF_KEY:
                     package_info.root_local_project_root = project_root
+                    package_info.deployment_package_root = scratch_root
+                else:
+                    package_info.deployment_package_root = (
+                        lock_dep.to_dependency_ref().get_install_path(scratch_root / "apm_modules")
+                    )
                 dep_key = lock_dep.get_unique_key()
 
                 integrate_package_primitives(

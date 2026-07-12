@@ -144,6 +144,20 @@ if [ -n "$skill_subset_lexical_hits" ] || [ "$skill_subset_ast_status" -ne 0 ]; 
     violations=$((violations + 1))
 fi
 check_pattern \
+    "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" \
+    'deployment_package_root' \
+    $(find src/apm_cli -name '*.py' \
+        ! -path 'src/apm_cli/models/apm_package.py' \
+        ! -path 'src/apm_cli/integration/base_integrator.py' \
+        ! -path 'src/apm_cli/compilation/link_resolver.py' \
+        ! -path 'src/apm_cli/install/drift.py')
+if ! grep -q \
+    'candidate_in_deployment = ctx.deployment_package_root / package_relative' \
+    src/apm_cli/compilation/link_resolver.py; then
+    echo "[x] UnifiedLinkResolver must project source assets into the deployment frame"
+    violations=$((violations + 1))
+fi
+check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
     src/apm_cli/deps/apm_resolver.py
@@ -217,6 +231,18 @@ if ! grep -A8 'def add_marketplace' src/apm_cli/marketplace/registry.py \
     || ! grep -A12 'def remove_marketplace' src/apm_cli/marketplace/registry.py \
     | grep -q '_marketplace_mutation'; then
     echo "[x] Marketplace mutations must lock the full load-modify-save transaction"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC8: Windows installer authorities"
+# Owner presence + duplicate-derivation scanning both live in the single
+# canonical checker so this guard and the architecture test suite cannot
+# drift apart. See scripts/check_windows_stable_path_owner.py.
+windows_owner_output=$(python3 scripts/check_windows_stable_path_owner.py --root "$ROOT" 2>&1)
+windows_owner_status=$?
+if [ "$windows_owner_status" -ne 0 ]; then
+    echo "[x] Windows stable executable path belongs to install.ps1"
+    echo "$windows_owner_output"
     violations=$((violations + 1))
 fi
 
