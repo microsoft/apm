@@ -157,8 +157,13 @@ lockfile_to_ref_body=$(awk '
     flag && /^class / {exit}
     flag {print}
 ' src/apm_cli/deps/lockfile.py)
+# Checked as two separate function-scoped greps (rather than requiring both
+# the keyword and the owner attribute on one physical line) so that ruff/
+# manual formatting wrapping the ``skill_subset=`` expression across lines
+# does not produce a false positive.
 if ! echo "$lockfile_to_ref_body" | grep -q 'DependencyReference(' \
-    || ! echo "$lockfile_to_ref_body" | grep 'skill_subset=' | grep -q 'self\.skill_subset'; then
+    || ! echo "$lockfile_to_ref_body" | grep -q 'skill_subset=' \
+    || ! echo "$lockfile_to_ref_body" | grep -q 'self\.skill_subset'; then
     echo "[x] LockedDependency.to_dependency_ref must reconstruct skill_subset from self.skill_subset"
     violations=$((violations + 1))
 fi
@@ -167,9 +172,12 @@ run_replay_body=$(awk '
     flag && /^def / && !/run_replay/ {exit}
     flag {print}
 ' src/apm_cli/install/drift.py)
+# Same rationale as the lockfile guard above: keyword and owner attribute
+# are checked as independent function-scoped greps so multiline formatting
+# of the ``skill_subset=`` expression is still accepted.
 if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
-    || ! echo "$run_replay_body" | grep 'skill_subset=' \
-        | grep -q 'package_info\.dependency_ref\.skill_subset'; then
+    || ! echo "$run_replay_body" | grep -q 'skill_subset=' \
+    || ! echo "$run_replay_body" | grep -q 'package_info\.dependency_ref\.skill_subset'; then
     echo "[x] Audit replay must preserve locked skill subset intent"
     violations=$((violations + 1))
 fi

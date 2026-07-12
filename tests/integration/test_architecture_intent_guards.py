@@ -65,6 +65,13 @@ def _expression_depends_on(expr: ast.expr, expected_path: str) -> bool:
 def test_locked_dependency_reconstructs_persisted_skill_subset() -> None:
     """LockedDependency.to_dependency_ref() must forward the persisted subset.
 
+    This is a structural *routing* guard: it asserts, at the source level,
+    that ``self.skill_subset`` is the value threaded into the reconstructed
+    ``DependencyReference(...)`` call. It does not exercise runtime
+    behavior -- ``tests/unit/install/test_drift.py::
+    test_run_replay_threads_locked_skill_subset`` owns the runtime symptom
+    coverage (an actual replay producing the correctly filtered primitives).
+
     The lockfile is the sole persisted record of a consumer's ``--skill``
     selection. If ``to_dependency_ref()`` stopped forwarding
     ``self.skill_subset`` into the reconstructed ``DependencyReference``
@@ -88,6 +95,11 @@ def test_locked_dependency_reconstructs_persisted_skill_subset() -> None:
 def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> None:
     """run_replay() must forward, not reinterpret, the locked skill subset.
 
+    Like the guard above, this is a structural *routing* guard operating on
+    the AST, not a runtime behavior test: ``tests/unit/install/
+    test_drift.py::test_run_replay_threads_locked_skill_subset`` owns the
+    runtime symptom coverage for an actual replay run.
+
     ``integrate_package_primitives`` is the canonical owner of skill-subset
     filtering during install/replay. ``run_replay`` must pass through
     ``package_info.dependency_ref.skill_subset`` untouched (no recomputation,
@@ -110,12 +122,21 @@ def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> 
 def test_static_boundary_guard_covers_replay_skill_subset_authority() -> None:
     """The static lint script must guard both propagation edges above.
 
-    A behavioral/AST regression test alone can be deleted or weakened by a
-    future change; the architecture-boundary lint script is the second,
-    independent guardrail required by the single-canonical-owner discipline
-    (see .github/instructions/architecture.instructions.md, AC4).
+    This meta-test does not itself re-derive runtime behavior; it only
+    confirms the two independent, function-scoped static guards below exist
+    in the lint script. Both AST tests above are structural routing guards
+    and the lint script is the second, independent guardrail required by
+    the single-canonical-owner discipline (see
+    .github/instructions/architecture.instructions.md, AC4). A
+    behavioral/AST regression test alone can be deleted or weakened by a
+    future change, so both guards -- lockfile-side reconstruction and
+    replay-side forwarding -- must be present in the script.
     """
     lint_source = _LINT_SCRIPT.read_text(encoding="utf-8")
+    assert (
+        "LockedDependency.to_dependency_ref must reconstruct skill_subset "
+        "from self.skill_subset" in lint_source
+    )
     assert "Audit replay must preserve locked skill subset intent" in lint_source
 
 
