@@ -141,7 +141,7 @@ class TestDiscoverPolicyWithChainEMUEndToEnd:
         _git_init_with_remote(tmp_path, "enterprise-user@github.com:contoso/some-app.git")
         _write_minimal_apm_yml(tmp_path)
 
-        sentinel = PolicyFetchResult(outcome="absent", source="org:contoso/.github")
+        sentinel = PolicyFetchResult(outcome="absent", source="org:contoso/.github-private")
 
         with patch(
             "apm_cli.policy.discovery._fetch_from_repo", return_value=sentinel
@@ -150,11 +150,11 @@ class TestDiscoverPolicyWithChainEMUEndToEnd:
 
         # The regression guard for #1159 is the ROUTING: discovery reached
         # _fetch_from_repo (proves SCP_LIKE_RE matched and the org was
-        # extracted) and the FIRST candidate it tried was contoso/.github.
+        # extracted) and the FIRST candidate it tried was contoso/.github-private.
         assert mock_fetch.call_count >= 1
         first_call_repo_ref = mock_fetch.call_args_list[0].args[0]
-        assert first_call_repo_ref == "contoso/.github"
-        # Cascading discovery (#1830) tries .github -> .apm -> _apm. With every
+        assert first_call_repo_ref == "contoso/.github-private"
+        # Cascading discovery (#1830) tries .github-private -> .github -> .apm -> _apm. With every
         # candidate mocked absent, the cascade exhausts and returns a fresh
         # terminal "absent" result -- it does NOT propagate the per-candidate
         # sentinel object. The org-routing assertion above is the real guard.

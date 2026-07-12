@@ -61,8 +61,18 @@ def _deps_list_source_label(
 
 
 def _dep_display_name(dep) -> str:
-    """Get display name for a locked dependency (key@version)."""
-    key = dep.get_unique_key()
+    """Get display name for a locked dependency (key@version).
+
+    Local deps render their declared ``local_path`` (``../pkg``) instead of the
+    lockfile unique key. For anchored transitive local deps the unique key is an
+    absolute ``local:/...`` slot (see build_dependency_unique_key), which would
+    leak the host filesystem path into user-facing tree output. The declared
+    relative path is the logical, portable identity the user typed.
+    """
+    if getattr(dep, "source", None) == "local" and getattr(dep, "local_path", None):
+        key = dep.local_path
+    else:
+        key = dep.get_unique_key()
     version = (
         dep.version
         or (dep.resolved_commit[:7] if dep.resolved_commit else None)
@@ -209,18 +219,26 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
 
-    # Also load lockfile deps to avoid false orphan flags on transitive deps
+    # Also load lockfile deps to avoid false orphan flags on transitive deps.
+    # Local transitive deps are installed into hashed physical slots
+    # (``_local/<hash>/pkg``) to prevent sibling collisions (#2155), but their
+    # logical identity is the un-hashed lockfile ``repo_url`` (``_local/pkg``).
+    # Key orphan/insecure state on the logical id and remember each physical
+    # slot -> logical id so the scan below can report the logical name instead
+    # of leaking the hash slot into user-facing output.
+    physical_to_logical: dict[str, str] = {}
     try:
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
-                # Match the host-blind apm_modules/ layout. Local dependency
-                # identity retains its source-relative path, so derive its key
-                # from the canonical install path instead.
+                # Local deps: key on the logical lockfile identity
+                # (``repo_url``) and map the physical install slot back to it.
                 if dep.source == "local":
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
-                    dep_key = install_path.relative_to(apm_modules_path).as_posix()
+                    physical_key = install_path.relative_to(apm_modules_path).as_posix()
+                    dep_key = dep.repo_url
+                    physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
                 if dep_key and dep_key not in declared_sources:
@@ -284,24 +302,28 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     orphaned_packages = []
     for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
         try:
+            # Local transitive deps are scanned at their physical hash slot
+            # (``_local/<hash>/pkg``); report and orphan-check against the
+            # logical lockfile key (``_local/pkg``) instead of leaking the slot.
+            logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
             version = "unknown"
             if has_apm_yml:
                 package = APMPackage.from_apm_yml(candidate / APM_YML_FILENAME)
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = org_repo_name not in declared_with_ancestors
+            is_orphaned = logical_name not in declared_with_ancestors
             if is_orphaned:
-                orphaned_packages.append(org_repo_name)
+                orphaned_packages.append(logical_name)
 
-            locked_dep = insecure_lock_deps.get(org_repo_name)
+            locked_dep = insecure_lock_deps.get(logical_name)
             installed_packages.append(
                 {
-                    "name": org_repo_name,
+                    "name": logical_name,
                     "version": version,
                     "source": "orphaned"
                     if is_orphaned
-                    else declared_sources.get(org_repo_name, "github"),
+                    else declared_sources.get(logical_name, "github"),
                     "primitives": primitives,
                     "path": str(candidate),
                     "is_orphaned": is_orphaned,

@@ -255,8 +255,17 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
     prune_output = pruned.stdout + pruned.stderr
     for embedded_name in embedded_names:
         assert embedded_name not in prune_output
-    for package_name in package_names:
-        assert (consumer / "apm_modules" / "_local" / package_name / "apm.yml").is_file()
+    # Direct dep (depth-1) lands in a flat ``_local/pkg`` slot; transitive
+    # local deps are materialised in parent-scoped hashed slots
+    # (``_local/<hash>/pkg``) per #2155, so locate them by glob the same way
+    # test_three_level_apm_chain_resolves_all_levels does.
+    modules_local = consumer / "apm_modules" / "_local"
+    assert (modules_local / package_names[0] / "apm.yml").is_file()
+    for package_name in package_names[1:]:
+        matches = list(modules_local.glob(f"*/{package_name}/apm.yml"))
+        assert len(matches) == 1, (
+            f"Transitive package {package_name} not materialised in its parent-scoped slot"
+        )
     assert (
         consumer
         / "apm_modules"

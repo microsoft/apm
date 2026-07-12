@@ -174,7 +174,8 @@ def test_apm_pack_rejects_tampered_file_in_deployed_directory(tmp_path: Path) ->
     _write_apm_yml(project)
     _write_deployed_skill(project, "alpha", "deployed alpha")
     skill_dir = project / ".github" / "skills" / "alpha"
-    # Hash the contained files, but list the DIRECTORY in deployed_files.
+    # Production-realistic shape: real installs list the directory entry AND
+    # every contained file in deployed_files, with per-child hashes.
     file_rels = [
         (skill_dir / "SKILL.md").relative_to(project).as_posix(),
         (skill_dir / "notes.md").relative_to(project).as_posix(),
@@ -185,7 +186,7 @@ def test_apm_pack_rejects_tampered_file_in_deployed_directory(tmp_path: Path) ->
         resolved_commit="abc123",
         depth=1,
         package_type="skill_bundle",
-        deployed_files=[skill_dir.relative_to(project).as_posix() + "/"],
+        deployed_files=[skill_dir.relative_to(project).as_posix() + "/", *file_rels],
         deployed_file_hashes=hashes,
     )
     _write_lockfile(project, dep)
@@ -255,7 +256,7 @@ def test_apm_pack_directory_symlink_does_not_escape(tmp_path: Path) -> None:
         resolved_commit="abc123",
         depth=1,
         package_type="skill_bundle",
-        deployed_files=[skill_dir.relative_to(project).as_posix() + "/"],
+        deployed_files=[skill_dir.relative_to(project).as_posix() + "/", *deployed],
         deployed_file_hashes={rel: compute_file_hash(project / rel) for rel in deployed},
     )
     _write_lockfile(project, dep)
