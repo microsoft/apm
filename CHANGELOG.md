@@ -12,6 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm update` now converges for git-source semver dependencies already at
   their locked tag instead of reporting a spurious update on every run. Branch
   dependencies remain unaffected. (by @srobroek, #2165)
+- `apm update` now re-checks a transitive dependency's own semver range
+  against the remote at any depth, not just for direct dependencies.
+  Previously, `download_callback` only ran for a dependency whose install
+  path didn't already exist, so a transitive dependency already present on
+  disk (e.g. `pkg1 -> pkg2 -> pkg3`, all constrained by `^1.0.0`) never had
+  its own range re-evaluated -- publishing a new matching version of `pkg3`
+  was silently ignored by `apm update` in `pkg1` even though `pkg2`'s
+  manifest allowed it. (by @nadav-y)
+  
+### Added
+
+- Corporate proxy and internal-CA users can now use Python-based APM HTTPS paths
+  without per-shell TLS setup. APM verifies against the OS trust store through
+  `truststore` for `apm install`, the Python `llm` child runtime, and the frozen
+  binary, with `certifi` as fallback. `REQUESTS_CA_BUNDLE` /
+  `CURL_CA_BUNDLE` still wins, and `APM_DISABLE_TRUSTSTORE=1` restores
+  certifi-only behavior. Node (Copilot) and Rust (Codex) children are not yet covered
+  and retain their own trust configuration; tracked in #2034.
+  (closes #2004) (#2005)
 
 ## [0.25.0] - 2026-07-12
 

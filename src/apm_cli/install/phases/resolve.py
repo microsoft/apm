@@ -196,11 +196,10 @@ def _purge_cached_semver_paths_for_update(
     and rewrites the lockfile with the latest matching tag. Matches
     npm / cargo / bundler: ``--update`` is the explicit re-resolve
     trigger and must not be swallowed by the on-disk cache. Scoped to
-    direct deps to avoid disturbing transitive cached content; the
-    resolver re-walks transitives naturally once a direct dep's
-    callback rewrites its ref. Local and proxy deps are excluded (their
-    semver semantics belong to a different resolver path). Registry semver
-    deps are included: their callback also gates on install_path.exists().
+    direct deps -- a transitive dep's own range is covered separately by
+    ``APMDependencyResolver._should_force_recheck``. Local and proxy deps
+    are excluded (different resolver path). Registry semver deps are
+    included: their callback also gates on install_path.exists().
     """
     from contextlib import suppress
 
@@ -770,6 +769,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
         apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,
         auth_resolver=ctx.auth_resolver,
+        update_refs=update_refs,
     )
 
     # Resolver reads ``<anchor>/apm.yml``. Preserve the original

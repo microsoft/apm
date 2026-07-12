@@ -598,7 +598,10 @@ def temp_project(tmp_path):
 class TestPluginNetworkE2E:
     """Network E2E tests — real CLI installs from GitHub."""
 
-    PLUGIN_REF = "github/awesome-copilot/plugins/context-engineering"
+    PLUGIN_REF = "github/awesome-copilot/plugins/context-engineering#marketplace"
+    # On-disk / logical key form: the ``#marketplace`` ref suffix is stripped
+    # from the install path (see DependencyReference.get_install_path).
+    PLUGIN_PATH = "github/awesome-copilot/plugins/context-engineering"
 
     # ---- Test 1: install real plugin ------------------------------------
 
@@ -617,7 +620,7 @@ class TestPluginNetworkE2E:
         )
 
         # Installed directory exists
-        pkg_path = temp_project / "apm_modules" / self.PLUGIN_REF
+        pkg_path = temp_project / "apm_modules" / self.PLUGIN_PATH
         assert pkg_path.is_dir(), f"Expected {pkg_path} to exist"
 
         # apm.yml synthesized
@@ -716,7 +719,7 @@ class TestPluginNetworkE2E:
         )
 
         # Both packages installed
-        assert (temp_project / "apm_modules" / self.PLUGIN_REF).is_dir()
+        assert (temp_project / "apm_modules" / self.PLUGIN_PATH).is_dir()
         review_path = (
             temp_project
             / "apm_modules"
@@ -754,7 +757,7 @@ class TestPluginNetworkE2E:
             cwd=str(temp_project),
             timeout=300,
         )
-        pkg_path = temp_project / "apm_modules" / self.PLUGIN_REF
+        pkg_path = temp_project / "apm_modules" / self.PLUGIN_PATH
         assert pkg_path.is_dir(), "Plugin must be installed before uninstall test"
 
         # Uninstall
@@ -893,7 +896,7 @@ class TestPluginNetworkE2E:
         )
         assert r.returncode == 0, f"Install failed:\n{r.stderr}"
 
-        pkg_path = temp_project / "apm_modules" / self.PLUGIN_REF
+        pkg_path = temp_project / "apm_modules" / self.PLUGIN_PATH
         assert pkg_path.is_dir(), "Plugin must be installed before prune test"
 
         # Remove the plugin from apm.yml (simulate user edit)
@@ -1010,5 +1013,5 @@ class TestPluginNetworkE2E:
         )
 
         # Package should still be on disk
-        pkg_path = temp_project / "apm_modules" / self.PLUGIN_REF
+        pkg_path = temp_project / "apm_modules" / self.PLUGIN_PATH
         assert pkg_path.is_dir(), "Plugin should still be present after reinstall"
