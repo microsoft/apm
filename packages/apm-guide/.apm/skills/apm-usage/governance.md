@@ -22,6 +22,10 @@ environment-only so redirecting binary downloads remains invocation-scoped.
 
 ## Policy schema overview
 
+Unknown top-level keys are reported as warnings. Known fields with the wrong
+native YAML type are rejected; for example, `cache` must be a mapping and
+`dependencies.allow` must be a list.
+
 ```yaml
 name: "Contoso Engineering Policy"
 version: "1.0.0"
@@ -399,8 +403,10 @@ The merge follows "Inheritance rules" above (most fields tighten; deny/require l
 
 **Multi-level extends:** install-time enforcement and `apm audit --ci` both
 resolve the full `extends:` chain up to `MAX_CHAIN_DEPTH = 5`. Cycles are
-detected and abort with an error. If a parent fetch fails midway, APM
-merges what it resolved and emits a `Policy chain incomplete` warning.
+detected and abort with an error. If a parent fetch fails midway, APM marks
+the chain incomplete and fails closed rather than enforcing a weaker subset.
+`manifest.require_explicit_includes` is OR-merged, so a descendant cannot
+relax an ancestor that requires an explicit `includes:` list.
 
 ### 4. What gets enforced
 

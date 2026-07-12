@@ -5,6 +5,7 @@ from typing import Any
 
 from ...constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage
+from ...utils.yaml_io import load_yaml
 
 
 def _scan_installed_packages(apm_modules_dir: Path) -> list:
@@ -154,6 +155,35 @@ def _get_detailed_context_counts(package_path: Path) -> dict[str, int]:
     return counts
 
 
+def _tolerant_identity(package_path: Path, apm_yml_path: Path) -> dict[str, str] | None:
+    """Best-effort name/version read for the tolerant ``deps`` display paths.
+
+    ``APMPackage.from_apm_yml`` is the strict identity authority: it rejects
+    empty/non-string ``name`` and ``version`` so ``audit`` and ``policy``
+    surfaces fail schema-invalid manifests. The ``deps list`` / ``deps info``
+    display commands are a different surface -- they must stay tolerant so a
+    manifest that merely omits or empties ``version`` still renders as
+    ``@unknown`` rather than an alarming ``@error`` that masks the package.
+
+    Returns a ``{"name", "version"}`` dict on a best-effort read, or ``None``
+    only when the apm.yml cannot be parsed at all (genuinely malformed YAML),
+    which the callers surface as ``error``.
+    """
+    try:
+        data = load_yaml(apm_yml_path)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw_name = data.get("name")
+    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else package_path.name
+    raw_version = data.get("version")
+    version = (
+        raw_version.strip() if isinstance(raw_version, str) and raw_version.strip() else "unknown"
+    )
+    return {"name": name, "version": version}
+
+
 def _get_package_display_info(package_path: Path) -> dict[str, str]:
     """Get package display information."""
     try:
@@ -173,10 +203,17 @@ def _get_package_display_info(package_path: Path) -> dict[str, str]:
                 "version": "unknown",
             }
     except Exception:
+        identity = _tolerant_identity(package_path, package_path / APM_YML_FILENAME)
+        if identity is None:
+            return {
+                "display_name": f"{package_path.name}@error",
+                "name": package_path.name,
+                "version": "error",
+            }
         return {
-            "display_name": f"{package_path.name}@error",
-            "name": package_path.name,
-            "version": "error",
+            "display_name": f"{identity['name']}@{identity['version']}",
+            "name": identity["name"],
+            "version": identity["version"],
         }
 
 
@@ -228,6 +265,22 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
                 "hooks": primitives.get("hooks", 0),
             }
     except Exception as e:
+        identity = _tolerant_identity(package_path, package_path / APM_YML_FILENAME)
+        if identity is not None:
+            # Tolerant display: a readable manifest with incomplete identity
+            # (e.g. empty/missing version) renders gracefully -- symmetric with
+            # `deps list` -- instead of masking the package behind an error.
+            return {
+                "name": identity["name"],
+                "version": identity["version"],
+                "description": "apm.yml identity incomplete",
+                "author": "Unknown",
+                "source": "local",
+                "install_path": str(package_path.resolve()),
+                "context_files": _get_detailed_context_counts(package_path),
+                "workflows": 0,
+                "hooks": 0,
+            }
         return {
             "name": package_path.name,
             "version": "error",

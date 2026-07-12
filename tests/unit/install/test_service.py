@@ -83,10 +83,13 @@ class TestInstallServiceDelegation:
             marketplace_provenance={"source": "test-marketplace"},
         )
         with patch("apm_cli.install.pipeline.run_install_pipeline") as mock_run:
-            mock_run.return_value = "result-sentinel"
+            from apm_cli.models.results import InstallResult
+
+            expected = InstallResult()
+            mock_run.return_value = expected
             result = InstallService().run(request)
 
-        assert result == "result-sentinel"
+        assert result is expected
         mock_run.assert_called_once()
         args, kwargs = mock_run.call_args
         assert args[0] is fake_apm_package
@@ -114,9 +117,11 @@ class TestInstallServiceDelegation:
         assert kwargs["scope"] is scope
 
     def test_service_is_reusable_across_invocations(self, fake_apm_package):
+        from apm_cli.models.results import InstallResult
+
         service = InstallService()
         with patch("apm_cli.install.pipeline.run_install_pipeline") as mock_run:
-            mock_run.return_value = "ok"
+            mock_run.return_value = InstallResult()
             service.run(_make_request(fake_apm_package))
             service.run(_make_request(fake_apm_package, force=True))
         assert mock_run.call_count == 2

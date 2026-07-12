@@ -433,9 +433,9 @@ class TestDetectTargetCursor:
         )
         assert target == "all"
 
-    def test_cursor_no_compile_agents_md(self):
-        """Cursor target should NOT compile AGENTS.md (uses .cursor/agents/)."""
-        assert should_compile_agents_md("cursor") is False
+    def test_cursor_compiles_agents_md(self):
+        """Cursor's agents compile family emits the shared root context."""
+        assert should_compile_agents_md("cursor") is True
 
     def test_cursor_no_compile_claude_md(self):
         """Cursor target should NOT compile CLAUDE.md."""

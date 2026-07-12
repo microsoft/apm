@@ -31,6 +31,13 @@ backfills one from the other:
   is no apm.yml-side equivalent.
 - `name`, `version`, `license`, `dependencies`, `scripts` live
   exclusively in `apm.yml`.
+- `name` and `version` must be non-empty strings. Quote numeric versions so
+  YAML does not parse them as numbers.
+
+Use the standard `$schema` key when authoring against normative OpenAPM v0.1:
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json`.
+Omitting `$schema` selects APM's current working draft. Unknown schema
+identities fail closed rather than being interpreted as the working draft.
 
 Populate both descriptions when you ship a HYBRID package. `apm pack`
 warns when `apm.yml.description` is missing so listings do not
@@ -144,10 +151,11 @@ to `commonjs`); shell-only bundles do not get a sidecar.
 
 `apm install` (project-scope, no `-g`) keeps hook `command` paths
 **repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
-`<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
-sidecar, and equivalents for Cursor / Gemini / Antigravity / Windsurf / Kiro) so clones,
-contributors, and CI runners do not see the installer's machine-local
-absolute prefix. `apm install -g` (user-scope, e.g.
+`<repo>/.codex/hooks.json`, and equivalents for Cursor / Gemini / Antigravity /
+Windsurf / Kiro). Native hook files contain only upstream schema fields; each
+merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
+sidecar, so clones, contributors, and CI runners do not see the installer's
+machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
 references to absolute paths because the user-scope config is read
 without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses

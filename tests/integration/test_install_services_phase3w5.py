@@ -34,6 +34,11 @@ def make_target(
     target.auto_create = True
     target.hooks_config_display = hooks_config_display
     target.resolved_deploy_root = resolved_deploy_root
+    if resolved_deploy_root is not None:
+        target.managed_deploy_root = resolved_deploy_root
+    else:
+        _root = Path(root_dir)
+        target.managed_deploy_root = _root if _root.is_absolute() else None
     return target
 
 

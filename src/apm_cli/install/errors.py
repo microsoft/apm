@@ -43,6 +43,10 @@ class DirectDependencyError(RuntimeError):
     """
 
 
+class InstallFailureAlreadyRendered(RuntimeError):
+    """Signal a failed install whose user-facing diagnostics are complete."""
+
+
 class AuthenticationError(RuntimeError):
     """Raised when a remote host rejects credentials or none are available.
 

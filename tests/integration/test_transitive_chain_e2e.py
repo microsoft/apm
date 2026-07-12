@@ -103,9 +103,11 @@ def test_three_level_apm_chain_resolves_all_levels(chain_workspace, apm_command)
     assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
     modules_local = consumer / "apm_modules" / "_local"
-    for name in ("pkg-a", "pkg-b", "pkg-c"):
-        assert (modules_local / name / "apm.yml").exists(), (
-            f"Transitive package {name} not materialised under apm_modules/_local/"
+    assert (modules_local / "pkg-a" / "apm.yml").exists()
+    for name in ("pkg-b", "pkg-c"):
+        matches = list(modules_local.glob(f"*/{name}/apm.yml"))
+        assert len(matches) == 1, (
+            f"Transitive package {name} not materialised in its parent-scoped slot"
         )
 
     deps = _deps_by_name(_load_lockfile(consumer))
@@ -155,7 +157,7 @@ def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_command)
 
     modules_local = consumer / "apm_modules" / "_local"
     for name in ("pkg-a", "pkg-b", "pkg-c"):
-        assert not (modules_local / name).exists(), (
+        assert not list(modules_local.rglob(name)), (
             f"Transitive orphan {name} not cleaned from apm_modules/_local/"
         )
 
@@ -224,7 +226,7 @@ def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_command):
     # anchor is on specialized/, not on consumer/. Install path uses the
     # source-dir basename (NOT the apm.yml `name` field).
     assert (consumer / "apm_modules" / "_local" / "specialized").exists()
-    assert (consumer / "apm_modules" / "_local" / "base").exists()
+    assert len(list((consumer / "apm_modules" / "_local").glob("*/base"))) == 1
     # No "outside the project root" rejection should appear in either stream.
     combined = result.stdout + result.stderr
     assert "outside the project root" not in combined, combined

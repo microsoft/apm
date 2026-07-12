@@ -352,6 +352,12 @@ class TestNoOrphans:
 class TestConfigConsistency:
     def test_pass_no_mcp(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo"])
+        package = tmp_path / "apm_modules" / "owner" / "repo"
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text(
+            "name: repo\nversion: 1.0.0\n",
+            encoding="utf-8",
+        )
         _write_lockfile(
             tmp_path,
             textwrap.dedent("""\
@@ -416,56 +422,6 @@ class TestConfigConsistency:
         result = _check_config_consistency(manifest, lock)
         assert not result.passed
         assert any("my-server" in d and "differs" in d for d in result.details)
-
-    def test_transitive_mcp_server_not_flagged_as_orphan(self, tmp_path):
-        """A server declared by a local-path sub-package is exempt from orphan.
-
-        Topology: root -> ./packages/agent-config (local-path) which declares
-        a self-defined MCP server 'shadcn'. The root manifest cannot declare
-        the server, so it is recorded in mcp_configs with provenance pointing
-        at the declaring package. config-consistency must pass. Regression test
-        for #2081 (MCP-side sibling of #1846/#1855).
-
-        Fix-toggle: the SAME lockfile without the provenance entry must FAIL,
-        proving the exemption -- not some unrelated condition -- is what flips
-        the result.
-        """
-        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-        from apm_cli.models.apm_package import APMPackage
-
-        # Root manifest declares only the local-path dependency, no mcp: block.
-        _write_apm_yml(tmp_path, deps=["./packages/agent-config"])
-
-        exempt_lock = textwrap.dedent("""\
-            lockfile_version: '1'
-            generated_at: '2025-01-01T00:00:00Z'
-            dependencies: []
-            mcp_configs:
-              shadcn:
-                name: shadcn
-                registry: false
-                transport: stdio
-                command: npx
-            mcp_config_provenance:
-              shadcn: '@qado/agent-config'
-        """)
-        _write_lockfile(tmp_path, exempt_lock)
-        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
-        lock = LockFile.read(get_lockfile_path(tmp_path))
-        # Provenance must survive the YAML round-trip for the exemption to work.
-        assert lock.mcp_config_provenance == {"shadcn": "@qado/agent-config"}
-        result = _check_config_consistency(manifest, lock)
-        assert result.passed, result.details
-
-        # Fix-toggle: strip the provenance block; the exact same server now
-        # falls through the orphan branch and fails.
-        without_provenance = exempt_lock[: exempt_lock.index("mcp_config_provenance:")]
-        _write_lockfile(tmp_path, without_provenance)
-        lock_no_prov = LockFile.read(get_lockfile_path(tmp_path))
-        assert lock_no_prov.mcp_config_provenance == {}
-        result_no_prov = _check_config_consistency(manifest, lock_no_prov)
-        assert not result_no_prov.passed
-        assert any("shadcn" in d and "not in manifest" in d for d in result_no_prov.details)
 
     def test_genuine_orphan_mcp_still_flagged(self, tmp_path):
         """Provenance must not mask a real orphan (server absent from manifest
@@ -778,6 +734,12 @@ class TestContentIntegrity:
 class TestRunBaselineChecks:
     def test_all_pass(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo#v1.0.0"])
+        package = tmp_path / "apm_modules" / "owner" / "repo"
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text(
+            "name: repo\nversion: 1.0.0\n",
+            encoding="utf-8",
+        )
         _make_deployed_file(tmp_path, ".github/prompts/test.md")
         _write_lockfile(
             tmp_path,
@@ -1562,3 +1524,65 @@ class TestManifestMissingWarning:
         names = [c.name for c in result.checks]
         assert "manifest-missing" not in names
         assert result.passed
+
+
+def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -> None:
+    """The consistency check delegates all source derivation to the owner."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+    _write_apm_yml(tmp_path, mcp=["server"])
+    manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+    lock = LockFile(
+        mcp_configs={"server": {"name": "server"}},
+        mcp_config_provenance={"removed": "old-package"},
+    )
+    calls = []
+
+    def fake_derive(
+        cls,
+        derived_root,
+        derived_lock,
+        modules_root,
+        *,
+        trust_transitive_self_defined,
+        diagnostics=None,
+    ):
+        calls.append(
+            (
+                derived_root,
+                derived_lock,
+                modules_root,
+                trust_transitive_self_defined,
+                diagnostics,
+            )
+        )
+        return CurrentMcpConfigView(
+            dependencies=(),
+            configs={"server": {"name": "server"}},
+            provenance={},
+            problems=(),
+        )
+
+    monkeypatch.setattr(CurrentMcpConfigView, "derive", classmethod(fake_derive))
+
+    result = _check_config_consistency(manifest, lock)
+
+    assert result.passed
+    assert calls == [(manifest, lock, tmp_path / "apm_modules", True, None)]
+
+
+def test_mcp_config_consistency_has_no_package_manifest_traversal() -> None:
+    """Architecture guard: the check must not regain sibling traversal logic."""
+    import inspect
+
+    source = inspect.getsource(_check_config_consistency)
+    forbidden = (
+        "APMPackage.from_apm_yml",
+        "collect_transitive",
+        "get_install_path",
+        "resolve_local_dep_dir",
+        "rglob(",
+    )
+
+    assert all(token not in source for token in forbidden)

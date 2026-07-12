@@ -56,6 +56,8 @@ def _make_package_dir(root: Path, org: str, repo: str) -> Path:
 def _write_lockfile(root: Path, yaml_content: str) -> Path:
     """Write an apm.lock.yaml file at *root* (current lockfile format)."""
     lockfile_path = root / "apm.lock.yaml"
+    if "lockfile_version:" not in yaml_content:
+        yaml_content = "lockfile_version: '1'\n" + yaml_content
     lockfile_path.write_text(yaml_content)
     return lockfile_path
 

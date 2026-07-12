@@ -27,8 +27,8 @@ _KNOWN_DICT_KEYS = frozenset(
         # Install-time provenance field: reserved here so a manifest key named
         # ``resolved_by`` is treated as known (ignored by from_dict, never
         # constructed from user input) instead of passing through ``extra`` into
-        # the serialized config. Only MCPIntegrator.collect_transitive may set
-        # it. Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
+        # the serialized config. Only current-source derivation may set it.
+        # Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
         "resolved_by",
     }
 )
@@ -73,7 +73,7 @@ class MCPDependency:
     # Install-time provenance: the declaring package identity when this server
     # was contributed transitively (via a sub-package's apm.yml), else None for
     # servers declared directly in the root manifest. Set by
-    # ``MCPIntegrator.collect_transitive``; deliberately NOT serialized in
+    # ``CurrentMcpConfigView``; deliberately NOT serialized in
     # ``to_dict`` so it never leaks into the lockfile ``mcp_configs`` values or
     # the config-drift comparison (#2081).
     resolved_by: str | None = None

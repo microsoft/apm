@@ -133,9 +133,10 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
     permanently on fresh checkouts. Knowing the declared universe lets the union
     drop those ghosts while still honouring the #1716 multi-target contract.
     """
-    from apm_cli.core.apm_yml import CANONICAL_TARGETS
     from apm_cli.core.scope import InstallScope
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.install.manifest_reconcile import (
+        declared_target_profiles as profiles_for_project,
+    )
 
     try:
         names = _read_yaml_targets(ctx)
@@ -146,35 +147,10 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
     if not names:
         return None
     is_user = getattr(ctx, "scope", None) is InstallScope.USER
-
-    profiles: list[TargetProfile] = []
-    # Declared canonical targets: scope-applied, mirroring ``ctx.targets``. A
-    # scope that drops a target (``for_scope`` -> None) means it does not apply
-    # here, so it is skipped.
-    for name in dict.fromkeys(names):
-        profile = KNOWN_TARGETS.get(name)
-        if profile is None:
-            continue
-        scoped = profile.for_scope(user_scope=is_user)
-        if scoped is not None:
-            profiles.append(scoped)
-
-    # Gated / dynamic targets (``copilot-app``, ``copilot-cowork``, ``openclaw``,
-    # ``hermes`` -- KNOWN but NON-canonical) are activated by flag or detection
-    # and can NEVER be declared in apm.yml, so their entries (e.g.
-    # ``copilot-app-db://`` rows) must always count as legitimate, not ghosts --
-    # otherwise a run that does not activate them would wrongly drop their prior
-    # lockfile rows and regress the #1716 multi-target contract. Their
-    # governance is name/scheme based, so fall back to the raw profile when a
-    # dynamic target has no project-scope form (``copilot-app`` -> None).
-    for name in KNOWN_TARGETS:
-        if name in CANONICAL_TARGETS:
-            continue
-        profile = KNOWN_TARGETS[name]
-        scoped = profile.for_scope(user_scope=is_user)
-        profiles.append(scoped if scoped is not None else profile)
-
-    return profiles or None
+    package_path = getattr(ctx.apm_package, "package_path", None)
+    if package_path is None:
+        return None
+    return profiles_for_project(Path(package_path), user_scope=is_user)
 
 
 def _create_target_dirs(
@@ -439,6 +415,13 @@ def _resolve_targets_by_scope(
             parts = [t.strip() for t in raw_override.split(",") if t.strip()]
         else:
             parts = list(raw_override)
+        from apm_cli.core.target_catalog import expand_all
+
+        parts = [
+            expanded
+            for part in parts
+            for expanded in (expand_all("install") if part == "all" else (part,))
+        ]
         # Multi-token CLI parsing returns runtime aliases; convert them before filtering.
         parts = _normalize_runtime_target_aliases(parts)
         parts = [p for p in parts if p in _CANONICAL]
@@ -545,6 +528,10 @@ def run(ctx: InstallContext) -> None:
     # Resolve effective explicit target: CLI --target wins, then apm.yml,
     # then user-scoped config default target.
     _explicit = ctx.target_override or config_target or None
+    if _explicit == "all":
+        from apm_cli.core.target_catalog import expand_all
+
+        _explicit = list(expand_all("install"))
 
     # ------------------------------------------------------------------
     # Deprecation warning for legacy '--target agents' alias (cli-review §1)

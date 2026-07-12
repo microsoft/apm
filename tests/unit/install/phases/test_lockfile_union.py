@@ -357,6 +357,32 @@ class TestInactiveTargetGhostDrop:
         assert "copilot-app-db://workflows/new" in files
         assert "copilot-app-db://workflows/old" not in files
 
+    def test_state_reconcile_without_declared_universe_preserves_sibling(self, tmp_path):
+        """Command entrypoints retain legacy multi-target state without targets."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_state
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        sibling = ".windsurf/rules/keep.md"
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/pkg",
+                deployed_files=[sibling],
+                deployed_file_hashes={sibling: "sha256:old"},
+            )
+        )
+
+        changed = reconcile_deployed_state(
+            project_root=tmp_path,
+            lockfile=lockfile,
+            active_targets=[_known("copilot")],
+            declared_targets=None,
+            diagnostics=DiagnosticCollector(),
+        )
+
+        assert not changed
+        assert lockfile.get_dependency("owner/pkg").deployed_files == [sibling]
+
     def test_gated_dynamic_target_uri_never_treated_as_ghost(self, tmp_path):
         """A consumer that declares only canonical ``copilot`` but uses the
         gated ``copilot-app`` target (activated by flag/detection, NOT

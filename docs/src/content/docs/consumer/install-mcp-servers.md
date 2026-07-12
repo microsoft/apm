@@ -128,6 +128,10 @@ the gate took effect:
 [i] Skipped MCP config for claude, codex  (active targets: copilot)
 ```
 
+On reinstall, removing a previously configured target also removes the
+APM-managed server entries from that target's native config. User-authored
+servers and unrelated JSON or TOML settings remain unchanged.
+
 This single rule replaces two older ones that used to coexist:
 
 - A "directory opt-in" carve-out for Cursor / Gemini / OpenCode -- now

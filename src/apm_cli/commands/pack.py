@@ -15,7 +15,6 @@ from ..core.build_orchestrator import (
 )
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
-from ..utils.console import set_console_stderr
 
 MARKETPLACE_DOCS_URL = (
     "https://microsoft.github.io/apm/producer/publish-to-a-marketplace/#consume-from-any-assistant"
@@ -298,10 +297,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     check_clean,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
-    # -- Stream discipline: under --json, route ALL output to stderr --
-    if json_output:
-        set_console_stderr(True)
-
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
 
     # Error when --archive-format is explicitly set but --archive is not.
