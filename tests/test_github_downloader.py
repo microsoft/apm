@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import pytest
 import requests as requests_lib
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import (
     APMPackage,
@@ -2494,7 +2495,7 @@ class TestGiteaGogsApiVersionNegotiation:
         with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
             self.downloader = GitHubPackageDownloader()
 
-    def test_object_form_type_gitlab_routes_untrusted_host_without_token(self):
+    def test_object_form_type_gitlab_routes_untrusted_host_without_global_pat(self):
         dep_ref = DependencyReference.parse_from_dict(
             {"git": "https://code.acme.com/group/sub/repo.git", "type": "gitlab"}
         )
@@ -2502,8 +2503,17 @@ class TestGiteaGogsApiVersionNegotiation:
         response = _make_resp(200, expected)
 
         with patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-bespoke"}, clear=True):
-            downloader = GitHubPackageDownloader()
-            with patch.object(downloader, "_resilient_get", return_value=response) as mock_get:
+            downloader = GitHubPackageDownloader(
+                auth_resolver=AuthResolver(allow_external_fallback=False)
+            )
+            with (
+                patch.object(
+                    downloader._strategies,
+                    "_download_gitlab_file_via_git",
+                    side_effect=RuntimeError("force REST fallback"),
+                ),
+                patch.object(downloader, "_resilient_get", return_value=response) as mock_get,
+            ):
                 result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
 
         assert result == expected
@@ -2527,8 +2537,17 @@ class TestGiteaGogsApiVersionNegotiation:
         }
 
         with patch.dict(os.environ, env, clear=True):
-            downloader = GitHubPackageDownloader()
-            with patch.object(downloader, "_resilient_get", return_value=response) as mock_get:
+            downloader = GitHubPackageDownloader(
+                auth_resolver=AuthResolver(allow_external_fallback=False)
+            )
+            with (
+                patch.object(
+                    downloader._strategies,
+                    "_download_gitlab_file_via_git",
+                    side_effect=RuntimeError("force REST fallback"),
+                ),
+                patch.object(downloader, "_resilient_get", return_value=response) as mock_get,
+            ):
                 result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
 
         assert result == expected

@@ -4,13 +4,9 @@ import os
 from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
-
-_CRED_FILL_PATCH = patch(
-    "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-    return_value=None,
-)
 
 
 def _download_from_bespoke_gitlab_host(env: dict[str, str]) -> tuple[str, dict[str, str]]:
@@ -20,9 +16,18 @@ def _download_from_bespoke_gitlab_host(env: dict[str, str]) -> tuple[str, dict[s
     )
     response = Mock(status_code=200, content=b"gitlab raw", headers={})
 
-    with patch.dict(os.environ, env, clear=True), _CRED_FILL_PATCH:
-        downloader = GitHubPackageDownloader()
-        with patch.object(downloader, "_resilient_get", return_value=response) as mock_get:
+    with patch.dict(os.environ, env, clear=True):
+        downloader = GitHubPackageDownloader(
+            auth_resolver=AuthResolver(allow_external_fallback=False)
+        )
+        with (
+            patch.object(
+                downloader._strategies,
+                "_download_gitlab_file_via_git",
+                side_effect=RuntimeError("force REST fallback"),
+            ),
+            patch.object(downloader, "_resilient_get", return_value=response) as mock_get,
+        ):
             result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
 
     assert result == b"gitlab raw"
