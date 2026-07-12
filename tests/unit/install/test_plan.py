@@ -235,6 +235,79 @@ class TestBuildUpdatePlan:
         assert entry.new_resolved_ref != "v1.0.0"
         assert entry.action == "update"
 
+    def test_git_semver_tag_dep_unchanged_when_cached_and_ref_matches(self):
+        """A cached git-semver dep already at its locked tag must stay 'unchanged'.
+
+        Regression (git-source parity with #1908's registry fix): on ``apm update``
+        the git-semver resolver rewrites ``dep.reference`` to the concrete tag and
+        computes its SHA, but that SHA is stashed in ``ctx.git_semver_resolutions``
+        and never attached back to ``dep.resolved_reference``. So at plan time the
+        dep carries ``reference='eli5--v2.0.0'`` with ``resolved_reference=None``.
+        Without the locked-commit fallback, ``build_update_plan`` compares the
+        locked SHA against ``None`` and emits a spurious UPDATE on every run -- the
+        lockfile then rewrites the identical SHA, so ``apm update`` never converges.
+
+        The locked entry carries a concrete ``resolved_tag`` (immutable), so the
+        matching-ref case is safe to treat as unchanged.
+        """
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="srobroek/agentic-packages",
+                resolved_ref="eli5--v2.0.0",
+                resolved_commit="9" * 40,
+                depth=1,
+                is_virtual=True,
+                virtual_path="packages/eli5",
+                constraint=">=2.0.0 <3.0.0",
+                resolved_tag="eli5--v2.0.0",
+            )
+        )
+        # Cached git-semver dep: ref rewritten to the concrete tag by the resolver,
+        # but resolved_reference never populated (SHA not plumbed to the plan).
+        dep = DependencyReference(
+            repo_url="srobroek/agentic-packages",
+            reference="eli5--v2.0.0",
+            is_virtual=True,
+            virtual_path="packages/eli5",
+        )
+        assert getattr(dep, "resolved_reference", None) is None
+
+        plan = build_update_plan(lock, [dep])
+
+        assert plan.has_changes is False
+        entry = plan.entries[0]
+        assert entry.action == "unchanged"
+        assert entry.new_resolved_ref == "eli5--v2.0.0"
+        # The locked commit is borrowed so the display shows a real SHA, not '-'.
+        assert entry.new_resolved_commit == "9" * 40
+
+    def test_git_branch_dep_tip_advance_still_shows_update(self):
+        """A branch dep whose tip advanced must NOT be masked as unchanged.
+
+        Guards the locked-commit fallback: it applies only to immutable tag refs
+        (locked entry carries ``resolved_tag``). A branch dep has no ``resolved_tag``
+        and its tip can move under a stable ref name, so a freshly-resolved commit
+        that differs from the lockfile must still surface as an update.
+        """
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/o/r",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+                depth=1,
+            )
+        )
+        # Branch dep, freshly resolved to a new tip SHA (no resolved_tag on lock).
+        deps = [_resolved_dep("https://github.com/o/r", "main", "b" * 40)]
+
+        plan = build_update_plan(lock, deps)
+
+        assert plan.has_changes is True
+        assert plan.entries[0].action == "update"
+        assert plan.entries[0].new_resolved_commit == "b" * 40
+
 
 # -----------------------------------------------------------------------------
 # render_plan_text

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm update` no longer reports a spurious update on every run for git-source
+  semver dependencies already at their locked tag. The git-semver resolver
+  rewrites the dep reference to the concrete tag but does not attach the
+  resolved SHA to `resolved_reference`, so the update plan compared the locked
+  commit against `None` and never converged. `build_update_plan` now borrows the
+  locked commit for cached, immutable-tag deps whose ref is unchanged, mirroring
+  the registry fix in #1908 (branch deps are unaffected -- their tips can still
+  advance under a stable ref name). (closes microsoft/apm#2163)
+
 ## [0.25.0] - 2026-07-12
 
 ### Added
