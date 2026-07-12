@@ -3,6 +3,8 @@
 Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 """
 
+# ruff: noqa: E402
+
 import ctypes
 import logging
 import os
@@ -10,6 +12,10 @@ import sys
 import warnings
 
 import click
+
+from apm_cli.core.tls_trust import configure_process_tls_trust, log_tls_trust_status
+
+configure_process_tls_trust()
 
 from apm_cli.commands._helpers import (
     ERROR,
@@ -153,6 +159,7 @@ def cli(ctx, verbose: bool) -> None:
     if verbose:
         # Upgrade to DEBUG when the flag is set; env-var path runs in main().
         _configure_logging(verbose=True)
+    log_tls_trust_status()
 
     # Suppress only the agents-target deprecation warning so CLI users see
     # the formatted logger.warning() in the install phase, not a double print.
@@ -352,6 +359,7 @@ def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
+    configure_process_tls_trust()
     try:
         cli(obj={})
     except Exception as e:

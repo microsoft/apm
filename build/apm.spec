@@ -88,6 +88,13 @@ entry_point = repo_root / 'src' / 'apm_cli' / 'cli.py'
 datas = [
     (str(repo_root / 'scripts' / 'runtime'), 'scripts/runtime'),  # Bundle runtime setup scripts
     (str(repo_root / 'pyproject.toml'), '.'),  # Bundle pyproject.toml for version reading
+    # Child-runtime TLS trust bootstrap: ships at apm_cli/core/_child_tls/ so
+    # ensure_child_tls_bootstrap() can copy the self-contained .pth bootstrap
+    # into a child runtime venv's site-packages from the frozen binary.
+    (str(repo_root / 'src' / 'apm_cli' / 'core' / '_child_tls' / '_apm_tls_bootstrap.py'),
+     'apm_cli/core/_child_tls'),
+    (str(repo_root / 'src' / 'apm_cli' / 'core' / '_child_tls' / '_apm_tls.pth'),
+     'apm_cli/core/_child_tls'),
 ]
 
 # Bundle platform-appropriate token helper
@@ -188,6 +195,7 @@ hiddenimports = [
     'frontmatter',
     'requests',
     'certifi',  # CA certificate bundle for SSL verification in frozen binary
+    'truststore',  # OS trust-store verification (corporate CA / TLS proxy support)
     # Rich modules (lazily imported, must be explicitly included)
     'rich',
     'rich.console',

@@ -6,6 +6,7 @@
 | Authentication errors (401/403) | Set the correct token. Run `apm install --verbose` to see which token source is used. See [Authentication](./authentication.md). |
 | File collision on install | A local file conflicts with a dependency file. Use `--force` to overwrite, or rename the local file. |
 | Stale dependencies | Run `apm install --update` to refresh to latest refs. |
+| TLS verification failed | Install your corporate CA into the OS trust store. For a per-shell override, set `REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem`; `SSL_CERT_FILE` alone is not a reliable requests override. |
 | Orphaned packages in lockfile | Run `apm prune` to remove packages no longer in apm.yml. |
 | Security findings block install | Run `apm audit` to review findings, then `apm install --force` if acceptable. |
 | Compilation not picking up changes | Run `apm compile --clean` to remove orphaned output, or `apm compile --watch` for auto-regeneration. |

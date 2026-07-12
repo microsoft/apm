@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Corporate proxy and internal-CA users can now use Python-based APM HTTPS paths
+  without per-shell TLS setup. APM verifies against the OS trust store through
+  `truststore` for `apm install`, the Python `llm` child runtime, and the frozen
+  binary, with `certifi` as fallback. `REQUESTS_CA_BUNDLE` /
+  `CURL_CA_BUNDLE` still wins, and `APM_DISABLE_TRUSTSTORE=1` restores
+  certifi-only behavior. Node (Copilot) and Rust (Codex) children are not yet covered
+  and retain their own trust configuration; tracked in #2034.
+  (closes #2004) (#2005)
+
 ## [0.25.0] - 2026-07-12
 
 ### Added
