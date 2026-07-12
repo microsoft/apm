@@ -13,21 +13,9 @@ import warnings
 
 import click
 
-from apm_cli.core.tls_trust import configure_tls_trust
+from apm_cli.core.tls_trust import configure_process_tls_trust, log_tls_trust_status
 
-_TLS_TRUST_CONFIGURED = False
-
-
-def _configure_process_tls_trust() -> None:
-    """Configure process-wide TLS trust before network clients are imported."""
-    global _TLS_TRUST_CONFIGURED
-    if _TLS_TRUST_CONFIGURED:
-        return
-    configure_tls_trust()
-    _TLS_TRUST_CONFIGURED = True
-
-
-_configure_process_tls_trust()
+configure_process_tls_trust()
 
 from apm_cli.commands._helpers import (
     ERROR,
@@ -171,6 +159,7 @@ def cli(ctx, verbose: bool) -> None:
     if verbose:
         # Upgrade to DEBUG when the flag is set; env-var path runs in main().
         _configure_logging(verbose=True)
+    log_tls_trust_status()
 
     # Suppress only the agents-target deprecation warning so CLI users see
     # the formatted logger.warning() in the install phase, not a double print.
@@ -370,7 +359,7 @@ def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
-    _configure_process_tls_trust()
+    configure_process_tls_trust()
     try:
         cli(obj={})
     except Exception as e:

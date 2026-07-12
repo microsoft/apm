@@ -28,6 +28,7 @@ from apm_cli.core.tls_trust import (
     configure_tls_trust,
     ensure_child_tls_bootstrap,
     has_explicit_ca_override,
+    log_tls_trust_status,
 )
 
 _NON_REQUESTS_CA_ENV_VARS = ("SSL_CERT_FILE", "SSL_CERT_DIR")
@@ -212,7 +213,7 @@ def test_cli_bootstrap_is_idempotent_across_import_and_main(tmp_path):
 
 # ---------------------------------------------------------------------------
 # H2 -- visible trust-source diagnostic. Each branch of configure_tls_trust must
-# emit an ASCII "[i] TLS: ..." line at DEBUG naming which trust source is in
+# emit an ASCII "TLS: ..." line at DEBUG naming which trust source is in
 # effect, so an operator can tell OS-store vs certifi-fallback vs explicit
 # bundle vs opt-out from the logs alone.
 # ---------------------------------------------------------------------------
@@ -233,7 +234,7 @@ def test_diag_default_inject_names_os_trust_store(monkeypatch, caplog):
         assert configure_tls_trust() is True
 
     messages = _trust_source_messages(caplog)
-    assert "[i] TLS: verifying against OS trust store (truststore)" in messages
+    assert "TLS: verifying against OS trust store (truststore)" in messages
     for message in messages:
         message.encode("ascii")  # must not raise
 
@@ -243,7 +244,7 @@ def test_diag_disabled_names_opt_out(caplog):
         assert configure_tls_trust(env={_DISABLE_ENV_VAR: "1"}) is False
 
     messages = _trust_source_messages(caplog)
-    assert "[i] TLS: OS trust-store injection disabled (APM_DISABLE_TRUSTSTORE)" in messages
+    assert "TLS: OS trust-store injection disabled (APM_DISABLE_TRUSTSTORE)" in messages
     for message in messages:
         message.encode("ascii")
 
@@ -254,7 +255,7 @@ def test_diag_explicit_bundle_names_the_path(caplog):
         assert configure_tls_trust(env={"REQUESTS_CA_BUNDLE": ca_path}) is False
 
     messages = _trust_source_messages(caplog)
-    assert f"[i] TLS: explicit CA bundle in use: {ca_path}" in messages
+    assert f"TLS: explicit CA bundle in use: {ca_path}" in messages
     for message in messages:
         message.encode("ascii")
 
@@ -268,10 +269,21 @@ def test_diag_import_failure_names_certifi_fallback(monkeypatch, caplog):
     messages = _trust_source_messages(caplog)
     # The branch appends the captured exception in brackets; match the stable core.
     assert any(
-        m.startswith("[i] TLS: verifying against bundled CA (certifi fallback)") for m in messages
+        m.startswith("TLS: verifying against bundled CA (certifi fallback)") for m in messages
     ), messages
     for message in messages:
         message.encode("ascii")
+
+
+def test_cached_trust_source_can_be_replayed_after_logging_configuration(monkeypatch, caplog):
+    _install_fake_truststore(monkeypatch)
+    configure_tls_trust()
+    caplog.clear()
+
+    with caplog.at_level(logging.DEBUG, logger="apm_cli.core.tls_trust"):
+        log_tls_trust_status()
+
+    assert _trust_source_messages(caplog) == ["TLS: verifying against OS trust store (truststore)"]
 
 
 # ---------------------------------------------------------------------------

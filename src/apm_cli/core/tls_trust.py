@@ -26,6 +26,7 @@ Rust (Codex) runtimes verify against their own default trust for now (#2034).
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 import os
 import sys
@@ -74,6 +75,21 @@ _BOOTSTRAP_MODULE_NAME = _BOOTSTRAP_MODULE_FILE.removesuffix(".py")
 _PTH_CONTENT = f"import {_BOOTSTRAP_MODULE_NAME}\n"
 
 _TRUTHY = {"1", "true", "yes", "on"}
+_LAST_TLS_STATUS: tuple[str, tuple[object, ...]] | None = None
+
+
+def _record_tls_trust_status(message: str, *args: object) -> None:
+    """Cache and emit the selected trust source at debug level."""
+    global _LAST_TLS_STATUS
+    _LAST_TLS_STATUS = (message, args)
+    logger.debug(message, *args)
+
+
+def log_tls_trust_status() -> None:
+    """Re-emit the cached trust source after CLI logging is configured."""
+    if _LAST_TLS_STATUS is not None:
+        message, args = _LAST_TLS_STATUS
+        logger.debug(message, *args)
 
 
 def _env_flag(name: str, env: Mapping[str, str] | None = None) -> bool:
@@ -131,11 +147,11 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
     environ.pop(_BUNDLED_CERT_MARKER, None)
 
     if _env_flag(_DISABLE_ENV_VAR, env):
-        logger.debug("[i] TLS: OS trust-store injection disabled (%s)", _DISABLE_ENV_VAR)
+        _record_tls_trust_status("TLS: OS trust-store injection disabled (%s)", _DISABLE_ENV_VAR)
         return False
 
     if has_explicit_ca_override(env):
-        logger.debug("[i] TLS: explicit CA bundle in use: %s", _explicit_ca_path(env))
+        _record_tls_trust_status("TLS: explicit CA bundle in use: %s", _explicit_ca_path(env))
         return False
 
     try:
@@ -143,7 +159,7 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
         # only with ImportError -- degrade instead of crashing startup.
         import truststore
     except Exception as exc:
-        logger.debug("[i] TLS: verifying against bundled CA (certifi fallback) [%s]", exc)
+        _record_tls_trust_status("TLS: verifying against bundled CA (certifi fallback) [%s]", exc)
         return False
 
     # If the frozen hook pinned SSL_CERT_FILE to bundled certifi, pop it so
@@ -161,11 +177,17 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
         # musl/minimal-container hosts still verify against certifi.
         if bundled_cert is not None:
             environ[_SSL_CERT_FILE_VAR] = bundled_cert
-        logger.debug("[i] TLS: verifying against bundled CA (certifi fallback) [%s]", exc)
+        _record_tls_trust_status("TLS: verifying against bundled CA (certifi fallback) [%s]", exc)
         return False
 
-    logger.debug("[i] TLS: verifying against OS trust store (truststore)")
+    _record_tls_trust_status("TLS: verifying against OS trust store (truststore)")
     return True
+
+
+@functools.lru_cache(maxsize=1)
+def configure_process_tls_trust() -> bool:
+    """Configure process TLS once while retaining the selected trust source."""
+    return configure_tls_trust()
 
 
 def _child_bootstrap_dir() -> str | None:
