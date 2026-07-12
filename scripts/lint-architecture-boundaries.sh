@@ -119,6 +119,20 @@ if [ "$winner_selector_calls" -ne 3 ]; then
     violations=$((violations + 1))
 fi
 check_pattern \
+    "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" \
+    'deployment_package_root' \
+    $(find src/apm_cli -name '*.py' \
+        ! -path 'src/apm_cli/models/apm_package.py' \
+        ! -path 'src/apm_cli/integration/base_integrator.py' \
+        ! -path 'src/apm_cli/compilation/link_resolver.py' \
+        ! -path 'src/apm_cli/install/drift.py')
+if ! grep -q \
+    'candidate_in_deployment = ctx.deployment_package_root / package_relative' \
+    src/apm_cli/compilation/link_resolver.py; then
+    echo "[x] UnifiedLinkResolver must project source assets into the deployment frame"
+    violations=$((violations + 1))
+fi
+check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
     src/apm_cli/deps/apm_resolver.py

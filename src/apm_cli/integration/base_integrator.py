@@ -751,6 +751,9 @@ class BaseIntegrator:
             if install_path.resolve() != home_root.resolve() and install_path.is_dir():
                 if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
                     self.link_resolver.package_root = Path(install_path)
+                    self.link_resolver.deployment_package_root = Path(
+                        getattr(package_info, "deployment_package_root", None) or install_path
+                    )
         except Exception:
             self.link_resolver = None
 

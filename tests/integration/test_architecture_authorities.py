@@ -217,3 +217,13 @@ def test_tls_injection_has_one_canonical_authority() -> None:
 
     assert "TLS trust injection belongs to canonical owners" in guard
     assert duplicate_owners == []
+
+
+def test_link_resolver_owns_dependency_deployment_frame_mapping() -> None:
+    """Dependency asset links must use the canonical resolver frame mapping."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/compilation/link_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "candidate_in_deployment = ctx.deployment_package_root / package_relative" in source
+    assert "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" in guard
