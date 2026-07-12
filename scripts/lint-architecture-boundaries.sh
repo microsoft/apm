@@ -118,11 +118,31 @@ if [ "$winner_selector_calls" -ne 3 ]; then
     echo "[x] Dependency dispatch and flattening must share _select_dependency_winners"
     violations=$((violations + 1))
 fi
-check_pattern \
-    "Skill subset filter tokens must come from models/dependency/subsets.py" \
-    'def _skill_subset_name_filter|set\(dep\.skill_subset\)|Path\(normalized_path\)\.name' \
-    src/apm_cli/integration/skill_integrator.py \
+# Skill subset filter tokens: two layers of defense. The cheap lexical grep
+# catches the exact retired shape (literal helper name / pattern); it is kept
+# as defense in depth even though it is not sufficient on its own -- a
+# renamed helper reimplementing the same normalization algorithm evades a
+# grep by construction. The AST checker (scripts/check_skill_subset_owner.py)
+# is the semantic detector: it flags ANY local function, in these same two
+# files, that combines slash normalization + path-leaf extraction +
+# token-set collection, regardless of naming. Both feed one label and
+# increment violations at most once.
+skill_subset_files=(
+    src/apm_cli/integration/skill_integrator.py
     src/apm_cli/bundle/plugin_exporter.py
+)
+skill_subset_lexical_hits=$(grep -En \
+    'def _skill_subset_name_filter|set\(dep\.skill_subset\)|Path\(normalized_path\)\.name' \
+    "${skill_subset_files[@]}" 2>/dev/null \
+    | grep -v 'architecture-authority-exempt:' || true)
+skill_subset_ast_hits=$(python3 scripts/check_skill_subset_owner.py "${skill_subset_files[@]}" 2>&1)
+skill_subset_ast_status=$?
+if [ -n "$skill_subset_lexical_hits" ] || [ "$skill_subset_ast_status" -ne 0 ]; then
+    echo "[x] Skill subset filter tokens must come from models/dependency/subsets.py"
+    [ -n "$skill_subset_lexical_hits" ] && echo "$skill_subset_lexical_hits"
+    [ "$skill_subset_ast_status" -ne 0 ] && echo "$skill_subset_ast_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \

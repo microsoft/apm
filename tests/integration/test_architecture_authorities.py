@@ -2,10 +2,31 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from dataclasses import replace
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+
+
+def _load_skill_subset_owner_checker() -> ModuleType:
+    """Import scripts/check_skill_subset_owner.py as a standalone module.
+
+    The AST checker is the single detection owner for the semantic
+    renamed-helper case (see tests/unit/scripts/test_check_skill_subset_owner.py
+    for its own unit coverage); this integration test reuses it rather than
+    re-implementing any part of its algorithm.
+    """
+    root = Path(__file__).parents[2]
+    script_path = root / "scripts" / "check_skill_subset_owner.py"
+    spec = importlib.util.spec_from_file_location("check_skill_subset_owner", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
@@ -214,6 +235,39 @@ def test_skill_subset_filtering_has_one_canonical_owner() -> None:
     assert "skill_subset_filter_tokens(dep.skill_subset)" in exporter
     assert "Skill subset filter tokens must come from models/dependency/subsets.py" in guard
     assert "def _skill_subset_name_filter" not in integrator
+
+
+def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
+    """The Bash guard must invoke the semantic AST checker, not only grep.
+
+    A lexical grep alone was empirically evaded by a renamed helper
+    containing the same normalization algorithm; the guard must also run
+    scripts/check_skill_subset_owner.py over both consumer files.
+    """
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "check_skill_subset_owner.py" in guard
+    assert "src/apm_cli/integration/skill_integrator.py" in guard
+    assert "src/apm_cli/bundle/plugin_exporter.py" in guard
+
+
+def test_skill_subset_ast_checker_passes_on_real_consumers() -> None:
+    """The real consumer files must be clean under the AST checker today.
+
+    This delegates entirely to scripts/check_skill_subset_owner.py
+    (imported directly, see tests/unit/scripts/test_check_skill_subset_owner.py
+    for the checker's own unit coverage of the renamed-helper detection
+    algorithm) so this test does not duplicate any of that logic.
+    """
+    root = Path(__file__).parents[2]
+    checker = _load_skill_subset_owner_checker()
+    integrator = root / "src/apm_cli/integration/skill_integrator.py"
+    exporter = root / "src/apm_cli/bundle/plugin_exporter.py"
+
+    violations = checker.find_violations([integrator, exporter])
+
+    assert violations == []
 
 
 def test_tls_injection_has_one_canonical_authority() -> None:
