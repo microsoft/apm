@@ -211,6 +211,21 @@
           "allOf": [
             {
               "if": {
+                "properties": {
+                  "classification": {
+                    "enum": ["new-owner", "split-authority-repair"]
+                  }
+                },
+                "required": ["classification"]
+              },
+              "then": {
+                "properties": {
+                  "dual_guardrail_required": { "const": true }
+                }
+              }
+            },
+            {
+              "if": {
                 "properties": { "dual_guardrail_required": { "const": true } },
                 "required": ["dual_guardrail_required"]
               },
