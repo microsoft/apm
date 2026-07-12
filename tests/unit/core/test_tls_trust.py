@@ -11,6 +11,7 @@ Covers every branch:
 
 from __future__ import annotations
 
+import ast
 import logging
 import os
 import subprocess
@@ -438,6 +439,32 @@ def test_pth_is_generated_not_copied(tmp_path, monkeypatch):
     # Exact generated content: a single import line the interpreter runs.
     assert pth.read_text(encoding="ascii") == "import _apm_tls_bootstrap\n"
     assert (site / "_apm_tls_bootstrap.py").read_text(encoding="ascii") == "# bootstrap\n"
+
+
+def test_child_bootstrap_tls_policy_matches_parent_constants():
+    import apm_cli.core.tls_trust as tls
+
+    bootstrap = Path(tls._child_bootstrap_dir()) / "_apm_tls_bootstrap.py"
+    literals = {
+        node.value
+        for node in ast.walk(ast.parse(bootstrap.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    expected = {
+        tls._DISABLE_ENV_VAR,
+        *tls._EXPLICIT_CA_ENV_VARS,
+        tls._BUNDLED_CERT_MARKER,
+        tls._SSL_CERT_FILE_VAR,
+    }
+
+    assert expected <= literals
+
+
+def test_child_bootstrap_debug_messages_do_not_embed_console_symbols():
+    import apm_cli.core.tls_trust as tls
+
+    bootstrap = Path(tls._child_bootstrap_dir()) / "_apm_tls_bootstrap.py"
+    assert '"[i] TLS:' not in bootstrap.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

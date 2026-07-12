@@ -27,6 +27,7 @@ class LLMRuntime(RuntimeAdapter):
                 text=True,
                 encoding="utf-8",
                 check=True,
+                env=build_child_tls_env(os.environ),
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise RuntimeError("llm CLI not found. Please install: pip install llm")  # noqa: B904
@@ -133,6 +134,7 @@ class LLMRuntime(RuntimeAdapter):
                 text=True,
                 encoding="utf-8",
                 check=True,
+                env=build_child_tls_env(os.environ),
             )
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):

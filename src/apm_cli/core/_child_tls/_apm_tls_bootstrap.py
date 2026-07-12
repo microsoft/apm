@@ -37,11 +37,11 @@ def _bootstrap():
     _os.environ.pop(marker, None)
     try:
         truststore.inject_into_ssl()
-        _logger.debug("[i] TLS: child verifying against OS trust store")
+        _logger.debug("TLS: child verifying against OS trust store")
     except Exception:
         if bundled is not None:
             _os.environ["SSL_CERT_FILE"] = bundled
-        _logger.debug("[i] TLS: child falling back to certifi")
+        _logger.debug("TLS: child falling back to certifi")
 
 
 _bootstrap()
