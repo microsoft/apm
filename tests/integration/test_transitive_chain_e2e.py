@@ -245,14 +245,20 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
     for embedded_name in embedded_names:
         assert embedded_name not in tree_output
 
-    # Negative guard (regression for the v0.25.0 leak): neither the physical
-    # hashed slot (``_local/<12-hex>/``) nor an absolute ``local:/<path>`` host
-    # slot may surface in user-facing list/tree output. Bounded regex, no
-    # host-specific matching.
+    # Negative guard (regression for the v0.25.0 leak): user-facing list/tree
+    # output must never surface a physical hashed slot (``_local/<12-hex>/``),
+    # an absolute ``local:/<path>`` unique-key slot, or any host-absolute path.
+    # The workspace root is the ground truth for "an absolute path that would
+    # leak" -- checking it (plus a bounded Windows-drive regex) stays generic
+    # without brittle host-specific matching.
     hash_slot = re.compile(r"_local/[0-9a-f]{12}/")
+    windows_abs = re.compile(r"[A-Za-z]:\\")
+    workspace_root = str(deep_chain_workspace)
     for label, output in (("deps list", list_output), ("deps tree", tree_output)):
         assert not hash_slot.search(output), f"{label} leaked a hashed slot:\n{output}"
         assert "local:/" not in output, f"{label} leaked an absolute local slot:\n{output}"
+        assert workspace_root not in output, f"{label} leaked an absolute host path:\n{output}"
+        assert not windows_abs.search(output), f"{label} leaked a Windows-absolute path:\n{output}"
 
     pruned = subprocess.run(
         [apm_command, "prune"],
