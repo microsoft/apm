@@ -47,6 +47,14 @@ def test_completion_schema_mirror_is_byte_identical() -> None:
     assert CANONICAL_SCHEMA.read_bytes() == MIRROR_SCHEMA.read_bytes()
 
 
+def test_ready_completion_requires_architecture_evidence() -> None:
+    """A driver cannot report ready without the canonical-owner gate result."""
+    document = _ready_completion("ordinary-fix", dual_guardrail_required=False)
+    document.pop("architecture_evidence")
+
+    assert list(_validator().iter_errors(document))
+
+
 @pytest.mark.parametrize("classification", ["new-owner", "split-authority-repair"])
 def test_authority_creating_classification_cannot_disable_dual_guardrail(
     classification: str,
