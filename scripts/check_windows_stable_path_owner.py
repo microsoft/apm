@@ -71,7 +71,10 @@ REQUIRED_OWNER_STATEMENTS: tuple[str, ...] = (
 EXEMPT_MARKER = "architecture-authority-exempt:"
 
 # Literal stable-path forms: current\apm.exe (Windows) or current/apm.exe.
-_LITERAL_STABLE_EXE = re.compile(r"current[\\/]apm\.exe")
+# The leading \b prevents matching a "current" that is a suffix of a longer
+# identifier (e.g. concurrent/apm.exe, mycurrent/apm.exe) while still
+# matching both path separators for a real standalone "current" segment.
+_LITERAL_STABLE_EXE = re.compile(r"\bcurrent[\\/]apm\.exe")
 
 # A Join-Path call is a duplicate derivation if it appears on the same
 # line as a quoted "current" (single or double quotes), regardless of

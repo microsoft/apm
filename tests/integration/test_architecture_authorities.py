@@ -245,6 +245,47 @@ def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
     assert checker.check(root) == []
 
 
+def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
+    """The new owner-table row must not silently drop on the next deploy.
+
+    ``.github/instructions/architecture.instructions.md`` is a compiled
+    artifact: ``.apm/instructions/architecture.instructions.md`` is its
+    canonical compile source (see docs/src/content/docs/producer/compile.md),
+    and apm.lock.yaml records a content hash of the deployed copy. If the
+    deployed file gains a row that the source lacks, the next
+    ``apm compile`` / ``apm install`` would regenerate the deployed file
+    from the (stale) source and silently remove the row; a stale lockfile
+    hash would additionally make ``apm audit`` report drift. This guards
+    all three legs of that contract using the project's own lockfile codec
+    and content-hash function rather than a bespoke comparison.
+    """
+    root = Path(__file__).parents[2]
+    source = root / ".apm/instructions/architecture.instructions.md"
+    deployed = root / ".github/instructions/architecture.instructions.md"
+
+    owner_row = "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |"
+    assert owner_row in source.read_text(encoding="utf-8")
+
+    # Source and deployed must be byte-identical: the deployed file is a
+    # compiled copy of the source, not an independently edited artifact.
+    assert source.read_bytes() == deployed.read_bytes()
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    lockfile = LockFile.load_or_create(root / "apm.lock.yaml")
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    locator_key = "copilot||project|.github/instructions/architecture.instructions.md"
+    record = ledger.records.get(locator_key)
+
+    assert record is not None, "lockfile must track the deployed architecture instruction"
+    assert record.content_hash == compute_file_hash(deployed), (
+        "apm.lock.yaml content_hash is stale relative to the deployed file; "
+        "the next 'apm audit' would report hash drift"
+    )
+
+
 def test_tls_injection_has_one_canonical_authority() -> None:
     """Only the parent TLS owner and standalone child bootstrap may inject."""
     root = Path(__file__).parents[2]

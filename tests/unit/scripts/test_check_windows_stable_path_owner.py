@@ -144,6 +144,26 @@ def test_literal_stable_path_duplicate_is_detected(tmp_path: Path, separator: st
     assert hits[0].path == culprit
 
 
+@pytest.mark.parametrize("separator", ["\\", "/"])
+def test_similarly_named_identifier_is_not_a_false_positive(tmp_path: Path, separator: str) -> None:
+    """ "concurrent/apm.exe" must not be mistaken for the stable "current" path.
+
+    The literal-path branch matched "current[\\/]apm.exe" anywhere in the
+    line, so a substring like "concurrent/apm.exe" (or the Windows-
+    separator form) tripped a false positive purely because "concurrent"
+    contains "current" as a substring. The check must require "current"
+    to start at a word boundary so unrelated identifiers ending in
+    "current" are left alone, while both real path separators for an
+    actual standalone "current" segment keep matching (see the
+    parametrized ``test_literal_stable_path_duplicate_is_detected`` above).
+    """
+    _make_valid_repo(tmp_path)
+    innocent = tmp_path / "src" / "apm_cli" / "innocent.py"
+    innocent.write_text(f'path = "concurrent{separator}apm.exe"\n', encoding="utf-8")
+
+    assert checker.find_duplicate_hits(tmp_path) == []
+
+
 def test_exemption_marker_suppresses_a_duplicate_line(tmp_path: Path) -> None:
     """A line-level architecture-authority-exempt marker is honored."""
     _make_valid_repo(tmp_path)
