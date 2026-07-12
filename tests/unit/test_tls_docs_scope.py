@@ -89,3 +89,26 @@ def test_ssl_docs_pip_cert_and_replaces_notes():
     # stale-bundle "still failing?" note.
     assert "*replaces*" in docs or "replaces" in docs
     assert "stale `REQUESTS_CA_BUNDLE`" in docs
+
+
+def test_ssl_docs_keep_planned_configuration_generic():
+    docs = (
+        _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
+    ).read_text(encoding="utf-8")
+
+    assert "APM_EXTRA_CA_BUNDLE" not in docs
+    assert docs.count("#2034") == 1
+
+
+def test_enterprise_security_docs_transport_trust_model():
+    security = (
+        _repo_root() / "docs" / "src" / "content" / "docs" / "enterprise" / "security.md"
+    ).read_text(encoding="utf-8")
+
+    assert "## HTTPS transport trust" in security
+    assert "APM_DISABLE_TRUSTSTORE" in security
+    assert "REQUESTS_CA_BUNDLE" in security
+    assert "CURL_CA_BUNDLE" in security
+    assert ".pth" in security
+    assert "Node" in security
+    assert "Rust" in security
