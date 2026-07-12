@@ -3,6 +3,7 @@ Runtime management functionality for APM CLI.
 Handles installation, configuration, and management of AI runtimes.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -16,6 +17,8 @@ from colorama import Fore, Style
 from ..core.tls_trust import build_child_tls_env, ensure_child_tls_bootstrap
 from ..core.token_manager import setup_runtime_environment
 from .registry import get_runtime_descriptor, runtime_descriptors
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeManager:
@@ -280,10 +283,13 @@ class RuntimeManager:
             if not ensure_child_tls_bootstrap(venv_path):
                 click.echo(
                     f"{Fore.YELLOW}[!]  Could not install OS-trust bootstrap into the llm venv; "
-                    f"the llm runtime may fall back to bundled CAs behind a proxy.{Style.RESET_ALL}"
+                    "use Python 3.10+ or set PIP_CERT to your proxy CA bundle, then re-run "
+                    "`apm runtime setup llm`. See: "
+                    "https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+                    f"{Style.RESET_ALL}"
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("TLS bootstrap installation raised unexpectedly: %s", exc)
 
     def list_runtimes(self) -> dict[str, dict[str, str]]:
         """List available and installed runtimes."""

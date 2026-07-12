@@ -32,6 +32,7 @@ function Install-Llm {
 
     $pipExe = Join-Path (Join-Path $llmVenv "Scripts") "pip.exe"
     $llmExe = Join-Path (Join-Path $llmVenv "Scripts") "llm.exe"
+    $venvPython = Join-Path (Join-Path $llmVenv "Scripts") "python.exe"
 
     # Install LLM
     Write-Info "Installing LLM library..."
@@ -47,7 +48,13 @@ function Install-Llm {
         & $pipExe install "truststore>=0.10.0"
         if ($LASTEXITCODE -ne 0) { throw "pip exited $LASTEXITCODE" }
     } catch {
-        Write-WarningText "truststore install failed (needs Python 3.10+); llm child will fall back to bundled CAs behind a proxy"
+        & $venvPython -c "import sys; raise SystemExit(sys.version_info < (3, 10))"
+        if ($LASTEXITCODE -ne 0) {
+            $pythonVersion = & $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+            Write-WarningText "truststore install failed: Python 3.10+ is required (found $pythonVersion); recreate the llm runtime with a supported Python. See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+        } else {
+            Write-WarningText "truststore install failed: if pip is behind a TLS proxy, set PIP_CERT=C:\path\to\org-ca-bundle.pem and re-run setup; the llm runtime will otherwise use bundled CAs. See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+        }
     }
 
     # Install GitHub Models plugin in non-vanilla mode

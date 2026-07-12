@@ -29,6 +29,7 @@ network. The interpreter under test is still a foreign venv without ``apm_cli``.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import shutil
 import subprocess
@@ -38,6 +39,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.tls_trust import _child_bootstrap_dir, _venv_site_packages
+from apm_cli.runtime.manager import RuntimeManager
 
 pytestmark = pytest.mark.integration
 
@@ -167,3 +169,62 @@ def test_bootstrap_is_additive_to_user_sitecustomize(tmp_path):
     assert result.stdout.strip().startswith("truststore"), (
         f"truststore must still inject with a user sitecustomize present, got {result.stdout!r}"
     )
+
+
+def test_runtime_manager_setup_llm_installs_tls_bootstrap(tmp_path, monkeypatch):
+    """Runtime setup must deliver both bootstrap files into the created venv."""
+    manager = RuntimeManager()
+    manager.runtime_dir = tmp_path / "runtimes"
+    monkeypatch.setattr(manager, "get_embedded_script", lambda _name: "")
+    monkeypatch.setattr(manager, "get_common_script", lambda: "")
+
+    def _create_llm_venv(_script, _common, _args):
+        site_packages = (
+            manager.runtime_dir
+            / "llm-venv"
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+        site_packages.mkdir(parents=True)
+        return True
+
+    monkeypatch.setattr(manager, "run_embedded_script", _create_llm_venv)
+
+    assert manager.setup_runtime("llm") is True
+    site_packages = _venv_site_packages(manager.runtime_dir / "llm-venv")
+    assert site_packages is not None
+    assert (site_packages / "_apm_tls_bootstrap.py").is_file()
+    assert (site_packages / "_apm_tls.pth").read_text(encoding="ascii") == (
+        "import _apm_tls_bootstrap\n"
+    )
+
+
+def test_runtime_manager_bootstrap_warning_is_actionable(tmp_path, capsys):
+    """A best-effort delivery failure must tell proxy users how to recover."""
+    manager = RuntimeManager()
+    manager.runtime_dir = tmp_path / "runtimes"
+
+    manager._install_llm_tls_bootstrap()
+
+    output = capsys.readouterr().out
+    assert "PIP_CERT" in output
+    assert "Python 3.10+" in output
+    assert "https://microsoft.github.io/apm/troubleshooting/ssl-issues/" in output
+
+
+def test_runtime_manager_bootstrap_exception_is_visible_in_debug_log(tmp_path, monkeypatch, caplog):
+    """Unexpected helper failures must remain visible under verbose logging."""
+    import apm_cli.runtime.manager as manager_module
+
+    manager = RuntimeManager()
+    manager.runtime_dir = tmp_path / "runtimes"
+
+    def _raise(_venv_path):
+        raise RuntimeError("unexpected bootstrap failure")
+
+    monkeypatch.setattr(manager_module, "ensure_child_tls_bootstrap", _raise)
+    with caplog.at_level(logging.DEBUG, logger="apm_cli.runtime.manager"):
+        manager._install_llm_tls_bootstrap()
+
+    assert "unexpected bootstrap failure" in caplog.text

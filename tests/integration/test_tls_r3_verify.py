@@ -314,13 +314,17 @@ def test_v4_setup_llm_truststore_is_best_effort_and_pinned():
     # Both scripts pin the floor so the child gets an OS-trust-capable truststore.
     assert "truststore>=0.10.0" in sh
     assert "truststore>=0.10.0" in ps1
+    assert "sys.version_info < (3, 10)" in sh
+    assert "sys.version_info < (3, 10)" in ps1
+    assert "PIP_CERT" in sh
+    assert "PIP_CERT" in ps1
+    docs_url = "https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+    assert docs_url in sh
+    assert docs_url in ps1
 
-    # Bash: the pip install is guarded by `|| log_warning`, so a failure under
+    # Bash: the pip install is guarded by an if block, so a failure under
     # `set -euo pipefail` does not abort setup.
-    sh_line = next(
-        line for line in sh.splitlines() if "truststore>=0.10.0" in line and "pip" in line
-    )
-    assert "|| log_warning" in sh_line, sh_line
+    assert 'if ! "$llm_venv/bin/pip" install "truststore>=0.10.0"; then' in sh
 
     # PowerShell: the install lives inside a try/catch that downgrades to a
     # warning rather than surfacing under `$ErrorActionPreference = 'Stop'`.
