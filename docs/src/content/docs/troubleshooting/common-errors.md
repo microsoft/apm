@@ -21,7 +21,7 @@ Cause: APM was invoked in a directory with no manifest, or the manifest has a di
 
 Fix: run `apm init` to scaffold a manifest, or `cd` into the project that owns the `apm.yml`.
 
-See also: [../reference/cli/init/](../../reference/cli/init/)
+See also: [`apm init` reference](../../reference/cli/init/)
 
 ### `lockfile not found at <path>; run 'apm install' to generate it`
 
@@ -33,7 +33,7 @@ Cause: a command that needs a resolved dependency graph (drift check, audit, com
 
 Fix: run `apm install` once to produce `apm.lock.yaml`, then re-run the original command.
 
-See also: [./install-failures/](../install-failures/), [../reference/lockfile-spec/](../../reference/lockfile-spec/)
+See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 
 ### `<pkg>: not found in lockfile`
 
@@ -48,7 +48,7 @@ Cause: a dependency exists in `apm.yml` but has no entry in `apm.lock.yaml`. Mos
 
 Fix: run `apm install` locally to refresh `apm.lock.yaml` and commit the result. Do not hand-edit the lockfile.
 
-See also: [./install-failures/](../install-failures/), [../reference/lockfile-spec/](../../reference/lockfile-spec/)
+See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 
 ### `<pkg>: manifest ref '<ref>' != lockfile ref '<ref>'`
 
@@ -61,7 +61,7 @@ Cause: the version or ref pinned in `apm.yml` was changed without re-running ins
 
 Fix: run `apm install` and commit the updated `apm.lock.yaml`.
 
-See also: [./install-failures/](../install-failures/)
+See also: [Install failures](../install-failures/)
 
 ### `Drift detected: N file(s)`
 
@@ -74,7 +74,7 @@ Cause: deployed primitive files in the project differ from the content recorded 
 
 Fix: run `apm install` to re-deploy from the cache. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
 
-See also: [./install-failures/](../install-failures/)
+See also: [Install failures](../install-failures/)
 
 ### `Content hash mismatch for <pkg>: expected <a>, got <b>`
 
@@ -89,7 +89,7 @@ Cause: the bytes APM downloaded for a locked dependency do not match the `conten
 
 Fix: investigate the upstream package before accepting. If the change is legitimate, run `apm install --update` to re-pin and commit the new hash.
 
-See also: [./install-failures/](../install-failures/), [../reference/lockfile-spec/](../../reference/lockfile-spec/)
+See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 
 ### `Install blocked by org policy -- see violations above`
 
@@ -101,7 +101,7 @@ Cause: an org-level policy (compilation target, dependency allowlist, security b
 
 Fix: read the violations above the summary line, remove or replace the offending packages, or update org policy if the rule is wrong.
 
-See also: [./policy-debugging/](../policy-debugging/)
+See also: [Policy debugging](../policy-debugging/)
 
 ### `from unapproved host(s): <host>`
 
@@ -115,7 +115,7 @@ Cause: a dependency resolves to a host outside the configured allowlist.
 
 Fix: add the host to the allowlist, or pass `--allow-insecure-host <host>` for a one-off install. Do not bypass the allowlist in CI.
 
-See also: [./policy-debugging/](../policy-debugging/)
+See also: [Policy debugging](../policy-debugging/)
 
 ### `Race condition: concurrent checkout failed integrity for <url> @ <sha>`
 
@@ -127,7 +127,7 @@ Cause: two `apm install` processes raced on the same cache shard and the loser's
 
 Fix: re-run `apm install`. If it reproduces, ensure only one install runs at a time per `APM_CACHE_DIR`. In CI, give each job its own cache directory.
 
-See also: [./install-failures/](../install-failures/)
+See also: [Install failures](../install-failures/)
 
 ## Compile
 
@@ -139,7 +139,7 @@ Cause: no primitives in the project (or filtered subset) match the active target
 
 Fix: run `apm compile --dry-run --verbose` to see what was discovered and why each primitive was skipped.
 
-See also: [./compile-zero-output-warning/](../compile-zero-output-warning/), [../reference/cli/compile/](../../reference/cli/compile/)
+See also: [Compile zero-output warning](../compile-zero-output-warning/), [`apm compile` reference](../../reference/cli/compile/)
 
 ### `[x] No harness detected`
 
@@ -151,7 +151,7 @@ Cause: the project has no harness markers (`.github/copilot-instructions.md`, `.
 
 Fix: pass `--target <harness>` on the command, or declare `targets:` in `apm.yml`. Run `apm targets` to list supported harnesses.
 
-See also: [../reference/cli/targets/](../../reference/cli/targets/), [../reference/targets-matrix/](../../reference/targets-matrix/)
+See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matrix](../../reference/targets-matrix/)
 
 ### `[x] Multiple harnesses detected: <a>, <b>`
 
@@ -159,7 +159,7 @@ Cause: APM found markers for more than one harness and cannot pick.
 
 Fix: pin a target with `--target <harness>` or declare `targets:` in `apm.yml`. Use `apm install --dry-run` to preview each option.
 
-See also: [../reference/cli/targets/](../../reference/cli/targets/)
+See also: [`apm targets` reference](../../reference/cli/targets/)
 
 ### `[x] Unknown target '<value>'`
 
@@ -172,7 +172,7 @@ Cause: the value passed to `--target` (or listed in `apm.yml` `targets:`) is not
 
 Fix: run `apm targets` for the canonical list. Check for typos.
 
-See also: [../reference/cli/targets/](../../reference/cli/targets/), [../reference/targets-matrix/](../../reference/targets-matrix/)
+See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matrix](../../reference/targets-matrix/)
 
 ## Audit
 
@@ -184,9 +184,9 @@ See also: [../reference/cli/targets/](../../reference/cli/targets/), [../referen
 
 Cause: a dependency failed an org policy check during install or audit. The reason field names the rule.
 
-Fix: see [./policy-debugging/](../policy-debugging/) for resolving each rule type. For audit-only reporting, use `apm audit --format sarif` or `--format json` to feed the findings into your code-scanning pipeline.
+Fix: see [Policy debugging](../policy-debugging/) for resolving each rule type. For audit-only reporting, use `apm audit --format sarif` or `--format json` to feed the findings into your code-scanning pipeline.
 
-See also: [./policy-debugging/](../policy-debugging/), [../reference/cli/audit/](../../reference/cli/audit/)
+See also: [Policy debugging](../policy-debugging/), [`apm audit` reference](../../reference/cli/audit/)
 
 ### `Policy hash mismatch from <source>: expected <a>, got <b>`
 
@@ -194,7 +194,7 @@ Cause: the org policy file fetched from the configured source does not match the
 
 Fix: confirm the upstream change is legitimate, then update the policy pin in your APM config to the new hash.
 
-See also: [./policy-debugging/](../policy-debugging/)
+See also: [Policy debugging](../policy-debugging/)
 
 ## Run
 
@@ -209,7 +209,7 @@ Cause: `apm run <name>` could not match `<name>` to a script in `apm.yml`, an au
 
 Fix: check the available scripts list printed under the error. To list discoverable prompts, run `apm list`. To install a remote prompt, use `apm install <owner>/<repo>/path/to/prompt.prompt.md`.
 
-See also: [../reference/cli/run/](../../reference/cli/run/), [../reference/cli/list/](../../reference/cli/list/)
+See also: [`apm run` reference](../../reference/cli/run/), [`apm list` reference](../../reference/cli/list/)
 
 ### `No such command '<x>'`
 
@@ -221,7 +221,7 @@ Cause: standard Click error. The subcommand does not exist, or you are on an old
 
 Fix: run `apm --help` for the current command list. Upgrade APM if the command was added in a newer release.
 
-See also: [../reference/](../../reference/), [./migration/](../migration/)
+See also: [Reference](../../reference/), [Troubleshooting migration](../migration/)
 
 ## Auth and network
 
@@ -236,7 +236,7 @@ Cause: the remote host rejected APM's credentials, or no credentials were availa
 
 Fix: set `GITHUB_APM_PAT` (or run `gh auth login`) with a token that has access to the dependency's repo. For Azure DevOps, set `ADO_APM_PAT`. The diagnostic block printed under the error names the host and the resolution attempts that failed.
 
-See also: [./install-failures/](../install-failures/)
+See also: [Install failures](../install-failures/)
 
 ### `TLS verification failed`
 
@@ -250,7 +250,7 @@ Cause: Python's TLS stack rejected the server certificate. Almost always a corpo
 
 Fix: export `REQUESTS_CA_BUNDLE=/path/to/corporate-ca.pem` and retry. Do not disable TLS verification.
 
-See also: [./ssl-issues/](../ssl-issues/)
+See also: [SSL issues](../ssl-issues/)
 
 ### Network timeout or host unreachable
 
@@ -260,4 +260,4 @@ Cause: the host is unreachable, the proxy is down, or DNS is failing.
 
 Fix: confirm `curl -v https://<host>` works from the same shell. Check `HTTPS_PROXY` / `NO_PROXY` are set correctly. Re-run `apm install --verbose` to see which host failed and on which leg (API probe vs git fetch).
 
-See also: [./ssl-issues/](../ssl-issues/), [./install-failures/](../install-failures/)
+See also: [SSL issues](../ssl-issues/), [Install failures](../install-failures/)
