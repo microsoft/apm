@@ -2,8 +2,121 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from unittest.mock import MagicMock
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_LINT_SCRIPT = _REPO_ROOT / "scripts" / "lint-architecture-boundaries.sh"
+
+
+def _find_function(tree: ast.AST, name: str) -> ast.FunctionDef:
+    """Locate a (possibly nested/method) function definition by name."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"function {name!r} not found")
+
+
+def _find_call(func: ast.FunctionDef, callee_name: str) -> ast.Call:
+    """Locate a direct call to ``callee_name(...)`` inside ``func``'s body."""
+    for node in ast.walk(func):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == callee_name
+        ):
+            return node
+    raise AssertionError(f"no call to {callee_name}(...) found inside {func.name}")
+
+
+def _keyword_value(call: ast.Call, keyword: str) -> ast.expr:
+    for kw in call.keywords:
+        if kw.arg == keyword:
+            return kw.value
+    raise AssertionError(f"call to {call.func.id} has no keyword {keyword!r}")  # type: ignore[union-attr]
+
+
+def _attribute_path(node: ast.AST) -> str | None:
+    """Reconstruct a dotted attribute path, e.g. ``self.skill_subset``.
+
+    Returns ``None`` if the node is not a plain ``Name``/``Attribute`` chain.
+    """
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _expression_depends_on(expr: ast.expr, expected_path: str) -> bool:
+    """True if any attribute access inside ``expr`` resolves to ``expected_path``."""
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Attribute) and node.attr == expected_path.rsplit(".", 1)[-1]:
+            if _attribute_path(node) == expected_path:
+                return True
+    return False
+
+
+def test_locked_dependency_reconstructs_persisted_skill_subset() -> None:
+    """LockedDependency.to_dependency_ref() must forward the persisted subset.
+
+    The lockfile is the sole persisted record of a consumer's ``--skill``
+    selection. If ``to_dependency_ref()`` stopped forwarding
+    ``self.skill_subset`` into the reconstructed ``DependencyReference``
+    (e.g. hardcoding ``None`` or a constant), every downstream consumer --
+    including audit replay -- would silently lose the narrowing and drift
+    would go undetected.
+    """
+    source_path = _REPO_ROOT / "src" / "apm_cli" / "deps" / "lockfile.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+    method = _find_function(tree, "to_dependency_ref")
+    call = _find_call(method, "DependencyReference")
+    value = _keyword_value(call, "skill_subset")
+
+    assert _expression_depends_on(value, "self.skill_subset"), (
+        "to_dependency_ref()'s DependencyReference(...) call must pass "
+        "skill_subset derived from self.skill_subset, not a constant"
+    )
+
+
+def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> None:
+    """run_replay() must forward, not reinterpret, the locked skill subset.
+
+    ``integrate_package_primitives`` is the canonical owner of skill-subset
+    filtering during install/replay. ``run_replay`` must pass through
+    ``package_info.dependency_ref.skill_subset`` untouched (no recomputation,
+    no dropping to ``None``) so the replay pipeline enforces exactly what was
+    locked -- not a value re-derived at replay time.
+    """
+    source_path = _REPO_ROOT / "src" / "apm_cli" / "install" / "drift.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+    func = _find_function(tree, "run_replay")
+    call = _find_call(func, "integrate_package_primitives")
+    value = _keyword_value(call, "skill_subset")
+
+    assert _expression_depends_on(value, "package_info.dependency_ref.skill_subset"), (
+        "run_replay()'s integrate_package_primitives(...) call must pass "
+        "skill_subset derived from package_info.dependency_ref.skill_subset"
+    )
+
+
+def test_static_boundary_guard_covers_replay_skill_subset_authority() -> None:
+    """The static lint script must guard both propagation edges above.
+
+    A behavioral/AST regression test alone can be deleted or weakened by a
+    future change; the architecture-boundary lint script is the second,
+    independent guardrail required by the single-canonical-owner discipline
+    (see .github/instructions/architecture.instructions.md, AC4).
+    """
+    lint_source = _LINT_SCRIPT.read_text(encoding="utf-8")
+    assert "Audit replay must preserve locked skill subset intent" in lint_source
 
 
 def test_incompatible_refs_survive_to_conflict_selection(tmp_path: Path) -> None:

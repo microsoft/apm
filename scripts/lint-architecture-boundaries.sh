@@ -151,6 +151,28 @@ if ! grep -A25 'if plugin.registry:' src/apm_cli/marketplace/resolver.py \
     echo "[x] Marketplace registry intent must create a registry dependency"
     violations=$((violations + 1))
 fi
+lockfile_to_ref_body=$(awk '
+    /^    def to_dependency_ref\(/ {flag=1}
+    flag && /^    def / && !/to_dependency_ref/ {exit}
+    flag && /^class / {exit}
+    flag {print}
+' src/apm_cli/deps/lockfile.py)
+if ! echo "$lockfile_to_ref_body" | grep -q 'DependencyReference(' \
+    || ! echo "$lockfile_to_ref_body" | grep 'skill_subset=' | grep -q 'self\.skill_subset'; then
+    echo "[x] LockedDependency.to_dependency_ref must reconstruct skill_subset from self.skill_subset"
+    violations=$((violations + 1))
+fi
+run_replay_body=$(awk '
+    /^def run_replay\(/ {flag=1}
+    flag && /^def / && !/run_replay/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
+    || ! echo "$run_replay_body" | grep 'skill_subset=' \
+        | grep -q 'package_info\.dependency_ref\.skill_subset'; then
+    echo "[x] Audit replay must preserve locked skill subset intent"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC5: process-wide I/O boundaries"
 check_pattern \
