@@ -523,12 +523,15 @@ class UnifiedLinkResolver:
 
         candidate_in_deployment = candidate
         if ctx.deployment_package_root is not None:
+            # Source containment is already enforced above. This projection only
+            # changes emitted link text; it does not access the deployment path.
             try:
                 package_relative = candidate.relative_to(source_package_root)
                 candidate_in_deployment = ctx.deployment_package_root / package_relative
             except (OSError, ValueError):
                 return None
         elif not candidate.is_relative_to(ctx.base_dir):
+            # Legacy replay callers project source-relative assets under base_dir.
             try:
                 package_relative = candidate.relative_to(source_package_root)
                 candidate_in_deployment = ctx.base_dir / package_relative
