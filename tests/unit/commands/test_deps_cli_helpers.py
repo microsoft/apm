@@ -19,6 +19,8 @@ from apm_cli.commands.deps.cli import (
     _resolve_scope_deps,
 )
 from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
 # _format_primitive_counts
@@ -126,6 +128,22 @@ class TestDepDisplayNameLocal:
         """A Windows-absolute declared path must never leak the host filesystem."""
         dep = _make_local_dep(local_path=r"C:\Users\alice\pkg", repo_url="_local/pkg")
         result = _dep_display_name(dep)
+        assert result == "_local/pkg@latest"
+        assert "C:" not in result
+        assert "\\" not in result
+
+    def test_parsed_windows_absolute_path_renders_cross_platform_logical_name(self):
+        """Display derives a safe name even when parsed on a non-Windows host."""
+        dep_ref = DependencyReference.parse(r"C:\Users\alice\pkg")
+        dep = LockedDependency.from_dependency_ref(
+            dep_ref,
+            resolved_commit=None,
+            depth=0,
+            resolved_by=None,
+        )
+
+        result = _dep_display_name(dep)
+
         assert result == "_local/pkg@latest"
         assert "C:" not in result
         assert "\\" not in result
@@ -259,6 +277,22 @@ class TestResolveScopeDepsOrphanHashSlot:
         # The raw physical hash slot must never surface in user-facing output.
         for name in names + orphaned:
             assert _HASH_SLOT not in name
+
+    def test_declared_remote_hash_shaped_identity_is_not_redacted(self, tmp_path):
+        remote_name = f"_local/{_HASH_SLOT}/pkg"
+        modules_dir = tmp_path / APM_MODULES_DIR
+        package_dir = modules_dir / remote_name
+        package_dir.mkdir(parents=True)
+        (package_dir / APM_YML_FILENAME).write_text("name: pkg\nversion: 1.0.0\n")
+
+        dep = LockedDependency(repo_url=remote_name, resolved_commit="a" * 40)
+        LockFile(dependencies={dep.get_unique_key(): dep}).write(get_lockfile_path(tmp_path))
+
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+
+        assert installed is not None
+        assert [package["name"] for package in installed] == [remote_name]
+        assert orphaned == []
 
 
 class TestResolveScopeDepsReadFailure:

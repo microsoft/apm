@@ -79,6 +79,17 @@ def _is_absolute_local_path(path: str) -> bool:
     return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
 
 
+def _absolute_local_display(path: str, fallback: str) -> str:
+    """Return a portable logical name for an absolute local dependency."""
+    windows_path = PureWindowsPath(path)
+    parsed_path = (
+        windows_path
+        if windows_path.is_absolute() or path.startswith("~\\")
+        else PurePosixPath(path)
+    )
+    return f"_local/{parsed_path.name}" if parsed_path.name else fallback
+
+
 def _logical_local_display(physical_name: str) -> str:
     """Strip the physical hash segment from an unmapped local slot.
 
@@ -108,6 +119,8 @@ def _dep_display_name(dep: LockedDependency) -> str:
     if dep.source == "local":
         if dep.local_path and not _is_absolute_local_path(dep.local_path):
             key = dep.local_path
+        elif dep.local_path:
+            key = _absolute_local_display(dep.local_path, dep.repo_url)
         else:
             key = dep.repo_url
     else:
@@ -344,10 +357,12 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         # (``_local/<hash>/pkg``); report and orphan-check against the
         # logical lockfile key (``_local/pkg``) instead of leaking the slot.
         # A genuinely orphaned slot has no lockfile entry, so it stays keyed by
-        # its raw physical identity for correct detection -- but its displayed
-        # name is always the hash-free logical form.
+        # its raw physical identity for correct detection. Only confirmed
+        # orphans have their physical hash redacted; declared remote identities
+        # that happen to match the slot shape remain unchanged.
         logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
-        display_name = _logical_local_display(logical_name)
+        is_orphaned = logical_name not in declared_with_ancestors
+        display_name = _logical_local_display(logical_name) if is_orphaned else logical_name
         try:
             version = "unknown"
             if has_apm_yml:
@@ -355,7 +370,6 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = logical_name not in declared_with_ancestors
             if is_orphaned:
                 orphaned_packages.append(display_name)
 
