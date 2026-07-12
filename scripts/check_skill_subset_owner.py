@@ -18,18 +18,34 @@ algorithm:
 
   1. slash normalization  -- ``X.replace("\\\\", "/")``
   2. path leaf extraction -- ``PurePosixPath(...).name`` (or ``Path``/
-     ``PureWindowsPath``/``PurePath``)
+     ``PureWindowsPath``/``PurePath``), including the split-statement form
+     ``p = PurePosixPath(...)`` followed by ``leaf = p.name`` in the same
+     function
   3. token-set collection -- ``tokens.add(...)``
 
-A function that calls ``skill_subset_filter_tokens(...)`` directly is never
-flagged, even if it also happens to touch one of the three signals.
+Calling ``skill_subset_filter_tokens(...)`` directly does not exempt a
+function: a function that both delegates to the canonical owner *and*
+independently reimplements the three-signal algorithm is still flagged,
+because the reimplementation is the actual duplication regardless of what
+else the function does. A function is only clean if it does not combine all
+three signals in its own scope -- which is naturally the case for a function
+that does nothing but call the canonical owner.
 
 This is intentionally NOT a general dataflow analyzer: it scans only the
 files given on the command line (currently
 ``src/apm_cli/integration/skill_integrator.py`` and
 ``src/apm_cli/bundle/plugin_exporter.py``, wired from
 scripts/lint-architecture-boundaries.sh) and looks for one specific
-duplicated shape.
+duplicated shape. The split-statement leaf-extraction tracking is limited to
+the smallest pattern needed: simple ``name = LeafCallee(...)`` assignments
+within the same function, matched against later ``name.name`` reads; it does
+not follow assignments across function boundaries, reassignment shadowing,
+or any other dataflow beyond that single hop.
+
+A configured consumer path that is missing or not a regular file is a
+misconfiguration, not "nothing to check": ``find_violations()`` fails closed
+by raising ``ConfiguredPathError`` rather than silently skipping it, so the
+guard cannot be evaded by pointing it at a path that no longer exists.
 """
 
 from __future__ import annotations
@@ -82,19 +98,58 @@ def _is_backslash_to_slash_replace(node: ast.AST) -> bool:
     return "\\" in first.value and second.value == "/"
 
 
-def _is_path_leaf_access(node: ast.AST) -> bool:
-    """Return True for an attribute access shaped like ``PurePosixPath(...).name``."""
-    if not (isinstance(node, ast.Attribute) and node.attr == "name"):
+def _is_leaf_path_call(node: ast.AST) -> bool:
+    """Return True for a call to one of the leaf-path constructors."""
+    if not isinstance(node, ast.Call):
         return False
-    value = node.value
-    if not isinstance(value, ast.Call):
-        return False
-    callee = value.func
+    callee = node.func
     if isinstance(callee, ast.Name):
         return callee.id in _LEAF_PATH_CALLEES
     if isinstance(callee, ast.Attribute):
         return callee.attr in _LEAF_PATH_CALLEES
     return False
+
+
+def _leaf_path_call_targets(scope_nodes: Sequence[ast.AST]) -> set[str]:
+    """Return local variable names assigned directly from a leaf-path call.
+
+    Tracks the narrow split-statement pattern ``name = PurePosixPath(...)``
+    (or ``Path``/``PureWindowsPath``/``PurePath``) so a later ``name.name``
+    read in the same function is still recognized as leaf extraction even
+    when split across two statements, e.g.::
+
+        path = PurePosixPath(normalized)
+        leaf = path.name
+
+    This intentionally covers only simple ``Name = Call(...)`` assignments
+    with exactly one target -- it is not general dataflow analysis, and does
+    not attempt to track reassignment, tuple unpacking, or attribute/
+    subscript targets.
+    """
+    leaf_vars: set[str] = set()
+    for node in scope_nodes:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and _is_leaf_path_call(node.value):
+            leaf_vars.add(target.id)
+    return leaf_vars
+
+
+def _is_path_leaf_access(node: ast.AST, leaf_vars: frozenset[str] = frozenset()) -> bool:
+    """Return True for a leaf-path ``.name`` read, direct or split across statements.
+
+    Matches the direct form ``PurePosixPath(...).name`` as well as the split
+    form where the leaf-path call was first assigned to a local variable
+    (see ``_leaf_path_call_targets``) and ``.name`` is read off that
+    variable in a later statement: ``leaf = path.name``.
+    """
+    if not (isinstance(node, ast.Attribute) and node.attr == "name"):
+        return False
+    value = node.value
+    if _is_leaf_path_call(value):
+        return True
+    return isinstance(value, ast.Name) and value.id in leaf_vars
 
 
 def _is_token_set_add(node: ast.AST) -> bool:
@@ -103,18 +158,6 @@ def _is_token_set_add(node: ast.AST) -> bool:
         return False
     func = node.func
     return isinstance(func, ast.Attribute) and func.attr == "add"
-
-
-def _calls_canonical_owner(node: ast.AST) -> bool:
-    """Return True for a direct call to the canonical owner function."""
-    if not isinstance(node, ast.Call):
-        return False
-    func = node.func
-    if isinstance(func, ast.Name):
-        return func.id == CANONICAL_OWNER
-    if isinstance(func, ast.Attribute):
-        return func.attr == CANONICAL_OWNER
-    return False
 
 
 def _walk_own_scope(node: ast.AST) -> Iterator[ast.AST]:
@@ -150,17 +193,32 @@ def _build_qualnames(tree: ast.Module) -> dict[ast.AST, str]:
     return qualnames
 
 
+class ConfiguredPathError(RuntimeError):
+    """Raised when a configured consumer path is missing or not a regular file.
+
+    A path passed to this checker is a hard-coded consumer file wired from
+    scripts/lint-architecture-boundaries.sh, not user input: if it does not
+    exist (or is a directory, socket, etc.), the checker cannot scan it and
+    must fail closed rather than silently reporting "no violations", which
+    would let a misconfigured or renamed path evade the guard entirely.
+    """
+
+
 def find_violations(paths: Sequence[Path]) -> list[Violation]:
     """Return every local skill-subset token normalizer found in ``paths``.
 
-    Only files that exist and parse as Python are scanned; missing or
-    unparseable files are silently skipped so this stays a narrow, targeted
-    check rather than a general-purpose linter.
+    Every path must exist and be a regular file; a missing or non-regular
+    path raises ``ConfiguredPathError`` instead of being silently skipped
+    (see ``ConfiguredPathError``). Files that exist but fail to parse as
+    Python are still skipped, since a syntax error is a pre-existing problem
+    unrelated to this narrow, targeted check.
     """
     violations: list[Violation] = []
     for path in paths:
         if not path.is_file():
-            continue
+            raise ConfiguredPathError(
+                f"{path}: configured consumer path is missing or not a regular file"
+            )
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except SyntaxError:
@@ -168,10 +226,9 @@ def find_violations(paths: Sequence[Path]) -> list[Violation]:
 
         for func, qualname in _build_qualnames(tree).items():
             scope_nodes = list(_walk_own_scope(func))
-            if any(_calls_canonical_owner(n) for n in scope_nodes):
-                continue
+            leaf_vars = _leaf_path_call_targets(scope_nodes)
             has_replace = any(_is_backslash_to_slash_replace(n) for n in scope_nodes)
-            has_leaf = any(_is_path_leaf_access(n) for n in scope_nodes)
+            has_leaf = any(_is_path_leaf_access(n, leaf_vars) for n in scope_nodes)
             has_add = any(_is_token_set_add(n) for n in scope_nodes)
             if has_replace and has_leaf and has_add:
                 violations.append(Violation(path=path, line=func.lineno, qualname=qualname))
@@ -198,9 +255,18 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the checker over the given paths and return a process exit code."""
+    """Run the checker over the given paths and return a process exit code.
+
+    Fails closed (nonzero, with an actionable diagnostic) if a configured
+    consumer path is missing or not a regular file, rather than reporting a
+    misleading "no violations found" for a path that was never scanned.
+    """
     args = _parse_args(argv)
-    violations = find_violations(args.paths)
+    try:
+        violations = find_violations(args.paths)
+    except ConfiguredPathError as exc:
+        print(f"[x] {exc}")
+        return 1
     if violations:
         for violation in violations:
             print(f"[x] {violation.render()}")
