@@ -77,11 +77,14 @@ let prsStore;
 // ---------------------------------------------------------------------------
 
 describe("Solid.js stores", () => {
+  let triageStore;
+
   before(async () => {
     // Dynamic imports execute module-level store code (createSignal,
     // createResource, setInterval) exactly once; ESM caches the modules.
     issuesStore = await import("../client/src/stores/issues.js");
     prsStore = await import("../client/src/stores/prs.js");
+    triageStore = await import("../client/src/stores/triage.js");
 
     // Allow the async resource fetchers (triggered by createResource's initial
     // signal value) to resolve before the first test runs.
@@ -237,6 +240,60 @@ describe("Solid.js stores", () => {
         issuesAfter,
         issuesBefore,
         "Prs interval should not trigger /api/issues",
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // triage.js -- lazy store
+  // -------------------------------------------------------------------------
+
+  describe("triage.js -- exports", () => {
+    it("exports triageResource as a function", () => {
+      assert.strictEqual(typeof triageStore.triageResource, "function");
+    });
+
+    it("exports refetchTriage as a function", () => {
+      assert.strictEqual(typeof triageStore.refetchTriage, "function");
+    });
+
+    it("exports activateTriage as a function", () => {
+      assert.strictEqual(typeof triageStore.activateTriage, "function");
+    });
+  });
+
+  describe("triage.js -- lazy-load contract", () => {
+    it("does NOT fetch /api/triage on import (lazy until activateTriage())", () => {
+      // fetchCalls is populated before the import; triage store uses fetchTick=null
+      // so createResource fires the fetcher with null and returns early -- no HTTP call.
+      assert.strictEqual(
+        countFetchCalls("/api/triage"),
+        0,
+        "triage store must not fetch on import; fetchTick starts as null",
+      );
+    });
+
+    it("fetches /api/triage after activateTriage() is called", async () => {
+      const before = countFetchCalls("/api/triage");
+      triageStore.activateTriage();
+      await tick(50);
+      const after = countFetchCalls("/api/triage");
+      assert.ok(
+        after > before,
+        `Expected a /api/triage fetch after activateTriage() (before: ${before}, after: ${after})`,
+      );
+    });
+
+    it("calling activateTriage() a second time does NOT trigger another fetch (idempotent)", async () => {
+      // activateTriage() sets fetchTick from null to 0 only on first call.
+      const before = countFetchCalls("/api/triage");
+      triageStore.activateTriage();
+      await tick(50);
+      const after = countFetchCalls("/api/triage");
+      assert.strictEqual(
+        after,
+        before,
+        "activateTriage() should be idempotent -- no extra fetch on repeated calls",
       );
     });
   });
