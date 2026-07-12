@@ -519,7 +519,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     package_name=dep_key,
                     logger=None,
                     scope=None,
-                    skill_subset=None,
+                    skill_subset=tuple(package_info.dependency_ref.skill_subset or ()) or None,
                     ctx=None,
                     scratch_root=scratch_root,
                     # Honor per-dependency 'targets:' narrowing from apm.yml so the

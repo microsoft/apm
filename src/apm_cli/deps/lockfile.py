@@ -615,6 +615,7 @@ class LockedDependency:
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
             source=self.source,
+            skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
         )
 

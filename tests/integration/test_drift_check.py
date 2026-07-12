@@ -411,6 +411,41 @@ class TestSectionBRegressions:
         combined = (result.stdout or "") + (result.stderr or "")
         assert "Drift detected" not in combined
 
+    def test_b5_skill_subset_excludes_unselected_skills_from_drift(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: audit replay must honor a dependency's skill subset."""
+        project = _make_apm_project(tmp_path)
+        bundle = tmp_path / "skill-bundle"
+        for name in ("grill-me", "grilling", "unselected"):
+            skill_dir = bundle / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_bytes(
+                f"---\nname: {name}\ndescription: Test skill {name}.\n---\n".encode()
+            )
+        (bundle / "apm.yml").write_bytes(b"name: skill-bundle\nversion: 1.0.0\n")
+
+        monkeypatch.chdir(project)
+        install_result = CliRunner().invoke(
+            cli,
+            [
+                "install",
+                str(bundle),
+                "--skill",
+                "grill-me",
+                "--skill",
+                "grilling",
+            ],
+            catch_exceptions=False,
+        )
+        assert install_result.exit_code == 0, install_result.output
+        assert not (project / ".agents" / "skills" / "unselected").exists()
+
+        audit_result = _audit(project, monkeypatch, "--ci", "-f", "json")
+
+        assert audit_result.exit_code == 0, audit_result.output
+        assert _drift_paths(audit_result.stdout) == []
+
 
 # ---------------------------------------------------------------------------
 # Section C -- edge cases
