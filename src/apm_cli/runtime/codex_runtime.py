@@ -5,7 +5,7 @@ import subprocess
 from typing import Any
 
 from ..core.tls_trust import build_child_tls_env
-from .base import RuntimeAdapter
+from .base import RuntimeAdapter, _stream_subprocess_output
 from .utils import find_runtime_binary
 
 
@@ -40,26 +40,11 @@ class CodexRuntime(RuntimeAdapter):
             # Use codex exec to execute the prompt with real-time streaming
             # Always skip git repo check when running from APM
             codex_binary = find_runtime_binary("codex") or "codex"
-            process = subprocess.Popen(
+            output_lines, return_code = _stream_subprocess_output(
                 [codex_binary, "exec", "--skip-git-repo-check", prompt_content],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout for streaming
-                text=True,
-                encoding="utf-8",
-                bufsize=1,  # Line buffered
                 env=build_child_tls_env(os.environ),
+                timeout=300,
             )
-
-            output_lines = []
-
-            # Stream output in real-time
-            for line in iter(process.stdout.readline, ""):
-                # Print to terminal in real-time
-                print(line, end="", flush=True)
-                output_lines.append(line)
-
-            # Wait for process to complete
-            return_code = process.wait(timeout=300)  # 5 minute timeout
 
             if return_code != 0:
                 full_output = "".join(output_lines)
@@ -74,8 +59,6 @@ class CodexRuntime(RuntimeAdapter):
             return "".join(output_lines).strip()
 
         except subprocess.TimeoutExpired:
-            if "process" in locals():
-                process.kill()
             raise RuntimeError("Codex execution timed out after 5 minutes")  # noqa: B904
         except FileNotFoundError:
             raise RuntimeError("Codex CLI not found. Install with: npm i -g @openai/codex@native")  # noqa: B904

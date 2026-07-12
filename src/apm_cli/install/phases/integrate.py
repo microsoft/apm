@@ -354,7 +354,11 @@ def _integrate_root_project(
 
         # Track deployed files for the post-deps-local phase (stale
         # cleanup + lockfile persistence of local_deployed_files).
-        ctx.local_deployed_files = _root_result.get("deployed_files", [])
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        DeploymentLedgerCodec.replace_context_local_files(
+            ctx, _root_result.get("deployed_files", [])
+        )
 
         _local_total = sum(
             _root_result.get(k, 0)

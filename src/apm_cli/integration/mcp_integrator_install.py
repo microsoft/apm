@@ -32,6 +32,7 @@ def _install_registry_group(
     verbose: bool,
     console: Any,
     logger: Any,
+    managed_target_servers: dict[str, set[str]] | None,
 ) -> int:
     """Process one group of registry deps through a single ``MCPServerOperations`` instance.
 
@@ -161,6 +162,7 @@ def _install_registry_group(
                         logger=logger,
                     ):
                         any_ok = True
+                        _record_managed_server(managed_target_servers, rt, dep)
 
                 if any_ok:
                     if console:
@@ -182,6 +184,16 @@ def _install_registry_group(
                     logger.error(f"{dep} -- failed for all runtimes")
 
     return configured_count
+
+
+def _record_managed_server(
+    managed_target_servers: dict[str, set[str]] | None,
+    runtime: str,
+    server_name: str,
+) -> None:
+    """Record a server only after APM successfully writes its target config."""
+    if managed_target_servers is not None:
+        managed_target_servers.setdefault(runtime, set()).add(server_name)
 
 
 def _hermes_runtime_opted_in() -> bool:
@@ -330,7 +342,7 @@ def _resolve_target_runtimes(
     apm_config: dict | None,
     project_root,
     user_scope: bool,
-    explicit_target: str | None,
+    explicit_target: str | list[str] | None,
     scope: InstallScope | None,
     logger,
     console,
@@ -347,6 +359,15 @@ def _resolve_target_runtimes(
         # Single runtime mode - skip auto-discovery entirely.
         logger.progress(f"Targeting specific runtime: {runtime}")
         target_runtimes: list[str] = [runtime]
+    elif explicit_target is not None:
+        # A plural --target value is already parser-normalized. Use that exact
+        # runtime set instead of broad discovery so selecting IntelliJ does not
+        # also select adjacent runtimes that share its Copilot policy profile.
+        target_runtimes = (
+            [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
+        )
+        runtime_label = "runtime" if len(target_runtimes) == 1 else "runtimes"
+        logger.progress(f"Targeting specific {runtime_label}: {', '.join(target_runtimes)}")
     else:
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
@@ -487,6 +508,7 @@ def _install_self_defined_deps(
     verbose: bool,
     console,
     logger,
+    managed_target_servers: dict[str, set[str]] | None,
 ) -> int:
     """Install self-defined (``registry: false``) MCP deps for all target runtimes.
 
@@ -576,6 +598,7 @@ def _install_self_defined_deps(
                 logger=logger,
             ):
                 any_ok = True
+                _record_managed_server(managed_target_servers, rt, dep.name)
 
         if any_ok:
             if console:
@@ -631,10 +654,11 @@ def run_mcp_install(
     stored_mcp_configs: dict | None = None,
     project_root=None,
     user_scope: bool = False,
-    explicit_target: str | None = None,
+    explicit_target: str | list[str] | None = None,
     logger=None,
     diagnostics=None,
     scope: InstallScope | None = None,
+    managed_target_servers: dict[str, set[str]] | None = None,
 ) -> int:
     """Install MCP dependencies.
 
@@ -656,6 +680,7 @@ def run_mcp_install(
         scope: InstallScope (PROJECT or USER). When USER, only
             runtimes whose adapter declares ``supports_user_scope``
             are targeted; workspace-only runtimes are skipped.
+        managed_target_servers: Mutable per-target APM ownership state.
 
     Returns:
         Number of MCP servers newly configured or updated.
@@ -733,6 +758,19 @@ def run_mcp_install(
     if target_runtimes is None:
         return 0
 
+    if managed_target_servers is not None:
+        active_targets = set(target_runtimes)
+        current_names = {
+            dep.name if hasattr(dep, "name") else dep
+            for dep in mcp_deps
+            if isinstance(dep, str) or hasattr(dep, "name")
+        }
+        for target in list(managed_target_servers):
+            if target not in active_targets:
+                del managed_target_servers[target]
+            else:
+                managed_target_servers[target].intersection_update(current_names)
+
     # Use the new registry operations module for better server detection
     configured_count = 0
 
@@ -773,6 +811,7 @@ def run_mcp_install(
                     verbose=verbose,
                     console=console,
                     logger=logger,
+                    managed_target_servers=managed_target_servers,
                 )
 
         except ImportError:
@@ -793,6 +832,7 @@ def run_mcp_install(
             verbose=verbose,
             console=console,
             logger=logger,
+            managed_target_servers=managed_target_servers,
         )
 
     # Close the panel

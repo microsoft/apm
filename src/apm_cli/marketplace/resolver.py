@@ -720,16 +720,20 @@ def resolve_plugin_source(
         raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
-def _extract_token(auth_resolver: object | None, host: str, org: str | None = None) -> str | None:
-    """Extract a token from the auth resolver for the given host."""
+def _extract_auth(
+    auth_resolver: object | None, host: str, org: str | None = None
+) -> tuple[str | None, str]:
+    """Extract the token and scheme from the auth resolver for the given host."""
     if auth_resolver is None:
-        return None
+        return None, "basic"
     try:
         ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
-        return ctx.token if ctx and ctx.token else None
+        if ctx is None or not ctx.token:
+            return None, "basic"
+        return ctx.token, ctx.auth_scheme
     except Exception as exc:
-        logger.debug("Could not extract token for host '%s': %s", host, type(exc).__name__)
-        return None
+        logger.debug("Could not extract auth for host '%s': %s", host, type(exc).__name__)
+        return None, "basic"
 
 
 def resolve_marketplace_plugin(
@@ -787,6 +791,32 @@ def resolve_marketplace_plugin(
     plugin = manifest.find_plugin(plugin_name)
     if plugin is None:
         raise PluginNotFoundError(plugin_name, marketplace_name)
+
+    if plugin.registry:
+        selector = version_spec or plugin.version
+        if not selector:
+            raise ValueError(f"Registry-routed plugin {plugin.name!r} has no version selector")
+        source_data = plugin.source if isinstance(plugin.source, dict) else {}
+        package_id = source_data.get("repo") or source_data.get("repository")
+        if not isinstance(package_id, str) or package_id.count("/") != 1:
+            raise ValueError(
+                f"Registry-routed plugin {plugin.name!r} must declare an "
+                "owner/repo repository identity"
+            )
+        dep_ref = DependencyReference(
+            repo_url=package_id,
+            reference=selector,
+            source="registry",
+            registry_name=plugin.registry,
+        )
+        return MarketplacePluginResolution(
+            canonical=dep_ref.to_canonical(),
+            plugin=plugin,
+            dependency_reference=dep_ref,
+            cross_repo_misconfig_risk=None,
+            source_url=manifest.source_url,
+            source_digest=manifest.source_digest,
+        )
 
     source_kind = source.kind
 
@@ -929,7 +959,7 @@ def resolve_marketplace_plugin(
             from .version_resolver import resolve_version_constraint
 
             owner_repo = f"{source.owner}/{source.repo}"
-            token = _extract_token(auth_resolver, source.host, org=source.owner)
+            token, auth_scheme = _extract_auth(auth_resolver, source.host, org=source.owner)
             try:
                 tag_name, _sha = resolve_version_constraint(
                     plugin_name,
@@ -937,6 +967,8 @@ def resolve_marketplace_plugin(
                     version_spec,
                     host=source.host,
                     token=token,
+                    auth_scheme=auth_scheme,
+                    auth_resolver=auth_resolver,
                 )
                 canonical = f"{base}#{tag_name}"
                 logger.debug(

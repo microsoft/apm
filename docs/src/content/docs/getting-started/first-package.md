@@ -30,6 +30,15 @@ cd team-skills
 `apm init` creates exactly one file -- the manifest. The `.apm/` source tree
 is yours to author.
 
+:::tip[Already have a Claude plugin?]
+If `skills/`, `agents/`, or `commands/` already exists at the project root,
+`apm init` leaves that layout in place. It writes `includes: auto` without
+creating `.apm/`, and those plugin-native directories remain sources for
+`apm pack`. Create `.apm/` later when you want `apm pack` to source from that
+directory instead of the project root. See [source layout and install-time
+discovery](../../producer/pack-a-bundle/#source-layout-and-install-time-discovery).
+:::
+
 ```
 team-skills/
 +-- apm.yml
@@ -52,11 +61,11 @@ includes: auto
 scripts: {}
 ```
 
-`includes: auto` is the field that makes step 4 work: with no remote
-dependencies declared, `apm install` walks your local `.apm/` tree
-and deploys what it finds. Set `includes: []` (or omit the field) and
-local content stops deploying. Override with an explicit list of
-paths to gate exactly what ships.
+`includes: auto` records explicit consent to deploy or pack local content.
+Omitting the field preserves legacy implicit consent and produces an audit
+advisory. Use an explicit list of paths when you need an exhaustive publication
+boundary. Source layout is independent: `.apm/` is authoritative when present;
+otherwise supported plugin-native root directories remain pack sources.
 
 ## 2. Add a skill
 

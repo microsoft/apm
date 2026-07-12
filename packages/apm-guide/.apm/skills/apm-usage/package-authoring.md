@@ -31,6 +31,13 @@ backfills one from the other:
   is no apm.yml-side equivalent.
 - `name`, `version`, `license`, `dependencies`, `scripts` live
   exclusively in `apm.yml`.
+- `name` and `version` must be non-empty strings. Quote numeric versions so
+  YAML does not parse them as numbers.
+
+Use the standard `$schema` key when authoring against normative OpenAPM v0.1:
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json`.
+Omitting `$schema` selects APM's current working draft. Unknown schema
+identities fail closed rather than being interpreted as the working draft.
 
 Populate both descriptions when you ship a HYBRID package. `apm pack`
 warns when `apm.yml.description` is missing so listings do not
@@ -62,12 +69,14 @@ my-package/
 
 ## Install-time discovery rules
 
-`apm pack` (export) is liberal: it collects primitives from both
-`.apm/<type>/` and root convention directories (`agents/`, `skills/`,
-`instructions/`, etc.). `apm install` (integration) is per-primitive
-and stricter. Authors who rely on root convention directories for
-instructions or prompts will produce bundles that pack but install
-silently incomplete.
+When `.apm/` exists, `apm pack` sources local primitives and hooks from
+`.apm/`. Without `.apm/`, supported plugin-native root directories
+(`agents/`, `skills/`, `commands/`, `instructions/`, `extensions/`, and
+hooks) remain pack sources, including after `apm init` writes
+`includes: auto`. Mixed layouts pack from `.apm/` and warn about skipped
+root sources. An explicit `includes:` list is exhaustive; invalid listed
+paths fail instead of falling back to implicit discovery. Prefer
+`.apm/<type>/` so pack and install use the same source layout.
 
 Per-primitive scan paths for `apm install`:
 
@@ -81,9 +90,7 @@ Per-primitive scan paths for `apm install`:
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
-`apm pack` and `apm install`. Authoring `instructions/` at the plugin
-root will pack cleanly but instructions will be silently dropped when
-consumers run `apm install`.
+`apm pack` and `apm install`.
 
 ## Hook files
 
@@ -144,10 +151,11 @@ to `commonjs`); shell-only bundles do not get a sidecar.
 
 `apm install` (project-scope, no `-g`) keeps hook `command` paths
 **repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
-`<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
-sidecar, and equivalents for Cursor / Gemini / Antigravity / Windsurf / Kiro) so clones,
-contributors, and CI runners do not see the installer's machine-local
-absolute prefix. `apm install -g` (user-scope, e.g.
+`<repo>/.codex/hooks.json`, and equivalents for Cursor / Gemini / Antigravity /
+Windsurf / Kiro). Native hook files contain only upstream schema fields; each
+merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
+sidecar, so clones, contributors, and CI runners do not see the installer's
+machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
 references to absolute paths because the user-scope config is read
 without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
@@ -482,7 +490,9 @@ Section 7.5 is canonical for the full validation and override rules.
 The base may target any supported host -- GitHub.com, GitHub Enterprise,
 self-hosted GitLab, or Azure DevOps. For Azure DevOps, use a
 `https://dev.azure.com/{org}/{project}/_git` base; the `dev.azure.com` host is
-preserved through to the consumer and authenticated with `ADO_APM_PAT`:
+preserved through to the consumer. APM appends each repository name without a
+`.git` suffix. Authentication uses `ADO_APM_PAT` when set, or an Azure CLI
+bearer credential when the PAT is unset and `az` is signed in:
 
 ```yaml
 marketplace:

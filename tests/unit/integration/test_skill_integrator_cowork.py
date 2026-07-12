@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest  # noqa: F401
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.skill_integrator import SkillIntegrator
 
 # ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ def _make_cowork_target_profile():
     from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
     return TargetProfile(
-        name="copilot-cowork",
+        capability=TARGET_CAPABILITIES["copilot-cowork"],
         root_dir="copilot-cowork",
         primitives={
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
@@ -42,7 +43,7 @@ def _make_copilot_target_profile(project_root: Path):
     from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
     return TargetProfile(
-        name="copilot",
+        capability=TARGET_CAPABILITIES["copilot"],
         root_dir=".github",
         primitives={
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),

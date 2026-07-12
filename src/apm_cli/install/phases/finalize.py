@@ -82,7 +82,6 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
 def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
     from apm_cli.commands import install as _install_mod
-    from apm_cli.models.results import InstallResult
 
     # Show integration stats (verbose-only when logger is available)
     if ctx.total_links_resolved > 0:
@@ -152,10 +151,6 @@ def run(ctx: InstallContext) -> InstallResult:
     if ctx.scope is InstallScope.USER:
         _hint_global_root_context(ctx)
 
-    return InstallResult(
-        ctx.installed_count,
-        ctx.total_prompts_integrated,
-        ctx.total_agents_integrated,
-        ctx.diagnostics,
-        package_types=dict(ctx.package_types),
-    )
+    from apm_cli.install.outcome import result_from_install_context
+
+    return result_from_install_context(ctx)

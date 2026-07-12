@@ -762,8 +762,10 @@ class TestFreshDependencySourceAcquire:
         assert result is not None
         assert result.deltas.get("unpinned") == 1
 
-    def test_hash_mismatch_calls_sys_exit(self, tmp_path: Path) -> None:
-        """Content hash mismatch → sys.exit(1)."""
+    def test_hash_mismatch_raises_direct_dependency_error(self, tmp_path: Path) -> None:
+        """Content hash mismatch returns to the transaction boundary."""
+        from apm_cli.install.errors import DirectDependencyError
+
         ctx = _make_ctx(targets=["copilot"], logger=None, tui=None, update_refs=False)
         dep_ref = _make_dep_ref(is_virtual=False, reference="main")
         install_path = tmp_path / "pkg"
@@ -785,14 +787,11 @@ class TestFreshDependencySourceAcquire:
                 return_value="actual_different_hash",
             ),
             patch("apm_cli.utils.path_security.safe_rmtree"),
-            patch("apm_cli.utils.console._rich_error"),
             patch("apm_cli.utils.console._rich_success"),
-            pytest.raises(SystemExit) as exc_info,
+            pytest.raises(DirectDependencyError),
         ):
             source = self._make_source(ctx, dep_ref, install_path, dep_locked_chk=locked_chk)
             source.acquire()
-
-        assert exc_info.value.code == 1
 
     def test_exception_in_download_records_error_returns_none(self, tmp_path: Path) -> None:
         """Exception in download → diagnostics.error + None returned."""

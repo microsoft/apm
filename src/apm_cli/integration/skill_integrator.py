@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.atomic_io import write_text_lf
@@ -60,6 +61,7 @@ class SkillIntegrationResult:
     # layer can surface an actionable hint: "project_scope" | "no_claude_target".
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None  # All deployed directories (for deployed_files manifest)
+    materializations: tuple[MaterializationResult, ...] = ()
 
     def __post_init__(self):
         if self.target_paths is None:
@@ -618,6 +620,34 @@ class SkillIntegrator(BaseIntegrator):
         return name_filter or None
 
     @staticmethod
+    def available_skill_names(package_info) -> frozenset[str] | None:
+        """Return names selectable through ``--skill`` for one package."""
+        package_path = package_info.install_path
+        if (package_path / "SKILL.md").is_file():
+            return None
+
+        from apm_cli.models.validation import PackageType
+
+        normalized = package_path / ".apm" / "skills"
+        root_bundle = package_path / "skills"
+        if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
+            skills_dir = normalized
+        elif root_bundle.is_dir() and any(
+            (child / "SKILL.md").is_file() for child in root_bundle.iterdir() if child.is_dir()
+        ):
+            skills_dir = root_bundle
+        else:
+            skills_dir = normalized
+
+        if not skills_dir.is_dir():
+            return frozenset()
+        return frozenset(
+            child.name
+            for child in skills_dir.iterdir()
+            if child.is_dir() and (child / "SKILL.md").is_file()
+        )
+
+    @staticmethod
     def _promote_sub_skills(
         sub_skills_dir: Path,
         target_skills_root: Path,
@@ -753,10 +783,18 @@ class SkillIntegrator(BaseIntegrator):
         """Read the lockfile once and build two ownership maps.
 
         Returns a tuple of:
-        - owned_by: skill_name -> last-segment owner name, for sub-skill self-overwrite detection.
+        - owned_by: skill_name -> dep.get_unique_key(), for sub-skill self-overwrite detection.
         - native_owners: skill_name -> dep.get_unique_key(), for native-skill cross-package
           collision detection.  Only paths under a ``/skills/`` prefix are included to avoid
           false attribution from non-skill deployed_files entries (prompts, hooks, commands, etc.).
+
+        Both maps key on the full unique dependency identity (owner/repo, or the
+        equivalent durable key for local/registry deps), NOT the last path
+        segment. Two different packages can share a repo/leaf name (e.g. two
+        orgs each publishing a "shared-skill" or "utils" repo); comparing only
+        the last segment would treat them as the same owner and silently
+        suppress the cross-package collision warning precisely when it matters
+        most -- an unrelated package overwriting another's skill undetected.
         """
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
@@ -766,13 +804,12 @@ class SkillIntegrator(BaseIntegrator):
         if not lockfile:
             return owned_by, native_owners
         for dep in lockfile.get_package_dependencies():
-            short_owner = (dep.virtual_path or dep.repo_url).rsplit("/", 1)[-1]
             unique_key = dep.get_unique_key()
             for deployed_path in dep.deployed_files:
                 normalized = deployed_path.rstrip("/").replace("\\", "/")
                 skill_name = normalized.rsplit("/", 1)[-1]
                 # Both maps cover all paths for sub-skill self-overwrite tracking.
-                owned_by[skill_name] = short_owner
+                owned_by[skill_name] = unique_key
                 # Native-owner map is scoped to skill paths only to avoid false
                 # attribution from prompts/hooks/commands that share a leaf name.
                 if "/skills/" in normalized:
@@ -837,7 +874,11 @@ class SkillIntegrator(BaseIntegrator):
 
             targets = active_targets(project_root)
 
-        parent_name = package_path.name
+        # Durable identity for self-overwrite comparison -- NOT package_path.name,
+        # which is just the repo/leaf name and collides across owners (see
+        # _build_ownership_maps).
+        _dep_ref = getattr(package_info, "dependency_ref", None)
+        parent_name = _dep_ref.get_unique_key() if _dep_ref is not None else package_path.name
         owned_by = self._build_skill_ownership_map(project_root)
         name_filter = self._skill_subset_name_filter(skill_subset)
         count = 0
@@ -1080,12 +1121,14 @@ class SkillIntegrator(BaseIntegrator):
             if is_primary:
                 files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
 
-            # Promote sub-skills for this target.
+            # Promote sub-skills for this target. Identify the parent by its
+            # durable unique key (current_key), not skill_name -- the folder
+            # name collides across owners (see _build_ownership_maps).
             target_skills_root = self._target_skills_root(target, project_root)
             _, sub_deployed = self._promote_sub_skills(
                 sub_skills_dir,
                 target_skills_root,
-                skill_name,
+                current_key or skill_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
                 diagnostics=diagnostics if is_primary else None,
@@ -1159,7 +1202,13 @@ class SkillIntegrator(BaseIntegrator):
 
             targets = active_targets(project_root)
 
-        parent_name = package_info.install_path.name
+        # Durable identity for self-overwrite comparison -- NOT install_path.name,
+        # which is just the repo/leaf name and collides across owners (see
+        # _build_ownership_maps).
+        _dep_ref = getattr(package_info, "dependency_ref", None)
+        parent_name = (
+            _dep_ref.get_unique_key() if _dep_ref is not None else package_info.install_path.name
+        )
         owned_by, lockfile_native_owners = self._build_ownership_maps(project_root)  # noqa: RUF059
 
         total_promoted = 0

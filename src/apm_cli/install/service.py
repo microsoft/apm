@@ -4,7 +4,7 @@ The ``InstallService`` is the *behaviour-bearing* entry point for installs.
 Adapters (the Click handler today; programmatic / API callers tomorrow)
 build an :class:`InstallRequest` and call :meth:`InstallService.run`,
 which returns a :class:`InstallResult`.  Adapters own presentation,
-``sys.exit``, and CLI option parsing -- the service does not.
+process-exit translation, and CLI option parsing -- the service does not.
 
 Why a class rather than a free function?
 ----------------------------------------
@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from apm_cli.install.request import InstallRequest
+from apm_cli.models.results import InstallDisposition
 
 if TYPE_CHECKING:
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
@@ -101,10 +102,15 @@ class InstallService:
             plan_callback=request.plan_callback,
             refresh=request.refresh,
             lockfile_only=request.lockfile_only,
+            transaction=request.transaction,
         )
 
-        post_event = self._build_event("post-install", request)
-        runner.fire("post-install", post_event)
+        if result.disposition in {
+            InstallDisposition.SUCCESS,
+            InstallDisposition.PARTIAL_SUCCESS,
+        }:
+            post_event = self._build_event("post-install", request)
+            runner.fire("post-install", post_event)
 
         return result
 

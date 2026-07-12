@@ -482,7 +482,7 @@ class TestAuditContentScanBranches:
 
         # Create the lockfile so the scan proceeds past the "no lockfile" early-exit
         lock_file = tmp_path / "apm.lock.yaml"
-        lock_file.write_text("dependencies: {}\n")
+        lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
 
         with pytest.raises(SystemExit) as exc_info:
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
@@ -499,7 +499,7 @@ class TestAuditContentScanBranches:
     def test_package_not_found_warning_and_exit(self, tmp_path: Path) -> None:
         logger = _make_logger()
         lock_file = tmp_path / "apm.lock.yaml"
-        lock_file.write_text("dependencies: {}\n")
+        lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
         cfg = _AuditConfig(
             project_root=tmp_path,
             logger=logger,
@@ -521,7 +521,7 @@ class TestAuditContentScanBranches:
     def test_dry_run_without_strip_warns(self, tmp_path: Path) -> None:
         logger = _make_logger()
         lock_file = tmp_path / "apm.lock.yaml"
-        lock_file.write_text("dependencies: {}\n")
+        lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
         cfg = _AuditConfig(
             project_root=tmp_path,
             logger=logger,

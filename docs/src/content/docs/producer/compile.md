@@ -90,10 +90,12 @@ apm compile --all                            # every canonical target
 ```
 
 Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `all`. The `agent-skills` slug
-is a no-op for compile (skills are deployed by `apm install`); it is
-accepted in target lists for symmetry only. Unknown slugs are
-rejected before any work runs.
+`gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `agent-skills`,
+and `all`. The `agent-skills` slug is a no-op for compile (skills are
+deployed by `apm install`); it is accepted in target lists for symmetry
+only. `intellij` uses the Copilot profile for file primitives and produces
+`AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs
+are rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
 `copilot-app`) are deployment targets for `apm install --target <flag>`
@@ -145,11 +147,10 @@ Per target, with the rules shape on disk after compile:
 | Add a dependency or refresh `apm_modules/` | `apm install` |
 | Verify deployed bytes match the lockfile | `apm audit` |
 
-`apm install` runs compile internally as part of its integrate phase,
-so a normal `apm install` on a clean checkout already produces
-correct AGENTS.md / CLAUDE.md / GEMINI.md output. Reach for
-`apm compile` directly when you are iterating on instructions and
-do not want install's side effects.
+`apm install` deploys individual primitives but does not generate aggregate
+context files. On a clean checkout, run `apm install && apm compile` when you
+need `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. Run `apm compile` by itself
+when iterating on instructions without install's dependency side effects.
 
 :::note[Copilot deduplication]
 <a id="copilot-deduplication"></a>

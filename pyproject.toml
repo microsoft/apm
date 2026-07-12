@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.24.0"
+version = "0.24.1"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ dependencies = [
     "llm-github-models>=0.18.0",
     "tomli>=1.2.0; python_version<'3.11'",
     "toml>=0.10.2",
+    "tomlkit>=0.13",
     "rich>=13.0.0",
     "rich-click>=1.7.0",
     "watchdog>=3.0.0",
@@ -177,4 +178,3 @@ markers = [
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
 ]
-

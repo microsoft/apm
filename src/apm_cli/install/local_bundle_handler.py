@@ -195,10 +195,13 @@ def install_local_bundle(
             lockfile = LockFile.read(lockfile_path) or LockFile()
             existing = set(lockfile.local_deployed_files)
             existing.update(deployed)
-            lockfile.local_deployed_files = sorted(existing)
             existing_hashes = dict(lockfile.local_deployed_file_hashes)
             existing_hashes.update(deployed_hashes)
-            lockfile.local_deployed_file_hashes = existing_hashes
+            from ..core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_legacy_owner(
+                lockfile, ".", sorted(existing), existing_hashes
+            )
 
             # Auto-migrate legacy per-client skill paths (#737).
             # After deploying new .agents/skills/ files, detect and clean up

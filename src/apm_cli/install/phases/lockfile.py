@@ -141,6 +141,7 @@ class LockfileBuilder:
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
             self._preserve_existing_mcp_state(lockfile)
+            self._preserve_existing_lsp_state(lockfile)
             self._preserve_existing_local_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
 
@@ -187,25 +188,76 @@ class LockfileBuilder:
         committed lockfile and they stay covered by the audit gates (issue
         #1716). See :mod:`apm_cli.install.manifest_reconcile`.
         """
-        from apm_cli.install.manifest_reconcile import union_preserving
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.install.phases.targets import declared_target_profiles
 
         existing = self.ctx.existing_lockfile
-        for dep_key, locked_dep in lockfile.dependencies.items():
-            current = list(self.ctx.package_deployed_files.get(dep_key, []))
+        prior_files_by_package: dict[str, list[str]] = {}
+        prior_hashes_by_package: dict[str, dict[str, str]] = {}
+        for dep_key in lockfile.dependencies:
+            previous = existing.get_dependency(dep_key) if existing is not None else None
+            prior_files_by_package[dep_key] = (
+                previous.deployed_files if previous is not None else []
+            )
+            prior_hashes_by_package[dep_key] = (
+                previous.deployed_file_hashes if previous is not None else {}
+            )
+        from apm_cli.core.deployment_state import DeploymentReconciler
+
+        package_claims = DeploymentReconciler.reconcile_package_claims(
+            package_keys=lockfile.dependencies,
+            current_claims=self.ctx.package_deployed_files,
+            prior_files=prior_files_by_package,
+            prior_hashes=prior_hashes_by_package,
+        )
+        declared = declared_target_profiles(self.ctx)
+        diagnostics = getattr(self.ctx, "diagnostics", None)
+        if diagnostics is None:
+            from apm_cli.utils.diagnostics import DiagnosticCollector
+
+            diagnostics = DiagnosticCollector()
+        ghost_count = 0
+        for dep_key in lockfile.dependencies:
+            claim = package_claims[dep_key]
+            current = list(claim.current_files)
             current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
-            prev = existing.get_dependency(dep_key) if existing is not None else None
-            prior_files = prev.deployed_files if prev is not None else []
-            prior_hashes = prev.deployed_file_hashes if prev is not None else {}
-            files, hashes = union_preserving(
-                current, current_hashes, prior_files, prior_hashes, self.ctx.targets
+            prior_files = list(claim.prior_files)
+            prior_hashes = claim.prior_hashes
+
+            def _log_ghost_drop(path: str, package_key: str = dep_key) -> None:
+                nonlocal ghost_count
+                ghost_count += 1
+                logger = getattr(self.ctx, "logger", None)
+                if logger:
+                    logger.verbose_detail(
+                        f"Removed stale lockfile path {path} "
+                        f"(target not declared in apm.yml) for {package_key}"
+                    )
+
+            files, hashes = reconcile_deployed_block(
+                project_root=self.ctx.project_root,
+                dep_key=dep_key,
+                current_files=current,
+                current_hashes=current_hashes,
+                prior_files=prior_files,
+                prior_hashes=prior_hashes,
+                active_targets=self.ctx.targets,
+                declared_targets=declared,
+                diagnostics=diagnostics,
+                on_ghost_drop=_log_ghost_drop,
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;
                 # leave deployed_files untouched so the whole-dep
                 # _merge_existing path can preserve it intact.
                 continue
-            locked_dep.deployed_files = files
-            locked_dep.deployed_file_hashes = hashes
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
+        logger = getattr(self.ctx, "logger", None)
+        if logger and ghost_count:
+            noun = "entry" if ghost_count == 1 else "entries"
+            logger.info(f"Repaired {ghost_count} inactive-target lockfile {noun}")
 
     def _attach_package_types(self, lockfile: LockFile) -> None:
         for dep_key, pkg_type in self.ctx.package_types.items():
@@ -311,6 +363,9 @@ class LockfileBuilder:
             # these carried-forward fields against the current manifest.
             lockfile.mcp_servers = list(self.ctx.existing_lockfile.mcp_servers)
             lockfile.mcp_configs = copy.deepcopy(self.ctx.existing_lockfile.mcp_configs)
+            lockfile.mcp_config_provenance = copy.deepcopy(
+                self.ctx.existing_lockfile.mcp_config_provenance
+            )
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(
                     "MCP state unchanged -- carrying forward "
@@ -318,12 +373,28 @@ class LockfileBuilder:
                     f"{len(lockfile.mcp_configs)} config(s)"
                 )
 
+    def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:
+        """Keep LSP fields until LSP integration reconciles them later in install."""
+        if self.ctx.existing_lockfile:
+            lockfile.lsp_servers = list(self.ctx.existing_lockfile.lsp_servers)
+            lockfile.lsp_configs = copy.deepcopy(self.ctx.existing_lockfile.lsp_configs)
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "LSP state unchanged -- carrying forward "
+                    f"{len(lockfile.lsp_servers)} server(s), "
+                    f"{len(lockfile.lsp_configs)} config(s)"
+                )
+
     def _preserve_existing_local_state(self, lockfile: LockFile) -> None:
         """Keep local fields until post_deps_local reconciles content hashes."""
         if self.ctx.existing_lockfile:
-            lockfile.local_deployed_files = list(self.ctx.existing_lockfile.local_deployed_files)
-            lockfile.local_deployed_file_hashes = copy.deepcopy(
-                self.ctx.existing_lockfile.local_deployed_file_hashes
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_legacy_owner(
+                lockfile,
+                ".",
+                list(self.ctx.existing_lockfile.local_deployed_files),
+                copy.deepcopy(self.ctx.existing_lockfile.local_deployed_file_hashes),
             )
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(

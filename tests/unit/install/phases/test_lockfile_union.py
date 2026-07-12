@@ -135,10 +135,33 @@ class TestCurrentInstallGovernance:
         from apm_cli.install.manifest_reconcile import install_governance
 
         targets = [_target("copilot", root_dir=".github", deploy_roots=[".agents"])]
-        file_roots, uri_schemes = install_governance(targets)
-        assert ".github" in file_roots
-        assert ".agents" in file_roots
+        file_prefixes, uri_schemes = install_governance(targets)
+        assert ".github/" in file_prefixes
+        assert ".agents/" in file_prefixes
         assert uri_schemes == set()
+
+    def test_shared_agents_root_is_partitioned_by_primitive_subdirectory(self):
+        from apm_cli.install.manifest_reconcile import install_governance
+
+        file_prefixes, _ = install_governance([_known("copilot")])
+
+        assert ".agents/skills/" in file_prefixes
+        assert ".agents/" not in file_prefixes
+
+    def test_shared_root_filename_governance_requires_exact_match(self):
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        lookalike = ".agents/hooks.json.bak"
+        files, _ = union_preserving(
+            current_files=[],
+            current_hashes={},
+            prior_files=[lookalike],
+            prior_hashes={},
+            targets=[_known("antigravity")],
+            declared_targets=[_known("antigravity")],
+        )
+
+        assert lookalike in files
 
     def test_copilot_app_target_uses_uri_scheme(self, tmp_path):
         from apm_cli.install.manifest_reconcile import install_governance
@@ -182,3 +205,241 @@ class TestLocalDeployedFilesUnion:
         )
         assert ".agents/skills/demo/SKILL.md" in files
         assert ".agents/skills/gone/SKILL.md" not in files
+
+
+# Consumer of issue #2059: declares five targets, none of them windsurf.
+_CONSUMER_5 = ("claude", "codex", "copilot", "cursor", "gemini")
+
+
+def _known(name):
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return KNOWN_TARGETS[name]
+
+
+class TestInactiveTargetGhostDrop:
+    """Issue #2059: a prior ``deployed_files`` entry for a target the consumer
+    never DECLARES (e.g. a dependency's package-declared ``windsurf`` skill
+    paths) must be dropped rather than re-preserved forever. Otherwise it never
+    exists on disk yet lingers in the lock, failing ``deployed-files-present``
+    permanently on fresh checkouts."""
+
+    def test_union_drops_ghost_when_declared_universe_known(self):
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        declared = [_known(n) for n in _CONSUMER_5]  # no windsurf
+        current = [".agents/skills/az/foo/SKILL.md", ".claude/skills/az/foo/SKILL.md"]
+        ghost = ".windsurf/skills/az/foo/SKILL.md"
+        files, hashes = union_preserving(
+            current_files=current,
+            current_hashes={p: "sha256:new" for p in current},
+            prior_files=[*current, ghost],
+            prior_hashes={ghost: "sha256:ghost"},
+            targets=declared,
+            declared_targets=declared,
+        )
+        assert ghost not in files
+        assert ghost not in hashes
+        assert set(current).issubset(set(files))
+
+    def test_union_preserves_declared_but_narrowed_target(self):
+        """--target narrows this run to copilot, but claude IS declared: keep
+        claude's prior file (legit sibling target) yet still drop the windsurf
+        ghost (never declared)."""
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        declared = [_known(n) for n in _CONSUMER_5]
+        claude_file = ".claude/skills/az/foo/SKILL.md"
+        ghost = ".windsurf/skills/az/foo/SKILL.md"
+        files, _ = union_preserving(
+            current_files=[".agents/skills/az/foo/SKILL.md"],
+            current_hashes={},
+            prior_files=[".agents/skills/az/foo/SKILL.md", claude_file, ghost],
+            prior_hashes={},
+            targets=[_known("copilot")],
+            declared_targets=declared,
+        )
+        assert claude_file in files
+        assert ghost not in files
+
+    def test_union_preserves_declared_sibling_under_shared_agents_root(self):
+        """Copilot owns .agents/skills, not Antigravity's .agents/rules."""
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        rule = ".agents/rules/keep.md"
+        files, hashes = union_preserving(
+            current_files=[".agents/skills/demo/SKILL.md"],
+            current_hashes={},
+            prior_files=[rule],
+            prior_hashes={rule: "sha256:rule"},
+            targets=[_known("copilot")],
+            declared_targets=[_known("copilot"), _known("antigravity")],
+        )
+
+        assert rule in files
+        assert hashes[rule] == "sha256:rule"
+
+    def test_union_drops_undeclared_target_under_shared_agents_root(self):
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        ghost = ".agents/rules/ghost.md"
+        files, _ = union_preserving(
+            current_files=[".agents/skills/demo/SKILL.md"],
+            current_hashes={},
+            prior_files=[ghost],
+            prior_hashes={},
+            targets=[_known("copilot")],
+            declared_targets=[_known("copilot")],
+        )
+
+        assert ghost not in files
+
+    def test_exact_shared_root_filename_tracks_declared_sibling(self):
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        hooks = ".agents/hooks.json"
+        active = [_known("copilot")]
+        preserved, _ = union_preserving(
+            current_files=[],
+            current_hashes={},
+            prior_files=[hooks],
+            prior_hashes={},
+            targets=active,
+            declared_targets=[*active, _known("antigravity")],
+        )
+        dropped, _ = union_preserving(
+            current_files=[],
+            current_hashes={},
+            prior_files=[hooks],
+            prior_hashes={},
+            targets=active,
+            declared_targets=active,
+        )
+
+        assert preserved == [hooks]
+        assert dropped == []
+
+    def test_union_declared_none_preserves_all_legacy(self):
+        """No declared universe (auto-detect / --target-only consumer) keeps the
+        legacy preserve-all behaviour so a genuine multi-target deploy is never
+        clobbered (issue #1716)."""
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        # Active target is copilot-app (URI scheme; governs no file root), so
+        # under legacy preserve-all BOTH prior file rows survive.
+        prior = [".windsurf/skills/x/SKILL.md", ".agents/skills/demo/SKILL.md"]
+        files, _ = union_preserving(
+            current_files=[],
+            current_hashes={},
+            prior_files=prior,
+            prior_hashes={},
+            targets=[_known("copilot-app")],
+            declared_targets=None,
+        )
+        assert set(prior).issubset(set(files))
+
+    def test_union_declared_universe_still_preserves_1716_sibling(self):
+        """The #1716 contract survives declared-gating: a copilot-app run keeps
+        the prior copilot file rows when copilot is in the declared universe."""
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        declared = [_known("copilot"), _known("copilot-app")]
+        prior = [".agents/skills/demo/SKILL.md", "copilot-app-db://workflows/old"]
+        files, _ = union_preserving(
+            current_files=["copilot-app-db://workflows/new"],
+            current_hashes={},
+            prior_files=prior,
+            prior_hashes={},
+            targets=[_known("copilot-app")],
+            declared_targets=declared,
+        )
+        assert ".agents/skills/demo/SKILL.md" in files
+        assert "copilot-app-db://workflows/new" in files
+        assert "copilot-app-db://workflows/old" not in files
+
+    def test_state_reconcile_without_declared_universe_preserves_sibling(self, tmp_path):
+        """Command entrypoints retain legacy multi-target state without targets."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_state
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        sibling = ".windsurf/rules/keep.md"
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/pkg",
+                deployed_files=[sibling],
+                deployed_file_hashes={sibling: "sha256:old"},
+            )
+        )
+
+        changed = reconcile_deployed_state(
+            project_root=tmp_path,
+            lockfile=lockfile,
+            active_targets=[_known("copilot")],
+            declared_targets=None,
+            diagnostics=DiagnosticCollector(),
+        )
+
+        assert not changed
+        assert lockfile.get_dependency("owner/pkg").deployed_files == [sibling]
+
+    def test_gated_dynamic_target_uri_never_treated_as_ghost(self, tmp_path):
+        """A consumer that declares only canonical ``copilot`` but uses the
+        gated ``copilot-app`` target (activated by flag/detection, NOT
+        declarable in apm.yml) must keep its ``copilot-app-db://`` rows across a
+        run that does not activate copilot-app -- while a windsurf ghost the
+        consumer never uses is still dropped. Guards against the declared
+        universe being *only* apm.yml canonical targets, which would regress the
+        #1716 copilot-app preservation contract."""
+        from apm_cli.install.manifest_reconcile import union_preserving
+        from apm_cli.install.phases.targets import declared_target_profiles
+
+        (tmp_path / "apm.yml").write_text("targets:\n  - copilot\n", encoding="utf-8")
+        ctx = SimpleNamespace(apm_package=SimpleNamespace(package_path=tmp_path), scope=None)
+        declared = declared_target_profiles(ctx)
+        uri = "copilot-app-db://workflows/old"
+        ghost = ".windsurf/rules/ghost.md"
+        files, _ = union_preserving(
+            current_files=[".agents/skills/demo/SKILL.md"],
+            current_hashes={},
+            prior_files=[".agents/skills/demo/SKILL.md", uri, ghost],
+            prior_hashes={},
+            targets=[_known("copilot")],
+            declared_targets=declared,
+        )
+        assert uri in files  # gated dynamic target row preserved
+        assert ghost not in files  # canonical undeclared target ghost dropped
+
+    def test_attach_deployed_files_drops_ghost_from_apm_yml_targets(self, tmp_path):
+        """End-to-end wiring: ``_attach_deployed_files`` reads the consumer's
+        declared targets from apm.yml and drops the windsurf ghost while keeping
+        the active-target file."""
+        (tmp_path / "apm.yml").write_text("targets:\n  - claude\n  - copilot\n", encoding="utf-8")
+        key = "owner/pkg"
+        ghost = ".windsurf/skills/demo/SKILL.md"
+        active_file = ".agents/skills/demo/SKILL.md"
+        prior = LockFile()
+        prior.add_dependency(
+            LockedDependency(
+                repo_url=key,
+                deployed_files=[active_file, ghost],
+                deployed_file_hashes={active_file: "sha256:a", ghost: "sha256:g"},
+            )
+        )
+        new = LockFile()
+        new.add_dependency(LockedDependency(repo_url=key))
+
+        ctx = SimpleNamespace(
+            package_deployed_files={key: [active_file]},
+            existing_lockfile=prior,
+            targets=[_known("claude"), _known("copilot")],
+            project_root=tmp_path,
+            apm_package=SimpleNamespace(package_path=tmp_path),
+            scope=None,
+        )
+        LockfileBuilder(ctx)._attach_deployed_files(new)
+
+        dep = new.get_dependency(key)
+        assert ghost not in dep.deployed_files
+        assert ghost not in dep.deployed_file_hashes
+        assert active_file in dep.deployed_files

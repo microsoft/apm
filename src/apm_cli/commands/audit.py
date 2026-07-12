@@ -535,7 +535,7 @@ def _audit_ci_gate(
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
     # files via unmanaged-files checks. --no-policy skips discovery.
-    from ..policy.discovery import discover_policy, discover_policy_with_chain
+    from ..policy.discovery import discover_policy_with_chain
     from ..policy.project_config import (
         read_project_fetch_failure_default,
     )
@@ -543,7 +543,7 @@ def _audit_ci_gate(
     fetch_result = None
     auto_discovered = False
     if policy_source and (not fail_fast or ci_result.passed):
-        fetch_result = discover_policy(
+        fetch_result = discover_policy_with_chain(
             cfg.project_root,
             policy_override=policy_source,
             no_cache=no_cache,
@@ -576,6 +576,7 @@ def _audit_ci_gate(
             "malformed",
             "cache_miss_fetch_fail",
             "garbage_response",
+            "incomplete_chain",
         )
         no_policy_outcomes = ("absent", "no_git_remote", "empty")
 
@@ -595,7 +596,7 @@ def _audit_ci_gate(
             source = fetch_result.source
             err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
             cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
-            if project_default == "block":
+            if fetch_result.outcome == "incomplete_chain" or project_default == "block":
                 click.echo(
                     f"[x] {cause} (policy.fetch_failure_default=block)",
                     err=True,
@@ -858,10 +859,16 @@ def _audit_content_scan(
             else:
                 logger.start("Scanning all installed packages...")
 
-            findings_by_file, files_scanned = scan_lockfile_packages(
-                project_root,
-                package_filter=package,
-            )
+            from apm_cli.deps.lockfile import LockfileFormatError
+
+            try:
+                findings_by_file, files_scanned = scan_lockfile_packages(
+                    project_root,
+                    package_filter=package,
+                )
+            except LockfileFormatError as exc:
+                logger.error(f"Cannot audit invalid apm.lock.yaml: {exc}")
+                sys.exit(1)
 
             if files_scanned == 0 and not external:
                 if package:

@@ -1,15 +1,46 @@
 """Base runtime adapter interface for APM."""
 
 import os
+import queue
+import signal
 import subprocess
+import threading
+import time
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from typing import Any
 
 from ..core.tls_trust import build_child_tls_env
 
 
+def _terminate_and_reap(process: subprocess.Popen) -> None:
+    """Terminate a runtime process group and always reap the parent."""
+    pid = getattr(process, "pid", None)
+    try:
+        if os.name != "nt" and isinstance(pid, int) and pid > 0:
+            os.killpg(pid, signal.SIGTERM)
+        else:
+            process.terminate()
+        process.wait(timeout=1)
+    except (OSError, TypeError, subprocess.TimeoutExpired):
+        try:
+            if os.name != "nt" and isinstance(pid, int) and pid > 0:
+                os.killpg(pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except (OSError, TypeError):
+            pass
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=1)
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+
+
 def _stream_subprocess_output(
-    cmd: list, timeout: int | None = None, env: dict | None = None
+    cmd: list,
+    timeout: float | None = None,
+    env: dict | None = None,
 ) -> tuple[list, int]:
     """Run *cmd* as a subprocess, stream stdout in real-time, and return output.
 
@@ -37,22 +68,62 @@ def _stream_subprocess_output(
         encoding="utf-8",
         bufsize=1,  # Line buffered
         env=env,
+        start_new_session=os.name != "nt",
     )
 
-    output_lines = []
+    output_lines: list[str] = []
+    stream_queue: queue.Queue[str | None] = queue.Queue(maxsize=1024)
+    cancelled = threading.Event()
 
-    for line in iter(process.stdout.readline, ""):
-        print(line, end="", flush=True)
-        output_lines.append(line)
+    def _queue_item(item: str | None) -> None:
+        while not cancelled.is_set():
+            try:
+                stream_queue.put(item, timeout=0.1)
+                return
+            except queue.Full:
+                continue
 
+    def _read_output() -> None:
+        try:
+            if process.stdout is not None:
+                for line in iter(process.stdout.readline, ""):
+                    _queue_item(line)
+        finally:
+            _queue_item(None)
+
+    reader = threading.Thread(target=_read_output, daemon=True)
+    reader.start()
+
+    def _expire() -> None:
+        cancelled.set()
+        _terminate_and_reap(process)
+        reader.join(timeout=1)
+
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    stream_closed = False
+    while not stream_closed:
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            _expire()
+            raise subprocess.TimeoutExpired(cmd, timeout, output="".join(output_lines))
+        try:
+            item = stream_queue.get(timeout=remaining)
+        except queue.Empty:
+            _expire()
+            raise subprocess.TimeoutExpired(cmd, timeout, output="".join(output_lines)) from None
+        if item is None:
+            stream_closed = True
+            continue
+        print(item, end="", flush=True)
+        output_lines.append(item)
+
+    reader.join(timeout=1)
+    remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
     try:
-        return_code = process.wait(timeout=timeout)
+        return_code = process.wait(timeout=remaining)
     except subprocess.TimeoutExpired:
-        process.kill()
-        for line in iter(process.stdout.readline, ""):
-            output_lines.append(line)
-        process.stdout.close()
-        raise
+        _expire()
+        raise subprocess.TimeoutExpired(cmd, timeout, output="".join(output_lines)) from None
     return output_lines, return_code
 
 

@@ -104,6 +104,11 @@ components:
     upstream: https://github.com/uiri/toml
     spdx: MIT
     copyright_snippet: Copyright 2013-2019 William Pearson
+  - name: tomlkit
+    pyproject_name: tomlkit
+    upstream: https://github.com/python-poetry/tomlkit
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2018 Sébastien Eustace
   - name: rich
     pyproject_name: rich
     upstream: https://github.com/Textualize/rich

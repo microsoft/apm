@@ -7,6 +7,7 @@ from apm_cli.utils.console — no new output primitives.
 
 from dataclasses import dataclass
 
+from apm_cli.models.results import InstallDisposition
 from apm_cli.utils.console import (
     _rich_echo,
     _rich_error,
@@ -127,6 +128,16 @@ class CommandLogger:
     def error(self, message: str, symbol: str = "error"):
         """Log an error."""
         _rich_error(message, symbol=symbol)
+
+    def error_detail(self, message: str):
+        """Log supporting error context that must remain visible by default."""
+        _rich_echo(message)
+
+    def exception(self, message: str):
+        """Log an unexpected error and own the verbose recovery hint."""
+        self.error(message)
+        if not self.verbose:
+            self.info("Run with --verbose for detailed diagnostics")
 
     def verbose_detail(self, message: str):
         """Log a detail only when verbose mode is enabled."""
@@ -762,6 +773,7 @@ class InstallLogger(CommandLogger):
         errors: int = 0,
         stale_cleaned: int = 0,
         elapsed_seconds: float | None = None,
+        disposition: InstallDisposition = InstallDisposition.SUCCESS,
     ):
         """Log final install summary.
 
@@ -798,11 +810,31 @@ class InstallLogger(CommandLogger):
         if elapsed_seconds is not None:
             timing_suffix = f" in {elapsed_seconds:.1f}s"
 
-        if parts:
+        if disposition is InstallDisposition.DRY_RUN:
+            summary = " and ".join(parts) if parts else "no changes"
+            _rich_info(
+                f"Dry run completed: would install {summary}{timing_suffix}.",
+                symbol="info",
+            )
+        elif disposition is InstallDisposition.FAILED:
+            error_suffix = f" with {errors} error(s)" if errors > 0 else ""
+            _rich_error(
+                "Installation failed"
+                f"{error_suffix}{timing_suffix}. "
+                "No install transaction changes were committed.",
+                symbol="error",
+            )
+        elif parts:
             summary = " and ".join(parts)
             if errors > 0:
                 _rich_warning(
                     f"Installed {summary}{cleanup_suffix}{timing_suffix} with {errors} error(s).",
+                    symbol="warning",
+                )
+            elif disposition is InstallDisposition.PARTIAL_SUCCESS:
+                _rich_warning(
+                    f"Installed {summary}{cleanup_suffix}{timing_suffix}; "
+                    "some requested packages were skipped.",
                     symbol="warning",
                 )
             else:
@@ -833,4 +865,11 @@ class InstallLogger(CommandLogger):
         _rich_warning(
             f"Install interrupted after {elapsed_seconds:.1f}s.",
             symbol="warning",
+        )
+
+    def install_failed(self, elapsed_seconds: float) -> None:
+        """Render a handled terminal failure when no full summary ran."""
+        _rich_error(
+            f"Install failed after {elapsed_seconds:.1f}s.",
+            symbol="error",
         )

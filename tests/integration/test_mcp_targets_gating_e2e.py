@@ -78,6 +78,31 @@ def _codex_mcp_path(project: Path) -> Path:
 
 
 class TestMCPTargetsGatingE2E:
+    def test_user_scope_claude_install_honors_claude_config_dir(self, tmp_path, monkeypatch):
+        project = tmp_path / "project"
+        project.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        config_dir = tmp_path / "relocated-claude"
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+        installed = MCPIntegrator.install(
+            [_make_stdio_dep("relocated-claude-mcp")],
+            runtime="claude",
+            project_root=project,
+            user_scope=True,
+            explicit_target="claude",
+        )
+
+        relocated_config = config_dir / ".claude.json"
+        default_config = fake_home / ".claude.json"
+        assert installed == 1
+        assert relocated_config.is_file()
+        data = json.loads(relocated_config.read_text(encoding="utf-8"))
+        assert data["mcpServers"]["relocated-claude-mcp"]["command"] == "echo"
+        assert not default_config.exists()
+
     def test_targets_whitelist_copilot_suppresses_foreign_writes(
         self, tmp_path, capsys, monkeypatch
     ):

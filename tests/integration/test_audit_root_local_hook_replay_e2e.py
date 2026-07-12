@@ -69,12 +69,14 @@ def _install(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _codex_marker(root: Path) -> str:
-    """Return the first APM ownership marker from Codex hooks.json."""
+    """Return the first APM ownership marker from the Codex sidecar."""
     hooks_path = root / ".codex" / "hooks.json"
     data = json.loads(hooks_path.read_text(encoding="utf-8"))
     entries = data["hooks"]["PreToolUse"]
     assert len(entries) == 1
-    marker = entries[0]["_apm_source"]
+    assert "_apm_source" not in entries[0]
+    sidecar = json.loads((root / ".codex" / "apm-hooks.json").read_text(encoding="utf-8"))
+    marker = sidecar["PreToolUse"][0]["_apm_source"]
     assert isinstance(marker, str)
     return marker
 

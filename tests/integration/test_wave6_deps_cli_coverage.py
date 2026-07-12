@@ -396,6 +396,89 @@ class TestDepsTree:
         assert result.exit_code == 0
         assert "parent-pkg" in result.output
 
+    def test_tree_retains_identity_for_colliding_package_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CLI tree renders each canonical identity despite colliding names."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            dedent("""\
+                name: consumer
+                version: 0.1.0
+                dependencies:
+                  apm:
+                    - example/monorepo
+            """)
+        )
+        (tmp_path / "apm.lock.yaml").write_text(
+            dedent("""\
+                lockfile_version: "1"
+                dependencies:
+                  - repo_url: example/monorepo
+                    name: shared-display-name
+                    depth: 1
+                    version: "1.0.0"
+                  - repo_url: example/monorepo
+                    name: shared-display-name
+                    virtual_path: packages/inner
+                    is_virtual: true
+                    depth: 2
+                    resolved_by: example/monorepo
+                    version: "1.0.0"
+                  - repo_url: example/monorepo
+                    name: shared-display-name
+                    virtual_path: packages/leaf
+                    is_virtual: true
+                    depth: 3
+                    resolved_by: example/monorepo
+                    version: "1.0.0"
+            """)
+        )
+
+        result = CliRunner().invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0, result.output
+        identities = [
+            "example/monorepo@1.0.0",
+            "example/monorepo/packages/inner@1.0.0",
+            "example/monorepo/packages/leaf@1.0.0",
+        ]
+        positions = [result.output.index(identity) for identity in identities]
+        assert positions == sorted(positions)
+        assert all(result.output.count(identity) == 1 for identity in identities)
+
+    def test_tree_surfaces_dependency_with_ambiguous_legacy_parent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Legacy parent ambiguity remains visible instead of dropping a child."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text("name: consumer\nversion: 0.1.0\n")
+        (tmp_path / "apm.lock.yaml").write_text(
+            dedent("""\
+                lockfile_version: "1"
+                dependencies:
+                  - repo_url: example/shared
+                    host: git.example-one.test
+                    depth: 1
+                    version: "1.0.0"
+                  - repo_url: example/shared
+                    host: git.example-two.test
+                    depth: 1
+                    version: "1.0.0"
+                  - repo_url: example/child
+                    depth: 2
+                    resolved_by: example/shared
+                    version: "1.0.0"
+            """)
+        )
+
+        result = CliRunner().invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("example/child@1.0.0") == 1
+        assert "could not place in tree" in result.output
+        assert "run apm install" in result.output
+
     def test_tree_no_lockfile_with_modules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -678,6 +761,33 @@ class TestResolveScopeDepsEdgeCases:
         result = CliRunner().invoke(cli, ["deps", "list"])
         assert result.exit_code == 0
         assert "local-pkg" in result.output
+
+    def test_local_transitive_dependency_matches_installed_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A locked local transitive package matches its installed path."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(_APM_YML_SIMPLE)
+        lockfile_content = dedent("""\
+            lockfile_version: "1"
+            dependencies:
+              - repo_url: _local/sub-package
+                name: sub-package
+                source: local
+                local_path: ../sub-package
+                depth: 2
+                resolved_by: _local/parent-package
+        """)
+        (tmp_path / "apm.lock.yaml").write_text(lockfile_content)
+        modules = tmp_path / "apm_modules"
+        _make_pkg(modules, "_local", "sub-package")
+
+        result = CliRunner().invoke(cli, ["deps", "list"])
+
+        assert result.exit_code == 0, result.output
+        assert "_local/sub-package" in result.output
+        assert "local" in result.output
+        assert "orphaned package(s) found" not in result.output
 
     def test_modules_dir_with_dotfile_dirs_skipped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

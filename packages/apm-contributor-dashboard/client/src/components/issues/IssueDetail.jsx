@@ -1,14 +1,16 @@
-import { createResource, Show } from "solid-js";
+import { createResource, createSignal, Show } from "solid-js";
 import Modal from "../Modal";
 import { getIssueDetail, startSession, openSession } from "../../services/api";
 import { renderMarkdown } from "../../utils/markdown";
 import { showToast } from "../Toast";
 import CommentComposer from "../CommentComposer";
 import { canTriage } from "../../stores/permissions";
+import IssueComments from "./IssueComments";
 
 export default function IssueDetail(props) {
   const issue = () => props.issue;
   const [detail, { refetch }] = createResource(() => issue()?.number, getIssueDetail);
+  const [subTab, setSubTab] = createSignal("details");
 
   async function handleStart() {
     try {
@@ -62,7 +64,26 @@ export default function IssueDetail(props) {
                 {d().labels.map(l => <span class="label-tag">{l}</span>)}
               </div>
             </Show>
-            <div class="issue-body" innerHTML={renderMarkdown(d().body)} />
+            <div class="activity-body-tabs">
+              <button
+                class={`activity-body-tab ${subTab() === "details" ? "active" : ""}`}
+                onClick={() => setSubTab("details")}
+              >
+                Details
+              </button>
+              <button
+                class={`activity-body-tab ${subTab() === "comments" ? "active" : ""}`}
+                onClick={() => setSubTab("comments")}
+              >
+                Comments ({d().comments})
+              </button>
+            </div>
+            <Show when={subTab() === "details"}>
+              <div class="issue-body" innerHTML={renderMarkdown(d().body)} />
+            </Show>
+            <Show when={subTab() === "comments"}>
+              <IssueComments commentList={d().commentList || []} />
+            </Show>
             <CommentComposer
               type="issue"
               number={issue().number}

@@ -333,6 +333,7 @@ class TestCompileEndToEnd:
         runner = CliRunner()
         result = runner.invoke(self._cli(), ["compile"], catch_exceptions=False)
         assert result.exit_code == 0
+        assert (tmp_path / "AGENTS.md").is_file()
 
     def test_compile_single_agents_mode(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

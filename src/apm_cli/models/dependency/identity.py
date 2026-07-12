@@ -5,9 +5,14 @@ file-length guardrail. These are pure, stateless helpers with no dependency on
 ``DependencyReference`` internals; both ``DependencyReference`` and
 ``LockedDependency`` reuse them so the two identity models share one body shape
 without collapsing their distinct local-detection semantics.
+
+``normalize_package_repo_url`` is the single casing-normalization boundary for
+package identity. Callers must not lowercase repository paths independently.
 """
 
 import re
+
+from ...utils.github_host import default_host, is_github_hostname
 
 # Allowed character set for a single repository path segment.
 #
@@ -26,6 +31,37 @@ _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
 
 
+def normalize_package_repo_url(
+    repo_url: str,
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> str:
+    """Return the canonical repository path for package identity.
+
+    GitHub and package-registry identifiers are case-insensitive, so their
+    owner/repository path is lowercase at the model boundary. Unknown git
+    hosts retain their path casing because their repository semantics may be
+    case-sensitive.
+    """
+    if is_local or source == "local" or is_marketplace:
+        return repo_url
+
+    if source == "registry" or registry_prefix:
+        return repo_url.lower()
+
+    configured_default_host = default_host()
+    effective_host = host or configured_default_host
+    if effective_host.lower() == configured_default_host.lower() or is_github_hostname(
+        effective_host
+    ):
+        return repo_url.lower()
+    return repo_url
+
+
 def build_dependency_unique_key(
     repo_url: str,
     *,
@@ -35,6 +71,8 @@ def build_dependency_unique_key(
     is_virtual: bool = False,
     virtual_path: str | None = None,
     registry_prefix: str | None = None,
+    declaring_parent: str | None = None,
+    anchored_local_path: str | None = None,
 ) -> str:
     """Return the lockfile/dedup key for a dependency identity.
 
@@ -52,6 +90,8 @@ def build_dependency_unique_key(
     lockfile key correspondence used by re-install and orphan detection.
     """
     if source == "local" and local_path:
+        if anchored_local_path:
+            return f"local:{anchored_local_path}"
         return local_path
 
     key = repo_url

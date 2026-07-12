@@ -220,6 +220,8 @@ apm install
 
 The cache short-circuits already-downloaded packages and the integrate phase overwrites partially-deployed files.
 
+If resolution rejects a cyclic dependency graph, fix the package manifests and run `apm install` again. APM rolls back only the package snapshots staged by the rejected resolution, so no manual `apm_modules/` deletion is required.
+
 If files in `apm_modules/` or under target harness directories look corrupt, force a fresh deploy by combining cache bypass with overwrite:
 
 ```bash

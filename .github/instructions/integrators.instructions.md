@@ -12,7 +12,7 @@ APM runs inside repositories of any size — from single-package repos to monore
 1. **One base, many file types.** All file-level integrators share a single `BaseIntegrator` infrastructure for collision detection, manifest-based sync, path security, link resolution, and file discovery. New integrators add *what* to deploy, never *how* to deploy. When logic belongs to more than one integrator, push it into `BaseIntegrator`.
 2. **Pay only for what you touch.** Operations must be proportional to the files a single package deploys, not the size of the workspace or the total managed-files set. Pre-normalize once, partition once, look up in O(1). Avoid full-tree walks, per-file parent cleanup, or repeated set scans.
 
-When evolving integration logic — new file types, richer transforms, cross-package awareness — preserve these properties. If a change would violate either principle, refactor the base class first.
+When evolving integration logic -- new file types, richer transforms, cross-package awareness -- preserve these properties. If a change would violate either principle, refactor the base class first. This subsystem is the integration-specific instance of the repo-wide single-canonical-owner rule; see architecture.instructions.md.
 
 ## Required structure
 

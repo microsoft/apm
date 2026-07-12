@@ -823,7 +823,7 @@ class TestRestoreManifestFromSnapshot:
     """_restore_manifest_from_snapshot — atomic write."""
 
     def test_restore_writes_original_bytes(self, tmp_path: Path) -> None:
-        from apm_cli.commands.install import _restore_manifest_from_snapshot
+        from apm_cli.install.transaction import _restore_manifest_from_snapshot
 
         apm_yml = tmp_path / "apm.yml"
         original = b"name: original\n"
@@ -834,7 +834,7 @@ class TestRestoreManifestFromSnapshot:
         assert apm_yml.read_bytes() == original
 
     def test_restore_creates_file_if_missing(self, tmp_path: Path) -> None:
-        from apm_cli.commands.install import _restore_manifest_from_snapshot
+        from apm_cli.install.transaction import _restore_manifest_from_snapshot
 
         apm_yml = tmp_path / "apm.yml"
         original = b"name: fresh\n"
@@ -848,8 +848,8 @@ class TestMaybeRollbackManifest:
     """_maybe_rollback_manifest — no-op when snapshot is None."""
 
     def test_noop_when_snapshot_is_none(self, tmp_path: Path) -> None:
-        from apm_cli.commands.install import _maybe_rollback_manifest
         from apm_cli.core.command_logger import InstallLogger
+        from apm_cli.install.transaction import _maybe_rollback_manifest
 
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_bytes(b"name: current\n")
@@ -862,8 +862,8 @@ class TestMaybeRollbackManifest:
         logger.progress.assert_not_called()
 
     def test_restores_when_snapshot_provided(self, tmp_path: Path) -> None:
-        from apm_cli.commands.install import _maybe_rollback_manifest
         from apm_cli.core.command_logger import InstallLogger
+        from apm_cli.install.transaction import _maybe_rollback_manifest
 
         apm_yml = tmp_path / "apm.yml"
         original = b"name: original\n"

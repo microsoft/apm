@@ -20,28 +20,17 @@ from apm_cli.core.errors import (
     render_conflicting_schema_error,
     render_unknown_target_error,
 )
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES, manifest_target_names
 
 # Canonical target names accepted by APM.
-CANONICAL_TARGETS: frozenset[str] = frozenset(
-    {
-        "claude",
-        "copilot",
-        "cursor",
-        "opencode",
-        "codex",
-        "gemini",
-        "antigravity",
-        "windsurf",
-        "kiro",
-        "agent-skills",
-    }
-)
+CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
 
 
 def _validate_canonical(tokens: list[str]) -> None:
     """Validate every token is in CANONICAL_TARGETS. Raises UnknownTargetError."""
     for token in tokens:
-        if token not in CANONICAL_TARGETS:
+        capability = TARGET_CAPABILITIES.get(token)
+        if capability is None or capability.experimental_flag is not None or capability.mcp_only:
             raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
 
 

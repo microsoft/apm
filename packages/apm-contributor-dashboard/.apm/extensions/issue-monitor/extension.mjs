@@ -29,6 +29,7 @@ let lastPrFingerprint = null;
 // Persist started sessions to disk so they survive extension reloads
 const __extensionDir = dirname(fileURLToPath(import.meta.url));
 const SESSION_FILE = join(__extensionDir, ".sessions.json");
+const SESSION_IDS_FILE = join(__extensionDir, ".session-ids.json");
 
 function loadSessions() {
     try {
@@ -37,14 +38,24 @@ function loadSessions() {
     } catch { return new Set(); }
 }
 
+// Map<issueNumber, projectSessionId> for direct navigation without LLM lookup
+function loadSessionIds() {
+    try {
+        const data = JSON.parse(readFileSync(SESSION_IDS_FILE, "utf-8"));
+        return new Map(typeof data === "object" && !Array.isArray(data) ? Object.entries(data).map(([k, v]) => [Number(k), v]) : []);
+    } catch { return new Map(); }
+}
+
 function saveSessions() {
     try {
         mkdirSync(dirname(SESSION_FILE), { recursive: true });
         writeFileSync(SESSION_FILE, JSON.stringify([...startedSessions]));
+        writeFileSync(SESSION_IDS_FILE, JSON.stringify(Object.fromEntries(sessionIds)));
     } catch {}
 }
 
 const startedSessions = loadSessions();
+const sessionIds = loadSessionIds(); // issue number -> project_session_id
 
 // -- Concurrency semaphore for gh CLI calls --
 
@@ -197,6 +208,7 @@ async function startServer(instanceId) {
         ghExec,
         session,
         startedSessions,
+        sessionIds,
         saveSessions,
         getIssueData: () => issueData,
         getPrData: () => prData,
@@ -272,6 +284,29 @@ const session = await joinSession({
                         if (ctx.input.session) issue.session = ctx.input.session;
                         lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                         return { updated: issue.number, status: issue.status, timestamp: lastUpdated };
+                    },
+                },
+                {
+                    name: "register_session",
+                    description: "Store the project_session_id for an issue so the dashboard can navigate directly without a session lookup. Call this immediately after open_issue_session succeeds.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            issue_number: { type: "number", description: "The issue number the session was created for" },
+                            session_id: { type: "string", description: "The project_session_id returned by open_issue_session" },
+                        },
+                        required: ["issue_number", "session_id"],
+                    },
+                    handler: async (ctx) => {
+                        const { issue_number, session_id } = ctx.input;
+                        // Validate session_id is UUID-shaped before persisting or injecting into prompts.
+                        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(session_id || "")) {
+                            return { ok: false, error: "invalid session_id: must be a UUID" };
+                        }
+                        sessionIds.set(issue_number, session_id);
+                        startedSessions.add(issue_number);
+                        saveSessions();
+                        return { ok: true, issue_number, session_id };
                     },
                 },
                 {

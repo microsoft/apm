@@ -103,7 +103,7 @@ class TestSkillIntegratorSkipsSelfEntry:
         """The self-entry's local skills must not pollute the package-owner map.
 
         The self-entry has repo_url='<self>' / virtual_path=None which would
-        give a bogus short_owner of '<self>'. It must be filtered out.
+        give a bogus owner key of '<self>'. It must be filtered out.
         """
         lock = _lockfile_with_self_and_remote()
         # The self-entry has a deployed skill file that would otherwise land
@@ -121,5 +121,8 @@ class TestSkillIntegratorSkipsSelfEntry:
         # Self-entry's owner string would have been '<self>' if not skipped.
         assert "<self>" not in owned_by.values()
         assert "<self>" not in native_owners.values()
-        # The remote dep's skill leaf-name is 'SKILL.md' (last path segment).
-        assert owned_by.get("SKILL.md") == "repo"
+        # Owner keys are the full unique dependency identity (owner/repo),
+        # not the last path segment -- two different packages can share a
+        # repo/leaf name, and comparing only the leaf would falsely treat
+        # them as the same owner (see _build_ownership_maps).
+        assert owned_by.get("SKILL.md") == "owner/repo"

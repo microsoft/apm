@@ -413,36 +413,31 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
     # Optional dedicated-registry routing (design §4.5). When ``registry``
     # is set, ``version`` is interpreted as a semver range and the plugin
     # resolves via the dedicated-registry resolver. The marketplace.json
-    # parser is intentionally permissive — invalid values are downgraded
-    # to "no registry routing" and a debug log line, so a malformed entry
-    # doesn't break a whole marketplace fetch.
+    # parser fails closed when registry intent is malformed so resolution
+    # never silently falls back to Git.
     registry_name = ""
     raw_registry = entry.get("registry")
     if raw_registry is not None:
         if isinstance(raw_registry, str) and raw_registry.strip():
             registry_name = raw_registry.strip()
         else:
-            logger.debug(
-                "Plugin '%s' has invalid 'registry' field (expected non-empty string), ignoring",
-                name,
+            raise ValueError(
+                f"Plugin {name!r} has invalid 'registry' field; expected a non-empty string"
             )
 
-    if registry_name and version:
-        # Validate semver range for registry-routed plugins. A bad ref
-        # surfaces here as a debug log + downgrade to "no registry"
-        # rather than a hard fail, since one malformed plugin shouldn't
-        # poison a whole marketplace.
+    if registry_name:
+        if not version:
+            raise ValueError(
+                f"Plugin {name!r} routes through registry {registry_name!r} "
+                "but declares no version selector"
+            )
         from apm_cli.deps.registry.semver import is_semver_range
 
         if not is_semver_range(version):
-            logger.debug(
-                "Plugin '%s' has registry='%s' but version '%s' is not a "
-                "semver range; ignoring registry routing for this entry",
-                name,
-                registry_name,
-                version,
+            raise ValueError(
+                f"Plugin {name!r} routes through registry {registry_name!r} "
+                f"but version {version!r} is not a valid semver selector"
             )
-            registry_name = ""
 
     return MarketplacePlugin(
         name=name,

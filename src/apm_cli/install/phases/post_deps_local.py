@@ -86,7 +86,12 @@ def run(ctx: InstallContext) -> None:
                 recorded_hashes=_prev_hashes,
             )
             # Failed paths stay in lockfile so we retry next time.
-            ctx.local_deployed_files.extend(_cleanup_result.failed)
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_context_local_files(
+                ctx,
+                [*ctx.local_deployed_files, *_cleanup_result.failed],
+            )
             if _cleanup_result.deleted_targets:
                 BaseIntegrator.cleanup_empty_parents(
                     _cleanup_result.deleted_targets, ctx.project_root
@@ -112,19 +117,39 @@ def run(ctx: InstallContext) -> None:
     # the per-dependency reconciliation in phases/lockfile.py and with
     # on-disk stale cleanup, so a multi-target deploy keeps content-integrity
     # coverage for every committed deploy target (issue #1716).
-    from apm_cli.install.manifest_reconcile import union_preserving as _union
+    from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+    from apm_cli.install.phases.targets import declared_target_profiles
 
     _current_files = sorted(ctx.local_deployed_files)
     _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
-    _files, _hashes = _union(
-        _current_files,
-        _current_hashes,
-        list(_persist_lock.local_deployed_files),
-        dict(_persist_lock.local_deployed_file_hashes),
-        ctx.targets,
+    _ghost_count = 0
+
+    def _log_local_ghost_drop(path: str) -> None:
+        nonlocal _ghost_count
+        _ghost_count += 1
+        if logger:
+            logger.verbose_detail(
+                f"Removed stale local lockfile path {path} (target not declared in apm.yml)"
+            )
+
+    _files, _hashes = reconcile_deployed_block(
+        project_root=ctx.project_root,
+        dep_key="<local .apm/>",
+        current_files=_current_files,
+        current_hashes=_current_hashes,
+        prior_files=list(_persist_lock.local_deployed_files),
+        prior_hashes=dict(_persist_lock.local_deployed_file_hashes),
+        active_targets=ctx.targets,
+        declared_targets=declared_target_profiles(ctx),
+        diagnostics=ctx.diagnostics,
+        on_ghost_drop=_log_local_ghost_drop,
     )
-    _persist_lock.local_deployed_files = sorted(_files)
-    _persist_lock.local_deployed_file_hashes = _hashes
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    DeploymentLedgerCodec.replace_legacy_owner(_persist_lock, ".", sorted(_files), _hashes)
+    if logger and _ghost_count:
+        noun = "entry" if _ghost_count == 1 else "entries"
+        logger.info(f"Repaired {_ghost_count} inactive-target local lockfile {noun}")
     # Only write if changed.
     _existing_for_cmp = _LF.read(_lock_path)
     if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):

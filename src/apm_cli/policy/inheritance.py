@@ -258,6 +258,8 @@ def _merge_manifest(parent: ManifestPolicy, child: ManifestPolicy) -> ManifestPo
         required_fields=_union(parent.required_fields, child.required_fields),
         scripts=_escalate(_SCRIPTS_LEVELS, parent.scripts, child.scripts),
         content_types=merged_content_types,
+        require_explicit_includes=parent.require_explicit_includes
+        or child.require_explicit_includes,
     )
 
 

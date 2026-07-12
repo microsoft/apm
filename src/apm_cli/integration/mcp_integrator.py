@@ -16,14 +16,23 @@ import logging
 import re
 import shutil
 import warnings
+from collections.abc import MutableMapping
 from datetime import datetime, timezone
 from pathlib import Path
 
+import tomlkit
+from tomlkit.exceptions import TOMLKitError
+
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
+from apm_cli.integration.mcp_config_view import (
+    _collect_transitive_compat,
+    _deduplicate,
+    _get_server_configs,
+    _get_server_provenance,
+)
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
     _rich_error,
@@ -124,15 +133,15 @@ def _clean_toml_mcp_config(
     if not config_path.exists():
         return 0
     try:
-        import toml as _toml
-
-        config = _toml.loads(config_path.read_text(encoding="utf-8"))
+        config = tomlkit.parse(config_path.read_text(encoding="utf-8"))
         servers = config.get("mcp_servers", {})
+        if not isinstance(servers, MutableMapping):
+            return 0
         removed = [n for n in stale_names if n in servers]
         for name in removed:
             del servers[name]
         if removed:
-            write_text_lf(config_path, _toml.dumps(config))
+            atomic_write_text(config_path, tomlkit.dumps(config), new_file_mode=0o600)
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
                 if use_rich:
@@ -140,7 +149,7 @@ def _clean_toml_mcp_config(
                 elif logger is not None:
                     logger.progress(msg)
         return len(removed)
-    except Exception:
+    except (OSError, TOMLKitError, UnicodeDecodeError):
         _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
         return 0
 
@@ -210,66 +219,14 @@ class MCPIntegrator:
         logger=None,
         diagnostics=None,
     ) -> list:
-        """Collect MCP dependencies from resolved APM packages listed in apm.lock.
-
-        Only scans apm.yml files for packages present in apm.lock to avoid
-        picking up stale/orphaned packages from previous installs.
-        Falls back to scanning all apm.yml files if no lock file is available.
-
-        Self-defined servers (registry: false) from direct dependencies
-        (depth == 1) are auto-trusted.  Self-defined servers from transitive
-        dependencies (depth > 1) are skipped with a warning unless
-        *trust_private* is True.
-        """
-        if logger is None:
-            logger = NullCommandLogger()
-        if not apm_modules_dir.exists():
-            return []
-
-        from apm_cli.models.apm_package import APMPackage
-
-        # Build set of expected apm.yml paths from apm.lock
-        resolved, direct_paths = resolve_locked_apm_yml_paths(apm_modules_dir, lock_path)
-        apm_yml_paths = resolved if resolved is not None else apm_modules_dir.rglob("apm.yml")
-
-        collected = []
-        for apm_yml_path in apm_yml_paths:
-            try:
-                pkg = APMPackage.from_apm_yml(apm_yml_path)
-                mcp = pkg.get_mcp_dependencies()
-                if mcp:
-                    is_direct = apm_yml_path.resolve() in direct_paths
-                    for dep in mcp:
-                        if hasattr(dep, "is_self_defined") and dep.is_self_defined:
-                            if is_direct:
-                                logger.progress(
-                                    f"Trusting direct dependency MCP '{dep.name}' from '{pkg.name}'"
-                                )
-                            elif trust_private:
-                                logger.progress(
-                                    f"Trusting self-defined MCP server '{dep.name}' "
-                                    f"from transitive package '{pkg.name}' (--trust-transitive-mcp)"
-                                )
-                            else:
-                                _trust_msg = (
-                                    f"Transitive package '{pkg.name}' declares self-defined "
-                                    f"MCP server '{dep.name}' (registry: false). "
-                                    f"Re-declare it in your apm.yml or use --trust-transitive-mcp."
-                                )
-                                if diagnostics:
-                                    diagnostics.warn(_trust_msg)
-                                else:
-                                    logger.warning(_trust_msg)
-                                continue
-                        collected.append(dep)
-            except Exception:
-                _log.debug(
-                    "Skipping package at %s: failed to parse apm.yml",
-                    apm_yml_path,
-                    exc_info=True,
-                )
-                continue
-        return collected
+        """Compatibility delegate for canonical MCP source traversal."""
+        return _collect_transitive_compat(
+            apm_modules_dir,
+            lock_path,
+            trust_private,
+            logger=logger,
+            diagnostics=diagnostics,
+        )
 
     # ------------------------------------------------------------------
     # Deduplication
@@ -282,7 +239,7 @@ class MCPIntegrator:
         Root deps are listed before transitive, so root overlays take
         precedence.
         """
-        return deduplicate_deps(deps)
+        return _deduplicate(deps)
 
     # ------------------------------------------------------------------
     # Server info helpers
@@ -442,13 +399,22 @@ class MCPIntegrator:
     @staticmethod
     def get_server_configs(mcp_deps: list) -> builtins.dict:
         """Extract server configs as {name: config_dict} from MCP dependencies."""
-        configs: builtins.dict = {}
-        for dep in mcp_deps:
-            if hasattr(dep, "to_dict") and hasattr(dep, "name"):
-                configs[dep.name] = dep.to_dict()
-            elif isinstance(dep, str):
-                configs[dep] = {"name": dep}
-        return configs
+        return _get_server_configs(mcp_deps)
+
+    @staticmethod
+    def get_server_provenance(mcp_deps: list) -> builtins.dict:
+        """Extract transitive provenance as {name: declaring_package} from MCP deps.
+
+        Only servers carrying a ``resolved_by`` (set by
+        :meth:`collect_transitive` for servers declared by a sub-package)
+        are included. Servers declared directly in the root manifest have
+        ``resolved_by is None`` and are omitted -- absence means "direct",
+        mirroring the dependency-side convention. Because ``mcp_deps`` is the
+        final deduplicated list (root entries listed first, first-wins), a
+        server declared both in the root and transitively resolves to the
+        root entry and is correctly treated as direct here (#2081).
+        """
+        return _get_server_provenance(mcp_deps)
 
     @staticmethod
     def _append_drifted_to_install_list(
@@ -777,6 +743,8 @@ class MCPIntegrator:
         lock_path: Path | None = None,
         *,
         mcp_configs: builtins.dict | None = None,
+        mcp_target_servers: builtins.dict | None = None,
+        mcp_config_provenance: builtins.dict | None = None,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
@@ -788,6 +756,12 @@ class MCPIntegrator:
             lock_path: Path to the lockfile.  Defaults to ``apm.lock.yaml`` in CWD.
             mcp_configs: Keyword-only.  When provided, overwrites ``mcp_configs``
                          in the lockfile (used for drift-detection baseline).
+            mcp_target_servers: Keyword-only. Per-target APM-owned server names.
+            mcp_config_provenance: Keyword-only.  When provided, overwrites
+                         ``mcp_config_provenance`` (name -> declaring package for
+                         transitively-contributed servers). Passed in lockstep
+                         with ``mcp_configs`` so the two never diverge (#2081).
+                         ``None`` leaves the existing value untouched.
         """
         if lock_path is None:
             lock_path = get_lockfile_path(Path.cwd())
@@ -801,6 +775,30 @@ class MCPIntegrator:
             lockfile.mcp_servers = sorted(mcp_server_names)
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
+            if mcp_target_servers is not None:
+                from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+                DeploymentLedgerCodec.replace_mcp_target_servers(
+                    lockfile,
+                    {
+                        target: sorted(servers)
+                        for target, servers in sorted(mcp_target_servers.items())
+                        if servers
+                    },
+                )
+            if mcp_config_provenance is not None:
+                lockfile.mcp_config_provenance = mcp_config_provenance
+            # Invariant: provenance only carries entries that still have a live
+            # config. Prune dangling keys unconditionally so a caller that
+            # rewrites mcp_configs without an explicit provenance argument (e.g.
+            # the single-server ``apm install mcp`` path) can never leave a
+            # stale entry that would exempt a genuinely orphaned server (#2081).
+            if lockfile.mcp_config_provenance:
+                lockfile.mcp_config_provenance = {
+                    name: pkg
+                    for name, pkg in lockfile.mcp_config_provenance.items()
+                    if name in lockfile.mcp_configs
+                }
             if lockfile.is_semantically_equivalent(existing_lockfile):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return
@@ -1105,6 +1103,15 @@ class MCPIntegrator:
             return out
 
         # --- step 3 (project scope): delegate to the v2 resolver -------
+        if flag is not None:
+            project_tokens = flag if isinstance(flag, list) else [flag]
+            if "all" in project_tokens:
+                from apm_cli.core.target_catalog import expand_all
+
+                flag = [
+                    RUNTIME_TO_CANONICAL_TARGET.get(target, target)
+                    for target in expand_all("install")
+                ]
         from apm_cli.core.errors import (
             AmbiguousHarnessError,
             NoHarnessError,
@@ -1160,10 +1167,11 @@ class MCPIntegrator:
         stored_mcp_configs: dict = None,  # noqa: RUF013
         project_root=None,
         user_scope: bool = False,
-        explicit_target: str | None = None,
+        explicit_target: str | list[str] | None = None,
         logger=None,
         diagnostics=None,
         scope=None,
+        managed_target_servers: builtins.dict | None = None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -1184,6 +1192,9 @@ class MCPIntegrator:
             scope: InstallScope (PROJECT or USER). When USER, only
                 runtimes whose adapter declares ``supports_user_scope``
                 are targeted; workspace-only runtimes are skipped.
+            managed_target_servers: Mutable per-target ownership state. Existing
+                entries are reconciled to active targets and successful writes
+                are recorded in place.
 
         Returns:
             Number of MCP servers newly configured or updated.
@@ -1203,4 +1214,5 @@ class MCPIntegrator:
             logger=logger,
             diagnostics=diagnostics,
             scope=scope,
+            managed_target_servers=managed_target_servers,
         )

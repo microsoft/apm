@@ -8,6 +8,11 @@ import time
 from pathlib import Path
 
 from ..output.script_formatters import ScriptExecutionFormatter
+from ..runtime.registry import (
+    get_runtime_descriptor,
+    runtime_descriptors,
+    runtime_names,
+)
 from ..runtime.utils import find_runtime_binary
 from .token_manager import setup_runtime_environment
 
@@ -251,7 +256,7 @@ class ScriptRunner:
             # Check if this is a runtime command before transformation
             is_runtime_cmd = any(
                 re.search(r"(?:^|\s)" + runtime + r"(?:\s|$)", command)
-                for runtime in ["copilot", "codex", "llm", "gemini"]
+                for runtime in runtime_names()
             ) and re.search(re.escape(prompt_file), command)
 
             # Transform command based on runtime pattern
@@ -284,7 +289,7 @@ class ScriptRunner:
         """
         # Handle environment variables prefix (e.g., "ENV1=val1 ENV2=val2 codex [args] file.prompt.md")
         # More robust approach: split by runtime commands to separate env vars from command
-        runtime_commands = ["codex", "copilot", "llm", "gemini"]
+        runtime_commands = runtime_names()
 
         # Try matching with env-var prefix (e.g. "ENV=val codex args file.prompt.md")
         for runtime_cmd in runtime_commands:
@@ -355,13 +360,12 @@ class ScriptRunner:
         if env_prefix is not None and runtime_cmd != "codex":
             args_before = args_before.replace("-p", "").strip()
 
-        builders = {
-            "codex": self._build_codex_command,
-            "copilot": self._build_copilot_command,
-            "llm": self._build_llm_command,
-            "gemini": self._build_gemini_command,
-        }
-        builder = builders.get(runtime_cmd)
+        descriptor = get_runtime_descriptor(runtime_cmd)
+        builder = (
+            getattr(self, descriptor.script_builder)
+            if descriptor.script_builder is not None
+            else None
+        )
         if builder:
             return builder(args_before, args_after, env_prefix)
         return None
@@ -480,16 +484,10 @@ class ScriptRunner:
             Name of the detected runtime (copilot, codex, llm, gemini, or unknown)
         """
         command_lower = command.lower().strip()
-        if re.search(r"(?:^|\s)copilot(?:\s|$)", command_lower):
-            return "copilot"
-        elif re.search(r"(?:^|\s)codex(?:\s|$)", command_lower):
-            return "codex"
-        elif re.search(r"(?:^|\s)llm(?:\s|$)", command_lower):
-            return "llm"
-        elif re.search(r"(?:^|\s)gemini(?:\s|$)", command_lower):
-            return "gemini"
-        else:
-            return "unknown"
+        for runtime_name in runtime_names():
+            if re.search(rf"(?:^|\s){re.escape(runtime_name)}(?:\s|$)", command_lower):
+                return runtime_name
+        return "unknown"
 
     def _execute_runtime_command(
         self, command: str, content: str, env: dict
@@ -534,20 +532,13 @@ class ScriptRunner:
         # Determine how to pass content based on runtime
         runtime = self._detect_runtime(" ".join(actual_command_args))
 
-        if runtime == "copilot":
-            # Copilot uses -p flag
-            actual_command_args.extend(["-p", content])
-        elif runtime == "codex":
-            # Codex exec expects content as the last argument
-            actual_command_args.append(content)
-        elif runtime == "llm":
-            # LLM expects content as argument
-            actual_command_args.append(content)
-        elif runtime == "gemini":
-            # Gemini uses -p flag for prompt content
+        try:
+            content_argument = get_runtime_descriptor(runtime).content_argument
+        except ValueError:
+            content_argument = "positional"
+        if content_argument == "prompt_flag":
             actual_command_args.extend(["-p", content])
         else:
-            # Default: assume content as last argument
             actual_command_args.append(content)
 
         # Show subprocess details for debugging
@@ -920,22 +911,20 @@ class ScriptRunner:
         Raises:
             RuntimeError: If no compatible runtime is found
         """
-        if find_runtime_binary("copilot"):
-            return "copilot"
-        elif find_runtime_binary("codex"):
-            return "codex"
-        elif find_runtime_binary("gemini"):
-            return "gemini"
-        else:
-            raise RuntimeError(
-                "No compatible runtime found.\n"
-                "Install GitHub Copilot CLI with:\n"
-                "  apm runtime setup copilot\n"
-                "Or install Codex CLI with:\n"
-                "  apm runtime setup codex\n"
-                "Or install Gemini CLI with:\n"
-                "  apm runtime setup gemini"
-            )
+        executable_descriptors = [
+            descriptor
+            for descriptor in runtime_descriptors()
+            if descriptor.default_command is not None
+        ]
+        for descriptor in executable_descriptors:
+            if find_runtime_binary(descriptor.binary):
+                return descriptor.name
+        setup_lines = "\n".join(
+            f"  apm runtime setup {descriptor.name}" for descriptor in executable_descriptors
+        )
+        raise RuntimeError(
+            f"No compatible runtime found.\nInstall a supported runtime with one of:\n{setup_lines}"
+        )
 
     def _generate_runtime_command(self, runtime: str, prompt_file: Path) -> str:
         """Generate appropriate runtime command with proper defaults.
@@ -947,16 +936,13 @@ class ScriptRunner:
         Returns:
             Full command string with runtime-specific defaults
         """
-        if runtime == "copilot":
-            return (
-                f"copilot --log-level all --log-dir copilot-logs --allow-all-tools -p {prompt_file}"
-            )
-        elif runtime == "codex":
-            return f"codex -s workspace-write --skip-git-repo-check {prompt_file}"
-        elif runtime == "gemini":
-            return f"gemini -p {prompt_file}"
-        else:
+        try:
+            descriptor = get_runtime_descriptor(runtime)
+        except ValueError:
+            raise ValueError(f"Unsupported runtime: {runtime}") from None
+        if descriptor.default_command is None:
             raise ValueError(f"Unsupported runtime: {runtime}")
+        return descriptor.default_command.format(prompt_file=prompt_file)
 
 
 class PromptCompiler:

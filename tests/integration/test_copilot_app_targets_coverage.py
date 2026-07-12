@@ -12,10 +12,13 @@ External I/O is isolated via monkeypatch or pytest tmp_path fixtures.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 
 # ===========================================================================
 # copilot_app_db -- constants
@@ -518,7 +521,12 @@ class TestTargetProfile:
         from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
         defaults = dict(
-            name="test",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="test",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".test",
             primitives={
                 "instructions": PrimitiveMapping("rules", ".md", "test_rules"),
@@ -547,7 +555,7 @@ class TestTargetProfile:
         from apm_cli.integration.targets import TargetProfile
 
         profile = TargetProfile(
-            name="codex",
+            capability=TARGET_CAPABILITIES["codex"],
             root_dir=".codex",
             primitives={},
             pack_prefixes=(".codex/", ".agents/"),

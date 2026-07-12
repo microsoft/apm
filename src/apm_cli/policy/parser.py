@@ -54,6 +54,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "manifest",
     "unmanaged_files",
     "security",
+    "registry_source",
     "bin_deploy",
     "executables",
 }
@@ -62,8 +63,9 @@ _KNOWN_TOP_LEVEL_KEYS = {
 class PolicyValidationError(Exception):
     """Raised when policy YAML is malformed or violates schema constraints."""
 
-    def __init__(self, errors: list[str]):
+    def __init__(self, errors: list[str], warnings: list[str] | None = None):
         self.errors = errors
+        self.warnings = warnings or []
         super().__init__(f"Policy validation failed: {'; '.join(errors)}")
 
 
@@ -83,6 +85,11 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
     unknown = set(data.keys()) - _KNOWN_TOP_LEVEL_KEYS
     for key in sorted(unknown):
         warnings.append(f"Unknown top-level policy key: '{key}'")
+
+    for key in ("mcp", "manifest", "compilation", "registry_source", "bin_deploy"):
+        value = data.get(key)
+        if value is not None and not isinstance(value, dict):
+            errors.append(f"{key} must be a YAML mapping")
 
     # enforcement (coerce YAML booleans: off → "off")
     enforcement = data.get("enforcement")
@@ -107,7 +114,9 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
 
     # cache.ttl
     cache = data.get("cache")
-    if isinstance(cache, dict):
+    if cache is not None and not isinstance(cache, dict):
+        errors.append("cache must be a YAML mapping")
+    elif isinstance(cache, dict):
         ttl = cache.get("ttl")
         if ttl is not None:
             if not isinstance(ttl, int) or isinstance(ttl, bool):
@@ -117,7 +126,15 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
 
     # dependencies
     deps = data.get("dependencies")
-    if isinstance(deps, dict):
+    if deps is not None and not isinstance(deps, dict):
+        errors.append("dependencies must be a YAML mapping")
+    elif isinstance(deps, dict):
+        for key in ("allow", "deny", "require"):
+            value = deps.get(key)
+            if value is not None and (
+                not isinstance(value, list) or not all(isinstance(item, str) for item in value)
+            ):
+                errors.append(f"dependencies.{key} must be a YAML list of package patterns")
         rr = deps.get("require_resolution")
         if rr is not None and rr not in _VALID_REQUIRE_RESOLUTION:
             errors.append(
@@ -452,7 +469,7 @@ def load_policy(source: str | Path) -> tuple[ApmPolicy, list[str]]:
 
     errors, warnings = validate_policy(data)
     if errors:
-        raise PolicyValidationError(errors)
+        raise PolicyValidationError(errors, warnings)
 
     return _build_policy(data), warnings
 

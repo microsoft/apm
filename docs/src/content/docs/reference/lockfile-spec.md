@@ -90,11 +90,23 @@ dependencies:
     package_type: apm_package
 mcp_servers:
   - github
+  - transitive-server
 mcp_configs:
   github:
     type: stdio
     command: docker
     args: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"]
+  transitive-server:
+    type: stdio
+    command: local-server
+mcp_target_servers:
+  codex:
+    - github
+  copilot:
+    - github
+    - transitive-server
+mcp_config_provenance:
+  transitive-server: local-package
 lsp_servers:
   - pyright
 lsp_configs:
@@ -116,11 +128,13 @@ local_deployed_file_hashes:
 | `generated_at` | ISO 8601 string | yes | UTC timestamp of the last write. Ignored by equivalence checks. |
 | `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
-| `mcp_servers` | list of strings | no | Names of MCP servers declared in the manifest as of the last install or update. |
+| `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
+| `mcp_target_servers` | map of string lists | no | `target -> server names` for MCP entries APM successfully wrote. Reinstall uses this ownership record to remove only APM-managed entries when a target is dropped. Older lockfiles without this field adopt an existing self-defined native entry only when it exactly matches the stored `mcp_configs` baseline; registry-resolved and user-edited entries remain unowned. |
+| `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used to identify the former owner in `config-consistency` diagnostics; it never exempts a lock-only entry. |
 | `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest as of the last install or update. |
 | `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
-| `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). See [self entry](#self-entry). |
+| `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
 
 ## Per-entry fields
@@ -145,7 +159,7 @@ Each item in `dependencies` describes one resolved package.
 | `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
-| `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. |
+| `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. A shared path has one canonical package owner; uninstall transfers ownership to a surviving provider. When the consumer manifest declares targets, reinstall preserves entries for other declared, gated, or dynamic targets and removes entries outside that target universe. Without a declared target set, reinstall preserves prior other-target entries. |
 | `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
 | `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](./cli/approve/). |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
@@ -178,6 +192,11 @@ host (`host/owner/repo`), so `github.com/team/skills` and
 `gitea.myorg.com/team/skills` can coexist without overwriting each other, and
 host casing cannot create duplicate keys. Registry-proxy entries keep the bare
 logical key because the proxy host is transport, not package identity.
+
+GitHub and package-registry owner/repository paths are lowercased before APM
+derives the key. Older mixed-case GitHub entries therefore serialize with the
+same key as new lowercase references. Repository path casing remains unchanged
+for unknown git hosts because those backends may be case-sensitive.
 
 ## Self entry
 
@@ -271,7 +290,7 @@ check maps to specific lockfile fields:
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
 | `skill-subset-consistency` | `skill_subset` per `skill_bundle` entry |
-| `config-consistency` | `mcp_servers` and `mcp_configs` |
+| `config-consistency` | `mcp_configs` and `mcp_config_provenance` |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically
@@ -298,8 +317,11 @@ Orphan detection works in two directions:
   `lockfile_version`. APM refuses to operate on a lockfile whose version it
   does not recognize, and will instruct the user to upgrade or regenerate.
 
-A lockfile that fails to parse is treated as absent - APM logs the error and,
-for non-frozen installs, proceeds to regenerate from `apm.yml`.
+Invalid YAML, an unsupported explicit version, an empty or non-mapping root,
+malformed container fields, and invalid deployment rows fail closed before APM
+constructs lock state. Pre-versioned legacy files migrate as v1 inputs. Fix or
+remove other invalid files explicitly; APM does not silently replace them with
+an empty lockfile.
 
 ## Example
 

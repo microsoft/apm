@@ -16,14 +16,21 @@ Security notes
 
 from __future__ import annotations
 
-import os
+import base64
 import re
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
 
-from ..utils.github_host import build_https_clone_url, default_host
+from ..utils.github_host import (
+    build_ado_bearer_git_env,
+    build_authorization_header_git_env,
+    build_https_clone_url,
+    default_host,
+    is_ado_auth_failure_signal,
+    is_azure_devops_hostname,
+)
 from ._git_utils import redact_token as _redact_token
 from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
@@ -137,9 +144,10 @@ class RefResolver:
         When ``True`` (default), stderr from failed ``git`` calls is
         classified via ``translate_git_stderr``.
     token:
-        Optional GitHub PAT to embed in the ``https://`` URL.  When set
-        the URL uses ``x-access-token`` authentication; when ``None``
-        (default) git runs unauthenticated.
+        Optional PAT or bearer credential. Basic credentials are embedded in
+        the URL; ADO bearer credentials are sent through ``http.extraheader``.
+    auth_scheme:
+        ``"basic"`` (default) or ``"bearer"`` from ``AuthContext``.
     """
 
     def __init__(
@@ -150,12 +158,20 @@ class RefResolver:
         stderr_translator_enabled: bool = True,
         host: str | None = None,
         token: str | None = None,
+        auth_scheme: str = "basic",
+        git_env: dict[str, str] | None = None,
+        auth_resolver=None,
+        auth_target=None,
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
         self._stderr_translator = stderr_translator_enabled
         self._host: str = host or default_host() or "github.com"
         self._token: str | None = token
+        self._auth_scheme = auth_scheme
+        self._git_env = dict(git_env) if git_env is not None else None
+        self._auth_resolver = auth_resolver
+        self._auth_target = auth_target
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
@@ -172,6 +188,43 @@ class RefResolver:
             if owner_repo not in self._remote_locks:
                 self._remote_locks[owner_repo] = threading.Lock()
             return self._remote_locks[owner_repo]
+
+    def _git_url_and_env(self, owner_repo: str) -> tuple[str, dict[str, str]]:
+        """Build the remote URL and auth environment for one git operation."""
+        requested_bearer = self._auth_scheme == "bearer"
+        ado_host = is_azure_devops_hostname(self._host)
+        if requested_bearer and not ado_host:
+            raise GitLsRemoteError(
+                package="",
+                summary=f"Bearer authentication is not supported for host '{self._host}'.",
+                hint="Use bearer authentication only with an Azure DevOps host.",
+            )
+        bearer = requested_bearer and ado_host
+        url_token = None if requested_bearer else self._token
+        if ado_host:
+            url = f"https://{self._host}/{owner_repo}"
+        else:
+            url = build_https_clone_url(self._host, owner_repo, token=url_token)
+        if self._git_env is not None:
+            env = dict(self._git_env)
+        else:
+            from apm_cli.core.auth import AuthResolver
+
+            host_kind = "ado" if ado_host else "github"
+            env = AuthResolver._build_git_env(
+                self._token,
+                scheme=self._auth_scheme,
+                host_kind=host_kind,
+            )
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = "echo"
+        if bearer and self._token:
+            env.pop("GIT_TOKEN", None)
+            env.update(build_ado_bearer_git_env(self._token))
+        elif ado_host and url_token:
+            credential = base64.b64encode(f":{url_token}".encode()).decode()
+            env.update(build_authorization_header_git_env("Basic", credential))
+        return url, env
 
     def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
         """Fetch all tags and heads from the configured Git host.
@@ -206,8 +259,7 @@ class RefResolver:
             if self._offline:
                 raise OfflineMissError(package="", remote=owner_repo)
 
-            url = build_https_clone_url(self._host, owner_repo, token=self._token)
-            env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+            url, env = self._git_url_and_env(owner_repo)
             try:
                 result = subprocess.run(
                     ["git", "ls-remote", "--tags", "--heads", url],
@@ -228,6 +280,11 @@ class RefResolver:
                     summary=f"Failed to run git ls-remote for '{owner_repo}'.",
                     hint=f"Ensure git is installed and on PATH. Error: {exc}",
                 )
+
+            fallback_refs = self._retry_rejected_ado_pat(result, owner_repo)
+            if fallback_refs is not None:
+                self._cache.put(owner_repo, fallback_refs)
+                return fallback_refs
 
             if result.returncode != 0:
                 stderr = _redact_token(result.stderr)
@@ -252,6 +309,60 @@ class RefResolver:
             refs = _parse_ls_remote_output(result.stdout)
             self._cache.put(owner_repo, refs)
             return refs
+
+    def _retry_rejected_ado_pat(
+        self,
+        result: subprocess.CompletedProcess,
+        owner_repo: str,
+    ) -> list[RemoteRef] | None:
+        """Retry one rejected ADO basic credential with an Azure CLI bearer."""
+        eligible = (
+            result.returncode != 0
+            and self._auth_resolver is not None
+            and self._auth_target is not None
+            and self._auth_scheme == "basic"
+            and bool(self._token)
+            and is_azure_devops_hostname(self._host)
+        )
+        if not eligible:
+            return None
+
+        def _bearer_op(bearer: str) -> list[RemoteRef]:
+            from apm_cli.core.auth import AuthResolver
+
+            bearer_env = (
+                dict(self._git_env) if self._git_env is not None else AuthResolver._build_git_env()
+            )
+            AuthResolver._clear_git_auth_env(bearer_env)
+            bearer_env.update(build_ado_bearer_git_env(bearer))
+            bearer_env["GIT_TERMINAL_PROMPT"] = "0"
+            bearer_env["GIT_ASKPASS"] = "echo"
+            resolver = RefResolver(
+                timeout_seconds=self._timeout,
+                offline=self._offline,
+                stderr_translator_enabled=self._stderr_translator,
+                host=self._host,
+                token=bearer,
+                auth_scheme="bearer",
+                git_env=bearer_env,
+            )
+            try:
+                return resolver.list_remote_refs(owner_repo)
+            finally:
+                resolver.close()
+
+        fallback = self._auth_resolver.execute_with_bearer_fallback(
+            self._auth_target,
+            lambda: result,
+            _bearer_op,
+            lambda outcome: (
+                getattr(outcome, "returncode", 0) != 0
+                and is_ado_auth_failure_signal(getattr(outcome, "stderr", ""))
+            ),
+        )
+        if isinstance(fallback.outcome, list):
+            return fallback.outcome
+        return None
 
     # -----------------------------------------------------------------
     # Single-ref resolution (no cache)
@@ -281,8 +392,7 @@ class RefResolver:
         GitLsRemoteError
             When the ref does not exist or the subprocess fails.
         """
-        url = build_https_clone_url(self._host, owner_repo, token=self._token)
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+        url, env = self._git_url_and_env(owner_repo)
         try:
             result = subprocess.run(
                 ["git", "ls-remote", url, ref],

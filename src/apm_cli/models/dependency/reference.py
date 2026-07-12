@@ -33,6 +33,7 @@ from .identity import (
     _path_segment_pattern,
     build_canonical_dependency_string,
     build_dependency_unique_key,
+    normalize_package_repo_url,
 )
 from .object_fields import (
     apply_optional_dependency_fields,
@@ -76,6 +77,8 @@ class DependencyReference:
     # Local path dependency fields
     is_local: bool = False  # True if this is a local filesystem dependency
     local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
+    declaring_parent: str | None = None
+    anchored_local_path: str | None = None
 
     # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
     is_parent_repo_inheritance: bool = False
@@ -116,6 +119,17 @@ class DependencyReference:
     marketplace_name: str | None = None
     marketplace_plugin_name: str | None = None
     marketplace_version_spec: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize case-insensitive package identity at the model boundary."""
+        self.repo_url = normalize_package_repo_url(
+            self.repo_url,
+            host=self.host,
+            source=self.source,
+            registry_prefix=self.artifactory_prefix,
+            is_local=self.is_local,
+            is_marketplace=self.is_marketplace,
+        )
 
     @property
     def ref_kind(self) -> str | None:
@@ -304,7 +318,21 @@ class DependencyReference:
             is_virtual=self.is_virtual,
             virtual_path=self.virtual_path,
             registry_prefix=self.artifactory_prefix,
+            declaring_parent=self.declaring_parent,
+            anchored_local_path=self.anchored_local_path,
         )
+
+    def get_resolution_key(self) -> str:
+        """Return identity plus the declared ref constraint."""
+        if self.reference:
+            return f"{self.get_unique_key()}#{self.reference}"
+        return self.get_unique_key()
+
+    def get_cycle_key(self) -> str:
+        """Return physical local identity for recursion detection."""
+        if self.is_local and self.anchored_local_path:
+            return f"local:{self.anchored_local_path}"
+        return self.get_unique_key()
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -418,21 +446,6 @@ class DependencyReference:
 
         This is the single source of truth for where a package lives in apm_modules/.
 
-        For regular packages:
-            - GitHub: apm_modules/owner/repo/
-            - ADO: apm_modules/org/project/repo/
-
-        For virtual file/collection packages:
-            - GitHub: apm_modules/owner/<virtual-package-name>/
-            - ADO: apm_modules/org/project/<virtual-package-name>/
-
-        For subdirectory packages (Claude Skills, nested APM packages):
-            - GitHub: apm_modules/owner/repo/subdir/path/
-            - ADO: apm_modules/org/project/repo/subdir/path/
-
-        For local packages:
-            - apm_modules/_local/<directory-name>/
-
         Args:
             apm_modules_dir: Path to the apm_modules directory
 
@@ -455,7 +468,14 @@ class DependencyReference:
                 context="local package path",
                 reject_empty=True,
             )
-            result = apm_modules_dir / "_local" / pkg_dir_name
+            if self.declaring_parent:
+                import hashlib
+
+                identity = self.anchored_local_path or self.local_path
+                parent_slot = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+                result = apm_modules_dir / "_local" / parent_slot / pkg_dir_name
+            else:
+                result = apm_modules_dir / "_local" / pkg_dir_name
             ensure_path_within(result, apm_modules_dir)
             return result
 
@@ -908,21 +928,19 @@ class DependencyReference:
     def _parse_host_type(raw: object) -> str | None:
         """Parse the optional object-form ``type`` host-kind hint.
 
-        Currently only ``gitlab`` is accepted; any other value fails closed with
-        a ``ValueError``. This is a deliberate gate, not an oversight: future
-        host kinds (e.g. ``gitea``, ``bitbucket``) would extend the accepted set
-        here and thread a matching branch through ``AuthResolver.classify_host``
-        and ``host_backends.backend_for``. Until those backends exist, rejecting
-        unknown hints keeps classification explicit rather than silently
-        mis-routing a bespoke host to the GitHub path.
+        Values come from the canonical host-provider registry. Unknown hints
+        fail closed rather than silently selecting a generic transport.
         """
         if raw is None:
             return None
         if not isinstance(raw, str) or not raw.strip():
             raise ValueError("'type' field must be a non-empty string")
         value = raw.strip().lower()
-        if value != "gitlab":
-            raise ValueError(f"'type' field only supports 'gitlab'; got {raw!r}")
+        from apm_cli.core.host_providers import accepted_host_types
+
+        supported = accepted_host_types()
+        if value not in supported:
+            raise ValueError(f"'type' field supports {', '.join(supported)}; got {raw!r}")
         return value
 
     @classmethod

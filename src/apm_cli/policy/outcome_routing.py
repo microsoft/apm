@@ -60,6 +60,7 @@ _NON_FOUND_LOGGED_OUTCOMES = (
     "malformed",
     "cache_miss_fetch_fail",
     "garbage_response",
+    "incomplete_chain",
 )
 
 
@@ -123,6 +124,22 @@ def route_discovery_outcome(
                 "does not match fetched policy bytes "
                 f"(source={source or 'unknown'}). "
                 "Update apm.yml policy.hash or contact your org admin.",
+                policy_source=source or "unknown",
+            )
+        return None
+
+    if outcome == "incomplete_chain":
+        if logger is not None:
+            logger.policy_discovery_miss(
+                outcome=outcome,
+                source=source,
+                error=fetch_result.error or fetch_result.fetch_error,
+            )
+        if raise_blocking_errors:
+            raise PolicyViolationError(
+                "Install blocked: org policy inheritance chain is incomplete "
+                f"(source={source or 'unknown'}). Restore the unreachable parent "
+                "policy before retrying.",
                 policy_source=source or "unknown",
             )
         return None

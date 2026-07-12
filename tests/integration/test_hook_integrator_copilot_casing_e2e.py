@@ -80,7 +80,9 @@ def _read_copilot_hooks_config(project_root: Path, package_name: str) -> dict[st
     """Read the actual Copilot hook JSON written under .github/hooks."""
     config_path = project_root / ".github" / "hooks" / f"{package_name}-hooks.json"
     assert config_path.exists()
-    return json.loads(config_path.read_text(encoding="utf-8"))
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["version"] == 1
+    return config
 
 
 def test_copilot_install_writes_only_camel_case_hook_events(tmp_path: Path) -> None:

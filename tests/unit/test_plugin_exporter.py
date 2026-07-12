@@ -1203,14 +1203,314 @@ class TestExportPluginBundle:
     def test_root_level_plugin_dirs_collected(self, tmp_path):
         """Root-level agents/ commands/ etc. are picked up for plugin-native repos."""
         project = _setup_plugin_project(tmp_path)
-        # Create root-level agents dir (no .apm/)
+        (project / ".apm").rmdir()
         root_agents = project / "agents"
         root_agents.mkdir()
-        (root_agents / "root-bot.agent.md").write_text("root bot")
+        (root_agents / "root-bot.agent.md").write_text("root bot", encoding="utf-8")
 
         out = tmp_path / "build"
         result = export_plugin_bundle(project, out)
         assert (result.bundle_path / "agents" / "root-bot.agent.md").exists()
+
+    def test_apm_dir_excludes_root_level_plugin_dirs(self, tmp_path):
+        """The .apm directory makes APM-native sources authoritative."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "root-bot.agent.md").write_text("root bot", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "agents" / "root-bot.agent.md").exists()
+
+    def test_auto_includes_preserves_native_root_without_apm_dir(self, tmp_path):
+        """Auto consent does not select the local source layout."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        (project / ".apm").rmdir()
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "root-bot.agent.md").write_text("root bot", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "root-bot.agent.md").is_file()
+
+    def test_omitted_includes_with_apm_dir_skips_root_components(self, tmp_path):
+        """An omitted includes field does not weaken .apm authority."""
+        project = _setup_plugin_project(tmp_path)
+        root_skills = project / "skills" / "root-skill"
+        root_skills.mkdir(parents=True)
+        (root_skills / "SKILL.md").write_text("# Root\n", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "skills" / "root-skill").exists()
+
+    def test_explicit_includes_are_exhaustive(self, tmp_path):
+        """An explicit path list packs no unlisted local primitives."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(
+            project,
+            extra={"includes": [".apm/agents/published.agent.md"]},
+        )
+        agents = project / ".apm" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "published.agent.md").write_text("published", encoding="utf-8")
+        (agents / "private.agent.md").write_text("private", encoding="utf-8")
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "draft.agent.md").write_text("draft", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "published.agent.md").is_file()
+        assert not (result.bundle_path / "agents" / "private.agent.md").exists()
+        assert not (result.bundle_path / "agents" / "draft.agent.md").exists()
+
+    def test_explicit_includes_can_publish_deliberate_root_path(self, tmp_path):
+        """An explicit list may deliberately publish a root convention path."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": ["agents/published.agent.md"]})
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "published.agent.md").write_text("published", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "published.agent.md").is_file()
+
+    def test_missing_explicit_include_fails_pack(self, tmp_path):
+        """A missing explicit path is a configuration error."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(
+            project,
+            extra={"includes": [".apm/agents/missing.agent.md"]},
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"includes path '\.apm/agents/missing\.agent\.md' does not exist",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_symlink(self, tmp_path):
+        """An explicit path cannot publish through a symlink."""
+        project = _setup_plugin_project(tmp_path)
+        target = project / ".apm" / "agents" / "real.agent.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("real", encoding="utf-8")
+        link = project / "linked.agent.md"
+        try:
+            os.symlink(target, link)
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": ["linked.agent.md"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"includes path 'linked\.agent\.md' is a symlink",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_nested_symlink(self, tmp_path):
+        """A listed directory cannot publish a nested symlink."""
+        project = _setup_plugin_project(tmp_path)
+        agents = project / ".apm" / "agents"
+        agents.mkdir(parents=True, exist_ok=True)
+        target = agents / "real.agent.md"
+        target.write_text("real", encoding="utf-8")
+        link = agents / "linked.agent.md"
+        try:
+            os.symlink(target, link)
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": [".apm/agents"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"Symlink found inside includes path '\.apm/agents': "
+            r"linked\.agent\.md",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_nested_directory_symlink(self, tmp_path):
+        """A listed directory cannot publish through a symlinked directory."""
+        project = _setup_plugin_project(tmp_path)
+        skills = project / ".apm" / "skills"
+        skills.mkdir(parents=True, exist_ok=True)
+        external = tmp_path / "external-skill"
+        external.mkdir()
+        (external / "SKILL.md").write_text("# External\n", encoding="utf-8")
+        try:
+            os.symlink(external, skills / "linked")
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": [".apm/skills"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"Symlink found inside includes path '\.apm/skills': linked",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    @pytest.mark.parametrize(
+        ("content", "message"),
+        [
+            ("not-json", r"Explicit hook include is not valid JSON"),
+            ("[]", r"Explicit hook include must contain a JSON object"),
+        ],
+    )
+    def test_explicit_hook_include_rejects_invalid_content(
+        self,
+        tmp_path,
+        content,
+        message,
+    ):
+        """Explicit hook files must contain valid JSON objects."""
+        project = _setup_plugin_project(tmp_path)
+        hook = project / ".apm" / "hooks" / "invalid.json"
+        hook.parent.mkdir(parents=True)
+        hook.write_text(content, encoding="utf-8")
+        _write_apm_yml(project, extra={"includes": [".apm/hooks/invalid.json"]})
+
+        with pytest.raises(ValueError, match=message):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_non_packable_path(self, tmp_path):
+        """Explicit paths must map to a supported plugin primitive."""
+        project = _setup_plugin_project(tmp_path)
+        (project / "README.md").write_text("not a primitive", encoding="utf-8")
+        _write_apm_yml(project, extra={"includes": ["README.md"]})
+
+        with pytest.raises(ValueError, match=r"is not a packable primitive"):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_native_root_symlink_is_not_packed(self, tmp_path):
+        """Implicit root discovery does not follow convention-dir symlinks."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        (project / ".apm").rmdir()
+        external = tmp_path / "external-skills"
+        skill = external / "outside"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# Outside\n", encoding="utf-8")
+        try:
+            os.symlink(external, project / "skills")
+        except OSError:
+            pytest.skip("symlinks not supported")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "skills" / "outside").exists()
+
+    def test_explicit_hook_includes_are_exhaustive(self, tmp_path):
+        """Only explicitly listed hook configuration reaches the bundle."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(
+            project,
+            extra={"includes": [".apm/hooks/published.json"]},
+        )
+        hooks_dir = project / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "published.json").write_text(
+            json.dumps({"preCommit": ["published"]}),
+            encoding="utf-8",
+        )
+        (hooks_dir / "private.json").write_text(
+            json.dumps({"postPush": ["private"]}),
+            encoding="utf-8",
+        )
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+        hooks = json.loads((result.bundle_path / "hooks.json").read_text(encoding="utf-8"))
+
+        assert hooks == {"preCommit": ["published"]}
+
+    def test_apm_dir_excludes_root_hook_config(self, tmp_path):
+        """Root hooks follow the same .apm authority rule as primitives."""
+        project = _setup_plugin_project(tmp_path)
+        apm_hooks = project / ".apm" / "hooks"
+        apm_hooks.mkdir(parents=True)
+        (apm_hooks / "hooks.json").write_text(
+            json.dumps({"preCommit": ["published"]}),
+            encoding="utf-8",
+        )
+        (project / "hooks.json").write_text(
+            json.dumps({"postPush": ["draft"]}),
+            encoding="utf-8",
+        )
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+        hooks = json.loads((result.bundle_path / "hooks.json").read_text(encoding="utf-8"))
+
+        assert hooks == {"preCommit": ["published"]}
+
+    def test_apm_authority_preserves_dependency_components(self, tmp_path):
+        """Local layout authority does not affect dependency discovery."""
+        project = _setup_plugin_project(tmp_path)
+        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "dependency")
+        dep = LockedDependency(
+            repo_url="acme/tools",
+            depth=1,
+            deployed_files=deployed,
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "dep-agent.agent.md").is_file()
+
+    def test_mixed_layout_emits_actionable_warnings(self, tmp_path):
+        """Each skipped root source names the cause and next action."""
+        project = _setup_plugin_project(tmp_path)
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "draft.agent.md").write_text("draft", encoding="utf-8")
+        (project / "hooks.json").write_text("{}", encoding="utf-8")
+        captured: list[str] = []
+
+        class _StubLogger:
+            def info(self, message, symbol=None):
+                pass
+
+            def warning(self, message):
+                captured.append(message)
+
+        export_plugin_bundle(project, tmp_path / "build", logger=_StubLogger())
+
+        assert captured == [
+            "Skipping root-level agents/ because .apm/ is present. "
+            "Move publishable files to .apm/agents/ or remove agents/ "
+            "to silence this warning.",
+            "Skipping root-level hooks.json because .apm/ is present. "
+            "Move publishable hook configuration to .apm/hooks/ or remove "
+            "hooks.json to silence this warning.",
+            "No local primitives found. Expected content under .apm/. "
+            "Move plugin-native content into .apm/, or remove .apm/ to restore "
+            "root convention discovery.",
+        ]
+
+    def test_empty_apm_dir_warns_when_no_local_primitives_exist(self, tmp_path):
+        """An empty APM-native layout explains how to recover."""
+        project = _setup_plugin_project(tmp_path)
+        captured: list[str] = []
+
+        class _StubLogger:
+            def info(self, message, symbol=None):
+                pass
+
+            def warning(self, message):
+                captured.append(message)
+
+        export_plugin_bundle(project, tmp_path / "build", logger=_StubLogger())
+
+        assert captured == [
+            "No local primitives found. Expected content under .apm/. "
+            "Move plugin-native content into .apm/, or remove .apm/ to restore "
+            "root convention discovery.",
+        ]
 
 
 class TestExportPluginBundleViaPackBundle:

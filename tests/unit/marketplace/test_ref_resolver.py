@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import subprocess
 import time
 import urllib.parse
@@ -599,3 +600,34 @@ class TestRefResolverTokenInjection:
             assert parsed.hostname == "corp.ghe.com"
             assert parsed.username == "x-access-token"
             assert parsed.path.endswith(".git")
+
+    def test_bearer_auth_rejects_non_ado_host(self) -> None:
+        """Bearer credentials never silently downgrade on unsupported hosts."""
+        resolver = RefResolver(
+            host="gitlab.example.com",
+            token="bearer_token",
+            auth_scheme="bearer",
+        )
+
+        with pytest.raises(
+            GitLsRemoteError,
+            match=r"Bearer authentication is not supported for host 'gitlab\.example\.com'",
+        ):
+            resolver.list_remote_refs("owner/repo")
+
+    def test_ado_pat_uses_basic_header_without_url_credentials(self) -> None:
+        """ADO PATs stay out of the process-visible remote URL."""
+        resolver = RefResolver(host="dev.azure.com", token="ado_pat")
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/heads/main\n")
+
+            resolver.list_remote_refs("contoso/platform/_git/repo")
+
+        command = mock_run.call_args.args[0]
+        parsed = urllib.parse.urlparse(command[-1])
+        assert parsed.hostname == "dev.azure.com"
+        assert parsed.username is None
+        env = mock_run.call_args.kwargs["env"]
+        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+        expected = base64.b64encode(b":ado_pat").decode()
+        assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Basic {expected}"

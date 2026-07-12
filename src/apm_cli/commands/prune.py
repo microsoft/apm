@@ -21,14 +21,14 @@ from ._helpers import (
 )
 
 
-@click.command(help="Remove APM packages not listed in apm.yml")
+@click.command(help="Remove APM packages absent from the resolved dependency graph")
 @click.option("--dry-run", is_flag=True, help="Show what would be removed without removing")
 @click.pass_context
 def prune(ctx, dry_run):
-    """Remove installed APM packages that are not listed in apm.yml (like npm prune).
+    """Remove installed APM packages absent from the resolved dependency graph (like npm prune).
 
-    This command cleans up the apm_modules/ directory by removing packages that
-    were previously installed but are no longer declared as dependencies in apm.yml.
+    This command cleans up the apm_modules/ directory by removing packages that are
+    neither declared in apm.yml nor retained as transitive nodes in apm.lock.yaml.
 
     Examples:
         apm prune           # Remove orphaned packages
@@ -52,7 +52,7 @@ def prune(ctx, dry_run):
         # Build expected vs installed using shared helpers
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            declared_deps = apm_package.get_apm_dependencies()
+            declared_deps = apm_package.get_all_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
             expected_installed = _build_expected_install_paths(
                 declared_deps, lockfile, apm_modules_dir
