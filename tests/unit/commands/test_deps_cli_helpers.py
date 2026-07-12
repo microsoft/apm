@@ -84,6 +84,37 @@ class TestDepDisplayName:
         assert _dep_display_name(dep) == "owner/repo@2.0.0"
 
 
+def _make_local_dep(local_path=None, repo_url="_local/pkg", version=None):
+    """Local dep whose unique key would leak an absolute host slot."""
+    dep = MagicMock()
+    dep.source = "local"
+    dep.local_path = local_path
+    dep.repo_url = repo_url
+    dep.version = version
+    dep.resolved_commit = None
+    dep.resolved_ref = None
+    # The anchored unique key is an absolute ``local:/...`` slot the display
+    # must never surface for a local dep.
+    dep.get_unique_key.return_value = "local:/abs/host/path/pkg"
+    return dep
+
+
+class TestDepDisplayNameLocal:
+    def test_local_dep_uses_local_path_when_present(self):
+        dep = _make_local_dep(local_path="../pkg-depth-2")
+        result = _dep_display_name(dep)
+        assert result == "../pkg-depth-2@latest"
+        assert "local:/" not in result
+        dep.get_unique_key.assert_not_called()
+
+    def test_local_dep_falls_back_to_logical_repo_url_when_path_missing(self):
+        dep = _make_local_dep(local_path=None, repo_url="_local/pkg-depth-2")
+        result = _dep_display_name(dep)
+        assert result == "_local/pkg-depth-2@latest"
+        assert "local:/" not in result
+        dep.get_unique_key.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # _resolve_scope_deps - filesystem paths
 # ---------------------------------------------------------------------------

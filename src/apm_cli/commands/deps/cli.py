@@ -60,19 +60,18 @@ def _deps_list_source_label(
     return "github"
 
 
-def _dep_display_name(dep) -> str:
+def _dep_display_name(dep: LockedDependency) -> str:
     """Get display name for a locked dependency (key@version).
 
-    Local deps render their declared ``local_path`` (``../pkg``) instead of the
-    lockfile unique key. For anchored transitive local deps the unique key is an
+    Local deps render a logical, portable identity instead of the lockfile
+    unique key. For anchored transitive local deps the unique key is an
     absolute ``local:/...`` slot (see build_dependency_unique_key), which would
-    leak the host filesystem path into user-facing tree output. The declared
-    relative path is the logical, portable identity the user typed.
+    leak the host filesystem path into user-facing tree output. Prefer the
+    declared relative ``local_path`` (``../pkg``); fall back to the logical
+    ``repo_url`` (``_local/pkg``) if the path is absent. Remote deps keep their
+    canonical unique key.
     """
-    if getattr(dep, "source", None) == "local" and getattr(dep, "local_path", None):
-        key = dep.local_path
-    else:
-        key = dep.get_unique_key()
+    key = (dep.local_path or dep.repo_url) if dep.source == "local" else dep.get_unique_key()
     version = (
         dep.version
         or (dep.resolved_commit[:7] if dep.resolved_commit else None)
@@ -301,11 +300,12 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     installed_packages = []
     orphaned_packages = []
     for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
+        # Local transitive deps are scanned at their physical hash slot
+        # (``_local/<hash>/pkg``); report and orphan-check against the
+        # logical lockfile key (``_local/pkg``) instead of leaking the slot.
+        # Resolve before the try so a read failure warns with the logical name.
+        logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
         try:
-            # Local transitive deps are scanned at their physical hash slot
-            # (``_local/<hash>/pkg``); report and orphan-check against the
-            # logical lockfile key (``_local/pkg``) instead of leaking the slot.
-            logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
             version = "unknown"
             if has_apm_yml:
                 package = APMPackage.from_apm_yml(candidate / APM_YML_FILENAME)
@@ -336,7 +336,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 }
             )
         except Exception as e:
-            logger.warning(f"Failed to read package {org_repo_name}: {e}")
+            logger.warning(f"Failed to read package {logical_name}: {e}")
 
     if insecure_only:
         installed_packages = [pkg for pkg in installed_packages if pkg["is_insecure"]]

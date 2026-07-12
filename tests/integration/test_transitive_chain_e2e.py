@@ -7,6 +7,7 @@ still flowing through the same resolver/lockfile/integration code that
 remote APM deps use.
 """
 
+import re
 import shutil
 import subprocess
 from itertools import pairwise
@@ -243,6 +244,15 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
     assert all(left < right for left, right in pairwise(key_columns))
     for embedded_name in embedded_names:
         assert embedded_name not in tree_output
+
+    # Negative guard (regression for the v0.25.0 leak): neither the physical
+    # hashed slot (``_local/<12-hex>/``) nor an absolute ``local:/<path>`` host
+    # slot may surface in user-facing list/tree output. Bounded regex, no
+    # host-specific matching.
+    hash_slot = re.compile(r"_local/[0-9a-f]{12}/")
+    for label, output in (("deps list", list_output), ("deps tree", tree_output)):
+        assert not hash_slot.search(output), f"{label} leaked a hashed slot:\n{output}"
+        assert "local:/" not in output, f"{label} leaked an absolute local slot:\n{output}"
 
     pruned = subprocess.run(
         [apm_command, "prune"],
