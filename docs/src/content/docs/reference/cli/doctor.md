@@ -66,7 +66,7 @@ apm doctor --verbose
 Use the exit code as a basic CI pre-flight:
 
 ```bash
-apm doctor
+apm doctor && apm audit --ci
 ```
 
 For project integrity and policy enforcement in CI, use
