@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.integration.opencode_frontmatter import _ascii_safe_name, validate_opencode_frontmatter
 from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -160,7 +160,12 @@ class AgentIntegrator(BaseIntegrator):
                 continue
 
             if mapping.format_id == "codex_agent":
-                self._write_codex_agent(source_file, target_path)
+                self._write_codex_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
                 links_resolved = 0
             else:
                 if mapping.format_id == "opencode_agent":
@@ -293,7 +298,13 @@ class AgentIntegrator(BaseIntegrator):
     )
 
     @staticmethod
-    def _write_codex_agent(source: Path, target: Path) -> None:
+    def _write_codex_agent(
+        source: Path,
+        target: Path,
+        *,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
+    ) -> None:
         """Transform an ``.agent.md`` file to Codex ``.toml`` format.
 
         Parses YAML frontmatter for ``name`` and ``description``, uses
@@ -310,16 +321,49 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
+        safe_name = _ascii_safe_name(source.name)
+        safe_package = _ascii_safe_name(package_name)
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
             body = content[fm_match.end() :]
             try:
                 fm = load_yaml_str(fm_match.group(1)) or {}
-                name = fm.get("name", name)
-                description = fm.get("description", description)
-            except Exception:
-                pass
+                if isinstance(fm, dict):
+                    name = fm.get("name", name)
+                    description = fm.get("description", description)
+                elif diagnostics is not None:
+                    diagnostics.warn(
+                        message=(
+                            f"Codex agent {safe_name}: YAML frontmatter must be a mapping and was ignored. "
+                            "Tool restrictions could not be verified, so the agent may inherit broader "
+                            "tool access. Fix the frontmatter, and do not rely on this generated agent "
+                            "for tool isolation until APM supports the mapping."
+                        ),
+                        package=safe_package,
+                    )
+                if diagnostics is not None and isinstance(fm, dict) and "tools" in fm:
+                    diagnostics.warn(
+                        message=(
+                            f"Codex agent {safe_name}: frontmatter field 'tools' was dropped "
+                            "because APM does not currently map agent tool restrictions into "
+                            "Codex agent TOML. The agent may inherit broader tool access. "
+                            "Do not rely on this generated agent for tool isolation until APM "
+                            "supports the mapping."
+                        ),
+                        package=safe_package,
+                    )
+            except yaml.YAMLError:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=(
+                            f"Codex agent {safe_name}: invalid YAML frontmatter was ignored. "
+                            "Tool restrictions could not be verified, so the agent may inherit "
+                            "broader tool access. Fix the frontmatter, and do not rely on this generated "
+                            "agent for tool isolation until APM supports the mapping."
+                        ),
+                        package=safe_package,
+                    )
 
         doc = {
             "name": name,

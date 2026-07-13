@@ -159,7 +159,13 @@ for...
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
-verbatim. Codex receives a TOML translation. Windsurf, Kiro, and
+verbatim. Codex currently translates only `name`, `description`, and
+the Markdown body; it does not map agent-level `model` or `tools` into
+the generated TOML. When `tools` is present, `apm install` emits a
+lossy-compilation warning because the generated agent may inherit
+broader project or session tool access. APM cannot currently persist
+that restriction for Codex, so do not treat the generated agent as
+tool-isolated until this mapping is supported. Windsurf, Kiro, and
 Gemini do not receive `.agent.md` files at all -- use skills for
 Windsurf or Kiro personas; Gemini CLI has no agents primitive.
 
@@ -192,7 +198,7 @@ offending package and field so you can fix the source.
 | claude | `.claude/agents/<name>.md` | verbatim |
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
-| codex | `.codex/agents/<name>.toml` | YAML frontmatter -> TOML; body becomes `developer_instructions` |
+| codex | `.codex/agents/<name>.toml` | `name` and `description` -> TOML; body becomes `developer_instructions`; unsupported `tools` emits a warning |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
 | kiro | not deployed | Kiro target v1 ships personas as skills, not `.agent.md` files |
 | gemini | not deployed | Gemini CLI has no agents primitive |
