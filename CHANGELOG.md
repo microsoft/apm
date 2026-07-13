@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).
   Cached inheritance chains no longer relabel stale strict parents as fresh or
   bypass inherited policy in `apm policy status` and executable approval.
+- `apm pack` now emits the `category` field in the Claude marketplace output
+  (`.claude-plugin/marketplace.json`) when a package sets it, matching the
+  Anthropic marketplace schema and the existing Codex output. It stays optional
+  (omitted when unset). Previously `category` was silently stripped from the
+  Claude output even though the `apm.yml` schema accepts and validates it.
+  (closes #2188)
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)
