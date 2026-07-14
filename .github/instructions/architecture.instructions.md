@@ -40,6 +40,7 @@ instead of re-deriving the answer locally.
 | Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators |
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) |
+| Git repository cache identity | DependencyReference.to_repository_cache_url() -> cache/url_normalize.py |
 
 If you are about to compute one of these locally, stop and call the
 owner. If the owner is missing a case you need, EXTEND the owner --

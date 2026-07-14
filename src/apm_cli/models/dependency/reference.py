@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
+    build_ssh_url,
     default_host,
     is_artifactory_path,
     is_azure_devops_hostname,
@@ -2064,6 +2065,23 @@ class DependencyReference:
 
     def to_clone_url(self) -> str:
         """Convert to a clone-friendly URL (same as to_github_url for most purposes)."""
+        return self.to_github_url()
+
+    def to_repository_cache_url(self) -> str:
+        """Return the credential-free repository URL used for Git cache identity.
+
+        Unlike dependency identity, clone cache identity includes explicit
+        transport context such as the SSH username and port.  The complete
+        repository path is retained so nested GitLab projects cannot share a
+        cache entry merely because they have the same top-level group prefix.
+        """
+        if self.explicit_scheme == "ssh":
+            return build_ssh_url(
+                self.host or default_host(),
+                self.repo_url,
+                port=self.port,
+                user=self.ssh_user or "git",
+            )
         return self.to_github_url()
 
     def get_display_name(self) -> str:

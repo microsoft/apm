@@ -1319,7 +1319,7 @@ class TestSharedCloneCache:
 
         cache = SharedCloneCache(base_dir=tmp_path)
         try:
-            result = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+            result = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
             assert result.is_dir()
             assert call_count == 1
         finally:
@@ -1339,8 +1339,8 @@ class TestSharedCloneCache:
 
         cache = SharedCloneCache(base_dir=tmp_path)
         try:
-            p1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
-            p2 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+            p1 = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
+            p2 = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
             assert p1 == p2
             assert call_count == 1  # Only cloned once
         finally:
@@ -1356,8 +1356,8 @@ class TestSharedCloneCache:
 
         cache = SharedCloneCache(base_dir=tmp_path)
         try:
-            p1 = cache.get_or_clone("github.com", "owner", "repo1", "main", clone_fn)
-            p2 = cache.get_or_clone("github.com", "owner", "repo2", "main", clone_fn)
+            p1 = cache.get_or_clone("https://github.com/owner/repo1", "main", clone_fn)
+            p2 = cache.get_or_clone("https://github.com/owner/repo2", "main", clone_fn)
             assert p1 != p2
         finally:
             cache.cleanup()
@@ -1371,7 +1371,7 @@ class TestSharedCloneCache:
             (path / "HEAD").write_text("ref: refs/heads/main\n")
 
         cache = SharedCloneCache(base_dir=tmp_path)
-        result_path = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+        result_path = cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
         assert result_path.exists()
 
         cache.cleanup()
@@ -1388,7 +1388,7 @@ class TestSharedCloneCache:
             (path / "HEAD").write_text("ref: refs/heads/main\n")
 
         with SharedCloneCache(base_dir=tmp_path) as cache:
-            cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+            cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
         # After context manager exit, entries should be cleared
         assert len(cache._entries) == 0
 
@@ -1402,9 +1402,9 @@ class TestSharedCloneCache:
         cache = SharedCloneCache(base_dir=tmp_path)
         try:
             with pytest.raises(RuntimeError, match="clone failed"):
-                cache.get_or_clone("github.com", "owner", "repo", "main", failing_clone_fn)
+                cache.get_or_clone("https://github.com/owner/repo", "main", failing_clone_fn)
             # Entry should have error set, not path
-            key = ("github.com", "owner", "repo", "main")
+            key = ("https://github.com/owner/repo", "main")
             entry = cache._entries.get(key)
             assert entry is not None
             assert entry.path is None
@@ -1417,7 +1417,7 @@ class TestSharedCloneCache:
 
         cache = SharedCloneCache(base_dir=tmp_path)
         try:
-            result = cache._find_repo_bare("github.com", "owner", "repo")
+            result = cache._find_repo_bare("https://github.com/owner/repo")
             assert result is None
         finally:
             cache.cleanup()
@@ -1439,11 +1439,11 @@ class TestSharedCloneCache:
         cache = SharedCloneCache(base_dir=tmp_path)
         try:
             # First clone to register a bare
-            cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+            cache.get_or_clone("https://github.com/owner/repo", "main", clone_fn)
 
             # Second request for same repo but different ref with fetch_fn
             cache.get_or_clone(
-                "github.com", "owner", "repo", "abc1234", clone_fn, fetch_fn=fetch_fn
+                "https://github.com/owner/repo", "abc1234", clone_fn, fetch_fn=fetch_fn
             )
             # fetch_fn should have been called
             assert len(fetch_called) > 0

@@ -1146,14 +1146,11 @@ class GitHubPackageDownloader:
             progress_obj.update(progress_task_id, completed=10, total=100)
 
         # WS2a (#1116): attempt shared clone dedup when a per-run cache
-        # is available.  Two subdir deps from the same (host, owner, repo, ref)
+        # is available.  Two subdir deps from the same (repository URL, ref)
         # share one clone; different refs always get independent clones.
         shared_cache = self.shared_clone_cache
         use_shared = shared_cache is not None
-        # Determine cache key components from the dep_ref.
-        cache_host = dep_ref.host or default_host()
-        cache_owner = dep_ref.repo_url.split("/")[0] if "/" in dep_ref.repo_url else ""
-        cache_repo = dep_ref.repo_url.split("/")[1] if "/" in dep_ref.repo_url else dep_ref.repo_url
+        repository_cache_url = dep_ref.to_repository_cache_url()
 
         # WS3 (#1116): try persistent cross-run cache first.
         # Build a canonical URL for cache key derivation.
@@ -1161,7 +1158,6 @@ class GitHubPackageDownloader:
         _persistent_checkout: Path | None = None
         _resolved_sha_for_cache: str | None = None
         if _persistent_cache is not None:
-            _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
             try:
                 # Tiered ref resolution (perf #1433 follow-up): resolve
                 # the ref through the attached TieredRefResolver BEFORE
@@ -1180,7 +1176,7 @@ class GitHubPackageDownloader:
                 # same SHA land in separate variant shards; bare cache
                 # is unchanged so they still share object data.
                 _persistent_checkout = _persistent_cache.get_checkout(
-                    _canonical_url,
+                    repository_cache_url,
                     _resolved_sha_for_cache or ref,
                     locked_sha=_resolved_sha_for_cache,
                     env=self._git_env_dict(),
@@ -1223,7 +1219,7 @@ class GitHubPackageDownloader:
                     )
             elif use_shared:
                 # WS2 (#1126): shared cache holds BARE clones keyed by
-                # (host, owner, repo, ref). Each consumer materializes its
+                # (repository URL, ref). Each consumer materializes its
                 # own working tree from the bare; this is subdir-agnostic
                 # so two parallel consumers requesting different
                 # subdirectories of the same repo+ref can share one bare
@@ -1250,9 +1246,7 @@ class GitHubPackageDownloader:
 
                 try:
                     shared_bare_path = shared_cache.get_or_clone(
-                        cache_host,
-                        cache_owner,
-                        cache_repo,
+                        repository_cache_url,
                         ref,
                         _shared_bare_clone_fn,
                         fetch_fn=_shared_bare_fetch_fn if is_commit_sha else None,
@@ -1643,14 +1637,8 @@ class GitHubPackageDownloader:
         _persistent_cache = self.persistent_git_cache
         if _persistent_cache is not None:
             try:
-                cache_host = dep_ref.host or default_host()
-                cache_owner = dep_ref.repo_url.split("/")[0] if "/" in dep_ref.repo_url else ""
-                cache_repo = (
-                    dep_ref.repo_url.split("/")[1] if "/" in dep_ref.repo_url else dep_ref.repo_url
-                )
-                _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
                 _cached = _persistent_cache.get_checkout(
-                    _canonical_url,
+                    dep_ref.to_repository_cache_url(),
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                     env=self._git_env_dict(),

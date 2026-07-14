@@ -30,13 +30,15 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from ..cache.url_normalize import cache_shard_key, normalize_repo_url
+
 _log = logging.getLogger(__name__)
 
 
 class SharedCloneCache:
     """Thread-safe per-run cache of shared Git clones.
 
-    Keys are ``(host, owner, repo, ref_or_None)`` tuples. The first
+    Keys are ``(normalized_repository_url, ref_or_None)`` tuples. The first
     caller for a given key performs the clone; concurrent callers block
     until the clone completes and then reuse the result.
 
@@ -49,12 +51,12 @@ class SharedCloneCache:
         self._base_dir = base_dir
         self._lock = threading.Lock()
         # Maps cache_key -> _CacheEntry
-        self._entries: dict[tuple[str, str, str, str | None], _CacheEntry] = {}
+        self._entries: dict[tuple[str, str | None], _CacheEntry] = {}
         self._temp_dirs: list[str] = []
-        # Maps (host, owner, repo) -> list of (ref, bare_path) tuples.
+        # Maps normalized repository URL -> list of (ref, bare_path) tuples.
         # Used to locate an existing bare for the same repo when a new ref
         # (typically a SHA pin on a transitive dep) is requested.
-        self._repo_bares: dict[tuple[str, str, str], list[tuple[str | None, Path]]] = {}
+        self._repo_bares: dict[str, list[tuple[str | None, Path]]] = {}
         # Per-bare-path locks to serialise concurrent Tier-0 fetches into the
         # same bare (git concurrent pack-file writes are not safe).
         self._bare_fetch_locks: dict[Path, threading.Lock] = {}
@@ -67,9 +69,7 @@ class SharedCloneCache:
 
     def get_or_clone(
         self,
-        host: str,
-        owner: str,
-        repo: str,
+        repository_url: str,
         ref: str | None,
         clone_fn: Callable[[Path], None],
         fetch_fn: Callable[[Path, str], bool] | None = None,
@@ -77,9 +77,8 @@ class SharedCloneCache:
         """Return a path to a shared clone, cloning on first access.
 
         Args:
-            host: Git host (e.g. "github.com").
-            owner: Repository owner.
-            repo: Repository name.
+            repository_url: Credential-free URL identifying the complete Git
+                repository, including any nested group path.
             ref: Git ref (branch/tag/sha) or None for default branch.
             clone_fn: Callable that performs the clone into the given
                 directory.  Called at most once per unique key.  Must
@@ -96,7 +95,9 @@ class SharedCloneCache:
         Raises:
             Whatever ``clone_fn`` raises on failure.
         """
-        key = (host, owner, repo, ref)
+        repository = normalize_repo_url(repository_url)
+        repository_shard = cache_shard_key(repository)
+        key = (repository, ref)
         entry = self._get_or_create_entry(key)
 
         with entry.lock:
@@ -112,7 +113,7 @@ class SharedCloneCache:
             # when a transitive dep pins a SHA that is missing only because
             # the initial shallow bare did not include that commit.
             if ref and fetch_fn:
-                existing_bare = self._find_repo_bare(host, owner, repo)
+                existing_bare = self._find_repo_bare(repository)
                 if existing_bare is not None:
                     # Acquire a per-bare lock so concurrent Tier-0 fetches
                     # into the same bare are serialised (git pack-file writes
@@ -126,24 +127,22 @@ class SharedCloneCache:
                             if fetch_fn(existing_bare, ref):
                                 entry.path = existing_bare
                                 with self._lock:
-                                    repo_key = (host, owner, repo)
-                                    if repo_key not in self._repo_bares:
-                                        self._repo_bares[repo_key] = []
-                                    self._repo_bares[repo_key].append((ref, existing_bare))
+                                    if repository not in self._repo_bares:
+                                        self._repo_bares[repository] = []
+                                    self._repo_bares[repository].append((ref, existing_bare))
                                 return existing_bare
                     except Exception:
                         _log.info(
-                            "Bare fetch miss for %s/%s/%s ref=%s, falling back to fresh clone",
-                            host,
-                            owner,
-                            repo,
+                            "Bare fetch miss for repository shard=%s ref=%s, "
+                            "falling back to fresh clone",
+                            repository_shard,
                             ref,
                         )
 
             # First caller (or retry after failure): perform the clone.
             temp_dir = tempfile.mkdtemp(
                 dir=str(self._base_dir) if self._base_dir else None,
-                prefix=f"apm_shared_{owner}_{repo}_",
+                prefix=f"apm_shared_{repository_shard}_",
             )
             clone_path = Path(temp_dir) / "bare"
             with self._lock:
@@ -168,33 +167,31 @@ class SharedCloneCache:
                         )
                 entry.path = clone_path
                 with self._lock:
-                    repo_key = (host, owner, repo)
-                    if repo_key not in self._repo_bares:
-                        self._repo_bares[repo_key] = []
-                    self._repo_bares[repo_key].append((ref, clone_path))
+                    if repository not in self._repo_bares:
+                        self._repo_bares[repository] = []
+                    self._repo_bares[repository].append((ref, clone_path))
                 return clone_path
             except Exception as exc:
                 entry.error = exc
                 raise
 
-    def _find_repo_bare(self, host: str, owner: str, repo: str) -> Path | None:
+    def _find_repo_bare(self, repository_url: str) -> Path | None:
         """Return an existing bare path for the same repo (any ref), or None.
 
         Searches the reverse index populated after each successful clone.
-        Returns the path of the first registered bare for ``(host, owner,
-        repo)`` regardless of which ref it was originally cloned at.
+        Returns the path of the first registered bare for the normalized
+        repository URL regardless of which ref it was originally cloned at.
 
         Args:
-            host: Git host (e.g. "github.com").
-            owner: Repository owner.
-            repo: Repository name.
+            repository_url: Credential-free complete repository URL.
 
         Returns:
             A :class:`Path` to an existing bare, or ``None`` if none is
             registered yet.
         """
+        repository = normalize_repo_url(repository_url)
         with self._lock:
-            entries = self._repo_bares.get((host, owner, repo))
+            entries = self._repo_bares.get(repository)
             if entries:
                 return entries[0][1]
             return None

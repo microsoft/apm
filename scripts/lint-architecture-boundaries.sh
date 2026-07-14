@@ -276,6 +276,16 @@ if [ "$windows_owner_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC9: Git repository cache identity authority"
+if [ "$(grep -c 'to_repository_cache_url()' src/apm_cli/deps/github_downloader.py)" -lt 2 ]; then
+    echo "[x] Repository cache identity must come from DependencyReference.to_repository_cache_url"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "Repository cache identity must not truncate repository paths" \
+    'cache_(host|owner|repo)|_canonical_url[[:space:]]*=[[:space:]]*f?"https://' \
+    src/apm_cli/deps/github_downloader.py
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

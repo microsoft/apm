@@ -378,3 +378,17 @@ def test_link_resolver_owns_dependency_deployment_frame_mapping() -> None:
 
     assert "candidate_in_deployment = ctx.deployment_package_root / package_relative" in source
     assert "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" in guard
+
+
+def test_dependency_reference_owns_repository_cache_identity() -> None:
+    """Downloader cache tiers must consume one complete repository identity."""
+    root = Path(__file__).parents[2]
+    downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text()
+    reference = (root / "src/apm_cli/models/dependency/reference.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def to_repository_cache_url(" in reference
+    assert downloader.count("to_repository_cache_url()") == 2
+    assert "Repository cache identity must not truncate repository paths" in guard
+    for retired_derivation in ("cache_owner", "cache_repo", '_canonical_url = f"https://'):
+        assert retired_derivation not in downloader

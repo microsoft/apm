@@ -210,3 +210,10 @@ class TestBuildSshUrlDispatchesUser:
         dep = DependencyReference.parse("ssh://buildbot@git.corp.com:7999/team/repo.git")
         url = build_ssh_url(dep.host, dep.repo_url, port=dep.port, user=dep.ssh_user or "git")
         assert url == "ssh://buildbot@git.corp.com:7999/team/repo.git"
+
+    def test_repository_cache_url_keeps_explicit_ssh_context(self):
+        dep = DependencyReference.parse("ssh://buildbot@git.corp.com:7999/Group/Subgroup/Repo.git")
+        assert (
+            dep.to_repository_cache_url()
+            == "ssh://buildbot@git.corp.com:7999/Group/Subgroup/Repo.git"
+        )
