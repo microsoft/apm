@@ -809,3 +809,59 @@ class TestHttpInsecureDeps:
         https_dep = DependencyReference.parse("https://gitlab.com/owner/repo.git")
         # Identity includes host but not scheme, so they are the same package
         assert http_dep.get_identity() == https_dep.get_identity()
+
+
+# ── HTTPS custom-port shorthand round-trip (#2203) ───────────────────────────
+
+
+class TestHttpsCustomPortShorthand:
+    """The apm.yml entry APM writes for a custom-port HTTPS dep must re-parse.
+
+    to_canonical()/get_identity() emit the scheme-free ``host:port/owner/repo``
+    form for a non-default-port HTTPS dependency. Before the fix the shorthand
+    parser rejected that form, so any command re-reading apm.yml failed on an
+    entry APM itself wrote.
+    """
+
+    def test_shorthand_with_custom_port_parses(self):
+        """Bare ``host:port/owner/repo`` restores host and port."""
+        dep = DependencyReference.parse("git.example.com:8443/owner/repo")
+        assert dep.host == "git.example.com"
+        assert dep.port == 8443
+        assert dep.repo_url == "owner/repo"
+
+    def test_apm_yml_entry_round_trips(self):
+        """parse -> to_apm_yml_entry -> parse preserves host and port (#2203)."""
+        dep = DependencyReference.parse("https://git.example.com:8443/owner/repo")
+        entry = dep.to_apm_yml_entry()
+        assert entry == "git.example.com:8443/owner/repo"
+        reparsed = DependencyReference.parse(entry)
+        assert reparsed.host == "git.example.com"
+        assert reparsed.port == 8443
+        # Serialization is idempotent: what APM writes, it can read and rewrite.
+        assert reparsed.to_canonical() == entry
+
+    def test_identity_round_trips(self):
+        """get_identity() (uninstall/dedup key) also re-parses with its port."""
+        dep = DependencyReference.parse("https://git.example.com:8443/owner/repo")
+        reparsed = DependencyReference.parse(dep.get_identity())
+        assert reparsed.port == 8443
+        assert reparsed.get_identity() == dep.get_identity()
+
+    def test_shorthand_with_ref_and_custom_port(self):
+        """A trailing ``#ref`` still parses alongside a custom port."""
+        dep = DependencyReference.parse("git.example.com:8443/owner/repo#v1.0")
+        assert dep.host == "git.example.com"
+        assert dep.port == 8443
+        assert dep.reference == "v1.0"
+
+    def test_redundant_https_default_port_is_normalized(self):
+        """``host:443`` normalizes to no port, matching the URL-form parser."""
+        dep = DependencyReference.parse("git.example.com:443/owner/repo")
+        assert dep.port is None
+        assert dep.to_canonical() == "git.example.com/owner/repo"
+
+    def test_plain_shorthand_has_no_port(self):
+        """Portless shorthand is unaffected by the port-splitting branch."""
+        assert DependencyReference.parse("owner/repo").port is None
+        assert DependencyReference.parse("github.com/owner/repo").port is None

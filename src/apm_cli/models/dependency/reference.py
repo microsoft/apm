@@ -1523,13 +1523,29 @@ class DependencyReference:
         Validates path components before returning.
 
         Returns:
-            ``(parsed_url, host)``
+            ``(parsed_url, host, port)`` -- *port* is the custom port split off
+            the leading ``host:port`` segment, or ``None``.
         """
         parts = repo_url.split("/")
 
         if "_git" in parts:
             git_idx = parts.index("_git")
             parts = parts[:git_idx] + parts[git_idx + 1 :]
+
+        # Accept a custom port on the leading host segment
+        # (``git.example.com:8443/owner/repo``). to_canonical()/get_identity()
+        # emit this form for non-default-port HTTPS deps, so parse() must be
+        # able to read back what APM itself wrote (#2203).
+        port = None
+        if parts and ":" in parts[0]:
+            maybe_host, _, maybe_port = parts[0].rpartition(":")
+            if maybe_host and maybe_port.isdigit() and 1 <= int(maybe_port) <= 65535:
+                parsed_port = int(maybe_port)
+                parts = [maybe_host, *parts[1:]]
+                # Drop a redundant HTTPS default port for canonical consistency
+                # with the URL-form parser (https://host:443 -> port None).
+                if parsed_port != _DEFAULT_SCHEME_PORTS.get("https"):
+                    port = parsed_port
 
         if len(parts) >= 3 and is_supported_git_host(parts[0]):
             host = parts[0]
@@ -1597,7 +1613,7 @@ class DependencyReference:
         github_url = urllib.parse.urljoin(f"https://{host}/", quoted_repo)
         parsed_url = urllib.parse.urlparse(github_url)
 
-        return parsed_url, host
+        return parsed_url, host, port
 
     @classmethod
     def _validate_url_repo_path(cls, parsed_url) -> tuple[str, str | None]:
@@ -1773,7 +1789,7 @@ class DependencyReference:
             if port == _DEFAULT_SCHEME_PORTS.get(scheme):
                 port = None
         else:
-            parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
+            parsed_url, host, port = cls._resolve_shorthand_to_parsed_url(repo_url, host)
 
         repo_url, url_virtual_path = cls._validate_url_repo_path(parsed_url)
 
