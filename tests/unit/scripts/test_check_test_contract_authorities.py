@@ -76,6 +76,42 @@ def test_binary_fixture_delegation_is_allowed(tmp_path: Path) -> None:
     assert _load_checker().find_binary_selection_violations(tmp_path) == []
 
 
+def test_direct_os_getenv_binary_read_is_rejected(tmp_path: Path) -> None:
+    """Deleting the os.getenv detector must fail independently."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "getenv_duplicate.py"
+    duplicate.write_text(
+        "import os\ndef choose():\n    return os.getenv('APM_BINARY_PATH')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct APM_BINARY_PATH read" in violations[0]
+
+
+def test_venv_fallback_without_which_is_rejected(tmp_path: Path) -> None:
+    """Deleting the .venv detector must fail independently of PATH lookup."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "venv_duplicate.py"
+    duplicate.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "def choose():\n"
+        "    configured = os.getenv('APM_BINARY_PATH')\n"
+        "    candidate = Path('.venv') / 'bin' / 'apm'\n"
+        "    return configured or (str(candidate) if candidate.exists() else None)\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 2
+    assert any("direct APM_BINARY_PATH read" in item for item in violations)
+    assert any("direct .venv apm fallback" in item for item in violations)
+
+
 def test_renamed_binary_resolver_is_rejected(tmp_path: Path) -> None:
     """A renamed resolver still fails because it reads the owned variable."""
     _write_owner_stubs(tmp_path)

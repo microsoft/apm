@@ -90,6 +90,19 @@ def _direct_binary_env_read_lines(tree: ast.AST) -> list[int]:
     return sorted(lines)
 
 
+def _venv_binary_fallback_lines(tree: ast.AST) -> list[int]:
+    lines: set[int] = set()
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        strings = {
+            value for child in ast.walk(function) if (value := _literal_string(child)) is not None
+        }
+        if ".venv" in strings and "apm" in strings:
+            lines.add(function.lineno)
+    return sorted(lines)
+
+
 def _defined_functions(tree: ast.AST) -> set[str]:
     return {
         node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -124,11 +137,18 @@ def find_binary_selection_violations(root: Path) -> list[str]:
         if tree is None:
             continue
         relative = path.relative_to(root).as_posix()
-        for line in _direct_binary_env_read_lines(tree):
+        env_read_lines = _direct_binary_env_read_lines(tree)
+        for line in env_read_lines:
             diagnostics.append(
                 f"[x] direct APM_BINARY_PATH read outside {BINARY_OWNER}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
+        if env_read_lines:
+            for line in _venv_binary_fallback_lines(tree):
+                diagnostics.append(
+                    f"[x] direct .venv apm fallback outside {BINARY_OWNER}: "
+                    f"{relative}:{line}; consume the apm_binary_path fixture"
+                )
         if path.parent == integration_root and "_resolve_apm_binary" in _defined_functions(tree):
             diagnostics.append(
                 f"[x] duplicate _resolve_apm_binary definition: {relative}; owner is {BINARY_OWNER}"

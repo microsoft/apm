@@ -68,10 +68,31 @@ def effective_env(
 
 def shell_tokens(step: WorkflowNode) -> list[str]:
     """Tokenize a run step while treating commented commands as absent."""
+    return [token for command in shell_commands(step) for token in command]
+
+
+def shell_commands(step: WorkflowNode) -> list[list[str]]:
+    """Tokenize each shell command after joining line continuations."""
     command = step.get("run")
     if not isinstance(command, str):
         raise AssertionError("workflow step must contain a run command")
-    return shlex.split(command, comments=True, posix=True)
+    logical = command.replace("\\\n", " ")
+    return [
+        tokens
+        for line in logical.splitlines()
+        if (tokens := shlex.split(line, comments=True, posix=True))
+    ]
+
+
+def assert_exact_command(
+    commands: list[list[str]],
+    expected: list[str],
+    *,
+    label: str,
+) -> None:
+    """Require one complete shell command to match exactly."""
+    if expected not in commands:
+        raise AssertionError(f"{label} must contain exact command: {expected!r}")
 
 
 def assert_unconditional(node: WorkflowNode, *, label: str) -> None:

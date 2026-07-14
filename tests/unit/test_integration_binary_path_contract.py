@@ -91,6 +91,7 @@ def test_empty_explicit_binary_path_fails_without_fallback(
     (
         ("empty", "APM_BINARY_PATH is set but empty."),
         ("missing", "APM_BINARY_PATH does not exist or is not a file:"),
+        ("directory", "APM_BINARY_PATH does not exist or is not a file:"),
         pytest.param(
             "non-executable",
             "APM_BINARY_PATH is not executable:",
@@ -115,6 +116,10 @@ def test_silent_adopt_consumer_rejects_invalid_explicit_binary(
         env["APM_BINARY_PATH"] = ""
     elif configured_kind == "missing":
         env["APM_BINARY_PATH"] = str(tmp_path / "missing-apm")
+    elif configured_kind == "directory":
+        configured = tmp_path / "configured-apm"
+        configured.mkdir()
+        env["APM_BINARY_PATH"] = str(configured)
     else:
         configured = tmp_path / "configured-apm"
         configured.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")

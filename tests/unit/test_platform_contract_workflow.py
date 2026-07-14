@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 
 from tests.workflow_contracts import (
+    assert_exact_command,
     assert_unconditional,
     effective_env,
     load_workflow,
+    shell_commands,
     shell_tokens,
     workflow_job,
     workflow_step,
@@ -39,7 +41,20 @@ def _assert_macos_startup_step(workflow: dict) -> None:
     }
     tokens = shell_tokens(step)
     assert tokens[:3] == ["test", "-x", "$APM_BINARY_PATH"]
-    assert MACOS_TEST_ID in tokens
+    assert_exact_command(
+        shell_commands(step),
+        [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            MACOS_TEST_ID,
+            "-vv",
+            "-ra",
+            "--tb=short",
+        ],
+        label="macOS Intel startup step",
+    )
     assert workflow_step_index(job, "Build binary") < workflow_step_index(
         job,
         "Test macOS non-shell binary startup",
@@ -104,6 +119,22 @@ def test_macos_disabled_mutations_are_rejected(scope: str) -> None:
     job = workflow_job(workflow, "build-and-validate-macos-intel")
     step = workflow_step(job, "Test macOS non-shell binary startup")
     {"job": job, "step": step}[scope]["if"] = False
+
+    with pytest.raises(AssertionError):
+        _assert_macos_startup_step(workflow)
+
+
+def test_macos_echo_replacement_mutation_is_rejected() -> None:
+    """An echo cannot replace the exact frozen pytest invocation."""
+    workflow = deepcopy(_workflow())
+    step = workflow_step(
+        workflow_job(workflow, "build-and-validate-macos-intel"),
+        "Test macOS non-shell binary startup",
+    )
+    step["run"] = (
+        'test -x "$APM_BINARY_PATH"\n'
+        f"echo uv run --frozen pytest {MACOS_TEST_ID} -vv -ra --tb=short\n"
+    )
 
     with pytest.raises(AssertionError):
         _assert_macos_startup_step(workflow)
