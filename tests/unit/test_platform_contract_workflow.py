@@ -1,49 +1,109 @@
-"""Static contracts for hosted PR6 platform evidence."""
+"""Semantic contracts for hosted PR6 platform evidence."""
 
+from __future__ import annotations
+
+from copy import deepcopy
 from pathlib import Path
+
+import pytest
+
+from tests.workflow_contracts import (
+    assert_unconditional,
+    effective_env,
+    load_workflow,
+    shell_tokens,
+    workflow_job,
+    workflow_step,
+    workflow_step_index,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
+MACOS_TEST_ID = "tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs"
+WINDOWS_TEST_ID = "tests/integration/test_windows_installer_launchers.py"
+
+
+def _workflow() -> dict:
+    return load_workflow(WORKFLOW)
+
+
+def _assert_macos_startup_step(workflow: dict) -> None:
+    job = workflow_job(workflow, "build-and-validate-macos-intel")
+    step = workflow_step(job, "Test macOS non-shell binary startup")
+    assert_unconditional(job, label="macOS Intel job")
+    assert_unconditional(step, label="macOS Intel startup step")
+    assert job["runs-on"] == "macos-15-intel"
+    assert step["env"] == {
+        "APM_E2E_TESTS": "1",
+        "APM_BINARY_PATH": "${{ github.workspace }}/dist/apm-darwin-x86_64/apm",
+    }
+    tokens = shell_tokens(step)
+    assert tokens[:3] == ["test", "-x", "$APM_BINARY_PATH"]
+    assert MACOS_TEST_ID in tokens
+    assert workflow_step_index(job, "Build binary") < workflow_step_index(
+        job,
+        "Test macOS non-shell binary startup",
+    )
+
+
+def _assert_windows_installer_step(workflow: dict) -> None:
+    job = workflow_job(workflow, "build-and-test")
+    step = workflow_step(job, "Test install.ps1 end-to-end (Windows)")
+    assert step.get("if") == "matrix.platform == 'windows'"
+    assert effective_env(workflow, job, step).get("GITHUB_TOKEN") is None
+    assert step["env"] == {"APM_E2E_TESTS": "1"}
+    tokens = shell_tokens(step)
+    assert tokens[:4] == ["uv", "run", "--frozen", "pytest"]
+    assert WINDOWS_TEST_ID in tokens
+    assert "-vv" in tokens
+    assert "-ra" in tokens
+    assert "--tb=short" in tokens
 
 
 def test_macos_intel_runs_non_shell_binary_startup_after_build() -> None:
-    """The Intel job must execute the existing list-form binary startup test."""
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    intel_start = workflow.index("  build-and-validate-macos-intel:")
-    arm_start = workflow.index("  build-and-validate-macos-arm:")
-    intel_job = workflow[intel_start:arm_start]
-
-    build_step = "      - name: Build binary"
-    test_id = "tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs"
-    binary_path = "APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-x86_64/apm"
-
-    assert test_id in intel_job
-    assert binary_path in intel_job
-    assert 'APM_E2E_TESTS: "1"' in intel_job
-    assert intel_job.index(build_step) < intel_job.index(test_id)
-    command_start = intel_job.index("      - name: Test macOS non-shell binary startup")
-    command = intel_job[command_start : command_start + 500]
-    assert 'test -x "$APM_BINARY_PATH"' in command
-    assert "uv run --frozen pytest" in command
-    assert command.index('test -x "$APM_BINARY_PATH"') < command.index(test_id)
-    assert "matrix:" not in intel_job
+    """The Intel job executes the exact generated artifact unconditionally."""
+    _assert_macos_startup_step(_workflow())
 
 
-def test_windows_installer_contract_reports_its_exact_test_id() -> None:
-    """The hosted Windows log is exact, frozen, and does not expose a token."""
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    windows_start = workflow.index("  build-and-test:")
-    intel_start = workflow.index("  build-and-validate-macos-intel:")
-    build_job = workflow[windows_start:intel_start]
+def test_windows_installer_contract_is_windows_only_and_tokenless() -> None:
+    """The Windows E2E has exact gating and no effective repository token."""
+    _assert_windows_installer_step(_workflow())
 
-    test_id = "tests/integration/test_windows_installer_launchers.py"
-    assert test_id in build_job
-    command_start = build_job.index(test_id)
-    command = build_job[command_start : command_start + 160]
-    assert "-vv -ra --tb=short" in command
-    installer_step_start = build_job.index("      - name: Test install.ps1 end-to-end (Windows)")
-    installer_step_end = build_job.index("      - name: Run unit tests", installer_step_start)
-    installer_step = build_job[installer_step_start:installer_step_end]
-    assert "uv run --frozen pytest" in installer_step
-    assert 'APM_E2E_TESTS: "1"' in installer_step
-    assert "GITHUB_TOKEN:" not in installer_step
+
+@pytest.mark.parametrize("scope", ("workflow", "job", "step"))
+def test_windows_token_scope_mutations_are_rejected(scope: str) -> None:
+    """A token inherited from any Actions scope must fail the contract."""
+    workflow = deepcopy(_workflow())
+    job = workflow_job(workflow, "build-and-test")
+    step = workflow_step(job, "Test install.ps1 end-to-end (Windows)")
+    {"workflow": workflow, "job": job, "step": step}[scope].setdefault("env", {})[
+        "GITHUB_TOKEN"
+    ] = "secret"
+
+    with pytest.raises(AssertionError):
+        _assert_windows_installer_step(workflow)
+
+
+def test_windows_linux_gate_mutation_is_rejected() -> None:
+    """A Linux condition cannot satisfy the Windows-only platform contract."""
+    workflow = deepcopy(_workflow())
+    step = workflow_step(
+        workflow_job(workflow, "build-and-test"),
+        "Test install.ps1 end-to-end (Windows)",
+    )
+    step["if"] = "matrix.platform == 'linux'"
+
+    with pytest.raises(AssertionError):
+        _assert_windows_installer_step(workflow)
+
+
+@pytest.mark.parametrize("scope", ("job", "step"))
+def test_macos_disabled_mutations_are_rejected(scope: str) -> None:
+    """The Intel startup evidence cannot be disabled at job or step scope."""
+    workflow = deepcopy(_workflow())
+    job = workflow_job(workflow, "build-and-validate-macos-intel")
+    step = workflow_step(job, "Test macOS non-shell binary startup")
+    {"job": job, "step": step}[scope]["if"] = False
+
+    with pytest.raises(AssertionError):
+        _assert_macos_startup_step(workflow)
