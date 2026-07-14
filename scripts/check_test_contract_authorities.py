@@ -930,9 +930,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     diagnostics = check(args.root.resolve())
     for diagnostic in diagnostics:
-        print(diagnostic)
+        print(diagnostic, file=sys.stderr)
     if diagnostics:
-        print(f"[x] {len(diagnostics)} test contract authority violation(s) found")
+        count = len(diagnostics)
+        label = "violation" if count == 1 else "violations"
+        print(
+            f"[x] {count} test contract authority {label} found",
+            file=sys.stderr,
+        )
         return 1
     print("[+] test contract authority check clean")
     return 0

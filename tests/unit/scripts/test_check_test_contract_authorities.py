@@ -35,6 +35,34 @@ def _write_owner_stubs(root: Path) -> None:
     )
 
 
+def test_checker_main_reserves_stdout_for_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checker = _load_checker()
+    monkeypatch.setattr(checker, "check", lambda _root: [])
+
+    assert checker.main(["--root", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "[+] test contract authority check clean\n"
+    assert captured.err == ""
+
+
+def test_checker_main_routes_failures_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checker = _load_checker()
+    monkeypatch.setattr(checker, "check", lambda _root: ["[x] duplicate owner"])
+
+    assert checker.main(["--root", str(tmp_path)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ("[x] duplicate owner\n[x] 1 test contract authority violation found\n")
+
+
 @pytest.mark.parametrize(
     "source",
     (
