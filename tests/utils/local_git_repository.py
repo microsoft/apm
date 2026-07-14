@@ -32,7 +32,7 @@ class LocalGitRepositoryFactory:
     """Create and advance deterministic local Git repository fixtures."""
 
     def __init__(self, root: Path, *, env: Mapping[str, str]) -> None:
-        self._root = root
+        self._root = root.resolve()
         self._env = dict(env)
         self._root.mkdir(parents=True, exist_ok=True)
 

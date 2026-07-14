@@ -100,6 +100,49 @@ def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
     assert not (tmp_path / "outside-worktree").exists()
 
 
+def test_relative_root_resolves_once_at_the_intended_location(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = _git_environment(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    factory = LocalGitRepositoryFactory(Path("repositories"), env=environment)
+
+    repository = factory.create("package")
+    manifest = repository.worktree / "apm.yml"
+    manifest.write_text("name: package\nversion: 0.1.0\n", encoding="utf-8")
+    commit = factory.commit(repository, message="seed")
+
+    expected_root = tmp_path / "repositories"
+    assert repository.origin == expected_root / "package.git"
+    assert repository.worktree == expected_root / "package-worktree"
+    assert repository.file_url == (expected_root / "package.git").as_uri()
+    assert not (expected_root / "repositories").exists()
+    bare = _run_git(
+        "-C",
+        str(repository.origin),
+        "rev-parse",
+        "--is-bare-repository",
+        environment=environment,
+    )
+    assert bare.stdout.strip() == "true"
+    worktree = _run_git(
+        "-C",
+        str(repository.worktree),
+        "rev-parse",
+        "--is-inside-work-tree",
+        environment=environment,
+    )
+    assert worktree.stdout.strip() == "true"
+    remote_main = _run_git(
+        "ls-remote",
+        repository.file_url,
+        "refs/heads/main",
+        environment=environment,
+    )
+    assert remote_main.stdout.split()[0] == commit.sha
+
+
 def test_same_source_sequence_produces_deterministic_commit(tmp_path: Path) -> None:
     commits = []
     for name in ("first", "second"):
