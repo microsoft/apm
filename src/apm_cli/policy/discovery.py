@@ -1395,23 +1395,47 @@ def _policy_fingerprint(serialized: str) -> str:
 
 
 def _is_policy_empty(policy: ApmPolicy) -> bool:
-    """Return True if a policy has no actionable restrictions.
-
-    An 'empty' policy is syntactically valid but imposes no constraints
-    beyond the permissive defaults.
-    """
-    return (
-        not policy.dependencies.effective_deny
-        and policy.dependencies.allow is None
-        and not policy.dependencies.effective_require
-        and not policy.mcp.deny
-        and policy.mcp.allow is None
-        and policy.mcp.transport.allow is None
-        and policy.compilation.target.allow is None
-        and not policy.manifest.required_fields
-        and policy.manifest.scripts == "allow"
-        and policy.manifest.content_types is None
-        and policy.unmanaged_files.effective_action == "ignore"
+    """Return True only when the policy has no actionable restrictions."""
+    return not any(
+        (
+            policy.fetch_failure != "warn",
+            policy.dependencies.effective_deny,
+            policy.dependencies.allow is not None,
+            policy.dependencies.effective_require,
+            policy.dependencies.require_resolution != "project-wins",
+            policy.dependencies.max_depth != 50,
+            policy.dependencies.require_pinned_constraint,
+            policy.mcp.deny,
+            policy.mcp.allow is not None,
+            policy.mcp.transport.allow is not None,
+            policy.mcp.self_defined != "warn",
+            policy.mcp.trust_transitive,
+            policy.compilation.target.allow is not None,
+            policy.compilation.target.enforce is not None,
+            policy.compilation.strategy.enforce is not None,
+            policy.compilation.source_attribution,
+            policy.manifest.required_fields,
+            policy.manifest.scripts != "allow",
+            policy.manifest.content_types is not None,
+            policy.manifest.require_explicit_includes,
+            policy.unmanaged_files.effective_action != "ignore",
+            policy.unmanaged_files.directories is not None,
+            policy.unmanaged_files.exclude is not None,
+            policy.registry_source.require,
+            not policy.registry_source.allow_non_registry,
+            policy.security.audit.on_install is not None,
+            policy.security.audit.external is not None,
+            policy.security.audit.scanners is not None,
+            policy.security.audit.fail_on_drift,
+            policy.security.integrity.require_hashes,
+            policy.bin_deploy.deny_all,
+            policy.bin_deploy.deny,
+            policy.executables.deny_all,
+            policy.executables.deny,
+            policy.executables.require,
+            policy.executables.recommend,
+            policy.executables.enforce,
+        )
     )
 
 

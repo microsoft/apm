@@ -20,7 +20,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch  # noqa: F401
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.policy.discovery import (
@@ -474,6 +474,48 @@ class TestIsPolicyEmpty(unittest.TestCase):
         """enforcement='block' alone doesn't make a policy non-empty."""
         p = ApmPolicy(enforcement="block")
         self.assertTrue(_is_policy_empty(p))
+
+
+@pytest.mark.parametrize(
+    "policy_yaml",
+    [
+        pytest.param(
+            "dependencies:\n  require_pinned_constraint: true\n",
+            id="pinned-constraint",
+        ),
+        pytest.param(
+            "manifest:\n  require_explicit_includes: true\n",
+            id="explicit-includes",
+        ),
+        pytest.param(
+            "registry_source:\n  allow_non_registry: false\n",
+            id="registry-source",
+        ),
+        pytest.param(
+            "security:\n  integrity:\n    require_hashes: true\n",
+            id="integrity",
+        ),
+        pytest.param(
+            "security:\n  audit:\n    on_install: block\n",
+            id="audit",
+        ),
+        pytest.param(
+            "bin_deploy:\n  deny_all: true\n",
+            id="bin-deploy",
+        ),
+        pytest.param(
+            "executables:\n  deny_all: true\n",
+            id="executables",
+        ),
+        pytest.param(
+            "fetch_failure: block\n",
+            id="fetch-failure",
+        ),
+    ],
+)
+def test_modern_only_policy_is_not_empty(policy_yaml: str) -> None:
+    policy, _warnings = load_policy("name: modern-only\n" + policy_yaml)
+    assert not _is_policy_empty(policy)
 
 
 # ---------------------------------------------------------------------------
