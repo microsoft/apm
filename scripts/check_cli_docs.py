@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import click
@@ -62,15 +63,32 @@ def main(argv: list[str] | None = None) -> int:
             args.dist_dir,
         )
     except FileNotFoundError as error:
-        print(f"[x] {error}")
+        print(f"[x] {error}", file=sys.stderr)
+        print(
+            "[i] Rebuild docs with 'cd docs && npm run build', then rerun "
+            f"'uv run --frozen python scripts/check_cli_docs.py {args.dist_dir}'.",
+            file=sys.stderr,
+        )
         return 1
 
     if missing_pages or orphan_pages:
-        print("[x] CLI registry/rendered documentation mismatch:")
+        print("[x] CLI registry/rendered documentation mismatch:", file=sys.stderr)
         if missing_pages:
-            print("  executable commands missing rendered pages: " + ", ".join(missing_pages))
+            print(
+                "  executable commands missing rendered pages: " + ", ".join(missing_pages),
+                file=sys.stderr,
+            )
         if orphan_pages:
-            print("  rendered pages missing executable commands: " + ", ".join(orphan_pages))
+            print(
+                "  rendered pages missing executable commands: " + ", ".join(orphan_pages),
+                file=sys.stderr,
+            )
+        print(
+            "[i] Add or remove the matching CLI reference page, rebuild with "
+            "'cd docs && npm run build', then rerun "
+            f"'uv run --frozen python scripts/check_cli_docs.py {args.dist_dir}'.",
+            file=sys.stderr,
+        )
         return 1
 
     command_count = len(public_top_level_commands(cli))
