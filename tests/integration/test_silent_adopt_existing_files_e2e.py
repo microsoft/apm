@@ -20,55 +20,22 @@ catch-22.
 Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
 
-pytestmark = pytest.mark.requires_github_token
+pytestmark = [
+    pytest.mark.requires_github_token,
+    pytest.mark.requires_apm_binary,
+]
 
 
 @pytest.fixture
-def apm_command():
-    """Resolve an apm binary that is wired to *this* checkout's source.
-
-    The repo binary (homebrew/system ``apm``) may be a stable release that
-    predates the fix under test, which would silently make this regression
-    test pass against unfixed code. Prefer the CI-built artifact or a
-    venv-installed editable binary so the test exercises the in-repo
-    apm_cli source.
-
-    Resolution order:
-      1. ``APM_TEST_BINARY`` env override (explicit per-test pin).
-      2. ``APM_BINARY_PATH`` env (CI sets this after the build step;
-         shared with ``apm_binary_path`` fixture in ``conftest.py``).
-      3. Repo-local ``.venv/bin/apm`` (this worktree).
-      4. Sibling ``../awd-cli/.venv/bin/apm`` (shared dev venv pointing
-         at this worktree via ``pip install -e .``).
-      5. ``apm`` on PATH (last resort; may be stale).
-    """
-    import os
-
-    for env_var in ("APM_TEST_BINARY", "APM_BINARY_PATH"):
-        override = os.environ.get(env_var)
-        if override and Path(override).exists():
-            return override
-
-    repo_root = Path(__file__).parent.parent.parent
-    candidates = [
-        repo_root / ".venv" / "bin" / "apm",
-        repo_root.parent / "awd-cli" / ".venv" / "bin" / "apm",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test binary selection unchanged."""
+    return str(apm_binary_path)
 
 
 @pytest.fixture

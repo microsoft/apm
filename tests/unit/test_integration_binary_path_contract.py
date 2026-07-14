@@ -1,5 +1,8 @@
 """Contracts for authoritative integration-test binary selection."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -63,6 +66,40 @@ def test_empty_explicit_binary_path_fails_without_fallback(
 
     with pytest.raises(pytest.UsageError, match=r"APM_BINARY_PATH is set but empty"):
         integration_conftest._resolve_apm_binary()
+
+
+def test_silent_adopt_consumer_rejects_empty_explicit_binary(
+    tmp_path: Path,
+) -> None:
+    """The silent-adopt E2E must fail through the canonical resolver."""
+    fallback = tmp_path / "apm"
+    fallback.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fallback.chmod(0o755)
+    env = os.environ.copy()
+    env["APM_BINARY_PATH"] = ""
+    env["GITHUB_APM_PAT"] = "test-token"
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "tests/integration/test_silent_adopt_existing_files_e2e.py",
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "ERROR: APM_BINARY_PATH is set but empty." in combined
+    assert "INTERNALERROR" not in combined
 
 
 def test_non_executable_explicit_binary_path_fails_without_fallback(
