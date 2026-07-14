@@ -33,6 +33,7 @@ _GIT_DEPENDENCY_FIELDS = {
     "skills",
     "targets",
 }
+_PARENT_GIT_DEPENDENCY_FIELDS = {"git", "path", "ref", "alias"}
 
 
 @dataclass(frozen=True)
@@ -297,6 +298,12 @@ class LocalPackageFactory:
                 dependency = DependencyReference.parse(entry)
             elif isinstance(entry, Mapping):
                 object_entry = dict(entry)
+                if object_entry.get("git") == "parent":
+                    reject_unknown_fields(
+                        object_entry,
+                        _PARENT_GIT_DEPENDENCY_FIELDS,
+                        "parent git",
+                    )
                 dependency = DependencyReference.parse_from_dict(object_entry)
                 if "git" in object_entry:
                     reject_unknown_fields(object_entry, _GIT_DEPENDENCY_FIELDS, "git")

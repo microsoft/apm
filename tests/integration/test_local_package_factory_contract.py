@@ -275,6 +275,55 @@ def test_relative_dependency_uses_portable_manifest_path(
     }
     _assert_source_tree(remote_forms.root, {"apm.yml"})
 
+    parent_inherited = factory.create(
+        "parent-inherited",
+        dependencies=(
+            {
+                "git": "parent",
+                "path": "packages/shared",
+                "ref": "main",
+                "alias": "shared",
+            },
+        ),
+    )
+    assert load_yaml(parent_inherited.manifest_path) == {
+        "name": "parent-inherited",
+        "version": "0.1.0",
+        "description": "Hermetic test package parent-inherited",
+        "author": "APM Test",
+        "dependencies": {
+            "apm": [
+                {
+                    "git": "parent",
+                    "path": "packages/shared",
+                    "ref": "main",
+                    "alias": "shared",
+                }
+            ]
+        },
+    }
+    _assert_source_tree(parent_inherited.root, {"apm.yml"})
+
+    for package_name, inert_field, inert_value in (
+        ("parent-insecure", "allow_insecure", True),
+        ("parent-skills", "skills", ["grill-me"]),
+        ("parent-targets", "targets", ["copilot"]),
+        ("parent-type", "type", "gitlab"),
+        ("parent-lock-shaped", "resolved_commit", "a" * 40),
+    ):
+        with pytest.raises(ValueError, match="Unsupported field"):
+            factory.create(
+                package_name,
+                dependencies=(
+                    {
+                        "git": "parent",
+                        "path": "packages/shared",
+                        inert_field: inert_value,
+                    },
+                ),
+            )
+        assert not (tmp_path / "packages" / package_name).exists()
+
     for package_name, extra_field in (
         ("remote-lock-shaped", "resolved_commit"),
         ("remote-typo-shaped", "alais"),
