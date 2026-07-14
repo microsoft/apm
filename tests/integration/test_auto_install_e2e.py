@@ -133,15 +133,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # Run the exact README command with streaming output monitoring
-        process = subprocess.Popen(
+        process = _start_apm(
+            apm_binary_path,
             [
-                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -215,15 +212,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # First run - install with early termination
-        process = subprocess.Popen(
+        process = _start_apm(
+            apm_binary_path,
             [
-                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -253,15 +247,12 @@ author: test
         assert package_path.exists(), "Package should exist after first run"
 
         # Second run - should use cache with early termination
-        process = subprocess.Popen(
+        process = _start_apm(
+            apm_binary_path,
             [
-                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -305,15 +296,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # First install with full path - early termination
-        process = subprocess.Popen(
+        process = _start_apm(
+            apm_binary_path,
             [
-                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -333,11 +321,9 @@ author: test
             process.stdout.close()
 
         # Run with simple name - early termination
-        process = subprocess.Popen(
-            [str(apm_binary_path), "run", "architecture-blueprint-generator"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        process = _start_apm(
+            apm_binary_path,
+            ["run", "architecture-blueprint-generator"],
             cwd=self.test_dir,
             env=env,
         )
@@ -379,15 +365,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # Test with qualified path (without .prompt.md extension) - early termination
-        process = subprocess.Popen(
+        process = _start_apm(
+            apm_binary_path,
             [
-                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
             cwd=self.test_dir,
             env=env,
         )

@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from tests.integration import conftest as integration_conftest
-from tests.integration import test_ado_e2e, test_plugin_skill_subset_pack_e2e
+from tests.integration import (
+    test_ado_e2e,
+    test_auto_install_e2e,
+    test_plugin_skill_subset_pack_e2e,
+)
 from tests.integration.marketplace import conftest as marketplace_conftest
 
 
@@ -193,3 +197,30 @@ def test_representative_subprocess_consumers_launch_injected_binary(
     assert commands[0][1:] == ["install", "owner/package"]
     assert commands[1][1:3] == ["pack", "--format"]
     assert commands[2][1:] == ["marketplace", "build"]
+
+
+def test_auto_install_popen_launches_injected_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The streaming helper must put the injected artifact in argv[0]."""
+    injected = tmp_path / "canonical-apm"
+    commands: list[list[str]] = []
+
+    class FakeProcess:
+        pass
+
+    def capture_popen(command: list[str], **_kwargs: object) -> FakeProcess:
+        commands.append(command)
+        return FakeProcess()
+
+    monkeypatch.setattr(test_auto_install_e2e.subprocess, "Popen", capture_popen)
+
+    test_auto_install_e2e._start_apm(
+        injected,
+        ["--version"],
+        cwd=str(tmp_path),
+        env={},
+    )
+
+    assert commands == [[str(injected), "--version"]]
