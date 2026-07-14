@@ -278,6 +278,69 @@ function New-IsolatedPrefix {
     return @{ Root = $root; BinDir = $binDir; TmpDir = $tmpDir }
 }
 
+function Assert-MissingStableExecutableFailsForNativeProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$CurrentDir,
+        [Parameter(Mandatory = $true)][string]$BinDir,
+        [Parameter(Mandatory = $true)][string]$WorkingDir
+    )
+
+    $stableExe = Join-Path $CurrentDir "apm.exe"
+    $cmdShim = Join-Path $BinDir "apm.cmd"
+    $disabledCurrent = "$CurrentDir.pr6-disabled"
+    $savedPath = $env:Path
+    $savedLaunchCwd = $env:APM_LAUNCH_TEST_CWD
+    $pythonExe = (Get-Command python -ErrorAction Stop).Source
+
+    Assert-True (Test-Path $stableExe) "Negative twin starts with stable apm.exe"
+    Assert-True (Test-Path $cmdShim) "Negative twin keeps apm.cmd available"
+
+    try {
+        Move-Item -Path $CurrentDir -Destination $disabledCurrent
+        Assert-True (-not (Test-Path $stableExe)) "Stable apm.exe is absent during negative twin"
+        Assert-True (Test-Path $cmdShim) "apm.cmd remains during negative twin"
+        $env:Path = "$CurrentDir;$BinDir"
+        $env:APM_LAUNCH_TEST_CWD = $WorkingDir
+
+        $pythonScript = @'
+import os
+import subprocess
+import sys
+
+try:
+    subprocess.run(
+        ["apm", "--version"],
+        cwd=os.environ["APM_LAUNCH_TEST_CWD"],
+    )
+except FileNotFoundError:
+    print("missing stable executable rejected")
+    sys.exit(0)
+
+print("bare apm unexpectedly resolved", file=sys.stderr)
+sys.exit(1)
+'@
+        $pythonOutput = & $pythonExe -c $pythonScript 2>&1
+        $pythonExit = $LASTEXITCODE
+        if ($pythonExit -ne 0) {
+            throw "Python subprocess unexpectedly resolved missing stable apm.exe (got $pythonExit; output: $pythonOutput)"
+        }
+        if (($pythonOutput | Out-String) -notmatch "missing stable executable rejected") {
+            throw "Python subprocess did not record FileNotFoundError (output: $pythonOutput)"
+        }
+        Write-Success "Python subprocess rejects missing stable apm.exe"
+    } finally {
+        $env:Path = $savedPath
+        if ($null -ne $savedLaunchCwd) {
+            $env:APM_LAUNCH_TEST_CWD = $savedLaunchCwd
+        } else {
+            Remove-Item Env:APM_LAUNCH_TEST_CWD -ErrorAction SilentlyContinue
+        }
+        if (Test-Path $disabledCurrent) {
+            Move-Item -Path $disabledCurrent -Destination $CurrentDir
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Test 3: End-to-end install into an isolated prefix (fresh install path).
 # ---------------------------------------------------------------------------
@@ -367,6 +430,11 @@ sys.exit(result.returncode)
                 $pythonExit = $LASTEXITCODE
                 Assert-True ($pythonExit -eq 0) "Python subprocess resolves bare apm (got $pythonExit; output: $pythonOutput)"
                 Assert-True (($pythonOutput | Out-String) -match [regex]::Escape($PinnedVersion.TrimStart("v"))) "Python subprocess reports $PinnedVersion"
+
+                Assert-MissingStableExecutableFailsForNativeProcess `
+                    -CurrentDir $currentDir `
+                    -BinDir $prefix.BinDir `
+                    -WorkingDir $prefix.Root
 
                 $bash = Get-Command bash -ErrorAction SilentlyContinue
                 if ($bash) {
