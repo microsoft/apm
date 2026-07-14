@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import tempfile
 import time
 import unittest
@@ -998,6 +999,92 @@ dependencies:
     ]
 
 
+def test_ghes_org_sentinel_uses_project_remote_host_and_warm_cache(
+    tmp_path: Path,
+) -> None:
+    leaf_ref = "ghes.contoso.com/team/policy"
+    leaf_yaml = """
+name: team-policy
+extends: org
+dependencies:
+  deny: [team/blocked]
+"""
+    parent_yaml = """
+name: platform-policy
+enforcement: block
+dependencies:
+  require_pinned_constraint: true
+"""
+    subprocess.run(
+        ["git", "init", "--quiet"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://ghes.contoso.com/platform/application.git",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    observed_urls: list[str] = []
+    expected_paths = [
+        "/api/v3/repos/team/policy/contents/apm-policy.yml",
+        "/api/v3/repos/platform/.github-private/contents/apm-policy.yml",
+        "/api/v3/repos/platform/.github/contents/apm-policy.yml",
+    ]
+
+    def get(url: str, **_kwargs) -> MagicMock:
+        parsed = urlparse(url)
+        assert parsed.hostname == "ghes.contoso.com"
+        assert parsed.path == expected_paths[len(observed_urls)]
+        observed_urls.append(url)
+        response = MagicMock()
+        response.headers = {}
+        if parsed.path == expected_paths[1]:
+            response.status_code = 404
+        else:
+            response.status_code = 200
+            response.json.return_value = {
+                "content": leaf_yaml if parsed.path == expected_paths[0] else parent_yaml
+            }
+        return response
+
+    with (
+        patch("apm_cli.policy.discovery._get_token_for_host", return_value=None),
+        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
+    ):
+        cold = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
+        assert cold.policy is not None
+        assert cold.policy.enforcement == "block"
+        assert cold.policy.dependencies.deny == ("team/blocked",)
+        assert cold.policy.dependencies.require_pinned_constraint is True
+        assert transport.call_count == 3
+
+        transport.side_effect = AssertionError("network fetch attempted on warm cache hit")
+        warm = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
+
+    assert [(urlparse(url).hostname, urlparse(url).path) for url in observed_urls] == [
+        ("ghes.contoso.com", path) for path in expected_paths
+    ]
+    assert warm.cached is True
+    assert warm.policy == cold.policy
+    cache_entry = _read_cache_entry(leaf_ref, tmp_path)
+    assert cache_entry is not None
+    assert cache_entry.chain_refs == [
+        "ghes.contoso.com/platform/.github",
+        leaf_ref,
+    ]
+
+
 @pytest.mark.parametrize(
     ("parent_ref", "expected_parent"),
     [
@@ -1143,6 +1230,109 @@ def test_stale_parent_propagates_chain_outcome_without_fresh_leaf_cache(
             source=result.source,
             error="503: parent refresh unavailable",
         )
+
+
+def test_nearest_stale_ancestor_metadata_wins_without_fresh_leaf_cache(
+    tmp_path: Path,
+) -> None:
+    leaf_ref = "child/.github"
+    nearest_ref = "parent/.github"
+    farthest_ref = "root/.github"
+    leaf_yaml = f"""
+name: child
+extends: {nearest_ref}
+dependencies:
+  deny: [child/blocked]
+"""
+    nearest = ApmPolicy(
+        name="parent",
+        extends=farthest_ref,
+        dependencies=DependencyPolicy(deny=("parent/blocked",)),
+    )
+    farthest = ApmPolicy(
+        name="root",
+        enforcement="block",
+        dependencies=DependencyPolicy(deny=("root/blocked",)),
+    )
+    fixed_time = 2_000_000_000.0
+    nearest_age = DEFAULT_CACHE_TTL + 111
+    farthest_age = DEFAULT_CACHE_TTL + 999
+
+    def fetch(repo_ref: str, policy_path: str) -> tuple[str | None, str | None]:
+        assert policy_path == "apm-policy.yml"
+        if repo_ref == leaf_ref:
+            return leaf_yaml, None
+        if repo_ref == nearest_ref:
+            return None, "503: nearest parent refresh unavailable"
+        assert repo_ref == farthest_ref
+        return None, "503: farthest parent refresh unavailable"
+
+    with patch("apm_cli.policy.discovery.time.time", return_value=fixed_time):
+        _setup_cache(
+            nearest_ref,
+            tmp_path,
+            nearest,
+            cached_at=fixed_time - nearest_age,
+        )
+        _setup_cache(
+            farthest_ref,
+            tmp_path,
+            farthest,
+            cached_at=fixed_time - farthest_age,
+        )
+        with patch("apm_cli.policy.discovery._fetch_github_contents", side_effect=fetch):
+            result = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
+
+    assert result.outcome == "cached_stale"
+    assert result.policy is not None
+    assert result.policy.enforcement == "block"
+    assert result.policy.dependencies.deny == (
+        "root/blocked",
+        "parent/blocked",
+        "child/blocked",
+    )
+    assert result.fetch_error == "503: nearest parent refresh unavailable"
+    assert result.cache_age_seconds == nearest_age
+    assert result.cached is True
+    assert result.cache_stale is True
+    assert _read_cache_entry(leaf_ref, tmp_path) is None
+
+
+def test_farther_failure_overrides_nearest_stale_ancestor(
+    tmp_path: Path,
+) -> None:
+    leaf_ref = "child/.github"
+    nearest_ref = "parent/.github"
+    farthest_ref = "root/.github"
+    leaf_yaml = f"name: child\nextends: {nearest_ref}\n"
+    nearest = ApmPolicy(name="parent", extends=farthest_ref, enforcement="block")
+    fixed_time = 2_000_000_000.0
+
+    def fetch(repo_ref: str, policy_path: str) -> tuple[str | None, str | None]:
+        assert policy_path == "apm-policy.yml"
+        if repo_ref == leaf_ref:
+            return leaf_yaml, None
+        if repo_ref == nearest_ref:
+            return None, "503: nearest parent refresh unavailable"
+        assert repo_ref == farthest_ref
+        return None, "503: root unavailable"
+
+    with patch("apm_cli.policy.discovery.time.time", return_value=fixed_time):
+        _setup_cache(
+            nearest_ref,
+            tmp_path,
+            nearest,
+            cached_at=fixed_time - DEFAULT_CACHE_TTL - 111,
+        )
+        with patch("apm_cli.policy.discovery._fetch_github_contents", side_effect=fetch):
+            result = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
+
+    assert result.outcome == "incomplete_chain"
+    assert result.policy is None
+    assert result.fetch_error is None
+    assert result.cached is False
+    assert result.cache_stale is False
+    assert _read_cache_entry(leaf_ref, tmp_path) is None
 
 
 def test_incomplete_chain_does_not_leave_weak_leaf_cache(tmp_path: Path) -> None:

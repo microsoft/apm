@@ -439,6 +439,47 @@ def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
         )
 
 
+def _resolve_ado_parent_ref(
+    parent_ref: str,
+    current_source: str,
+    leaf_host: str,
+) -> tuple[str, str, str, str] | None:
+    """Normalize an ADO parent ref to ``(org, project, repo, host)``."""
+    current_parts = _strip_source_prefix(current_source).split("/")
+    if is_visualstudio_legacy_hostname(leaf_host):
+        current_org = leaf_host[: -len(".visualstudio.com")]
+    elif len(current_parts) >= 2:
+        current_org = current_parts[1]
+    else:
+        current_org = ""
+
+    if parent_ref == "org":
+        resolved = (current_org, ADO_POLICY_PROJECT, "_apm", leaf_host)
+    else:
+        parts = parent_ref.strip("/").split("/")
+        explicit_host = _extract_extends_host(parent_ref)
+        if explicit_host is None and len(parts) == 2:
+            resolved = (current_org, parts[0], parts[1], leaf_host)
+        elif explicit_host and is_visualstudio_legacy_hostname(explicit_host) and len(parts) >= 3:
+            resolved = (
+                explicit_host[: -len(".visualstudio.com")],
+                parts[1],
+                "/".join(parts[2:]),
+                explicit_host,
+            )
+        elif explicit_host and is_azure_devops_hostname(explicit_host) and len(parts) >= 4:
+            resolved = (
+                parts[1],
+                parts[2],
+                "/".join(parts[3:]),
+                explicit_host,
+            )
+        else:
+            return None
+
+    return resolved if all(resolved[:3]) else None
+
+
 def _fetch_chain_parent(
     parent_ref: str,
     *,
@@ -463,64 +504,14 @@ def _fetch_chain_parent(
         )
 
     if leaf_host and is_azure_devops_hostname(leaf_host):
-        current_parts = _strip_source_prefix(current_source).split("/")
-        if is_visualstudio_legacy_hostname(leaf_host):
-            current_org = leaf_host[: -len(".visualstudio.com")]
-        elif len(current_parts) >= 2:
-            current_org = current_parts[1]
-        else:
-            current_org = ""
-
-        if parent_ref == "org":
-            org, project, repo, host = (
-                current_org,
-                ADO_POLICY_PROJECT,
-                "_apm",
-                leaf_host,
-            )
-        else:
-            parts = parent_ref.strip("/").split("/")
-            explicit_host = _extract_extends_host(parent_ref)
-            if explicit_host is None and len(parts) == 2:
-                org, project, repo, host = (
-                    current_org,
-                    parts[0],
-                    parts[1],
-                    leaf_host,
-                )
-            elif explicit_host and is_visualstudio_legacy_hostname(explicit_host):
-                if len(parts) < 3:
-                    return PolicyFetchResult(
-                        source=f"org:{parent_ref}",
-                        error=f"Invalid Azure DevOps policy reference: {parent_ref}",
-                        outcome="cache_miss_fetch_fail",
-                    )
-                org, project, repo, host = (
-                    explicit_host[: -len(".visualstudio.com")],
-                    parts[1],
-                    "/".join(parts[2:]),
-                    explicit_host,
-                )
-            elif explicit_host and is_azure_devops_hostname(explicit_host) and len(parts) >= 4:
-                org, project, repo, host = (
-                    parts[1],
-                    parts[2],
-                    "/".join(parts[3:]),
-                    explicit_host,
-                )
-            else:
-                return PolicyFetchResult(
-                    source=f"org:{parent_ref}",
-                    error=f"Invalid Azure DevOps policy reference: {parent_ref}",
-                    outcome="cache_miss_fetch_fail",
-                )
-
-        if not all((org, project, repo)):
+        resolved = _resolve_ado_parent_ref(parent_ref, current_source, leaf_host)
+        if resolved is None:
             return PolicyFetchResult(
                 source=f"org:{parent_ref}",
                 error=f"Invalid Azure DevOps policy reference: {parent_ref}",
                 outcome="cache_miss_fetch_fail",
             )
+        org, project, repo, host = resolved
         return _fetch_from_ado_repo(
             org=org,
             project=project,
