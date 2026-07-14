@@ -20,6 +20,7 @@ import unittest
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -920,6 +921,158 @@ security:
             "registry-source",
         }
         assert warm.policy == cold.policy
+
+
+@pytest.mark.parametrize(
+    "parent_ref",
+    [
+        "platform/.github",
+        "ghes.contoso.com/platform/.github",
+    ],
+)
+def test_ghes_chain_preserves_backend_for_shorthand_and_explicit_parent(
+    tmp_path: Path,
+    parent_ref: str,
+) -> None:
+    leaf_yaml = f"""
+name: child
+extends: {parent_ref}
+dependencies:
+  deny: [child/deny]
+"""
+    parent_yaml = """
+name: strict-parent
+enforcement: block
+dependencies:
+  require_pinned_constraint: true
+"""
+    expected_paths = {
+        "/api/v3/repos/team/.github/contents/apm-policy.yml": leaf_yaml,
+        "/api/v3/repos/platform/.github/contents/apm-policy.yml": parent_yaml,
+    }
+    observed_urls: list[str] = []
+
+    def get(url: str, **_kwargs) -> MagicMock:
+        parsed = urlparse(url)
+        assert parsed.hostname == "ghes.contoso.com"
+        assert parsed.path in expected_paths
+        observed_urls.append(url)
+        response = MagicMock()
+        response.status_code = 200
+        response.headers = {}
+        response.json.return_value = {"content": expected_paths[parsed.path]}
+        return response
+
+    with (
+        patch("apm_cli.policy.discovery._get_token_for_host", return_value=None),
+        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
+    ):
+        cold = discover_policy_with_chain(
+            tmp_path,
+            policy_override="ghes.contoso.com/team/.github",
+        )
+        assert cold.policy is not None
+        assert cold.policy.enforcement == "block"
+        assert cold.policy.dependencies.require_pinned_constraint is True
+        assert cold.cached is False
+        assert transport.call_count == 2
+
+        transport.side_effect = AssertionError("network fetch attempted on warm cache hit")
+        warm = discover_policy_with_chain(
+            tmp_path,
+            policy_override="ghes.contoso.com/team/.github",
+        )
+
+    assert {(urlparse(url).hostname, urlparse(url).path) for url in observed_urls} == {
+        ("ghes.contoso.com", path) for path in expected_paths
+    }
+    assert warm.cached is True
+    assert warm.policy == cold.policy
+    cache_entry = _read_cache_entry("ghes.contoso.com/team/.github", tmp_path)
+    assert cache_entry is not None
+    assert cache_entry.chain_refs == [
+        "ghes.contoso.com/platform/.github",
+        "ghes.contoso.com/team/.github",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("parent_ref", "expected_parent"),
+    [
+        (
+            "dev.azure.com/contoso/governance/policy",
+            ("contoso", "governance", "policy", "dev.azure.com"),
+        ),
+        (
+            "governance/policy",
+            ("contoso", "governance", "policy", "dev.azure.com"),
+        ),
+    ],
+)
+def test_ado_chain_preserves_backend_for_explicit_and_same_org_parent(
+    tmp_path: Path,
+    parent_ref: str,
+    expected_parent: tuple[str, str, str, str],
+) -> None:
+    leaf_yaml = f"name: child\nextends: {parent_ref}\n"
+    parent_yaml = (
+        "name: strict-parent\n"
+        "enforcement: block\n"
+        "dependencies:\n"
+        "  require_pinned_constraint: true\n"
+    )
+    observed: list[tuple[str, str, str, str]] = []
+
+    def fetch_ado(
+        org: str,
+        project: str,
+        repo: str,
+        policy_path: str,
+        *,
+        host: str,
+    ) -> tuple[str | None, str | None]:
+        assert policy_path == "apm-policy.yml"
+        key = (org, project, repo, host)
+        observed.append(key)
+        if key == ("contoso", "_apm", "_apm", "dev.azure.com"):
+            return leaf_yaml, None
+        assert key == expected_parent
+        return parent_yaml, None
+
+    with (
+        patch(
+            "apm_cli.policy.discovery._extract_org_from_git_remote",
+            return_value=("contoso", "dev.azure.com"),
+        ),
+        patch("apm_cli.policy.discovery._fetch_ado_contents", side_effect=fetch_ado) as ado,
+        patch(
+            "apm_cli.policy.discovery._fetch_github_contents",
+            side_effect=AssertionError("ADO policy routed through GitHub Contents API"),
+        ) as github,
+    ):
+        cold = discover_policy_with_chain(tmp_path)
+        assert cold.source == "org:dev.azure.com/contoso/_apm/_apm"
+        assert cold.policy is not None
+        assert cold.policy.enforcement == "block"
+        assert cold.policy.dependencies.require_pinned_constraint is True
+        assert ado.call_count == 2
+        github.assert_not_called()
+
+        ado.side_effect = AssertionError("network fetch attempted on warm cache hit")
+        warm = discover_policy_with_chain(tmp_path)
+
+    assert observed == [
+        ("contoso", "_apm", "_apm", "dev.azure.com"),
+        expected_parent,
+    ]
+    assert warm.cached is True
+    assert warm.policy == cold.policy
+    cache_entry = _read_cache_entry("dev.azure.com/contoso/_apm/_apm", tmp_path)
+    assert cache_entry is not None
+    assert cache_entry.chain_refs == [
+        "dev.azure.com/contoso/governance/policy",
+        "dev.azure.com/contoso/_apm/_apm",
+    ]
 
 
 def test_incomplete_chain_does_not_leave_weak_leaf_cache(tmp_path: Path) -> None:

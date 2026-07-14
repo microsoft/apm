@@ -439,6 +439,108 @@ def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
         )
 
 
+def _fetch_chain_parent(
+    parent_ref: str,
+    *,
+    current_source: str,
+    leaf_host: str | None,
+    project_root: Path,
+    no_cache: bool,
+) -> PolicyFetchResult:
+    """Fetch one parent without losing the leaf's host or backend.
+
+    GitHub-style ``owner/repo`` refs are qualified with a non-default leaf
+    host. On ADO, ``project/repo`` means a repo in the current ancestor's org,
+    while explicit refs use ``host/org/project/repo`` on ``dev.azure.com`` or
+    ``host/project/repo`` on legacy ``*.visualstudio.com`` hosts. URLs and
+    local-file refs continue through the public single-policy owner.
+    """
+    if parent_ref.startswith(("http://", "https://")) or Path(parent_ref).is_file():
+        return discover_policy(
+            project_root,
+            policy_override=parent_ref,
+            no_cache=no_cache,
+        )
+
+    if leaf_host and is_azure_devops_hostname(leaf_host):
+        current_parts = _strip_source_prefix(current_source).split("/")
+        if is_visualstudio_legacy_hostname(leaf_host):
+            current_org = leaf_host[: -len(".visualstudio.com")]
+        elif len(current_parts) >= 2:
+            current_org = current_parts[1]
+        else:
+            current_org = ""
+
+        if parent_ref == "org":
+            org, project, repo, host = (
+                current_org,
+                ADO_POLICY_PROJECT,
+                "_apm",
+                leaf_host,
+            )
+        else:
+            parts = parent_ref.strip("/").split("/")
+            explicit_host = _extract_extends_host(parent_ref)
+            if explicit_host is None and len(parts) == 2:
+                org, project, repo, host = (
+                    current_org,
+                    parts[0],
+                    parts[1],
+                    leaf_host,
+                )
+            elif explicit_host and is_visualstudio_legacy_hostname(explicit_host):
+                if len(parts) < 3:
+                    return PolicyFetchResult(
+                        source=f"org:{parent_ref}",
+                        error=f"Invalid Azure DevOps policy reference: {parent_ref}",
+                        outcome="cache_miss_fetch_fail",
+                    )
+                org, project, repo, host = (
+                    explicit_host[: -len(".visualstudio.com")],
+                    parts[1],
+                    "/".join(parts[2:]),
+                    explicit_host,
+                )
+            elif explicit_host and is_azure_devops_hostname(explicit_host) and len(parts) >= 4:
+                org, project, repo, host = (
+                    parts[1],
+                    parts[2],
+                    "/".join(parts[3:]),
+                    explicit_host,
+                )
+            else:
+                return PolicyFetchResult(
+                    source=f"org:{parent_ref}",
+                    error=f"Invalid Azure DevOps policy reference: {parent_ref}",
+                    outcome="cache_miss_fetch_fail",
+                )
+
+        if not all((org, project, repo)):
+            return PolicyFetchResult(
+                source=f"org:{parent_ref}",
+                error=f"Invalid Azure DevOps policy reference: {parent_ref}",
+                outcome="cache_miss_fetch_fail",
+            )
+        return _fetch_from_ado_repo(
+            org=org,
+            project=project,
+            repo=repo,
+            host=host,
+            project_root=project_root,
+            no_cache=no_cache,
+        )
+
+    normalized_ref = parent_ref
+    if leaf_host and leaf_host != "github.com" and _extract_extends_host(parent_ref) is None:
+        if "/" in parent_ref:
+            normalized_ref = f"{leaf_host}/{parent_ref}"
+    return discover_policy(
+        project_root,
+        policy_override=normalized_ref,
+        no_cache=no_cache,
+    )
+
+
 def _resolve_and_persist_chain(
     fetch_result: PolicyFetchResult,
     project_root: Path,
@@ -505,9 +607,11 @@ def _resolve_and_persist_chain(
                 f"(chain: {' -> '.join(visited)} -> {next_ref})"
             )
 
-        parent_result = discover_policy(
-            project_root,
-            policy_override=next_ref,
+        parent_result = _fetch_chain_parent(
+            next_ref,
+            current_source=chain_sources[-1],
+            leaf_host=leaf_host,
+            project_root=project_root,
             no_cache=no_cache,
         )
         fetch_result.warnings.extend(parent_result.warnings)
