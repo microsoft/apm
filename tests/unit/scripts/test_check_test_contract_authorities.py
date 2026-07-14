@@ -201,6 +201,7 @@ def test_venv_fallback_without_env_or_which_is_rejected(tmp_path: Path) -> None:
     "selector",
     (
         "Path('.venv', 'bin', 'apm')",
+        "PurePath('.venv', 'bin', 'apm')",
         "Path('.venv').joinpath('Scripts', 'apm.exe')",
         "PurePosixPath('.venv', 'bin', 'apm')",
         "PureWindowsPath('.venv', 'Scripts', 'apm.exe')",
@@ -216,7 +217,7 @@ def test_standalone_venv_constructor_forms_are_rejected(
     duplicate = tmp_path / "tests" / "integration" / "venv_constructor.py"
     duplicate.write_text(
         "import os\n"
-        "from pathlib import Path, PurePosixPath, PureWindowsPath\n"
+        "from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath\n"
         f"def choose():\n    return {selector}\n",
         encoding="utf-8",
     )

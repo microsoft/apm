@@ -75,6 +75,18 @@ def _resolve_binding(node: ast.AST, bindings: dict[str, str]) -> str | None:
     return None
 
 
+def _scope_nodes(body: list[ast.stmt]) -> list[ast.AST]:
+    nodes: list[ast.AST] = []
+    stack: list[ast.AST] = list(reversed(body))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        nodes.append(node)
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+    return nodes
+
+
 def _scope_binding_maps(
     tree: ast.Module,
 ) -> tuple[dict[int, dict[str, str]], dict[int, ast.AST]]:
@@ -87,6 +99,7 @@ def _scope_binding_maps(
             if isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
             else []
         )
+        scope_nodes = _scope_nodes(body)
         bindings = dict(inherited)
         if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
             local_names = {
@@ -99,9 +112,7 @@ def _scope_binding_maps(
             }
             local_names.update(
                 name
-                for statement in body
-                if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                for child in ast.walk(statement)
+                for child in scope_nodes
                 if isinstance(child, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
                 for target in (child.targets if isinstance(child, ast.Assign) else [child.target])
                 for name in _bound_names(target)
@@ -109,7 +120,7 @@ def _scope_binding_maps(
             for name in local_names:
                 bindings.pop(name, None)
 
-        for statement in body:
+        for statement in scope_nodes:
             if isinstance(statement, ast.Import):
                 for alias in statement.names:
                     if alias.name in {"os", "shutil", "subprocess", "sys"}:
@@ -122,9 +133,9 @@ def _scope_binding_maps(
                 for alias in statement.names:
                     bindings[alias.asname or alias.name] = f"{statement.module}.{alias.name}"
 
-        for _ in range(len(body) + 1):
+        for _ in range(len(scope_nodes) + 1):
             changed = False
-            for statement in body:
+            for statement in scope_nodes:
                 if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
                     continue
                 value = statement.value
