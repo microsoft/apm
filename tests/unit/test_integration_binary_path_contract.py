@@ -68,15 +68,40 @@ def test_empty_explicit_binary_path_fails_without_fallback(
         integration_conftest._resolve_apm_binary()
 
 
-def test_silent_adopt_consumer_rejects_empty_explicit_binary(
+@pytest.mark.parametrize(
+    ("configured_kind", "expected_error"),
+    (
+        ("empty", "APM_BINARY_PATH is set but empty."),
+        ("missing", "APM_BINARY_PATH does not exist or is not a file:"),
+        pytest.param(
+            "non-executable",
+            "APM_BINARY_PATH is not executable:",
+            marks=pytest.mark.skipif(
+                os.name == "nt",
+                reason="Windows os.access(X_OK) does not model executable bits",
+            ),
+        ),
+    ),
+)
+def test_silent_adopt_consumer_rejects_invalid_explicit_binary(
     tmp_path: Path,
+    configured_kind: str,
+    expected_error: str,
 ) -> None:
-    """The silent-adopt E2E must fail through the canonical resolver."""
+    """The silent-adopt E2E must inherit every canonical failure mode."""
     fallback = tmp_path / "apm"
     fallback.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fallback.chmod(0o755)
     env = os.environ.copy()
-    env["APM_BINARY_PATH"] = ""
+    if configured_kind == "empty":
+        env["APM_BINARY_PATH"] = ""
+    elif configured_kind == "missing":
+        env["APM_BINARY_PATH"] = str(tmp_path / "missing-apm")
+    else:
+        configured = tmp_path / "configured-apm"
+        configured.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        configured.chmod(0o644)
+        env["APM_BINARY_PATH"] = str(configured)
     env["GITHUB_APM_PAT"] = "test-token"
     env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
 
@@ -98,7 +123,7 @@ def test_silent_adopt_consumer_rejects_empty_explicit_binary(
 
     combined = result.stdout + result.stderr
     assert result.returncode != 0
-    assert "ERROR: APM_BINARY_PATH is set but empty." in combined
+    assert f"ERROR: {expected_error}" in combined
     assert "INTERNALERROR" not in combined
 
 

@@ -69,6 +69,25 @@ def test_binary_fixture_delegation_is_allowed(tmp_path: Path) -> None:
     assert _load_checker().find_binary_selection_violations(tmp_path) == []
 
 
+def test_binary_environment_subscript_fallback_is_rejected(tmp_path: Path) -> None:
+    """Subscript syntax must not evade the binary-selection boundary."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "subscript_duplicate.py"
+    duplicate.write_text(
+        "import os\n"
+        "import shutil\n"
+        "def apm_command():\n"
+        "    configured = os.environ['APM_BINARY_PATH']\n"
+        "    return configured or shutil.which('apm')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "duplicate integration binary selection" in violations[0]
+
+
 def test_known_rendered_parity_reimplementation_is_rejected(tmp_path: Path) -> None:
     """A second registry/page set comparison must trip the boundary."""
     _write_owner_stubs(tmp_path)

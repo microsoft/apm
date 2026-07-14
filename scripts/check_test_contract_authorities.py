@@ -60,14 +60,27 @@ def _calls_named(node: ast.AST, names: set[str]) -> bool:
     return False
 
 
+def _reads_binary_path_environment(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    if "APM_BINARY_PATH" not in _string_values(function):
+        return False
+    if _calls_named(function, {"os.environ.get", "os.getenv"}):
+        return True
+    return any(
+        isinstance(node, ast.Subscript)
+        and _attribute_name(node.value) == "os.environ"
+        and isinstance(node.slice, ast.Constant)
+        and node.slice.value == "APM_BINARY_PATH"
+        for node in ast.walk(function)
+    )
+
+
 def _binary_duplicate_reason(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> str | None:
     strings = _string_values(function)
-    reads_binary_env = "APM_BINARY_PATH" in strings and _calls_named(
-        function,
-        {"os.environ.get", "os.getenv"},
-    )
+    reads_binary_env = _reads_binary_path_environment(function)
     discovers_path_binary = _calls_named(function, {"shutil.which"}) and "apm" in strings
     discovers_venv_binary = ".venv" in strings and "apm" in strings
 
