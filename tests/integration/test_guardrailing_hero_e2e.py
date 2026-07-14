@@ -87,24 +87,9 @@ def run_command(
 
 
 @pytest.fixture(scope="module")
-def apm_binary():
-    """Get path to APM binary for testing."""
-    possible_paths = [
-        "apm",
-        "./apm",
-        "./dist/apm",
-        Path(__file__).parent.parent.parent / "dist" / "apm",
-    ]
-
-    for path in possible_paths:
-        try:
-            result = subprocess.run([str(path), "--version"], capture_output=True, text=True)
-            if result.returncode == 0:
-                return str(path)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-
-    pytest.skip("APM binary not found. Build it first with: python -m build")
+def apm_binary(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test executable."""
+    return str(apm_binary_path)
 
 
 class TestGuardrailingHeroScenario:

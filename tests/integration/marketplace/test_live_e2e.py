@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 
 import pytest
 
@@ -60,12 +60,17 @@ packages:
 class TestLiveBuild:
     """Live build test: resolves real tags and writes marketplace.json."""
 
-    def test_live_build_succeeds(self, live_marketplace_repo, tmp_path):
+    def test_live_build_succeeds(
+        self,
+        live_marketplace_repo,
+        tmp_path,
+        apm_binary_path: Path,
+    ):
         """Build with a real remote must exit 0 and produce marketplace.json."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
 
-        result = run_cli(["marketplace", "build"], cwd=tmp_path, timeout=120)
+        result = run_cli(apm_binary_path, ["marketplace", "build"], cwd=tmp_path, timeout=120)
 
         assert result.returncode == 0, (
             f"build exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
@@ -74,12 +79,17 @@ class TestLiveBuild:
         out_path = tmp_path / "marketplace.json"
         assert out_path.exists(), "marketplace.json was not produced"
 
-    def test_live_build_resolves_sha(self, live_marketplace_repo, tmp_path):
+    def test_live_build_resolves_sha(
+        self,
+        live_marketplace_repo,
+        tmp_path,
+        apm_binary_path: Path,
+    ):
         """All plugins in the produced marketplace.json must have a 40-char SHA."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
 
-        result = run_cli(["marketplace", "build"], cwd=tmp_path, timeout=120)
+        result = run_cli(apm_binary_path, ["marketplace", "build"], cwd=tmp_path, timeout=120)
         if result.returncode != 0:
             pytest.skip(
                 f"Build failed (possible: no v1.x tags on {live_marketplace_repo}). "
@@ -98,23 +108,33 @@ class TestLiveBuild:
 class TestLiveOutdated:
     """Live outdated test: reports upgrades in correct format."""
 
-    def test_live_outdated_exits_zero(self, live_marketplace_repo, tmp_path):
+    def test_live_outdated_exits_zero(
+        self,
+        live_marketplace_repo,
+        tmp_path,
+        apm_binary_path: Path,
+    ):
         """outdated always exits 0 (informational command)."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
 
-        result = run_cli(["marketplace", "outdated"], cwd=tmp_path, timeout=120)
+        result = run_cli(apm_binary_path, ["marketplace", "outdated"], cwd=tmp_path, timeout=120)
 
         assert result.returncode == 0, (
             f"outdated exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
 
-    def test_live_outdated_output_contains_package_name(self, live_marketplace_repo, tmp_path):
+    def test_live_outdated_output_contains_package_name(
+        self,
+        live_marketplace_repo,
+        tmp_path,
+        apm_binary_path: Path,
+    ):
         """Output must contain the package name from the yml."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
 
-        result = run_cli(["marketplace", "outdated"], cwd=tmp_path, timeout=120)
+        result = run_cli(apm_binary_path, ["marketplace", "outdated"], cwd=tmp_path, timeout=120)
 
         assert "live-plugin" in result.stdout or "live-plugin" in result.stderr, (
             "Expected package name 'live-plugin' to appear in outdated output"
@@ -124,12 +144,17 @@ class TestLiveOutdated:
 class TestLiveCheck:
     """Live check test: all entries must be reachable."""
 
-    def test_live_check_exits_zero(self, live_marketplace_repo, tmp_path):
+    def test_live_check_exits_zero(
+        self,
+        live_marketplace_repo,
+        tmp_path,
+        apm_binary_path: Path,
+    ):
         """check must exit 0 when all entries resolve against the live remote."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
 
-        result = run_cli(["marketplace", "check"], cwd=tmp_path, timeout=120)
+        result = run_cli(apm_binary_path, ["marketplace", "check"], cwd=tmp_path, timeout=120)
 
         assert result.returncode in (0, 1), (
             f"check exited {result.returncode} (unexpected)\n"
@@ -148,23 +173,33 @@ class TestLiveCheck:
 class TestLiveDoctor:
     """Live doctor test: git + network checks should pass in CI with network."""
 
-    def test_live_doctor_exits_zero(self, live_marketplace_repo, tmp_path):
+    def test_live_doctor_exits_zero(
+        self,
+        live_marketplace_repo,
+        tmp_path,
+        apm_binary_path: Path,
+    ):
         """doctor must exit 0 when git is available and github.com is reachable."""
         # Place a valid marketplace.yml so the yml check is informational-pass
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
 
-        result = run_cli(["marketplace", "doctor"], cwd=tmp_path, timeout=30)
+        result = run_cli(apm_binary_path, ["marketplace", "doctor"], cwd=tmp_path, timeout=30)
 
         assert result.returncode == 0, (
             f"doctor exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
 
-    def test_live_doctor_mentions_git(self, live_marketplace_repo, tmp_path):
+    def test_live_doctor_mentions_git(
+        self,
+        live_marketplace_repo,
+        tmp_path,
+        apm_binary_path: Path,
+    ):
         """doctor output must mention the git check."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
 
-        result = run_cli(["marketplace", "doctor"], cwd=tmp_path, timeout=30)
+        result = run_cli(apm_binary_path, ["marketplace", "doctor"], cwd=tmp_path, timeout=30)
 
         assert "git" in (result.stdout + result.stderr).lower()
