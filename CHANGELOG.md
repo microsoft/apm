@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)
