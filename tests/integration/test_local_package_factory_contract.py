@@ -322,6 +322,23 @@ def test_relative_link_and_policy_are_source_inputs(tmp_path: Path) -> None:
         "version": "1.0.0",
         "enforcement": "block",
     }
+    rejected_link = package.root / ".apm/instructions/rejected.instructions.md"
+    for unsafe_target in (
+        PurePosixPath("/absolute/README.md"),
+        PurePosixPath(r"..\README.md"),
+        PurePosixPath(r"C:\repo\README.md"),
+        PurePosixPath("C:/repo/README.md"),
+        PurePosixPath(r"\\server\share\README.md"),
+        PurePosixPath("//server/share/README.md"),
+    ):
+        with pytest.raises(ValueError, match="relative POSIX"):
+            factory.add_relative_link(
+                package,
+                PurePosixPath(".apm/instructions/rejected.instructions.md"),
+                unsafe_target,
+            )
+        assert not rejected_link.exists()
+        assert link.read_bytes() == b"[reference](../../README.md)\n"
 
     symlink_package = factory.create("symlink-policy")
     outside_policy = tmp_path / "outside-policy.yml"

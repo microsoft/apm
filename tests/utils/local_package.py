@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TypeAlias
 
 import yaml
@@ -172,6 +172,7 @@ class LocalPackageFactory:
     ) -> Path:
         """Author a Markdown relative link as a package source input."""
         path = self._source_path(package, link_path, _PRIMITIVE_LAYOUTS)
+        self._validate_relative_link_target(target_path)
         return self._write_text(path, f"[{label}]({target_path.as_posix()})\n")
 
     def write_policy(
@@ -265,6 +266,12 @@ class LocalPackageFactory:
         validate_path_segments(name, context=f"{kind} name", reject_empty=True)
         if len(name.replace("\\", "/").split("/")) != 1:
             raise ValueError(f"Unsafe {kind} name: {name!r}")
+
+    @staticmethod
+    def _validate_relative_link_target(target_path: PurePosixPath) -> None:
+        raw_target = target_path.as_posix()
+        if target_path.is_absolute() or "\\" in raw_target or PureWindowsPath(raw_target).drive:
+            raise ValueError(f"Markdown target path must be a relative POSIX path: {target_path}")
 
     @staticmethod
     def _validate_dependencies(
