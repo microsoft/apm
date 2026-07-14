@@ -85,6 +85,29 @@ def test_approval_policy_uses_chain_aware_discovery(tmp_path: Path) -> None:
     mock_chain.assert_called_once_with(tmp_path)
 
 
+def test_approve_recommended_warns_when_org_policy_chain_fails() -> None:
+    runner = CliRunner()
+    warning = (
+        "Org policy could not be resolved; approval is proceeding without org "
+        "restrictions. Run 'apm policy status --no-cache' to diagnose."
+    )
+    with runner.isolated_filesystem():
+        _write_manifest(".")
+        _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+        with (
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                side_effect=RuntimeError("SENSITIVE_TRANSPORT_DETAIL"),
+            ),
+            patch("apm_cli.core.command_logger.CommandLogger.warning") as mock_warning,
+        ):
+            result = runner.invoke(approve_cmd, ["--recommended"])
+
+    assert result.exit_code == 0
+    mock_warning.assert_called_once_with(warning)
+    assert "SENSITIVE_TRANSPORT_DETAIL" not in result.output
+
+
 # ---------------------------------------------------------------------------
 # _find_matching_key
 # ---------------------------------------------------------------------------

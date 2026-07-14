@@ -385,4 +385,6 @@ def explain(package):
     """
     from .approve import explain_decision
 
-    explain_decision(package)
+    logger = CommandLogger("policy explain")
+    explain_decision(package, logger=logger)
+    logger.render_summary()
