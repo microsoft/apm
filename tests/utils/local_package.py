@@ -12,6 +12,7 @@ import yaml
 
 from apm_cli.core.apm_yml import parse_targets_field
 from apm_cli.models.dependency import DependencyReference
+from apm_cli.models.dependency.object_fields import reject_unknown_fields
 from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
@@ -22,6 +23,16 @@ _SKILL_LAYOUT = "skill"
 _AGENT_LAYOUT = "agent"
 _INSTRUCTION_LAYOUT = "instruction"
 _PRIMITIVE_LAYOUTS = frozenset({_SKILL_LAYOUT, _AGENT_LAYOUT, _INSTRUCTION_LAYOUT})
+_GIT_DEPENDENCY_FIELDS = {
+    "git",
+    "type",
+    "path",
+    "ref",
+    "allow_insecure",
+    "alias",
+    "skills",
+    "targets",
+}
 
 
 @dataclass(frozen=True)
@@ -281,13 +292,20 @@ class LocalPackageFactory:
     ) -> list[str | dict[str, object]]:
         validated: list[str | dict[str, object]] = []
         for entry in dependencies:
+            object_entry: dict[str, object] | None = None
             if isinstance(entry, str):
                 dependency = DependencyReference.parse(entry)
             elif isinstance(entry, Mapping):
-                dependency = DependencyReference.parse_from_dict(dict(entry))
+                object_entry = dict(entry)
+                dependency = DependencyReference.parse_from_dict(object_entry)
+                if "git" in object_entry:
+                    reject_unknown_fields(object_entry, _GIT_DEPENDENCY_FIELDS, "git")
             else:
                 raise TypeError("APM dependency entries must be strings or mappings")
-            validated.append(dependency.to_apm_yml_entry())
+            serialized = dependency.to_apm_yml_entry()
+            if object_entry is not None and isinstance(serialized, str):
+                serialized = object_entry
+            validated.append(serialized)
         return validated
 
     @staticmethod

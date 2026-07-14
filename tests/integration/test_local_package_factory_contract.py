@@ -231,6 +231,67 @@ def test_relative_dependency_uses_portable_manifest_path(
     }
     _assert_source_tree(string_declared.root, {"apm.yml"})
 
+    remote_forms = factory.create(
+        "remote-forms",
+        dependencies=(
+            "owner/repo",
+            {"git": "owner/repo", "alias": "renamed"},
+            {
+                "git": "owner/repo",
+                "ref": "v1.2.3",
+                "alias": "versioned",
+            },
+            {
+                "git": "owner/repo",
+                "skills": ["grill-me"],
+                "targets": ["copilot"],
+            },
+        ),
+    )
+    assert load_yaml(remote_forms.manifest_path) == {
+        "name": "remote-forms",
+        "version": "0.1.0",
+        "description": "Hermetic test package remote-forms",
+        "author": "APM Test",
+        "dependencies": {
+            "apm": [
+                "owner/repo",
+                {
+                    "git": "owner/repo",
+                    "alias": "renamed",
+                },
+                {
+                    "git": "owner/repo",
+                    "ref": "v1.2.3",
+                    "alias": "versioned",
+                },
+                {
+                    "git": "owner/repo",
+                    "skills": ["grill-me"],
+                    "targets": ["copilot"],
+                },
+            ]
+        },
+    }
+    _assert_source_tree(remote_forms.root, {"apm.yml"})
+
+    for package_name, extra_field in (
+        ("remote-lock-shaped", "resolved_commit"),
+        ("remote-typo-shaped", "alais"),
+    ):
+        with pytest.raises(ValueError, match="Unsupported field"):
+            factory.create(
+                package_name,
+                dependencies=(
+                    {
+                        "git": "owner/repo",
+                        "alias": "renamed",
+                        extra_field: "unexpected",
+                    },
+                ),
+            )
+        assert not (tmp_path / "packages" / package_name).exists()
+
     with pytest.raises(TypeError, match="strings or mappings"):
         factory.create("invalid-dependency-type", dependencies=(42,))
     assert not (tmp_path / "packages/invalid-dependency-type").exists()
