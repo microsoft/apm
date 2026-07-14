@@ -347,6 +347,62 @@ def test_shadowed_subprocess_binding_does_not_duplicate_diagnostics(
     assert "direct apm subprocess selection" in violations[0]
 
 
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import shutil\n"
+        "def choose(flag):\n"
+        "    if flag:\n"
+        "        locate = shutil.which\n"
+        "    else:\n"
+        "        locate = shutil.which\n"
+        "    return locate('apm')\n",
+        "import os\n"
+        "def choose(items):\n"
+        "    for _ in items:\n"
+        "        env = os.environ\n"
+        "    return env.get('APM_BINARY_PATH')\n",
+        "import subprocess\n"
+        "def choose():\n"
+        "    try:\n"
+        "        runner = subprocess\n"
+        "    finally:\n"
+        "        pass\n"
+        "    return runner.run(['apm', '--version'])\n",
+    ),
+)
+def test_nested_control_flow_aliases_are_rejected(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Aliases assigned inside compound statements retain their authority."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "nested_alias.py"
+    duplicate.write_text(source, encoding="utf-8")
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+
+
+def test_command_assignment_does_not_leak_between_scopes(tmp_path: Path) -> None:
+    """Common command variable names remain isolated per function."""
+    _write_owner_stubs(tmp_path)
+    consumer = tmp_path / "tests" / "integration" / "commands.py"
+    consumer.write_text(
+        "import subprocess\n"
+        "def unrelated_tool():\n"
+        "    command = ['ls', '-la']\n"
+        "    return subprocess.run(command)\n"
+        "def apm_data_only():\n"
+        "    command = ['apm', '--version']\n"
+        "    return command\n",
+        encoding="utf-8",
+    )
+
+    assert _load_checker().find_binary_selection_violations(tmp_path) == []
+
+
 def test_probe_list_selector_is_rejected(tmp_path: Path) -> None:
     """Probe-loop selection must use the canonical fixture."""
     _write_owner_stubs(tmp_path)

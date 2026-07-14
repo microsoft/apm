@@ -420,22 +420,45 @@ def _list_literal_values(node: ast.AST) -> list[str | None]:
 
 def _assignment_command_values(
     tree: ast.AST,
-) -> tuple[dict[str, list[str | None]], dict[str, str]]:
-    lists: dict[str, list[str | None]] = {}
-    strings: dict[str, str] = {}
+    scope_by_node: dict[int, ast.AST],
+) -> tuple[
+    dict[int, dict[str, list[str | None]]],
+    dict[int, dict[str, str]],
+]:
+    assignments: dict[int, list[tuple[list[str], ast.AST]]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         names = [name for target in targets for name in _bound_names(target)]
-        list_value = _list_literal_values(node.value)
-        string_value = _literal_string(node.value)
-        for name in names:
-            if list_value:
-                lists[name] = list_value
-            elif string_value is not None:
-                strings[name] = string_value
-    return lists, strings
+        scope = scope_by_node.get(id(node), tree)
+        assignments.setdefault(id(scope), []).append((names, node.value))
+
+    lists_by_scope: dict[int, dict[str, list[str | None]]] = {}
+    strings_by_scope: dict[int, dict[str, str]] = {}
+    for scope_id, scoped_assignments in assignments.items():
+        lists: dict[str, list[str | None]] = {}
+        strings: dict[str, str] = {}
+        for _ in range(len(scoped_assignments) + 1):
+            changed = False
+            for names, value in scoped_assignments:
+                list_value = _list_literal_values(value)
+                string_value = _literal_string(value)
+                if isinstance(value, ast.Name):
+                    list_value = lists.get(value.id, [])
+                    string_value = strings.get(value.id)
+                for name in names:
+                    if list_value and lists.get(name) != list_value:
+                        lists[name] = list_value
+                        changed = True
+                    elif string_value is not None and strings.get(name) != string_value:
+                        strings[name] = string_value
+                        changed = True
+            if not changed:
+                break
+        lists_by_scope[scope_id] = lists
+        strings_by_scope[scope_id] = strings
+    return lists_by_scope, strings_by_scope
 
 
 def _shell_enabled(call: ast.Call) -> bool:
@@ -449,7 +472,10 @@ def _shell_enabled(call: ast.Call) -> bool:
 
 def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
     bindings_by_scope, scope_by_node = _scope_binding_maps(tree)
-    assigned_lists, assigned_strings = _assignment_command_values(tree)
+    lists_by_scope, strings_by_scope = _assignment_command_values(
+        tree,
+        scope_by_node,
+    )
     lines: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.List, ast.Tuple)):
@@ -486,6 +512,9 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
         if not isinstance(node, ast.Call) or not node.args:
             continue
         scope = scope_by_node.get(id(node), tree)
+        scope_id = id(scope)
+        assigned_lists = lists_by_scope.get(scope_id, {})
+        assigned_strings = strings_by_scope.get(scope_id, {})
         if not _is_subprocess_call(
             node,
             bindings_by_scope.get(id(scope), {}),
