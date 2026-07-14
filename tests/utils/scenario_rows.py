@@ -1,18 +1,19 @@
 """Immutable records for declarative lifecycle scenarios."""
 
-from __future__ import annotations
+from __future__ import annotations as _annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias
+from collections.abc import Callable as _Callable
+from dataclasses import dataclass as _dataclass
+from pathlib import Path as _Path
+from typing import TYPE_CHECKING as _TYPE_CHECKING
+from typing import TypeAlias as _TypeAlias
 
-if TYPE_CHECKING:
-    from tests.utils.apm_lifecycle_runner import CommandResult
-    from tests.utils.artifact_snapshot import ArtifactSnapshot
+if _TYPE_CHECKING:
+    from tests.utils.apm_lifecycle_runner import CommandResult as _CommandResult
+    from tests.utils.artifact_snapshot import ArtifactSnapshot as _ArtifactSnapshot
 
 
-@dataclass(frozen=True)
+@_dataclass(frozen=True)
 class LifecycleAction:
     """Describe one lifecycle command and its expected return code."""
 
@@ -20,23 +21,23 @@ class LifecycleAction:
     expected_returncode: int = 0
 
 
-@dataclass(frozen=True)
+@_dataclass(frozen=True)
 class ScenarioObservation:
     """Collect source inputs, command results, and artifact snapshots."""
 
-    source_inputs: tuple[Path, ...]
-    results: tuple[CommandResult, ...]
-    snapshots: tuple[ArtifactSnapshot, ...]
+    source_inputs: tuple[_Path, ...]
+    results: tuple[_CommandResult, ...]
+    snapshots: tuple[_ArtifactSnapshot, ...]
 
 
-ScenarioAssertion: TypeAlias = Callable[[ScenarioObservation], None]
+ScenarioAssertion: _TypeAlias = _Callable[[ScenarioObservation], None]
 
 
-@dataclass(frozen=True)
+@_dataclass(frozen=True)
 class ScenarioRow:
     """Compose source inputs, lifecycle actions, and scenario assertions."""
 
     id: str
-    source_inputs: tuple[Path, ...]
+    source_inputs: tuple[_Path, ...]
     lifecycle_actions: tuple[LifecycleAction, ...]
     assertions: tuple[ScenarioAssertion, ...]

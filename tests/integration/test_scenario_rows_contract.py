@@ -1,10 +1,14 @@
-from dataclasses import FrozenInstanceError
+from collections.abc import Callable
+from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
+from typing import get_args, get_origin
 
 import pytest
 
+from tests.utils import scenario_rows
 from tests.utils.scenario_rows import (
     LifecycleAction,
+    ScenarioAssertion,
     ScenarioObservation,
     ScenarioRow,
 )
@@ -44,20 +48,39 @@ def test_row_is_frozen_plain_data(tmp_path: Path) -> None:
         observation.source_inputs = ()
 
 
-def test_row_exposes_no_execution_or_discovery_surface(tmp_path: Path) -> None:
-    row = ScenarioRow(
-        id="plain",
-        source_inputs=(tmp_path,),
-        lifecycle_actions=(),
-        assertions=(),
+def test_row_records_and_module_expose_only_reviewed_contract() -> None:
+    assert tuple(field.name for field in fields(LifecycleAction)) == (
+        "args",
+        "expected_returncode",
+    )
+    assert tuple(field.name for field in fields(ScenarioObservation)) == (
+        "source_inputs",
+        "results",
+        "snapshots",
+    )
+    assert tuple(field.name for field in fields(ScenarioRow)) == (
+        "id",
+        "source_inputs",
+        "lifecycle_actions",
+        "assertions",
     )
 
-    forbidden = {
-        "execute",
-        "run",
-        "discover",
-        "register",
-        "hooks",
-        "plugins",
+    expected_assertion = Callable[[ScenarioObservation], None]
+    assert ScenarioAssertion == expected_assertion
+    assert get_origin(ScenarioAssertion) is Callable
+    assert get_args(ScenarioAssertion) == ([ScenarioObservation], None)
+
+    allowed_public_surface = {
+        "LifecycleAction",
+        "ScenarioAssertion",
+        "ScenarioObservation",
+        "ScenarioRow",
     }
-    assert forbidden.isdisjoint(dir(row))
+    public_surface = {name for name in vars(scenario_rows) if not name.startswith("_")}
+    public_callables = {
+        name
+        for name, value in vars(scenario_rows).items()
+        if not name.startswith("_") and callable(value)
+    }
+    assert public_surface == allowed_public_surface
+    assert public_callables == allowed_public_surface
