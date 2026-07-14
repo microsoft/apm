@@ -38,6 +38,21 @@ def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
         "process_environment",
     )
     assert tuple(field.name for field in fields(IsolatedApmEnvironment)) == expected_fields
+    expected_field_annotations = {
+        "root": "Path",
+        "home": "Path",
+        "config_root": "Path",
+        "cache_root": "Path",
+        "package_root": "Path",
+        "repository_root": "Path",
+        "work_root": "Path",
+        "temp_root": "Path",
+        "process_environment": "Mapping[str, str]",
+    }
+    assert IsolatedApmEnvironment.__annotations__ == expected_field_annotations
+    assert {field.name: field.type for field in fields(IsolatedApmEnvironment)} == (
+        expected_field_annotations
+    )
     public_methods = {
         name
         for name, member in inspect.getmembers(
@@ -53,14 +68,24 @@ def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
     }
     assert public_methods == {"create", "subprocess_env"}
     assert public_callables == {"create", "subprocess_env"}
-    assert set(IsolatedApmEnvironment.__annotations__) == set(expected_fields)
-    create_parameters = inspect.signature(IsolatedApmEnvironment.create).parameters
+    create_signature = inspect.signature(IsolatedApmEnvironment.create)
+    create_parameters = create_signature.parameters
     assert tuple(create_parameters) == ("root", "base_env")
     assert create_parameters["root"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert create_parameters["root"].default is inspect.Parameter.empty
+    assert create_parameters["root"].annotation == "Path"
     assert create_parameters["base_env"].kind is inspect.Parameter.KEYWORD_ONLY
-    subprocess_parameters = inspect.signature(IsolatedApmEnvironment.subprocess_env).parameters
+    assert create_parameters["base_env"].default is inspect.Parameter.empty
+    assert create_parameters["base_env"].annotation == "Mapping[str, str]"
+    assert create_signature.return_annotation == "IsolatedApmEnvironment"
+    subprocess_signature = inspect.signature(IsolatedApmEnvironment.subprocess_env)
+    subprocess_parameters = subprocess_signature.parameters
     assert tuple(subprocess_parameters) == ("self", "overrides")
+    assert subprocess_parameters["self"].annotation is inspect.Parameter.empty
     assert subprocess_parameters["overrides"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert subprocess_parameters["overrides"].default is None
+    assert subprocess_parameters["overrides"].annotation == "Mapping[str, str] | None"
+    assert subprocess_signature.return_annotation == "dict[str, str]"
 
     first = IsolatedApmEnvironment.create(
         tmp_path / "first",
@@ -72,6 +97,13 @@ def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
     )
     with pytest.raises(AttributeError):
         first.root = tmp_path / "mutated"
+    with pytest.raises(TypeError):
+        first.process_environment["GITHUB_TOKEN"] = "injected"
+    with pytest.raises(TypeError):
+        first.process_environment["GIT_DIR"] = "/injected/git"
+    immutable_child_environment = first.subprocess_env()
+    assert "GITHUB_TOKEN" not in immutable_child_environment
+    assert "GIT_DIR" not in immutable_child_environment
 
     for attribute in _ROOT_ATTRIBUTES:
         assert getattr(first, attribute) != getattr(second, attribute)
@@ -223,7 +255,17 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "APM_RELEASE_METADATA_URL",
         "APM_REPO",
         "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
+        "ARTIFACTORY_BASE_URL",
+        "ARTIFACTORY_ONLY",
         "CURL_CA_BUNDLE",
+        "GITHUB_HOST",
+        "GITHUB_URL",
+        "GITLAB_HOST",
+        "MCP_REGISTRY_ALLOW_HTTP",
+        "MCP_REGISTRY_URL",
+        "PROXY_REGISTRY_ALLOW_HTTP",
+        "PROXY_REGISTRY_ONLY",
+        "PROXY_REGISTRY_URL",
         "REQUESTS_CA_BUNDLE",
         "SSL_CERT_FILE",
     )
@@ -322,6 +364,21 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "SSH_AUTH_SOCK",
         "SYSTEM_ACCESSTOKEN",
     )
+    child_runtime_injection_names = (
+        "BASH_ENV",
+        "ENV",
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "PERL5LIB",
+        "PERL5OPT",
+        "PYTHONBREAKPOINT",
+        "PYTHONHOME",
+        "PYTHONINSPECT",
+        "PYTHONSTARTUP",
+        "PYTHONUSERBASE",
+        "RUBYLIB",
+        "RUBYOPT",
+    )
     tool_home_names = (
         "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
@@ -342,6 +399,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             *git_state_names,
             *git_execution_names,
             *ambient_credential_names,
+            *child_runtime_injection_names,
             *tool_home_names,
             *proxy_names,
         )
@@ -392,6 +450,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         *git_state_names,
         *git_execution_names,
         *ambient_credential_names,
+        *child_runtime_injection_names,
         *tool_home_names,
         *proxy_names,
         "APM_ARBITRARY_INHERITED_SWITCH",
@@ -468,6 +527,11 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "APM_REGISTRY_PASS_INTERNAL",
         "GIT_CONFIG_KEY_0",
         "GIT_CONFIG_VALUE_0",
+        "GIT_TRACE",
+        "GIT_TRACE_PACKET",
+        "GIT_TRACE2",
+        "GIT_TRACE2_EVENT",
+        "Git_Trace2_Event",
     )
     case_variant_exact_names = ("home", "github_token", "Git_Allow_Protocol")
     for name in exact_names + case_variant_exact_names:
@@ -567,6 +631,11 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
             "socket.SocketType(socket.AF_INET6, socket.SOCK_STREAM)"
             ".connect(('2001:db8::1', 443))"
         ),
+        "import socket; socket.gethostbyname('example.invalid')",
+        "import socket; socket.gethostbyname_ex('example.invalid')",
+        "import socket; socket.gethostbyaddr('203.0.113.1')",
+        ("import socket; socket.getnameinfo(('203.0.113.1', 443), socket.NI_NUMERICHOST)"),
+        ("import socket; socket.getnameinfo(('2001:db8::1', 443), socket.NI_NUMERICHOST)"),
         (
             "import socket; "
             "socket.socket(socket.AF_INET, socket.SOCK_STREAM)"

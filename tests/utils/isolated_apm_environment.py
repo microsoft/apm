@@ -64,6 +64,10 @@ socket.socket = _GuardedSocket
 socket.SocketType = _GuardedSocket
 socket.create_connection = _deny_network
 socket.getaddrinfo = _deny_network
+socket.gethostbyaddr = _deny_network
+socket.gethostbyname = _deny_network
+socket.gethostbyname_ex = _deny_network
+socket.getnameinfo = _deny_network
 """
 
 _SECRET_ENV_NAMES = frozenset(
@@ -164,6 +168,23 @@ _GIT_EXECUTION_ENV_NAMES = frozenset(
         "SSH_ASKPASS_REQUIRE",
     }
 )
+_CHILD_RUNTIME_INJECTION_ENV_NAMES = frozenset(
+    {
+        "BASH_ENV",
+        "ENV",
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "PERL5LIB",
+        "PERL5OPT",
+        "PYTHONBREAKPOINT",
+        "PYTHONHOME",
+        "PYTHONINSPECT",
+        "PYTHONSTARTUP",
+        "PYTHONUSERBASE",
+        "RUBYLIB",
+        "RUBYOPT",
+    }
+)
 _PROXY_ENV_NAMES = frozenset(
     {
         "ALL_PROXY",
@@ -181,6 +202,7 @@ _STRIPPED_ENV_NAMES = (
     | _PROXY_ENV_NAMES
     | _GIT_STATE_ENV_NAMES
     | _GIT_EXECUTION_ENV_NAMES
+    | _CHILD_RUNTIME_INJECTION_ENV_NAMES
     | _CREDENTIAL_STORE_ENV_NAMES
     | _TOOL_HOME_ENV_NAMES
 )
@@ -229,7 +251,17 @@ _SECURITY_CONTROL_ENV_NAMES = frozenset(
         "APM_RELEASE_METADATA_URL",
         "APM_REPO",
         "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
+        "ARTIFACTORY_BASE_URL",
+        "ARTIFACTORY_ONLY",
         "CURL_CA_BUNDLE",
+        "GITHUB_HOST",
+        "GITHUB_URL",
+        "GITLAB_HOST",
+        "MCP_REGISTRY_ALLOW_HTTP",
+        "MCP_REGISTRY_URL",
+        "PROXY_REGISTRY_ALLOW_HTTP",
+        "PROXY_REGISTRY_ONLY",
+        "PROXY_REGISTRY_URL",
         "REQUESTS_CA_BUNDLE",
         "SSL_CERT_FILE",
     }
@@ -290,7 +322,11 @@ def _set_environment_value(
 
 @dataclass(frozen=True)
 class IsolatedApmEnvironment:
-    """Filesystem roots and immutable child environment for one test scenario."""
+    """Filesystem roots and immutable child environment for one test scenario.
+
+    The caller owns native executable trust through PATH. File URL containment
+    and hostile post-creation filesystem races are outside this helper's scope.
+    """
 
     root: Path
     home: Path
