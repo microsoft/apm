@@ -96,20 +96,32 @@ def test_venv_fallback_without_which_is_rejected(tmp_path: Path) -> None:
     _write_owner_stubs(tmp_path)
     duplicate = tmp_path / "tests" / "integration" / "venv_duplicate.py"
     duplicate.write_text(
-        "import os\n"
         "from pathlib import Path\n"
         "def choose():\n"
-        "    configured = os.getenv('APM_BINARY_PATH')\n"
         "    candidate = Path('.venv') / 'bin' / 'apm'\n"
-        "    return configured or (str(candidate) if candidate.exists() else None)\n",
+        "    return str(candidate) if candidate.exists() else None\n",
         encoding="utf-8",
     )
 
     violations = _load_checker().find_binary_selection_violations(tmp_path)
 
-    assert len(violations) == 2
-    assert any("direct APM_BINARY_PATH read" in item for item in violations)
-    assert any("direct .venv apm fallback" in item for item in violations)
+    assert len(violations) == 1
+    assert "direct .venv apm fallback" in violations[0]
+
+
+def test_path_fallback_without_venv_is_rejected(tmp_path: Path) -> None:
+    """PATH selection is distinct from local virtualenv selection."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "path_duplicate.py"
+    duplicate.write_text(
+        "import shutil\ndef choose():\n    return shutil.which('apm')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct shutil.which('apm') fallback" in violations[0]
 
 
 def test_renamed_binary_resolver_is_rejected(tmp_path: Path) -> None:

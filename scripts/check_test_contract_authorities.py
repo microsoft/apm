@@ -103,6 +103,19 @@ def _venv_binary_fallback_lines(tree: ast.AST) -> list[int]:
     return sorted(lines)
 
 
+def _path_binary_fallback_lines(tree: ast.AST) -> list[int]:
+    return sorted(
+        {
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and _attribute_name(node.func) == "shutil.which"
+            and bool(node.args)
+            and _literal_string(node.args[0]) == "apm"
+        }
+    )
+
+
 def _defined_functions(tree: ast.AST) -> set[str]:
     return {
         node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -143,12 +156,16 @@ def find_binary_selection_violations(root: Path) -> list[str]:
                 f"[x] direct APM_BINARY_PATH read outside {BINARY_OWNER}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
-        if env_read_lines:
-            for line in _venv_binary_fallback_lines(tree):
-                diagnostics.append(
-                    f"[x] direct .venv apm fallback outside {BINARY_OWNER}: "
-                    f"{relative}:{line}; consume the apm_binary_path fixture"
-                )
+        for line in _venv_binary_fallback_lines(tree):
+            diagnostics.append(
+                f"[x] direct .venv apm fallback outside {BINARY_OWNER}: "
+                f"{relative}:{line}; consume the apm_binary_path fixture"
+            )
+        for line in _path_binary_fallback_lines(tree):
+            diagnostics.append(
+                f"[x] direct shutil.which('apm') fallback outside {BINARY_OWNER}: "
+                f"{relative}:{line}; consume the apm_binary_path fixture"
+            )
         if path.parent == integration_root and "_resolve_apm_binary" in _defined_functions(tree):
             diagnostics.append(
                 f"[x] duplicate _resolve_apm_binary definition: {relative}; owner is {BINARY_OWNER}"
