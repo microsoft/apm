@@ -282,6 +282,24 @@ class GitHubPackageDownloader:
 
         return GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
 
+    def _cache_git_env(self, dep_ref: DependencyReference) -> dict[str, str]:
+        """Return the subprocess environment for persistent Git cache operations.
+
+        Plaintext HTTP repositories must not inherit ambient credential helpers:
+        GitCache performs network fetches as well as local checkout operations, so
+        it needs the same credential-suppression fence as direct HTTP transport.
+        """
+        from .git_auth_env import GitAuthEnvBuilder
+
+        git_env = GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
+        if dep_ref.is_insecure:
+            git_env = GitAuthEnvBuilder.noninteractive_env(
+                git_env,
+                preserve_config_isolation=True,
+                suppress_credential_helpers=True,
+            )
+        return git_env
+
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
 
@@ -1179,7 +1197,7 @@ class GitHubPackageDownloader:
                     repository_cache_url,
                     _resolved_sha_for_cache or ref,
                     locked_sha=_resolved_sha_for_cache,
-                    env=self._git_env_dict(),
+                    env=self._cache_git_env(dep_ref),
                     sparse_paths=[subdir_path],
                 )
             except Exception:
@@ -1641,7 +1659,7 @@ class GitHubPackageDownloader:
                     dep_ref.to_repository_cache_url(),
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
-                    env=self._git_env_dict(),
+                    env=self._cache_git_env(dep_ref),
                 )
                 from ..utils.file_ops import robust_copy2, robust_copytree
 

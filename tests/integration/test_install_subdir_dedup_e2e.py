@@ -27,16 +27,16 @@ from __future__ import annotations
 import concurrent.futures
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 from apm_cli.models.dependency.reference import DependencyReference
-
-pytestmark = pytest.mark.requires_github_token
 
 # Two sibling subdirs under the same upstream repo+ref. Both are
 # present on github/awesome-copilot at the time of writing; if either
@@ -51,6 +51,98 @@ SUBDIR_B = "skills/agent-governance"
 # upstream-API issue). The KNOWN_SHA constant below is a fallback for
 # offline scenarios where the resolver cannot reach the API.
 KNOWN_SHA: str | None = None
+
+
+def _create_package_repo(path: Path, package_name: str) -> None:
+    """Create a real Git repository containing one subdirectory package."""
+    subprocess.run(
+        ["git", "init", "-b", "main", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "APM Test"],
+        check=True,
+        capture_output=True,
+    )
+    package_dir = path / "skills" / "tool"
+    package_dir.mkdir(parents=True)
+    (package_dir / "apm.yml").write_text(f"name: {package_name}\nversion: 1.0.0\n")
+    (package_dir / "repository.txt").write_text(package_name)
+    instructions_dir = package_dir / ".apm" / "instructions"
+    instructions_dir.mkdir(parents=True)
+    (instructions_dir / "fixture.instructions.md").write_text(f"# {package_name}\n")
+    subprocess.run(
+        ["git", "-C", str(path), "add", "-A"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "fixture"],
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.mark.integration
+def test_nested_gitlab_repositories_with_same_group_install_independently(tmp_path: Path) -> None:
+    """Real bare clones must not cross-wire nested projects with a shared prefix."""
+    source_a = tmp_path / "source-a"
+    source_b = tmp_path / "source-b"
+    _create_package_repo(source_a, "repo-a")
+    _create_package_repo(source_b, "repo-b")
+
+    dep_a = DependencyReference.parse_from_dict(
+        {
+            "git": "gitlab.com/spiritt/tenants/spiritt/repo-a",
+            "path": "skills/tool",
+            "ref": "main",
+        }
+    )
+    dep_b = DependencyReference.parse_from_dict(
+        {
+            "git": "gitlab.com/spiritt/tenants/spiritt/repo-b",
+            "path": "skills/tool",
+            "ref": "main",
+        }
+    )
+    fixture_by_repository = {
+        dep_a.repo_url: source_a,
+        dep_b.repo_url: source_b,
+    }
+    cloned_repositories: list[str] = []
+
+    def clone_fixture(repository: str, bare_target: Path, **_kwargs) -> None:
+        cloned_repositories.append(repository)
+        subprocess.run(
+            ["git", "clone", "--bare", str(fixture_by_repository[repository]), str(bare_target)],
+            check=True,
+            capture_output=True,
+        )
+
+    downloader = GitHubPackageDownloader()
+    downloader.persistent_git_cache = None
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    target_a = tmp_path / "installed" / "repo-a"
+    target_b = tmp_path / "installed" / "repo-b"
+
+    with (
+        SharedCloneCache(base_dir=cache_dir) as shared_cache,
+        patch.object(downloader, "_bare_clone_with_fallback", side_effect=clone_fixture),
+    ):
+        downloader.shared_clone_cache = shared_cache
+        downloader.download_subdirectory_package(dep_a, target_a)
+        downloader.download_subdirectory_package(dep_b, target_b)
+
+    assert cloned_repositories == [dep_a.repo_url, dep_b.repo_url]
+    assert (target_a / "repository.txt").read_text() == "repo-a"
+    assert (target_b / "repository.txt").read_text() == "repo-b"
 
 
 def _resolve_known_sha() -> str | None:
@@ -86,6 +178,7 @@ def _resolve_known_sha() -> str | None:
 
 
 @pytest.mark.integration
+@pytest.mark.requires_github_token
 @pytest.mark.parametrize(
     "ref_kind,ref_value",
     [

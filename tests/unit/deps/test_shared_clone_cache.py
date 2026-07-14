@@ -9,6 +9,7 @@ Verifies:
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -141,6 +142,34 @@ class TestSharedCloneCache:
 
         assert fetched["n"] == 0
         assert cloned["n"] == 2
+        cache.cleanup()
+
+    def test_tier0_fetch_miss_logs_safe_repository_context(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Diagnostics identify the repository without exposing URL credentials."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        repository_url = "https://oauth2:secret@git.corp/Group/Repo.git"
+
+        def clone_fn(target: Path) -> None:
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fail_fetch(_bare: Path, _ref: str) -> bool:
+            raise RuntimeError("miss")
+
+        cache.get_or_clone(repository_url, "main", clone_fn)
+
+        with caplog.at_level(logging.INFO, logger="apm_cli.deps.shared_clone_cache"):
+            cache.get_or_clone(
+                repository_url,
+                "a" * 40,
+                clone_fn,
+                fetch_fn=fail_fetch,
+            )
+
+        assert "git.corp/Group/Repo" in caplog.text
+        assert "oauth2" not in caplog.text
+        assert "secret" not in caplog.text
         cache.cleanup()
 
     def test_failure_surfaces_to_all_consumers(self, tmp_path: Path) -> None:

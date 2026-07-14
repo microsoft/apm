@@ -15,6 +15,7 @@ the git subprocess with no test failing.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from unittest.mock import patch
 
@@ -172,13 +173,57 @@ class TestNoninteractiveEnv:
 
     def test_suppress_credential_helpers_sets_full_fence(self):
         # HTTP transport: block credential.helper, askpass, system config.
-        env = GitAuthEnvBuilder.noninteractive_env(self._base(), suppress_credential_helpers=True)
+        base = self._base()
+        base.update(
+            {
+                "GIT_CONFIG_PARAMETERS": "'credential.helper=store'",
+                "GIT_HTTP_EXTRAHEADER": "Authorization: Basic secret",
+                "GIT_CONFIG_COUNT": "2",
+                "GIT_CONFIG_KEY_0": "credential.helper",
+                "GIT_CONFIG_VALUE_0": "cache",
+                "GIT_CONFIG_KEY_1": "http.extraheader",
+                "GIT_CONFIG_VALUE_1": "Authorization: Bearer secret",
+            }
+        )
+        env = GitAuthEnvBuilder.noninteractive_env(base, suppress_credential_helpers=True)
         assert env["GIT_TERMINAL_PROMPT"] == "0"
         assert env["GIT_ASKPASS"] == "echo"
         assert env["GIT_CONFIG_NOSYSTEM"] == "1"
         assert env["GIT_CONFIG_COUNT"] == "1"
         assert env["GIT_CONFIG_KEY_0"] == "credential.helper"
         assert env["GIT_CONFIG_VALUE_0"] == ""
+        assert "GIT_CONFIG_PARAMETERS" not in env
+        assert "GIT_HTTP_EXTRAHEADER" not in env
+        assert "GIT_CONFIG_KEY_1" not in env
+        assert "GIT_CONFIG_VALUE_1" not in env
+
+    def test_suppress_credential_helpers_is_effective_in_real_git(self):
+        base = {
+            **os.environ,
+            **self._base(),
+            "GIT_CONFIG_PARAMETERS": (
+                "'credential.helper=store' 'http.extraheader=Authorization: Basic inherited-secret'"
+            ),
+        }
+        env = GitAuthEnvBuilder.noninteractive_env(base, suppress_credential_helpers=True)
+
+        helpers = subprocess.run(
+            ["git", "config", "--get-all", "credential.helper"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        headers = subprocess.run(
+            ["git", "config", "--get-all", "http.extraheader"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert helpers.stdout.splitlines() == [""]
+        assert headers.stdout == ""
 
     def test_default_clears_credential_helper_fence_keys(self):
         base = self._base()

@@ -27,12 +27,27 @@ import os
 import shutil
 import tempfile
 import threading
+import urllib.parse
 from collections.abc import Callable
 from pathlib import Path
 
 from ..cache.url_normalize import cache_shard_key, normalize_repo_url
 
 _log = logging.getLogger(__name__)
+
+
+def _safe_repository_log_label(repository: str) -> str | None:
+    """Return host/path context with all URL userinfo removed."""
+    try:
+        parsed = urllib.parse.urlsplit(repository)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return None
+    if not hostname:
+        return None
+    authority = f"{hostname}:{port}" if port else hostname
+    return f"{authority}{parsed.path}"
 
 
 class SharedCloneCache:
@@ -132,12 +147,22 @@ class SharedCloneCache:
                                     self._repo_bares[repository].append((ref, existing_bare))
                                 return existing_bare
                     except Exception:
-                        _log.info(
-                            "Bare fetch miss for repository shard=%s ref=%s, "
-                            "falling back to fresh clone",
-                            repository_shard,
-                            ref,
-                        )
+                        repository_label = _safe_repository_log_label(repository)
+                        if repository_label:
+                            _log.info(
+                                "Bare fetch miss for repository=%s shard=%s ref=%s, "
+                                "falling back to fresh clone",
+                                repository_label,
+                                repository_shard,
+                                ref,
+                            )
+                        else:
+                            _log.info(
+                                "Bare fetch miss for repository shard=%s ref=%s, "
+                                "falling back to fresh clone",
+                                repository_shard,
+                                ref,
+                            )
 
             # First caller (or retry after failure): perform the clone.
             temp_dir = tempfile.mkdtemp(

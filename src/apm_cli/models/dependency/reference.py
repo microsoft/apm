@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
+    build_ado_ssh_url,
     build_ssh_url,
     default_host,
     is_artifactory_path,
@@ -2076,6 +2077,12 @@ class DependencyReference:
         cache entry merely because they have the same top-level group prefix.
         """
         if self.explicit_scheme == "ssh":
+            if self.is_azure_devops():
+                return build_ado_ssh_url(
+                    self.ado_organization,
+                    self.ado_project,
+                    self.ado_repo,
+                )
             return build_ssh_url(
                 self.host or default_host(),
                 self.repo_url,

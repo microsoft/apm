@@ -33,6 +33,7 @@ from apm_cli.deps.host_backends import (
     backend_for,
     backend_for_host,
 )
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -260,6 +261,20 @@ class TestADOBackend:
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
         url = backend.build_clone_ssh_url(self._ado_dep())
         assert url.startswith("git@ssh.dev.azure.com:")
+
+    def test_ssh_cache_url_matches_backend_clone_url(self):
+        dep_ref = DependencyReference(
+            host="dev.azure.com",
+            repo_url="myorg/myproj/myrepo",
+            explicit_scheme="ssh",
+            ado_organization="myorg",
+            ado_project="myproj",
+            ado_repo="myrepo",
+            ssh_user="git",
+        )
+        backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
+
+        assert dep_ref.to_repository_cache_url() == backend.build_clone_ssh_url(dep_ref)
 
     def test_http_clone_rejected(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
