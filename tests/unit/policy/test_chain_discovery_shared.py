@@ -142,6 +142,27 @@ class TestChainResolution:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
+    def test_fully_permissive_chain_reports_empty_outcome(
+        self,
+        mock_discover: MagicMock,
+        mock_write_cache: MagicMock,
+    ) -> None:
+        leaf = _make_policy(extends="parent/.github")
+        leaf_fetch = _make_fetch(policy=leaf, source="org:child/.github", cached=False)
+        parent_fetch = _make_fetch(
+            policy=_make_policy(),
+            source="org:parent/.github",
+            cached=False,
+        )
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+
+        result = discover_policy_with_chain(Path("/fake"))
+
+        assert result.outcome == "empty"
+        assert result.policy is not None
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
     def test_no_extends_no_chain_resolution(self, mock_discover, mock_write_cache):
         """Without extends:, no chain resolution or re-caching happens."""
         policy = _make_policy(enforcement="warn")
