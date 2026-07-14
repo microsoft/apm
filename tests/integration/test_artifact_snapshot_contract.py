@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import FrozenInstanceError
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
 from tests.utils.artifact_snapshot import (
     ArtifactSnapshot,
+    _portable_path,
     assert_only_paths_changed,
     assert_paths_absent,
     assert_paths_created,
@@ -34,6 +35,9 @@ def test_capture_is_read_only_and_portable(tmp_path: Path) -> None:
     assert source_entry.relative_path == "nested/source.bin"
     assert source_entry.kind == "file"
     assert source_entry.fingerprint == hashlib.sha256(source_bytes).hexdigest()
+    assert _portable_path(PureWindowsPath(r"nested\source.bin")) == "nested/source.bin"
+    with pytest.raises(FrozenInstanceError):
+        source_entry.__setattr__("kind", "directory")
 
 
 def test_diff_observes_created_changed_and_removed_paths(tmp_path: Path) -> None:
@@ -53,7 +57,7 @@ def test_diff_observes_created_changed_and_removed_paths(tmp_path: Path) -> None
     assert difference.removed == frozenset({"removed.txt"})
     assert difference.changed == frozenset({"changed.txt"})
     with pytest.raises(FrozenInstanceError):
-        difference.changed = frozenset()
+        difference.__setattr__("changed", frozenset())
 
 
 def test_assertion_helpers_compare_captured_state(tmp_path: Path) -> None:
@@ -68,14 +72,32 @@ def test_assertion_helpers_compare_captured_state(tmp_path: Path) -> None:
     assert_only_paths_changed(before, after, {"apm.lock.yaml"})
     assert_unchanged(after, ArtifactSnapshot.capture(tmp_path))
 
+    with pytest.raises(AssertionError, match="Missing artifact paths"):
+        assert_paths_present(before, {"apm.lock.yaml"})
+    with pytest.raises(AssertionError, match="Unexpected artifact paths"):
+        assert_paths_absent(after, {"apm.lock.yaml"})
+    with pytest.raises(AssertionError, match="Paths were not created"):
+        assert_paths_created(after, after, {"apm.lock.yaml"})
+    with pytest.raises(AssertionError, match="Unexpected artifact changes"):
+        assert_unchanged(before, after)
+    with pytest.raises(AssertionError, match="Unexpected changed paths"):
+        assert_only_paths_changed(before, after, set())
+
     empty_root = tmp_path / "empty-root"
-    absent_root = ArtifactSnapshot.capture(empty_root)
+    empty_root.mkdir()
+    present_root = ArtifactSnapshot.capture(empty_root)
+    empty_root.rmdir()
+    deleted_root = ArtifactSnapshot.capture(empty_root)
+    assert present_root.root_existed is True
+    assert deleted_root.root_existed is False
+    with pytest.raises(AssertionError, match="Root existence changed"):
+        assert_unchanged(present_root, deleted_root)
+
     empty_root.mkdir()
     recreated_root = ArtifactSnapshot.capture(empty_root)
-    assert absent_root.root_existed is False
     assert recreated_root.root_existed is True
     with pytest.raises(AssertionError, match="Root existence changed"):
-        assert_unchanged(absent_root, recreated_root)
+        assert_unchanged(deleted_root, recreated_root)
 
 
 def test_assertions_reject_authored_expected_mappings(tmp_path: Path) -> None:
@@ -84,4 +106,4 @@ def test_assertions_reject_authored_expected_mappings(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="ArtifactSnapshot"):
         assert_unchanged({}, snapshot)
     with pytest.raises(FrozenInstanceError):
-        snapshot.root_existed = False
+        snapshot.__setattr__("root_existed", False)

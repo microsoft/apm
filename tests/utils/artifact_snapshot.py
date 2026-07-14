@@ -6,7 +6,7 @@ import hashlib
 import os
 from collections.abc import Collection
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Literal, TypeAlias
 
 ArtifactKind: TypeAlias = Literal["file", "directory", "symlink"]
@@ -45,9 +45,9 @@ class ArtifactSnapshot:
             return cls(root=root, root_existed=False, entries=())
 
         entries = []
-        paths = sorted(root.rglob("*"), key=lambda path: path.relative_to(root).as_posix())
+        paths = sorted(root.rglob("*"), key=lambda path: _portable_path(path.relative_to(root)))
         for path in paths:
-            relative_path = path.relative_to(root).as_posix()
+            relative_path = _portable_path(path.relative_to(root))
             if path.is_symlink():
                 entry = ArtifactEntry(
                     relative_path=relative_path,
@@ -137,7 +137,9 @@ def assert_unchanged(
         f"Root existence changed for {before.root}: {before.root_existed} -> {after.root_existed}"
     )
     difference = before.diff(after)
-    assert difference == ArtifactDiff(frozenset(), frozenset(), frozenset())
+    assert difference == ArtifactDiff(frozenset(), frozenset(), frozenset()), (
+        f"Unexpected artifact changes for {before.root}: {difference}"
+    )
 
 
 def assert_only_paths_changed(
@@ -158,3 +160,8 @@ def _require_snapshot(value: object) -> None:
     """Reject authored mappings in place of real filesystem captures."""
     if not isinstance(value, ArtifactSnapshot):
         raise TypeError("artifact assertions require ArtifactSnapshot instances")
+
+
+def _portable_path(path: PurePath) -> str:
+    """Render any pathlib path flavor with portable separators."""
+    return path.as_posix()
