@@ -18,6 +18,12 @@ def _named_assertion(observation: object) -> None:
     assert observation is not None
 
 
+def _public_callable_names(value: object) -> set[str]:
+    return {
+        name for name in dir(value) if not name.startswith("_") and callable(getattr(value, name))
+    }
+
+
 def test_row_is_frozen_plain_data(tmp_path: Path) -> None:
     source_input = tmp_path / "source"
     action = LifecycleAction(("install", "--target", "copilot"))
@@ -84,3 +90,28 @@ def test_row_records_and_module_expose_only_reviewed_contract() -> None:
     }
     assert public_surface == allowed_public_surface
     assert public_callables == allowed_public_surface
+
+
+def test_each_record_exposes_only_reviewed_callable_surface(tmp_path: Path) -> None:
+    records = (
+        LifecycleAction(("install",)),
+        ScenarioObservation(
+            source_inputs=(tmp_path,),
+            results=(),
+            snapshots=(),
+        ),
+        ScenarioRow(
+            id="plain",
+            source_inputs=(tmp_path,),
+            lifecycle_actions=(),
+            assertions=(),
+        ),
+    )
+    allowed_public_callables = {
+        LifecycleAction: set(),
+        ScenarioObservation: set(),
+        ScenarioRow: set(),
+    }
+
+    for record in records:
+        assert _public_callable_names(record) == allowed_public_callables[type(record)]
