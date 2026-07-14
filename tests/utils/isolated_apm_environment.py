@@ -8,13 +8,15 @@ from pathlib import Path
 from types import MappingProxyType
 
 _NETWORK_GUARD = """\
+import _socket
 import socket
 
 _MESSAGE = "IP network disabled by test environment"
 _REAL_SOCKET = socket.socket
+_REAL_RAW_SOCKET = _socket.socket
 
 
-class _GuardedSocket(_REAL_SOCKET):
+class _GuardedSocketOperations:
     def _accept(self):
         if self.family in (socket.AF_INET, socket.AF_INET6):
             raise OSError(_MESSAGE)
@@ -40,11 +42,6 @@ class _GuardedSocket(_REAL_SOCKET):
             raise OSError(_MESSAGE)
         return super().listen(backlog)
 
-    def accept(self):
-        if self.family in (socket.AF_INET, socket.AF_INET6):
-            raise OSError(_MESSAGE)
-        return super().accept()
-
     def sendto(self, *args, **kwargs):
         if self.family in (socket.AF_INET, socket.AF_INET6):
             raise OSError(_MESSAGE)
@@ -56,12 +53,24 @@ class _GuardedSocket(_REAL_SOCKET):
         return super().sendmsg(*args, **kwargs)
 
 
+class _GuardedSocket(_GuardedSocketOperations, _REAL_SOCKET):
+    def accept(self):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().accept()
+
+
+class _GuardedRawSocket(_GuardedSocketOperations, _REAL_RAW_SOCKET):
+    pass
+
+
 def _deny_network(*args, **kwargs):
     raise OSError(_MESSAGE)
 
 
 socket.socket = _GuardedSocket
 socket.SocketType = _GuardedSocket
+_socket.socket = _GuardedRawSocket
 socket.create_connection = _deny_network
 socket.getaddrinfo = _deny_network
 socket.gethostbyaddr = _deny_network
@@ -72,30 +81,25 @@ socket.getnameinfo = _deny_network
 
 _SECRET_ENV_NAMES = frozenset(
     {
-        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_URL",
-        "ACTIONS_RUNTIME_TOKEN",
-        "ADO_APM_PAT",
-        "ARTIFACTORY_APM_TOKEN",
-        "AZURE_DEVOPS_EXT_PAT",
-        "COPILOT_GITHUB_TOKEN",
-        "GH_TOKEN",
-        "GH_ENTERPRISE_TOKEN",
-        "GITHUB_APM_PAT",
-        "GITHUB_COPILOT_PAT",
-        "GITHUB_ENTERPRISE_TOKEN",
         "GITHUB_MODELS_KEY",
-        "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "GITHUB_TOKEN",
-        "GITLAB_APM_PAT",
-        "GITLAB_TOKEN",
         "GIT_ASKPASS",
-        "PROXY_REGISTRY_TOKEN",
+        "GIT_TOKEN",
         "SSH_AGENT_PID",
         "SSH_ASKPASS",
         "SSH_AUTH_SOCK",
         "SYSTEM_ACCESSTOKEN",
     }
+)
+_CREDENTIAL_ENV_SUFFIXES = (
+    "_ACCESS_KEY_ID",
+    "_API_KEY",
+    "_INFERENCE_KEY",
+    "_PASSWORD",
+    "_PAT",
+    "_SECRET",
+    "_SECRET_ACCESS_KEY",
+    "_TOKEN",
 )
 _SECRET_ENV_PREFIXES = (
     "APM_REGISTRY_PASS_",
@@ -171,7 +175,21 @@ _GIT_EXECUTION_ENV_NAMES = frozenset(
 _CHILD_RUNTIME_INJECTION_ENV_NAMES = frozenset(
     {
         "BASH_ENV",
+        "CORECLR_ENABLE_PROFILING",
+        "CORECLR_PROFILER",
+        "CORECLR_PROFILER_PATH",
+        "CORECLR_PROFILER_PATH_32",
+        "CORECLR_PROFILER_PATH_64",
+        "DOTNET_ADDITIONAL_DEPS",
+        "DOTNET_STARTUP_HOOKS",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
         "ENV",
+        "JAVA_TOOL_OPTIONS",
+        "JDK_JAVA_OPTIONS",
+        "LD_AUDIT",
+        "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
         "NODE_OPTIONS",
         "NODE_PATH",
         "PERL5LIB",
@@ -183,6 +201,8 @@ _CHILD_RUNTIME_INJECTION_ENV_NAMES = frozenset(
         "PYTHONUSERBASE",
         "RUBYLIB",
         "RUBYOPT",
+        "ZDOTDIR",
+        "_JAVA_OPTIONS",
     }
 )
 _PROXY_ENV_NAMES = frozenset(
@@ -252,6 +272,7 @@ _SECURITY_CONTROL_ENV_NAMES = frozenset(
         "APM_REPO",
         "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
         "ARTIFACTORY_BASE_URL",
+        "ARTIFACTORY_MAX_ARCHIVE_MB",
         "ARTIFACTORY_ONLY",
         "CURL_CA_BUNDLE",
         "GITHUB_HOST",
@@ -278,8 +299,10 @@ def _normalized_env_name(name: str) -> str:
 
 def _is_protected_override(name: str) -> bool:
     normalized_name = _normalized_env_name(name)
-    return normalized_name in _PROTECTED_OVERRIDE_NAMES or normalized_name.startswith(
-        _STRIPPED_ENV_PREFIXES
+    return (
+        normalized_name in _PROTECTED_OVERRIDE_NAMES
+        or normalized_name.endswith(_CREDENTIAL_ENV_SUFFIXES)
+        or normalized_name.startswith(_STRIPPED_ENV_PREFIXES)
     )
 
 
@@ -288,6 +311,7 @@ def _should_strip_inherited(name: str) -> bool:
     return (
         normalized_name.startswith("APM_")
         or normalized_name in _PROTECTED_OVERRIDE_NAMES
+        or normalized_name.endswith(_CREDENTIAL_ENV_SUFFIXES)
         or normalized_name.startswith(_STRIPPED_ENV_PREFIXES)
     )
 

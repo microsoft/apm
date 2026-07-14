@@ -256,6 +256,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "APM_REPO",
         "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
         "ARTIFACTORY_BASE_URL",
+        "ARTIFACTORY_MAX_ARCHIVE_MB",
         "ARTIFACTORY_ONLY",
         "CURL_CA_BUNDLE",
         "GITHUB_HOST",
@@ -288,8 +289,21 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GITLAB_APM_PAT",
         "GITLAB_TOKEN",
         "GIT_ASKPASS",
+        "GIT_TOKEN",
+        "NVIDIA_INFERENCE_KEY",
+        "OPENAI_API_KEY",
         "PROXY_REGISTRY_TOKEN",
         "SSH_ASKPASS",
+    )
+    credential_pattern_names = (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "SERVICE_API_KEY",
+        "SERVICE_PASSWORD",
+        "SERVICE_PAT",
+        "SERVICE_SECRET",
+        "SERVICE_TOKEN",
     )
     pinned_names = (
         "HOME",
@@ -366,7 +380,21 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     )
     child_runtime_injection_names = (
         "BASH_ENV",
+        "CORECLR_ENABLE_PROFILING",
+        "CORECLR_PROFILER",
+        "CORECLR_PROFILER_PATH",
+        "CORECLR_PROFILER_PATH_32",
+        "CORECLR_PROFILER_PATH_64",
+        "DOTNET_ADDITIONAL_DEPS",
+        "DOTNET_STARTUP_HOOKS",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
         "ENV",
+        "JAVA_TOOL_OPTIONS",
+        "JDK_JAVA_OPTIONS",
+        "LD_AUDIT",
+        "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
         "NODE_OPTIONS",
         "NODE_PATH",
         "PERL5LIB",
@@ -378,6 +406,8 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "PYTHONUSERBASE",
         "RUBYLIB",
         "RUBYOPT",
+        "ZDOTDIR",
+        "_JAVA_OPTIONS",
     )
     tool_home_names = (
         "CLAUDE_CONFIG_DIR",
@@ -394,6 +424,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     protected_exact_names = frozenset(
         (
             *exact_secret_names,
+            *credential_pattern_names,
             *pinned_names,
             *security_control_names,
             *git_state_names,
@@ -443,9 +474,21 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         base_env=ambient_environment,
     )
     environment = isolated.subprocess_env()
+    case_variant_credential_names = ("GIT_TOKEN", "OPENAI_API_KEY", "NVIDIA_INFERENCE_KEY")
+    case_variant_isolated = IsolatedApmEnvironment.create(
+        tmp_path / "case-variant-credentials",
+        base_env={name.title(): "ambient" for name in case_variant_credential_names},
+    )
+    case_variant_environment_names = {
+        name.upper() for name in case_variant_isolated.process_environment
+    }
+    assert {name.upper() for name in case_variant_credential_names}.isdisjoint(
+        case_variant_environment_names
+    )
 
     stripped_names = (
         *exact_secret_names,
+        *credential_pattern_names,
         *security_control_names,
         *git_state_names,
         *git_execution_names,
@@ -551,11 +594,17 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         overrides={
             "APM_LOG_LEVEL": "debug",
             "APM_NO_CACHE": "1",
+            "MODEL_KEY_FORMAT": "safe",
+            "PASSWORD_POLICY": "safe",
+            "TOKEN_COUNT": "1",
             "SCENARIO": "safe",
         }
     )
     assert safe_environment["APM_LOG_LEVEL"] == "debug"
     assert safe_environment["APM_NO_CACHE"] == "1"
+    assert safe_environment["MODEL_KEY_FORMAT"] == "safe"
+    assert safe_environment["PASSWORD_POLICY"] == "safe"
+    assert safe_environment["TOKEN_COUNT"] == "1"
     assert safe_environment["SCENARIO"] == "safe"
 
 
@@ -609,6 +658,29 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
     )
     assert local_socket_result.returncode == 0, local_socket_result.stderr
 
+    direct_local_socket_result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import _socket, os, sys; "
+                "hasattr(_socket, 'AF_UNIX') or sys.exit(0); "
+                "path = 'direct-local.sock'; "
+                "server = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM); "
+                "server.bind(path); server.listen(); "
+                "client = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM); "
+                "client.connect(path); "
+                "client.close(); server.close(); os.unlink(path)"
+            ),
+        ],
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert direct_local_socket_result.returncode == 0, direct_local_socket_result.stderr
+
     scripts = (
         "import socket; socket.create_connection(('example.invalid', 443))",
         (
@@ -636,6 +708,22 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         "import socket; socket.gethostbyaddr('203.0.113.1')",
         ("import socket; socket.getnameinfo(('203.0.113.1', 443), socket.NI_NUMERICHOST)"),
         ("import socket; socket.getnameinfo(('2001:db8::1', 443), socket.NI_NUMERICHOST)"),
+        (
+            "import _socket; "
+            "_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)"
+            ".bind(('127.0.0.1', 0))"
+        ),
+        ("import _socket; _socket.socket(_socket.AF_INET6, _socket.SOCK_STREAM).bind(('::1', 0))"),
+        (
+            "import _socket; "
+            "_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)"
+            ".connect(('203.0.113.1', 443))"
+        ),
+        (
+            "import _socket; "
+            "_socket.socket(_socket.AF_INET6, _socket.SOCK_STREAM)"
+            ".connect(('2001:db8::1', 443))"
+        ),
         (
             "import socket; "
             "socket.socket(socket.AF_INET, socket.SOCK_STREAM)"
