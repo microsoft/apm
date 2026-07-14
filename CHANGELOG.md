@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ignoring them; use `ref` rather than `version`, and omit inert `name` fields
   from `git: parent`. CI audit also rejects full-SHA pins whose
   `resolved_commit` was altered, while source-identity repair preserves files
-  freshly redeployed under the canonical identity. (#2209)
+  freshly redeployed under the canonical identity; the existing lockfile
+  requirements in `openapm-v0.1.md` now cite both behaviors. (#2209)
 
 ### Fixed
 
