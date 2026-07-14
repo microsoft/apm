@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,25 @@ _ROOT_ATTRIBUTES = (
 
 
 def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
+    assert tuple(field.name for field in fields(IsolatedApmEnvironment)) == (
+        "root",
+        "home",
+        "config_root",
+        "cache_root",
+        "package_root",
+        "repository_root",
+        "work_root",
+        "temp_root",
+        "process_environment",
+    )
+    create_parameters = inspect.signature(IsolatedApmEnvironment.create).parameters
+    assert tuple(create_parameters) == ("root", "base_env")
+    assert create_parameters["root"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert create_parameters["base_env"].kind is inspect.Parameter.KEYWORD_ONLY
+    subprocess_parameters = inspect.signature(IsolatedApmEnvironment.subprocess_env).parameters
+    assert tuple(subprocess_parameters) == ("self", "overrides")
+    assert subprocess_parameters["overrides"].kind is inspect.Parameter.KEYWORD_ONLY
+
     first = IsolatedApmEnvironment.create(
         tmp_path / "first",
         base_env=os.environ,
@@ -78,6 +99,11 @@ def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
             generated_root = getattr(isolated, attribute).resolve()
             assert generated_root.is_relative_to(isolated.root.resolve())
 
+    with pytest.raises(TypeError):
+        IsolatedApmEnvironment.create(tmp_path / "positional", {})
+    with pytest.raises(TypeError):
+        first.subprocess_env({})
+
 
 def test_create_rejects_reused_root(tmp_path: Path) -> None:
     root = tmp_path / "scenario"
@@ -93,9 +119,48 @@ def test_create_rejects_reused_root(tmp_path: Path) -> None:
 
 
 def test_environment_does_not_mutate_parent_process(tmp_path: Path) -> None:
+    fresh_process_root = tmp_path / "fresh-process"
+    script = """\
+import os
+import sys
+from pathlib import Path
+
+mutation = os.environ.pop("CENV_MUTATION", "")
+parent_environment = os.environ.copy()
+parent_cwd = Path.cwd()
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+
+if mutation == "mutate-parent":
+    os.environ["CENV_MUTATED"] = "1"
+IsolatedApmEnvironment.create(Path(sys.argv[1]), base_env=os.environ)
+if os.environ != parent_environment:
+    raise AssertionError("create mutated parent environment")
+if Path.cwd() != parent_cwd:
+    raise AssertionError("create mutated parent cwd")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(fresh_process_root)],
+        cwd=_PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    mutated_environment = dict(os.environ)
+    mutated_environment["CENV_MUTATION"] = "mutate-parent"
+    mutation_result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "mutated-process")],
+        cwd=_PROJECT_ROOT,
+        env=mutated_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert mutation_result.returncode != 0
+    assert mutation_result.stderr.count("create mutated parent environment") == 1
+
     parent_environment = os.environ.copy()
     parent_cwd = Path.cwd()
-
     canonical_first = IsolatedApmEnvironment.create(
         tmp_path / "canonical-first",
         base_env={"PATH": "canonical-path", "Path": "case-variant-path"},
@@ -112,7 +177,6 @@ def test_environment_does_not_mutate_parent_process(tmp_path: Path) -> None:
     child_environment = canonical_first.subprocess_env(
         overrides={"Path": "scenario-path", "SCENARIO": "one"}
     )
-
     assert child_environment["SCENARIO"] == "one"
     assert child_environment["Path"] == "scenario-path"
     assert "PATH" not in child_environment
@@ -120,31 +184,6 @@ def test_environment_does_not_mutate_parent_process(tmp_path: Path) -> None:
     assert len(normalized_names) == len(set(normalized_names))
     assert os.environ == parent_environment
     assert Path.cwd() == parent_cwd
-
-    fresh_process_root = tmp_path / "fresh-process"
-    script = """\
-import os
-import sys
-from pathlib import Path
-
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-
-parent_environment = os.environ.copy()
-parent_cwd = Path.cwd()
-IsolatedApmEnvironment.create(Path(sys.argv[1]), base_env=os.environ)
-if os.environ != parent_environment:
-    raise AssertionError("create mutated parent environment")
-if Path.cwd() != parent_cwd:
-    raise AssertionError("create mutated parent cwd")
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script, str(fresh_process_root)],
-        cwd=_PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
 
 
 def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
@@ -217,9 +256,47 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_COMMITTER_DATE",
         "PYTHONPATH",
     )
+    git_state_names = (
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_DIR",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_GRAFTS_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_INDEX_VERSION",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    )
+    tool_home_names = (
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "COPILOT_HOME",
+        "HERMES_HOME",
+    )
+    proxy_names = (
+        "ALL_PROXY",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    )
+    protected_exact_names = frozenset(
+        (
+            *exact_secret_names,
+            *pinned_names,
+            *security_control_names,
+            *git_state_names,
+            *tool_home_names,
+            *proxy_names,
+        )
+    )
     ambient_environment = dict(os.environ)
-    ambient_environment.update({name: "ambient" for name in exact_secret_names})
-    ambient_environment.update({name: "ambient" for name in security_control_names})
+    ambient_environment.update({name: "ambient" for name in protected_exact_names})
     for name in pinned_names:
         ambient_environment[name] = "canonical-poison"
         ambient_environment[name.lower()] = "lower-poison"
@@ -259,6 +336,9 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     stripped_names = (
         *exact_secret_names,
         *security_control_names,
+        *git_state_names,
+        *tool_home_names,
+        *proxy_names,
         "APM_ARBITRARY_INHERITED_SWITCH",
         "APM_NO_CACHE",
         "APM_REGISTRY_PASS_INTERNAL",
@@ -320,7 +400,6 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         assert Path(environment[name]).resolve().is_relative_to(isolated.root.resolve())
 
     exact_names = ("HOME", "GIT_ALLOW_PROTOCOL", "GITHUB_TOKEN", "PYTHONPATH")
-    tool_home_names = ("CLAUDE_CONFIG_DIR", "APM_TEMP_DIR")
     dynamic_prefix_names = (
         "GITHUB_APM_PAT_ACME",
         "APM_REGISTRY_TOKEN_INTERNAL",
@@ -330,17 +409,12 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_CONFIG_VALUE_0",
     )
     case_variant_exact_names = ("home", "github_token", "Git_Allow_Protocol")
-    for name in exact_names + case_variant_exact_names + tool_home_names:
+    for name in exact_names + case_variant_exact_names:
         with pytest.raises(ValueError, match="protected environment"):
             isolated.subprocess_env(overrides={name: "unsafe"})
     assert tuple(pinned_environment) == pinned_names
-    for name in pinned_names + security_control_names:
-        variants = (name, name.lower(), name.title())
-        for variant in variants:
-            with pytest.raises(ValueError, match="protected environment"):
-                isolated.subprocess_env(overrides={variant: "unsafe"})
-    for name in exact_secret_names:
-        for variant in (name, name.lower()):
+    for name in protected_exact_names:
+        for variant in (name, name.title()):
             with pytest.raises(ValueError, match="protected environment"):
                 isolated.subprocess_env(overrides={variant: "unsafe"})
     for name in dynamic_prefix_names:
@@ -481,6 +555,27 @@ def test_git_rejects_non_file_transport(tmp_path: Path) -> None:
         tmp_path / "scenario",
         base_env=os.environ,
     )
+
+    bare_repository = isolated.repository_root / "allowed.git"
+    init_result = subprocess.run(
+        ["git", "init", "--bare", str(bare_repository)],
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert init_result.returncode == 0, init_result.stderr
+
+    file_result = subprocess.run(
+        ["git", "ls-remote", bare_repository.as_uri(), "HEAD"],
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert file_result.returncode == 0, file_result.stderr
 
     result = subprocess.run(
         ["git", "ls-remote", "https://example.invalid/repository", "HEAD"],
