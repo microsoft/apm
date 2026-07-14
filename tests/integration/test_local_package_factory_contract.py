@@ -281,6 +281,29 @@ def test_relative_link_and_policy_are_source_inputs(tmp_path: Path) -> None:
             "apm.yml",
         },
     )
+    factory.add_skill(package, "grill-me", "# Grill me\n")
+    nested_link = factory.add_relative_link(
+        package,
+        PurePosixPath("skills/grill-me/references/guide.md"),
+        PurePosixPath("../assets/example.txt"),
+        label="guide",
+    )
+    assert nested_link == package.root / "skills/grill-me/references/guide.md"
+    assert nested_link.read_bytes() == b"[guide](../assets/example.txt)\n"
+    _assert_source_tree(
+        package.root,
+        {
+            ".apm",
+            ".apm/instructions",
+            ".apm/instructions/reference.instructions.md",
+            "apm.yml",
+            "skills",
+            "skills/grill-me",
+            "skills/grill-me/SKILL.md",
+            "skills/grill-me/references",
+            "skills/grill-me/references/guide.md",
+        },
+    )
     policy = factory.write_policy(
         package,
         {"name": "strict", "version": "1.0.0", "enforcement": "block"},
@@ -301,6 +324,11 @@ def test_relative_link_and_policy_are_source_inputs(tmp_path: Path) -> None:
             ".apm/instructions/reference.instructions.md",
             "apm-policy.yml",
             "apm.yml",
+            "skills",
+            "skills/grill-me",
+            "skills/grill-me/SKILL.md",
+            "skills/grill-me/references",
+            "skills/grill-me/references/guide.md",
         },
     )
 
@@ -348,6 +376,22 @@ def test_relative_link_and_policy_are_source_inputs(tmp_path: Path) -> None:
         factory.write_policy(symlink_package, {"name": "strict"})
     assert outside_policy.read_text(encoding="utf-8") == "name: outside\n"
 
+    symlink_skill = factory.create("symlink-skill")
+    factory.add_skill(symlink_skill, "linked", "# Linked\n")
+    outside_skill = tmp_path / "outside-skill"
+    outside_skill.mkdir()
+    (symlink_skill.root / "skills/linked/references").symlink_to(
+        outside_skill,
+        target_is_directory=True,
+    )
+    with pytest.raises(ValueError, match=r"outside|symlink"):
+        factory.add_relative_link(
+            symlink_skill,
+            PurePosixPath("skills/linked/references/escaped.md"),
+            PurePosixPath("../assets/example.txt"),
+        )
+    assert not (outside_skill / "escaped.md").exists()
+
     for unsafe_path in (
         PurePosixPath("."),
         PurePosixPath("../README.md"),
@@ -373,9 +417,17 @@ def test_product_output_paths_are_rejected(tmp_path: Path) -> None:
         PurePosixPath("build/source.md"),
         PurePosixPath("dist/source.md"),
         PurePosixPath(".apm/cache/source.md"),
+        PurePosixPath(".apm/skills/example/SKILL.md"),
         PurePosixPath("AGENTS.md"),
         PurePosixPath("README.md"),
-        PurePosixPath("skills/example/README.md"),
+        PurePosixPath(".agents/generated.md"),
+        PurePosixPath("bundle/output.md"),
+        PurePosixPath("cache/data.json"),
+        PurePosixPath("locks/apm.lock.yaml"),
+        PurePosixPath(".git/config"),
+        PurePosixPath("skills/example"),
+        PurePosixPath("skills/example/.git/config"),
+        PurePosixPath(r"skills/example/references\guide.md"),
         PurePosixPath(".github/copilot-instructions.md"),
         PurePosixPath(".claude/agents/generated.md"),
     )
@@ -394,7 +446,13 @@ def test_product_output_paths_are_rejected(tmp_path: Path) -> None:
         "build",
         "dist",
         ".apm/cache",
+        ".apm/skills",
         "AGENTS.md",
+        ".agents",
+        "bundle",
+        "cache",
+        "locks",
+        ".git",
         ".github",
         ".claude",
     ):

@@ -239,14 +239,16 @@ class LocalPackageFactory:
     @staticmethod
     def _source_layout(relative_path: PurePosixPath) -> str | None:
         parts = relative_path.parts
+        if "\\" in relative_path.as_posix() or ".git" in parts:
+            return None
         if parts == ("apm.yml",):
             return _MANIFEST_LAYOUT
         if parts == ("apm-policy.yml",):
             return _POLICY_LAYOUT
+        if len(parts) >= 3 and parts[0] == "skills":
+            return _SKILL_LAYOUT
         if len(parts) != 3:
             return None
-        if parts[0] == "skills" and parts[2] == "SKILL.md":
-            return _SKILL_LAYOUT
         if (
             parts[:2] == (".apm", "agents")
             and parts[2].endswith(".agent.md")
