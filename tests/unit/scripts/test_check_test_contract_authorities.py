@@ -44,6 +44,9 @@ def _write_owner_stubs(root: Path) -> None:
         "import os\ndef choose():\n    return os.environ['APM_BINARY_PATH']\n",
         "from os import environ\ndef choose():\n    return environ.get('APM_BINARY_PATH')\n",
         "from os import environ as env\ndef choose():\n    return env['APM_BINARY_PATH']\n",
+        "def choose():\n"
+        "    import os as nested_os\n"
+        "    return nested_os.environ.get('APM_BINARY_PATH')\n",
     ),
 )
 def test_any_direct_binary_environment_read_is_rejected(
@@ -153,6 +156,26 @@ def test_unrelated_recursive_registry_walk_is_allowed(tmp_path: Path) -> None:
     assert _load_checker().find_rendered_parity_violations(tmp_path) == []
 
 
+def test_loop_based_registry_projection_is_rejected(tmp_path: Path) -> None:
+    """A loop that builds the public command set is still a projection."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "scripts" / "loop_projection.py"
+    duplicate.write_text(
+        "def project(group):\n"
+        "    result = set()\n"
+        "    for name, command in group.commands.items():\n"
+        "        if not command.hidden:\n"
+        "            result.add(name)\n"
+        "    return result\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct Click command registry projection" in violations[0]
+
+
 def test_direct_rendered_inventory_is_rejected_with_imported_registry(
     tmp_path: Path,
 ) -> None:
@@ -172,6 +195,24 @@ def test_direct_rendered_inventory_is_rejected_with_imported_registry(
 
     assert len(violations) >= 2
     assert any("internal rendered parity projection imported" in item for item in violations)
+    assert any("direct rendered CLI route inventory" in item for item in violations)
+
+
+def test_split_path_rendered_inventory_is_rejected(tmp_path: Path) -> None:
+    """Splitting reference/cli across assignments cannot evade ownership."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "scripts" / "split_page_projection.py"
+    duplicate.write_text(
+        "def project(dist):\n"
+        "    base = dist / 'reference'\n"
+        "    cli_dir = base / 'cli'\n"
+        "    return {child.name for child in cli_dir.iterdir() "
+        "if (child / 'index.html').is_file()}\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
     assert any("direct rendered CLI route inventory" in item for item in violations)
 
 
@@ -230,3 +271,26 @@ def test_rendered_parity_facade_delegation_is_allowed(tmp_path: Path) -> None:
     )
 
     assert _load_checker().find_rendered_parity_violations(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import scripts.check_cli_docs\n",
+        "from scripts import check_cli_docs\n",
+    ),
+)
+def test_direct_parity_module_import_is_rejected(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Direct module imports cannot bypass facade-only consumption."""
+    _write_owner_stubs(tmp_path)
+    consumer = tmp_path / "tests" / "consumer.py"
+    consumer.parent.mkdir(exist_ok=True)
+    consumer.write_text(source, encoding="utf-8")
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "rendered parity module imported directly" in violations[0]

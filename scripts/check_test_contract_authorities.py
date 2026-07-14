@@ -55,7 +55,7 @@ def _direct_binary_env_read_lines(tree: ast.AST) -> list[int]:
     os_aliases = {"os"}
     environ_aliases: set[str] = set()
     getenv_aliases: set[str] = set()
-    for node in tree.body:
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             os_aliases.update(
                 alias.asname or alias.name for alias in node.names if alias.name == "os"
@@ -186,6 +186,21 @@ def _registry_projection_lines(tree: ast.AST) -> list[int]:
         )
         if projects_commands and filters_hidden:
             lines.add(node.lineno)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.For):
+            continue
+        projects_commands = isinstance(node.iter, ast.Call) and _is_commands_items(node.iter)
+        filters_hidden = any(
+            isinstance(child, ast.Attribute) and child.attr == "hidden" for child in ast.walk(node)
+        )
+        collects_names = any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Attribute)
+            and child.func.attr in {"add", "append", "update"}
+            for child in ast.walk(node)
+        )
+        if projects_commands and filters_hidden and collects_names:
+            lines.add(node.lineno)
     return sorted(lines)
 
 
@@ -193,17 +208,39 @@ def _path_string_segments(node: ast.AST) -> set[str]:
     return {value for child in ast.walk(node) if (value := _literal_string(child)) is not None}
 
 
+def _path_segments(node: ast.AST, known: dict[str, set[str]]) -> set[str]:
+    segments = _path_string_segments(node)
+    segments.update(
+        segment
+        for child in ast.walk(node)
+        if isinstance(child, ast.Name)
+        for segment in known.get(child.id, set())
+    )
+    return segments
+
+
 def _rendered_cli_path_names(tree: ast.AST) -> set[str]:
-    names: set[str] = set()
+    assignments: list[tuple[list[str], ast.AST]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        value = node.value
-        if value is None or not {"reference", "cli"}.issubset(_path_string_segments(value)):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        names.update(target.id for target in targets if isinstance(target, ast.Name))
-    return names
+        names = [target.id for target in targets if isinstance(target, ast.Name)]
+        if names:
+            assignments.append((names, node.value))
+
+    known: dict[str, set[str]] = {}
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for names, value in assignments:
+            segments = _path_segments(value, known)
+            for name in names:
+                if not segments.issubset(known.get(name, set())):
+                    known.setdefault(name, set()).update(segments)
+                    changed = True
+        if not changed:
+            break
+    return {name for name, segments in known.items() if {"reference", "cli"}.issubset(segments)}
 
 
 def _rendered_inventory_lines(tree: ast.AST) -> list[int]:
