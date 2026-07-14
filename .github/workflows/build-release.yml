@@ -76,9 +76,8 @@ jobs:
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
-          uv run pytest
+          uv run --frozen pytest
           tests/integration/test_windows_installer_launchers.py
           -vv -ra --tb=short
 

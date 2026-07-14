@@ -30,7 +30,7 @@ def test_macos_intel_runs_non_shell_binary_startup_after_build() -> None:
 
 
 def test_windows_installer_contract_reports_its_exact_test_id() -> None:
-    """The hosted Windows log must distinguish a pass from a skip."""
+    """The hosted Windows log is exact, frozen, and does not expose a token."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     windows_start = workflow.index("  build-and-test:")
     intel_start = workflow.index("  build-and-validate-macos-intel:")
@@ -41,3 +41,9 @@ def test_windows_installer_contract_reports_its_exact_test_id() -> None:
     command_start = build_job.index(test_id)
     command = build_job[command_start : command_start + 160]
     assert "-vv -ra --tb=short" in command
+    installer_step_start = build_job.index("      - name: Test install.ps1 end-to-end (Windows)")
+    installer_step_end = build_job.index("      - name: Run unit tests", installer_step_start)
+    installer_step = build_job[installer_step_start:installer_step_end]
+    assert "uv run --frozen pytest" in installer_step
+    assert 'APM_E2E_TESTS: "1"' in installer_step
+    assert "GITHUB_TOKEN:" not in installer_step

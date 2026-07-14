@@ -22,6 +22,7 @@ on:
     paths:
       - 'docs/**'
       - 'src/apm_cli/cli.py'
+      - 'src/apm_cli/commands/**'
       - 'scripts/check_cli_docs.py'
       - 'tests/unit/test_cli_docs_contract.py'
       - '.github/workflows/docs.yml'
@@ -29,8 +30,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages-${{ github.ref }}"
@@ -61,7 +60,7 @@ jobs:
           enable-cache: true
 
       - name: Install Python test dependencies
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
 
       - name: Install dependencies
         working-directory: ./docs
@@ -72,14 +71,14 @@ jobs:
         run: npm run test:links
 
       - name: Test CLI registry contract
-        run: uv run pytest tests/unit/test_cli_docs_contract.py -q
+        run: uv run --frozen pytest tests/unit/test_cli_docs_contract.py -q
 
       - name: Build documentation
         working-directory: ./docs
         run: npm run build
 
       - name: Check CLI registry against rendered pages
-        run: uv run python scripts/check_cli_docs.py docs/dist
+        run: uv run --frozen python scripts/check_cli_docs.py docs/dist
 
       - name: Verify schema $id reachability
         # Asserts every JSON Schema's declared $id URL resolves to a
