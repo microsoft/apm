@@ -1,4 +1,4 @@
-"""Mutation-style tests for test contract authority boundaries."""
+"""Adversarial tests for test contract authority boundaries."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 
 def _load_checker() -> ModuleType:
@@ -33,28 +35,27 @@ def _write_owner_stubs(root: Path) -> None:
     )
 
 
-def test_known_binary_fallback_chain_is_rejected(tmp_path: Path) -> None:
-    """The retired silent-adopt resolver shape must trip the boundary."""
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import os\ndef renamed():\n    return os.environ.get('APM_BINARY_PATH') or 'apm'\n",
+        "import os\ndef choose():\n    return os.getenv('APM_BINARY_PATH')\n",
+        "import os\ndef choose():\n    return os.environ['APM_BINARY_PATH']\n",
+    ),
+)
+def test_any_direct_binary_environment_read_is_rejected(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Names and fallback syntax cannot evade canonical binary selection."""
     _write_owner_stubs(tmp_path)
     duplicate = tmp_path / "tests" / "integration" / "duplicate.py"
-    duplicate.write_text(
-        "import os\n"
-        "import shutil\n"
-        "from pathlib import Path\n"
-        "def apm_command():\n"
-        "    for env_var in ('APM_TEST_BINARY', 'APM_BINARY_PATH'):\n"
-        "        override = os.environ.get(env_var)\n"
-        "        if override and Path(override).exists():\n"
-        "            return override\n"
-        "    candidate = Path('.venv') / 'bin' / 'apm'\n"
-        "    return str(candidate) if candidate.exists() else shutil.which('apm')\n",
-        encoding="utf-8",
-    )
+    duplicate.write_text(source, encoding="utf-8")
 
     violations = _load_checker().find_binary_selection_violations(tmp_path)
 
     assert len(violations) == 1
-    assert "duplicate integration binary selection" in violations[0]
+    assert "direct APM_BINARY_PATH read" in violations[0]
 
 
 def test_binary_fixture_delegation_is_allowed(tmp_path: Path) -> None:
@@ -69,50 +70,140 @@ def test_binary_fixture_delegation_is_allowed(tmp_path: Path) -> None:
     assert _load_checker().find_binary_selection_violations(tmp_path) == []
 
 
-def test_binary_environment_subscript_fallback_is_rejected(tmp_path: Path) -> None:
-    """Subscript syntax must not evade the binary-selection boundary."""
+def test_renamed_binary_resolver_is_rejected(tmp_path: Path) -> None:
+    """A renamed resolver still fails because it reads the owned variable."""
     _write_owner_stubs(tmp_path)
-    duplicate = tmp_path / "tests" / "integration" / "subscript_duplicate.py"
+    duplicate = tmp_path / "tests" / "integration" / "renamed.py"
     duplicate.write_text(
-        "import os\n"
-        "import shutil\n"
-        "def apm_command():\n"
-        "    configured = os.environ['APM_BINARY_PATH']\n"
-        "    return configured or shutil.which('apm')\n",
+        "import os\ndef resolve_tool():\n    return os.environ.get('APM_BINARY_PATH')\n",
         encoding="utf-8",
     )
 
     violations = _load_checker().find_binary_selection_violations(tmp_path)
 
     assert len(violations) == 1
-    assert "duplicate integration binary selection" in violations[0]
+    assert "direct APM_BINARY_PATH read" in violations[0]
 
 
-def test_known_rendered_parity_reimplementation_is_rejected(tmp_path: Path) -> None:
-    """A second registry/page set comparison must trip the boundary."""
+def test_comment_only_parity_owner_definitions_are_rejected(tmp_path: Path) -> None:
+    """Owner presence must come from AST definitions, not comments."""
     _write_owner_stubs(tmp_path)
-    duplicate = tmp_path / "scripts" / "duplicate_parity.py"
-    duplicate.write_text(
-        "def duplicate(group, dist):\n"
-        "    commands = {name for name, command in group.commands.items() "
-        "if not command.hidden}\n"
-        "    cli_dir = dist / 'reference' / 'cli'\n"
-        "    pages = {child.name for child in cli_dir.iterdir() "
-        "if (child / 'index.html').is_file()}\n"
-        "    return sorted(commands - pages), sorted(pages - commands)\n",
+    owner = tmp_path / "scripts" / "check_cli_docs.py"
+    owner.write_text(
+        "# def public_top_level_commands():\n"
+        "# def rendered_cli_reference_pages():\n"
+        "# def registry_docs_mismatches():\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
+    assert len(violations) == 3
+    assert all("must define rendered parity owner function" in item for item in violations)
+
+
+def test_internal_projection_import_is_rejected(tmp_path: Path) -> None:
+    """External consumers may import only the parity facade."""
+    _write_owner_stubs(tmp_path)
+    consumer = tmp_path / "tests" / "consumer.py"
+    consumer.parent.mkdir(exist_ok=True)
+    consumer.write_text(
+        "from scripts.check_cli_docs import public_top_level_commands\n",
         encoding="utf-8",
     )
 
     violations = _load_checker().find_rendered_parity_violations(tmp_path)
 
     assert len(violations) == 1
-    assert "duplicate rendered CLI parity computation" in violations[0]
+    assert "internal rendered parity projection imported" in violations[0]
 
 
-def test_rendered_parity_helper_delegation_is_allowed(tmp_path: Path) -> None:
-    """A consumer importing the canonical comparison is not a second owner."""
+def test_direct_registry_projection_is_rejected_without_comparison(tmp_path: Path) -> None:
+    """Registry projection alone is owned, independent of set-difference syntax."""
     _write_owner_stubs(tmp_path)
-    consumer = tmp_path / "scripts" / "consumer.py"
+    duplicate = tmp_path / "scripts" / "registry_projection.py"
+    duplicate.write_text(
+        "def renamed(group):\n"
+        "    return {name for name, command in group.commands.items() "
+        "if not command.hidden}\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct Click command registry projection" in violations[0]
+
+
+def test_direct_rendered_inventory_is_rejected_with_imported_registry(
+    tmp_path: Path,
+) -> None:
+    """Importing one side cannot permit recomputing the other side."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "scripts" / "page_projection.py"
+    duplicate.write_text(
+        "from scripts.check_cli_docs import public_top_level_commands\n"
+        "def renamed(dist):\n"
+        "    cli_dir = dist / 'reference' / 'cli'\n"
+        "    return {child.name for child in cli_dir.iterdir() "
+        "if (child / 'index.html').is_file()}\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
+    assert len(violations) >= 2
+    assert any("internal rendered parity projection imported" in item for item in violations)
+    assert any("direct rendered CLI route inventory" in item for item in violations)
+
+
+def test_direct_registry_projection_is_rejected_with_imported_pages(
+    tmp_path: Path,
+) -> None:
+    """Importing page projection cannot permit recomputing the registry side."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "scripts" / "registry_projection.py"
+    duplicate.write_text(
+        "from scripts.check_cli_docs import rendered_cli_reference_pages\n"
+        "def renamed(group):\n"
+        "    return {name for name, command in group.commands.items() "
+        "if not command.hidden}\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
+    assert len(violations) == 2
+    assert any("internal rendered parity projection imported" in item for item in violations)
+    assert any("direct Click command registry projection" in item for item in violations)
+
+
+def test_set_difference_parity_reimplementation_is_rejected(tmp_path: Path) -> None:
+    """Method-form set differences cannot evade projection ownership."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "scripts" / "difference_parity.py"
+    duplicate.write_text(
+        "def compare(group, dist):\n"
+        "    commands = {name for name, command in group.commands.items() "
+        "if not command.hidden}\n"
+        "    cli_dir = dist / 'reference' / 'cli'\n"
+        "    pages = {child.name for child in cli_dir.iterdir() "
+        "if (child / 'index.html').is_file()}\n"
+        "    return commands.difference(pages), pages.difference(commands)\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_rendered_parity_violations(tmp_path)
+
+    assert any("direct Click command registry projection" in item for item in violations)
+    assert any("direct rendered CLI route inventory" in item for item in violations)
+
+
+def test_rendered_parity_facade_delegation_is_allowed(tmp_path: Path) -> None:
+    """Consumers may import and call the canonical comparison facade."""
+    _write_owner_stubs(tmp_path)
+    consumer = tmp_path / "tests" / "consumer.py"
+    consumer.parent.mkdir(exist_ok=True)
     consumer.write_text(
         "from scripts.check_cli_docs import registry_docs_mismatches\n"
         "def check(group, dist):\n"
