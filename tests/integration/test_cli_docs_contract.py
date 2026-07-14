@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from apm_cli.cli import cli
-from scripts.check_cli_docs import public_top_level_commands
+from scripts.check_cli_docs import registry_docs_mismatches
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / "scripts" / "check_cli_docs.py"
@@ -19,10 +19,20 @@ def _render_page(dist: Path, name: str) -> None:
     page.write_text("<p>rendered</p>\n", encoding="utf-8")
 
 
-def _render_public_pages(dist: Path, *, omit: set[str] | None = None) -> None:
+def _public_command_names(dist: Path) -> set[str]:
+    cli_dir = dist / "reference" / "cli"
+    cli_dir.mkdir(parents=True, exist_ok=True)
+    missing, orphan = registry_docs_mismatches(cli, dist)
+    assert orphan == []
+    return set(missing)
+
+
+def _render_public_pages(dist: Path, *, omit: set[str] | None = None) -> set[str]:
     omitted = omit or set()
-    for name in public_top_level_commands(cli) - omitted:
+    public = _public_command_names(dist)
+    for name in public - omitted:
         _render_page(dist, name)
+    return public
 
 
 def _run_checker(dist: Path) -> subprocess.CompletedProcess[str]:
@@ -90,13 +100,13 @@ def test_checker_cli_reports_missing_rendered_directory_on_stderr(tmp_path: Path
 
 def test_checker_cli_reserves_stdout_for_success(tmp_path: Path) -> None:
     """A matching rendered tree emits only successful evidence on stdout."""
-    _render_public_pages(tmp_path)
+    public = _render_public_pages(tmp_path)
 
     result = _run_checker(tmp_path)
 
     assert result.returncode == 0
     assert result.stderr == ""
-    command_count = len(public_top_level_commands(cli))
+    command_count = len(public)
     assert result.stdout == (
         f"[+] {command_count} public CLI commands match {command_count} rendered pages.\n"
     )
