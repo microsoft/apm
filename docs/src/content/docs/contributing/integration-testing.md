@@ -77,6 +77,43 @@ uv run pytest tests/integration/test_golden_scenario_e2e.py -v
 uv run pytest tests/integration -m requires_github_token -v
 ```
 
+### Hermetic lifecycle fixtures
+
+`tests/integration/test_hermetic_lifecycle_foundation.py` is the cross-module
+contract. It directly imports six flat utilities:
+
+```text
+tests/utils/isolated_apm_environment.py
+tests/utils/local_git_repository.py
+tests/utils/local_package.py
+tests/utils/apm_lifecycle_runner.py
+tests/utils/artifact_snapshot.py
+tests/utils/scenario_rows.py
+```
+
+Source fixtures author only source inputs; the real APM CLI creates lockfiles,
+deployed trees, compiled output, bundles, hashes, cache state, and audit
+reports.
+
+`IsolatedApmEnvironment` provides bounded Python-process
+environment/filesystem isolation, not an OS/native-code sandbox.
+`GIT_ALLOW_PROTOCOL=file` and local `url.*.insteadOf` rewriting bound native
+Git transport to the file-only protocol.
+
+Keep modules flat: no facade, base class, registry, or shared DSL. Command
+failures retain command, return code, stdout, and stderr evidence. Hermetic
+tests require no network or token marker.
+
+Run serially or with xdist enabled:
+
+```bash
+# Serial
+uv run pytest tests/integration/test_hermetic_lifecycle_foundation.py -v
+
+# xdist
+uv run pytest -n auto tests/integration/test_hermetic_lifecycle_foundation.py -v
+```
+
 ### Apm binary resolution
 
 Tests that need to shell out to a real `apm` binary use the
