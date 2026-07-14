@@ -289,6 +289,45 @@ def test_skill_subset_ast_checker_passes_on_real_consumers() -> None:
     assert violations == []
 
 
+def test_policy_cache_writer_routes_through_canonical_serializer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apm_cli.policy import discovery
+    from apm_cli.policy.schema import ApmPolicy
+
+    serialized = "name: serializer-owner\n"
+    calls: list[ApmPolicy] = []
+
+    def serialize(policy: ApmPolicy) -> str:
+        calls.append(policy)
+        return serialized
+
+    monkeypatch.setattr(discovery, "_serialize_policy", serialize)
+    policy = ApmPolicy(name="original")
+    repo_ref = "owner/.github"
+
+    discovery._write_cache(repo_ref, policy, tmp_path)
+
+    cache_file = discovery._get_cache_dir(tmp_path) / f"{discovery._cache_key(repo_ref)}.yml"
+    assert cache_file.read_text(encoding="utf-8") == serialized
+    assert calls == [policy]
+
+
+def test_policy_cache_serializer_boundary_is_registered() -> None:
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    owner_row = (
+        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |"
+    )
+    assert ("Cached policy shape must route through policy/discovery.py::_policy_to_dict") in guard
+    for token in ("_policy_to_dict", "_serialize_policy", "_write_cache"):
+        assert token in guard
+    assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
     """install.ps1 alone may define the stable current/apm.exe location.
 
@@ -329,8 +368,13 @@ def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
     source = root / ".apm/instructions/architecture.instructions.md"
     deployed = root / ".github/instructions/architecture.instructions.md"
 
-    owner_row = "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |"
-    assert owner_row in source.read_text(encoding="utf-8")
+    owner_rows = (
+        "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |",
+        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |",
+    )
+    source_text = source.read_text(encoding="utf-8")
+    for owner_row in owner_rows:
+        assert owner_row in source_text
 
     # Source and deployed must be byte-identical: the deployed file is a
     # compiled copy of the source, not an independently edited artifact.

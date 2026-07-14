@@ -98,6 +98,38 @@ if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
     echo "[x] Incomplete policy chains must route through fail-closed outcome handling"
     violations=$((violations + 1))
 fi
+policy_file="src/apm_cli/policy/discovery.py"
+policy_named_defs=$(grep -Ec \
+    '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
+    "$policy_file" || true)
+policy_serializer_body=$(awk '
+    /^def _serialize_policy\(/ {flag=1}
+    flag && /^def / && !/^def _serialize_policy\(/ {exit}
+    flag {print}
+' "$policy_file")
+policy_cache_write_body=$(awk '
+    /^def _write_cache\(/ {flag=1}
+    flag && /^def / && !/^def _write_cache\(/ {exit}
+    flag {print}
+' "$policy_file")
+policy_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
+        src/apm_cli/policy \
+        | grep -v "^${policy_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$policy_named_defs" -ne 2 ] \
+    || ! printf '%s\n' "$policy_serializer_body" \
+        | grep -Eq '^[[:space:]]*[^#]*_policy_to_dict\(policy\)' \
+    || ! printf '%s\n' "$policy_cache_write_body" \
+        | grep -Eq '^[[:space:]]*serialized[[:space:]]*=[[:space:]]*_serialize_policy\(policy\)' \
+    || [ -n "$policy_duplicate_hits" ]; then
+    echo "[x] Cached policy shape must route through policy/discovery.py::_policy_to_dict"
+    [ -n "$policy_duplicate_hits" ] && echo "$policy_duplicate_hits"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC4: declared-intent preservation"
 check_pattern \
