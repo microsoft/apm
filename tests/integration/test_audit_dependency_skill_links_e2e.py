@@ -10,11 +10,7 @@ import pytest
 TIMEOUT = 180
 
 
-def _run(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess[str]:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the APM CLI in *cwd* and return the completed subprocess."""
     return subprocess.run(
         [str(apm_binary_path), *args],

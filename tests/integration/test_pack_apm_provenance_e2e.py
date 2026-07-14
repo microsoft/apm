@@ -119,10 +119,7 @@ def _bundle_dir(project: Path, output_name: str = "build") -> Path:
     return project / output_name / "apm-provenance-e2e-1.0.0"
 
 
-def test_apm_pack_accepts_matching_deployed_file(
-    tmp_path: Path,
-    apm_binary_path: Path,
-) -> None:
+def test_apm_pack_accepts_matching_deployed_file(tmp_path: Path, apm_binary_path: Path) -> None:
     """Untampered deployed files pack cleanly (guards against false positives)."""
     project = tmp_path / "project"
     project.mkdir()
@@ -139,10 +136,7 @@ def test_apm_pack_accepts_matching_deployed_file(
     ) == "deployed alpha"
 
 
-def test_apm_pack_rejects_tampered_deployed_file(
-    tmp_path: Path,
-    apm_binary_path: Path,
-) -> None:
+def test_apm_pack_rejects_tampered_deployed_file(tmp_path: Path, apm_binary_path: Path) -> None:
     """A deployed file tampered after install must fail the pack loudly.
 
     This is the RED-without-fix / GREEN-with-fix provenance gate for the
@@ -170,8 +164,7 @@ def test_apm_pack_rejects_tampered_deployed_file(
 
 
 def test_apm_pack_rejects_tampered_file_in_deployed_directory(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """A tampered file inside a deployed *directory* entry also fails loud.
 
@@ -210,8 +203,7 @@ def test_apm_pack_rejects_tampered_file_in_deployed_directory(
 
 
 def test_apm_pack_cross_target_mapped_file_no_false_positive(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """Cross-target mapped files verify against the on-disk key, not bundle key.
 
@@ -237,10 +229,7 @@ def test_apm_pack_cross_target_mapped_file_no_false_positive(
     ) == "deployed alpha"
 
 
-def test_apm_pack_directory_symlink_does_not_escape(
-    tmp_path: Path,
-    apm_binary_path: Path,
-) -> None:
+def test_apm_pack_directory_symlink_does_not_escape(tmp_path: Path, apm_binary_path: Path) -> None:
     """A directory symlink inside a deployed dir must not leak external bytes.
 
     Defense-in-depth: the copytree ignore filter drops symlinks and the

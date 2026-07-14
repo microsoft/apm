@@ -44,11 +44,7 @@ INSTRUCTION_BODY = (
 INSTRUCTION_SENTINEL = "Use type hints everywhere."
 
 
-def _run(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(apm_binary_path), *args],
         cwd=str(cwd),
@@ -71,8 +67,7 @@ def project_with_instruction():
 
 @pytest.mark.integration
 def test_install_then_compile_skips_duplicated_instructions(
-    project_with_instruction,
-    apm_binary_path: Path,
+    project_with_instruction, apm_binary_path: Path
 ):
     """After install populates .github/instructions/, compile must drop the
     instructions content from AGENTS.md. Pre-fix, the content was duplicated
@@ -107,8 +102,7 @@ def test_install_then_compile_skips_duplicated_instructions(
 
 @pytest.mark.integration
 def test_compile_without_github_instructions_includes_content(
-    project_with_instruction,
-    apm_binary_path: Path,
+    project_with_instruction, apm_binary_path: Path
 ):
     """Without .github/instructions/ populated, compile should include
     instruction content in AGENTS.md (the non-dedup baseline).

@@ -60,12 +60,7 @@ packages:
 class TestLiveBuild:
     """Live build test: resolves real tags and writes marketplace.json."""
 
-    def test_live_build_succeeds(
-        self,
-        live_marketplace_repo,
-        tmp_path,
-        apm_binary_path: Path,
-    ):
+    def test_live_build_succeeds(self, live_marketplace_repo, tmp_path, apm_binary_path: Path):
         """Build with a real remote must exit 0 and produce marketplace.json."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
@@ -79,12 +74,7 @@ class TestLiveBuild:
         out_path = tmp_path / "marketplace.json"
         assert out_path.exists(), "marketplace.json was not produced"
 
-    def test_live_build_resolves_sha(
-        self,
-        live_marketplace_repo,
-        tmp_path,
-        apm_binary_path: Path,
-    ):
+    def test_live_build_resolves_sha(self, live_marketplace_repo, tmp_path, apm_binary_path: Path):
         """All plugins in the produced marketplace.json must have a 40-char SHA."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
@@ -108,12 +98,7 @@ class TestLiveBuild:
 class TestLiveOutdated:
     """Live outdated test: reports upgrades in correct format."""
 
-    def test_live_outdated_exits_zero(
-        self,
-        live_marketplace_repo,
-        tmp_path,
-        apm_binary_path: Path,
-    ):
+    def test_live_outdated_exits_zero(self, live_marketplace_repo, tmp_path, apm_binary_path: Path):
         """outdated always exits 0 (informational command)."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
@@ -125,10 +110,7 @@ class TestLiveOutdated:
         )
 
     def test_live_outdated_output_contains_package_name(
-        self,
-        live_marketplace_repo,
-        tmp_path,
-        apm_binary_path: Path,
+        self, live_marketplace_repo, tmp_path, apm_binary_path: Path
     ):
         """Output must contain the package name from the yml."""
         yml_path = tmp_path / "marketplace.yml"
@@ -144,12 +126,7 @@ class TestLiveOutdated:
 class TestLiveCheck:
     """Live check test: all entries must be reachable."""
 
-    def test_live_check_exits_zero(
-        self,
-        live_marketplace_repo,
-        tmp_path,
-        apm_binary_path: Path,
-    ):
+    def test_live_check_exits_zero(self, live_marketplace_repo, tmp_path, apm_binary_path: Path):
         """check must exit 0 when all entries resolve against the live remote."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
@@ -173,12 +150,7 @@ class TestLiveCheck:
 class TestLiveDoctor:
     """Live doctor test: git + network checks should pass in CI with network."""
 
-    def test_live_doctor_exits_zero(
-        self,
-        live_marketplace_repo,
-        tmp_path,
-        apm_binary_path: Path,
-    ):
+    def test_live_doctor_exits_zero(self, live_marketplace_repo, tmp_path, apm_binary_path: Path):
         """doctor must exit 0 when git is available and github.com is reachable."""
         # Place a valid marketplace.yml so the yml check is informational-pass
         yml_path = tmp_path / "marketplace.yml"
@@ -190,12 +162,7 @@ class TestLiveDoctor:
             f"doctor exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
 
-    def test_live_doctor_mentions_git(
-        self,
-        live_marketplace_repo,
-        tmp_path,
-        apm_binary_path: Path,
-    ):
+    def test_live_doctor_mentions_git(self, live_marketplace_repo, tmp_path, apm_binary_path: Path):
         """doctor output must mention the git check."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")

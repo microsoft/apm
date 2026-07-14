@@ -6,11 +6,7 @@ from pathlib import Path
 from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
 
 
-def run_cli(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess:
+def run_cli(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(apm_binary_path), "compile", "--single-agents", *args],
         cwd=str(cwd),

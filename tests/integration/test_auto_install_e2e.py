@@ -111,11 +111,7 @@ author: test
                 else:
                     raise
 
-    def test_auto_install_virtual_prompt_first_run(
-        self,
-        temp_e2e_home,
-        apm_binary_path: Path,
-    ):
+    def test_auto_install_virtual_prompt_first_run(self, temp_e2e_home, apm_binary_path: Path):
         """Test auto-install on first run with virtual package reference.
 
         This is the exact README hero scenario:
@@ -137,12 +133,15 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # Run the exact README command with streaming output monitoring
-        process = _start_apm(
-            apm_binary_path,
+        process = subprocess.Popen(
             [
+                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -203,11 +202,7 @@ author: test
 
         print(f"[+] Auto-install successful: {package_path}")
 
-    def test_auto_install_uses_cache_on_second_run(
-        self,
-        temp_e2e_home,
-        apm_binary_path: Path,
-    ):
+    def test_auto_install_uses_cache_on_second_run(self, temp_e2e_home, apm_binary_path: Path):
         """Test that second run uses cached package (no re-download).
 
         Expected behavior:
@@ -220,12 +215,15 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # First run - install with early termination
-        process = _start_apm(
-            apm_binary_path,
+        process = subprocess.Popen(
             [
+                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -255,12 +253,15 @@ author: test
         assert package_path.exists(), "Package should exist after first run"
 
         # Second run - should use cache with early termination
-        process = _start_apm(
-            apm_binary_path,
+        process = subprocess.Popen(
             [
+                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -291,11 +292,7 @@ author: test
 
         print("[+] Second run used cached package (no re-download)")
 
-    def test_simple_name_works_after_install(
-        self,
-        temp_e2e_home,
-        apm_binary_path: Path,
-    ):
+    def test_simple_name_works_after_install(self, temp_e2e_home, apm_binary_path: Path):
         """Test that simple name works after package is installed.
 
         Expected behavior:
@@ -308,12 +305,15 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # First install with full path - early termination
-        process = _start_apm(
-            apm_binary_path,
+        process = subprocess.Popen(
             [
+                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -333,9 +333,11 @@ author: test
             process.stdout.close()
 
         # Run with simple name - early termination
-        process = _start_apm(
-            apm_binary_path,
-            ["run", "architecture-blueprint-generator"],
+        process = subprocess.Popen(
+            [str(apm_binary_path), "run", "architecture-blueprint-generator"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             cwd=self.test_dir,
             env=env,
         )
@@ -365,11 +367,7 @@ author: test
 
         print("[+] Simple name works after installation")
 
-    def test_auto_install_with_qualified_path(
-        self,
-        temp_e2e_home,
-        apm_binary_path: Path,
-    ):
+    def test_auto_install_with_qualified_path(self, temp_e2e_home, apm_binary_path: Path):
         """Test auto-install works with qualified path format.
 
         Tests both formats:
@@ -381,12 +379,15 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # Test with qualified path (without .prompt.md extension) - early termination
-        process = _start_apm(
-            apm_binary_path,
+        process = subprocess.Popen(
             [
+                str(apm_binary_path),
                 "run",
                 "github/awesome-copilot/skills/architecture-blueprint-generator",
             ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             cwd=self.test_dir,
             env=env,
         )

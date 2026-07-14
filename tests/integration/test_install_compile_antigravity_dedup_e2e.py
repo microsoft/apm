@@ -38,11 +38,7 @@ EXPECTED_RULE = (
 INSTRUCTION_SENTINEL = "Use type hints everywhere."
 
 
-def _run(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(apm_binary_path), *args],
         cwd=str(cwd),
@@ -97,13 +93,7 @@ def test_install_then_compile_dedups_only_expected_antigravity_rule(
     if agents_md.exists():
         agents_md.unlink()
 
-    unrelated_res = _run(
-        apm_binary_path,
-        proj,
-        "compile",
-        "--target",
-        "antigravity",
-    )
+    unrelated_res = _run(apm_binary_path, proj, "compile", "--target", "antigravity")
     assert unrelated_res.returncode == 0, (
         f"unrelated compile stdout:\n{unrelated_res.stdout}\n"
         f"unrelated compile stderr:\n{unrelated_res.stderr}"

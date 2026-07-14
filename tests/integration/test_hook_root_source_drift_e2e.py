@@ -15,11 +15,7 @@ from pathlib import Path
 import pytest
 
 
-def _run(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(apm_binary_path), *args],
         cwd=str(cwd),
@@ -123,6 +119,7 @@ def _rewrite_source(
 @pytest.mark.parametrize("target, settings_rel, sidecar_rel, event_key", _HARNESS_CASES)
 def test_root_hook_source_drift_heals_on_reinstall(
     tmp_path: Path,
+    apm_binary_path: Path,
     target: str,
     settings_rel: str,
     sidecar_rel: str | None,

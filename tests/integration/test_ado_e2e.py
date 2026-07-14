@@ -21,10 +21,7 @@ pytestmark = pytest.mark.requires_ado_pat
 
 
 def run_apm_command(
-    apm_binary_path: Path,
-    cmd: str,
-    cwd: Path,
-    timeout: int = 60,
+    apm_binary_path: Path, cmd: str, cwd: Path, timeout: int = 60
 ) -> subprocess.CompletedProcess:
     """Run an APM CLI command and return the result."""
     result = subprocess.run(
@@ -65,11 +62,7 @@ class TestADOInstall:
         )
 
         # Install ADO package
-        result = run_apm_command(
-            apm_binary_path,
-            f'install "{self.ADO_TEST_REPO}"',
-            project_dir,
-        )
+        result = run_apm_command(apm_binary_path, f'install "{self.ADO_TEST_REPO}"', project_dir)
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
         # Verify 3-level directory structure
@@ -216,10 +209,7 @@ class TestADOVirtualPackage:
 
         # Install virtual package
         result = run_apm_command(
-            apm_binary_path,
-            f'install "{self.ADO_VIRTUAL_PACKAGE}"',
-            project_dir,
-            timeout=120,
+            apm_binary_path, f'install "{self.ADO_VIRTUAL_PACKAGE}"', project_dir, timeout=120
         )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 

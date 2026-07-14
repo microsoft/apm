@@ -42,12 +42,6 @@ _BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
 
 
 @pytest.fixture()
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
-
-
-@pytest.fixture()
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolated home directory wired into every APM config lookup."""
     home = tmp_path / "home"
@@ -153,7 +147,7 @@ class TestIntelliJCliE2E:
     def test_mcp_install_respects_composed_target_set(
         self,
         tmp_path: Path,
-        apm_command: str,
+        apm_binary_path: str,
         target: str,
         expect_claude: bool,
     ) -> None:
@@ -180,7 +174,7 @@ class TestIntelliJCliE2E:
 
         result = subprocess.run(
             [
-                apm_command,
+                apm_binary_path,
                 "install",
                 "--mcp",
                 "test-http-server",

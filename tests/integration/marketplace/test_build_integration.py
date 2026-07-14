@@ -265,21 +265,12 @@ class TestBuildCLI:
         result = run_cli(apm_binary_path, ["marketplace", "build"], cwd=tmp_path)
         assert result.returncode == 2
 
-    def test_dry_run_flag_present(
-        self,
-        tmp_path: Path,
-        mock_ref_resolver,
-        apm_binary_path: Path,
-    ):
+    def test_dry_run_flag_present(self, tmp_path: Path, mock_ref_resolver, apm_binary_path: Path):
         """The removed `apm marketplace build` accepts --dry-run without
         crashing on unknown args; exit is the deprecation code (2) and
         there is no Python traceback."""
         _write_yml(tmp_path, MINIMAL_YML)
-        result = run_cli(
-            apm_binary_path,
-            ["marketplace", "build", "--dry-run"],
-            cwd=tmp_path,
-        )
+        result = run_cli(apm_binary_path, ["marketplace", "build", "--dry-run"], cwd=tmp_path)
         assert result.returncode == 2
         assert "Traceback" not in result.stderr
         combined = result.stdout + result.stderr

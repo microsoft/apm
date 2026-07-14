@@ -14,11 +14,7 @@ pytestmark = pytest.mark.integration
 TIMEOUT = 180
 
 
-def _run(
-    apm_binary_path: Path,
-    project: Path,
-    *args: str,
-) -> subprocess.CompletedProcess[str]:
+def _run(apm_binary_path: Path, project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the APM CLI in the fixture project."""
     return subprocess.run(
         [str(apm_binary_path), *args],
@@ -65,8 +61,7 @@ dependencies:
 
 
 def test_ci_audit_tracks_current_transitive_mcp_source(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """Audit accepts installed transitive MCP, then rejects its removal."""
     project = _write_workspace(tmp_path)
@@ -87,15 +82,7 @@ def test_ci_audit_tracks_current_transitive_mcp_source(
     lock_data = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
     assert lock_data["mcp_config_provenance"] == {"shadcn": "agent-config"}
 
-    audit = _run(
-        apm_binary_path,
-        project,
-        "audit",
-        "--ci",
-        "--no-policy",
-        "-f",
-        "json",
-    )
+    audit = _run(apm_binary_path, project, "audit", "--ci", "--no-policy", "-f", "json")
     assert audit.returncode == 0, f"audit stdout:\n{audit.stdout}\naudit stderr:\n{audit.stderr}"
     payload = json.loads(audit.stdout)
     config_check = next(

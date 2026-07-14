@@ -14,15 +14,9 @@ regress when adapter wiring changes.
 import json
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
-
-
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    return str(apm_binary_path)
 
 
 @pytest.fixture
@@ -50,7 +44,7 @@ class TestMcpEnvVarHeadersVSCode:
     for both ${VAR} and ${env:VAR} header syntaxes from apm.yml."""
 
     def test_self_defined_http_server_translates_both_env_var_syntaxes(
-        self, temp_project, apm_command
+        self, temp_project, apm_binary_path
     ):
         """Both bare ${VAR} and explicit ${env:VAR} in apm.yml headers must
         land in mcp.json as ${env:VAR} (the syntax VS Code resolves at
@@ -81,7 +75,7 @@ class TestMcpEnvVarHeadersVSCode:
         env["APM_NON_INTERACTIVE"] = "1"
 
         result = subprocess.run(
-            [apm_command, "install", "--target", "vscode"],
+            [apm_binary_path, "install", "--target", "vscode"],
             cwd=temp_project,
             capture_output=True,
             text=True,

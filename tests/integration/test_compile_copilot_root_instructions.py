@@ -20,8 +20,7 @@ def run_cli(apm_binary_path: Path, cwd: Path) -> subprocess.CompletedProcess:
 
 
 def test_compile_emits_copilot_root_instructions_and_is_idempotent(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ):
     (tmp_path / "apm.yml").write_text("name: test-project\nversion: 0.1.0\n", encoding="utf-8")
     instructions_dir = tmp_path / ".apm" / "instructions"
@@ -49,8 +48,7 @@ def test_compile_emits_copilot_root_instructions_and_is_idempotent(
 
 
 def test_compile_removes_stale_root_file_when_only_scoped_rules_remain(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ):
     (tmp_path / "apm.yml").write_text("name: test-project\nversion: 0.1.0\n", encoding="utf-8")
     instructions_dir = tmp_path / ".apm" / "instructions"

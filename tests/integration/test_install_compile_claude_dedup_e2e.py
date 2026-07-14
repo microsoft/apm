@@ -64,11 +64,7 @@ INSTRUCTION_BODY = (
 )
 
 
-def _run(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(apm_binary_path), *args],
         cwd=str(cwd),
@@ -91,8 +87,7 @@ def project_with_instruction():
 
 @pytest.mark.integration
 def test_install_then_compile_skips_duplicated_instructions(
-    project_with_instruction,
-    apm_binary_path: Path,
+    project_with_instruction, apm_binary_path: Path
 ):
     """After install populates .claude/rules/, compile must drop the
     instructions section from CLAUDE.md. Pre-PR-#1146 the section was
@@ -132,8 +127,7 @@ def test_install_then_compile_skips_duplicated_instructions(
 
 @pytest.mark.integration
 def test_clean_flag_removes_stale_apm_generated_claude_md(
-    project_with_instruction,
-    apm_binary_path: Path,
+    project_with_instruction, apm_binary_path: Path
 ):
     """apm compile --target claude --clean must remove a stale APM-generated
     CLAUDE.md when .claude/rules/ is already populated.
@@ -156,14 +150,7 @@ def test_clean_flag_removes_stale_apm_generated_claude_md(
         encoding="utf-8",
     )
 
-    compile_res = _run(
-        apm_binary_path,
-        proj,
-        "compile",
-        "--target",
-        "claude",
-        "--clean",
-    )
+    compile_res = _run(apm_binary_path, proj, "compile", "--target", "claude", "--clean")
     assert compile_res.returncode == 0, (
         f"compile --clean stdout:\n{compile_res.stdout}\n"
         f"compile --clean stderr:\n{compile_res.stderr}"
@@ -178,8 +165,7 @@ def test_clean_flag_removes_stale_apm_generated_claude_md(
 
 @pytest.mark.integration
 def test_compile_alone_then_compile_again_skips_on_second_run(
-    project_with_instruction,
-    apm_binary_path: Path,
+    project_with_instruction, apm_binary_path: Path
 ):
     """`apm compile` itself also writes per-file rules into
     ``.claude/rules/``; running it twice must trigger the dedup on the

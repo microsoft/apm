@@ -21,19 +21,12 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.requires_apm_binary
 
 SAMPLE_MARKETPLACE_NAME = "test-mkt"
-
-
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
 
 
 @pytest.fixture
@@ -52,9 +45,9 @@ def _env_with_home(fake_home):
     return env
 
 
-def _run_apm(apm_command, args, fake_home, cwd=None, timeout=60):
+def _run_apm(apm_binary_path, args, fake_home, cwd=None, timeout=60):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
@@ -74,11 +67,11 @@ def _seed_marketplace(
     (apm_dir / "marketplaces.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def test_marketplace_list_shows_seeded_entry(apm_command, fake_home):
+def test_marketplace_list_shows_seeded_entry(apm_binary_path, fake_home):
     """`apm marketplace list` surfaces entries persisted in the registry."""
     _seed_marketplace(fake_home)
 
-    result = _run_apm(apm_command, ["marketplace", "list"], fake_home)
+    result = _run_apm(apm_binary_path, ["marketplace", "list"], fake_home)
 
     assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
     combined = result.stdout + result.stderr
@@ -86,10 +79,10 @@ def test_marketplace_list_shows_seeded_entry(apm_command, fake_home):
     assert "acme-org/plugin-marketplace" in combined
 
 
-def test_marketplace_add_rejects_invalid_format(apm_command, fake_home):
+def test_marketplace_add_rejects_invalid_format(apm_binary_path, fake_home):
     """`apm marketplace add` validates OWNER/REPO format without hitting the
     network (validation happens before the GitHub fetch)."""
-    result = _run_apm(apm_command, ["marketplace", "add", "not-a-valid-repo"], fake_home)
+    result = _run_apm(apm_binary_path, ["marketplace", "add", "not-a-valid-repo"], fake_home)
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr
@@ -102,12 +95,12 @@ def test_marketplace_add_rejects_invalid_format(apm_command, fake_home):
         assert data.get("marketplaces", []) == []
 
 
-def test_marketplace_remove_clears_entry(apm_command, fake_home):
+def test_marketplace_remove_clears_entry(apm_binary_path, fake_home):
     """`apm marketplace remove --yes` deletes the entry from the registry."""
     _seed_marketplace(fake_home)
 
     remove_result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["marketplace", "remove", SAMPLE_MARKETPLACE_NAME, "--yes"],
         fake_home,
     )
@@ -115,7 +108,7 @@ def test_marketplace_remove_clears_entry(apm_command, fake_home):
         f"stdout={remove_result.stdout!r}\nstderr={remove_result.stderr!r}"
     )
 
-    list_result = _run_apm(apm_command, ["marketplace", "list"], fake_home)
+    list_result = _run_apm(apm_binary_path, ["marketplace", "list"], fake_home)
     assert list_result.returncode == 0
     combined = list_result.stdout + list_result.stderr
     assert SAMPLE_MARKETPLACE_NAME not in combined

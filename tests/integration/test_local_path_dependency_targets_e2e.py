@@ -27,11 +27,7 @@ This instruction must deploy only to Copilot.
 DEPENDENCY_SENTINEL = "This instruction must deploy only to Copilot."
 
 
-def _run(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess[str]:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the APM CLI in *cwd* and return the completed subprocess."""
     return subprocess.run(
         [str(apm_binary_path), *args],
@@ -102,13 +98,7 @@ def test_path_dependency_targets_deploy_only_to_declared_target(
     """A path dependency with targets: [copilot] must not deploy to Claude."""
     consumer = local_path_targets_workspace
 
-    install_res = _run(
-        apm_binary_path,
-        consumer,
-        "install",
-        "--target",
-        "copilot,claude",
-    )
+    install_res = _run(apm_binary_path, consumer, "install", "--target", "copilot,claude")
     assert install_res.returncode == 0, (
         f"install stdout:\n{install_res.stdout}\ninstall stderr:\n{install_res.stderr}"
     )
@@ -119,13 +109,7 @@ def test_path_dependency_targets_deploy_only_to_declared_target(
         f"and replay. Lockfile dependencies: {locked_deps}"
     )
 
-    compile_res = _run(
-        apm_binary_path,
-        consumer,
-        "compile",
-        "--target",
-        "copilot,claude",
-    )
+    compile_res = _run(apm_binary_path, consumer, "compile", "--target", "copilot,claude")
     assert compile_res.returncode == 0, (
         f"compile stdout:\n{compile_res.stdout}\ncompile stderr:\n{compile_res.stderr}"
     )

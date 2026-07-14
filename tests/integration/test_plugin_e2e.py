@@ -38,11 +38,11 @@ FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "mock-marketplace-plug
 
 
 def _run_apm_command(
-    apm_command: str, args: list[str], cwd: Path, timeout: int = 120
+    apm_binary_path: str, args: list[str], cwd: Path, timeout: int = 120
 ) -> subprocess.CompletedProcess[str]:
     """Run the real APM CLI in a project directory."""
     return subprocess.run(
-        [apm_command, *args],
+        [apm_binary_path, *args],
         capture_output=True,
         text=True,
         cwd=str(cwd),
@@ -419,7 +419,7 @@ class TestPluginHeroScenarios:
 
     @pytest.mark.requires_apm_binary
     def test_local_plugin_uninstall_after_sequential_skill_install_cleans_deployed_files(
-        self, apm_command, tmp_path
+        self, apm_binary_path, tmp_path
     ):
         """Sequential CLI installs must retain plugin deployed_files for uninstall cleanup."""
         import yaml as yaml_lib
@@ -443,13 +443,13 @@ class TestPluginHeroScenarios:
         (project / ".github" / "copilot-instructions.md").write_text("# test\n")
 
         plugin_install = _run_apm_command(
-            apm_command, ["install", str(plugin_dir)], project, timeout=120
+            apm_binary_path, ["install", str(plugin_dir)], project, timeout=120
         )
         assert plugin_install.returncode == 0, (
             f"Plugin install failed:\n{plugin_install.stdout}\n{plugin_install.stderr}"
         )
         skill_install = _run_apm_command(
-            apm_command, ["install", str(skill_dir)], project, timeout=120
+            apm_binary_path, ["install", str(skill_dir)], project, timeout=120
         )
         assert skill_install.returncode == 0, (
             f"Skill install failed:\n{skill_install.stdout}\n{skill_install.stderr}"
@@ -464,7 +464,7 @@ class TestPluginHeroScenarios:
         assert project / ".github" / "agents" / "test-agent.agent.md" in deployed_paths
 
         uninstall = _run_apm_command(
-            apm_command, ["uninstall", str(plugin_dir)], project, timeout=60
+            apm_binary_path, ["uninstall", str(plugin_dir)], project, timeout=60
         )
         assert uninstall.returncode == 0, (
             f"Uninstall failed:\n{uninstall.stdout}\n{uninstall.stderr}"
@@ -507,11 +507,7 @@ class TestPluginBinDeployPermissionsE2E:
     it to 0o700.
     """
 
-    def test_install_global_deploys_plugin_bin_as_0700(
-        self,
-        tmp_path: Path,
-        apm_binary_path: Path,
-    ) -> None:
+    def test_install_global_deploys_plugin_bin_as_0700(self, tmp_path, apm_binary_path: Path):
         if not FIXTURE_DIR.exists():
             pytest.skip("mock-marketplace-plugin fixture not found")
 
@@ -558,12 +554,6 @@ pytestmark_network = pytest.mark.requires_github_token
 
 
 @pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
-
-
-@pytest.fixture
 def temp_project(tmp_path):
     """Create a temporary APM project."""
     project_dir = tmp_path / "e2e-project"
@@ -592,10 +582,10 @@ class TestPluginNetworkE2E:
 
     # ---- Test 1: install real plugin ------------------------------------
 
-    def test_install_real_plugin(self, apm_command, temp_project):
+    def test_install_real_plugin(self, apm_binary_path, temp_project):
         """Install a real plugin from GitHub, verify artifacts on disk."""
         result = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF, "--verbose"],
+            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -624,11 +614,11 @@ class TestPluginNetworkE2E:
 
     # ---- Test 2: deps list — no false orphans ---------------------------
 
-    def test_deps_list_no_false_orphans(self, apm_command, temp_project):
+    def test_deps_list_no_false_orphans(self, apm_binary_path, temp_project):
         """After install, deps list should show the plugin without orphan warnings."""
         # Install first
         subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF, "--verbose"],
+            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -636,7 +626,7 @@ class TestPluginNetworkE2E:
         )
 
         result = subprocess.run(
-            [apm_command, "deps", "list"],
+            [apm_binary_path, "deps", "list"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -653,10 +643,10 @@ class TestPluginNetworkE2E:
 
     # ---- Test 3: deps tree shows plugin ---------------------------------
 
-    def test_deps_tree_shows_plugin(self, apm_command, temp_project):
+    def test_deps_tree_shows_plugin(self, apm_binary_path, temp_project):
         """deps tree output should contain the plugin reference."""
         subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF, "--verbose"],
+            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -664,7 +654,7 @@ class TestPluginNetworkE2E:
         )
 
         result = subprocess.run(
-            [apm_command, "deps", "tree"],
+            [apm_binary_path, "deps", "tree"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -681,7 +671,7 @@ class TestPluginNetworkE2E:
 
     # ---- Test 4: mixed dependencies (plugin + skill) --------------------
 
-    def test_install_mixed_dependencies(self, apm_command, temp_project):
+    def test_install_mixed_dependencies(self, apm_binary_path, temp_project):
         """Install a plugin AND a regular skill together."""
         apm_yml = temp_project / "apm.yml"
         apm_yml.write_text(
@@ -694,7 +684,7 @@ class TestPluginNetworkE2E:
         )
 
         result = subprocess.run(
-            [apm_command, "install", "--verbose"],
+            [apm_binary_path, "install", "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -723,7 +713,7 @@ class TestPluginNetworkE2E:
 
         # deps list — no orphans
         list_result = subprocess.run(
-            [apm_command, "deps", "list"],
+            [apm_binary_path, "deps", "list"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -734,11 +724,11 @@ class TestPluginNetworkE2E:
 
     # ---- Test 5: uninstall plugin ---------------------------------------
 
-    def test_uninstall_plugin(self, apm_command, temp_project):
+    def test_uninstall_plugin(self, apm_binary_path, temp_project):
         """Uninstall a plugin — directory and scattered files cleaned up."""
         # Install first
         subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF, "--verbose"],
+            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -749,7 +739,7 @@ class TestPluginNetworkE2E:
 
         # Uninstall
         result = subprocess.run(
-            [apm_command, "uninstall", self.PLUGIN_REF],
+            [apm_binary_path, "uninstall", self.PLUGIN_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -765,13 +755,13 @@ class TestPluginNetworkE2E:
 
     # ---- Test 6: lockfile preserved on sequential installs ---------------
 
-    def test_lockfile_preserved_on_sequential_install(self, apm_command, temp_project):
+    def test_lockfile_preserved_on_sequential_install(self, apm_binary_path, temp_project):
         """Installing packages one at a time must preserve previous lockfile entries."""
         skill_ref = "github/awesome-copilot/skills/review-and-refactor"
 
         # Install plugin
         r1 = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF],
+            [apm_binary_path, "install", self.PLUGIN_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -781,7 +771,7 @@ class TestPluginNetworkE2E:
 
         # Install skill separately
         r2 = subprocess.run(
-            [apm_command, "install", skill_ref],
+            [apm_binary_path, "install", skill_ref],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -807,7 +797,7 @@ class TestPluginNetworkE2E:
 
         # deps tree should show both
         tree = subprocess.run(
-            [apm_command, "deps", "tree"],
+            [apm_binary_path, "deps", "tree"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -821,7 +811,7 @@ class TestPluginNetworkE2E:
         # Verify cleanup for the files that were actually deployed instead of
         # hard-coding that it must currently contain an agent primitive.
         r3 = subprocess.run(
-            [apm_command, "uninstall", self.PLUGIN_REF],
+            [apm_binary_path, "uninstall", self.PLUGIN_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -838,11 +828,11 @@ class TestPluginNetworkE2E:
 
     # ---- Test 7: compile includes plugin primitives ---------------------
 
-    def test_compile_includes_plugin_primitives(self, apm_command, temp_project):
+    def test_compile_includes_plugin_primitives(self, apm_binary_path, temp_project):
         """apm compile should include primitives from a normalized plugin."""
         # Install the plugin
         r = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF, "--verbose"],
+            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -852,7 +842,7 @@ class TestPluginNetworkE2E:
 
         # Compile
         result = subprocess.run(
-            [apm_command, "compile"],
+            [apm_binary_path, "compile"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -871,11 +861,11 @@ class TestPluginNetworkE2E:
 
     # ---- Test 8: prune removes orphaned plugin --------------------------
 
-    def test_prune_removes_orphaned_plugin(self, apm_command, temp_project):
+    def test_prune_removes_orphaned_plugin(self, apm_binary_path, temp_project):
         """apm prune should remove a plugin no longer in apm.yml."""
         # Install the plugin
         r = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF, "--verbose"],
+            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -898,7 +888,7 @@ class TestPluginNetworkE2E:
 
         # Prune should detect and remove the orphan
         result = subprocess.run(
-            [apm_command, "prune"],
+            [apm_binary_path, "prune"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -913,10 +903,10 @@ class TestPluginNetworkE2E:
 
     # ---- Test 9: install counter reports plugin -------------------------
 
-    def test_install_counter_includes_plugin(self, apm_command, temp_project):
+    def test_install_counter_includes_plugin(self, apm_binary_path, temp_project):
         """apm install output should count plugin as an installed dependency."""
         result = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF],
+            [apm_binary_path, "install", self.PLUGIN_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -932,10 +922,10 @@ class TestPluginNetworkE2E:
 
     # ---- Test 10: lockfile records package_type -------------------------
 
-    def test_lockfile_records_package_type(self, apm_command, temp_project):
+    def test_lockfile_records_package_type(self, apm_binary_path, temp_project):
         """Lockfile should record package_type for plugin dependencies."""
         result = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF],
+            [apm_binary_path, "install", self.PLUGIN_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -966,11 +956,11 @@ class TestPluginNetworkE2E:
 
     # ---- Test 11: idempotent reinstall ----------------------------------
 
-    def test_idempotent_reinstall(self, apm_command, temp_project):
+    def test_idempotent_reinstall(self, apm_binary_path, temp_project):
         """Running apm install twice should be safe and produce identical results."""
         # First install
         r1 = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF],
+            [apm_binary_path, "install", self.PLUGIN_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
@@ -985,7 +975,7 @@ class TestPluginNetworkE2E:
 
         # Second install (should use cache)
         r2 = subprocess.run(
-            [apm_command, "install", self.PLUGIN_REF],
+            [apm_binary_path, "install", self.PLUGIN_REF],
             capture_output=True,
             text=True,
             cwd=str(temp_project),

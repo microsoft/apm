@@ -19,7 +19,6 @@ the Copilot translation accidentally bleeds into Cursor.
 import json
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
@@ -33,11 +32,6 @@ pytestmark = [
     # silently ignored and tests would race on global env state.
     pytest.mark.xdist_group(name="home_env"),
 ]
-
-
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    return str(apm_binary_path)
 
 
 def _write_apm_yml(project_dir, mcp_servers):
@@ -57,7 +51,9 @@ class TestMcpEnvVarHeadersCopilot:
     values from the installer's environment must NEVER appear on disk.
     """
 
-    def test_self_defined_http_server_translates_env_vars_not_resolves(self, tmp_path, apm_command):
+    def test_self_defined_http_server_translates_env_vars_not_resolves(
+        self, tmp_path, apm_binary_path
+    ):
         """``${VAR}`` and ``${env:VAR}`` syntaxes in apm.yml headers must
         land in mcp-config.json as ``${VAR}`` (Copilot CLI's native runtime
         substitution syntax). No host env values may leak into the file.
@@ -100,7 +96,7 @@ class TestMcpEnvVarHeadersCopilot:
         env["APM_NON_INTERACTIVE"] = "1"
 
         result = subprocess.run(
-            [apm_command, "install", "--target", "copilot"],
+            [apm_binary_path, "install", "--target", "copilot"],
             cwd=project_dir,
             capture_output=True,
             text=True,
@@ -145,7 +141,7 @@ class TestMcpEnvVarHeadersCopilot:
             f"File contents:\n{full_text}"
         )
 
-    def test_self_defined_stdio_server_translates_env_vars_in_args(self, tmp_path, apm_command):
+    def test_self_defined_stdio_server_translates_env_vars_in_args(self, tmp_path, apm_binary_path):
         """Self-defined stdio server with env-var placeholders in BOTH the
         ``env`` block and ``args`` list must land in mcp-config.json with
         ``${VAR}`` runtime placeholders. Closes the integration-tier gap
@@ -189,7 +185,7 @@ class TestMcpEnvVarHeadersCopilot:
         env["APM_NON_INTERACTIVE"] = "1"
 
         result = subprocess.run(
-            [apm_command, "install", "--target", "copilot"],
+            [apm_binary_path, "install", "--target", "copilot"],
             cwd=project_dir,
             capture_output=True,
             text=True,
@@ -261,7 +257,7 @@ class TestMcpEnvVarHeadersCursor:
     a way that breaks Cursor.
     """
 
-    def test_cursor_still_resolves_env_vars_to_literal(self, tmp_path, apm_command):
+    def test_cursor_still_resolves_env_vars_to_literal(self, tmp_path, apm_binary_path):
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         # Cursor target signal.
@@ -288,7 +284,7 @@ class TestMcpEnvVarHeadersCursor:
         env["APM_NON_INTERACTIVE"] = "1"
 
         result = subprocess.run(
-            [apm_command, "install", "--target", "cursor"],
+            [apm_binary_path, "install", "--target", "cursor"],
             cwd=project_dir,
             capture_output=True,
             text=True,

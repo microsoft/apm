@@ -9,18 +9,11 @@ and do not require GITHUB_APM_PAT / GITHUB_TOKEN.
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
 
 pytestmark = pytest.mark.requires_apm_binary
-
-
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
 
 
 @pytest.fixture
@@ -52,10 +45,10 @@ def local_pkg_root(tmp_path):
     return pkg
 
 
-def _run_apm(apm_command, args, cwd, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, timeout=180):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -163,14 +156,14 @@ class TestNestedPackagePrune:
     """End-to-end regression coverage for nested package ownership."""
 
     def test_prune_preserves_nested_content_then_removes_whole_parent(
-        self, temp_project, apm_command, tmp_path
+        self, temp_project, apm_binary_path, tmp_path
     ):
         """Prune protects a declared parent, then removes all of it once orphaned."""
         parent = _make_local_nested_package(tmp_path, "parent-pkg")
         unrelated = _make_local_nested_package(tmp_path, "unrelated-pkg")
         _write_apm_yml_local_packages(temp_project, [parent, unrelated])
 
-        installed = _run_apm(apm_command, ["install"], temp_project)
+        installed = _run_apm(apm_binary_path, ["install"], temp_project)
         assert installed.returncode == 0, (
             f"Install failed:\nSTDOUT: {installed.stdout}\nSTDERR: {installed.stderr}"
         )
@@ -182,14 +175,14 @@ class TestNestedPackagePrune:
         assert nested_payload.is_file()
         assert unrelated_payload.is_file()
 
-        updated = _run_apm(apm_command, ["update", "--yes"], temp_project)
+        updated = _run_apm(apm_binary_path, ["update", "--yes"], temp_project)
         assert updated.returncode == 0, (
             f"Update failed:\nSTDOUT: {updated.stdout}\nSTDERR: {updated.stderr}"
         )
         assert nested_payload.is_file(), "Update removed nested package content"
         assert unrelated_payload.is_file(), "Update removed unrelated package content"
 
-        kept = _run_apm(apm_command, ["prune"], temp_project)
+        kept = _run_apm(apm_binary_path, ["prune"], temp_project)
         assert kept.returncode == 0, (
             f"Initial prune failed:\nSTDOUT: {kept.stdout}\nSTDERR: {kept.stderr}"
         )
@@ -197,7 +190,7 @@ class TestNestedPackagePrune:
         assert unrelated_payload.is_file(), "Unrelated package content was pruned"
 
         _write_apm_yml_local_packages(temp_project, [unrelated])
-        removed = _run_apm(apm_command, ["prune"], temp_project)
+        removed = _run_apm(apm_binary_path, ["prune"], temp_project)
         assert removed.returncode == 0, (
             f"Orphan prune failed:\nSTDOUT: {removed.stdout}\nSTDERR: {removed.stderr}"
         )
@@ -210,12 +203,12 @@ class TestFileRenamedWithinPackage:
     """Regression tests for issue #666: renaming a file inside a still-present
     package must delete the stale deployed artifacts on the next apm install."""
 
-    def test_renamed_file_cleanup_on_install(self, temp_project, apm_command, local_pkg_root):
+    def test_renamed_file_cleanup_on_install(self, temp_project, apm_binary_path, local_pkg_root):
         """Rename a source primitive, re-install, assert old files gone and
         lockfile deployed_files no longer lists the stale paths."""
         # -- Step 1: initial install --
         _write_apm_yml_local(temp_project, local_pkg_root)
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -236,7 +229,7 @@ class TestFileRenamedWithinPackage:
         src.rename(new)
 
         # -- Step 3: re-install --
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             f"Re-install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -257,7 +250,9 @@ class TestFileRenamedWithinPackage:
                 f"Stale path {stale} still in lockfile deployed_files after cleanup"
             )
 
-    def test_partial_install_cleans_renamed_file(self, temp_project, apm_command, local_pkg_root):
+    def test_partial_install_cleans_renamed_file(
+        self, temp_project, apm_binary_path, local_pkg_root
+    ):
         """`apm install --only=apm` on a package with a renamed file still cleans up.
 
         Verifies that partial installs clean files for the packages they touch
@@ -265,7 +260,7 @@ class TestFileRenamedWithinPackage:
         no-ops on partial installs."""
         # -- Step 1: initial install --
         _write_apm_yml_local(temp_project, local_pkg_root)
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, f"Initial install failed: {result1.stderr}"
 
         lockfile_before = _read_lockfile(temp_project)
@@ -282,7 +277,7 @@ class TestFileRenamedWithinPackage:
         src.rename(new)
 
         # -- Step 3: partial install --
-        result2 = _run_apm(apm_command, ["install", "--only=apm"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install", "--only=apm"], temp_project)
         assert result2.returncode == 0, f"Partial re-install failed: {result2.stderr}"
 
         # -- Step 4: old deployed files must be gone --
@@ -306,7 +301,7 @@ class TestCrossPackageSharedFileCleanup:
     """Regression tests for issue #1831 across real local-path packages."""
 
     def test_shared_file_survives_when_other_package_still_deploys_it(
-        self, temp_project, apm_command, tmp_path
+        self, temp_project, apm_binary_path, tmp_path
     ):
         """If pkg-a drops a shared prompt, pkg-b's deployed copy survives."""
         shared_body = "---\ndescription: shared\n---\nshared\n"
@@ -325,7 +320,7 @@ class TestCrossPackageSharedFileCleanup:
         )
         _write_apm_yml_local_packages(temp_project, [pkg_a, pkg_b])
 
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -349,7 +344,7 @@ class TestCrossPackageSharedFileCleanup:
         (pkg_a / ".apm" / "prompts" / "shared.prompt.md").unlink()
         (pkg_a / ".apm" / "prompts" / "only-a.prompt.md").unlink()
 
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             f"Re-install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )

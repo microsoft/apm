@@ -20,6 +20,12 @@ PARITY_OWNER_FUNCTIONS = {
     *PARITY_INTERNALS,
     PARITY_FACADE,
 }
+APM_EXECUTABLE_NAMES = {"apm", "apm.cmd", "apm.exe"}
+LOCAL_BINARY_FACADES = {
+    "_resolve_apm_executable",
+    "apm_binary",
+    "apm_command",
+}
 
 
 def _python_files(root: Path, locations: tuple[str, ...]) -> list[Path]:
@@ -90,16 +96,279 @@ def _direct_binary_env_read_lines(tree: ast.AST) -> list[int]:
     return sorted(lines)
 
 
-def _venv_binary_fallback_lines(tree: ast.AST) -> list[int]:
+def _direct_binary_path_lookup_lines(tree: ast.AST) -> list[int]:
+    shutil_aliases: set[str] = set()
+    which_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            shutil_aliases.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "shutil"
+            )
+        elif isinstance(node, ast.ImportFrom) and node.module == "shutil":
+            which_aliases.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "which"
+            )
+
     lines: set[int] = set()
-    for function in ast.walk(tree):
-        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
             continue
-        strings = {
-            value for child in ast.walk(function) if (value := _literal_string(child)) is not None
+        called = _attribute_name(node.func)
+        if _literal_string(node.args[0]) not in APM_EXECUTABLE_NAMES:
+            continue
+        if called in which_aliases or any(called == f"{alias}.which" for alias in shutil_aliases):
+            lines.add(node.lineno)
+    return sorted(lines)
+
+
+def _assignment_string_tokens(tree: ast.AST) -> dict[str, set[str]]:
+    assignments: list[tuple[list[str], ast.AST]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = [target.id for target in targets if isinstance(target, ast.Name)]
+        if names:
+            assignments.append((names, node.value))
+
+    known: dict[str, set[str]] = {}
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for names, value in assignments:
+            tokens = _expression_string_tokens(value, known)
+            for name in names:
+                if not tokens.issubset(known.get(name, set())):
+                    known.setdefault(name, set()).update(tokens)
+                    changed = True
+        if not changed:
+            break
+    return known
+
+
+def _expression_string_tokens(
+    node: ast.AST,
+    known: dict[str, set[str]],
+) -> set[str]:
+    tokens: set[str] = set()
+    for child in ast.walk(node):
+        value = _literal_string(child)
+        if value is not None:
+            tokens.update(part.casefold() for part in value.replace("\\", "/").split("/") if part)
+        elif isinstance(child, ast.Name):
+            tokens.update(known.get(child.id, set()))
+    return tokens
+
+
+def _venv_binary_fallback_lines(tree: ast.AST) -> list[int]:
+    known = _assignment_string_tokens(tree)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+    def is_path_construction(node: ast.AST) -> bool:
+        if isinstance(node, ast.BinOp):
+            return isinstance(node.op, ast.Div)
+        if not isinstance(node, ast.Call):
+            return False
+        if isinstance(node.func, ast.Attribute):
+            called = node.func.attr
+        elif isinstance(node.func, ast.Name):
+            called = node.func.id
+        else:
+            return False
+        return called in {
+            "Path",
+            "PurePath",
+            "join",
+            "joinpath",
         }
-        if ".venv" in strings and "apm" in strings:
-            lines.add(function.lineno)
+
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not is_path_construction(node):
+            continue
+        if any(is_path_construction(ancestor) for ancestor in _ancestors(node, parents)):
+            continue
+        tokens = _expression_string_tokens(node, known)
+        if ".venv" in tokens and tokens.intersection(APM_EXECUTABLE_NAMES):
+            lines.add(node.lineno)
+    return sorted(lines)
+
+
+def _ancestors(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> list[ast.AST]:
+    ancestors: list[ast.AST] = []
+    while node in parents:
+        node = parents[node]
+        ancestors.append(node)
+    return ancestors
+
+
+def _python_sibling_binary_lines(tree: ast.AST) -> list[int]:
+    sys_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            sys_aliases.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "sys"
+            )
+
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "with_name":
+            continue
+        if _literal_string(node.args[0]) not in APM_EXECUTABLE_NAMES:
+            continue
+        names = {
+            _attribute_name(child)
+            for child in ast.walk(node.func.value)
+            if isinstance(child, ast.Attribute)
+        }
+        if any(f"{alias}.executable" in names for alias in sys_aliases):
+            lines.add(node.lineno)
+    return sorted(lines)
+
+
+def _local_binary_facade_lines(tree: ast.AST) -> list[int]:
+    lines: set[int] = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name in LOCAL_BINARY_FACADES:
+            lines.add(node.lineno)
+            continue
+        fixture = any(
+            (_attribute_name(decorator) or "").endswith(".fixture")
+            or (
+                isinstance(decorator, ast.Call)
+                and (_attribute_name(decorator.func) or "").endswith(".fixture")
+            )
+            for decorator in node.decorator_list
+        )
+        parameter_names = {
+            argument.arg
+            for argument in (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            )
+        }
+        executable_body = [
+            statement
+            for statement in node.body
+            if not (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Constant)
+                and isinstance(statement.value.value, str)
+            )
+        ]
+        forwards_fixture = (
+            len(executable_body) == 1
+            and isinstance(executable_body[0], ast.Return)
+            and executable_body[0].value is not None
+            and any(
+                isinstance(child, ast.Name) and child.id == "apm_binary_path"
+                for child in ast.walk(executable_body[0].value)
+            )
+        )
+        if fixture and "apm_binary_path" in parameter_names and forwards_fixture:
+            lines.add(node.lineno)
+    return sorted(lines)
+
+
+def _subprocess_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
+    module_aliases: set[str] = set()
+    call_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            module_aliases.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "subprocess"
+            )
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            call_aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name in {"Popen", "call", "check_call", "check_output", "run"}
+            )
+    return module_aliases, call_aliases
+
+
+def _is_subprocess_call(
+    node: ast.Call,
+    module_aliases: set[str],
+    call_aliases: set[str],
+) -> bool:
+    called = _attribute_name(node.func)
+    return called in call_aliases or any(
+        called
+        in {
+            f"{alias}.Popen",
+            f"{alias}.call",
+            f"{alias}.check_call",
+            f"{alias}.check_output",
+            f"{alias}.run",
+        }
+        for alias in module_aliases
+    )
+
+
+def _list_literal_values(node: ast.AST) -> list[str | None]:
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return []
+    return [_literal_string(element) for element in node.elts]
+
+
+def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
+    module_aliases, call_aliases = _subprocess_aliases(tree)
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.List, ast.Tuple)):
+            values = _list_literal_values(node)
+            attributes = {
+                _attribute_name(child)
+                for child in ast.walk(node)
+                if isinstance(child, ast.Attribute)
+            }
+            runs_python_module = (
+                len(values) >= 3
+                and values[1] == "-m"
+                and values[2] in {"apm_cli", "apm_cli.cli"}
+                and any(
+                    attribute is not None and attribute.endswith(".executable")
+                    for attribute in attributes
+                )
+            )
+            runs_uv_apm = (
+                len(values) >= 5
+                and values[1:5] == ["-m", "uv", "run", "apm"]
+                and any(
+                    attribute is not None and attribute.endswith(".executable")
+                    for attribute in attributes
+                )
+            )
+            if runs_python_module or runs_uv_apm:
+                lines.add(node.lineno)
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if not _is_subprocess_call(node, module_aliases, call_aliases):
+            continue
+        command = node.args[0]
+        values = _list_literal_values(command)
+        if values and values[0] in APM_EXECUTABLE_NAMES:
+            lines.add(node.lineno)
+        noncanonical_names = {
+            child.id
+            for child in ast.walk(command)
+            if isinstance(child, ast.Name)
+            and child.id
+            in {
+                "apm_bin",
+                "apm_binary",
+                "apm_command",
+                "apm_executable",
+                "apm_path",
+            }
+        }
+        if noncanonical_names:
+            lines.add(node.lineno)
     return sorted(lines)
 
 
@@ -217,20 +486,30 @@ def find_binary_selection_violations(root: Path) -> list[str]:
                 f"[x] direct APM_BINARY_PATH read outside {BINARY_OWNER}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
+        for line in _direct_binary_path_lookup_lines(tree):
+            diagnostics.append(
+                f"[x] direct PATH lookup for apm outside {BINARY_OWNER}: "
+                f"{relative}:{line}; consume the apm_binary_path fixture"
+            )
         for line in _venv_binary_fallback_lines(tree):
             diagnostics.append(
                 f"[x] direct .venv apm fallback outside {BINARY_OWNER}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
-        for line in _path_binary_fallback_lines(tree):
+        for line in _python_sibling_binary_lines(tree):
             diagnostics.append(
-                f"[x] direct shutil.which('apm') fallback outside {BINARY_OWNER}: "
+                f"[x] interpreter-relative apm selection outside {BINARY_OWNER}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
-        for line in _standalone_binary_selector_lines(tree):
+        for line in _local_binary_facade_lines(tree):
             diagnostics.append(
-                f"[x] standalone APM subprocess selector outside {BINARY_OWNER}: "
-                f"{relative}:{line}; consume the apm_binary_path fixture"
+                f"[x] local apm binary fixture or facade outside {BINARY_OWNER}: "
+                f"{relative}:{line}; inject apm_binary_path directly"
+            )
+        for line in _direct_apm_subprocess_lines(tree):
+            diagnostics.append(
+                f"[x] direct apm subprocess selection outside {BINARY_OWNER}: "
+                f"{relative}:{line}; inject apm_binary_path directly"
             )
         if path.parent == integration_root and "_resolve_apm_binary" in _defined_functions(tree):
             diagnostics.append(

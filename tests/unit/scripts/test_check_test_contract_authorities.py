@@ -69,7 +69,7 @@ def test_binary_fixture_delegation_is_allowed(tmp_path: Path) -> None:
     _write_owner_stubs(tmp_path)
     consumer = tmp_path / "tests" / "integration" / "consumer.py"
     consumer.write_text(
-        "def apm_command(apm_binary_path):\n    return str(apm_binary_path)\n",
+        "def run_command(apm_binary_path):\n    return str(apm_binary_path)\n",
         encoding="utf-8",
     )
 
@@ -91,8 +91,38 @@ def test_direct_os_getenv_binary_read_is_rejected(tmp_path: Path) -> None:
     assert "direct APM_BINARY_PATH read" in violations[0]
 
 
-def test_venv_fallback_without_which_is_rejected(tmp_path: Path) -> None:
-    """Deleting the .venv detector must fail independently of PATH lookup."""
+def test_path_lookup_without_env_or_venv_is_rejected(tmp_path: Path) -> None:
+    """Deleting the PATH detector must fail independently."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "path_duplicate.py"
+    duplicate.write_text(
+        "import shutil\ndef choose():\n    return shutil.which('apm')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct PATH lookup for apm" in violations[0]
+
+
+def test_aliased_path_lookup_is_rejected(tmp_path: Path) -> None:
+    """Import aliases cannot evade the PATH selector boundary."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "path_alias_duplicate.py"
+    duplicate.write_text(
+        "from shutil import which as locate\ndef choose():\n    return locate('apm')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct PATH lookup for apm" in violations[0]
+
+
+def test_venv_fallback_without_env_or_which_is_rejected(tmp_path: Path) -> None:
+    """Deleting the .venv detector must fail independently."""
     _write_owner_stubs(tmp_path)
     duplicate = tmp_path / "tests" / "integration" / "venv_duplicate.py"
     duplicate.write_text(
@@ -109,54 +139,121 @@ def test_venv_fallback_without_which_is_rejected(tmp_path: Path) -> None:
     assert "direct .venv apm fallback" in violations[0]
 
 
-def test_path_fallback_without_venv_is_rejected(tmp_path: Path) -> None:
-    """PATH selection is distinct from local virtualenv selection."""
+@pytest.mark.parametrize(
+    "selector",
+    (
+        "Path('.venv', 'bin', 'apm')",
+        "Path('.venv').joinpath('Scripts', 'apm.exe')",
+        "os.path.join('.venv', 'bin', 'apm')",
+    ),
+)
+def test_standalone_venv_constructor_forms_are_rejected(
+    tmp_path: Path,
+    selector: str,
+) -> None:
+    """Every path-construction form is rejected without another selector."""
     _write_owner_stubs(tmp_path)
-    duplicate = tmp_path / "tests" / "integration" / "path_duplicate.py"
+    duplicate = tmp_path / "tests" / "integration" / "venv_constructor.py"
     duplicate.write_text(
-        "import shutil\ndef choose():\n    return shutil.which('apm')\n",
+        f"import os\nfrom pathlib import Path\ndef choose():\n    return {selector}\n",
         encoding="utf-8",
     )
 
     violations = _load_checker().find_binary_selection_violations(tmp_path)
 
     assert len(violations) == 1
-    assert "direct shutil.which('apm') fallback" in violations[0]
+    assert "direct .venv apm fallback" in violations[0]
+
+
+def test_venv_fallback_used_by_subprocess_is_reported_once(tmp_path: Path) -> None:
+    """The selector owns one diagnostic; subprocess options must not duplicate it."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "venv_subprocess.py"
+    duplicate.write_text(
+        "import subprocess\nfrom pathlib import Path\n"
+        "apm_path = Path('.venv') / 'bin' / 'apm'\n"
+        "subprocess.run([str(apm_path), '--encoding', 'utf-8'])\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 2
+    assert sum("direct .venv apm fallback" in item for item in violations) == 1
+    assert sum("direct apm subprocess selection" in item for item in violations) == 1
+
+
+def test_unrelated_tool_lookup_is_allowed(tmp_path: Path) -> None:
+    """The binary boundary must preserve discovery for non-APM tools."""
+    _write_owner_stubs(tmp_path)
+    consumer = tmp_path / "tests" / "integration" / "tools.py"
+    consumer.write_text(
+        "import shutil\n"
+        "def tools():\n"
+        "    return shutil.which('az'), shutil.which('uv'), shutil.which('git')\n",
+        encoding="utf-8",
+    )
+
+    assert _load_checker().find_binary_selection_violations(tmp_path) == []
+
+
+def test_interpreter_relative_apm_selector_is_rejected(tmp_path: Path) -> None:
+    """Deleting the interpreter-sibling detector must fail independently."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "sibling_duplicate.py"
+    duplicate.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "def choose():\n"
+        "    return Path(sys.executable).with_name('apm')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "interpreter-relative apm selection" in violations[0]
 
 
 @pytest.mark.parametrize(
     "source",
     (
-        "import subprocess\ndef run():\n    return subprocess.run(['apm', '--version'])\n",
-        "import subprocess\ndef run():\n    return subprocess.Popen(['apm', '--version'])\n",
-        "import subprocess\ndef run():\n"
-        "    return subprocess.run(['uv', 'run', 'apm', '--version'])\n",
-        "import subprocess\nimport sys\ndef run():\n"
-        "    return subprocess.run([sys.executable, '-m', 'apm_cli', '--version'])\n",
-        "import subprocess\nimport sys\nfrom pathlib import Path\n"
-        "def run():\n"
-        "    executable = Path(sys.executable).with_name('apm')\n"
-        "    return subprocess.run([str(executable), '--version'])\n",
-        "import subprocess\ndef probe():\n"
-        "    possible = ['apm', './apm', './dist/apm']\n"
-        "    for path in possible:\n"
-        "        result = subprocess.run([path, '--version'])\n"
-        "        if result.returncode == 0:\n"
-        "            return path\n",
+        "import subprocess\nsubprocess.run(['apm', '--version'])\n",
+        "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'apm_cli'])\n",
+        "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'uv', 'run', 'apm'])\n",
     ),
 )
-def test_standalone_binary_selector_shapes_are_rejected(
+def test_direct_subprocess_selection_is_rejected(
     tmp_path: Path,
     source: str,
 ) -> None:
-    """Known bare, uv, source-module, sibling, and probe selectors stay retired."""
+    """Each direct launcher syntax independently requires the fixture."""
     _write_owner_stubs(tmp_path)
-    duplicate = tmp_path / "tests" / "integration" / "selector.py"
+    duplicate = tmp_path / "tests" / "integration" / "launcher_duplicate.py"
     duplicate.write_text(source, encoding="utf-8")
 
     violations = _load_checker().find_binary_selection_violations(tmp_path)
 
-    assert any("standalone APM subprocess selector" in item for item in violations)
+    assert len(violations) == 1
+    assert "direct apm subprocess selection" in violations[0]
+
+
+def test_fixture_forwarding_facade_is_rejected(tmp_path: Path) -> None:
+    """Consumers must inject the canonical fixture without another fixture."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "facade.py"
+    duplicate.write_text(
+        "import pytest\n"
+        "@pytest.fixture\n"
+        "def binary(apm_binary_path):\n"
+        "    return str(apm_binary_path)\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "local apm binary fixture or facade" in violations[0]
 
 
 def test_renamed_binary_resolver_is_rejected(tmp_path: Path) -> None:

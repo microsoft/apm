@@ -33,11 +33,6 @@ pytestmark = pytest.mark.requires_github_token
 
 
 @pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    return str(apm_binary_path)
-
-
-@pytest.fixture
 def project_with_apm(tmp_path: Path) -> Path:
     """Minimal APM project with one stable APM dep for parity checks."""
     project = tmp_path / "parity-test"
@@ -108,7 +103,7 @@ def _clone_project(template: Path, dest: Path) -> Path:
 
 
 def test_lockfile_byte_identical_across_cache_regimes(
-    apm_command: str,
+    apm_binary_path: str,
     project_with_apm: Path,
     tmp_path: Path,
 ) -> None:
@@ -124,7 +119,7 @@ def test_lockfile_byte_identical_across_cache_regimes(
     # Run A: cold cache
     project_a = _clone_project(project_with_apm, tmp_path / "run-a")
     _run_install(
-        apm_command,
+        apm_binary_path,
         project_a,
         env_overrides={"APM_CACHE_DIR": str(cache_dir), "CI": "1"},
     )
@@ -133,7 +128,7 @@ def test_lockfile_byte_identical_across_cache_regimes(
     # Run B: warm cache (same APM_CACHE_DIR retained, fresh project tree)
     project_b = _clone_project(project_with_apm, tmp_path / "run-b")
     _run_install(
-        apm_command,
+        apm_binary_path,
         project_b,
         env_overrides={"APM_CACHE_DIR": str(cache_dir), "CI": "1"},
     )
@@ -142,7 +137,7 @@ def test_lockfile_byte_identical_across_cache_regimes(
     # Run C: cache disabled (fresh project tree)
     project_c = _clone_project(project_with_apm, tmp_path / "run-c")
     _run_install(
-        apm_command,
+        apm_binary_path,
         project_c,
         env_overrides={"APM_NO_CACHE": "1", "CI": "1"},
     )

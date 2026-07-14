@@ -194,9 +194,9 @@ def mock_ref_resolver():
 
     Usage in tests::
 
-        def test_something(mkt_repo_root, mock_ref_resolver):
+        def test_something(mkt_repo_root, mock_ref_resolver, apm_binary_path):
             # mock_ref_resolver.list_remote_refs is already patched
-            result = run_cli(["marketplace", "build"], cwd=mkt_repo_root)
+            result = run_cli(apm_binary_path, ["marketplace", "build"], cwd=mkt_repo_root)
             assert result.returncode == 0
     """
     with patch(
@@ -287,7 +287,7 @@ def run_cli(
     env: dict | None = None,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess:
-    """Invoke the canonical APM executable via subprocess.
+    """Invoke the canonical integration APM executable via subprocess.
 
     The subprocess inherits a curated env containing PATH and HOME.
     Additional env vars can be passed via *env*; they are merged on top.
@@ -328,20 +328,11 @@ def run_cli(
     if env:
         base_env.update(env)
 
-    cmd = [str(apm_binary_path), *args]
-
     return subprocess.run(
-        cmd,
+        [str(apm_binary_path), *args],
         cwd=str(cwd) if cwd else str(_PROJECT_ROOT),
         capture_output=True,
         text=True,
         timeout=timeout,
         env=base_env,
     )
-
-
-def _project_uv_bin() -> str | None:
-    """Return path to uv if it is on PATH, else None."""
-    import shutil
-
-    return shutil.which("uv")

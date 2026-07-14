@@ -36,11 +36,7 @@ def _make_project(root: Path) -> None:
     )
 
 
-def _run(
-    apm_binary_path: Path,
-    args: list[str],
-    cwd: Path,
-) -> subprocess.CompletedProcess:
+def _run(apm_binary_path: Path, args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(apm_binary_path), "compile", *args],
         cwd=str(cwd),
@@ -50,8 +46,7 @@ def _run(
 
 
 def test_root_redirect_is_byte_identical_and_keeps_sources_in_pwd(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     src = tmp_path / "src"
     src.mkdir()
@@ -84,8 +79,7 @@ def test_root_redirect_is_byte_identical_and_keeps_sources_in_pwd(
 
 
 def test_root_override_does_not_leak_into_next_invocation(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     src = tmp_path / "src"
     src.mkdir()

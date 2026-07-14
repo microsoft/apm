@@ -45,12 +45,6 @@ pytestmark = pytest.mark.requires_apm_binary
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
-
-
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # write_bytes (not write_text) keeps newlines as \n on Windows;
@@ -81,9 +75,9 @@ def _make_consumer(root: Path, *, targets: list[str] | None = None) -> Path:
     return consumer
 
 
-def _run_install(apm_bin: str, consumer: Path, *args: str) -> subprocess.CompletedProcess:
+def _run_install(apm_binary_path: Path, consumer: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [apm_bin, "install", *args],
+        [str(apm_binary_path), "install", *args],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -122,10 +116,10 @@ class TestInstructionSiblingLinkRewriting:
         consumer = _make_consumer(ws)
         return consumer, producer
 
-    def test_link_rewritten_and_resolves_on_disk(self, workspace, apm_command):
+    def test_link_rewritten_and_resolves_on_disk(self, workspace, apm_binary_path):
         consumer, producer = workspace
 
-        result = _run_install(apm_command, consumer, str(producer))
+        result = _run_install(apm_binary_path, consumer, str(producer))
         assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
 
         deployed = consumer / ".github" / "instructions" / "foo.instructions.md"
@@ -168,9 +162,9 @@ class TestPromptSiblingLinkRewriting:
         consumer = _make_consumer(ws)
         return consumer, producer
 
-    def test_prompt_link_rewritten_and_resolves(self, workspace, apm_command):
+    def test_prompt_link_rewritten_and_resolves(self, workspace, apm_binary_path):
         consumer, producer = workspace
-        result = _run_install(apm_command, consumer, str(producer))
+        result = _run_install(apm_binary_path, consumer, str(producer))
         assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
 
         deployed = consumer / ".github" / "prompts" / "review.prompt.md"
@@ -213,9 +207,9 @@ class TestMixedLinkTypes:
         consumer = _make_consumer(ws)
         return consumer, producer
 
-    def test_only_relative_in_package_links_rewritten(self, workspace, apm_command):
+    def test_only_relative_in_package_links_rewritten(self, workspace, apm_binary_path):
         consumer, producer = workspace
-        result = _run_install(apm_command, consumer, str(producer))
+        result = _run_install(apm_binary_path, consumer, str(producer))
         assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
 
         deployed = consumer / ".github" / "instructions" / "many.instructions.md"
@@ -269,9 +263,9 @@ class TestEscapeOutsidePackagePreserved:
         consumer = _make_consumer(ws)
         return consumer, producer, ws
 
-    def test_escape_link_preserved_verbatim(self, workspace, apm_command):
+    def test_escape_link_preserved_verbatim(self, workspace, apm_binary_path):
         consumer, producer, _ = workspace
-        result = _run_install(apm_command, consumer, str(producer))
+        result = _run_install(apm_binary_path, consumer, str(producer))
         assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
 
         deployed = consumer / ".github" / "instructions" / "escape.instructions.md"
@@ -329,9 +323,9 @@ class TestSkillBundleInternalLinkUnchanged:
         (consumer / ".agents").mkdir()
         return consumer, producer
 
-    def test_in_bundle_link_resolves_after_install(self, workspace, apm_command):
+    def test_in_bundle_link_resolves_after_install(self, workspace, apm_binary_path):
         consumer, producer = workspace
-        result = _run_install(apm_command, consumer, str(producer))
+        result = _run_install(apm_binary_path, consumer, str(producer))
         assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
 
         # Skills under the copilot target deploy under .agents/skills/<name>/
@@ -358,9 +352,9 @@ class TestSkillBundleInternalLinkUnchanged:
         )
         assert resolved.read_text(encoding="utf-8").startswith("# Reference")
 
-    def test_outbound_skill_links_rewritten_to_apm_modules(self, workspace, apm_command):
+    def test_outbound_skill_links_rewritten_to_apm_modules(self, workspace, apm_binary_path):
         consumer, producer = workspace
-        result = _run_install(apm_command, consumer, str(producer))
+        result = _run_install(apm_binary_path, consumer, str(producer))
         assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
 
         deployed_skills = [
@@ -418,9 +412,9 @@ class TestMultiTargetLinkRewriting:
         (consumer / ".claude").mkdir()
         return consumer, producer
 
-    def test_both_targets_resolve(self, workspace, apm_command):
+    def test_both_targets_resolve(self, workspace, apm_binary_path):
         consumer, producer = workspace
-        result = _run_install(apm_command, consumer, str(producer))
+        result = _run_install(apm_binary_path, consumer, str(producer))
         assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
 
         # Find every deployed copy of the instruction across targets,

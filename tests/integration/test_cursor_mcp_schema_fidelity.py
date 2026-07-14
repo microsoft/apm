@@ -19,11 +19,6 @@ import pytest
 import yaml
 
 
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    return str(apm_binary_path)
-
-
 def _write_apm_yml(project_dir: Path, mcp_servers: list[dict]) -> None:
     config = {
         "name": "cursor-schema-fidelity-e2e",
@@ -51,7 +46,7 @@ def _assert_no_copilot_fields(server_config: dict, label: str) -> None:
 class TestCursorStdioSchemaFidelity:
     """Verify stdio MCP servers produce Cursor-native schema on disk."""
 
-    def test_stdio_server_emits_type_stdio(self, tmp_path, apm_command):
+    def test_stdio_server_emits_type_stdio(self, tmp_path, apm_binary_path):
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / ".cursor").mkdir()
@@ -76,7 +71,7 @@ class TestCursorStdioSchemaFidelity:
         env["MY_VAR"] = "my-value"
 
         result = subprocess.run(
-            [apm_command, "install", "--target", "cursor"],
+            [apm_binary_path, "install", "--target", "cursor"],
             cwd=project_dir,
             env=env,
             capture_output=True,
@@ -108,7 +103,7 @@ class TestCursorStdioSchemaFidelity:
 class TestCursorHttpSchemaFidelity:
     """Verify HTTP MCP servers produce Cursor-native schema on disk."""
 
-    def test_http_server_emits_type_http(self, tmp_path, apm_command):
+    def test_http_server_emits_type_http(self, tmp_path, apm_binary_path):
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / ".cursor").mkdir()
@@ -131,7 +126,7 @@ class TestCursorHttpSchemaFidelity:
         env["APM_NON_INTERACTIVE"] = "1"
 
         result = subprocess.run(
-            [apm_command, "install", "--target", "cursor"],
+            [apm_binary_path, "install", "--target", "cursor"],
             cwd=project_dir,
             env=env,
             capture_output=True,

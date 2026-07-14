@@ -7,7 +7,6 @@ These tests require network access to GitHub.
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -39,20 +38,14 @@ dependencies:
     return project_dir
 
 
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
-
-
 class TestMixedDependencyInstall:
     """Test installing both APM packages and Claude Skills."""
 
-    def test_install_apm_package_and_claude_skill(self, temp_project, apm_command):
+    def test_install_apm_package_and_claude_skill(self, temp_project, apm_binary_path):
         """Install an APM package and a Claude Skill in the same project."""
         # Install APM package first
         result1 = subprocess.run(
-            [apm_command, "install", "microsoft/apm-sample-package"],
+            [apm_binary_path, "install", "microsoft/apm-sample-package"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -65,7 +58,7 @@ class TestMixedDependencyInstall:
 
         # Install Claude Skill
         result2 = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -82,18 +75,18 @@ class TestMixedDependencyInstall:
         assert apm_package_path.exists(), "APM package not installed"
         assert skill_path.exists(), "Claude Skill not installed"
 
-    def test_apm_yml_contains_both_dependency_types(self, temp_project, apm_command):
+    def test_apm_yml_contains_both_dependency_types(self, temp_project, apm_binary_path):
         """Verify apm.yml lists both APM packages and Claude Skills."""
         # Install both
         subprocess.run(
-            [apm_command, "install", "microsoft/apm-sample-package"],
+            [apm_binary_path, "install", "microsoft/apm-sample-package"],
             cwd=temp_project,
             capture_output=True,
             text=True,
             timeout=120,
         )
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -114,11 +107,11 @@ class TestMixedDependencyInstall:
 class TestMixedDependencyCompile:
     """Test compiling projects with mixed dependencies."""
 
-    def test_compile_with_mixed_deps_generates_agents_md(self, temp_project, apm_command):
+    def test_compile_with_mixed_deps_generates_agents_md(self, temp_project, apm_binary_path):
         """Compile should keep Copilot instructions outside AGENTS.md."""
         # Install Claude Skill (most likely to succeed)
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -139,7 +132,11 @@ This is a test.
 
         # Run compile
         result = subprocess.run(
-            [apm_command, "compile"], cwd=temp_project, capture_output=True, text=True, timeout=60
+            [apm_binary_path, "compile"],
+            cwd=temp_project,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
 
         assert result.returncode == 0, f"Compile failed: {result.stderr}"
@@ -156,11 +153,11 @@ This is a test.
         skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
         assert skill_integrated.exists(), "Skill not integrated to .agents/skills/"
 
-    def test_compile_output_mentions_sources(self, temp_project, apm_command):
+    def test_compile_output_mentions_sources(self, temp_project, apm_binary_path):
         """Compile output should mention different source types."""
         # Install skill
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -169,7 +166,7 @@ This is a test.
 
         # Run compile with verbose
         result = subprocess.run(
-            [apm_command, "compile", "--verbose"],
+            [apm_binary_path, "compile", "--verbose"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -183,10 +180,10 @@ This is a test.
 class TestDependencyTypeDetection:
     """Test that dependency types are correctly detected."""
 
-    def test_apm_package_has_apm_yml(self, temp_project, apm_command):
+    def test_apm_package_has_apm_yml(self, temp_project, apm_binary_path):
         """APM packages have apm.yml at root."""
         result = subprocess.run(
-            [apm_command, "install", "microsoft/apm-sample-package"],
+            [apm_binary_path, "install", "microsoft/apm-sample-package"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -199,10 +196,10 @@ class TestDependencyTypeDetection:
         pkg_path = temp_project / "apm_modules" / "microsoft" / "apm-sample-package"
         assert (pkg_path / "apm.yml").exists(), "APM package missing apm.yml"
 
-    def test_claude_skill_has_skill_md(self, temp_project, apm_command):
+    def test_claude_skill_has_skill_md(self, temp_project, apm_binary_path):
         """Claude Skills have SKILL.md at root."""
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -214,10 +211,10 @@ class TestDependencyTypeDetection:
         )
         assert (skill_path / "SKILL.md").exists(), "Claude Skill missing SKILL.md"
 
-    def test_skill_gets_integrated_to_github_skills(self, temp_project, apm_command):
+    def test_skill_gets_integrated_to_github_skills(self, temp_project, apm_binary_path):
         """Claude Skills get integrated to .agents/skills/ directory."""
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,

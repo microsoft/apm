@@ -8,7 +8,6 @@ These tests require network access to GitHub.
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -43,20 +42,14 @@ dependencies:
     return project_dir
 
 
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
-
-
 class TestSkillInstallIntegration:
     """Test SKILL.md integration at install time."""
 
-    def test_install_integrates_skill(self, temp_project, apm_command):
+    def test_install_integrates_skill(self, temp_project, apm_binary_path):
         """Install should integrate SKILL.md to .agents/skills/ when VSCode is target."""
         # Install skill
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -71,11 +64,11 @@ class TestSkillInstallIntegration:
             "Skill should be integrated to .agents/skills/ at install time"
         )
 
-    def test_install_preserves_skill_content(self, temp_project, apm_command):
+    def test_install_preserves_skill_content(self, temp_project, apm_binary_path):
         """Integrated skill should preserve the original SKILL.md content."""
         # Install skill
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -104,11 +97,11 @@ class TestSkillInstallIntegration:
         # The content should be preserved
         assert skill_content == integrated_content, "Integrated skill content should match original"
 
-    def test_install_creates_correct_structure(self, temp_project, apm_command):
+    def test_install_creates_correct_structure(self, temp_project, apm_binary_path):
         """Integrated skill should have SKILL.md in .agents/skills/{name}/."""
         # Install skill
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -126,11 +119,11 @@ class TestSkillInstallIntegration:
 class TestCompileSkipsSkills:
     """Test that compile does NOT modify or generate files from skills."""
 
-    def test_compile_does_not_modify_skills(self, temp_project, apm_command):
+    def test_compile_does_not_modify_skills(self, temp_project, apm_binary_path):
         """Compile should not modify skill files already integrated."""
         # Install skill (this integrates the skill)
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -146,7 +139,11 @@ class TestCompileSkipsSkills:
 
         # Run compile
         subprocess.run(
-            [apm_command, "compile"], cwd=temp_project, capture_output=True, text=True, timeout=60
+            [apm_binary_path, "compile"],
+            cwd=temp_project,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
 
         # Skill file should not be modified by compile
@@ -157,7 +154,7 @@ class TestCompileSkipsSkills:
 class TestMultipleSkillsInstall:
     """Test install with multiple skills."""
 
-    def test_multiple_skills_create_multiple_integrations(self, temp_project, apm_command):
+    def test_multiple_skills_create_multiple_integrations(self, temp_project, apm_binary_path):
         """Each installed skill should be integrated to .agents/skills/."""
         skills = [
             "anthropics/skills/skills/brand-guidelines",
@@ -166,7 +163,7 @@ class TestMultipleSkillsInstall:
 
         for skill in skills:
             result = subprocess.run(
-                [apm_command, "install", skill],
+                [apm_binary_path, "install", skill],
                 cwd=temp_project,
                 capture_output=True,
                 text=True,
@@ -185,10 +182,10 @@ class TestMultipleSkillsInstall:
 class TestSkillNaming:
     """Test that skill directory naming conventions are correct."""
 
-    def test_skill_name_matches_directory(self, temp_project, apm_command):
+    def test_skill_name_matches_directory(self, temp_project, apm_binary_path):
         """Skill directory name should match the skill name."""
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -200,10 +197,10 @@ class TestSkillNaming:
         assert skill_dir.exists(), "Skill directory should match skill name"
         assert (skill_dir / "SKILL.md").exists(), "SKILL.md should be in skill directory"
 
-    def test_skill_name_in_content(self, temp_project, apm_command):
+    def test_skill_name_in_content(self, temp_project, apm_binary_path):
         """Integrated SKILL.md should have content."""
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,

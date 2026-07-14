@@ -29,12 +29,6 @@ pytestmark = pytest.mark.requires_apm_binary
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
-
-
 def _write_manifest(project: Path, *, includes=None) -> None:
     """Write a minimal apm.yml. ``includes`` may be None, 'auto', or a list."""
     data = {
@@ -73,10 +67,10 @@ def _make_project(tmp_path: Path, *, includes=None) -> Path:
     return project
 
 
-def _run_apm(apm_command: str, args, cwd: Path):
+def _run_apm(apm_binary_path: str, args, cwd: Path):
     """Invoke the apm CLI and return CompletedProcess."""
     return subprocess.run(
-        [apm_command, *args],
+        [apm_binary_path, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -84,8 +78,8 @@ def _run_apm(apm_command: str, args, cwd: Path):
     )
 
 
-def _install(apm_command: str, project: Path):
-    result = _run_apm(apm_command, ["install"], project)
+def _install(apm_binary_path: str, project: Path):
+    result = _run_apm(apm_binary_path, ["install"], project)
     assert result.returncode == 0, (
         f"apm install failed (exit {result.returncode}):\n"
         f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
@@ -93,13 +87,13 @@ def _install(apm_command: str, project: Path):
     return result
 
 
-def _audit_json(apm_command: str, project: Path, extra_args=()):
+def _audit_json(apm_binary_path: str, project: Path, extra_args=()):
     """Run ``apm audit --ci -f json`` and return (exit_code, parsed_json)."""
     args = ["audit", "--ci", "--no-policy", "-f", "json", *extra_args]
     if "--policy" in extra_args:
         # When policy is provided, drop --no-policy so the override wins.
         args = ["audit", "--ci", "-f", "json", *extra_args]
-    result = _run_apm(apm_command, args, project)
+    result = _run_apm(apm_binary_path, args, project)
     # JSON output is on stdout; tolerate trailing log lines.
     payload = None
     try:
@@ -133,10 +127,10 @@ def _check(payload: dict, name: str) -> dict:
 class TestLocalContentAudit:
     """End-to-end coverage for issue #887 close-the-gap behavior."""
 
-    def test_install_records_self_entry(self, tmp_path, apm_command):
+    def test_install_records_self_entry(self, tmp_path, apm_binary_path):
         """Test A: ``apm install`` records local files + hashes in lockfile."""
         project = _make_project(tmp_path)
-        _install(apm_command, project)
+        _install(apm_binary_path, project)
 
         lock_path = project / "apm.lock.yaml"
         assert lock_path.exists(), "apm.lock.yaml not created by install"
@@ -165,12 +159,12 @@ class TestLocalContentAudit:
             f"hash not sha256-prefixed: {hashes[instr_keys[0]]!r}"
         )
 
-    def test_audit_passes_clean_install(self, tmp_path, apm_command):
+    def test_audit_passes_clean_install(self, tmp_path, apm_binary_path):
         """Test B: clean install passes audit; consent advisory present."""
         project = _make_project(tmp_path)  # no includes: declared
-        _install(apm_command, project)
+        _install(apm_binary_path, project)
 
-        exit_code, payload, _ = _audit_json(apm_command, project)
+        exit_code, payload, _ = _audit_json(apm_binary_path, project)
         assert exit_code == 0, f"audit --ci failed on clean install: {payload}"
         assert payload["passed"] is True
 
@@ -189,10 +183,10 @@ class TestLocalContentAudit:
             f"got: {consent['message']!r}"
         )
 
-    def test_audit_detects_drift(self, tmp_path, apm_command):
+    def test_audit_detects_drift(self, tmp_path, apm_binary_path):
         """Test C: hand-edit a deployed file -> hash-drift detected."""
         project = _make_project(tmp_path)
-        _install(apm_command, project)
+        _install(apm_binary_path, project)
 
         # Tamper with the deployed copy under .github/.
         deployed_instr = project / ".github" / "instructions" / "bar.instructions.md"
@@ -200,7 +194,7 @@ class TestLocalContentAudit:
         with open(deployed_instr, "a") as f:
             f.write("\nTAMPERED\n")
 
-        exit_code, payload, result = _audit_json(apm_command, project)
+        exit_code, payload, result = _audit_json(apm_binary_path, project)
         assert exit_code != 0, (
             f"audit --ci should fail on drift but passed: {payload}\nSTDERR: {result.stderr}"
         )
@@ -214,7 +208,7 @@ class TestLocalContentAudit:
             f"path of modified file not surfaced: {haystack!r}"
         )
 
-    def test_audit_passes_when_deployed_file_has_crlf(self, tmp_path, apm_command):
+    def test_audit_passes_when_deployed_file_has_crlf(self, tmp_path, apm_binary_path):
         """Test F (issue #1952): a deployed file whose only post-install
         change is LF -> CRLF must NOT be flagged as content drift.
 
@@ -226,7 +220,7 @@ class TestLocalContentAudit:
         identical content and pass.
         """
         project = _make_project(tmp_path)
-        _install(apm_command, project)
+        _install(apm_binary_path, project)
 
         deployed_instr = project / ".github" / "instructions" / "bar.instructions.md"
         assert deployed_instr.exists(), f"target file missing post-install: {deployed_instr}"
@@ -238,7 +232,7 @@ class TestLocalContentAudit:
         assert crlf != original, "rewrite did not change any line endings"
         deployed_instr.write_bytes(crlf)
 
-        exit_code, payload, result = _audit_json(apm_command, project)
+        exit_code, payload, result = _audit_json(apm_binary_path, project)
         assert exit_code == 0, (
             f"audit --ci should pass on a CRLF-only difference but failed: {payload}\n"
             f"STDERR: {result.stderr}"
@@ -248,13 +242,13 @@ class TestLocalContentAudit:
             f"content-integrity false-flagged a CRLF-only change (issue #1952): {ci}"
         )
 
-    def test_audit_passes_with_explicit_includes(self, tmp_path, apm_command):
+    def test_audit_passes_with_explicit_includes(self, tmp_path, apm_binary_path):
         """Test D: declaring ``includes:`` removes the consent advisory."""
         # Use 'auto' first.
         project = _make_project(tmp_path, includes="auto")
-        _install(apm_command, project)
+        _install(apm_binary_path, project)
 
-        exit_code, payload, _ = _audit_json(apm_command, project)
+        exit_code, payload, _ = _audit_json(apm_binary_path, project)
         assert exit_code == 0, f"audit failed unexpectedly: {payload}"
 
         consent = _check(payload, "includes-consent")
@@ -271,15 +265,15 @@ class TestLocalContentAudit:
                 ".apm/instructions/bar.instructions.md",
             ],
         )
-        exit_code2, payload2, _ = _audit_json(apm_command, project)
+        exit_code2, payload2, _ = _audit_json(apm_binary_path, project)
         assert exit_code2 == 0, f"audit failed with explicit list: {payload2}"
         consent2 = _check(payload2, "includes-consent")
         assert "[!]" not in consent2["message"]
 
-    def test_policy_blocks_undeclared_includes(self, tmp_path, apm_command):
+    def test_policy_blocks_undeclared_includes(self, tmp_path, apm_binary_path):
         """Test E: ``require_explicit_includes`` blocks ``includes: auto``."""
         project = _make_project(tmp_path, includes="auto")
-        _install(apm_command, project)
+        _install(apm_binary_path, project)
 
         # Local policy file -- pass via --policy <path>.
         policy_path = project / "apm-policy.yml"
@@ -295,7 +289,7 @@ class TestLocalContentAudit:
         )
 
         exit_code, payload, result = _audit_json(
-            apm_command, project, extra_args=["--policy", str(policy_path)]
+            apm_binary_path, project, extra_args=["--policy", str(policy_path)]
         )
         assert exit_code != 0, (
             f"policy should have blocked includes: auto but passed:\n"

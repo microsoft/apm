@@ -16,7 +16,6 @@ Uses real packages from GitHub:
 
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
@@ -29,12 +28,6 @@ SAMPLE_GIT_URL = "https://github.com/microsoft/apm-sample-package.git"
 # Initial commit of microsoft/apm-sample-package (older than current main).
 OLD_SHA = "318a8439"
 NEWER_REF = "main"
-
-
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
 
 
 @pytest.fixture
@@ -65,10 +58,10 @@ def _env_with_home(fake_home):
     return env
 
 
-def _run_apm(apm_command, args, cwd, env=None, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, env=None, timeout=180):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -116,11 +109,11 @@ def _get_locked_dep(lockfile, repo_url):
 # ---------------------------------------------------------------------------
 
 
-def test_deps_update_all_packages_bumps_lockfile_sha(temp_project, apm_command):
+def test_deps_update_all_packages_bumps_lockfile_sha(temp_project, apm_binary_path):
     """`apm deps update` (no args) re-resolves refs and bumps the lockfile SHA."""
     # Step 1: install pinned to an older commit SHA.
     _write_apm_yml(temp_project, [{"git": SAMPLE_GIT_URL, "ref": OLD_SHA}])
-    result1 = _run_apm(apm_command, ["install"], temp_project)
+    result1 = _run_apm(apm_binary_path, ["install"], temp_project)
     assert result1.returncode == 0, (
         f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
     )
@@ -136,7 +129,7 @@ def test_deps_update_all_packages_bumps_lockfile_sha(temp_project, apm_command):
     _write_apm_yml(temp_project, [{"git": SAMPLE_GIT_URL, "ref": NEWER_REF}])
 
     # Step 3: run `apm deps update` with no positional args.
-    result2 = _run_apm(apm_command, ["deps", "update"], temp_project)
+    result2 = _run_apm(apm_binary_path, ["deps", "update"], temp_project)
     assert result2.returncode == 0, (
         f"deps update failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
     )
@@ -163,7 +156,7 @@ def test_deps_update_all_packages_bumps_lockfile_sha(temp_project, apm_command):
 # ---------------------------------------------------------------------------
 
 
-def test_deps_update_single_package_selective(temp_project, apm_command):
+def test_deps_update_single_package_selective(temp_project, apm_binary_path):
     """`apm deps update <pkg>` should accept the selective filter and succeed.
 
     With two packages installed, requesting an update for one must succeed and
@@ -176,7 +169,7 @@ def test_deps_update_single_package_selective(temp_project, apm_command):
             "github/awesome-copilot/skills/aspire",
         ],
     )
-    result1 = _run_apm(apm_command, ["install"], temp_project)
+    result1 = _run_apm(apm_binary_path, ["install"], temp_project)
     assert result1.returncode == 0, (
         f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
     )
@@ -195,7 +188,7 @@ def test_deps_update_single_package_selective(temp_project, apm_command):
     )
 
     result2 = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["deps", "update", SAMPLE_REPO_URL],
         temp_project,
     )
@@ -218,7 +211,7 @@ def test_deps_update_single_package_selective(temp_project, apm_command):
 # ---------------------------------------------------------------------------
 
 
-def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
+def test_deps_update_global_user_scope(tmp_path, fake_home, apm_binary_path):
     """`apm deps update -g` must update ~/.apm/apm.lock.yaml, not cwd lockfile.
 
     Regression guard: a historical bug deployed silently to the project even
@@ -255,7 +248,7 @@ def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
     work_dir.mkdir()
 
     # Step 1: install -g to populate ~/.apm/apm.lock.yaml.
-    result1 = _run_apm(apm_command, ["install", "-g"], work_dir, env=env)
+    result1 = _run_apm(apm_binary_path, ["install", "-g"], work_dir, env=env)
     assert result1.returncode == 0, (
         f"Global install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
     )
@@ -270,7 +263,7 @@ def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
     _write_user_manifest(NEWER_REF)
 
     # Step 3: run `apm deps update -g` from a directory with no project.
-    result2 = _run_apm(apm_command, ["deps", "update", "-g"], work_dir, env=env)
+    result2 = _run_apm(apm_binary_path, ["deps", "update", "-g"], work_dir, env=env)
     assert result2.returncode == 0, (
         f"deps update -g failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
     )
@@ -300,16 +293,16 @@ def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
 # ---------------------------------------------------------------------------
 
 
-def test_deps_update_unknown_package_errors(temp_project, apm_command):
+def test_deps_update_unknown_package_errors(temp_project, apm_binary_path):
     """`apm deps update <unknown>` should exit non-zero with a helpful error."""
     _write_apm_yml(temp_project, [SAMPLE_REPO_URL])
-    result_install = _run_apm(apm_command, ["install"], temp_project)
+    result_install = _run_apm(apm_binary_path, ["install"], temp_project)
     assert result_install.returncode == 0, (
         f"Initial install failed:\nSTDOUT: {result_install.stdout}\nSTDERR: {result_install.stderr}"
     )
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["deps", "update", "some/nonexistent-package"],
         temp_project,
     )

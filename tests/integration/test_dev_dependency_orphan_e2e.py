@@ -13,11 +13,7 @@ from apm_cli.deps.lockfile import LockFile
 TIMEOUT = 180
 
 
-def _run(
-    apm_binary_path: Path,
-    cwd: Path,
-    *args: str,
-) -> subprocess.CompletedProcess[str]:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the APM CLI in *cwd* and return the completed subprocess."""
     return subprocess.run(
         [str(apm_binary_path), *args],
@@ -30,10 +26,7 @@ def _run(
 
 
 @pytest.mark.integration
-def test_dev_dependency_survives_audit_and_prune(
-    tmp_path: Path,
-    apm_binary_path: Path,
-) -> None:
+def test_dev_dependency_survives_audit_and_prune(tmp_path: Path, apm_binary_path: Path) -> None:
     """A clean install must not classify its dev dependency as orphaned."""
     package = tmp_path / "dev-package"
     package.mkdir()

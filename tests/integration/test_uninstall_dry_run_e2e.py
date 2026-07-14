@@ -8,7 +8,6 @@ Uses the real microsoft/apm-sample-package.
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
@@ -20,11 +19,6 @@ pytestmark = [
 
 
 @pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    return str(apm_binary_path)
-
-
-@pytest.fixture
 def temp_project(tmp_path):
     project_dir = tmp_path / "uninstall-dry-run-test"
     project_dir.mkdir()
@@ -33,9 +27,9 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, timeout=180):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -66,10 +60,10 @@ def _snapshot_files(project_dir):
 SAMPLE_PKG = "microsoft/apm-sample-package#main"
 
 
-def test_uninstall_dry_run_lists_files_without_removing(apm_command, temp_project):
+def test_uninstall_dry_run_lists_files_without_removing(apm_binary_path, temp_project):
     _write_apm_yml(temp_project, [SAMPLE_PKG])
 
-    install = _run_apm(apm_command, ["install"], temp_project)
+    install = _run_apm(apm_binary_path, ["install"], temp_project)
     assert install.returncode == 0, f"install failed: {install.stderr}\n{install.stdout}"
 
     apm_yml_before = (temp_project / "apm.yml").read_text(encoding="utf-8")
@@ -80,7 +74,7 @@ def test_uninstall_dry_run_lists_files_without_removing(apm_command, temp_projec
     files_before = _snapshot_files(temp_project)
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["uninstall", "microsoft/apm-sample-package", "--dry-run"],
         temp_project,
     )
@@ -100,17 +94,17 @@ def test_uninstall_dry_run_lists_files_without_removing(apm_command, temp_projec
     assert "apm-sample-package" in lock_path.read_text(encoding="utf-8")
 
 
-def test_uninstall_dry_run_with_unknown_package(apm_command, temp_project):
+def test_uninstall_dry_run_with_unknown_package(apm_binary_path, temp_project):
     _write_apm_yml(temp_project, [SAMPLE_PKG])
 
-    install = _run_apm(apm_command, ["install"], temp_project)
+    install = _run_apm(apm_binary_path, ["install"], temp_project)
     assert install.returncode == 0, f"install failed: {install.stderr}\n{install.stdout}"
 
     files_before = _snapshot_files(temp_project)
     apm_yml_before = (temp_project / "apm.yml").read_text(encoding="utf-8")
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["uninstall", "some/nonexistent", "--dry-run"],
         temp_project,
     )

@@ -21,7 +21,6 @@ Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
@@ -30,12 +29,6 @@ pytestmark = [
     pytest.mark.requires_github_token,
     pytest.mark.requires_apm_binary,
 ]
-
-
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test binary selection unchanged."""
-    return str(apm_binary_path)
 
 
 @pytest.fixture
@@ -55,9 +48,9 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=120):
+def _run_apm(apm_binary_path, args, cwd, timeout=120):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -87,7 +80,7 @@ class TestSilentAdoptOfExistingFiles:
     """Catch-22: degraded lockfile + identical files on disk -> must self-heal."""
 
     def test_reinstall_with_wiped_lockfile_repopulates_deployed_files(
-        self, temp_project, apm_command
+        self, temp_project, apm_binary_path
     ):
         """The exact zava-storefront reproducer.
 
@@ -103,7 +96,9 @@ class TestSilentAdoptOfExistingFiles:
         deployed_files, which would then trip
         ``required-packages-deployed`` policy.
         """
-        result1 = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result1 = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result1.returncode == 0, (
             f"First install failed:\nstderr={result1.stderr}\nstdout={result1.stdout}"
         )
@@ -125,7 +120,7 @@ class TestSilentAdoptOfExistingFiles:
         (temp_project / "apm.lock.yaml").unlink()
 
         # Re-install. Files are still on disk, byte-identical to package source.
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             f"Re-install failed:\nstderr={result2.stderr}\nstdout={result2.stdout}"
         )
@@ -147,7 +142,9 @@ class TestSilentAdoptOfExistingFiles:
                 f"Adopt path must not modify on-disk bytes: {f} changed."
             )
 
-    def test_required_packages_deployed_passes_after_lockfile_wipe(self, temp_project, apm_command):
+    def test_required_packages_deployed_passes_after_lockfile_wipe(
+        self, temp_project, apm_binary_path
+    ):
         """End-to-end: with adopt in place, ``apm audit`` (which runs the
         same ``required-packages-deployed`` check the policy gate uses)
         passes after a lockfile wipe + re-install -- proving the catch-22
@@ -160,7 +157,7 @@ class TestSilentAdoptOfExistingFiles:
         full pipeline now self-heals.
         """
         # Initial install
-        r1 = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        r1 = _run_apm(apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project)
         assert r1.returncode == 0, f"first install: {r1.stderr}\n{r1.stdout}"
 
         # Wipe lockfile -- degraded state
@@ -170,7 +167,7 @@ class TestSilentAdoptOfExistingFiles:
         # exercise just the integrator/lockfile path. (The fix lives in
         # the integrator; --no-policy keeps this test independent of the
         # current org policy fixtures.)
-        r2 = _run_apm(apm_command, ["install", "--no-policy"], temp_project)
+        r2 = _run_apm(apm_binary_path, ["install", "--no-policy"], temp_project)
         assert r2.returncode == 0, f"re-install: {r2.stderr}\n{r2.stdout}"
 
         lock2 = _read_lockfile(temp_project)
@@ -185,7 +182,7 @@ class TestSilentAdoptOfExistingFiles:
         # Third run: full policy gate, no --no-policy flag. Proves the
         # pipeline fully self-heals and the required-packages-deployed
         # check passes because deployed_files was repopulated in run 2.
-        r3 = _run_apm(apm_command, ["install"], temp_project)
+        r3 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert r3.returncode == 0, (
             "Third install (with policy) must succeed -- catch-22 is broken. "
             f"stderr: {r3.stderr}\nstdout: {r3.stdout}"

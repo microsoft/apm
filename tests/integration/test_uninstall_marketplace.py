@@ -22,14 +22,9 @@ pytestmark = [pytest.mark.requires_apm_binary]
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def apm_command(apm_binary_path: Path) -> str:
-    return str(apm_binary_path)
-
-
-def _run_apm(apm_command, args, cwd, timeout=60):
+def _run_apm(apm_binary_path, args, cwd, timeout=60):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -81,7 +76,7 @@ def _seed_project(project_dir: Path, canonical: str, marketplace_name: str, plug
 # ---------------------------------------------------------------------------
 
 
-def test_uninstall_marketplace_notation_via_lockfile(apm_command, tmp_path):
+def test_uninstall_marketplace_notation_via_lockfile(apm_binary_path, tmp_path):
     """``apm uninstall name@marketplace`` resolves via lockfile and removes the package."""
     project = tmp_path / "project"
     project.mkdir()
@@ -92,7 +87,7 @@ def test_uninstall_marketplace_notation_via_lockfile(apm_command, tmp_path):
     _seed_project(project, canonical, marketplace_name, plugin_name)
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["uninstall", f"{plugin_name}@{marketplace_name}"],
         project,
     )
@@ -114,7 +109,7 @@ def test_uninstall_marketplace_notation_via_lockfile(apm_command, tmp_path):
     assert not pkg_dir.exists(), f"Expected {pkg_dir} to be removed"
 
 
-def test_uninstall_marketplace_dry_run_no_changes(apm_command, tmp_path):
+def test_uninstall_marketplace_dry_run_no_changes(apm_binary_path, tmp_path):
     """``apm uninstall name@marketplace --dry-run`` resolves but does not mutate disk."""
     project = tmp_path / "project"
     project.mkdir()
@@ -123,7 +118,7 @@ def test_uninstall_marketplace_dry_run_no_changes(apm_command, tmp_path):
     _seed_project(project, canonical, "official", "my-plugin")
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["uninstall", "my-plugin@official", "--dry-run"],
         project,
     )
@@ -145,7 +140,7 @@ def test_uninstall_marketplace_dry_run_no_changes(apm_command, tmp_path):
     assert pkg_dir.exists(), "Expected apm_modules to be untouched after dry-run"
 
 
-def test_uninstall_marketplace_dry_run_no_lockfile_warns(apm_command, tmp_path):
+def test_uninstall_marketplace_dry_run_no_lockfile_warns(apm_binary_path, tmp_path):
     """``apm uninstall name@marketplace --dry-run`` without a lockfile warns and skips.
 
     Stage 1 (lockfile lookup) finds nothing because no lockfile exists, and Stage 2
@@ -166,7 +161,7 @@ def test_uninstall_marketplace_dry_run_no_lockfile_warns(apm_command, tmp_path):
     # Deliberately do NOT seed apm.lock.yaml -- this is the no-lockfile path.
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["uninstall", "my-plugin@official", "--dry-run"],
         project,
     )

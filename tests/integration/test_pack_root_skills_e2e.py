@@ -6,11 +6,7 @@ import subprocess
 from pathlib import Path
 
 
-def _run_apm(
-    apm_binary_path: Path,
-    project: Path,
-    *args: str,
-) -> subprocess.CompletedProcess[str]:
+def _run_apm(apm_binary_path: Path, project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the installed APM CLI in a project directory."""
     return subprocess.run(
         [str(apm_binary_path), *args],
@@ -22,10 +18,7 @@ def _run_apm(
     )
 
 
-def test_pack_auto_includes_only_apm_authored_skills(
-    tmp_path: Path,
-    apm_binary_path: Path,
-) -> None:
+def test_pack_auto_includes_only_apm_authored_skills(tmp_path: Path, apm_binary_path: Path) -> None:
     """The real pack command must not treat a root skills directory as publishable."""
     project = tmp_path / "project"
     project.mkdir()
@@ -64,8 +57,7 @@ def test_pack_auto_includes_only_apm_authored_skills(
 
 
 def test_init_then_pack_preserves_native_claude_skill(
-    tmp_path: Path,
-    apm_binary_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """Init must not make a native Claude root skill disappear from pack."""
     project = tmp_path / "native-plugin"

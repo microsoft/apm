@@ -159,21 +159,15 @@ def temp_e2e_home():
             del os.environ["HOME"]
 
 
-@pytest.fixture(scope="module")
-def apm_binary(apm_binary_path: Path) -> str:
-    """Use the canonical integration-test executable."""
-    return str(apm_binary_path)
-
-
 class TestMCPRegistryE2E:
     """E2E tests for MCP registry functionality."""
 
-    def test_mcp_search_command(self, temp_e2e_home, apm_binary):
+    def test_mcp_search_command(self, temp_e2e_home, apm_binary_path):
         """Test MCP registry search functionality."""
         print("\n=== Testing MCP Registry Search ===")
 
         # Test search for GitHub MCP server (retry on transient registry outage)
-        result = run_mcp_command_with_retry(f"{apm_binary} mcp search github", timeout=30)
+        result = run_mcp_command_with_retry(f"{apm_binary_path} mcp search github", timeout=30)
 
         # Verify output contains expected results
         output = result.stdout.lower()
@@ -184,12 +178,12 @@ class TestMCPRegistryE2E:
 
         # Test search with limit (retry on transient registry outage)
         result = run_mcp_command_with_retry(
-            f"{apm_binary} mcp search filesystem --limit 3", timeout=30
+            f"{apm_binary_path} mcp search filesystem --limit 3", timeout=30
         )
 
         print("[OK] MCP search with limit works")
 
-    def test_mcp_show_command(self, temp_e2e_home, apm_binary):
+    def test_mcp_show_command(self, temp_e2e_home, apm_binary_path):
         """Test MCP registry server details functionality."""
         print("\n=== Testing MCP Registry Show ===")
 
@@ -198,7 +192,9 @@ class TestMCPRegistryE2E:
         # the CLI surfaces that as "Could not reach MCP registry" -- retry on
         # that exact marker rather than treating it as a product regression.
         github_server = "io.github.github/github-mcp-server"
-        result = run_mcp_command_with_retry(f"{apm_binary} mcp show {github_server}", timeout=30)
+        result = run_mcp_command_with_retry(
+            f"{apm_binary_path} mcp show {github_server}", timeout=30
+        )
 
         # Verify output contains server details
         output = result.stdout.lower()
@@ -215,13 +211,13 @@ class TestMCPRegistryE2E:
         not _is_registry_healthy(),
         reason="GitHub MCP server configured as remote-only (no packages) - skipping installation tests",
     )
-    def test_registry_installation_with_codex(self, temp_e2e_home, apm_binary):
+    def test_registry_installation_with_codex(self, temp_e2e_home, apm_binary_path):
         """Test complete registry-based installation flow with Codex runtime."""
         print("\n=== Testing Registry Installation with Codex ===")
 
         # Step 1: Set up Codex runtime
         print("Setting up Codex runtime...")
-        result = run_command(f"{apm_binary} runtime setup codex", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup codex", timeout=300)
         assert result.returncode == 0, f"Codex setup failed: {result.stderr}"
 
         # Verify codex config was created
@@ -234,7 +230,7 @@ class TestMCPRegistryE2E:
 
             print("Creating project with MCP dependencies...")
             result = run_command(
-                f"{apm_binary} init registry-test-project --yes --target copilot",
+                f"{apm_binary_path} init registry-test-project --yes --target copilot",
                 cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
@@ -280,7 +276,7 @@ class TestMCPRegistryE2E:
             env_input = "\n\n\n\n\n"  # Empty for most optional environment variables
 
             result = run_command(
-                f"{apm_binary} install", cwd=project_dir, input_text=env_input, timeout=180
+                f"{apm_binary_path} install", cwd=project_dir, input_text=env_input, timeout=180
             )
 
             # Installation should succeed even with some empty environment variables
@@ -351,12 +347,12 @@ class TestMCPRegistryE2E:
         not _is_registry_healthy(),
         reason="GitHub MCP server configured as remote-only (no packages) - skipping installation tests",
     )
-    def test_empty_string_handling_e2e(self, temp_e2e_home, apm_binary):
+    def test_empty_string_handling_e2e(self, temp_e2e_home, apm_binary_path):
         """Test end-to-end empty string and defaults handling during installation."""
         print("\n=== Testing Empty String and Defaults Handling ===")
 
         # Set up a runtime first
-        result = run_command(f"{apm_binary} runtime setup codex", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup codex", timeout=300)
         if result.returncode != 0:
             pytest.skip("Codex setup failed, skipping empty string test")
 
@@ -364,7 +360,8 @@ class TestMCPRegistryE2E:
             project_dir = Path(project_workspace) / "empty-string-test"
 
             result = run_command(
-                f"{apm_binary} init empty-string-test --yes --target copilot", cwd=project_workspace
+                f"{apm_binary_path} init empty-string-test --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -402,7 +399,7 @@ class TestMCPRegistryE2E:
             env_input = "\n\n\n\n\n"  # Empty inputs for optional variables
 
             result = run_command(
-                f"{apm_binary} install --runtime copilot",
+                f"{apm_binary_path} install --runtime copilot",
                 cwd=project_dir,
                 input_text=env_input,
                 timeout=120,
@@ -466,12 +463,12 @@ class TestMCPRegistryE2E:
                 print("[WARN] Copilot configuration not created (binary may not be available)")
                 # This is OK for testing - we're validating the adapter logic
 
-    def test_empty_string_handling_e2e(self, temp_e2e_home, apm_binary):  # noqa: F811
+    def test_empty_string_handling_e2e(self, temp_e2e_home, apm_binary_path):  # noqa: F811
         """Test end-to-end empty string and defaults handling during installation."""
         print("\n=== Testing Empty String and Defaults Handling ===")
 
         # Set up a runtime first
-        result = run_command(f"{apm_binary} runtime setup codex", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup codex", timeout=300)
         if result.returncode != 0:
             pytest.skip("Codex setup failed, skipping empty string test")
 
@@ -479,7 +476,8 @@ class TestMCPRegistryE2E:
             project_dir = Path(project_workspace) / "empty-string-test"
 
             result = run_command(
-                f"{apm_binary} init empty-string-test --yes --target copilot", cwd=project_workspace
+                f"{apm_binary_path} init empty-string-test --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -502,7 +500,7 @@ class TestMCPRegistryE2E:
             env_input = "\n   \n\n\n\n"  # Empty/whitespace for optional vars
 
             result = run_command(
-                f"{apm_binary} install", cwd=project_dir, input_text=env_input, timeout=120
+                f"{apm_binary_path} install", cwd=project_dir, input_text=env_input, timeout=120
             )
 
             # Check the configuration to see how empty strings were handled
@@ -535,12 +533,12 @@ class TestMCPRegistryE2E:
         not _is_registry_healthy(),
         reason="GitHub MCP server configured as remote-only (no packages) - skipping installation tests",
     )
-    def test_cross_adapter_consistency(self, temp_e2e_home, apm_binary):
+    def test_cross_adapter_consistency(self, temp_e2e_home, apm_binary_path):
         """Test that Codex adapter handles MCP server installation consistently."""
         print("\n=== Testing Codex Adapter Consistency ===")
 
         # Set up Codex runtime
-        result = run_command(f"{apm_binary} runtime setup codex", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup codex", timeout=300)
         if result.returncode != 0:
             pytest.skip("Codex setup failed, skipping consistency test")
 
@@ -548,7 +546,8 @@ class TestMCPRegistryE2E:
             project_dir = Path(project_workspace) / "consistency-test"
 
             result = run_command(
-                f"{apm_binary} init consistency-test --yes --target copilot", cwd=project_workspace
+                f"{apm_binary_path} init consistency-test --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -571,7 +570,7 @@ class TestMCPRegistryE2E:
             env_input = "\n\n\n\n\n"  # Empty for optional vars
 
             result = run_command(
-                f"{apm_binary} install", cwd=project_dir, input_text=env_input, timeout=180
+                f"{apm_binary_path} install", cwd=project_dir, input_text=env_input, timeout=180
             )
 
             # Check Codex configuration
@@ -602,12 +601,12 @@ class TestMCPRegistryE2E:
         not _is_registry_healthy(),
         reason="GitHub MCP server configured as remote-only (no packages) - skipping installation tests",
     )
-    def test_duplication_prevention_e2e(self, temp_e2e_home, apm_binary):
+    def test_duplication_prevention_e2e(self, temp_e2e_home, apm_binary_path):
         """Test that repeated installations don't create duplicate entries."""
         print("\n=== Testing Duplication Prevention ===")
 
         # Set up runtime
-        result = run_command(f"{apm_binary} runtime setup codex", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup codex", timeout=300)
         if result.returncode != 0:
             pytest.skip("Codex setup failed, skipping duplication test")
 
@@ -615,7 +614,8 @@ class TestMCPRegistryE2E:
             project_dir = Path(project_workspace) / "duplication-test"
 
             result = run_command(
-                f"{apm_binary} init duplication-test --yes --target copilot", cwd=project_workspace
+                f"{apm_binary_path} init duplication-test --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -636,14 +636,14 @@ class TestMCPRegistryE2E:
             env_input = "test-token\n\n\n\n\n"  # token + empty for optional vars
 
             result1 = run_command(  # noqa: F841
-                f"{apm_binary} install", cwd=project_dir, input_text=env_input, timeout=120
+                f"{apm_binary_path} install", cwd=project_dir, input_text=env_input, timeout=120
             )
 
             # Second installation (should detect existing and skip)
             print("Running second installation (should skip duplicates)...")
 
             result2 = run_command(
-                f"{apm_binary} install", cwd=project_dir, input_text=env_input, timeout=120
+                f"{apm_binary_path} install", cwd=project_dir, input_text=env_input, timeout=120
             )
 
             # Verify no duplication in output
