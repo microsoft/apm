@@ -132,7 +132,6 @@ _GIT_CONFIG_INJECTION_PREFIXES = (
     "GIT_CONFIG_KEY_",
     "GIT_CONFIG_VALUE_",
 )
-_CACHE_BYPASS_ENV_NAMES = frozenset({"APM_NO_CACHE", "APM_TEMP_DIR"})
 _PROXY_ENV_NAMES = frozenset(
     {
         "ALL_PROXY",
@@ -151,29 +150,59 @@ _STRIPPED_ENV_NAMES = (
     | _GIT_STATE_ENV_NAMES
     | _CREDENTIAL_STORE_ENV_NAMES
     | _TOOL_HOME_ENV_NAMES
-    | _CACHE_BYPASS_ENV_NAMES
 )
 _STRIPPED_ENV_PREFIXES = _SECRET_ENV_PREFIXES + _GIT_CONFIG_INJECTION_PREFIXES
+_PINNED_ENVIRONMENT_NAMES = (
+    "HOME",
+    "USERPROFILE",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "LOCALAPPDATA",
+    "APM_HOME",
+    "APM_CACHE_DIR",
+    "APM_TEMP_DIR",
+    "GH_CONFIG_DIR",
+    "AZURE_CONFIG_DIR",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_ALLOW_PROTOCOL",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_DATE",
+    "PYTHONPATH",
+)
+_SECURITY_CONTROL_ENV_NAMES = frozenset(
+    {
+        "APM_ALLOW_PROTOCOL_FALLBACK",
+        "APM_COPILOT_APP_DB",
+        "APM_COPILOT_APP_WS_RUN_DIR",
+        "APM_COPILOT_COWORK_SKILLS_DIR",
+        "APM_DISABLE_TRUSTSTORE",
+        "APM_E2E_TESTS",
+        "APM_GITLAB_HOSTS",
+        "APM_GIT_PROTOCOL",
+        "APM_INSTALLER_BASE_URL",
+        "APM_NO_DIRECT_FALLBACK",
+        "APM_POLICY_DISABLE",
+        "APM_PYPI_INDEX_URL",
+        "APM_RELEASE_BASE_URL",
+        "APM_RELEASE_METADATA_URL",
+        "APM_REPO",
+        "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_FILE",
+    }
+)
 _PROTECTED_OVERRIDE_NAMES = (
-    frozenset(
-        {
-            "APM_CACHE_DIR",
-            "APM_HOME",
-            "GIT_ALLOW_PROTOCOL",
-            "GIT_CONFIG_GLOBAL",
-            "GIT_CONFIG_NOSYSTEM",
-            "HOME",
-            "LOCALAPPDATA",
-            "PYTHONPATH",
-            "TEMP",
-            "TMP",
-            "TMPDIR",
-            "USERPROFILE",
-            "XDG_CACHE_HOME",
-            "XDG_CONFIG_HOME",
-        }
-    )
-    | _STRIPPED_ENV_NAMES
+    frozenset(_PINNED_ENVIRONMENT_NAMES) | _STRIPPED_ENV_NAMES | _SECURITY_CONTROL_ENV_NAMES
 )
 
 
@@ -182,10 +211,19 @@ def _normalized_env_name(name: str) -> str:
     return name.upper()
 
 
-def _is_protected_name(name: str) -> bool:
+def _is_protected_override(name: str) -> bool:
     normalized_name = _normalized_env_name(name)
     return normalized_name in _PROTECTED_OVERRIDE_NAMES or normalized_name.startswith(
         _STRIPPED_ENV_PREFIXES
+    )
+
+
+def _should_strip_inherited(name: str) -> bool:
+    normalized_name = _normalized_env_name(name)
+    return (
+        normalized_name.startswith("APM_")
+        or normalized_name in _PROTECTED_OVERRIDE_NAMES
+        or normalized_name.startswith(_STRIPPED_ENV_PREFIXES)
     )
 
 
@@ -282,37 +320,39 @@ class IsolatedApmEnvironment:
 
         environment = _deduplicate_environment(base_env)
         for name in list(environment):
-            if _is_protected_name(name):
+            if _should_strip_inherited(name):
                 environment.pop(name, None)
 
-        environment.update(
-            {
-                "HOME": str(home),
-                "USERPROFILE": str(home),
-                "XDG_CONFIG_HOME": str(xdg_config_root),
-                "XDG_CACHE_HOME": str(xdg_cache_root),
-                "LOCALAPPDATA": str(local_app_data),
-                "APM_HOME": str(config_root),
-                "APM_CACHE_DIR": str(cache_root),
-                "APM_TEMP_DIR": str(temp_root),
-                "GH_CONFIG_DIR": str(gh_config_root),
-                "AZURE_CONFIG_DIR": str(azure_config_root),
-                "TMPDIR": str(temp_root),
-                "TMP": str(temp_root),
-                "TEMP": str(temp_root),
-                "GIT_CONFIG_GLOBAL": str(git_config),
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_ALLOW_PROTOCOL": "file",
-                "GIT_AUTHOR_NAME": "APM Test",
-                "GIT_AUTHOR_EMAIL": "apm-test@example.invalid",
-                "GIT_COMMITTER_NAME": "APM Test",
-                "GIT_COMMITTER_EMAIL": "apm-test@example.invalid",
-                "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
-                "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
-                "PYTHONPATH": str(guard_root),
-            }
-        )
+        pinned_environment = {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "XDG_CONFIG_HOME": str(xdg_config_root),
+            "XDG_CACHE_HOME": str(xdg_cache_root),
+            "LOCALAPPDATA": str(local_app_data),
+            "APM_HOME": str(config_root),
+            "APM_CACHE_DIR": str(cache_root),
+            "APM_TEMP_DIR": str(temp_root),
+            "GH_CONFIG_DIR": str(gh_config_root),
+            "AZURE_CONFIG_DIR": str(azure_config_root),
+            "TMPDIR": str(temp_root),
+            "TMP": str(temp_root),
+            "TEMP": str(temp_root),
+            "GIT_CONFIG_GLOBAL": str(git_config),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ALLOW_PROTOCOL": "file",
+            "GIT_AUTHOR_NAME": "APM Test",
+            "GIT_AUTHOR_EMAIL": "apm-test@example.invalid",
+            "GIT_COMMITTER_NAME": "APM Test",
+            "GIT_COMMITTER_EMAIL": "apm-test@example.invalid",
+            "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
+            "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+            "PYTHONPATH": str(guard_root),
+        }
+        if tuple(pinned_environment) != _PINNED_ENVIRONMENT_NAMES:
+            raise AssertionError("Pinned environment names are out of sync")
+        for name, value in pinned_environment.items():
+            _set_environment_value(environment, name, value)
         return cls(
             root=root,
             home=home,
@@ -333,7 +373,7 @@ class IsolatedApmEnvironment:
         """Return a child environment with only non-protected overrides applied."""
         environment = dict(self.process_environment)
         if overrides:
-            protected = {name for name in overrides if _is_protected_name(name)}
+            protected = {name for name in overrides if _is_protected_override(name)}
             if protected:
                 names = ", ".join(sorted(protected))
                 raise ValueError(f"Cannot override protected environment variables: {names}")

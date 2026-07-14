@@ -148,6 +148,27 @@ if Path.cwd() != parent_cwd:
 
 
 def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
+    security_control_names = (
+        "APM_ALLOW_PROTOCOL_FALLBACK",
+        "APM_COPILOT_APP_DB",
+        "APM_COPILOT_APP_WS_RUN_DIR",
+        "APM_COPILOT_COWORK_SKILLS_DIR",
+        "APM_DISABLE_TRUSTSTORE",
+        "APM_E2E_TESTS",
+        "APM_GITLAB_HOSTS",
+        "APM_GIT_PROTOCOL",
+        "APM_INSTALLER_BASE_URL",
+        "APM_NO_DIRECT_FALLBACK",
+        "APM_POLICY_DISABLE",
+        "APM_PYPI_INDEX_URL",
+        "APM_RELEASE_BASE_URL",
+        "APM_RELEASE_METADATA_URL",
+        "APM_REPO",
+        "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_FILE",
+    )
     exact_secret_names = (
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_URL",
@@ -170,10 +191,42 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "PROXY_REGISTRY_TOKEN",
         "SSH_ASKPASS",
     )
+    pinned_names = (
+        "HOME",
+        "USERPROFILE",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "LOCALAPPDATA",
+        "APM_HOME",
+        "APM_CACHE_DIR",
+        "APM_TEMP_DIR",
+        "GH_CONFIG_DIR",
+        "AZURE_CONFIG_DIR",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_TERMINAL_PROMPT",
+        "GIT_ALLOW_PROTOCOL",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_AUTHOR_DATE",
+        "GIT_COMMITTER_DATE",
+        "PYTHONPATH",
+    )
     ambient_environment = dict(os.environ)
     ambient_environment.update({name: "ambient" for name in exact_secret_names})
+    ambient_environment.update({name: "ambient" for name in security_control_names})
+    for name in pinned_names:
+        ambient_environment[name] = "canonical-poison"
+        ambient_environment[name.lower()] = "lower-poison"
+        ambient_environment[name.title()] = "mixed-poison"
     ambient_environment.update(
         {
+            "APM_ARBITRARY_INHERITED_SWITCH": "ambient",
             "APM_NO_CACHE": "1",
             "APM_REGISTRY_PASS_INTERNAL": "ambient",
             "APM_REGISTRY_TOKEN_INTERNAL": "ambient",
@@ -190,6 +243,8 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             "HERMES_HOME": "/ambient/hermes",
             "HTTPS_PROXY": "https://ambient.invalid",
             "Git_Config_Value_1": "ambient",
+            "Git_Terminal_Prompt": "ambient",
+            "apm_policy_disable": "1",
             "github_token": "ambient",
             "git_config_key_1": "credential.helper",
             "home": "/ambient/home",
@@ -203,6 +258,8 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
 
     stripped_names = (
         *exact_secret_names,
+        *security_control_names,
+        "APM_ARBITRARY_INHERITED_SWITCH",
         "APM_NO_CACHE",
         "APM_REGISTRY_PASS_INTERNAL",
         "APM_REGISTRY_TOKEN_INTERNAL",
@@ -219,14 +276,46 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "HERMES_HOME",
         "HTTPS_PROXY",
         "Git_Config_Value_1",
+        "apm_policy_disable",
         "github_token",
         "git_config_key_1",
     )
     normalized_environment_names = {name.upper() for name in environment}
     assert {name.upper() for name in stripped_names}.isdisjoint(normalized_environment_names)
+    pinned_environment = {
+        "HOME": str(isolated.home),
+        "USERPROFILE": str(isolated.home),
+        "XDG_CONFIG_HOME": str(isolated.root / "xdg-config"),
+        "XDG_CACHE_HOME": str(isolated.root / "xdg-cache"),
+        "LOCALAPPDATA": str(isolated.root / "local-app-data"),
+        "APM_HOME": str(isolated.config_root),
+        "APM_CACHE_DIR": str(isolated.cache_root),
+        "APM_TEMP_DIR": str(isolated.temp_root),
+        "GH_CONFIG_DIR": str(isolated.root / "gh-config"),
+        "AZURE_CONFIG_DIR": str(isolated.root / "azure-config"),
+        "TMPDIR": str(isolated.temp_root),
+        "TMP": str(isolated.temp_root),
+        "TEMP": str(isolated.temp_root),
+        "GIT_CONFIG_GLOBAL": str(isolated.root / "gitconfig"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ALLOW_PROTOCOL": "file",
+        "GIT_AUTHOR_NAME": "APM Test",
+        "GIT_AUTHOR_EMAIL": "apm-test@example.invalid",
+        "GIT_COMMITTER_NAME": "APM Test",
+        "GIT_COMMITTER_EMAIL": "apm-test@example.invalid",
+        "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
+        "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+        "PYTHONPATH": str(isolated.root / "network_guard"),
+    }
     assert len(environment) == len(normalized_environment_names)
-    assert "home" not in environment
-    assert environment["HOME"] == str(isolated.home)
+    assert "APM_POLICY_DISABLE" not in environment
+    assert "APM_ALLOW_PROTOCOL_FALLBACK" not in environment
+    assert "APM_GIT_PROTOCOL" not in environment
+    for name, expected_value in pinned_environment.items():
+        matching_names = [actual_name for actual_name in environment if actual_name.upper() == name]
+        assert matching_names == [name]
+        assert environment[name] == expected_value
     for name in ("GH_CONFIG_DIR", "AZURE_CONFIG_DIR", "GIT_CONFIG_GLOBAL"):
         assert Path(environment[name]).resolve().is_relative_to(isolated.root.resolve())
 
@@ -244,6 +333,12 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     for name in exact_names + case_variant_exact_names + tool_home_names:
         with pytest.raises(ValueError, match="protected environment"):
             isolated.subprocess_env(overrides={name: "unsafe"})
+    assert tuple(pinned_environment) == pinned_names
+    for name in pinned_names + security_control_names:
+        variants = (name, name.lower(), name.title())
+        for variant in variants:
+            with pytest.raises(ValueError, match="protected environment"):
+                isolated.subprocess_env(overrides={variant: "unsafe"})
     for name in exact_secret_names:
         for variant in (name, name.lower()):
             with pytest.raises(ValueError, match="protected environment"):
@@ -252,6 +347,17 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         for variant in (name, name.lower()):
             with pytest.raises(ValueError, match="protected environment"):
                 isolated.subprocess_env(overrides={variant: "unsafe"})
+
+    safe_environment = isolated.subprocess_env(
+        overrides={
+            "APM_LOG_LEVEL": "debug",
+            "APM_NO_CACHE": "1",
+            "SCENARIO": "safe",
+        }
+    )
+    assert safe_environment["APM_LOG_LEVEL"] == "debug"
+    assert safe_environment["APM_NO_CACHE"] == "1"
+    assert safe_environment["SCENARIO"] == "safe"
 
 
 def test_python_child_network_is_denied(tmp_path: Path) -> None:
