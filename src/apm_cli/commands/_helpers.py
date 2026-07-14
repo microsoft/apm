@@ -622,15 +622,32 @@ def _validate_project_name(name):
 
     Project names are used directly as directory names and must not contain
     '/' or '\' so the name is not interpreted as a filesystem path,
-    and must not be '..' to prevent directory traversal.
+    and must not be '..' to prevent directory traversal. Must also be
+    non-empty: an empty/whitespace name writes an apm.yml with 'name: ""',
+    which APMPackage.from_apm_yml's identity check rejects on every later
+    install/lock/compile run (#2155).
 
     Returns True if valid, False otherwise.
     """
+    if not name or not name.strip():
+        return False
     if "/" in name or "\\" in name:
         return False
     if name == "..":  # noqa: SIM103
         return False
     return True
+
+
+def _resolve_bootstrap_project_name(candidate: str) -> str:
+    """Return a valid apm.yml project name for the install auto-bootstrap path.
+
+    ``Path.cwd().name`` (or ``Path.home().name``) is '' at a filesystem/drive
+    root -- e.g. a container with ``WORKDIR /``. Writing that candidate
+    straight into apm.yml would produce ``name: ''``, which
+    ``APMPackage.from_apm_yml``'s identity check rejects on every later
+    install/lock/compile run (#2155). Falls back to a generic default instead.
+    """
+    return candidate if _validate_project_name(candidate) else "my-project"
 
 
 def _create_plugin_json(config):

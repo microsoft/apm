@@ -121,6 +121,7 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
+    _resolve_bootstrap_project_name,
 )
 
 # CRITICAL: Shadow Python builtins that share names with Click commands
@@ -1429,6 +1430,7 @@ def install(  # noqa: PLR0913
 
         if not apm_yml_exists and packages:
             project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
+            project_name = _resolve_bootstrap_project_name(project_name)
             config = _get_default_config(project_name)
             if manifest_targets := manifest_targets_from_target_option(target):
                 config["targets"] = manifest_targets

@@ -27,6 +27,7 @@ from ._helpers import (
     _create_plugin_json,
     _get_console,
     _get_default_config,
+    _resolve_bootstrap_project_name,
     _rich_blank_line,
     _validate_plugin_name,
     _validate_project_name,
@@ -149,7 +150,8 @@ def _perform_init(
         if project_name and not _validate_project_name(project_name):
             logger.error(
                 f"Invalid project name '{project_name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'."
+                "project names must be non-empty and must not contain "
+                "path separators ('/' or '\\\\') or be '..'."
             )
             sys.exit(1)
 
@@ -162,7 +164,11 @@ def _perform_init(
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
-            final_project_name = project_dir.name
+            # project_dir.name is '' at a filesystem/drive root (e.g. cwd == "/",
+            # or a container WORKDIR of "/"). With --yes this flows straight to
+            # _get_default_config with no further validation, silently writing
+            # apm.yml with 'name: ""'.
+            final_project_name = _resolve_bootstrap_project_name(project_dir.name)
         project_root = Path.cwd()
 
         # Validate plugin name early
@@ -395,7 +401,8 @@ def _interactive_project_setup(default_name, logger):
                 break
             console.print(
                 f"[error]Invalid project name '{name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'.[/error]"
+                "project names must be non-empty and must not contain "
+                "path separators ('/' or '\\\\') or be '..'.[/error]"
             )
 
         version = Prompt.ask("Version", default="1.0.0").strip()
@@ -412,7 +419,8 @@ def _interactive_project_setup(default_name, logger):
                 break
             click.echo(
                 f"{ERROR}Invalid project name '{name}': "
-                f"project names must not contain path separators ('/' or '\\\\') or be '..'.{RESET}"
+                f"project names must be non-empty and must not contain "
+                f"path separators ('/' or '\\\\') or be '..'.{RESET}"
             )
 
         version = click.prompt("Version", default="1.0.0").strip()
