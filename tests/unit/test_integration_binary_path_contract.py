@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from tests.integration import conftest as integration_conftest
-from tests.integration import test_ado_e2e, test_plugin_e2e
+from tests.integration import (
+    test_ado_e2e,
+    test_auto_install_e2e,
+    test_plugin_e2e,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -205,5 +209,32 @@ def test_plugin_consumer_executes_injected_binary(
     command = test_plugin_e2e.apm_command.__wrapped__(configured)
 
     test_plugin_e2e._run_apm_command(command, ["--version"], tmp_path)
+
+    assert captured == [[str(configured), "--version"]]
+
+
+def test_auto_install_consumer_executes_injected_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The streaming auto-install helper must launch the injected artifact."""
+    configured = tmp_path / "configured-apm"
+    captured: list[list[str]] = []
+
+    class FakeProcess:
+        pass
+
+    def fake_popen(args: list[str], **_kwargs) -> FakeProcess:
+        captured.append(args)
+        return FakeProcess()
+
+    monkeypatch.setattr(test_auto_install_e2e.subprocess, "Popen", fake_popen)
+
+    test_auto_install_e2e._start_apm(
+        configured,
+        ["--version"],
+        cwd=str(tmp_path),
+        env={},
+    )
 
     assert captured == [[str(configured), "--version"]]
