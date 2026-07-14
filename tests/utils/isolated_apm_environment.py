@@ -61,6 +61,7 @@ def _deny_network(*args, **kwargs):
 
 
 socket.socket = _GuardedSocket
+socket.SocketType = _GuardedSocket
 socket.create_connection = _deny_network
 socket.getaddrinfo = _deny_network
 """
@@ -86,7 +87,10 @@ _SECRET_ENV_NAMES = frozenset(
         "GITLAB_TOKEN",
         "GIT_ASKPASS",
         "PROXY_REGISTRY_TOKEN",
+        "SSH_AGENT_PID",
         "SSH_ASKPASS",
+        "SSH_AUTH_SOCK",
+        "SYSTEM_ACCESSTOKEN",
     }
 )
 _SECRET_ENV_PREFIXES = (
@@ -131,6 +135,34 @@ _GIT_STATE_ENV_NAMES = frozenset(
 _GIT_CONFIG_INJECTION_PREFIXES = (
     "GIT_CONFIG_KEY_",
     "GIT_CONFIG_VALUE_",
+    "GIT_TRACE",
+)
+_GIT_EXECUTION_ENV_NAMES = frozenset(
+    {
+        "GIT_ATTR_NOSYSTEM",
+        "GIT_CLONE_PROTECTION_ACTIVE",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DEFAULT_BRANCH",
+        "GIT_DEFAULT_HASH",
+        "GIT_DEFAULT_REF_FORMAT",
+        "GIT_EDITOR",
+        "GIT_EXEC_PATH",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PAGER",
+        "GIT_PROTOCOL",
+        "GIT_PROTOCOL_FROM_USER",
+        "GIT_SEQUENCE_EDITOR",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSH_VARIANT",
+        "GIT_SSL_CAINFO",
+        "GIT_SSL_CAPATH",
+        "GIT_SSL_CERT",
+        "GIT_SSL_KEY",
+        "GIT_SSL_NO_VERIFY",
+        "GIT_TEMPLATE_DIR",
+        "SSH_ASKPASS_REQUIRE",
+    }
 )
 _PROXY_ENV_NAMES = frozenset(
     {
@@ -148,6 +180,7 @@ _STRIPPED_ENV_NAMES = (
     _SECRET_ENV_NAMES
     | _PROXY_ENV_NAMES
     | _GIT_STATE_ENV_NAMES
+    | _GIT_EXECUTION_ENV_NAMES
     | _CREDENTIAL_STORE_ENV_NAMES
     | _TOOL_HOME_ENV_NAMES
 )

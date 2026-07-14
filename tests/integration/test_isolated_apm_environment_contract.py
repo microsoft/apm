@@ -292,6 +292,36 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_SHALLOW_FILE",
         "GIT_WORK_TREE",
     )
+    git_execution_names = (
+        "GIT_ATTR_NOSYSTEM",
+        "GIT_CLONE_PROTECTION_ACTIVE",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DEFAULT_BRANCH",
+        "GIT_DEFAULT_HASH",
+        "GIT_DEFAULT_REF_FORMAT",
+        "GIT_EDITOR",
+        "GIT_EXEC_PATH",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PAGER",
+        "GIT_PROTOCOL",
+        "GIT_PROTOCOL_FROM_USER",
+        "GIT_SEQUENCE_EDITOR",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSH_VARIANT",
+        "GIT_SSL_CAINFO",
+        "GIT_SSL_CAPATH",
+        "GIT_SSL_CERT",
+        "GIT_SSL_KEY",
+        "GIT_SSL_NO_VERIFY",
+        "GIT_TEMPLATE_DIR",
+        "SSH_ASKPASS_REQUIRE",
+    )
+    ambient_credential_names = (
+        "SSH_AGENT_PID",
+        "SSH_AUTH_SOCK",
+        "SYSTEM_ACCESSTOKEN",
+    )
     tool_home_names = (
         "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
@@ -310,6 +340,8 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             *pinned_names,
             *security_control_names,
             *git_state_names,
+            *git_execution_names,
+            *ambient_credential_names,
             *tool_home_names,
             *proxy_names,
         )
@@ -335,6 +367,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             "GIT_CONFIG_KEY_0": "credential.helper",
             "GIT_CONFIG_VALUE_0": "ambient",
             "GIT_DIR": "/ambient/git",
+            "GIT_TRACE2_EVENT": "/ambient/git-trace.json",
             "GIT_WORK_TREE": "/ambient/work-tree",
             "HERMES_HOME": "/ambient/hermes",
             "HTTPS_PROXY": "https://ambient.invalid",
@@ -343,6 +376,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             "apm_policy_disable": "1",
             "github_token": "ambient",
             "git_config_key_1": "credential.helper",
+            "git_trace2_event": "/ambient/lower-git-trace.json",
             "home": "/ambient/home",
         }
     )
@@ -356,6 +390,8 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         *exact_secret_names,
         *security_control_names,
         *git_state_names,
+        *git_execution_names,
+        *ambient_credential_names,
         *tool_home_names,
         *proxy_names,
         "APM_ARBITRARY_INHERITED_SWITCH",
@@ -370,6 +406,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_KEY_0",
         "GIT_CONFIG_VALUE_0",
+        "GIT_TRACE2_EVENT",
         "GIT_DIR",
         "GIT_WORK_TREE",
         "HERMES_HOME",
@@ -411,6 +448,11 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     assert "APM_POLICY_DISABLE" not in environment
     assert "APM_ALLOW_PROTOCOL_FALLBACK" not in environment
     assert "APM_GIT_PROTOCOL" not in environment
+    assert "SSH_AUTH_SOCK" not in environment
+    assert "SSH_AGENT_PID" not in environment
+    assert "SYSTEM_ACCESSTOKEN" not in environment
+    assert "git_terminal_prompt" not in environment
+    assert environment["GIT_TERMINAL_PROMPT"] == "0"
     for name, expected_value in pinned_environment.items():
         matching_names = [actual_name for actual_name in environment if actual_name.upper() == name]
         assert matching_names == [name]
@@ -487,9 +529,9 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
                 "import os, socket, sys; "
                 "hasattr(socket, 'AF_UNIX') or sys.exit(0); "
                 "path = 'local.sock'; "
-                "server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); "
+                "server = socket.SocketType(socket.AF_UNIX, socket.SOCK_STREAM); "
                 "server.bind(path); server.listen(); "
-                "client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); "
+                "client = socket.SocketType(socket.AF_UNIX, socket.SOCK_STREAM); "
                 "client.connect(path); accepted, _ = server.accept(); "
                 "client.sendall(b'x'); assert accepted.recv(1) == b'x'; "
                 "accepted.close(); client.close(); server.close(); os.unlink(path)"
@@ -517,6 +559,16 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         ),
         (
             "import socket; "
+            "socket.SocketType(socket.AF_INET, socket.SOCK_STREAM)"
+            ".connect(('203.0.113.1', 443))"
+        ),
+        (
+            "import socket; "
+            "socket.SocketType(socket.AF_INET6, socket.SOCK_STREAM)"
+            ".connect(('2001:db8::1', 443))"
+        ),
+        (
+            "import socket; "
             "socket.socket(socket.AF_INET, socket.SOCK_STREAM)"
             ".connect_ex(('203.0.113.1', 443))"
         ),
@@ -527,6 +579,10 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         ),
         ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).bind(('127.0.0.1', 0))"),
         ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM).bind(('::1', 0))"),
+        (
+            "import socket; socket.SocketType(socket.AF_INET, socket.SOCK_STREAM).bind(('127.0.0.1', 0))"
+        ),
+        ("import socket; socket.SocketType(socket.AF_INET6, socket.SOCK_STREAM).bind(('::1', 0))"),
         ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).listen()"),
         ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM).listen()"),
         ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).accept()"),
@@ -570,9 +626,21 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
 
 
 def test_git_rejects_non_file_transport(tmp_path: Path) -> None:
+    poisoned_template = tmp_path / "poisoned-template"
+    poisoned_hook = poisoned_template / "hooks" / "ambient-hook"
+    poisoned_hook.parent.mkdir(parents=True)
+    poisoned_hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    base_env = dict(os.environ)
+    base_env.update(
+        {
+            "GIT_TEMPLATE_DIR": str(poisoned_template),
+            "git_template_dir": str(poisoned_template),
+            "Git_Template_Dir": str(poisoned_template),
+        }
+    )
     isolated = IsolatedApmEnvironment.create(
         tmp_path / "scenario",
-        base_env=os.environ,
+        base_env=base_env,
     )
 
     bare_repository = isolated.repository_root / "allowed.git"
@@ -585,6 +653,7 @@ def test_git_rejects_non_file_transport(tmp_path: Path) -> None:
         check=False,
     )
     assert init_result.returncode == 0, init_result.stderr
+    assert not (bare_repository / "hooks" / poisoned_hook.name).exists()
 
     file_result = subprocess.run(
         ["git", "ls-remote", bare_repository.as_uri(), "HEAD"],
