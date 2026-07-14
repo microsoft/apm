@@ -2,15 +2,11 @@
 
 from __future__ import annotations as _annotations
 
-from collections.abc import Callable as _Callable
 from dataclasses import dataclass as _dataclass
 from pathlib import Path as _Path
-from typing import TYPE_CHECKING as _TYPE_CHECKING
-from typing import TypeAlias as _TypeAlias
 
-if _TYPE_CHECKING:
-    from tests.utils.apm_lifecycle_runner import CommandResult as _CommandResult
-    from tests.utils.artifact_snapshot import ArtifactSnapshot as _ArtifactSnapshot
+from tests.utils.apm_lifecycle_runner import CommandResult as _CommandResult
+from tests.utils.artifact_snapshot import ArtifactSnapshot as _ArtifactSnapshot
 
 
 @_dataclass(frozen=True)
@@ -30,14 +26,10 @@ class ScenarioObservation:
     snapshots: tuple[_ArtifactSnapshot, ...]
 
 
-ScenarioAssertion: _TypeAlias = _Callable[[ScenarioObservation], None]
-
-
 @_dataclass(frozen=True)
 class ScenarioRow:
-    """Compose source inputs, lifecycle actions, and scenario assertions."""
+    """Compose source inputs and expected lifecycle actions."""
 
     id: str
     source_inputs: tuple[_Path, ...]
     lifecycle_actions: tuple[LifecycleAction, ...]
-    assertions: tuple[ScenarioAssertion, ...]

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import (
     ArtifactSnapshot,
     assert_paths_absent,
@@ -49,25 +49,6 @@ class _LifecycleReceipt:
     git_source: str
     skill_name: str
     instruction_name: str
-
-
-def _command_evidence(result: CommandResult) -> str:
-    return (
-        f"command={result.command!r}\n"
-        f"returncode={result.returncode}\n"
-        f"stdout={result.stdout!r}\n"
-        f"stderr={result.stderr!r}"
-    )
-
-
-def _assert_action_results(
-    row: ScenarioRow,
-    results: tuple[CommandResult, ...],
-) -> None:
-    assert len(results) == len(row.lifecycle_actions)
-    for action, result in zip(row.lifecycle_actions, results, strict=True):
-        if result.returncode != action.expected_returncode:
-            raise AssertionError(_command_evidence(result))
 
 
 def _fingerprint(snapshot: ArtifactSnapshot, relative_path: str) -> str:
@@ -164,15 +145,15 @@ def _run_lifecycle_scenario(
             LifecycleAction(("pack", "--offline")),
             LifecycleAction(_AUDIT_ARGS),
         ),
-        assertions=(),
     )
 
     results = ApmLifecycleRunner().run_sequence(
         tuple(action.args for action in row.lifecycle_actions),
+        expected_returncodes=tuple(action.expected_returncode for action in row.lifecycle_actions),
+        scenario_id=row.id,
         cwd=project.root,
         env=environment,
     )
-    _assert_action_results(row, results)
 
     source_after = ArtifactSnapshot.capture(dependency.root)
     project_snapshot = ArtifactSnapshot.capture(project.root)
@@ -353,12 +334,21 @@ def test_concurrent_real_lifecycles_are_worker_isolated(
         )
 
 
-@pytest.mark.parametrize("mutation", ("deployed-file", "lockfile-hash"))
-def test_genuine_generated_artifact_negative_twins_retain_evidence(
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "deployed-file",
+        "resolved-ref",
+        "resolved-commit",
+        "content-hash",
+        "source-identity",
+    ),
+)
+def test_generated_artifact_tampering_reports_cause_and_recovers(
     tmp_path: Path,
     mutation: str,
 ) -> None:
-    scenario_id = mutation.replace("-file", "").replace("-hash", "")
+    scenario_id = mutation
     receipt = _run_lifecycle_scenario(
         tmp_path / scenario_id,
         scenario_id,
@@ -367,43 +357,108 @@ def test_genuine_generated_artifact_negative_twins_retain_evidence(
     _assert_lifecycle_receipt(receipt)
     project_root = receipt.row.source_inputs[1].parent
     instruction_path = f".github/instructions/{receipt.instruction_name}.instructions.md"
+    lock_path = project_root / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    locked_dependency = lock["dependencies"][0]
 
     if mutation == "deployed-file":
         (project_root / instruction_path).write_text(
             "# Mutated generated deployment\n",
             encoding="utf-8",
         )
+    elif mutation == "resolved-ref":
+        locked_dependency["resolved_ref"] = "0" * 40
+        dump_yaml(lock, lock_path)
+    elif mutation == "resolved-commit":
+        locked_dependency["resolved_commit"] = "0" * 40
+        dump_yaml(lock, lock_path)
+    elif mutation == "content-hash":
+        locked_dependency["content_hash"] = f"sha256:{'0' * 64}"
+        dump_yaml(lock, lock_path)
     else:
-        lock_path = project_root / "apm.lock.yaml"
-        lock = load_yaml(lock_path)
-        lock["dependencies"][0]["resolved_ref"] = "0" * 40
+        locked_dependency["host"] = "attacker.invalid"
+        locked_dependency["repo_url"] = "attacker/other"
         dump_yaml(lock, lock_path)
 
-    failing_action = LifecycleAction(
-        ("audit", "--ci", "--no-policy"),
-        expected_returncode=1,
-    )
-    failing_row = ScenarioRow(
-        id=f"{scenario_id}-negative",
-        source_inputs=receipt.row.source_inputs,
-        lifecycle_actions=(failing_action,),
-        assertions=(),
-    )
-    result = ApmLifecycleRunner().run(
-        failing_action.args,
-        cwd=project_root,
-        env=receipt.isolated.subprocess_env(),
-    )
-    _assert_action_results(failing_row, (result,))
-    assert result.stdout
-    assert result.stderr
+    runner = ApmLifecycleRunner()
+    environment = receipt.isolated.subprocess_env()
+    if mutation == "content-hash":
+        result = runner.run_sequence(
+            (("install", "--target", "copilot", "--frozen"),),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-negative",
+            cwd=project_root,
+            env=environment,
+        )[0]
+        normalized_stdout = " ".join(result.stdout.split())
+        assert "Content hash mismatch" in normalized_stdout
+        assert f"expected sha256:{'0' * 64}" in normalized_stdout
+        assert "This may indicate a supply-chain attack." in normalized_stdout
+        assert "Use 'apm install --update' to accept new content" in normalized_stdout
+        assert result.stderr == ""
+    else:
+        result = runner.run_sequence(
+            (("audit", "--ci", "--no-policy", "--format", "json"),),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-negative",
+            cwd=project_root,
+            env=environment,
+        )[0]
+        payload = json.loads(result.stdout)
+        failed_checks = {check["name"]: check for check in payload["checks"] if not check["passed"]}
+        assert result.stdout.lstrip().startswith("{")
+        assert "[x]" not in result.stdout
+        assert "[>] Replaying install (cache-only)..." in result.stderr
+        if mutation == "deployed-file":
+            assert set(failed_checks) == {"content-integrity", "drift"}
+            assert instruction_path in failed_checks["content-integrity"]["details"][0]
+            assert (
+                "'apm install' to restore drifted files"
+                in (failed_checks["content-integrity"]["message"])
+            )
+        elif mutation == "resolved-ref":
+            assert set(failed_checks) == {"ref-consistency"}
+            assert failed_checks["ref-consistency"]["details"] == [
+                f"gitlab.example.invalid/group/fixture-{scenario_id}: "
+                f"manifest ref '{receipt.commit_sha}' != lockfile ref '{'0' * 40}'"
+            ]
+        elif mutation == "resolved-commit":
+            assert set(failed_checks) == {"ref-consistency"}
+            assert failed_checks["ref-consistency"]["details"] == [
+                f"gitlab.example.invalid/group/fixture-{scenario_id}: "
+                f"manifest commit '{receipt.commit_sha}' != "
+                f"lockfile resolved_commit '{'0' * 40}'"
+            ]
+        else:
+            assert set(failed_checks) == {"ref-consistency"}
+            assert failed_checks["ref-consistency"]["details"] == [
+                f"gitlab.example.invalid/group/fixture-{scenario_id}: not found in lockfile"
+            ]
 
-    unexpected_success_row = ScenarioRow(
-        id=f"{scenario_id}-unexpected-success",
-        source_inputs=receipt.row.source_inputs,
-        lifecycle_actions=(LifecycleAction(failing_action.args),),
-        assertions=(),
-    )
-    with pytest.raises(AssertionError) as exc_info:
-        _assert_action_results(unexpected_success_row, (result,))
-    assert str(exc_info.value) == _command_evidence(result)
+    recovery_args = ["install", "--target", "copilot"]
+    if mutation in {"content-hash", "resolved-commit", "source-identity"}:
+        recovery_args.append("--update")
+    recovery = runner.run_sequence(
+        (tuple(recovery_args),),
+        expected_returncodes=(0,),
+        scenario_id=f"{scenario_id}-recovery",
+        cwd=project_root,
+        env=environment,
+    )[0]
+    assert recovery.stdout
+    assert recovery.stderr == ""
+
+    clean_audit = runner.run_sequence(
+        (("audit", "--ci", "--no-policy", "--format", "json"),),
+        expected_returncodes=(0,),
+        scenario_id=f"{scenario_id}-clean",
+        cwd=project_root,
+        env=environment,
+    )[0]
+    clean_payload = json.loads(clean_audit.stdout)
+    assert clean_payload["passed"] is True
+    repaired_dependency = load_yaml(lock_path)["dependencies"][0]
+    assert repaired_dependency["host"] == "gitlab.example.invalid"
+    assert repaired_dependency["repo_url"] == f"group/fixture-{scenario_id}"
+    assert repaired_dependency["resolved_commit"] == receipt.commit_sha
+    assert repaired_dependency["content_hash"] != f"sha256:{'0' * 64}"

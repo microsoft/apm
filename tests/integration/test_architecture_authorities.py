@@ -34,6 +34,22 @@ def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
     assert "Approval fallback outcomes must use policy/outcome_routing.py" in guard
 
 
+def test_object_git_dependency_fields_have_single_owner() -> None:
+    """Fixture authoring must consume the product parser's field vocabulary."""
+    root = Path(__file__).parents[2]
+    object_fields = (root / "src/apm_cli/models/dependency/object_fields.py").read_text()
+    parser = (root / "src/apm_cli/models/dependency/reference.py").read_text()
+    fixture = (root / "tests/utils/local_package.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def reject_unknown_git_fields" in object_fields
+    assert "reject_unknown_git_fields(entry, parent=True)" in parser
+    assert "reject_unknown_git_fields(entry, parent=False)" in parser
+    assert "reject_unknown_fields" not in fixture
+    assert "_GIT_DEPENDENCY_FIELDS" not in fixture
+    assert "Object-form Git dependency fields must come from the product parser" in guard
+
+
 def _load_skill_subset_owner_checker() -> ModuleType:
     """Import scripts/check_skill_subset_owner.py as a standalone module.
 

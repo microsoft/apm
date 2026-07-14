@@ -80,33 +80,105 @@ uv run pytest tests/integration -m requires_github_token -v
 ### Hermetic lifecycle fixtures
 
 `tests/integration/test_hermetic_lifecycle_foundation.py` is the cross-module
-contract. It directly imports six flat utilities:
+contract. Complete the [development setup](./development-guide/) first, then
+directly import the flat utility that owns each concern:
 
-```text
-tests/utils/isolated_apm_environment.py
-tests/utils/local_git_repository.py
-tests/utils/local_package.py
-tests/utils/apm_lifecycle_runner.py
-tests/utils/artifact_snapshot.py
-tests/utils/scenario_rows.py
-```
+| Utility | Contract test |
+| --- | --- |
+| `tests/utils/isolated_apm_environment.py` | `test_isolated_apm_environment_contract.py` |
+| `tests/utils/local_git_repository.py` | `test_local_git_repository_factory_contract.py` |
+| `tests/utils/local_package.py` | `test_local_package_factory_contract.py` |
+| `tests/utils/apm_lifecycle_runner.py` | `test_apm_lifecycle_runner_contract.py` |
+| `tests/utils/artifact_snapshot.py` | `test_artifact_snapshot_contract.py` |
+| `tests/utils/scenario_rows.py` | `test_scenario_rows_contract.py` |
 
 Source fixtures author only source inputs; the real APM CLI creates lockfiles,
 deployed trees, compiled output, bundles, hashes, cache state, and audit
 reports.
 
-`IsolatedApmEnvironment` provides bounded Python-process
-environment/filesystem isolation, not an OS/native-code sandbox.
-`GIT_ALLOW_PROTOCOL=file` and local `url.*.insteadOf` rewriting bound native
-Git transport to the file-only protocol.
+`IsolatedApmEnvironment` sanitizes child environments and installs a
+best-effort Python socket tripwire. It is not an OS/native-code sandbox:
+executables found through `PATH` remain trusted, reflective access to CPython
+internals or native extensions can bypass Python monkey-patches, `file://`
+access is not confined by the OS, and hostile post-creation filesystem races
+are outside the contract. `GIT_ALLOW_PROTOCOL=file` and local
+`url.*.insteadOf` rewriting separately restrict Git transport in reviewed
+scenarios.
 
 Keep modules flat: no facade, base class, registry, or shared DSL. Command
 failures retain command, return code, stdout, and stderr evidence. Hermetic
 tests require no network or token marker.
 
-Run serially or with xdist enabled:
+Inside a pytest test that accepts `tmp_path`, compose the utilities explicitly:
+
+```python
+import os
+import subprocess
+
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.artifact_snapshot import ArtifactSnapshot
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.local_git_repository import LocalGitRepositoryFactory
+from tests.utils.local_package import LocalPackageFactory
+from tests.utils.scenario_rows import LifecycleAction, ScenarioRow
+
+isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=os.environ)
+environment = isolated.subprocess_env()
+sources = LocalPackageFactory(isolated.package_root)
+dependency = sources.create("fixture")
+sources.add_skill(
+    dependency,
+    "example",
+    "---\nname: example\ndescription: Fixture\n---\n# Example\n",
+)
+repositories = LocalGitRepositoryFactory(
+    isolated.repository_root,
+    env=environment,
+)
+repository = repositories.create("fixture", source_tree=dependency.root)
+commit = repositories.commit(repository, message="seed")
+git_source = "git@gitlab.example.invalid:group/fixture.git"
+subprocess.run(
+    ("git", "config", "--global", f"url.{repository.file_url}.insteadOf", git_source),
+    env=environment,
+    check=True,
+    timeout=30,
+)
+project = LocalPackageFactory(isolated.work_root).create(
+    "consumer",
+    dependencies=({"git": git_source, "type": "gitlab", "ref": commit.sha},),
+    targets=("copilot",),
+)
+row = ScenarioRow(
+    id="example",
+    source_inputs=(dependency.root, project.manifest_path),
+    lifecycle_actions=(LifecycleAction(("install", "--target", "copilot")),),
+)
+results = ApmLifecycleRunner().run_sequence(
+    tuple(action.args for action in row.lifecycle_actions),
+    expected_returncodes=tuple(action.expected_returncode for action in row.lifecycle_actions),
+    scenario_id=row.id,
+    cwd=project.root,
+    env=environment,
+)
+snapshot = ArtifactSnapshot.capture(project.root)
+assert results[0].returncode == 0
+assert "apm.lock.yaml" in snapshot.paths
+```
+
+`ApmLifecycleRunner()` invokes `apm` through `PATH`; under
+`uv run --extra dev pytest`, this is the development environment's console
+script. Pass `(sys.executable, "-m", "apm_cli.cli")` to run the source module.
+To test a packaged standalone binary, build it or set `APM_BINARY_PATH`, then
+pass `(str(apm_binary_path),)`.
+
+Run the changed utility contract first, then the cross-module contract serially
+and with xdist:
 
 ```bash
+# One utility contract
+uv run pytest tests/integration/test_local_package_factory_contract.py -v
+
 # Serial
 uv run pytest tests/integration/test_hermetic_lifecycle_foundation.py -v
 

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
-from tests.utils.local_git_repository import LocalGitRepositoryFactory
+from tests.utils.local_git_repository import (
+    GitCommit,
+    LocalGitRepository,
+    LocalGitRepositoryFactory,
+)
+
+_GIT_TIMEOUT_SECONDS = 10.0
 
 
 def _git_environment(tmp_path: Path) -> dict[str, str]:
@@ -38,6 +46,7 @@ def _run_git(
         capture_output=True,
         text=True,
         check=check,
+        timeout=_GIT_TIMEOUT_SECONDS,
     )
 
 
@@ -157,6 +166,8 @@ def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
 
     assert not (tmp_path / "outside.git").exists()
     assert not (tmp_path / "outside-worktree").exists()
+    with pytest.raises(FileExistsError, match="origin already exists"):
+        factory.create("package")
 
 
 def test_relative_root_resolves_once_at_the_intended_location(
@@ -357,3 +368,113 @@ def test_tag_advancement_is_explicit_and_observable(tmp_path: Path) -> None:
         environment=environment,
     )
     assert advanced_tag.stdout.split()[0] == second.sha
+
+
+def test_repository_and_commit_records_are_immutable_and_factory_owned(
+    tmp_path: Path,
+) -> None:
+    environment = _git_environment(tmp_path)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    (repository.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    commit = factory.commit(repository, message="seed")
+
+    with pytest.raises(FrozenInstanceError):
+        repository.origin = tmp_path / "retargeted.git"
+    with pytest.raises(FrozenInstanceError):
+        commit.sha = "0" * 40
+
+    forged_repository = LocalGitRepository(
+        origin=repository.origin,
+        worktree=repository.worktree,
+    )
+    with pytest.raises(ValueError, match="not owned"):
+        factory.commit(forged_repository, message="forged")
+    forged_commit = GitCommit(sha=commit.sha, message=commit.message)
+    with pytest.raises(ValueError, match="not owned"):
+        factory.tag(repository, "forged", forged_commit)
+
+    foreign_factory = LocalGitRepositoryFactory(
+        tmp_path / "foreign-repositories",
+        env=environment,
+    )
+    foreign_repository = foreign_factory.create("foreign")
+    with pytest.raises(ValueError, match="not owned"):
+        factory.commit(foreign_repository, message="foreign")
+
+    outside = tmp_path / "outside-worktree"
+    outside.mkdir()
+    shutil.rmtree(repository.worktree)
+    repository.worktree.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match=r"outside|symlinked repository path"):
+        factory.commit(repository, message="escaped")
+
+
+def test_create_rejects_preexisting_and_symlinked_paths(tmp_path: Path) -> None:
+    environment = _git_environment(tmp_path)
+    repositories = tmp_path / "repositories"
+    repositories.mkdir()
+    factory = LocalGitRepositoryFactory(repositories, env=environment)
+
+    (repositories / "existing-worktree").mkdir()
+    with pytest.raises(FileExistsError, match="worktree already exists"):
+        factory.create("existing")
+    assert not (repositories / "existing.git").exists()
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    linked_root = tmp_path / "linked-root"
+    linked_root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlinked repository factory root"):
+        LocalGitRepositoryFactory(linked_root, env=environment)
+
+    (repositories / "linked.git").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(FileExistsError, match="origin already exists"):
+        factory.create("linked")
+    assert not (repositories / "linked-worktree").exists()
+
+    source_tree = tmp_path / "source"
+    source_tree.mkdir()
+    (source_tree / "apm.yml").write_text("name: linked-source\n", encoding="utf-8")
+    (source_tree / "escaped").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlinked source tree"):
+        factory.create("linked-source", source_tree=source_tree)
+    assert not (repositories / "linked-source.git").exists()
+    assert not (repositories / "linked-source-worktree").exists()
+
+
+def test_factory_passes_bounded_timeout_to_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = _git_environment(tmp_path)
+    timeout_seconds = 0.5
+    observed_timeouts: list[float | None] = []
+
+    def timeout_run(
+        command: tuple[str, ...],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        timeout = kwargs.get("timeout")
+        observed_timeouts.append(timeout if isinstance(timeout, float) else None)
+        raise subprocess.TimeoutExpired(command, timeout_seconds)
+
+    monkeypatch.setattr(
+        "tests.utils.local_git_repository.subprocess.run",
+        timeout_run,
+    )
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+        timeout_seconds=timeout_seconds,
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        factory.create("timeout")
+    assert observed_timeouts == [timeout_seconds]

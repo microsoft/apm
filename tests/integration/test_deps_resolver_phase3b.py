@@ -738,7 +738,7 @@ class TestResolverBuildDependencyTree:
             {
                 "name": "bad-pkg",
                 "version": "1.0.0",
-                "dependencies": {"apm": [{"git": "parent", "path": "sub/dir", "name": "sub-dep"}]},
+                "dependencies": {"apm": [{"git": "parent", "path": "sub/dir"}]},
             },
         )
         resolver = APMDependencyResolver()

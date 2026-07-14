@@ -94,7 +94,8 @@ def _check_ref_consistency(
     manifest: APMPackage,
     lock: LockFile,
 ) -> CheckResult:
-    """Verify every dependency's manifest ref matches lockfile resolved_ref."""
+    """Verify manifest refs match the lockfile's resolved ref and commit."""
+    from ..deps.revision_pins import is_full_revision_pin
     from ..drift import detect_ref_change
 
     mismatches: list[str] = []
@@ -103,6 +104,14 @@ def _check_ref_consistency(
         locked_dep = lock.get_dependency(key)
         if locked_dep is None:
             mismatches.append(f"{key}: not found in lockfile")
+            continue
+        if is_full_revision_pin(dep_ref.reference) and (
+            locked_dep.resolved_commit != dep_ref.reference
+        ):
+            mismatches.append(
+                f"{key}: manifest commit '{dep_ref.reference}' != "
+                f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
+            )
             continue
         if detect_ref_change(dep_ref, locked_dep):
             manifest_ref = dep_ref.reference or "(default branch)"

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Object-form Git dependencies now reject unsupported keys instead of silently
+  ignoring them; use `ref` rather than `version`, and omit inert `name` fields
+  from `git: parent`. CI audit also rejects full-SHA pins whose
+  `resolved_commit` was altered, while source-identity repair preserves files
+  freshly redeployed under the canonical identity. (#2209)
+
 ### Fixed
 
 - Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).

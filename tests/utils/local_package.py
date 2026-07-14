@@ -12,7 +12,6 @@ import yaml
 
 from apm_cli.core.apm_yml import parse_targets_field
 from apm_cli.models.dependency import DependencyReference
-from apm_cli.models.dependency.object_fields import reject_unknown_fields
 from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml, load_yaml_str, yaml_to_str
 
@@ -23,17 +22,6 @@ _SKILL_LAYOUT = "skill"
 _AGENT_LAYOUT = "agent"
 _INSTRUCTION_LAYOUT = "instruction"
 _PRIMITIVE_LAYOUTS = frozenset({_SKILL_LAYOUT, _AGENT_LAYOUT, _INSTRUCTION_LAYOUT})
-_GIT_DEPENDENCY_FIELDS = {
-    "git",
-    "type",
-    "path",
-    "ref",
-    "allow_insecure",
-    "alias",
-    "skills",
-    "targets",
-}
-_PARENT_GIT_DEPENDENCY_FIELDS = {"git", "path", "ref", "alias"}
 
 
 @dataclass(frozen=True)
@@ -298,15 +286,7 @@ class LocalPackageFactory:
                 source_entry: str | dict[str, object] = entry
             elif isinstance(entry, Mapping):
                 source_entry = dict(entry)
-                if source_entry.get("git") == "parent":
-                    reject_unknown_fields(
-                        source_entry,
-                        _PARENT_GIT_DEPENDENCY_FIELDS,
-                        "parent git",
-                    )
                 dependency = DependencyReference.parse_from_dict(source_entry)
-                if "git" in source_entry:
-                    reject_unknown_fields(source_entry, _GIT_DEPENDENCY_FIELDS, "git")
             else:
                 raise TypeError("APM dependency entries must be strings or mappings")
             roundtrip_document = load_yaml_str(yaml_to_str({"dependency": source_entry}))

@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
+
 
 @dataclass(frozen=True)
 class GitCommit:
@@ -31,9 +33,20 @@ class LocalGitRepository:
 class LocalGitRepositoryFactory:
     """Create and advance deterministic local Git repository fixtures."""
 
-    def __init__(self, root: Path, *, env: Mapping[str, str]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        env: Mapping[str, str],
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        if root.is_symlink():
+            raise ValueError(f"Refusing symlinked repository factory root: {root}")
         self._root = root.resolve()
         self._env = dict(env)
+        self._timeout_seconds = timeout_seconds
+        self._repositories: dict[int, LocalGitRepository] = {}
+        self._commits: dict[int, GitCommit] = {}
         self._root.mkdir(parents=True, exist_ok=True)
 
     def create(
@@ -45,9 +58,18 @@ class LocalGitRepositoryFactory:
         """Create a bare origin and working repository under the factory root."""
         if not name or "/" in name or "\\" in name or ":" in name or name in {".", ".."}:
             raise ValueError(f"Unsafe repository name: {name!r}")
+        validate_path_segments(name, context="repository name", reject_empty=True)
 
         origin = self._root / f"{name}.git"
         worktree = self._root / f"{name}-worktree"
+        if origin.exists() or origin.is_symlink():
+            raise FileExistsError(f"Repository origin already exists: {origin}")
+        if worktree.exists() or worktree.is_symlink():
+            raise FileExistsError(f"Repository worktree already exists: {worktree}")
+        ensure_path_within(origin, self._root)
+        ensure_path_within(worktree, self._root)
+        if source_tree is not None:
+            self._validate_source_tree(source_tree)
         self._run(
             ("git", "init", "--bare", "--initial-branch=main", str(origin)),
             cwd=self._root,
@@ -68,6 +90,7 @@ class LocalGitRepositoryFactory:
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns(".git"),
             )
+        self._repositories[id(repository)] = repository
         return repository
 
     def commit(
@@ -77,6 +100,7 @@ class LocalGitRepositoryFactory:
         message: str,
     ) -> GitCommit:
         """Commit all working-tree changes and publish the main branch."""
+        repository = self._owned_repository(repository)
         self._run(("git", "add", "--all"), cwd=repository.worktree)
         self._run(("git", "commit", "-m", message), cwd=repository.worktree)
         sha = self._run(
@@ -87,7 +111,9 @@ class LocalGitRepositoryFactory:
             ("git", "push", "origin", "HEAD:refs/heads/main"),
             cwd=repository.worktree,
         )
-        return GitCommit(sha=sha, message=message)
+        commit = GitCommit(sha=sha, message=message)
+        self._commits[id(commit)] = commit
+        return commit
 
     def tag(
         self,
@@ -96,6 +122,8 @@ class LocalGitRepositoryFactory:
         target: GitCommit,
     ) -> None:
         """Create and publish a tag at the target commit."""
+        repository = self._owned_repository(repository)
+        target = self._owned_commit(target)
         self._run(
             ("git", "tag", name, target.sha),
             cwd=repository.worktree,
@@ -112,6 +140,8 @@ class LocalGitRepositoryFactory:
         target: GitCommit,
     ) -> None:
         """Force an existing local and remote tag to the target commit."""
+        repository = self._owned_repository(repository)
+        target = self._owned_commit(target)
         self._run(
             ("git", "tag", "--force", name, target.sha),
             cwd=repository.worktree,
@@ -134,4 +164,36 @@ class LocalGitRepositoryFactory:
             capture_output=True,
             text=True,
             check=True,
+            timeout=self._timeout_seconds,
         )
+
+    def _owned_repository(self, repository: LocalGitRepository) -> LocalGitRepository:
+        if self._repositories.get(id(repository)) is not repository:
+            raise ValueError("Local Git repository is not owned by this factory")
+        ensure_path_within(repository.origin, self._root)
+        ensure_path_within(repository.worktree, self._root)
+        self._reject_symlink_components(repository.origin)
+        self._reject_symlink_components(repository.worktree)
+        return repository
+
+    def _owned_commit(self, commit: GitCommit) -> GitCommit:
+        if self._commits.get(id(commit)) is not commit:
+            raise ValueError("Git commit is not owned by this factory")
+        return commit
+
+    def _validate_source_tree(self, source_tree: Path) -> None:
+        if source_tree.is_symlink() or not source_tree.is_dir():
+            raise ValueError(f"Source tree must be a non-symlink directory: {source_tree}")
+        for source_path in source_tree.rglob("*"):
+            if source_path.is_symlink():
+                raise ValueError(f"Refusing symlinked source tree path: {source_path}")
+
+    def _reject_symlink_components(self, path: Path) -> None:
+        relative = path.relative_to(self._root)
+        current = self._root
+        if current.is_symlink():
+            raise ValueError(f"Refusing symlinked repository path: {current}")
+        for part in relative.parts:
+            current /= part
+            if current.is_symlink():
+                raise ValueError(f"Refusing symlinked repository path: {current}")

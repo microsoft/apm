@@ -9,11 +9,16 @@ from types import MappingProxyType
 
 _NETWORK_GUARD = """\
 import _socket
+import builtins
+import importlib
 import socket
+import sys
 
 _MESSAGE = "IP network disabled by test environment"
 _REAL_SOCKET = socket.socket
 _REAL_RAW_SOCKET = _socket.socket
+_REAL_IMPORT = builtins.__import__
+_REAL_IMPORT_MODULE = importlib.import_module
 
 
 class _GuardedSocketOperations:
@@ -68,20 +73,43 @@ def _deny_network(*args, **kwargs):
     raise OSError(_MESSAGE)
 
 
+def _guard_raw_socket_module(module):
+    module.socket = _GuardedRawSocket
+    module.SocketType = _GuardedRawSocket
+    module.getaddrinfo = _deny_network
+    module.gethostbyaddr = _deny_network
+    module.gethostbyname = _deny_network
+    module.gethostbyname_ex = _deny_network
+    module.getnameinfo = _deny_network
+
+
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    imported = _REAL_IMPORT(name, globals, locals, fromlist, level)
+    if name == "_socket":
+        module = sys.modules.get("_socket")
+        if module is not None:
+            _guard_raw_socket_module(module)
+    return imported
+
+
+def _guarded_import_module(name, package=None):
+    imported = _REAL_IMPORT_MODULE(name, package)
+    if name == "_socket":
+        _guard_raw_socket_module(imported)
+    return imported
+
+
 socket.socket = _GuardedSocket
 socket.SocketType = _GuardedSocket
-_socket.socket = _GuardedRawSocket
-_socket.getaddrinfo = _deny_network
-_socket.gethostbyaddr = _deny_network
-_socket.gethostbyname = _deny_network
-_socket.gethostbyname_ex = _deny_network
-_socket.getnameinfo = _deny_network
+_guard_raw_socket_module(_socket)
 socket.create_connection = _deny_network
 socket.getaddrinfo = _deny_network
 socket.gethostbyaddr = _deny_network
 socket.gethostbyname = _deny_network
 socket.gethostbyname_ex = _deny_network
 socket.getnameinfo = _deny_network
+builtins.__import__ = _guarded_import
+importlib.import_module = _guarded_import_module
 """
 
 _SECRET_ENV_NAMES = frozenset(
@@ -89,7 +117,14 @@ _SECRET_ENV_NAMES = frozenset(
         "ACTIONS_ID_TOKEN_REQUEST_URL",
         "GITHUB_MODELS_KEY",
         "GIT_ASKPASS",
+        "GIT_HTTP_EXTRAHEADER",
         "GIT_TOKEN",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AZURE_FEDERATED_TOKEN_FILE",
+        "DOCKER_AUTH_CONFIG",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_GHA_CREDS_PATH",
         "SSH_AGENT_PID",
         "SSH_ASKPASS",
         "SSH_AUTH_SOCK",

@@ -113,6 +113,33 @@ class TestGitParentParse:
                 {"git": "parent", "path": "a", "alias": "bad alias"}
             )
 
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        (
+            ("allow_insecure", True),
+            ("name", "shared"),
+            ("resolved_commit", "a" * 40),
+            ("skills", ["shared"]),
+            ("targets", ["copilot"]),
+        ),
+    )
+    def test_rejects_fields_outside_parent_git_vocabulary(
+        self,
+        field: str,
+        value: object,
+    ) -> None:
+        with pytest.raises(
+            ValueError,
+            match=r"Unsupported field\(s\) for parent git dependency",
+        ):
+            DependencyReference.parse_from_dict(
+                {
+                    "git": "parent",
+                    "path": "skills/shared",
+                    field: value,
+                }
+            )
+
     def test_does_not_expand_repo_coordinates(self):
         """Parsing must not set real host/repo; resolver expands later."""
         dep = DependencyReference.parse_from_dict({"git": "parent", "path": "skills/shared"})

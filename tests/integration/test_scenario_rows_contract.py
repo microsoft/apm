@@ -1,21 +1,17 @@
-from collections.abc import Callable
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
-from typing import get_args, get_origin
+from typing import get_type_hints
 
 import pytest
 
 from tests.utils import scenario_rows
+from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.artifact_snapshot import ArtifactSnapshot
 from tests.utils.scenario_rows import (
     LifecycleAction,
-    ScenarioAssertion,
     ScenarioObservation,
     ScenarioRow,
 )
-
-
-def _named_assertion(observation: object) -> None:
-    assert observation is not None
 
 
 def _public_callable_names(value: object) -> set[str]:
@@ -36,15 +32,12 @@ def test_row_is_frozen_plain_data(tmp_path: Path) -> None:
         id="bare-skill",
         source_inputs=observation.source_inputs,
         lifecycle_actions=(action,),
-        assertions=(_named_assertion,),
     )
 
     assert row.id == "bare-skill"
     assert row.source_inputs == (source_input,)
     assert row.lifecycle_actions == (action,)
     assert row.lifecycle_actions[0].expected_returncode == 0
-    assert row.assertions[0].__name__ == "_named_assertion"
-    row.assertions[0](observation)
 
     with pytest.raises(FrozenInstanceError):
         row.id = "changed"
@@ -68,17 +61,16 @@ def test_row_records_and_module_expose_only_reviewed_contract() -> None:
         "id",
         "source_inputs",
         "lifecycle_actions",
-        "assertions",
     )
 
-    expected_assertion = Callable[[ScenarioObservation], None]
-    assert ScenarioAssertion == expected_assertion
-    assert get_origin(ScenarioAssertion) is Callable
-    assert get_args(ScenarioAssertion) == ([ScenarioObservation], None)
+    assert get_type_hints(ScenarioObservation) == {
+        "source_inputs": tuple[Path, ...],
+        "results": tuple[CommandResult, ...],
+        "snapshots": tuple[ArtifactSnapshot, ...],
+    }
 
     allowed_public_surface = {
         "LifecycleAction",
-        "ScenarioAssertion",
         "ScenarioObservation",
         "ScenarioRow",
     }
@@ -104,7 +96,6 @@ def test_each_record_exposes_only_reviewed_callable_surface(tmp_path: Path) -> N
             id="plain",
             source_inputs=(tmp_path,),
             lifecycle_actions=(),
-            assertions=(),
         ),
     )
     allowed_public_callables = {

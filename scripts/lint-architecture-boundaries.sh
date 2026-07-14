@@ -251,6 +251,33 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
     echo "[x] Audit replay must preserve locked skill subset intent"
     violations=$((violations + 1))
 fi
+dependency_field_owner="src/apm_cli/models/dependency/object_fields.py"
+dependency_parser="src/apm_cli/models/dependency/reference.py"
+dependency_field_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'def reject_unknown_git_fields|_(REMOTE|PARENT)_GIT_DEPENDENCY_FIELDS' \
+        src tests \
+        | grep -v "^${dependency_field_owner}:" \
+        | grep -v '^tests/integration/test_architecture_authorities.py:' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+fixture_dependency_field_hits=$(
+    grep -En \
+        'reject_unknown_fields|_(REMOTE|PARENT)?_?GIT_DEPENDENCY_FIELDS' \
+        tests/utils/local_package.py \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'reject_unknown_git_fields(entry, parent=True)' "$dependency_parser" \
+    || ! grep -q 'reject_unknown_git_fields(entry, parent=False)' "$dependency_parser" \
+    || [ -n "$dependency_field_duplicate_hits" ] \
+    || [ -n "$fixture_dependency_field_hits" ]; then
+    echo "[x] Object-form Git dependency fields must come from the product parser"
+    [ -n "$dependency_field_duplicate_hits" ] && echo "$dependency_field_duplicate_hits"
+    [ -n "$fixture_dependency_field_hits" ] && echo "$fixture_dependency_field_hits"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC5: process-wide I/O boundaries"
 check_pattern \

@@ -314,7 +314,7 @@ class TestDependencyReferenceParsing:
         from apm_cli.models.apm_package import DependencyReference
 
         ref = DependencyReference.parse_from_dict(
-            {"git": "https://github.com/owner/repo", "version": ">=1.0"}
+            {"git": "https://github.com/owner/repo", "ref": "v1.0"}
         )
         assert ref is not None
 

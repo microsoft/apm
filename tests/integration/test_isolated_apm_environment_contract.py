@@ -13,6 +13,7 @@ import pytest
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_SUBPROCESS_TIMEOUT_SECONDS = 10.0
 _ROOT_ATTRIBUTES = (
     "root",
     "home",
@@ -195,6 +196,7 @@ if Path.cwd() != parent_cwd:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     mutated_environment = dict(os.environ)
@@ -206,6 +208,7 @@ if Path.cwd() != parent_cwd:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
     assert mutation_result.returncode != 0
     assert mutation_result.stderr.count("create mutated parent environment") == 1
@@ -276,8 +279,12 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "ACTIONS_RUNTIME_TOKEN",
         "ADO_APM_PAT",
         "ARTIFACTORY_APM_TOKEN",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AZURE_FEDERATED_TOKEN_FILE",
         "AZURE_DEVOPS_EXT_PAT",
         "COPILOT_GITHUB_TOKEN",
+        "DOCKER_AUTH_CONFIG",
         "GH_ENTERPRISE_TOKEN",
         "GH_TOKEN",
         "GITHUB_APM_PAT",
@@ -286,10 +293,13 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GITHUB_MODELS_KEY",
         "GITHUB_PERSONAL_ACCESS_TOKEN",
         "GITHUB_TOKEN",
+        "GIT_HTTP_EXTRAHEADER",
         "GITLAB_APM_PAT",
         "GITLAB_TOKEN",
         "GIT_ASKPASS",
         "GIT_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_GHA_CREDS_PATH",
         "NVIDIA_INFERENCE_KEY",
         "OPENAI_API_KEY",
         "PROXY_REGISTRY_TOKEN",
@@ -474,7 +484,18 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         base_env=ambient_environment,
     )
     environment = isolated.subprocess_env()
-    case_variant_credential_names = ("GIT_TOKEN", "OPENAI_API_KEY", "NVIDIA_INFERENCE_KEY")
+    case_variant_credential_names = (
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AZURE_FEDERATED_TOKEN_FILE",
+        "DOCKER_AUTH_CONFIG",
+        "GIT_HTTP_EXTRAHEADER",
+        "GIT_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_GHA_CREDS_PATH",
+        "NVIDIA_INFERENCE_KEY",
+        "OPENAI_API_KEY",
+    )
     case_variant_isolated = IsolatedApmEnvironment.create(
         tmp_path / "case-variant-credentials",
         base_env={name.title(): "ambient" for name in case_variant_credential_names},
@@ -631,6 +652,7 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
     assert local_result.returncode == 0, local_result.stderr
 
@@ -655,6 +677,7 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
     assert local_socket_result.returncode == 0, local_socket_result.stderr
 
@@ -678,6 +701,7 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
     assert direct_local_socket_result.returncode == 0, direct_local_socket_result.stderr
 
@@ -785,10 +809,86 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
 
         assert result.returncode != 0
         assert result.stderr.count("IP network disabled by test environment") == 1
+
+
+@pytest.mark.parametrize(
+    "script",
+    (
+        (
+            "import _socket; "
+            "_socket.SocketType(_socket.AF_INET, _socket.SOCK_STREAM)"
+            ".bind(('127.0.0.1', 0))"
+        ),
+        (
+            "import _socket, sys; "
+            "del sys.modules['_socket']; "
+            "import _socket; "
+            "_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)"
+            ".bind(('127.0.0.1', 0))"
+        ),
+        (
+            "import _socket, importlib, sys; "
+            "del sys.modules['_socket']; "
+            "reloaded = importlib.import_module('_socket'); "
+            "reloaded.SocketType(reloaded.AF_INET, reloaded.SOCK_STREAM)"
+            ".bind(('127.0.0.1', 0))"
+        ),
+    ),
+)
+def test_python_sockettype_and_reimport_bypasses_are_denied(
+    tmp_path: Path,
+    script: str,
+) -> None:
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "scenario",
+        base_env=os.environ,
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+    assert result.returncode != 0
+    assert result.stderr.count("IP network disabled by test environment") == 1
+
+
+def test_python_socket_reimport_preserves_af_unix(tmp_path: Path) -> None:
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "scenario",
+        base_env=os.environ,
+    )
+    script = (
+        "import _socket, os, sys; "
+        "hasattr(_socket, 'AF_UNIX') or sys.exit(0); "
+        "del sys.modules['_socket']; "
+        "import _socket; "
+        "path = 'reimported-local.sock'; "
+        "server = _socket.SocketType(_socket.AF_UNIX, _socket.SOCK_STREAM); "
+        "server.bind(path); server.close(); os.unlink(path)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_git_rejects_non_file_transport(tmp_path: Path) -> None:
@@ -817,6 +917,7 @@ def test_git_rejects_non_file_transport(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
     assert init_result.returncode == 0, init_result.stderr
     assert not (bare_repository / "hooks" / poisoned_hook.name).exists()
@@ -828,6 +929,7 @@ def test_git_rejects_non_file_transport(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
     assert file_result.returncode == 0, file_result.stderr
 
@@ -838,6 +940,7 @@ def test_git_rejects_non_file_transport(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     assert result.returncode != 0
