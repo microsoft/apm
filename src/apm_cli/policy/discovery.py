@@ -584,6 +584,7 @@ def _resolve_and_persist_chain(
 
     current = leaf_policy
     incomplete_chain: tuple[str, int, int] | None = None
+    stale_ancestor: PolicyFetchResult | None = None
 
     while current.extends:
         next_ref = current.extends
@@ -623,6 +624,12 @@ def _resolve_and_persist_chain(
             incomplete_chain = (next_ref, resolved, attempted)
             break
 
+        # Keep the nearest stale ancestor's refresh diagnostic. Continue
+        # merging its usable cached policy, but never relabel that ancestry
+        # as fresh or replace a nearer failure with a farther one.
+        if parent_result.outcome == "cached_stale" and stale_ancestor is None:
+            stale_ancestor = parent_result
+
         chain_policies.append(parent_result.policy)
         chain_sources.append(parent_result.source)
         visited.append(next_ref)
@@ -654,7 +661,7 @@ def _resolve_and_persist_chain(
     chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
 
     cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
-    if cache_key and incomplete_chain is None:
+    if cache_key and incomplete_chain is None and stale_ancestor is None:
         _write_cache(
             cache_key,
             merged,
@@ -675,6 +682,13 @@ def _resolve_and_persist_chain(
         return
 
     fetch_result.policy = merged
+    if stale_ancestor is not None:
+        fetch_result.outcome = "cached_stale"
+        fetch_result.fetch_error = stale_ancestor.fetch_error or stale_ancestor.error
+        fetch_result.cached = True
+        fetch_result.cache_stale = True
+        fetch_result.cache_age_seconds = stale_ancestor.cache_age_seconds
+        return
     fetch_result.outcome = "empty" if _is_policy_empty(merged) else "found"
 
 

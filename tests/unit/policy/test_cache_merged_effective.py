@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.install.errors import PolicyViolationError
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,
@@ -46,6 +47,7 @@ from apm_cli.policy.discovery import (
     discover_policy_with_chain,
 )
 from apm_cli.policy.inheritance import merge_policies, resolve_policy_chain  # noqa: F401
+from apm_cli.policy.outcome_routing import route_discovery_outcome
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import (
@@ -1073,6 +1075,74 @@ def test_ado_chain_preserves_backend_for_explicit_and_same_org_parent(
         "dev.azure.com/contoso/governance/policy",
         "dev.azure.com/contoso/_apm/_apm",
     ]
+
+
+@pytest.mark.parametrize("fetch_failure", ["block", "warn"])
+def test_stale_parent_propagates_chain_outcome_without_fresh_leaf_cache(
+    tmp_path: Path,
+    fetch_failure: str,
+) -> None:
+    leaf_ref = "child/.github"
+    parent_ref = "parent/.github"
+    leaf_yaml = f"name: child\nextends: {parent_ref}\n"
+    parent = ApmPolicy(
+        name="stale-parent",
+        enforcement="block",
+        fetch_failure=fetch_failure,
+        dependencies=DependencyPolicy(require_pinned_constraint=True),
+    )
+    stale_age = DEFAULT_CACHE_TTL + 100
+    _setup_cache(
+        parent_ref,
+        tmp_path,
+        parent,
+        cached_at=time.time() - stale_age,
+    )
+
+    def fetch(repo_ref: str, policy_path: str) -> tuple[str | None, str | None]:
+        assert policy_path == "apm-policy.yml"
+        if repo_ref == leaf_ref:
+            return leaf_yaml, None
+        assert repo_ref == parent_ref
+        return None, "503: parent refresh unavailable"
+
+    with patch("apm_cli.policy.discovery._fetch_github_contents", side_effect=fetch):
+        result = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
+
+    assert result.outcome == "cached_stale"
+    assert result.policy is not None
+    assert result.policy.enforcement == "block"
+    assert result.policy.dependencies.require_pinned_constraint is True
+    assert result.cached is True
+    assert result.cache_stale is True
+    assert result.cache_age_seconds is not None
+    assert result.cache_age_seconds >= stale_age
+    assert result.fetch_error == "503: parent refresh unavailable"
+    assert _read_cache_entry(leaf_ref, tmp_path) is None
+
+    logger = MagicMock()
+    if fetch_failure == "block":
+        with pytest.raises(
+            PolicyViolationError, match="cached policy declares fetch_failure=block"
+        ):
+            route_discovery_outcome(
+                result,
+                logger=logger,
+                fetch_failure_default="warn",
+            )
+    else:
+        routed = route_discovery_outcome(
+            result,
+            logger=logger,
+            fetch_failure_default="warn",
+        )
+        assert routed == result.policy
+        logger.policy_resolved.assert_called_once()
+        logger.policy_discovery_miss.assert_called_once_with(
+            outcome="cached_stale",
+            source=result.source,
+            error="503: parent refresh unavailable",
+        )
 
 
 def test_incomplete_chain_does_not_leave_weak_leaf_cache(tmp_path: Path) -> None:
