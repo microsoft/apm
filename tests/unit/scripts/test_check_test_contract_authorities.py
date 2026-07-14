@@ -403,6 +403,40 @@ def test_command_assignment_does_not_leak_between_scopes(tmp_path: Path) -> None
     assert _load_checker().find_binary_selection_violations(tmp_path) == []
 
 
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import subprocess\n"
+        "command = ['apm', '--version']\n"
+        "def run_it():\n"
+        "    return subprocess.run(command)\n",
+        "import subprocess\n"
+        "def outer():\n"
+        "    command = ['apm', '--version']\n"
+        "    def inner():\n"
+        "        return subprocess.run(command)\n"
+        "    return inner()\n",
+        "import subprocess\n"
+        "command = 'apm --version'\n"
+        "def run_it():\n"
+        "    return subprocess.run(command, shell=True)\n",
+    ),
+)
+def test_command_assignment_inherits_into_nested_scopes(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Module and closure command values remain visible to child scopes."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "inherited_command.py"
+    duplicate.write_text(source, encoding="utf-8")
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct apm subprocess selection" in violations[0]
+
+
 def test_probe_list_selector_is_rejected(tmp_path: Path) -> None:
     """Probe-loop selection must use the canonical fixture."""
     _write_owner_stubs(tmp_path)

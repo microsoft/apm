@@ -461,6 +461,38 @@ def _assignment_command_values(
     return lists_by_scope, strings_by_scope
 
 
+def _scope_parent_map(tree: ast.Module) -> dict[int, ast.AST]:
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    scope_parents: dict[int, ast.AST] = {}
+    for scope in (
+        node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        parent = parents.get(scope)
+        while parent is not None and not isinstance(
+            parent,
+            (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef),
+        ):
+            parent = parents.get(parent)
+        if parent is not None:
+            scope_parents[id(scope)] = parent
+    return scope_parents
+
+
+def _scoped_value(
+    name: str,
+    scope: ast.AST,
+    values_by_scope: dict[int, dict[str, object]],
+    scope_parents: dict[int, ast.AST],
+) -> object | None:
+    current: ast.AST | None = scope
+    while current is not None:
+        values = values_by_scope.get(id(current), {})
+        if name in values:
+            return values[name]
+        current = scope_parents.get(id(current))
+    return None
+
+
 def _shell_enabled(call: ast.Call) -> bool:
     return any(
         keyword.arg == "shell"
@@ -472,6 +504,7 @@ def _shell_enabled(call: ast.Call) -> bool:
 
 def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
     bindings_by_scope, scope_by_node = _scope_binding_maps(tree)
+    scope_parents = _scope_parent_map(tree)
     lists_by_scope, strings_by_scope = _assignment_command_values(
         tree,
         scope_by_node,
@@ -512,9 +545,6 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
         if not isinstance(node, ast.Call) or not node.args:
             continue
         scope = scope_by_node.get(id(node), tree)
-        scope_id = id(scope)
-        assigned_lists = lists_by_scope.get(scope_id, {})
-        assigned_strings = strings_by_scope.get(scope_id, {})
         if not _is_subprocess_call(
             node,
             bindings_by_scope.get(id(scope), {}),
@@ -523,13 +553,26 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
         command = node.args[0]
         values = _list_literal_values(command)
         if not values and isinstance(command, ast.Name):
-            values = assigned_lists.get(command.id, [])
+            inherited_list = _scoped_value(
+                command.id,
+                scope,
+                lists_by_scope,
+                scope_parents,
+            )
+            values = inherited_list if isinstance(inherited_list, list) else []
         if values and values[0] in APM_EXECUTABLE_NAMES:
             lines.add(node.lineno)
         if _shell_enabled(node):
             shell_command = _literal_string(command)
             if shell_command is None and isinstance(command, ast.Name):
-                shell_command = assigned_strings.get(command.id)
+                inherited_string = _scoped_value(
+                    command.id,
+                    scope,
+                    strings_by_scope,
+                    scope_parents,
+                )
+                if isinstance(inherited_string, str):
+                    shell_command = inherited_string
             if shell_command is not None:
                 try:
                     shell_tokens = shlex.split(shell_command, posix=True)
