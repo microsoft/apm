@@ -26,7 +26,7 @@ _ROOT_ATTRIBUTES = (
 
 
 def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
-    assert tuple(field.name for field in fields(IsolatedApmEnvironment)) == (
+    expected_fields = (
         "root",
         "home",
         "config_root",
@@ -37,6 +37,23 @@ def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
         "temp_root",
         "process_environment",
     )
+    assert tuple(field.name for field in fields(IsolatedApmEnvironment)) == expected_fields
+    public_methods = {
+        name
+        for name, member in inspect.getmembers(
+            IsolatedApmEnvironment,
+            predicate=inspect.isroutine,
+        )
+        if not name.startswith("_")
+    }
+    public_callables = {
+        name
+        for name in dir(IsolatedApmEnvironment)
+        if not name.startswith("_") and callable(getattr(IsolatedApmEnvironment, name))
+    }
+    assert public_methods == {"create", "subprocess_env"}
+    assert public_callables == {"create", "subprocess_env"}
+    assert set(IsolatedApmEnvironment.__annotations__) == set(expected_fields)
     create_parameters = inspect.signature(IsolatedApmEnvironment.create).parameters
     assert tuple(create_parameters) == ("root", "base_env")
     assert create_parameters["root"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
@@ -53,6 +70,8 @@ def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:
         tmp_path / "second",
         base_env=os.environ,
     )
+    with pytest.raises(AttributeError):
+        first.root = tmp_path / "mutated"
 
     for attribute in _ROOT_ATTRIBUTES:
         assert getattr(first, attribute) != getattr(second, attribute)
