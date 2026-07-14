@@ -203,9 +203,11 @@ if ! grep -q \
     violations=$((violations + 1))
 fi
 cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
-if ! grep -q 'DeploymentReconciler.current_claimed_paths(' "$cleanup_claim_owner" \
-    || grep -q 'for deployed_files in package_deployed_files.values()' "$cleanup_claim_owner"; then
+cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
+cleanup_claim_status=$?
+if [ "$cleanup_claim_status" -ne 0 ]; then
     echo "[x] Cleanup current-claim protection must use DeploymentReconciler"
+    echo "$cleanup_claim_output"
     violations=$((violations + 1))
 fi
 check_pattern \

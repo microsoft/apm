@@ -67,14 +67,36 @@ def test_runner_passes_explicit_cwd_and_environment(tmp_path: Path) -> None:
 
 
 def test_runner_raises_when_configured_timeout_expires(tmp_path: Path) -> None:
-    command = (sys.executable, "-c", "import time; time.sleep(10)")
+    command = (
+        sys.executable,
+        "-c",
+        (
+            "import sys, time; "
+            "print('before-timeout', flush=True); "
+            "print('timeout-stderr', file=sys.stderr, flush=True); "
+            "time.sleep(10)"
+        ),
+    )
     runner = ApmLifecycleRunner(command, timeout_seconds=0.05)
 
     with pytest.raises(subprocess.TimeoutExpired) as exc_info:
-        runner.run((), cwd=tmp_path, env=os.environ)
+        runner.run(
+            (),
+            scenario_id="single-timeout",
+            cwd=tmp_path,
+            env=os.environ,
+        )
 
     assert exc_info.value.cmd == command
     assert exc_info.value.timeout == 0.05
+    assert str(exc_info.value) == (
+        "scenario='single-timeout'\n"
+        f"cwd={str(tmp_path)!r}\n"
+        f"command={command!r}\n"
+        "budget_seconds=0.05\n"
+        "stdout='before-timeout\\n'\n"
+        "stderr='timeout-stderr\\n'"
+    )
 
 
 def test_run_sequence_enforces_one_scenario_deadline(tmp_path: Path) -> None:
@@ -96,6 +118,37 @@ def test_run_sequence_enforces_one_scenario_deadline(tmp_path: Path) -> None:
 
     assert time.monotonic() - started < 0.8
     assert 0 < exc_info.value.timeout < 0.2
+    message = str(exc_info.value)
+    assert "scenario='bounded-sequence'" in message
+    assert f"cwd={str(tmp_path)!r}" in message
+    assert "command=" in message
+    assert "budget_seconds=0.3" in message
+    assert "stdout=" in message
+    assert "stderr=" in message
+
+
+def test_expired_scenario_deadline_reports_context_before_spawn(
+    tmp_path: Path,
+) -> None:
+    runner = ApmLifecycleRunner(scenario_timeout_seconds=0)
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        runner.run_sequence(
+            (("--help",),),
+            expected_returncodes=(0,),
+            scenario_id="already-expired",
+            cwd=tmp_path,
+            env=os.environ,
+        )
+
+    assert str(exc_info.value) == (
+        "scenario='already-expired'\n"
+        f"cwd={str(tmp_path)!r}\n"
+        "command=('apm', '--help')\n"
+        "budget_seconds=0\n"
+        "stdout=''\n"
+        "stderr=''"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group assertion")

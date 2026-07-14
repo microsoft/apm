@@ -53,14 +53,26 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
     """Cleanup must route current deployed-file claims through the reconciler."""
     root = Path(__file__).parents[2]
-    cleanup = (root / "src/apm_cli/install/phases/cleanup.py").read_text()
     owner = (root / "src/apm_cli/core/deployment_state.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_cleanup_claim_owner_checker(root)
 
     assert "def current_claimed_paths" in owner
-    assert "DeploymentReconciler.current_claimed_paths(" in cleanup
-    assert "for deployed_files in package_deployed_files.values()" not in cleanup
+    assert checker.analyze_path(root / "src/apm_cli/install/phases/cleanup.py") == []
+    assert "scripts/check_cleanup_claim_owner.py" in guard
     assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
+
+
+def _load_cleanup_claim_owner_checker(root: Path) -> ModuleType:
+    """Import the semantic cleanup claim-authority checker."""
+    module_name = "check_cleanup_claim_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_skill_subset_owner_checker() -> ModuleType:

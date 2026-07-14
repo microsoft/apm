@@ -127,19 +127,40 @@ _SECRET_ENV_NAMES = frozenset(
         "AWS_SHARED_CREDENTIALS_FILE",
         "AWS_WEB_IDENTITY_TOKEN_FILE",
         "AZURE_CLIENT_CERTIFICATE_PATH",
+        "AZURE_AUTHORITY_HOST",
         "AZURE_FEDERATED_TOKEN_FILE",
         "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
         "CLOUDSDK_CONFIG",
+        "CONTAINERS_REGISTRIES_CONF",
+        "DBUS_SESSION_BUS_ADDRESS",
         "DOCKER_AUTH_CONFIG",
+        "DOCKER_CERT_PATH",
         "DOCKER_CONFIG",
+        "DOCKER_HOST",
+        "DOCKER_TLS_VERIFY",
         "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
         "GOOGLE_GHA_CREDS_PATH",
+        "GNOME_KEYRING_CONTROL",
+        "IDENTITY_ENDPOINT",
+        "IDENTITY_HEADER",
+        "IMDS_ENDPOINT",
+        "MSI_ENDPOINT",
+        "NPM_CONFIG_GLOBALCONFIG",
+        "NPM_CONFIG_PREFIX",
+        "NPM_CONFIG_USERCONFIG",
+        "PIP_CONFIG_FILE",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_INDEX_URL",
         "REGISTRY_AUTH_FILE",
         "SSH_AGENT_PID",
         "SSH_ASKPASS",
         "SSH_AUTH_SOCK",
         "SYSTEM_ACCESSTOKEN",
         "VSS_NUGET_EXTERNAL_FEED_ENDPOINTS",
+        "UV_EXTRA_INDEX_URL",
+        "UV_INDEX_URL",
+        "UV_KEYRING_PROVIDER",
     }
 )
 _CREDENTIAL_ENV_SUFFIXES = (
@@ -284,11 +305,15 @@ _PINNED_ENVIRONMENT_NAMES = (
     "XDG_CONFIG_HOME",
     "XDG_CACHE_HOME",
     "LOCALAPPDATA",
+    "APPDATA",
+    "XDG_DATA_HOME",
+    "XDG_RUNTIME_DIR",
     "APM_HOME",
     "APM_CACHE_DIR",
     "APM_TEMP_DIR",
     "GH_CONFIG_DIR",
     "AZURE_CONFIG_DIR",
+    "NUGET_PACKAGES",
     "TMPDIR",
     "TMP",
     "TEMP",
@@ -433,8 +458,12 @@ class IsolatedApmEnvironment:
         xdg_config_root = root / "xdg-config"
         xdg_cache_root = root / "xdg-cache"
         local_app_data = root / "local-app-data"
+        roaming_app_data = root / "roaming-app-data"
+        xdg_data_root = root / "xdg-data"
+        xdg_runtime_root = root / "xdg-runtime"
         gh_config_root = root / "gh-config"
         azure_config_root = root / "azure-config"
+        nuget_packages_root = root / "nuget-packages"
         for directory in (
             home,
             config_root,
@@ -447,10 +476,15 @@ class IsolatedApmEnvironment:
             xdg_config_root,
             xdg_cache_root,
             local_app_data,
+            roaming_app_data,
+            xdg_data_root,
+            xdg_runtime_root,
             gh_config_root,
             azure_config_root,
+            nuget_packages_root,
         ):
             directory.mkdir(parents=True)
+        xdg_runtime_root.chmod(0o700)
 
         git_config = root / "gitconfig"
         git_config.write_text(
@@ -473,11 +507,15 @@ class IsolatedApmEnvironment:
             "XDG_CONFIG_HOME": str(xdg_config_root),
             "XDG_CACHE_HOME": str(xdg_cache_root),
             "LOCALAPPDATA": str(local_app_data),
+            "APPDATA": str(roaming_app_data),
+            "XDG_DATA_HOME": str(xdg_data_root),
+            "XDG_RUNTIME_DIR": str(xdg_runtime_root),
             "APM_HOME": str(config_root),
             "APM_CACHE_DIR": str(cache_root),
             "APM_TEMP_DIR": str(temp_root),
             "GH_CONFIG_DIR": str(gh_config_root),
             "AZURE_CONFIG_DIR": str(azure_config_root),
+            "NUGET_PACKAGES": str(nuget_packages_root),
             "TMPDIR": str(temp_root),
             "TMP": str(temp_root),
             "TEMP": str(temp_root),

@@ -104,6 +104,12 @@ are outside the contract. `GIT_ALLOW_PROTOCOL=file` and local
 `url.*.insteadOf` rewriting separately restrict Git transport in reviewed
 scenarios.
 
+Credential-bearing config roots and endpoint overrides for Git, cloud SDKs,
+containers, NuGet, npm, pip, and uv are pinned or denied. Non-secret selectors
+such as `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AWS_PROFILE`, region/project
+selectors, and cache-control flags may pass through; pinned config roots and
+denied credential endpoints prevent them from selecting ambient credentials.
+
 Keep modules flat. Inside a pytest test with `tmp_path`, compose them directly:
 
 ```python

@@ -140,6 +140,22 @@ class TestGitParentParse:
                 }
             )
 
+    def test_parent_version_error_points_to_ref(self) -> None:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Git dependency field 'version' is unsupported; use 'ref' "
+                "for a branch, tag, or commit"
+            ),
+        ):
+            DependencyReference.parse_from_dict(
+                {
+                    "git": "parent",
+                    "path": "skills/shared",
+                    "version": "v1.0.0",
+                }
+            )
+
     def test_does_not_expand_repo_coordinates(self):
         """Parsing must not set real host/repo; resolver expands later."""
         dep = DependencyReference.parse_from_dict({"git": "parent", "path": "skills/shared"})

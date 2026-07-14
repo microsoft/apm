@@ -18,6 +18,36 @@ class CommandResult:
     cwd: Path
 
 
+class _LifecycleTimeoutExpired(subprocess.TimeoutExpired):
+    """Timeout with stable scenario evidence for pytest diagnostics."""
+
+    def __init__(
+        self,
+        command: tuple[str, ...],
+        timeout: float,
+        *,
+        scenario_id: str,
+        cwd: Path,
+        budget_seconds: float,
+        stdout: str = "",
+        stderr: str = "",
+    ) -> None:
+        super().__init__(command, timeout, output=stdout, stderr=stderr)
+        self.scenario_id = scenario_id
+        self.cwd = cwd
+        self.budget_seconds = budget_seconds
+
+    def __str__(self) -> str:
+        return (
+            f"scenario={self.scenario_id!r}\n"
+            f"cwd={str(self.cwd)!r}\n"
+            f"command={self.cmd!r}\n"
+            f"budget_seconds={self.budget_seconds}\n"
+            f"stdout={self.output!r}\n"
+            f"stderr={self.stderr!r}"
+        )
+
+
 class ApmLifecycleRunner:
     """Run an APM entry point with explicit process inputs and captured evidence.
 
@@ -41,6 +71,7 @@ class ApmLifecycleRunner:
         self,
         args: Sequence[str],
         *,
+        scenario_id: str = "single-command",
         cwd: Path,
         env: Mapping[str, str],
     ) -> CommandResult:
@@ -49,6 +80,8 @@ class ApmLifecycleRunner:
             cwd=cwd,
             env=env,
             timeout_seconds=self._timeout_seconds,
+            scenario_id=scenario_id,
+            budget_seconds=self._timeout_seconds,
         )
 
     def _run_with_timeout(
@@ -58,6 +91,8 @@ class ApmLifecycleRunner:
         cwd: Path,
         env: Mapping[str, str],
         timeout_seconds: float,
+        scenario_id: str,
+        budget_seconds: float,
     ) -> CommandResult:
         command = (*self._command, *args)
         process = subprocess.Popen(
@@ -75,10 +110,13 @@ class ApmLifecycleRunner:
         except subprocess.TimeoutExpired as exc:
             _terminate_process_tree(process)
             stdout, stderr = process.communicate()
-            raise subprocess.TimeoutExpired(
+            raise _LifecycleTimeoutExpired(
                 command,
                 timeout_seconds,
-                output=stdout,
+                scenario_id=scenario_id,
+                cwd=cwd,
+                budget_seconds=budget_seconds,
+                stdout=stdout,
                 stderr=stderr,
             ) from exc
         return CommandResult(
@@ -110,15 +148,20 @@ class ApmLifecycleRunner:
         ):
             remaining_seconds = deadline - time.monotonic()
             if remaining_seconds <= 0:
-                raise subprocess.TimeoutExpired(
+                raise _LifecycleTimeoutExpired(
                     (*self._command, *command),
-                    self._scenario_timeout_seconds,
+                    0,
+                    scenario_id=scenario_id,
+                    cwd=cwd,
+                    budget_seconds=self._scenario_timeout_seconds,
                 )
             result = self._run_with_timeout(
                 command,
                 cwd=cwd,
                 env=env,
                 timeout_seconds=min(self._timeout_seconds, remaining_seconds),
+                scenario_id=scenario_id,
+                budget_seconds=self._scenario_timeout_seconds,
             )
             results.append(result)
             if result.returncode != expected_returncode:
