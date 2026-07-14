@@ -14,14 +14,8 @@ def test_macos_intel_runs_non_shell_binary_startup_after_build() -> None:
     intel_job = workflow[intel_start:arm_start]
 
     build_step = "      - name: Build binary"
-    test_id = (
-        "tests/integration/test_core_smoke.py::"
-        "TestBinaryStartup::test_apm_version_runs"
-    )
-    binary_path = (
-        "APM_BINARY_PATH: "
-        "${{ github.workspace }}/dist/apm-darwin-x86_64/apm"
-    )
+    test_id = "tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs"
+    binary_path = "APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-x86_64/apm"
 
     assert test_id in intel_job
     assert binary_path in intel_job

@@ -43,9 +43,7 @@ def test_windows_installer_e2e_covers_bare_subprocess_resolution() -> None:
 
 def test_windows_installer_e2e_covers_missing_stable_executable_negative_twin() -> None:
     """The native-process proof must fail when only the cmd shim remains."""
-    test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(
-        encoding="utf-8"
-    )
+    test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(encoding="utf-8")
 
     helper_name = "Assert-MissingStableExecutableFailsForNativeProcess"
     assert f"function {helper_name}" in test_script
