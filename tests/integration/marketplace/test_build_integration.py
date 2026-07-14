@@ -25,7 +25,6 @@ from apm_cli.marketplace.yml_schema import load_marketplace_yml  # noqa: F401
 from .conftest import (
     GOLDEN_YML,
     MINIMAL_YML,
-    _project_uv_bin,
     run_cli,
 )
 
@@ -248,10 +247,6 @@ class TestBuildErrorPaths:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not _project_uv_bin(),
-    reason="uv not found on PATH; skipping subprocess CLI tests",
-)
 class TestBuildCLI:
     """Tests that invoke `apm marketplace build` via subprocess."""
 

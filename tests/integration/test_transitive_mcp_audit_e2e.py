@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -12,14 +11,17 @@ import yaml
 
 pytestmark = pytest.mark.integration
 
-CLI = [sys.executable, "-m", "apm_cli.cli"]
 TIMEOUT = 180
 
 
-def _run(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    apm_binary_path: Path,
+    project: Path,
+    *args: str,
+) -> subprocess.CompletedProcess[str]:
     """Run the APM CLI in the fixture project."""
     return subprocess.run(
-        [*CLI, *args],
+        [str(apm_binary_path), *args],
         cwd=project,
         capture_output=True,
         text=True,
@@ -62,11 +64,15 @@ dependencies:
     return project
 
 
-def test_ci_audit_tracks_current_transitive_mcp_source(tmp_path: Path) -> None:
+def test_ci_audit_tracks_current_transitive_mcp_source(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """Audit accepts installed transitive MCP, then rejects its removal."""
     project = _write_workspace(tmp_path)
 
     install = _run(
+        apm_binary_path,
         project,
         "install",
         "--force",
@@ -81,7 +87,15 @@ def test_ci_audit_tracks_current_transitive_mcp_source(tmp_path: Path) -> None:
     lock_data = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
     assert lock_data["mcp_config_provenance"] == {"shadcn": "agent-config"}
 
-    audit = _run(project, "audit", "--ci", "--no-policy", "-f", "json")
+    audit = _run(
+        apm_binary_path,
+        project,
+        "audit",
+        "--ci",
+        "--no-policy",
+        "-f",
+        "json",
+    )
     assert audit.returncode == 0, f"audit stdout:\n{audit.stdout}\naudit stderr:\n{audit.stderr}"
     payload = json.loads(audit.stdout)
     config_check = next(
@@ -96,6 +110,7 @@ def test_ci_audit_tracks_current_transitive_mcp_source(tmp_path: Path) -> None:
     )
 
     changed_audit = _run(
+        apm_binary_path,
         project,
         "audit",
         "--ci",

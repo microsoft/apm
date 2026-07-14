@@ -10,12 +10,9 @@ file in the rules directory must not trigger that deduplication.
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
-CLI = [sys.executable, "-m", "apm_cli.cli"]
 
 APM_YML = """name: test-antigravity-dedup
 version: 1.0.0
@@ -41,9 +38,13 @@ EXPECTED_RULE = (
 INSTRUCTION_SENTINEL = "Use type hints everywhere."
 
 
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+def _run(
+    apm_binary_path: Path,
+    cwd: Path,
+    *args: str,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        CLI + list(args),
+        [str(apm_binary_path), *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -66,11 +67,12 @@ def project_with_instruction(tmp_path: Path) -> Path:
 @pytest.mark.integration
 def test_install_then_compile_dedups_only_expected_antigravity_rule(
     project_with_instruction: Path,
+    apm_binary_path: Path,
 ) -> None:
     """Real install+compile proves Antigravity rule frontmatter and dedup."""
     proj = project_with_instruction
 
-    install_res = _run(proj, "install", "--target", "antigravity")
+    install_res = _run(apm_binary_path, proj, "install", "--target", "antigravity")
     assert install_res.returncode == 0, (
         f"install stdout:\n{install_res.stdout}\ninstall stderr:\n{install_res.stderr}"
     )
@@ -79,7 +81,7 @@ def test_install_then_compile_dedups_only_expected_antigravity_rule(
     rule_file = rules_dir / "style.md"
     assert rule_file.read_text(encoding="utf-8") == EXPECTED_RULE
 
-    dedup_res = _run(proj, "compile", "--target", "antigravity")
+    dedup_res = _run(apm_binary_path, proj, "compile", "--target", "antigravity")
     assert dedup_res.returncode == 0, (
         f"dedup compile stdout:\n{dedup_res.stdout}\ndedup compile stderr:\n{dedup_res.stderr}"
     )
@@ -95,7 +97,13 @@ def test_install_then_compile_dedups_only_expected_antigravity_rule(
     if agents_md.exists():
         agents_md.unlink()
 
-    unrelated_res = _run(proj, "compile", "--target", "antigravity")
+    unrelated_res = _run(
+        apm_binary_path,
+        proj,
+        "compile",
+        "--target",
+        "antigravity",
+    )
     assert unrelated_res.returncode == 0, (
         f"unrelated compile stdout:\n{unrelated_res.stdout}\n"
         f"unrelated compile stderr:\n{unrelated_res.stderr}"

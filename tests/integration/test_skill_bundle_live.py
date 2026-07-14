@@ -114,10 +114,7 @@ def _env_with_home(fake_home):
 
 def _run_apm(apm_command, args, cwd, fake_home, timeout=180):
     """Run apm CLI with isolated HOME."""
-    if apm_command:  # noqa: SIM108
-        cmd = [apm_command] + args  # noqa: RUF005
-    else:
-        cmd = [sys.executable, "-m", "apm_cli"] + args  # noqa: RUF005
+    cmd = [apm_command, *args]
     return subprocess.run(
         cmd,
         cwd=cwd,

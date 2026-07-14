@@ -12,7 +12,6 @@ escape the project root into the bundle.
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -84,7 +83,10 @@ def _write_lockfile(project: Path, dep: LockedDependency) -> None:
 
 
 def _run_pack_apm(
-    project: Path, target: str | None = None, output_name: str = "build"
+    apm_binary_path: Path,
+    project: Path,
+    target: str | None = None,
+    output_name: str = "build",
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     for name in ("GITHUB_TOKEN", "GITHUB_APM_PAT", "ADO_APM_PAT"):
@@ -93,9 +95,7 @@ def _run_pack_apm(
     home.mkdir(exist_ok=True)
     env.update({"APM_E2E_TESTS": "1", "HOME": str(home), "PYTHONUTF8": "1"})
     args = [
-        sys.executable,
-        "-m",
-        "apm_cli.cli",
+        str(apm_binary_path),
         "pack",
         "--format",
         "apm",
@@ -119,7 +119,10 @@ def _bundle_dir(project: Path, output_name: str = "build") -> Path:
     return project / output_name / "apm-provenance-e2e-1.0.0"
 
 
-def test_apm_pack_accepts_matching_deployed_file(tmp_path: Path) -> None:
+def test_apm_pack_accepts_matching_deployed_file(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """Untampered deployed files pack cleanly (guards against false positives)."""
     project = tmp_path / "project"
     project.mkdir()
@@ -127,7 +130,7 @@ def test_apm_pack_accepts_matching_deployed_file(tmp_path: Path) -> None:
     deployed = _write_deployed_skill(project, "alpha", "deployed alpha")
     _write_lockfile(project, _dep_with_hashes(project, deployed))
 
-    result = _run_pack_apm(project)
+    result = _run_pack_apm(apm_binary_path, project)
 
     assert result.returncode == 0, result.stdout + result.stderr
     bundle = _bundle_dir(project)
@@ -136,7 +139,10 @@ def test_apm_pack_accepts_matching_deployed_file(tmp_path: Path) -> None:
     ) == "deployed alpha"
 
 
-def test_apm_pack_rejects_tampered_deployed_file(tmp_path: Path) -> None:
+def test_apm_pack_rejects_tampered_deployed_file(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """A deployed file tampered after install must fail the pack loudly.
 
     This is the RED-without-fix / GREEN-with-fix provenance gate for the
@@ -154,7 +160,7 @@ def test_apm_pack_rejects_tampered_deployed_file(tmp_path: Path) -> None:
         "tampered payload", encoding="utf-8"
     )
 
-    result = _run_pack_apm(project)
+    result = _run_pack_apm(apm_binary_path, project)
 
     combined = result.stdout + result.stderr
     assert result.returncode != 0, combined
@@ -163,7 +169,10 @@ def test_apm_pack_rejects_tampered_deployed_file(tmp_path: Path) -> None:
     assert not packed.exists() or packed.read_text(encoding="utf-8") != "tampered payload"
 
 
-def test_apm_pack_rejects_tampered_file_in_deployed_directory(tmp_path: Path) -> None:
+def test_apm_pack_rejects_tampered_file_in_deployed_directory(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """A tampered file inside a deployed *directory* entry also fails loud.
 
     Directory entries are copied via copytree; the provenance walk verifies
@@ -193,14 +202,17 @@ def test_apm_pack_rejects_tampered_file_in_deployed_directory(tmp_path: Path) ->
 
     (skill_dir / "notes.md").write_text("tampered notes", encoding="utf-8")
 
-    result = _run_pack_apm(project)
+    result = _run_pack_apm(apm_binary_path, project)
 
     combined = result.stdout + result.stderr
     assert result.returncode != 0, combined
     assert "does not match the hash recorded in apm.lock.yaml" in combined
 
 
-def test_apm_pack_cross_target_mapped_file_no_false_positive(tmp_path: Path) -> None:
+def test_apm_pack_cross_target_mapped_file_no_false_positive(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """Cross-target mapped files verify against the on-disk key, not bundle key.
 
     Files deployed under ``.github/skills/`` are hashed against their on-disk
@@ -215,7 +227,7 @@ def test_apm_pack_cross_target_mapped_file_no_false_positive(tmp_path: Path) -> 
     deployed = _write_deployed_skill(project, "alpha", "deployed alpha")
     _write_lockfile(project, _dep_with_hashes(project, deployed))
 
-    result = _run_pack_apm(project, target="claude")
+    result = _run_pack_apm(apm_binary_path, project, target="claude")
 
     assert result.returncode == 0, result.stdout + result.stderr
     bundle = _bundle_dir(project)
@@ -225,7 +237,10 @@ def test_apm_pack_cross_target_mapped_file_no_false_positive(tmp_path: Path) -> 
     ) == "deployed alpha"
 
 
-def test_apm_pack_directory_symlink_does_not_escape(tmp_path: Path) -> None:
+def test_apm_pack_directory_symlink_does_not_escape(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """A directory symlink inside a deployed dir must not leak external bytes.
 
     Defense-in-depth: the copytree ignore filter drops symlinks and the
@@ -261,7 +276,7 @@ def test_apm_pack_directory_symlink_does_not_escape(tmp_path: Path) -> None:
     )
     _write_lockfile(project, dep)
 
-    result = _run_pack_apm(project)
+    result = _run_pack_apm(apm_binary_path, project)
 
     # Two acceptable outcomes prove the same invariant across Python versions:
     #  (a) pack succeeds and the symlinked secret simply never lands (rglob

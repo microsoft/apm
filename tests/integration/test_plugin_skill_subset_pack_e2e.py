@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -93,7 +92,11 @@ def _write_cached_hooks(project: Path, hook_event: str) -> None:
     )
 
 
-def _run_pack(project: Path, output_name: str = "build") -> subprocess.CompletedProcess[str]:
+def _run_pack(
+    apm_binary_path: Path,
+    project: Path,
+    output_name: str = "build",
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     for name in ("GITHUB_TOKEN", "GITHUB_APM_PAT", "ADO_APM_PAT"):
         env.pop(name, None)
@@ -108,9 +111,7 @@ def _run_pack(project: Path, output_name: str = "build") -> subprocess.Completed
     )
     return subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "apm_cli.cli",
+            str(apm_binary_path),
             "pack",
             "--format",
             "plugin",
@@ -140,6 +141,7 @@ def _assert_only_subset_skills(bundle_dir: Path) -> None:
 
 def test_pack_plugin_uses_deployed_skill_subset_and_survives_missing_cache(
     tmp_path: Path,
+    apm_binary_path: Path,
 ) -> None:
     """apm pack must export the installed subset, not raw apm_modules."""
     project = tmp_path / "project"
@@ -164,7 +166,7 @@ def test_pack_plugin_uses_deployed_skill_subset_and_survives_missing_cache(
     for skill in ("alpha", "beta", "gamma"):
         _write_cached_skill(project, skill, f"raw cache {skill}")
 
-    result = _run_pack(project)
+    result = _run_pack(apm_binary_path, project)
 
     assert result.returncode == 0, result.stderr
     _assert_only_subset_skills(_bundle_dir(project))
@@ -172,13 +174,16 @@ def test_pack_plugin_uses_deployed_skill_subset_and_survives_missing_cache(
     shutil.rmtree(project / "apm_modules")
     shutil.rmtree(project / "build")
 
-    result_without_cache = _run_pack(project)
+    result_without_cache = _run_pack(apm_binary_path, project)
 
     assert result_without_cache.returncode == 0, result_without_cache.stderr
     _assert_only_subset_skills(_bundle_dir(project))
 
 
-def test_pack_plugin_excludes_unattested_cache_hooks_and_mcp(tmp_path: Path) -> None:
+def test_pack_plugin_excludes_unattested_cache_hooks_and_mcp(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """Provenance guarantee: unattested apm_modules content is never packed.
 
     The dependency has an attested skill subset (alpha, beta), but its
@@ -212,7 +217,7 @@ def test_pack_plugin_excludes_unattested_cache_hooks_and_mcp(tmp_path: Path) -> 
     # An unattested extra skill in the cache, too.
     _write_cached_skill(project, "zeta", "raw cache zeta")
 
-    result = _run_pack(project)
+    result = _run_pack(apm_binary_path, project)
 
     assert result.returncode == 0, result.stderr
     bundle_dir = _bundle_dir(project)
@@ -224,7 +229,10 @@ def test_pack_plugin_excludes_unattested_cache_hooks_and_mcp(tmp_path: Path) -> 
     assert not (bundle_dir / "skills" / "zeta").exists(), "unattested cache skill leaked"
 
 
-def test_pack_plugin_rejects_unsafe_deployed_paths(tmp_path: Path) -> None:
+def test_pack_plugin_rejects_unsafe_deployed_paths(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """apm pack must reject unsafe deployed_files paths before copying."""
     project = tmp_path / "project"
     project.mkdir()
@@ -241,7 +249,7 @@ def test_pack_plugin_rejects_unsafe_deployed_paths(tmp_path: Path) -> None:
         ),
     )
 
-    result = _run_pack(project)
+    result = _run_pack(apm_binary_path, project)
 
     assert result.returncode != 0
     combined_output = result.stdout + result.stderr
@@ -250,6 +258,7 @@ def test_pack_plugin_rejects_unsafe_deployed_paths(tmp_path: Path) -> None:
 
 def test_pack_plugin_fails_when_dep_has_cache_but_no_deployed_files(
     tmp_path: Path,
+    apm_binary_path: Path,
 ) -> None:
     """A dep with cached primitives but no attested deployed_files fails loud.
 
@@ -271,7 +280,7 @@ def test_pack_plugin_fails_when_dep_has_cache_but_no_deployed_files(
     )
     _write_cached_skill(project, "legacy", "legacy cache skill")
 
-    result = _run_pack(project)
+    result = _run_pack(apm_binary_path, project)
 
     assert result.returncode != 0
     combined_output = result.stdout + result.stderr
@@ -280,7 +289,10 @@ def test_pack_plugin_fails_when_dep_has_cache_but_no_deployed_files(
     )
 
 
-def test_pack_plugin_warns_when_dep_hooks_mcp_config_dropped(tmp_path: Path) -> None:
+def test_pack_plugin_warns_when_dep_hooks_mcp_config_dropped(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
     """A hooks/MCP-config-only dep is skipped cleanly but warns loudly (#2013).
 
     The dependency records NO deployed_files (its only cached content is
@@ -306,7 +318,7 @@ def test_pack_plugin_warns_when_dep_hooks_mcp_config_dropped(tmp_path: Path) -> 
     _write_cached_mcp(project, "leaked-server")
     _write_cached_hooks(project, "preCommit")
 
-    result = _run_pack(project)
+    result = _run_pack(apm_binary_path, project)
 
     assert result.returncode == 0, result.stderr
     combined_output = result.stdout + result.stderr

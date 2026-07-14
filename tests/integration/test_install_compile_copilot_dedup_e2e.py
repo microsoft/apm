@@ -19,13 +19,10 @@ code path, not just the unit logic.
 from __future__ import annotations
 
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
-
-CLI = [sys.executable, "-m", "apm_cli.cli"]
 
 APM_YML = """name: test-copilot-dedup
 version: 1.0.0
@@ -47,9 +44,13 @@ INSTRUCTION_BODY = (
 INSTRUCTION_SENTINEL = "Use type hints everywhere."
 
 
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+def _run(
+    apm_binary_path: Path,
+    cwd: Path,
+    *args: str,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        CLI + list(args),
+        [str(apm_binary_path), *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -69,14 +70,17 @@ def project_with_instruction():
 
 
 @pytest.mark.integration
-def test_install_then_compile_skips_duplicated_instructions(project_with_instruction):
+def test_install_then_compile_skips_duplicated_instructions(
+    project_with_instruction,
+    apm_binary_path: Path,
+):
     """After install populates .github/instructions/, compile must drop the
     instructions content from AGENTS.md. Pre-fix, the content was duplicated
     into both files on every compile.
     """
     proj = project_with_instruction
 
-    install_res = _run(proj, "install", "--target", "copilot")
+    install_res = _run(apm_binary_path, proj, "install", "--target", "copilot")
     assert install_res.returncode == 0, (
         f"install stdout:\n{install_res.stdout}\ninstall stderr:\n{install_res.stderr}"
     )
@@ -88,7 +92,7 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
     instr_files = sorted(instructions_dir.glob("*.md"))
     assert instr_files, "install must emit at least one *.md instructions file"
 
-    compile_res = _run(proj, "compile", "--target", "agents")
+    compile_res = _run(apm_binary_path, proj, "compile", "--target", "agents")
     assert compile_res.returncode == 0, (
         f"compile stdout:\n{compile_res.stdout}\ncompile stderr:\n{compile_res.stderr}"
     )
@@ -102,13 +106,16 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
 
 
 @pytest.mark.integration
-def test_compile_without_github_instructions_includes_content(project_with_instruction):
+def test_compile_without_github_instructions_includes_content(
+    project_with_instruction,
+    apm_binary_path: Path,
+):
     """Without .github/instructions/ populated, compile should include
     instruction content in AGENTS.md (the non-dedup baseline).
     """
     proj = project_with_instruction
 
-    compile_res = _run(proj, "compile", "--target", "agents")
+    compile_res = _run(apm_binary_path, proj, "compile", "--target", "agents")
     assert compile_res.returncode == 0, (
         f"compile stdout:\n{compile_res.stdout}\ncompile stderr:\n{compile_res.stderr}"
     )

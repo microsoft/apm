@@ -1,25 +1,31 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
 
-CLI = [sys.executable, "-m", "apm_cli.cli", "compile", "--single-agents"]
 
-
-def run_cli(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(CLI + list(args), cwd=str(cwd), capture_output=True, text=True)
+def run_cli(
+    apm_binary_path: Path,
+    cwd: Path,
+    *args: str,
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(apm_binary_path), "compile", "--single-agents", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+    )
 
 
 def read_agents(cwd: Path) -> str:
     return (cwd / "AGENTS.md").read_text(encoding="utf-8")
 
 
-def test_injects_block_when_constitution_present():
+def test_injects_block_when_constitution_present(apm_binary_path: Path):
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
-        result = run_cli(proj)
+        result = run_cli(apm_binary_path, proj)
         assert result.returncode == 0, result.stderr
         content = read_agents(proj)
         lines = content.splitlines()
@@ -52,13 +58,13 @@ def test_injects_block_when_constitution_present():
         assert hash_line.startswith("hash:"), "Hash line missing after constitution begin"
 
 
-def test_header_then_block_ordering_idempotent():
+def test_header_then_block_ordering_idempotent(apm_binary_path: Path):
     """Ensure ordering (header -> block -> body) remains stable across runs."""
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
-        r1 = run_cli(proj)
+        r1 = run_cli(apm_binary_path, proj)
         assert r1.returncode == 0
         first = read_agents(proj).splitlines()
-        r2 = run_cli(proj)
+        r2 = run_cli(apm_binary_path, proj)
         assert r2.returncode == 0
         second = read_agents(proj).splitlines()
         assert first == second
@@ -74,40 +80,40 @@ def test_header_then_block_ordering_idempotent():
         assert begin_positions[0] > 2, "Constitution block unexpectedly before header metadata"
 
 
-def test_idempotent_when_no_changes():
+def test_idempotent_when_no_changes(apm_binary_path: Path):
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
-        r1 = run_cli(proj)
+        r1 = run_cli(apm_binary_path, proj)
         assert r1.returncode == 0
         first = read_agents(proj)
-        r2 = run_cli(proj)
+        r2 = run_cli(apm_binary_path, proj)
         assert r2.returncode == 0
         second = read_agents(proj)
         assert first == second
 
 
-def test_updates_when_constitution_changes():
+def test_updates_when_constitution_changes(apm_binary_path: Path):
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
-        run_cli(proj)
+        run_cli(apm_binary_path, proj)
         original = read_agents(proj)
         # Modify constitution
         (proj / ".specify" / "memory" / "constitution.md").write_text(
             DEFAULT_CONSTITUTION + "\nNew Principle X\n", encoding="utf-8"
         )
-        run_cli(proj)
+        run_cli(apm_binary_path, proj)
         updated = read_agents(proj)
         assert original != updated
         assert "New Principle X" in updated
 
 
-def test_skips_with_flag_no_constitution():
+def test_skips_with_flag_no_constitution(apm_binary_path: Path):
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
         # First compile to create file with block
-        run_cli(proj)
+        run_cli(apm_binary_path, proj)
         first = read_agents(proj)
         assert "<!-- SPEC-KIT CONSTITUTION: BEGIN -->" in first
 
         # Re-run with skip flag
-        run_cli(proj, "--no-constitution")
+        run_cli(apm_binary_path, proj, "--no-constitution")
         second = read_agents(proj)
 
         # Constitution block should be removed when --no-constitution flag is used
@@ -116,16 +122,16 @@ def test_skips_with_flag_no_constitution():
         assert "# AGENTS.md" in second
 
 
-def test_creates_agents_md_if_missing():
+def test_creates_agents_md_if_missing(apm_binary_path: Path):
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
         assert not (proj / "AGENTS.md").exists()
-        run_cli(proj)
+        run_cli(apm_binary_path, proj)
         assert (proj / "AGENTS.md").exists()
 
 
-def test_no_failure_if_constitution_absent():
+def test_no_failure_if_constitution_absent(apm_binary_path: Path):
     with temp_project_with_constitution(constitution_text=None) as proj:
-        result = run_cli(proj)
+        result = run_cli(apm_binary_path, proj)
         # When no constitution and no APM content exist, CLI should exit with error
         assert result.returncode == 1
         # Should not create AGENTS.md
