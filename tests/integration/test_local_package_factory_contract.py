@@ -3,6 +3,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from apm_cli.core.errors import UnknownTargetError
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
@@ -214,6 +215,16 @@ def test_relative_dependency_uses_portable_manifest_path(
             ]
         },
     }
+    declared_manifest = load_yaml(declared.manifest_path)
+    assert declared_manifest is not None
+    reparsed_local = DependencyReference.parse_from_dict(
+        declared_manifest["dependencies"]["apm"][0]
+    )
+    assert reparsed_local.is_local
+    assert reparsed_local.local_path == "../dependency"
+    assert reparsed_local.alias == "dep"
+    assert reparsed_local.skill_subset == ["grill-me"]
+    assert reparsed_local.target_subset == ["copilot"]
     _assert_source_tree(declared.root, {"apm.yml"})
 
     string_declared = factory.create(
@@ -234,6 +245,7 @@ def test_relative_dependency_uses_portable_manifest_path(
     remote_forms = factory.create(
         "remote-forms",
         dependencies=(
+            "git@github.com:acme/repo.git#main@fixture-alias",
             "owner/repo",
             {"git": "owner/repo", "alias": "renamed"},
             {
@@ -246,15 +258,22 @@ def test_relative_dependency_uses_portable_manifest_path(
                 "skills": ["grill-me"],
                 "targets": ["copilot"],
             },
+            {
+                "git": "https://code.acme.com/group/repo.git",
+                "type": "gitlab",
+                "skills": ["s"],
+            },
         ),
     )
-    assert load_yaml(remote_forms.manifest_path) == {
+    remote_manifest = load_yaml(remote_forms.manifest_path)
+    assert remote_manifest == {
         "name": "remote-forms",
         "version": "0.1.0",
         "description": "Hermetic test package remote-forms",
         "author": "APM Test",
         "dependencies": {
             "apm": [
+                "git@github.com:acme/repo.git#main@fixture-alias",
                 "owner/repo",
                 {
                     "git": "owner/repo",
@@ -270,9 +289,32 @@ def test_relative_dependency_uses_portable_manifest_path(
                     "skills": ["grill-me"],
                     "targets": ["copilot"],
                 },
+                {
+                    "git": "https://code.acme.com/group/repo.git",
+                    "type": "gitlab",
+                    "skills": ["s"],
+                },
             ]
         },
     }
+    assert remote_manifest is not None
+    remote_entries = remote_manifest["dependencies"]["apm"]
+    ssh_alias = DependencyReference.parse(remote_entries[0])
+    assert ssh_alias.reference == "main"
+    assert ssh_alias.alias == "fixture-alias"
+    simple_remote = DependencyReference.parse(remote_entries[1])
+    assert simple_remote.repo_url == "owner/repo"
+    alias_remote = DependencyReference.parse_from_dict(remote_entries[2])
+    assert alias_remote.alias == "renamed"
+    ref_alias_remote = DependencyReference.parse_from_dict(remote_entries[3])
+    assert ref_alias_remote.reference == "v1.2.3"
+    assert ref_alias_remote.alias == "versioned"
+    subset_remote = DependencyReference.parse_from_dict(remote_entries[4])
+    assert subset_remote.skill_subset == ["grill-me"]
+    assert subset_remote.target_subset == ["copilot"]
+    typed_gitlab = DependencyReference.parse_from_dict(remote_entries[5])
+    assert typed_gitlab.host_type == "gitlab"
+    assert typed_gitlab.skill_subset == ["s"]
     _assert_source_tree(remote_forms.root, {"apm.yml"})
 
     parent_inherited = factory.create(
@@ -302,6 +344,13 @@ def test_relative_dependency_uses_portable_manifest_path(
             ]
         },
     }
+    parent_manifest = load_yaml(parent_inherited.manifest_path)
+    assert parent_manifest is not None
+    reparsed_parent = DependencyReference.parse_from_dict(parent_manifest["dependencies"]["apm"][0])
+    assert reparsed_parent.is_parent_repo_inheritance
+    assert reparsed_parent.virtual_path == "packages/shared"
+    assert reparsed_parent.reference == "main"
+    assert reparsed_parent.alias == "shared"
     _assert_source_tree(parent_inherited.root, {"apm.yml"})
 
     for package_name, inert_field, inert_value in (

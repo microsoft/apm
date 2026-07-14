@@ -14,7 +14,7 @@ from apm_cli.core.apm_yml import parse_targets_field
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.dependency.object_fields import reject_unknown_fields
 from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
-from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml, load_yaml_str, yaml_to_str
 
 DependencyInput: TypeAlias = str | Mapping[str, object]
 _MANIFEST_LAYOUT = "manifest"
@@ -293,26 +293,37 @@ class LocalPackageFactory:
     ) -> list[str | dict[str, object]]:
         validated: list[str | dict[str, object]] = []
         for entry in dependencies:
-            object_entry: dict[str, object] | None = None
             if isinstance(entry, str):
                 dependency = DependencyReference.parse(entry)
+                source_entry: str | dict[str, object] = entry
             elif isinstance(entry, Mapping):
-                object_entry = dict(entry)
-                if object_entry.get("git") == "parent":
+                source_entry = dict(entry)
+                if source_entry.get("git") == "parent":
                     reject_unknown_fields(
-                        object_entry,
+                        source_entry,
                         _PARENT_GIT_DEPENDENCY_FIELDS,
                         "parent git",
                     )
-                dependency = DependencyReference.parse_from_dict(object_entry)
-                if "git" in object_entry:
-                    reject_unknown_fields(object_entry, _GIT_DEPENDENCY_FIELDS, "git")
+                dependency = DependencyReference.parse_from_dict(source_entry)
+                if "git" in source_entry:
+                    reject_unknown_fields(source_entry, _GIT_DEPENDENCY_FIELDS, "git")
             else:
                 raise TypeError("APM dependency entries must be strings or mappings")
-            serialized = dependency.to_apm_yml_entry()
-            if object_entry is not None and isinstance(serialized, str):
-                serialized = object_entry
-            validated.append(serialized)
+            roundtrip_document = load_yaml_str(yaml_to_str({"dependency": source_entry}))
+            if roundtrip_document is None:
+                raise ValueError("Dependency source form did not survive YAML serialization")
+            roundtrip_entry = roundtrip_document["dependency"]
+            if isinstance(source_entry, str):
+                if not isinstance(roundtrip_entry, str):
+                    raise ValueError("Dependency string did not survive YAML serialization")
+                reparsed = DependencyReference.parse(roundtrip_entry)
+            else:
+                if not isinstance(roundtrip_entry, dict):
+                    raise ValueError("Dependency mapping did not survive YAML serialization")
+                reparsed = DependencyReference.parse_from_dict(roundtrip_entry)
+            if reparsed != dependency:
+                raise ValueError("Dependency source form failed semantic round-trip validation")
+            validated.append(source_entry)
         return validated
 
     @staticmethod
