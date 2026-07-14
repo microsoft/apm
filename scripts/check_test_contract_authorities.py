@@ -122,6 +122,13 @@ def _list_literal_values(node: ast.AST) -> list[str | None]:
     return [_literal_string(element) for element in node.elts]
 
 
+def _is_subprocess_execution(call: ast.Call) -> bool:
+    return _attribute_name(call.func) in {
+        "subprocess.Popen",
+        "subprocess.run",
+    }
+
+
 def _standalone_binary_selector_lines(tree: ast.AST) -> list[int]:
     lines: set[int] = set()
     for node in ast.walk(tree):
@@ -143,7 +150,7 @@ def _standalone_binary_selector_lines(tree: ast.AST) -> list[int]:
             value for child in ast.walk(function) if (value := _literal_string(child)) is not None
         }
         runs_subprocess = any(
-            isinstance(child, ast.Call) and _attribute_name(child.func) == "subprocess.run"
+            isinstance(child, ast.Call) and _is_subprocess_execution(child)
             for child in ast.walk(function)
         )
         if runs_subprocess and {"apm", "./apm", "./dist/apm"}.issubset(strings):
@@ -157,7 +164,7 @@ def _standalone_binary_selector_lines(tree: ast.AST) -> list[int]:
                 and _literal_string(call.args[0]) == "apm"
             ):
                 lines.add(call.lineno)
-            if _attribute_name(call.func) != "subprocess.run" or not call.args:
+            if not _is_subprocess_execution(call) or not call.args:
                 continue
             command = _list_literal_values(call.args[0])
             if command and command[0] == "apm":

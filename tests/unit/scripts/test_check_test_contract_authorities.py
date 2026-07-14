@@ -128,6 +128,7 @@ def test_path_fallback_without_venv_is_rejected(tmp_path: Path) -> None:
     "source",
     (
         "import subprocess\ndef run():\n    return subprocess.run(['apm', '--version'])\n",
+        "import subprocess\ndef run():\n    return subprocess.Popen(['apm', '--version'])\n",
         "import subprocess\ndef run():\n"
         "    return subprocess.run(['uv', 'run', 'apm', '--version'])\n",
         "import subprocess\nimport sys\ndef run():\n"
