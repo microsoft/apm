@@ -516,6 +516,23 @@ def test_nested_binary_owner_definitions_are_rejected(tmp_path: Path) -> None:
     assert len(violations) >= 2
 
 
+def test_nested_integration_files_are_scanned_recursively(tmp_path: Path) -> None:
+    """Replacing rglob with top-level glob must miss this violation and fail."""
+    _write_owner_stubs(tmp_path)
+    nested = tmp_path / "tests" / "integration" / "nested" / "consumer.py"
+    nested.parent.mkdir()
+    nested.write_text(
+        "import os\ndef choose():\n    return os.getenv('APM_BINARY_PATH')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "nested/consumer.py" in violations[0]
+    assert "direct APM_BINARY_PATH read" in violations[0]
+
+
 def test_renamed_binary_resolver_is_rejected(tmp_path: Path) -> None:
     """A renamed resolver still fails because it reads the owned variable."""
     _write_owner_stubs(tmp_path)
