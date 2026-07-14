@@ -15,6 +15,11 @@ _REAL_SOCKET = socket.socket
 
 
 class _GuardedSocket(_REAL_SOCKET):
+    def bind(self, address):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().bind(address)
+
     def connect(self, address):
         if self.family in (socket.AF_INET, socket.AF_INET6):
             raise OSError(_MESSAGE)
@@ -24,6 +29,16 @@ class _GuardedSocket(_REAL_SOCKET):
         if self.family in (socket.AF_INET, socket.AF_INET6):
             raise OSError(_MESSAGE)
         return super().connect_ex(address)
+
+    def listen(self, backlog=0):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().listen(backlog)
+
+    def accept(self):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().accept()
 
     def sendto(self, *args, **kwargs):
         if self.family in (socket.AF_INET, socket.AF_INET6):

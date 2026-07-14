@@ -148,10 +148,32 @@ if Path.cwd() != parent_cwd:
 
 
 def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
+    exact_secret_names = (
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ADO_APM_PAT",
+        "ARTIFACTORY_APM_TOKEN",
+        "AZURE_DEVOPS_EXT_PAT",
+        "COPILOT_GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GH_TOKEN",
+        "GITHUB_APM_PAT",
+        "GITHUB_COPILOT_PAT",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "GITHUB_MODELS_KEY",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_TOKEN",
+        "GITLAB_APM_PAT",
+        "GITLAB_TOKEN",
+        "GIT_ASKPASS",
+        "PROXY_REGISTRY_TOKEN",
+        "SSH_ASKPASS",
+    )
     ambient_environment = dict(os.environ)
+    ambient_environment.update({name: "ambient" for name in exact_secret_names})
     ambient_environment.update(
         {
-            "ADO_APM_PAT": "ambient",
             "APM_NO_CACHE": "1",
             "APM_REGISTRY_PASS_INTERNAL": "ambient",
             "APM_REGISTRY_TOKEN_INTERNAL": "ambient",
@@ -159,10 +181,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             "CLAUDE_CONFIG_DIR": "/ambient/claude",
             "CODEX_HOME": "/ambient/codex",
             "COPILOT_HOME": "/ambient/copilot",
-            "GH_ENTERPRISE_TOKEN": "ambient",
             "GITHUB_APM_PAT_ACME": "ambient",
-            "GITHUB_ENTERPRISE_TOKEN": "ambient",
-            "GITHUB_TOKEN": "ambient",
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "credential.helper",
             "GIT_CONFIG_VALUE_0": "ambient",
@@ -183,7 +202,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     environment = isolated.subprocess_env()
 
     stripped_names = (
-        "ADO_APM_PAT",
+        *exact_secret_names,
         "APM_NO_CACHE",
         "APM_REGISTRY_PASS_INTERNAL",
         "APM_REGISTRY_TOKEN_INTERNAL",
@@ -191,10 +210,7 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
         "COPILOT_HOME",
-        "GH_ENTERPRISE_TOKEN",
         "GITHUB_APM_PAT_ACME",
-        "GITHUB_ENTERPRISE_TOKEN",
-        "GITHUB_TOKEN",
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_KEY_0",
         "GIT_CONFIG_VALUE_0",
@@ -225,13 +241,13 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_CONFIG_VALUE_0",
     )
     case_variant_exact_names = ("home", "github_token", "Git_Allow_Protocol")
-    enterprise_token_names = ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
-    for name in exact_names + case_variant_exact_names + tool_home_names + enterprise_token_names:
+    for name in exact_names + case_variant_exact_names + tool_home_names:
         with pytest.raises(ValueError, match="protected environment"):
             isolated.subprocess_env(overrides={name: "unsafe"})
-    for name in enterprise_token_names:
-        with pytest.raises(ValueError, match="protected environment"):
-            isolated.subprocess_env(overrides={name.lower(): "unsafe"})
+    for name in exact_secret_names:
+        for variant in (name, name.lower()):
+            with pytest.raises(ValueError, match="protected environment"):
+                isolated.subprocess_env(overrides={variant: "unsafe"})
     for name in dynamic_prefix_names:
         for variant in (name, name.lower()):
             with pytest.raises(ValueError, match="protected environment"):
@@ -243,6 +259,26 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         tmp_path / "scenario",
         base_env=os.environ,
     )
+
+    local_result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os; "
+                "read_fd, write_fd = os.pipe(); "
+                "os.write(write_fd, b'x'); "
+                "assert os.read(read_fd, 1) == b'x'; "
+                "os.close(read_fd); os.close(write_fd)"
+            ),
+        ],
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert local_result.returncode == 0, local_result.stderr
 
     scripts = (
         "import socket; socket.create_connection(('example.invalid', 443))",
@@ -263,6 +299,17 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         ),
         (
             "import socket; "
+            "socket.socket(socket.AF_INET6, socket.SOCK_STREAM)"
+            ".connect_ex(('2001:db8::1', 443))"
+        ),
+        ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).bind(('127.0.0.1', 0))"),
+        ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM).bind(('::1', 0))"),
+        ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).listen()"),
+        ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM).listen()"),
+        ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).accept()"),
+        ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM).accept()"),
+        (
+            "import socket; "
             "socket.socket(socket.AF_INET, socket.SOCK_DGRAM)"
             ".sendto(b'x', ('203.0.113.1', 9))"
         ),
@@ -275,6 +322,11 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
             "import socket; "
             "socket.socket(socket.AF_INET, socket.SOCK_DGRAM)"
             ".sendmsg([b'x'], [], 0, ('203.0.113.1', 9))"
+        ),
+        (
+            "import socket; "
+            "socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)"
+            ".sendmsg([b'x'], [], 0, ('2001:db8::1', 9))"
         ),
         "import socket; socket.getaddrinfo('example.invalid', 443)",
     )
