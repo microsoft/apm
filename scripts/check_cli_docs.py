@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError as error:
         print(f"[x] {error}", file=sys.stderr)
         print(
-            "[i] Rebuild docs with 'cd docs && npm run build', then rerun "
+            "[i] Rebuild docs with 'npm --prefix docs run build', then rerun "
             f"'uv run --frozen python scripts/check_cli_docs.py {args.dist_dir}'.",
             file=sys.stderr,
         )
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(
             "[i] Add or remove the matching CLI reference page, rebuild with "
-            "'cd docs && npm run build', then rerun "
+            "'npm --prefix docs run build', then rerun "
             f"'uv run --frozen python scripts/check_cli_docs.py {args.dist_dir}'.",
             file=sys.stderr,
         )

@@ -35,6 +35,14 @@ def _run_checker(dist: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _rerun_guidance(dist: Path) -> str:
+    return (
+        "[i] Add or remove the matching CLI reference page, rebuild with "
+        "'npm --prefix docs run build', then rerun "
+        f"'uv run --frozen python scripts/check_cli_docs.py {dist}'.\n"
+    )
+
+
 def test_checker_cli_reports_missing_rendered_page_on_stderr(tmp_path: Path) -> None:
     """A missing page exits 1, names the command, and explains recovery."""
     _render_public_pages(tmp_path, omit={"doctor"})
@@ -43,9 +51,11 @@ def test_checker_cli_reports_missing_rendered_page_on_stderr(tmp_path: Path) -> 
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "executable commands missing rendered pages: doctor" in result.stderr
-    assert "npm run build" in result.stderr
-    assert "scripts/check_cli_docs.py" in result.stderr
+    assert result.stderr == (
+        "[x] CLI registry/rendered documentation mismatch:\n"
+        "  executable commands missing rendered pages: doctor\n"
+        f"{_rerun_guidance(tmp_path)}"
+    )
 
 
 def test_checker_cli_reports_orphan_rendered_page_on_stderr(tmp_path: Path) -> None:
@@ -57,9 +67,25 @@ def test_checker_cli_reports_orphan_rendered_page_on_stderr(tmp_path: Path) -> N
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "rendered pages missing executable commands: not-a-command" in result.stderr
-    assert "npm run build" in result.stderr
-    assert "scripts/check_cli_docs.py" in result.stderr
+    assert result.stderr == (
+        "[x] CLI registry/rendered documentation mismatch:\n"
+        "  rendered pages missing executable commands: not-a-command\n"
+        f"{_rerun_guidance(tmp_path)}"
+    )
+
+
+def test_checker_cli_reports_missing_rendered_directory_on_stderr(tmp_path: Path) -> None:
+    """A missing build tree exits 1 with root-safe build and rerun commands."""
+    result = _run_checker(tmp_path)
+    cli_dir = tmp_path / "reference" / "cli"
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        f"[x] rendered CLI directory not found: {cli_dir}\n"
+        "[i] Rebuild docs with 'npm --prefix docs run build', then rerun "
+        f"'uv run --frozen python scripts/check_cli_docs.py {tmp_path}'.\n"
+    )
 
 
 def test_checker_cli_reserves_stdout_for_success(tmp_path: Path) -> None:
@@ -70,4 +96,7 @@ def test_checker_cli_reserves_stdout_for_success(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert "public CLI commands match" in result.stdout
+    command_count = len(public_top_level_commands(cli))
+    assert result.stdout == (
+        f"[+] {command_count} public CLI commands match {command_count} rendered pages.\n"
+    )
