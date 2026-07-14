@@ -124,6 +124,18 @@ def _list_literal_values(node: ast.AST) -> list[str | None]:
 
 def _standalone_binary_selector_lines(tree: ast.AST) -> list[int]:
     lines: set[int] = set()
+    for node in ast.walk(tree):
+        command = _list_literal_values(node)
+        if any(
+            command[index : index + 2]
+            in (
+                ["-m", "apm_cli"],
+                ["-m", "apm_cli.cli"],
+            )
+            for index in range(len(command))
+        ):
+            lines.add(node.lineno)
+
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
