@@ -8,9 +8,8 @@ Skip these tests if ADO_APM_PAT is not available.
 """
 
 import os
-import shutil
+import shlex
 import subprocess
-import sys
 import tempfile  # noqa: F401
 from pathlib import Path
 
@@ -21,22 +20,15 @@ import yaml
 pytestmark = pytest.mark.requires_ado_pat
 
 
-def run_apm_command(cmd: str, cwd: Path, timeout: int = 60) -> subprocess.CompletedProcess:
+def run_apm_command(
+    apm_binary_path: Path,
+    cmd: str,
+    cwd: Path,
+    timeout: int = 60,
+) -> subprocess.CompletedProcess:
     """Run an APM CLI command and return the result."""
-    # Prefer binary on PATH (CI uses the PR artifact there)
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        apm_path = apm_on_path
-    # Fallback to local dev venv
-    elif sys.platform == "win32":
-        apm_path = Path(__file__).parent.parent.parent / ".venv" / "Scripts" / "apm.exe"
-    else:
-        apm_path = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-
-    full_cmd = f"{apm_path} {cmd}"
     result = subprocess.run(
-        full_cmd,
-        shell=True,
+        [str(apm_binary_path), *shlex.split(cmd)],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -54,7 +46,7 @@ class TestADOInstall:
     # Test ADO repository - must be accessible with ADO_APM_PAT
     ADO_TEST_REPO = "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
 
-    def test_install_ado_package(self, tmp_path):
+    def test_install_ado_package(self, tmp_path, apm_binary_path: Path):
         """Install a real ADO package and verify directory structure."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -73,7 +65,11 @@ class TestADOInstall:
         )
 
         # Install ADO package
-        result = run_apm_command(f'install "{self.ADO_TEST_REPO}"', project_dir)
+        result = run_apm_command(
+            apm_binary_path,
+            f'install "{self.ADO_TEST_REPO}"',
+            project_dir,
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
         # Verify 3-level directory structure
@@ -93,7 +89,7 @@ class TestADODepsAndPrune:
 
     ADO_TEST_REPO = "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
 
-    def test_deps_list_shows_correct_path(self, tmp_path):
+    def test_deps_list_shows_correct_path(self, tmp_path, apm_binary_path: Path):
         """deps list should show full 3-level path for ADO packages."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -111,10 +107,10 @@ class TestADODepsAndPrune:
             )
         )
 
-        run_apm_command("install", project_dir, timeout=120)
+        run_apm_command(apm_binary_path, "install", project_dir, timeout=120)
 
         # Run deps list
-        result = run_apm_command("deps list", project_dir)
+        result = run_apm_command(apm_binary_path, "deps list", project_dir)
         assert result.returncode == 0, f"deps list failed: {result.stderr}"
 
         # Should show 3-level path (may be truncated with ...) and azure-devops source
@@ -122,7 +118,7 @@ class TestADODepsAndPrune:
         assert "azure-devops" in result.stdout
         assert "orphaned" not in result.stdout.lower()
 
-    def test_prune_no_false_positives(self, tmp_path):
+    def test_prune_no_false_positives(self, tmp_path, apm_binary_path: Path):
         """prune should not flag properly installed ADO packages as orphaned."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -140,10 +136,10 @@ class TestADODepsAndPrune:
             )
         )
 
-        run_apm_command("install", project_dir, timeout=120)
+        run_apm_command(apm_binary_path, "install", project_dir, timeout=120)
 
         # Run prune --dry-run
-        result = run_apm_command("prune --dry-run", project_dir)
+        result = run_apm_command(apm_binary_path, "prune --dry-run", project_dir)
         assert result.returncode == 0, f"prune failed: {result.stderr}"
 
         # Should report clean
@@ -155,7 +151,7 @@ class TestADOCompile:
 
     ADO_TEST_REPO = "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
 
-    def test_compile_generates_agents_md(self, tmp_path):
+    def test_compile_generates_agents_md(self, tmp_path, apm_binary_path: Path):
         """Compile should keep ADO Copilot instructions outside AGENTS.md."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -173,10 +169,10 @@ class TestADOCompile:
             )
         )
 
-        run_apm_command("install", project_dir, timeout=120)
+        run_apm_command(apm_binary_path, "install", project_dir, timeout=120)
 
         # Run compile
-        result = run_apm_command("compile --verbose", project_dir)
+        result = run_apm_command(apm_binary_path, "compile --verbose", project_dir)
         assert result.returncode == 0, f"compile failed: {result.stderr}"
 
         # Should not show orphan warnings
@@ -200,7 +196,7 @@ class TestADOVirtualPackage:
         "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules/gdpr-assessment.prompt.md"
     )
 
-    def test_install_virtual_package(self, tmp_path):
+    def test_install_virtual_package(self, tmp_path, apm_binary_path: Path):
         """Install a single file (virtual package) from ADO repo."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -219,7 +215,12 @@ class TestADOVirtualPackage:
         )
 
         # Install virtual package
-        result = run_apm_command(f'install "{self.ADO_VIRTUAL_PACKAGE}"', project_dir, timeout=120)
+        result = run_apm_command(
+            apm_binary_path,
+            f'install "{self.ADO_VIRTUAL_PACKAGE}"',
+            project_dir,
+            timeout=120,
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
         # Verify 3-level virtual package path
@@ -230,7 +231,7 @@ class TestADOVirtualPackage:
         )
         assert expected_path.exists(), f"Expected virtual package path not found: {expected_path}"
 
-    def test_virtual_package_not_orphaned(self, tmp_path):
+    def test_virtual_package_not_orphaned(self, tmp_path, apm_binary_path: Path):
         """Virtual packages should not be flagged as orphaned."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -248,14 +249,14 @@ class TestADOVirtualPackage:
             )
         )
 
-        run_apm_command("install", project_dir, timeout=120)
+        run_apm_command(apm_binary_path, "install", project_dir, timeout=120)
 
         # deps list should show it correctly
-        result = run_apm_command("deps list", project_dir)
+        result = run_apm_command(apm_binary_path, "deps list", project_dir)
         assert "orphaned" not in result.stdout.lower() or "0 orphan" in result.stdout.lower()
 
         # prune should report clean
-        result = run_apm_command("prune --dry-run", project_dir)
+        result = run_apm_command(apm_binary_path, "prune --dry-run", project_dir)
         assert "No orphaned packages found" in result.stdout or "clean" in result.stdout.lower()
 
 
@@ -265,7 +266,7 @@ class TestMixedDependencies:
     GITHUB_PACKAGE = "microsoft/apm-sample-package"
     ADO_PACKAGE = "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
 
-    def test_mixed_install(self, tmp_path):
+    def test_mixed_install(self, tmp_path, apm_binary_path: Path):
         """Both GitHub and ADO packages should install correctly."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -284,7 +285,7 @@ class TestMixedDependencies:
         )
 
         # Install all
-        result = run_apm_command("install", project_dir, timeout=180)
+        result = run_apm_command(apm_binary_path, "install", project_dir, timeout=180)
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
         # Verify both structures
@@ -298,7 +299,7 @@ class TestMixedDependencies:
         ado_path = apm_modules / "dmeppiel-org" / "market-js-app" / "compliance-rules"
         assert ado_path.exists(), f"ADO package not found: {ado_path}"
 
-    def test_mixed_deps_list(self, tmp_path):
+    def test_mixed_deps_list(self, tmp_path, apm_binary_path: Path):
         """deps list should show correct sources for mixed dependencies."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -316,10 +317,10 @@ class TestMixedDependencies:
             )
         )
 
-        run_apm_command("install", project_dir, timeout=180)
+        run_apm_command(apm_binary_path, "install", project_dir, timeout=180)
 
         # deps list should show both correctly
-        result = run_apm_command("deps list", project_dir)
+        result = run_apm_command(apm_binary_path, "deps list", project_dir)
         assert result.returncode == 0
 
         # Check sources are correct
@@ -331,7 +332,7 @@ class TestMixedDependencies:
         # Either no orphan warning or explicitly 0 orphaned
         assert "orphaned" not in lines or "0 orphan" in lines
 
-    def test_mixed_prune_no_false_positives(self, tmp_path):
+    def test_mixed_prune_no_false_positives(self, tmp_path, apm_binary_path: Path):
         """prune should handle both GitHub and ADO packages correctly."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
@@ -349,9 +350,9 @@ class TestMixedDependencies:
             )
         )
 
-        run_apm_command("install", project_dir, timeout=180)
+        run_apm_command(apm_binary_path, "install", project_dir, timeout=180)
 
         # prune should report clean
-        result = run_apm_command("prune --dry-run", project_dir)
+        result = run_apm_command(apm_binary_path, "prune --dry-run", project_dir)
         assert result.returncode == 0
         assert "No orphaned packages found" in result.stdout or "clean" in result.stdout.lower()

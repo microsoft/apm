@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests.integration import conftest as integration_conftest
+from tests.integration import test_ado_e2e, test_plugin_e2e
 
 
 @pytest.fixture(autouse=True)
@@ -167,3 +168,42 @@ def test_non_executable_explicit_binary_path_fails_without_fallback(
 
     with pytest.raises(pytest.UsageError, match=r"APM_BINARY_PATH is not executable"):
         integration_conftest._resolve_apm_binary()
+
+
+def test_ado_consumer_executes_injected_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ADO helper must launch the injected validated executable."""
+    configured = tmp_path / "configured-apm"
+    captured: list[list[str]] = []
+
+    def fake_run(args: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        captured.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(test_ado_e2e.subprocess, "run", fake_run)
+
+    test_ado_e2e.run_apm_command(configured, "--version", tmp_path)
+
+    assert captured == [[str(configured), "--version"]]
+
+
+def test_plugin_consumer_executes_injected_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The plugin fixture and helper must preserve the injected executable."""
+    configured = tmp_path / "configured-apm"
+    captured: list[list[str]] = []
+
+    def fake_run(args: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        captured.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(test_plugin_e2e.subprocess, "run", fake_run)
+    command = test_plugin_e2e.apm_command.__wrapped__(configured)
+
+    test_plugin_e2e._run_apm_command(command, ["--version"], tmp_path)
+
+    assert captured == [[str(configured), "--version"]]

@@ -8,7 +8,6 @@ remote APM deps use.
 """
 
 import re
-import shutil
 import subprocess
 from itertools import pairwise
 from pathlib import Path
@@ -23,15 +22,9 @@ DEEP_CHAIN_LENGTH = 8
 
 
 @pytest.fixture
-def apm_command():
-    """Resolve the APM CLI executable (PATH or local venv)."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test executable."""
+    return str(apm_binary_path)
 
 
 def _write_pkg(pkg_dir: Path, name: str, deps: list, primitive_name: str) -> None:

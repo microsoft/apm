@@ -12,7 +12,6 @@ Regression guard for #844.
 
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,14 +20,8 @@ import yaml
 
 
 @pytest.fixture
-def apm_command():
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    return str(apm_binary_path)
 
 
 def _write_apm_yml(project_dir: Path, mcp_servers: list[dict]) -> None:

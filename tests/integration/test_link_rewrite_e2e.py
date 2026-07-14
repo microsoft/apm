@@ -32,7 +32,6 @@ safe to run in CI without tokens.
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -47,15 +46,9 @@ pytestmark = pytest.mark.requires_apm_binary
 
 
 @pytest.fixture
-def apm_command():
-    """Resolve the ``apm`` binary the same way other local-install tests do."""
-    on_path = shutil.which("apm")
-    if on_path:
-        return on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test executable."""
+    return str(apm_binary_path)
 
 
 def _write(path: Path, content: str) -> None:

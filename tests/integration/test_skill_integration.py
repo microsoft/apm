@@ -7,7 +7,6 @@ and that compile does not modify skill files.
 These tests require network access to GitHub.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -45,17 +44,9 @@ dependencies:
 
 
 @pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    # Prefer binary on PATH (CI uses the PR artifact there)
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    # Fallback to local dev venv
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test executable."""
+    return str(apm_binary_path)
 
 
 class TestSkillInstallIntegration:

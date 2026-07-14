@@ -5,7 +5,6 @@ Round-trip tests: install -> pack -> install bundle -> verify files match.
 Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -15,15 +14,9 @@ pytestmark = pytest.mark.requires_github_token
 
 
 @pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test executable."""
+    return str(apm_binary_path)
 
 
 @pytest.fixture

@@ -479,17 +479,6 @@ class TestPluginHeroScenarios:
 # ===========================================================================
 
 
-def _resolve_apm_executable() -> str:
-    """Resolve the apm CLI executable (PATH, then repo .venv, then bare name)."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
-
-
 def _build_plugin_with_bin(dest: Path) -> str:
     """Copy the mock plugin fixture into *dest* and add a loose bin/ executable.
 
@@ -518,7 +507,11 @@ class TestPluginBinDeployPermissionsE2E:
     it to 0o700.
     """
 
-    def test_install_global_deploys_plugin_bin_as_0700(self, tmp_path):
+    def test_install_global_deploys_plugin_bin_as_0700(
+        self,
+        tmp_path: Path,
+        apm_binary_path: Path,
+    ) -> None:
         if not FIXTURE_DIR.exists():
             pytest.skip("mock-marketplace-plugin fixture not found")
 
@@ -534,7 +527,7 @@ class TestPluginBinDeployPermissionsE2E:
         env["HOME"] = str(fake_home)
 
         result = subprocess.run(
-            [_resolve_apm_executable(), "install", str(plugin_dir), "-g"],
+            [str(apm_binary_path), "install", str(plugin_dir), "-g"],
             capture_output=True,
             text=True,
             cwd=str(tmp_path),
@@ -565,15 +558,9 @@ pytestmark_network = pytest.mark.requires_github_token
 
 
 @pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test executable."""
+    return str(apm_binary_path)
 
 
 @pytest.fixture

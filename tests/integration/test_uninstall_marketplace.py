@@ -8,7 +8,6 @@ Does **not** require a GitHub token -- the lockfile is pre-seeded so the
 offline Stage 1 resolution path is exercised exclusively.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -24,14 +23,8 @@ pytestmark = [pytest.mark.requires_apm_binary]
 
 
 @pytest.fixture
-def apm_command():
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
+def apm_command(apm_binary_path: Path) -> str:
+    return str(apm_binary_path)
 
 
 def _run_apm(apm_command, args, cwd, timeout=60):

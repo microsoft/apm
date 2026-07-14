@@ -57,16 +57,9 @@ LIVE_REPOS = [
 
 
 @pytest.fixture
-def apm_command():
-    """Resolve the apm CLI executable (PATH first, then local venv)."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    # Fallback: run as module
-    return None
+def apm_command(apm_binary_path: Path) -> str:
+    """Use the canonical integration-test executable."""
+    return str(apm_binary_path)
 
 
 @pytest.fixture
