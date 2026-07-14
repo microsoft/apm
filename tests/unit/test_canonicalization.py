@@ -613,6 +613,29 @@ class TestHttpInsecureDeps:
         assert entry.get("ref") == "v1.0"
         assert "http://my-server.example.com/owner/repo" in entry["git"]
 
+    def test_http_to_apm_yml_entry_preserves_custom_port(self):
+        """Regression (#2202): a custom port must round-trip into apm.yml.
+
+        The HTTP branch of to_apm_yml_entry() previously built the git URL
+        from host alone, silently dropping the port so subsequent commands
+        connected to the default port and failed.
+        """
+        dep = DependencyReference.parse("http://192.168.1.10:8080/owner/repo")
+        dep.allow_insecure = True
+        assert dep.port == 8080  # parsed correctly
+        entry = dep.to_apm_yml_entry()
+        assert entry["git"] == "http://192.168.1.10:8080/owner/repo"
+
+    def test_http_to_apm_yml_entry_custom_port_round_trips(self):
+        """The persisted entry re-parses back to the same host and port (#2202)."""
+        original = "http://192.168.1.10:8080/owner/repo"
+        dep = DependencyReference.parse(original)
+        dep.allow_insecure = True
+        reparsed = DependencyReference.parse_from_dict(dep.to_apm_yml_entry())
+        assert reparsed.host == "192.168.1.10"
+        assert reparsed.port == 8080
+        assert reparsed.to_github_url() == original
+
     def test_https_to_apm_yml_entry_returns_string(self):
         """to_apm_yml_entry() for HTTPS dep returns canonical string (not dict)."""
         dep = DependencyReference.parse("owner/repo")
