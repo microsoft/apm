@@ -356,6 +356,15 @@ if [ "$windows_owner_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC9: executable test contract authorities"
+test_contract_output=$(python3 scripts/check_test_contract_authorities.py --root "$ROOT" 2>&1)
+test_contract_status=$?
+if [ "$test_contract_status" -ne 0 ]; then
+    echo "[x] Integration binary selection and rendered CLI parity require canonical owners"
+    echo "$test_contract_output"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

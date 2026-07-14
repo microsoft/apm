@@ -112,6 +112,18 @@ def _load_windows_stable_path_checker(root: Path) -> ModuleType:
     return module
 
 
+def _load_test_contract_checker(root: Path) -> ModuleType:
+    """Import the single scanner for executable test contract owners."""
+    module_name = "check_test_contract_authorities"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
     """The canonical manifest target list must control bundle packing."""
     from apm_cli.bundle.packer import pack_bundle
@@ -410,6 +422,19 @@ def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
     assert "check_windows_stable_path_owner.py" in guard
 
     checker = _load_windows_stable_path_checker(root)
+
+    assert checker.check(root) == []
+
+
+def test_executable_test_contracts_have_one_canonical_owner() -> None:
+    """Binary selection and rendered parity must use their canonical helpers."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "Integration binary selection and rendered CLI parity require canonical owners" in guard
+    assert "check_test_contract_authorities.py" in guard
+
+    checker = _load_test_contract_checker(root)
 
     assert checker.check(root) == []
 
