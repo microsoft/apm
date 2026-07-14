@@ -17,8 +17,10 @@ from apm_cli.commands.approve import (
     _find_matching_key,
     approve_cmd,
     deny_cmd,
+    load_org_policy,
 )
 from apm_cli.commands.policy import policy as policy_group
+from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 
 # ---------------------------------------------------------------------------
@@ -63,6 +65,24 @@ def _isolated_config(tmp_path: Path):
         patch("apm_cli.security.executables._legacy_approvals_path", lambda: legacy),
         cfg,
     )
+
+
+def test_approval_policy_uses_chain_aware_discovery(tmp_path: Path) -> None:
+    policy = ApmPolicy(executables=ExecutablesPolicy(recommend=("hook-pkg",)))
+    result = PolicyFetchResult(policy=policy, source="org:contoso/.github", outcome="found")
+    with (
+        patch(
+            "apm_cli.policy.discovery.discover_policy",
+            side_effect=AssertionError("lower-level discovery bypass"),
+        ),
+        patch(
+            "apm_cli.policy.discovery.discover_policy_with_chain",
+            return_value=result,
+        ) as mock_chain,
+    ):
+        loaded = load_org_policy(tmp_path)
+    assert loaded == policy
+    mock_chain.assert_called_once_with(tmp_path)
 
 
 # ---------------------------------------------------------------------------

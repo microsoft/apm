@@ -75,9 +75,9 @@ def _load_org_policy(project_root: Path):
     from ..policy.schema import ApmPolicy
 
     try:
-        from ..policy.discovery import discover_policy
+        from ..policy.discovery import discover_policy_with_chain
 
-        result = discover_policy(project_root)
+        result = discover_policy_with_chain(project_root)
         if getattr(result, "policy", None) is not None:
             return result.policy
     except Exception:
