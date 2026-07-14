@@ -540,6 +540,8 @@ def test_product_output_paths_are_rejected(tmp_path: Path) -> None:
         PurePosixPath("dist/source.md"),
         PurePosixPath(".apm/cache/source.md"),
         PurePosixPath(".apm/skills/example/SKILL.md"),
+        PurePosixPath(".apm/agents/helper/references/guide.agent.md"),
+        PurePosixPath(".apm/instructions/rules/references/guide.instructions.md"),
         PurePosixPath("AGENTS.md"),
         PurePosixPath("README.md"),
         PurePosixPath(".agents/generated.md"),
@@ -560,6 +562,7 @@ def test_product_output_paths_are_rejected(tmp_path: Path) -> None:
                 forbidden_path,
                 PurePosixPath("source.md"),
             )
+        assert not package.root.joinpath(*forbidden_path.parts).exists()
 
     for forbidden in (
         "apm.lock",
