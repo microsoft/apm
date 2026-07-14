@@ -24,18 +24,10 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import CommandLogger
+from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
 from ..policy.schema import ApmPolicy
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 
-_POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
-    {
-        "cache_miss_fetch_fail",
-        "garbage_response",
-        "hash_mismatch",
-        "incomplete_chain",
-        "malformed",
-    }
-)
 _POLICY_RESOLUTION_WARNING = (
     "Org policy could not be resolved; approval is proceeding without org "
     "restrictions. Run 'apm policy status --no-cache' to diagnose."
@@ -95,7 +87,7 @@ def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) ->
         result = discover_policy_with_chain(project_root)
         if getattr(result, "policy", None) is not None:
             return result.policy
-        should_warn = result.outcome in _POLICY_RESOLUTION_FAILURE_OUTCOMES
+        should_warn = result.outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES
     except Exception:
         should_warn = True
     if should_warn and logger is not None:

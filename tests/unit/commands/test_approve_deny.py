@@ -210,9 +210,14 @@ class TestApproveCmd:
 
     def test_no_manifest_exits_1(self) -> None:
         runner = CliRunner()
+        logger = MagicMock(spec=CommandLogger)
         with runner.isolated_filesystem():
-            result = runner.invoke(approve_cmd, [])
-            assert result.exit_code != 0
+            with patch("apm_cli.commands.approve.CommandLogger", return_value=logger):
+                result = runner.invoke(approve_cmd, [])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        logger.render_summary.assert_called_once_with()
 
     def test_no_args_shows_error(self) -> None:
         runner = CliRunner()

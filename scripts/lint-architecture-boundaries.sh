@@ -84,6 +84,19 @@ check_pattern \
     "Install adapters must not classify diagnostics" \
     'classify_post_install_result' \
     src/apm_cli/commands/install.py
+approval_file="src/apm_cli/commands/approve.py"
+policy_outcome_owner="src/apm_cli/policy/outcome_routing.py"
+if ! grep -q '^POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(' \
+    "$policy_outcome_owner" \
+    || ! grep -q \
+        'from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES' \
+        "$approval_file" \
+    || grep -Eq \
+        '"(cache_miss_fetch_fail|garbage_response|hash_mismatch|incomplete_chain|malformed)"' \
+        "$approval_file"; then
+    echo "[x] Approval fallback outcomes must use policy/outcome_routing.py"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Audit policy sources must use chain-aware discovery" \
     'discover_policy\(' \

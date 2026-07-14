@@ -11,6 +11,29 @@ from types import ModuleType
 import pytest
 
 
+def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
+    """Approval fallback outcomes must come from policy outcome routing."""
+    from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+
+    root = Path(__file__).parents[2]
+    approve_source = (root / "src/apm_cli/commands/approve.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    expected = {
+        "cache_miss_fetch_fail",
+        "garbage_response",
+        "hash_mismatch",
+        "incomplete_chain",
+        "malformed",
+    }
+
+    assert frozenset(expected) == POLICY_RESOLUTION_FAILURE_OUTCOMES
+    assert (
+        "from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES" in approve_source
+    )
+    assert not any(f'"{outcome}"' in approve_source for outcome in expected)
+    assert "Approval fallback outcomes must use policy/outcome_routing.py" in guard
+
+
 def _load_skill_subset_owner_checker() -> ModuleType:
     """Import scripts/check_skill_subset_owner.py as a standalone module.
 
