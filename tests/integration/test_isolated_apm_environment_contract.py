@@ -708,6 +708,15 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         "import socket; socket.gethostbyaddr('203.0.113.1')",
         ("import socket; socket.getnameinfo(('203.0.113.1', 443), socket.NI_NUMERICHOST)"),
         ("import socket; socket.getnameinfo(('2001:db8::1', 443), socket.NI_NUMERICHOST)"),
+        "import _socket; _socket.getaddrinfo('203.0.113.1', 443)",
+        "import _socket; _socket.gethostbyname('127.0.0.1')",
+        "import _socket; _socket.gethostbyname_ex('localhost')",
+        "import _socket; _socket.gethostbyaddr('127.0.0.1')",
+        (
+            "import _socket; "
+            "_socket.getnameinfo("
+            "('127.0.0.1', 443), _socket.NI_NUMERICHOST | _socket.NI_NUMERICSERV)"
+        ),
         (
             "import _socket; "
             "_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)"

@@ -71,6 +71,11 @@ def _deny_network(*args, **kwargs):
 socket.socket = _GuardedSocket
 socket.SocketType = _GuardedSocket
 _socket.socket = _GuardedRawSocket
+_socket.getaddrinfo = _deny_network
+_socket.gethostbyaddr = _deny_network
+_socket.gethostbyname = _deny_network
+_socket.gethostbyname_ex = _deny_network
+_socket.getnameinfo = _deny_network
 socket.create_connection = _deny_network
 socket.getaddrinfo = _deny_network
 socket.gethostbyaddr = _deny_network
