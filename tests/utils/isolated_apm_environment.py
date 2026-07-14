@@ -15,6 +15,11 @@ _REAL_SOCKET = socket.socket
 
 
 class _GuardedSocket(_REAL_SOCKET):
+    def _accept(self):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super()._accept()
+
     def bind(self, address):
         if self.family in (socket.AF_INET, socket.AF_INET6):
             raise OSError(_MESSAGE)

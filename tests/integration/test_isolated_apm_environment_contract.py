@@ -280,6 +280,30 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
     )
     assert local_result.returncode == 0, local_result.stderr
 
+    local_socket_result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os, socket, sys; "
+                "hasattr(socket, 'AF_UNIX') or sys.exit(0); "
+                "path = 'local.sock'; "
+                "server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); "
+                "server.bind(path); server.listen(); "
+                "client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); "
+                "client.connect(path); accepted, _ = server.accept(); "
+                "client.sendall(b'x'); assert accepted.recv(1) == b'x'; "
+                "accepted.close(); client.close(); server.close(); os.unlink(path)"
+            ),
+        ],
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert local_socket_result.returncode == 0, local_socket_result.stderr
+
     scripts = (
         "import socket; socket.create_connection(('example.invalid', 443))",
         (
@@ -308,6 +332,8 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM).listen()"),
         ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).accept()"),
         ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM).accept()"),
+        ("import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM)._accept()"),
+        ("import socket; socket.socket(socket.AF_INET6, socket.SOCK_STREAM)._accept()"),
         (
             "import socket; "
             "socket.socket(socket.AF_INET, socket.SOCK_DGRAM)"
