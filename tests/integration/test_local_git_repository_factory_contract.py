@@ -41,6 +41,40 @@ def _run_git(
     )
 
 
+def _assert_commit_poison_is_active(
+    root: Path,
+    environment: dict[str, str],
+) -> None:
+    _run_git(
+        "init",
+        "--initial-branch=main",
+        str(root),
+        environment=environment,
+    )
+    (root / "payload.txt").write_text("poison control\n", encoding="utf-8")
+    _run_git("-C", str(root), "add", "--all", environment=environment)
+    commit = _run_git(
+        "-C",
+        str(root),
+        "commit",
+        "-m",
+        "must fail",
+        environment=environment,
+        check=False,
+    )
+    assert commit.returncode != 0
+    head = _run_git(
+        "-C",
+        str(root),
+        "rev-parse",
+        "--verify",
+        "HEAD",
+        environment=environment,
+        check=False,
+    )
+    assert head.returncode != 0
+
+
 def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
     environment = _git_environment(tmp_path)
     source_tree = tmp_path / "source"
@@ -76,6 +110,14 @@ def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
         environment=environment,
     )
     assert bare.stdout.strip() == "true"
+    origin_head = _run_git(
+        "-C",
+        str(repository.origin),
+        "symbolic-ref",
+        "HEAD",
+        environment=environment,
+    )
+    assert origin_head.stdout.strip() == "refs/heads/main"
     remote = _run_git(
         "-C",
         str(repository.worktree),
@@ -93,6 +135,14 @@ def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
         environment=environment,
     )
     assert worktree.stdout.strip() == "true"
+    current_branch = _run_git(
+        "-C",
+        str(repository.worktree),
+        "branch",
+        "--show-current",
+        environment=environment,
+    )
+    assert current_branch.stdout.strip() == "main"
 
     for unsafe_name in (
         ".",
@@ -158,22 +208,44 @@ def test_same_source_sequence_produces_deterministic_commit(
 ) -> None:
     poisoned_config = tmp_path / "poisoned.gitconfig"
     poisoned_config.write_text(
-        "[user]\n    name = Poisoned Config\n    email = poisoned-config@example.invalid\n",
+        "[commit]\n"
+        "    gpgsign = true\n"
+        "[gpg]\n"
+        "    program = /definitely/missing/apm-test-gpg\n"
+        "[user]\n"
+        "    name = Poisoned Config\n"
+        "    email = poisoned-config@example.invalid\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(poisoned_config))
     monkeypatch.setenv("GIT_AUTHOR_NAME", "Poisoned Author")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "poisoned-author@example.invalid")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "Poisoned Committer")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "poisoned-committer@example.invalid")
-    monkeypatch.setenv("GIT_DIR", str(tmp_path / "poisoned-git-dir"))
-    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "poisoned-work-tree"))
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.name")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Poisoned Injection")
 
     commits = []
-    for name in ("first", "second"):
+    for name, poison_source in (("first", "global"), ("second", "counted")):
+        if poison_source == "global":
+            monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(poisoned_config))
+            monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+            monkeypatch.delenv("GIT_CONFIG_KEY_0", raising=False)
+            monkeypatch.delenv("GIT_CONFIG_VALUE_0", raising=False)
+            monkeypatch.delenv("GIT_CONFIG_KEY_1", raising=False)
+            monkeypatch.delenv("GIT_CONFIG_VALUE_1", raising=False)
+        else:
+            monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+            monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
+            monkeypatch.setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
+            monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+            monkeypatch.setenv("GIT_CONFIG_KEY_1", "gpg.program")
+            monkeypatch.setenv(
+                "GIT_CONFIG_VALUE_1",
+                "/definitely/missing/apm-test-gpg",
+            )
+
+        _assert_commit_poison_is_active(
+            tmp_path / f"{name}-poison-control",
+            dict(os.environ),
+        )
         scenario = tmp_path / name
         scenario.mkdir()
         environment = _git_environment(scenario)
