@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import FrozenInstanceError
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePath, PureWindowsPath
 
 import pytest
 
+from tests.utils import artifact_snapshot as artifact_snapshot_module
 from tests.utils.artifact_snapshot import (
     ArtifactSnapshot,
     _portable_path,
@@ -17,7 +17,10 @@ from tests.utils.artifact_snapshot import (
 )
 
 
-def test_capture_is_read_only_and_portable(tmp_path: Path) -> None:
+def test_capture_is_read_only_and_portable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     nested = tmp_path / "nested"
     nested.mkdir()
     source = nested / "source.bin"
@@ -36,8 +39,25 @@ def test_capture_is_read_only_and_portable(tmp_path: Path) -> None:
     assert source_entry.kind == "file"
     assert source_entry.fingerprint == hashlib.sha256(source_bytes).hexdigest()
     assert _portable_path(PureWindowsPath(r"nested\source.bin")) == "nested/source.bin"
-    with pytest.raises(FrozenInstanceError):
-        source_entry.__setattr__("kind", "directory")
+
+    entry_field = "kind"
+    with pytest.raises(AttributeError):
+        setattr(source_entry, entry_field, "directory")
+
+    spy_root = tmp_path / "spy-root"
+    spy_root.mkdir()
+    (spy_root / "original.txt").write_bytes(b"spy")
+    normalized_paths = []
+
+    def normalize_spy(path: PurePath) -> str:
+        normalized_paths.append(path)
+        return "normalized.txt"
+
+    monkeypatch.setattr(artifact_snapshot_module, "_portable_path", normalize_spy)
+    routed_snapshot = ArtifactSnapshot.capture(spy_root)
+
+    assert normalized_paths == [Path("original.txt"), Path("original.txt")]
+    assert routed_snapshot.paths == frozenset({"normalized.txt"})
 
 
 def test_diff_observes_created_changed_and_removed_paths(tmp_path: Path) -> None:
@@ -56,8 +76,9 @@ def test_diff_observes_created_changed_and_removed_paths(tmp_path: Path) -> None
     assert difference.added == frozenset({"created.txt"})
     assert difference.removed == frozenset({"removed.txt"})
     assert difference.changed == frozenset({"changed.txt"})
-    with pytest.raises(FrozenInstanceError):
-        difference.__setattr__("changed", frozenset())
+    diff_field = "changed"
+    with pytest.raises(AttributeError):
+        setattr(difference, diff_field, frozenset())
 
 
 def test_assertion_helpers_compare_captured_state(tmp_path: Path) -> None:
@@ -105,5 +126,6 @@ def test_assertions_reject_authored_expected_mappings(tmp_path: Path) -> None:
 
     with pytest.raises(TypeError, match="ArtifactSnapshot"):
         assert_unchanged({}, snapshot)
-    with pytest.raises(FrozenInstanceError):
-        snapshot.__setattr__("root_existed", False)
+    snapshot_field = "root_existed"
+    with pytest.raises(AttributeError):
+        setattr(snapshot, snapshot_field, False)
