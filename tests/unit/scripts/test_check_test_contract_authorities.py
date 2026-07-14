@@ -304,6 +304,7 @@ def test_interpreter_parent_apm_selector_is_rejected(tmp_path: Path) -> None:
         "import subprocess\nsubprocess.run('apm --version', shell=True)\n",
         "import subprocess\ncommand = 'apm --version'\nsubprocess.run(command, shell=True)\n",
         "import subprocess\ncommand = ['apm', '--version']\nsubprocess.run(command)\n",
+        "import subprocess\ncommand = ['apm', '--version']\nsubprocess.Popen(command)\n",
         "import subprocess\nsubprocess.run(['uv', 'run', 'apm'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'apm_cli'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'uv', 'run', 'apm'])\n",
