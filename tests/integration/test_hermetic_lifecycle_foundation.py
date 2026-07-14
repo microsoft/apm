@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,7 @@ _AUDIT_ARGS = (
     "--output",
     "reports/audit.json",
 )
+_SCENARIO_TIMEOUT_SECONDS = 240.0
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ class _LifecycleReceipt:
     git_source: str
     skill_name: str
     instruction_name: str
+    scenario_deadline: float
 
 
 def _fingerprint(snapshot: ArtifactSnapshot, relative_path: str) -> str:
@@ -65,6 +68,7 @@ def _run_lifecycle_scenario(
     *,
     base_env: dict[str, str],
 ) -> _LifecycleReceipt:
+    scenario_deadline = time.monotonic() + _SCENARIO_TIMEOUT_SECONDS
     isolated = IsolatedApmEnvironment.create(root, base_env=base_env)
     environment = isolated.subprocess_env(overrides={"APM_TEST_SCENARIO_ID": scenario_id})
     dependency_name = f"fixture-{scenario_id}"
@@ -100,6 +104,7 @@ def _run_lifecycle_scenario(
     repository_factory = LocalGitRepositoryFactory(
         isolated.repository_root,
         env=environment,
+        deadline=scenario_deadline,
     )
     repository = repository_factory.create(
         dependency_name,
@@ -119,7 +124,7 @@ def _run_lifecycle_scenario(
         capture_output=True,
         text=True,
         check=True,
-        timeout=30,
+        timeout=max(0.001, min(30, scenario_deadline - time.monotonic())),
     )
 
     project_factory = LocalPackageFactory(isolated.work_root)
@@ -147,7 +152,12 @@ def _run_lifecycle_scenario(
         ),
     )
 
-    results = ApmLifecycleRunner().run_sequence(
+    results = ApmLifecycleRunner(
+        scenario_timeout_seconds=max(
+            0.001,
+            scenario_deadline - time.monotonic(),
+        )
+    ).run_sequence(
         tuple(action.args for action in row.lifecycle_actions),
         expected_returncodes=tuple(action.expected_returncode for action in row.lifecycle_actions),
         scenario_id=row.id,
@@ -181,6 +191,7 @@ def _run_lifecycle_scenario(
         git_source=git_source,
         skill_name=skill_name,
         instruction_name=instruction_name,
+        scenario_deadline=scenario_deadline,
     )
 
 
@@ -380,16 +391,34 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         locked_dependency["repo_url"] = "attacker/other"
         dump_yaml(lock, lock_path)
 
-    runner = ApmLifecycleRunner()
+    runner = ApmLifecycleRunner(
+        scenario_timeout_seconds=max(
+            0.001,
+            receipt.scenario_deadline - time.monotonic(),
+        )
+    )
     environment = receipt.isolated.subprocess_env()
     if mutation == "content-hash":
-        result = runner.run_sequence(
-            (("install", "--target", "copilot", "--frozen"),),
-            expected_returncodes=(1,),
-            scenario_id=f"{scenario_id}-negative",
-            cwd=project_root,
-            env=environment,
-        )[0]
+        negative_args = ("install", "--target", "copilot", "--frozen")
+    else:
+        negative_args = ("audit", "--ci", "--no-policy", "--format", "json")
+
+    recovery_args = ["install", "--target", "copilot"]
+    if mutation in {"content-hash", "resolved-commit", "source-identity"}:
+        recovery_args.append("--update")
+    result, recovery, clean_audit = runner.run_sequence(
+        (
+            negative_args,
+            tuple(recovery_args),
+            ("audit", "--ci", "--no-policy", "--format", "json"),
+        ),
+        expected_returncodes=(1, 0, 0),
+        scenario_id=f"{scenario_id}-tamper-repair",
+        cwd=project_root,
+        env=environment,
+    )
+
+    if mutation == "content-hash":
         normalized_stdout = " ".join(result.stdout.split())
         assert "Content hash mismatch" in normalized_stdout
         assert f"expected sha256:{'0' * 64}" in normalized_stdout
@@ -397,13 +426,6 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         assert "Use 'apm install --update' to accept new content" in normalized_stdout
         assert result.stderr == ""
     else:
-        result = runner.run_sequence(
-            (("audit", "--ci", "--no-policy", "--format", "json"),),
-            expected_returncodes=(1,),
-            scenario_id=f"{scenario_id}-negative",
-            cwd=project_root,
-            env=environment,
-        )[0]
         payload = json.loads(result.stdout)
         failed_checks = {check["name"]: check for check in payload["checks"] if not check["passed"]}
         assert result.stdout.lstrip().startswith("{")
@@ -418,12 +440,15 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             )
         elif mutation == "resolved-ref":
             assert set(failed_checks) == {"ref-consistency"}
+            assert "run 'apm install'" in failed_checks["ref-consistency"]["message"]
+            assert "--update" not in failed_checks["ref-consistency"]["message"]
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: "
                 f"manifest ref '{receipt.commit_sha}' != lockfile ref '{'0' * 40}'"
             ]
         elif mutation == "resolved-commit":
             assert set(failed_checks) == {"ref-consistency"}
+            assert "run 'apm install --update'" in (failed_checks["ref-consistency"]["message"])
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: "
                 f"manifest commit '{receipt.commit_sha}' != "
@@ -431,30 +456,14 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             ]
         else:
             assert set(failed_checks) == {"ref-consistency"}
+            assert "run 'apm install --update'" in (failed_checks["ref-consistency"]["message"])
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: not found in lockfile"
             ]
 
-    recovery_args = ["install", "--target", "copilot"]
-    if mutation in {"content-hash", "resolved-commit", "source-identity"}:
-        recovery_args.append("--update")
-    recovery = runner.run_sequence(
-        (tuple(recovery_args),),
-        expected_returncodes=(0,),
-        scenario_id=f"{scenario_id}-recovery",
-        cwd=project_root,
-        env=environment,
-    )[0]
     assert recovery.stdout
     assert recovery.stderr == ""
 
-    clean_audit = runner.run_sequence(
-        (("audit", "--ci", "--no-policy", "--format", "json"),),
-        expected_returncodes=(0,),
-        scenario_id=f"{scenario_id}-clean",
-        cwd=project_root,
-        env=environment,
-    )[0]
     clean_payload = json.loads(clean_audit.stdout)
     assert clean_payload["passed"] is True
     repaired_dependency = load_yaml(lock_path)["dependencies"][0]

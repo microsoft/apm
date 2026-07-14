@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,12 +40,14 @@ class LocalGitRepositoryFactory:
         *,
         env: Mapping[str, str],
         timeout_seconds: float = 30.0,
+        deadline: float | None = None,
     ) -> None:
         if root.is_symlink():
             raise ValueError(f"Refusing symlinked repository factory root: {root}")
         self._root = root.resolve()
         self._env = dict(env)
         self._timeout_seconds = timeout_seconds
+        self._deadline = deadline
         self._repositories: dict[int, LocalGitRepository] = {}
         self._commits: dict[int, GitCommit] = {}
         self._root.mkdir(parents=True, exist_ok=True)
@@ -157,6 +160,12 @@ class LocalGitRepositoryFactory:
         *,
         cwd: Path,
     ) -> subprocess.CompletedProcess[str]:
+        timeout_seconds = self._timeout_seconds
+        if self._deadline is not None:
+            remaining_seconds = self._deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                raise subprocess.TimeoutExpired(command, 0)
+            timeout_seconds = min(timeout_seconds, remaining_seconds)
         return subprocess.run(
             command,
             cwd=cwd,
@@ -164,7 +173,7 @@ class LocalGitRepositoryFactory:
             capture_output=True,
             text=True,
             check=True,
-            timeout=self._timeout_seconds,
+            timeout=timeout_seconds,
         )
 
     def _owned_repository(self, repository: LocalGitRepository) -> LocalGitRepository:

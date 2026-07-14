@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.deployment_state import DeploymentReconciler
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.cleanup import remove_stale_deployed_files
@@ -70,11 +71,7 @@ def run(ctx: InstallContext) -> None:
         # deployed files even though it is still in apm.yml.
         from apm_cli.deps.lockfile import _SELF_KEY
 
-        freshly_deployed_files = {
-            deployed_file
-            for deployed_files in package_deployed_files.values()
-            for deployed_file in deployed_files
-        }
+        freshly_deployed_files = DeploymentReconciler.current_claimed_paths(package_deployed_files)
         _orphan_total_deleted = 0
         _orphan_deleted_targets: list = []
         for _orphan_key, _orphan_dep in existing_lockfile.dependencies.items():
@@ -129,9 +126,7 @@ def run(ctx: InstallContext) -> None:
     # packages that left the manifest entirely.
     # ------------------------------------------------------------------
     if existing_lockfile and package_deployed_files:
-        all_deployed_files: set[str] = set()
-        for deployed_files in package_deployed_files.values():
-            all_deployed_files.update(deployed_files)
+        all_deployed_files = set(DeploymentReconciler.current_claimed_paths(package_deployed_files))
 
         for dep_key, new_deployed in package_deployed_files.items():
             # Skip packages whose integration reported errors this run --

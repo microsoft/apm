@@ -117,11 +117,11 @@ dependencies:
 ```
 
 Remote Git objects accept only `git`, `path`, `ref`, `alias`, `type`,
-`allow_insecure`, `skills`, and `targets`. Unknown keys fail with
-`Unsupported field(s) for git dependency`. Use `ref` for Git tags, branches,
-and commit pins; `version` belongs to registry and marketplace objects. The
-special `git: parent` form accepts only `git`, `path`, `ref`, and `alias`. See
-the [full field table](../../reference/manifest-schema/#412-object-form).
+`allow_insecure`, `skills`, and `targets`. Unknown keys fail closed. In
+particular, `version` reports `use 'ref' for a branch, tag, or commit`;
+`version` belongs to registry and marketplace objects. The special
+`git: parent` form accepts only `git`, `path`, `ref`, and `alias`. See the
+[full field table](../../reference/manifest-schema/#412-object-form).
 
 A `path:` declared inside a remote package is allowed only when the resolved
 path stays inside that same cloned repo. APM expands it to the parent's remote

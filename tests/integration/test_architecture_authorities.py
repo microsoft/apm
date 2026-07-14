@@ -50,6 +50,19 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
+def test_cleanup_current_claim_protection_has_single_owner() -> None:
+    """Cleanup must route current deployed-file claims through the reconciler."""
+    root = Path(__file__).parents[2]
+    cleanup = (root / "src/apm_cli/install/phases/cleanup.py").read_text()
+    owner = (root / "src/apm_cli/core/deployment_state.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def current_claimed_paths" in owner
+    assert "DeploymentReconciler.current_claimed_paths(" in cleanup
+    assert "for deployed_files in package_deployed_files.values()" not in cleanup
+    assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
+
+
 def _load_skill_subset_owner_checker() -> ModuleType:
     """Import scripts/check_skill_subset_owner.py as a standalone module.
 

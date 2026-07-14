@@ -202,6 +202,12 @@ if ! grep -q \
     echo "[x] UnifiedLinkResolver must project source assets into the deployment frame"
     violations=$((violations + 1))
 fi
+cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
+if ! grep -q 'DeploymentReconciler.current_claimed_paths(' "$cleanup_claim_owner" \
+    || grep -q 'for deployed_files in package_deployed_files.values()' "$cleanup_claim_owner"; then
+    echo "[x] Cleanup current-claim protection must use DeploymentReconciler"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \

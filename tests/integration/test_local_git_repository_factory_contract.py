@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -478,3 +479,23 @@ def test_factory_passes_bounded_timeout_to_git(
     with pytest.raises(subprocess.TimeoutExpired):
         factory.create("timeout")
     assert observed_timeouts == [timeout_seconds]
+
+
+def test_factory_honors_shared_scenario_deadline(tmp_path: Path) -> None:
+    environment = _git_environment(tmp_path)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+        timeout_seconds=30,
+        deadline=time.monotonic() - 1,
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        factory.create("expired")
+
+    assert exc_info.value.cmd[:3] == (
+        "git",
+        "init",
+        "--bare",
+    )
+    assert exc_info.value.timeout == 0

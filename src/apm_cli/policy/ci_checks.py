@@ -99,11 +99,13 @@ def _check_ref_consistency(
     from ..drift import detect_ref_change
 
     mismatches: list[str] = []
+    requires_update = False
     for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
         locked_dep = lock.get_dependency(key)
         if locked_dep is None:
             mismatches.append(f"{key}: not found in lockfile")
+            requires_update = requires_update or bool(lock.dependencies)
             continue
         if is_full_revision_pin(dep_ref.reference) and (
             locked_dep.resolved_commit != dep_ref.reference
@@ -112,6 +114,7 @@ def _check_ref_consistency(
                 f"{key}: manifest commit '{dep_ref.reference}' != "
                 f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
             )
+            requires_update = True
             continue
         if detect_ref_change(dep_ref, locked_dep):
             manifest_ref = dep_ref.reference or "(default branch)"
@@ -126,10 +129,13 @@ def _check_ref_consistency(
             passed=True,
             message="All dependency refs match lockfile",
         )
+    repair_command = "apm install --update" if requires_update else "apm install"
     return CheckResult(
         name="ref-consistency",
         passed=False,
-        message=f"{len(mismatches)} ref mismatch(es) -- run 'apm install' to update lockfile",
+        message=(
+            f"{len(mismatches)} ref mismatch(es) -- run '{repair_command}' to update lockfile"
+        ),
         details=mismatches,
     )
 

@@ -191,6 +191,7 @@ class TestRefConsistency:
         result = _check_ref_consistency(manifest, lock)
 
         assert not result.passed
+        assert "run 'apm install --update'" in result.message
         assert result.details == [
             "owner/repo: manifest commit "
             f"'{manifest_commit}' != lockfile resolved_commit '{'b' * 40}'"

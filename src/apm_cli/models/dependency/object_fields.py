@@ -55,6 +55,11 @@ def reject_unknown_git_fields(entry: dict, *, parent: bool) -> None:
     """Reject fields outside the canonical remote or parent Git vocabulary."""
     allowed = _PARENT_GIT_DEPENDENCY_FIELDS if parent else _REMOTE_GIT_DEPENDENCY_FIELDS
     dependency_type = "parent git" if parent else "git"
+    unknown = set(entry) - set(allowed)
+    if not parent and "version" in unknown:
+        raise ValueError(
+            "Git dependency field 'version' is unsupported; use 'ref' for a branch, tag, or commit"
+        )
     reject_unknown_fields(entry, allowed, dependency_type)
 
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,9 +31,11 @@ class ApmLifecycleRunner:
         command: Sequence[str] | None = None,
         *,
         timeout_seconds: float = 120.0,
+        scenario_timeout_seconds: float = 300.0,
     ) -> None:
         self._command = tuple(command or ("apm",))
         self._timeout_seconds = timeout_seconds
+        self._scenario_timeout_seconds = scenario_timeout_seconds
 
     def run(
         self,
@@ -39,21 +44,48 @@ class ApmLifecycleRunner:
         cwd: Path,
         env: Mapping[str, str],
     ) -> CommandResult:
+        return self._run_with_timeout(
+            args,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=self._timeout_seconds,
+        )
+
+    def _run_with_timeout(
+        self,
+        args: Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str],
+        timeout_seconds: float,
+    ) -> CommandResult:
         command = (*self._command, *args)
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=cwd,
             env=dict(env),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=self._timeout_seconds,
-            check=False,
+            start_new_session=os.name != "nt",
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
         )
+        try:
+            stdout, stderr = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process_tree(process)
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(
+                command,
+                timeout_seconds,
+                output=stdout,
+                stderr=stderr,
+            ) from exc
         return CommandResult(
             command=command,
-            returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            returncode=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
             cwd=cwd,
         )
 
@@ -69,13 +101,25 @@ class ApmLifecycleRunner:
         if len(commands) != len(expected_returncodes):
             raise ValueError("commands and expected_returncodes must have equal length")
 
+        deadline = time.monotonic() + self._scenario_timeout_seconds
         results: list[CommandResult] = []
         for command, expected_returncode in zip(
             commands,
             expected_returncodes,
             strict=True,
         ):
-            result = self.run(command, cwd=cwd, env=env)
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                raise subprocess.TimeoutExpired(
+                    (*self._command, *command),
+                    self._scenario_timeout_seconds,
+                )
+            result = self._run_with_timeout(
+                command,
+                cwd=cwd,
+                env=env,
+                timeout_seconds=min(self._timeout_seconds, remaining_seconds),
+            )
             results.append(result)
             if result.returncode != expected_returncode:
                 raise AssertionError(
@@ -86,6 +130,27 @@ class ApmLifecycleRunner:
                     )
                 )
         return tuple(results)
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    """Terminate one isolated process group, including descendants."""
+    if os.name == "nt":
+        subprocess.run(
+            ("taskkill", "/PID", str(process.pid), "/T", "/F"),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if process.poll() is None:
+            process.kill()
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        if process.poll() is None:
+            process.kill()
 
 
 def _unexpected_result_evidence(
