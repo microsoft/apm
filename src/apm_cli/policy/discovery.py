@@ -197,7 +197,7 @@ def _verify_hash_pin(
 POLICY_CACHE_DIR = ".policy-cache"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "4"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "5"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -1306,6 +1306,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
     return {
         "name": policy.name,
         "version": policy.version,
+        "extends": policy.extends,
         "enforcement": policy.enforcement,
         "fetch_failure": policy.fetch_failure,
         "cache": {"ttl": policy.cache.ttl},
@@ -1315,6 +1316,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "require": _opt_list(policy.dependencies.require),
             "require_resolution": policy.dependencies.require_resolution,
             "max_depth": policy.dependencies.max_depth,
+            "require_pinned_constraint": policy.dependencies.require_pinned_constraint,
         },
         "mcp": {
             "allow": _opt_list(policy.mcp.allow),
@@ -1339,11 +1341,43 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "required_fields": list(policy.manifest.required_fields),
             "scripts": policy.manifest.scripts,
             "content_types": policy.manifest.content_types,
+            "require_explicit_includes": policy.manifest.require_explicit_includes,
         },
         "unmanaged_files": {
             "action": policy.unmanaged_files.action,
-            "directories": list(policy.unmanaged_files.directories or ()),
-            "exclude": list(policy.unmanaged_files.exclude or ()),
+            "directories": _opt_list(policy.unmanaged_files.directories),
+            "exclude": _opt_list(policy.unmanaged_files.exclude),
+        },
+        "registry_source": {
+            "require": list(policy.registry_source.require),
+            "allow_non_registry": policy.registry_source.allow_non_registry,
+        },
+        "security": {
+            "audit": {
+                "on_install": policy.security.audit.on_install,
+                "external": _opt_list(policy.security.audit.external),
+                "scanners": None
+                if policy.security.audit.scanners is None
+                else {
+                    name: {"allow_args": governance.allow_args}
+                    for name, governance in policy.security.audit.scanners
+                },
+                "fail_on_drift": policy.security.audit.fail_on_drift,
+            },
+            "integrity": {
+                "require_hashes": policy.security.integrity.require_hashes,
+            },
+        },
+        "bin_deploy": {
+            "deny_all": policy.bin_deploy.deny_all,
+            "deny": list(policy.bin_deploy.deny),
+        },
+        "executables": {
+            "deny_all": policy.executables.deny_all,
+            "deny": list(policy.executables.deny),
+            "require": list(policy.executables.require),
+            "recommend": list(policy.executables.recommend),
+            "enforce": list(policy.executables.enforce),
         },
     }
 

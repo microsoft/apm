@@ -16,9 +16,13 @@ import json
 import tempfile
 import time
 import unittest
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch  # noqa: F401
 
+import pytest  # noqa: F401
+
+from apm_cli.models.apm_package import DependencyReference
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,
     DEFAULT_CACHE_TTL,
@@ -31,20 +35,21 @@ from apm_cli.policy.discovery import (
     _get_cache_dir,
     _is_policy_empty,
     _policy_fingerprint,
-    _policy_to_dict,  # noqa: F401
+    _policy_to_dict,
     _read_cache,
     _read_cache_entry,
     _serialize_policy,
     _stale_fallback_or_error,
     _write_cache,
+    discover_policy_with_chain,
 )
 from apm_cli.policy.inheritance import merge_policies, resolve_policy_chain  # noqa: F401
 from apm_cli.policy.parser import load_policy
+from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import (
     ApmPolicy,
     DependencyPolicy,
     McpPolicy,
-    McpTransportPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -476,6 +481,116 @@ class TestIsPolicyEmpty(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+FIELD_COMPLETE_POLICY_YAML = """
+name: field-complete
+version: "9.9"
+enforcement: block
+fetch_failure: block
+cache:
+  ttl: 17
+dependencies:
+  allow: [acme/*]
+  deny: [evil/*]
+  require: [required/core]
+  require_resolution: block
+  max_depth: 4
+  require_pinned_constraint: true
+mcp:
+  allow: [approved-mcp]
+  deny: [blocked-mcp]
+  transport:
+    allow: [stdio]
+  self_defined: deny
+  trust_transitive: true
+compilation:
+  target:
+    allow: [vscode]
+    enforce: vscode
+  strategy:
+    enforce: distributed
+  source_attribution: true
+manifest:
+  required_fields: [version, description]
+  scripts: deny
+  content_types:
+    allow: [instructions, skill]
+  require_explicit_includes: true
+unmanaged_files:
+  action: deny
+  directories: [.github]
+  exclude: [.github/generated/**]
+registry_source:
+  require: [corp-main]
+  allow_non_registry: false
+security:
+  audit:
+    on_install: block
+    external: [skillspector]
+    scanners:
+      skillspector:
+        allow_args: false
+    fail_on_drift: true
+  integrity:
+    require_hashes: true
+bin_deploy:
+  deny_all: true
+  deny: [legacy/tool]
+executables:
+  deny_all: true
+  deny: [blocked/tool]
+  require: [required/tool]
+  recommend: [approved/tool]
+  enforce: [mandated/tool]
+"""
+
+
+def _assert_policy_fields_equal(expected: object, actual: object, path: str = "policy") -> None:
+    assert type(actual) is type(expected), f"{path} type changed across cache round trip"
+    for field_info in fields(expected):
+        field_path = f"{path}.{field_info.name}"
+        expected_value = getattr(expected, field_info.name)
+        actual_value = getattr(actual, field_info.name)
+        if is_dataclass(expected_value):
+            _assert_policy_fields_equal(expected_value, actual_value, field_path)
+        else:
+            assert actual_value == expected_value, f"{field_path} changed across cache round trip"
+
+
+def _dataclass_leaf_paths(value: object, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    paths: set[tuple[str, ...]] = set()
+    for field_info in fields(value):
+        field_path = (*prefix, field_info.name)
+        child = getattr(value, field_info.name)
+        if is_dataclass(child):
+            paths.update(_dataclass_leaf_paths(child, field_path))
+        else:
+            paths.add(field_path)
+    return paths
+
+
+def _mapping_leaf_paths(value: object, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    if not isinstance(value, dict) or not value:
+        return {prefix}
+    paths: set[tuple[str, ...]] = set()
+    for key, child in value.items():
+        child_path = (*prefix, key)
+        if isinstance(child, dict) and child:
+            paths.update(_mapping_leaf_paths(child, child_path))
+        else:
+            paths.add(child_path)
+    return paths
+
+
+def test_policy_serializer_covers_every_dataclass_leaf() -> None:
+    declared = _dataclass_leaf_paths(ApmPolicy())
+    serialized = _mapping_leaf_paths(_policy_to_dict(ApmPolicy()))
+    assert serialized == declared, (
+        f"cached policy shape differs from ApmPolicy: "
+        f"missing={sorted(declared - serialized)}, "
+        f"extra={sorted(serialized - declared)}"
+    )
+
+
 class TestPolicyRoundTrip(unittest.TestCase):
     """_policy_to_dict -> YAML -> load_policy preserves semantics."""
 
@@ -493,43 +608,14 @@ class TestPolicyRoundTrip(unittest.TestCase):
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    def test_full_policy_round_trip(self):
-        original = ApmPolicy(
-            name="full-test",
-            version="3.0",
-            enforcement="block",
-            dependencies=DependencyPolicy(
-                allow=("org/*", "approved/lib"),
-                deny=("banned/evil",),
-                require=("required/std",),
-                require_resolution="policy-wins",
-                max_depth=5,
-            ),
-            mcp=McpPolicy(
-                allow=("mcp-good",),
-                deny=("mcp-bad",),
-                transport=McpTransportPolicy(allow=("stdio", "sse")),
-                self_defined="deny",
-                trust_transitive=False,
-            ),
-        )
-        restored = self._round_trip(original)
-
-        self.assertEqual(restored.name, original.name)
-        self.assertEqual(restored.enforcement, original.enforcement)
-        self.assertEqual(restored.dependencies.deny, original.dependencies.deny)
-        self.assertEqual(restored.dependencies.allow, original.dependencies.allow)
-        self.assertEqual(restored.dependencies.require, original.dependencies.require)
-        self.assertEqual(
-            restored.dependencies.require_resolution,
-            original.dependencies.require_resolution,
-        )
-        self.assertEqual(restored.dependencies.max_depth, original.dependencies.max_depth)
-        self.assertEqual(restored.mcp.deny, original.mcp.deny)
-        self.assertEqual(restored.mcp.allow, original.mcp.allow)
-        self.assertEqual(restored.mcp.transport.allow, original.mcp.transport.allow)
-        self.assertEqual(restored.mcp.self_defined, original.mcp.self_defined)
-        self.assertEqual(restored.mcp.trust_transitive, original.mcp.trust_transitive)
+    def test_all_effective_policy_fields_survive_cache_round_trip(self) -> None:
+        original, _warnings = load_policy(FIELD_COMPLETE_POLICY_YAML)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_cache("contoso/.github", original, root)
+            entry = _read_cache_entry("contoso/.github", root)
+        self.assertIsNotNone(entry)
+        _assert_policy_fields_equal(original, entry.policy)
 
     def test_none_allow_preserved(self):
         """allow=None (no opinion) survives round-trip."""
@@ -543,6 +629,22 @@ class TestPolicyRoundTrip(unittest.TestCase):
         restored = self._round_trip(original)
         self.assertEqual(restored.dependencies.allow, ())
 
+    def test_unmanaged_none_preserved(self) -> None:
+        original = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action=None, directories=None, exclude=None)
+        )
+        restored = self._round_trip(original)
+        self.assertIsNone(restored.unmanaged_files.directories)
+        self.assertIsNone(restored.unmanaged_files.exclude)
+
+    def test_unmanaged_explicit_empty_preserved(self) -> None:
+        original = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action=None, directories=(), exclude=())
+        )
+        restored = self._round_trip(original)
+        self.assertEqual(restored.unmanaged_files.directories, ())
+        self.assertEqual(restored.unmanaged_files.exclude, ())
+
     def test_fingerprint_deterministic(self):
         """Same policy always produces same fingerprint."""
         policy = ApmPolicy(name="deterministic", enforcement="block")
@@ -550,6 +652,73 @@ class TestPolicyRoundTrip(unittest.TestCase):
         s2 = _serialize_policy(policy)
         self.assertEqual(s1, s2)
         self.assertEqual(_policy_fingerprint(s1), _policy_fingerprint(s2))
+
+
+class TestColdWarmEnforcementParity:
+    def test_merged_strict_policy_denials_survive_warm_cache(self, tmp_path: Path) -> None:
+        payloads = {
+            "contoso/.github": """
+name: leaf
+extends: hub/.github
+enforcement: block
+dependencies:
+  deny: [leaf/deny]
+""",
+            "hub/.github": """
+name: strict-parent
+enforcement: block
+dependencies:
+  require_pinned_constraint: true
+manifest:
+  require_explicit_includes: true
+registry_source:
+  allow_non_registry: false
+security:
+  integrity:
+    require_hashes: true
+""",
+        }
+
+        def fetch(repo_ref: str, policy_path: str) -> tuple[str | None, str | None]:
+            assert policy_path == "apm-policy.yml"
+            return payloads[repo_ref], None
+
+        with patch(
+            "apm_cli.policy.discovery._fetch_github_contents", side_effect=fetch
+        ) as transport:
+            cold = discover_policy_with_chain(tmp_path, policy_override="contoso/.github")
+            assert cold.policy is not None
+            assert cold.cached is False
+            assert transport.call_count == 2
+            transport.side_effect = AssertionError("network fetch attempted on warm cache hit")
+            warm = discover_policy_with_chain(tmp_path, policy_override="contoso/.github")
+
+        assert warm.policy is not None
+        assert warm.cached is True
+        dependency = DependencyReference.parse("acme/lib#main")
+
+        def failed_checks(policy: ApmPolicy) -> set[str]:
+            result = run_dependency_policy_checks(
+                [dependency],
+                policy=policy,
+                fail_fast=False,
+                manifest_includes="auto",
+                registries={},
+            )
+            return {check.name for check in result.checks if not check.passed}
+
+        cold_failures = failed_checks(cold.policy)
+        warm_failures = failed_checks(warm.policy)
+        assert warm_failures == cold_failures, (
+            "policy enforcement changed after cache warm-up: "
+            f"cold={sorted(cold_failures)}, warm={sorted(warm_failures)}"
+        )
+        assert warm_failures == {
+            "dependency-pinned-constraint",
+            "explicit-includes",
+            "registry-source",
+        }
+        assert warm.policy == cold.policy
 
 
 if __name__ == "__main__":
