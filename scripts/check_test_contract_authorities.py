@@ -344,7 +344,12 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
                     for attribute in attributes
                 )
             )
-            if runs_python_module or runs_uv_apm:
+            runs_bare_uv_apm = len(values) >= 3 and values[:3] == [
+                "uv",
+                "run",
+                "apm",
+            ]
+            if runs_python_module or runs_uv_apm or runs_bare_uv_apm:
                 lines.add(node.lineno)
         if not isinstance(node, ast.Call) or not node.args:
             continue
@@ -369,49 +374,7 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
         }
         if noncanonical_names:
             lines.add(node.lineno)
-    return sorted(lines)
-
-
-def _path_binary_fallback_lines(tree: ast.AST) -> list[int]:
-    return sorted(
-        {
-            node.lineno
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and _attribute_name(node.func) == "shutil.which"
-            and bool(node.args)
-            and _literal_string(node.args[0]) == "apm"
-        }
-    )
-
-
-def _list_literal_values(node: ast.AST) -> list[str | None]:
-    if not isinstance(node, (ast.List, ast.Tuple)):
-        return []
-    return [_literal_string(element) for element in node.elts]
-
-
-def _is_subprocess_execution(call: ast.Call) -> bool:
-    return _attribute_name(call.func) in {
-        "subprocess.Popen",
-        "subprocess.run",
-    }
-
-
-def _standalone_binary_selector_lines(tree: ast.AST) -> list[int]:
-    lines: set[int] = set()
-    for node in ast.walk(tree):
-        command = _list_literal_values(node)
-        if any(
-            command[index : index + 2]
-            in (
-                ["-m", "apm_cli"],
-                ["-m", "apm_cli.cli"],
-            )
-            for index in range(len(command))
-        ):
-            lines.add(node.lineno)
-
+    module_aliases, call_aliases = _subprocess_aliases(tree)
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -419,30 +382,11 @@ def _standalone_binary_selector_lines(tree: ast.AST) -> list[int]:
             value for child in ast.walk(function) if (value := _literal_string(child)) is not None
         }
         runs_subprocess = any(
-            isinstance(child, ast.Call) and _is_subprocess_execution(child)
+            isinstance(child, ast.Call) and _is_subprocess_call(child, module_aliases, call_aliases)
             for child in ast.walk(function)
         )
         if runs_subprocess and {"apm", "./apm", "./dist/apm"}.issubset(strings):
             lines.add(function.lineno)
-
-        for call in (child for child in ast.walk(function) if isinstance(child, ast.Call)):
-            if (
-                isinstance(call.func, ast.Attribute)
-                and call.func.attr == "with_name"
-                and bool(call.args)
-                and _literal_string(call.args[0]) == "apm"
-            ):
-                lines.add(call.lineno)
-            if not _is_subprocess_execution(call) or not call.args:
-                continue
-            command = _list_literal_values(call.args[0])
-            if command and command[0] == "apm":
-                lines.add(call.lineno)
-            compact = [value for value in command if value is not None]
-            if any(
-                compact[index : index + 3] == ["uv", "run", "apm"] for index in range(len(compact))
-            ):
-                lines.add(call.lineno)
     return sorted(lines)
 
 

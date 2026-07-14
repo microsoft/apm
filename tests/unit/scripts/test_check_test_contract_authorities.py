@@ -219,6 +219,8 @@ def test_interpreter_relative_apm_selector_is_rejected(tmp_path: Path) -> None:
     "source",
     (
         "import subprocess\nsubprocess.run(['apm', '--version'])\n",
+        "import subprocess\nsubprocess.Popen(['apm', '--version'])\n",
+        "import subprocess\nsubprocess.run(['uv', 'run', 'apm'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'apm_cli'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'uv', 'run', 'apm'])\n",
     ),
@@ -231,6 +233,27 @@ def test_direct_subprocess_selection_is_rejected(
     _write_owner_stubs(tmp_path)
     duplicate = tmp_path / "tests" / "integration" / "launcher_duplicate.py"
     duplicate.write_text(source, encoding="utf-8")
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct apm subprocess selection" in violations[0]
+
+
+def test_probe_list_selector_is_rejected(tmp_path: Path) -> None:
+    """Probe-loop selection must use the canonical fixture."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "probe_duplicate.py"
+    duplicate.write_text(
+        "import subprocess\n"
+        "def probe():\n"
+        "    possible = ['apm', './apm', './dist/apm']\n"
+        "    for path in possible:\n"
+        "        result = subprocess.run([path, '--version'])\n"
+        "        if result.returncode == 0:\n"
+        "            return path\n",
+        encoding="utf-8",
+    )
 
     violations = _load_checker().find_binary_selection_violations(tmp_path)
 
