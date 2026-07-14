@@ -35,6 +35,7 @@ def _assert_macos_startup_step(workflow: dict) -> None:
     assert_unconditional(job, label="macOS Intel job")
     assert_unconditional(step, label="macOS Intel startup step")
     assert job["runs-on"] == "macos-15-intel"
+    assert effective_env(workflow, job, step).get("GITHUB_TOKEN") is None
     assert step["env"] == {
         "APM_E2E_TESTS": "1",
         "APM_BINARY_PATH": "${{ github.workspace }}/dist/apm-darwin-x86_64/apm",
@@ -97,6 +98,20 @@ def test_windows_token_scope_mutations_are_rejected(scope: str) -> None:
 
     with pytest.raises(AssertionError):
         _assert_windows_installer_step(workflow)
+
+
+@pytest.mark.parametrize("scope", ("workflow", "job", "step"))
+def test_macos_token_scope_mutations_are_rejected(scope: str) -> None:
+    """A token inherited from any Actions scope must fail the macOS contract."""
+    workflow = deepcopy(_workflow())
+    job = workflow_job(workflow, "build-and-validate-macos-intel")
+    step = workflow_step(job, "Test macOS non-shell binary startup")
+    {"workflow": workflow, "job": job, "step": step}[scope].setdefault("env", {})[
+        "GITHUB_TOKEN"
+    ] = "secret"
+
+    with pytest.raises(AssertionError):
+        _assert_macos_startup_step(workflow)
 
 
 def test_windows_linux_gate_mutation_is_rejected() -> None:
