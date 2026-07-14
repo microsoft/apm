@@ -30,13 +30,14 @@ def _git_environment(tmp_path: Path) -> dict[str, str]:
 def _run_git(
     *arguments: str,
     environment: dict[str, str],
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ("git", *arguments),
         env=environment,
         capture_output=True,
         text=True,
-        check=True,
+        check=check,
     )
 
 
@@ -44,10 +45,12 @@ def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
     environment = _git_environment(tmp_path)
     source_tree = tmp_path / "source"
     source_tree.mkdir()
-    (source_tree / "apm.yml").write_text(
-        "name: package\nversion: 0.1.0\n",
-        encoding="utf-8",
-    )
+    manifest_bytes = b"name: package\nversion: 0.1.0\n"
+    binary_bytes = b"\x00\xfflocal-git-fixture\n\x10"
+    (source_tree / "apm.yml").write_bytes(manifest_bytes)
+    nested = source_tree / "nested"
+    nested.mkdir()
+    (nested / "payload.bin").write_bytes(binary_bytes)
     source_metadata = source_tree / ".git"
     source_metadata.mkdir()
     (source_metadata / "config").write_text("not real metadata", encoding="utf-8")
@@ -60,9 +63,8 @@ def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
     assert repository.origin.is_dir()
     assert repository.worktree.is_dir()
     assert repository.file_url == repository.origin.resolve().as_uri()
-    assert (repository.worktree / "apm.yml").read_text(encoding="utf-8") == (
-        "name: package\nversion: 0.1.0\n"
-    )
+    assert (repository.worktree / "apm.yml").read_bytes() == manifest_bytes
+    assert (repository.worktree / "nested" / "payload.bin").read_bytes() == binary_bytes
     assert (repository.worktree / ".git" / "config").read_text(
         encoding="utf-8"
     ) != "not real metadata"
@@ -92,7 +94,14 @@ def test_create_owns_bare_origin_and_isolated_worktree(tmp_path: Path) -> None:
     )
     assert worktree.stdout.strip() == "true"
 
-    for unsafe_name in ("../outside", "nested/repository", r"nested\repository", "Z:outside"):
+    for unsafe_name in (
+        ".",
+        "..",
+        "../outside",
+        "nested/repository",
+        r"nested\repository",
+        "Z:outside",
+    ):
         with pytest.raises(ValueError, match="Unsafe repository name"):
             factory.create(unsafe_name)
 
@@ -143,14 +152,34 @@ def test_relative_root_resolves_once_at_the_intended_location(
     assert remote_main.stdout.split()[0] == commit.sha
 
 
-def test_same_source_sequence_produces_deterministic_commit(tmp_path: Path) -> None:
+def test_same_source_sequence_produces_deterministic_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    poisoned_config = tmp_path / "poisoned.gitconfig"
+    poisoned_config.write_text(
+        "[user]\n    name = Poisoned Config\n    email = poisoned-config@example.invalid\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(poisoned_config))
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Poisoned Author")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "poisoned-author@example.invalid")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "Poisoned Committer")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "poisoned-committer@example.invalid")
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "poisoned-git-dir"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "poisoned-work-tree"))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.name")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Poisoned Injection")
+
     commits = []
     for name in ("first", "second"):
         scenario = tmp_path / name
         scenario.mkdir()
+        environment = _git_environment(scenario)
         factory = LocalGitRepositoryFactory(
             scenario / "repositories",
-            env=_git_environment(scenario),
+            env=environment,
         )
         repository = factory.create("package")
         (repository.worktree / "apm.yml").write_text(
@@ -158,6 +187,32 @@ def test_same_source_sequence_produces_deterministic_commit(tmp_path: Path) -> N
             encoding="utf-8",
         )
         commits.append(factory.commit(repository, message="seed"))
+        identity = _run_git(
+            "-C",
+            str(repository.worktree),
+            "show",
+            "-s",
+            "--format=%an%n%ae%n%cn%n%ce",
+            "HEAD",
+            environment=environment,
+        )
+        assert identity.stdout.splitlines() == [
+            "APM Test",
+            "apm-test@example.invalid",
+            "APM Test",
+            "apm-test@example.invalid",
+        ]
+        configured_user_name = _run_git(
+            "-C",
+            str(repository.worktree),
+            "config",
+            "--get",
+            "user.name",
+            environment=environment,
+            check=False,
+        )
+        assert configured_user_name.returncode == 1
+        assert configured_user_name.stdout == ""
 
     assert commits[0].sha == commits[1].sha
     assert commits[0].message == commits[1].message == "seed"
@@ -173,15 +228,27 @@ def test_tag_advancement_is_explicit_and_observable(tmp_path: Path) -> None:
     manifest = repository.worktree / "apm.yml"
     manifest.write_text("name: package\nversion: 0.1.0\n", encoding="utf-8")
     first = factory.commit(repository, message="first")
-    remote_main = _run_git(
-        "ls-remote",
-        repository.file_url,
-        "refs/heads/main",
+    manifest.write_text("name: package\nversion: 0.2.0\n", encoding="utf-8")
+    second = factory.commit(repository, message="second")
+    head_at_tag_creation = _run_git(
+        "-C",
+        str(repository.worktree),
+        "rev-parse",
+        "HEAD",
         environment=environment,
     )
-    assert remote_main.stdout.split()[0] == first.sha
+    assert head_at_tag_creation.stdout.strip() == second.sha
+    assert first.sha != second.sha
     factory.tag(repository, "v1.0.0", first)
 
+    local_initial_tag = _run_git(
+        "-C",
+        str(repository.worktree),
+        "rev-parse",
+        "refs/tags/v1.0.0",
+        environment=environment,
+    )
+    assert local_initial_tag.stdout.strip() == first.sha
     initial_tag = _run_git(
         "ls-remote",
         repository.file_url,
@@ -190,10 +257,27 @@ def test_tag_advancement_is_explicit_and_observable(tmp_path: Path) -> None:
     )
     assert initial_tag.stdout.split()[0] == first.sha
 
-    manifest.write_text("name: package\nversion: 0.2.0\n", encoding="utf-8")
-    second = factory.commit(repository, message="second")
+    manifest.write_text("name: package\nversion: 0.3.0\n", encoding="utf-8")
+    third = factory.commit(repository, message="third")
+    assert second.sha != third.sha
+    head_at_tag_advance = _run_git(
+        "-C",
+        str(repository.worktree),
+        "rev-parse",
+        "HEAD",
+        environment=environment,
+    )
+    assert head_at_tag_advance.stdout.strip() == third.sha
     factory.advance_tag(repository, "v1.0.0", second)
 
+    local_advanced_tag = _run_git(
+        "-C",
+        str(repository.worktree),
+        "rev-parse",
+        "refs/tags/v1.0.0",
+        environment=environment,
+    )
+    assert local_advanced_tag.stdout.strip() == second.sha
     advanced_tag = _run_git(
         "ls-remote",
         repository.file_url,
