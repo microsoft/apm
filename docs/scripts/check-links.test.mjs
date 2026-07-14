@@ -198,9 +198,10 @@ test('CLI exits 0 with no output errors when all links resolve', () => {
 	}
 });
 
-test('CLI exits non-zero with actionable diagnostics when a link is broken', () => {
+test('CLI exits non-zero with actionable diagnostics when a rendered target page is missing', () => {
 	const dist = makeFixtureDist({
-		'enterprise/registry-proxy/index.html': '<a href="../troubleshooting/ssl-issues/">SSL</a>',
+		'enterprise/registry-proxy/index.html':
+			'<a href="../../troubleshooting/ssl-issues/">SSL</a>',
 	});
 	try {
 		let threw = false;
@@ -211,10 +212,10 @@ test('CLI exits non-zero with actionable diagnostics when a link is broken', () 
 			assert.notEqual(error.status, 0);
 			const combined = `${error.stdout || ''}${error.stderr || ''}`;
 			assert.match(combined, /registry-proxy/);
-			assert.match(combined, /\.\.\/troubleshooting\/ssl-issues\//);
-			assert.match(combined, /\/apm\/enterprise\/troubleshooting\/ssl-issues\//);
+			assert.match(combined, /\.\.\/\.\.\/troubleshooting\/ssl-issues\//);
+			assert.match(combined, /\/apm\/troubleshooting\/ssl-issues\//);
 		}
-		assert.ok(threw, 'expected CLI to exit with a non-zero status');
+		assert.ok(threw, 'expected a missing rendered target page to fail');
 	} finally {
 		cleanup(dist);
 	}
