@@ -15,6 +15,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DIST = REPO_ROOT / "docs" / "dist"
 
 
+def recovery_guidance(dist_dir: Path, *, mismatch: bool) -> str:
+    """Return root-safe recovery guidance for the selected output tree."""
+    if dist_dir.resolve() == DEFAULT_DIST.resolve():
+        rebuild = "rebuild with 'npm --prefix docs run build'"
+    else:
+        rebuild = f"rebuild the rendered docs at '{dist_dir}'"
+    if mismatch:
+        action = f"Add or remove the matching CLI reference page, {rebuild}"
+    else:
+        action = rebuild[0].upper() + rebuild[1:]
+    return (
+        f"[i] {action}, then rerun 'uv run --frozen python scripts/check_cli_docs.py {dist_dir}'."
+    )
+
+
 def public_top_level_commands(group: click.Group) -> set[str]:
     """Return visible top-level names from Click's live command registry."""
     return {name for name, command in group.commands.items() if not command.hidden}
@@ -64,11 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except FileNotFoundError as error:
         print(f"[x] {error}", file=sys.stderr)
-        print(
-            "[i] Rebuild docs with 'npm --prefix docs run build', then rerun "
-            f"'uv run --frozen python scripts/check_cli_docs.py {args.dist_dir}'.",
-            file=sys.stderr,
-        )
+        print(recovery_guidance(args.dist_dir, mismatch=False), file=sys.stderr)
         return 1
 
     if missing_pages or orphan_pages:
@@ -83,12 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                 "  rendered pages missing executable commands: " + ", ".join(orphan_pages),
                 file=sys.stderr,
             )
-        print(
-            "[i] Add or remove the matching CLI reference page, rebuild with "
-            "'npm --prefix docs run build', then rerun "
-            f"'uv run --frozen python scripts/check_cli_docs.py {args.dist_dir}'.",
-            file=sys.stderr,
-        )
+        print(recovery_guidance(args.dist_dir, mismatch=True), file=sys.stderr)
         return 1
 
     command_count = len(public_top_level_commands(cli))

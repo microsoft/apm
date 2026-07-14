@@ -47,8 +47,8 @@ def _run_checker(dist: Path) -> subprocess.CompletedProcess[str]:
 
 def _rerun_guidance(dist: Path) -> str:
     return (
-        "[i] Add or remove the matching CLI reference page, rebuild with "
-        "'npm --prefix docs run build', then rerun "
+        "[i] Add or remove the matching CLI reference page, "
+        f"rebuild the rendered docs at '{dist}', then rerun "
         f"'uv run --frozen python scripts/check_cli_docs.py {dist}'.\n"
     )
 
@@ -93,7 +93,7 @@ def test_checker_cli_reports_missing_rendered_directory_on_stderr(tmp_path: Path
     assert result.stdout == ""
     assert result.stderr == (
         f"[x] rendered CLI directory not found: {cli_dir}\n"
-        "[i] Rebuild docs with 'npm --prefix docs run build', then rerun "
+        f"[i] Rebuild the rendered docs at '{tmp_path}', then rerun "
         f"'uv run --frozen python scripts/check_cli_docs.py {tmp_path}'.\n"
     )
 
