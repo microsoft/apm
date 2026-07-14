@@ -24,6 +24,7 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import CommandLogger
+from ..policy import outcome_routing as policy_outcomes
 from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
 from ..policy.schema import ApmPolicy
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
@@ -31,6 +32,11 @@ from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, 
 _POLICY_RESOLUTION_WARNING = (
     "Org policy could not be resolved; approval is proceeding without org "
     "restrictions. Run 'apm policy status --no-cache' to diagnose."
+)
+_POLICY_HASH_MISMATCH_WARNING = (
+    "Policy hash verification failed; this may indicate policy tampering. "
+    "Approval is proceeding without org restrictions. "
+    "Run 'apm policy status --no-cache' to verify the policy source."
 )
 
 
@@ -80,18 +86,21 @@ def _store_label(user_scope: bool) -> str:
 
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Best-effort load of the merged org policy. Returns a default on failure."""
-    should_warn = False
+    warning: str | None = None
     try:
         from ..policy.discovery import discover_policy_with_chain
 
         result = discover_policy_with_chain(project_root)
         if getattr(result, "policy", None) is not None:
             return result.policy
-        should_warn = result.outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES
+        if result.outcome == policy_outcomes.POLICY_HASH_MISMATCH_OUTCOME:
+            warning = _POLICY_HASH_MISMATCH_WARNING
+        elif result.outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
+            warning = _POLICY_RESOLUTION_WARNING
     except Exception:
-        should_warn = True
-    if should_warn and logger is not None:
-        logger.warning(_POLICY_RESOLUTION_WARNING)
+        warning = _POLICY_RESOLUTION_WARNING
+    if warning is not None and logger is not None:
+        logger.warning(warning)
     return ApmPolicy()
 
 

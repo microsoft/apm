@@ -107,7 +107,6 @@ def test_approval_policy_benign_miss_does_not_warn(tmp_path: Path, outcome: str)
     [
         "incomplete_chain",
         "malformed",
-        "hash_mismatch",
         "cache_miss_fetch_fail",
         "garbage_response",
     ],
@@ -130,6 +129,31 @@ def test_approval_policy_resolution_failure_warns(
         "Org policy could not be resolved; approval is proceeding without org "
         "restrictions. Run 'apm policy status --no-cache' to diagnose."
     )
+
+
+def test_approval_policy_hash_mismatch_gets_distinct_sanitized_warning(
+    tmp_path: Path,
+) -> None:
+    logger = MagicMock(spec=CommandLogger)
+    result = PolicyFetchResult(
+        policy=None,
+        outcome="hash_mismatch",
+        error="SENSITIVE_URL_TOKEN_HASH_EXCEPTION",
+    )
+
+    with patch(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        return_value=result,
+    ):
+        loaded = load_org_policy(tmp_path, logger=logger)
+
+    assert loaded == ApmPolicy()
+    logger.warning.assert_called_once_with(
+        "Policy hash verification failed; this may indicate policy tampering. "
+        "Approval is proceeding without org restrictions. "
+        "Run 'apm policy status --no-cache' to verify the policy source."
+    )
+    assert "SENSITIVE_URL_TOKEN_HASH_EXCEPTION" not in logger.warning.call_args.args[0]
 
 
 def test_approve_recommended_warns_when_org_policy_chain_fails() -> None:
