@@ -320,11 +320,10 @@ def discover_policy_with_chain(
     # -- Chain resolution if leaf has extends: -------------------------
     if (
         fetch_result.policy is not None
-        and fetch_result.outcome in ("found", "cached_stale")
         and fetch_result.policy.extends is not None
         and not fetch_result.cached  # Don't re-resolve if served from cache
     ):
-        _resolve_and_persist_chain(fetch_result, project_root)
+        _resolve_and_persist_chain(fetch_result, project_root, no_cache=no_cache)
 
     return fetch_result
 
@@ -443,6 +442,8 @@ def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
 def _resolve_and_persist_chain(
     fetch_result: PolicyFetchResult,
     project_root: Path,
+    *,
+    no_cache: bool = False,
 ) -> None:
     """Resolve inheritance chain and update cache with merged policy + chain_refs.
 
@@ -507,7 +508,7 @@ def _resolve_and_persist_chain(
         parent_result = discover_policy(
             project_root,
             policy_override=next_ref,
-            no_cache=False,
+            no_cache=no_cache,
         )
         fetch_result.warnings.extend(parent_result.warnings)
 
@@ -555,6 +556,7 @@ def _resolve_and_persist_chain(
             merged,
             project_root,
             chain_refs=chain_refs,
+            raw_bytes_hash=fetch_result.raw_bytes_hash,
             warnings=fetch_result.warnings,
         )
 
@@ -569,6 +571,7 @@ def _resolve_and_persist_chain(
         return
 
     fetch_result.policy = merged
+    fetch_result.outcome = "empty" if _is_policy_empty(merged) else "found"
 
 
 def discover_policy(
@@ -906,14 +909,15 @@ def _fetch_from_url(
 
     chain_refs = [url]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        url,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-        warnings=warnings,
-    )
+    if policy.extends is None:
+        _write_cache(
+            url,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -988,14 +992,15 @@ def _fetch_from_repo(
 
     chain_refs = [repo_ref]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        repo_ref,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-        warnings=warnings,
-    )
+    if policy.extends is None:
+        _write_cache(
+            repo_ref,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -1138,14 +1143,15 @@ def _fetch_from_ado_repo(
 
     chain_refs = [repo_ref]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        repo_ref,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-        warnings=warnings,
-    )
+    if policy.extends is None:
+        _write_cache(
+            repo_ref,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -164,6 +164,43 @@ class TestChainResolution:
         mock_write_cache.assert_not_called()
         # discover_policy called only once (no parent fetch)
         assert mock_discover.call_count == 1
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_no_cache_reaches_every_parent(
+        self, mock_discover: MagicMock, mock_write_cache: MagicMock
+    ) -> None:
+        leaf = _make_policy(extends="parent/.github", deny=("child/deny",))
+        leaf_fetch = _make_fetch(policy=leaf, source="org:child/.github", cached=False)
+        parent = _make_policy(enforcement="block", deny=("parent/deny",))
+        parent_fetch = _make_fetch(policy=parent, source="org:parent/.github", cached=False)
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+        discover_policy_with_chain(Path("/fake"), no_cache=True)
+        assert mock_discover.call_args_list == [
+            call(
+                Path("/fake"),
+                policy_override=None,
+                no_cache=True,
+                expected_hash=None,
+            ),
+            call(Path("/fake"), policy_override="parent/.github", no_cache=True),
+        ]
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_merged_cache_retains_leaf_raw_bytes_hash(
+        self, mock_discover: MagicMock, mock_write_cache: MagicMock
+    ) -> None:
+        leaf = _make_policy(extends="parent/.github", deny=("child/deny",))
+        leaf_fetch = _make_fetch(policy=leaf, source="org:child/.github", cached=False)
+        leaf_fetch.raw_bytes_hash = "sha256:" + ("a" * 64)
+        parent_fetch = _make_fetch(
+            policy=_make_policy(enforcement="block"),
+            source="org:parent/.github",
+        )
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+        discover_policy_with_chain(Path("/fake"))
+        assert mock_write_cache.call_args.kwargs["raw_bytes_hash"] == "sha256:" + ("a" * 64)
 
 
 # ======================================================================

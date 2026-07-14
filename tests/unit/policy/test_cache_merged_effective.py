@@ -763,5 +763,49 @@ security:
         assert warm.policy == cold.policy
 
 
+def test_incomplete_chain_does_not_leave_weak_leaf_cache(tmp_path: Path) -> None:
+    leaf_yaml = """
+name: child
+extends: parent/.github
+dependencies:
+  deny: [child/deny]
+"""
+
+    def fetch(repo_ref: str, policy_path: str) -> tuple[str | None, str | None]:
+        assert policy_path == "apm-policy.yml"
+        if repo_ref == "child/.github":
+            return leaf_yaml, None
+        assert repo_ref == "parent/.github"
+        return None, "503: parent unavailable"
+
+    with patch("apm_cli.policy.discovery._fetch_github_contents", side_effect=fetch) as transport:
+        first = discover_policy_with_chain(tmp_path, policy_override="child/.github")
+        assert first.outcome == "incomplete_chain"
+        assert first.policy is None
+        assert _read_cache_entry("child/.github", tmp_path) is None
+        second = discover_policy_with_chain(tmp_path, policy_override="child/.github")
+    assert second.outcome == "incomplete_chain"
+    assert second.policy is None
+    assert transport.call_count == 4
+
+
+def test_extends_only_leaf_resolves_strict_parent(tmp_path: Path) -> None:
+    payloads = {
+        "child/.github": "name: child\nextends: parent/.github\n",
+        "parent/.github": ("name: parent\ndependencies:\n  require_pinned_constraint: true\n"),
+    }
+
+    def fetch(repo_ref: str, policy_path: str) -> tuple[str | None, str | None]:
+        assert policy_path == "apm-policy.yml"
+        return payloads[repo_ref], None
+
+    with patch("apm_cli.policy.discovery._fetch_github_contents", side_effect=fetch) as transport:
+        result = discover_policy_with_chain(tmp_path, policy_override="child/.github")
+    assert result.outcome == "found"
+    assert result.policy is not None
+    assert result.policy.dependencies.require_pinned_constraint is True
+    assert transport.call_count == 2
+
+
 if __name__ == "__main__":
     unittest.main()
