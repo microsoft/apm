@@ -41,6 +41,7 @@ Markers
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -122,6 +123,11 @@ class TestBinaryStartup:
         smoke or integration check would also fail; failing fast
         here saves merge-queue minutes.
         """
+        configured_path = os.environ.get("APM_BINARY_PATH")
+        if configured_path:
+            assert apm_binary_path == Path(configured_path).resolve(), (
+                "APM_BINARY_PATH must select the exact generated artifact"
+            )
         result = _run_apm(apm_binary_path, ["--version"], cwd=tmp_path)
         assert result.returncode == 0, (
             f"apm --version failed (rc={result.returncode})\nstderr:\n{result.stderr}"

@@ -193,10 +193,11 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-x86_64/apm
-        run: >-
-          uv run pytest
-          tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs
-          -vv -ra --tb=short
+        run: |
+          test -x "$APM_BINARY_PATH"
+          uv run --frozen pytest \
+            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
+            -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4

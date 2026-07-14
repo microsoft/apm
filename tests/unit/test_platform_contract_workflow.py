@@ -21,6 +21,11 @@ def test_macos_intel_runs_non_shell_binary_startup_after_build() -> None:
     assert binary_path in intel_job
     assert 'APM_E2E_TESTS: "1"' in intel_job
     assert intel_job.index(build_step) < intel_job.index(test_id)
+    command_start = intel_job.index("      - name: Test macOS non-shell binary startup")
+    command = intel_job[command_start : command_start + 500]
+    assert 'test -x "$APM_BINARY_PATH"' in command
+    assert "uv run --frozen pytest" in command
+    assert command.index('test -x "$APM_BINARY_PATH"') < command.index(test_id)
     assert "matrix:" not in intel_job
 
 
