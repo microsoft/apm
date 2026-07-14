@@ -240,66 +240,21 @@ if Path.cwd() != parent_cwd:
     assert Path.cwd() == parent_cwd
 
 
-def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
-    security_control_names = (
+def test_bounded_apm_git_environment_contract(tmp_path: Path) -> None:
+    remote_control_names = (
         "APM_ALLOW_PROTOCOL_FALLBACK",
-        "APM_COPILOT_APP_DB",
-        "APM_COPILOT_APP_WS_RUN_DIR",
-        "APM_COPILOT_COWORK_SKILLS_DIR",
-        "APM_DISABLE_TRUSTSTORE",
-        "APM_E2E_TESTS",
+        "APM_GIT_CREDENTIAL_TIMEOUT",
         "APM_GITLAB_HOSTS",
         "APM_GIT_PROTOCOL",
-        "APM_INSTALLER_BASE_URL",
-        "APM_NO_DIRECT_FALLBACK",
+        "APM_NO_CACHE",
         "APM_POLICY_DISABLE",
-        "APM_PYPI_INDEX_URL",
-        "APM_RELEASE_BASE_URL",
-        "APM_RELEASE_METADATA_URL",
-        "APM_REPO",
-        "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
-        "ARTIFACTORY_BASE_URL",
-        "ARTIFACTORY_MAX_ARCHIVE_MB",
-        "ARTIFACTORY_ONLY",
-        "CURL_CA_BUNDLE",
         "GITHUB_HOST",
         "GITHUB_URL",
         "GITLAB_HOST",
-        "MCP_REGISTRY_ALLOW_HTTP",
-        "MCP_REGISTRY_URL",
-        "PROXY_REGISTRY_ALLOW_HTTP",
-        "PROXY_REGISTRY_ONLY",
-        "PROXY_REGISTRY_URL",
-        "REQUESTS_CA_BUNDLE",
-        "SSL_CERT_FILE",
     )
-    exact_secret_names = (
-        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-        "ACTIONS_ID_TOKEN_REQUEST_URL",
-        "ACTIONS_RUNTIME_TOKEN",
+    apm_auth_names = (
         "ADO_APM_PAT",
-        "ARTIFACTORY_APM_TOKEN",
-        "ARTIFACTS_CREDENTIALPROVIDER_FEED_ENDPOINTS",
-        "AWS_CONFIG_FILE",
-        "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
-        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-        "AWS_SHARED_CREDENTIALS_FILE",
-        "AWS_WEB_IDENTITY_TOKEN_FILE",
-        "AZURE_FEDERATED_TOKEN_FILE",
-        "AZURE_CLIENT_CERTIFICATE_PATH",
-        "AZURE_AUTHORITY_HOST",
-        "AZURE_DEVOPS_EXT_PAT",
-        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
-        "CLOUDSDK_CONFIG",
-        "CONTAINERS_REGISTRIES_CONF",
         "COPILOT_GITHUB_TOKEN",
-        "DBUS_SESSION_BUS_ADDRESS",
-        "DOCKER_CERT_PATH",
-        "DOCKER_AUTH_CONFIG",
-        "DOCKER_CONFIG",
-        "DOCKER_HOST",
-        "DOCKER_TLS_VERIFY",
         "GH_ENTERPRISE_TOKEN",
         "GH_TOKEN",
         "GITHUB_APM_PAT",
@@ -313,39 +268,9 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GITLAB_TOKEN",
         "GIT_ASKPASS",
         "GIT_TOKEN",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
-        "GOOGLE_GHA_CREDS_PATH",
-        "GNOME_KEYRING_CONTROL",
-        "IDENTITY_ENDPOINT",
-        "IDENTITY_HEADER",
-        "IMDS_ENDPOINT",
-        "MSI_ENDPOINT",
-        "NVIDIA_INFERENCE_KEY",
-        "NPM_CONFIG_GLOBALCONFIG",
-        "NPM_CONFIG_PREFIX",
-        "NPM_CONFIG_USERCONFIG",
-        "OPENAI_API_KEY",
-        "PIP_CONFIG_FILE",
-        "PIP_EXTRA_INDEX_URL",
-        "PIP_INDEX_URL",
-        "PROXY_REGISTRY_TOKEN",
-        "REGISTRY_AUTH_FILE",
+        "SSH_AGENT_PID",
         "SSH_ASKPASS",
-        "VSS_NUGET_EXTERNAL_FEED_ENDPOINTS",
-        "UV_EXTRA_INDEX_URL",
-        "UV_INDEX_URL",
-        "UV_KEYRING_PROVIDER",
-    )
-    credential_pattern_names = (
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-        "SERVICE_API_KEY",
-        "SERVICE_PASSWORD",
-        "SERVICE_PAT",
-        "SERVICE_SECRET",
-        "SERVICE_TOKEN",
+        "SSH_AUTH_SOCK",
     )
     pinned_names = (
         "HOME",
@@ -353,15 +278,11 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "XDG_CONFIG_HOME",
         "XDG_CACHE_HOME",
         "LOCALAPPDATA",
-        "APPDATA",
-        "XDG_DATA_HOME",
-        "XDG_RUNTIME_DIR",
         "APM_HOME",
         "APM_CACHE_DIR",
         "APM_TEMP_DIR",
         "GH_CONFIG_DIR",
         "AZURE_CONFIG_DIR",
-        "NUGET_PACKAGES",
         "TMPDIR",
         "TMP",
         "TEMP",
@@ -419,66 +340,13 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_TEMPLATE_DIR",
         "SSH_ASKPASS_REQUIRE",
     )
-    ambient_credential_names = (
-        "SSH_AGENT_PID",
-        "SSH_AUTH_SOCK",
-        "SYSTEM_ACCESSTOKEN",
-    )
-    child_runtime_injection_names = (
-        "BASH_ENV",
-        "CORECLR_ENABLE_PROFILING",
-        "CORECLR_PROFILER",
-        "CORECLR_PROFILER_PATH",
-        "CORECLR_PROFILER_PATH_32",
-        "CORECLR_PROFILER_PATH_64",
-        "DOTNET_ADDITIONAL_DEPS",
-        "DOTNET_STARTUP_HOOKS",
-        "DYLD_INSERT_LIBRARIES",
-        "DYLD_LIBRARY_PATH",
-        "ENV",
-        "JAVA_TOOL_OPTIONS",
-        "JDK_JAVA_OPTIONS",
-        "LD_AUDIT",
-        "LD_LIBRARY_PATH",
-        "LD_PRELOAD",
-        "NODE_OPTIONS",
-        "NODE_PATH",
-        "PERL5LIB",
-        "PERL5OPT",
-        "PYTHONBREAKPOINT",
-        "PYTHONHOME",
-        "PYTHONINSPECT",
-        "PYTHONSTARTUP",
-        "PYTHONUSERBASE",
-        "RUBYLIB",
-        "RUBYOPT",
-        "ZDOTDIR",
-        "_JAVA_OPTIONS",
-    )
-    tool_home_names = (
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "COPILOT_HOME",
-        "HERMES_HOME",
-    )
-    proxy_names = (
-        "ALL_PROXY",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-    )
     protected_exact_names = frozenset(
         (
-            *exact_secret_names,
-            *credential_pattern_names,
+            *apm_auth_names,
             *pinned_names,
-            *security_control_names,
+            *remote_control_names,
             *git_state_names,
             *git_execution_names,
-            *ambient_credential_names,
-            *child_runtime_injection_names,
-            *tool_home_names,
-            *proxy_names,
         )
     )
     ambient_environment = dict(os.environ)
@@ -489,14 +357,9 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         ambient_environment[name.title()] = "mixed-poison"
     ambient_environment.update(
         {
-            "APM_ARBITRARY_INHERITED_SWITCH": "ambient",
-            "APM_NO_CACHE": "1",
             "APM_REGISTRY_PASS_INTERNAL": "ambient",
             "APM_REGISTRY_TOKEN_INTERNAL": "ambient",
             "APM_REGISTRY_USER_INTERNAL": "ambient",
-            "CLAUDE_CONFIG_DIR": "/ambient/claude",
-            "CODEX_HOME": "/ambient/codex",
-            "COPILOT_HOME": "/ambient/copilot",
             "GITHUB_APM_PAT_ACME": "ambient",
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "credential.helper",
@@ -504,8 +367,6 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             "GIT_DIR": "/ambient/git",
             "GIT_TRACE2_EVENT": "/ambient/git-trace.json",
             "GIT_WORK_TREE": "/ambient/work-tree",
-            "HERMES_HOME": "/ambient/hermes",
-            "HTTPS_PROXY": "https://ambient.invalid",
             "Git_Config_Value_1": "ambient",
             "Git_Terminal_Prompt": "ambient",
             "apm_policy_disable": "1",
@@ -520,79 +381,23 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         base_env=ambient_environment,
     )
     environment = isolated.subprocess_env()
-    case_variant_credential_names = (
-        "ARTIFACTS_CREDENTIALPROVIDER_FEED_ENDPOINTS",
-        "AWS_CONFIG_FILE",
-        "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
-        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-        "AWS_SHARED_CREDENTIALS_FILE",
-        "AWS_WEB_IDENTITY_TOKEN_FILE",
-        "AZURE_FEDERATED_TOKEN_FILE",
-        "AZURE_CLIENT_CERTIFICATE_PATH",
-        "AZURE_AUTHORITY_HOST",
-        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
-        "CLOUDSDK_CONFIG",
-        "CONTAINERS_REGISTRIES_CONF",
-        "DBUS_SESSION_BUS_ADDRESS",
-        "DOCKER_AUTH_CONFIG",
-        "DOCKER_CERT_PATH",
-        "DOCKER_CONFIG",
-        "DOCKER_HOST",
-        "DOCKER_TLS_VERIFY",
-        "GIT_HTTP_EXTRAHEADER",
-        "GIT_TOKEN",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
-        "GOOGLE_GHA_CREDS_PATH",
-        "GNOME_KEYRING_CONTROL",
-        "IDENTITY_ENDPOINT",
-        "IDENTITY_HEADER",
-        "IMDS_ENDPOINT",
-        "MSI_ENDPOINT",
-        "NVIDIA_INFERENCE_KEY",
-        "NPM_CONFIG_GLOBALCONFIG",
-        "NPM_CONFIG_PREFIX",
-        "NPM_CONFIG_USERCONFIG",
-        "OPENAI_API_KEY",
-        "PIP_CONFIG_FILE",
-        "PIP_EXTRA_INDEX_URL",
-        "PIP_INDEX_URL",
-        "REGISTRY_AUTH_FILE",
-        "UV_EXTRA_INDEX_URL",
-        "UV_INDEX_URL",
-        "UV_KEYRING_PROVIDER",
-        "VSS_NUGET_EXTERNAL_FEED_ENDPOINTS",
-    )
     case_variant_isolated = IsolatedApmEnvironment.create(
-        tmp_path / "case-variant-credentials",
-        base_env={name.title(): "ambient" for name in case_variant_credential_names},
+        tmp_path / "case-variant-auth",
+        base_env={name.title(): "ambient" for name in apm_auth_names},
     )
     case_variant_environment_names = {
         name.upper() for name in case_variant_isolated.process_environment
     }
-    assert {name.upper() for name in case_variant_credential_names}.isdisjoint(
-        case_variant_environment_names
-    )
+    assert {name.upper() for name in apm_auth_names}.isdisjoint(case_variant_environment_names)
 
     stripped_names = (
-        *exact_secret_names,
-        *credential_pattern_names,
-        *security_control_names,
+        *apm_auth_names,
+        *remote_control_names,
         *git_state_names,
         *git_execution_names,
-        *ambient_credential_names,
-        *child_runtime_injection_names,
-        *tool_home_names,
-        *proxy_names,
-        "APM_ARBITRARY_INHERITED_SWITCH",
-        "APM_NO_CACHE",
         "APM_REGISTRY_PASS_INTERNAL",
         "APM_REGISTRY_TOKEN_INTERNAL",
         "APM_REGISTRY_USER_INTERNAL",
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "COPILOT_HOME",
         "GITHUB_APM_PAT_ACME",
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_KEY_0",
@@ -600,8 +405,6 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_TRACE2_EVENT",
         "GIT_DIR",
         "GIT_WORK_TREE",
-        "HERMES_HOME",
-        "HTTPS_PROXY",
         "Git_Config_Value_1",
         "apm_policy_disable",
         "github_token",
@@ -615,15 +418,11 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "XDG_CONFIG_HOME": str(isolated.root / "xdg-config"),
         "XDG_CACHE_HOME": str(isolated.root / "xdg-cache"),
         "LOCALAPPDATA": str(isolated.root / "local-app-data"),
-        "APPDATA": str(isolated.root / "roaming-app-data"),
-        "XDG_DATA_HOME": str(isolated.root / "xdg-data"),
-        "XDG_RUNTIME_DIR": str(isolated.root / "xdg-runtime"),
         "APM_HOME": str(isolated.config_root),
         "APM_CACHE_DIR": str(isolated.cache_root),
         "APM_TEMP_DIR": str(isolated.temp_root),
         "GH_CONFIG_DIR": str(isolated.root / "gh-config"),
         "AZURE_CONFIG_DIR": str(isolated.root / "azure-config"),
-        "NUGET_PACKAGES": str(isolated.root / "nuget-packages"),
         "TMPDIR": str(isolated.temp_root),
         "TMP": str(isolated.temp_root),
         "TEMP": str(isolated.temp_root),
@@ -645,7 +444,6 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     assert "APM_GIT_PROTOCOL" not in environment
     assert "SSH_AUTH_SOCK" not in environment
     assert "SSH_AGENT_PID" not in environment
-    assert "SYSTEM_ACCESSTOKEN" not in environment
     assert "git_terminal_prompt" not in environment
     assert environment["GIT_TERMINAL_PROMPT"] == "0"
     for name, expected_value in pinned_environment.items():
@@ -653,17 +451,11 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         assert matching_names == [name]
         assert environment[name] == expected_value
     for name in (
-        "APPDATA",
         "GH_CONFIG_DIR",
         "AZURE_CONFIG_DIR",
         "GIT_CONFIG_GLOBAL",
-        "NUGET_PACKAGES",
-        "XDG_DATA_HOME",
-        "XDG_RUNTIME_DIR",
     ):
         assert Path(environment[name]).resolve().is_relative_to(isolated.root.resolve())
-    if os.name != "nt":
-        assert Path(environment["XDG_RUNTIME_DIR"]).stat().st_mode & 0o777 == 0o700
 
     exact_names = ("HOME", "GIT_ALLOW_PROTOCOL", "GITHUB_TOKEN", "PYTHONPATH")
     dynamic_prefix_names = (
@@ -696,7 +488,9 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
     safe_environment = isolated.subprocess_env(
         overrides={
             "APM_LOG_LEVEL": "debug",
-            "APM_NO_CACHE": "1",
+            "EXAMPLE_API_KEY": "not-inspected",
+            "EXAMPLE_PASSWORD": "not-inspected",
+            "EXAMPLE_TOKEN": "not-inspected",
             "MODEL_KEY_FORMAT": "safe",
             "PASSWORD_POLICY": "safe",
             "TOKEN_COUNT": "1",
@@ -704,7 +498,9 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         }
     )
     assert safe_environment["APM_LOG_LEVEL"] == "debug"
-    assert safe_environment["APM_NO_CACHE"] == "1"
+    assert safe_environment["EXAMPLE_API_KEY"] == "not-inspected"
+    assert safe_environment["EXAMPLE_PASSWORD"] == "not-inspected"
+    assert safe_environment["EXAMPLE_TOKEN"] == "not-inspected"
     assert safe_environment["MODEL_KEY_FORMAT"] == "safe"
     assert safe_environment["PASSWORD_POLICY"] == "safe"
     assert safe_environment["TOKEN_COUNT"] == "1"

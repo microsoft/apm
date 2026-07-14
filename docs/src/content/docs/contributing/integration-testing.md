@@ -95,20 +95,18 @@ Source fixtures author only source inputs; the real APM CLI creates lockfiles,
 deployed trees, compiled output, bundles, hashes, cache state, and audit
 reports.
 
-`IsolatedApmEnvironment` sanitizes child environments and installs a
-best-effort Python socket tripwire. It is not an OS/native-code sandbox:
-executables found through `PATH` remain trusted, reflective access to CPython
-internals or native extensions can bypass Python monkey-patches, `file://`
-access is not confined by the OS, and hostile post-creation filesystem races
-are outside the contract. `GIT_ALLOW_PROTOCOL=file` and local
-`url.*.insteadOf` rewriting separately restrict Git transport in reviewed
-scenarios.
+`IsolatedApmEnvironment` builds deterministic child environments for APM and
+its Git/GitHub/ADO/GitLab/SSH flows, then installs a best-effort Python socket
+tripwire. The environment contract is deliberately bounded: it isolates the
+APM, Git, GH, Azure, home, cache, and temporary roots used by these tests. It
+does not scan arbitrary variables or act as a general credential scrubber.
 
-Credential-bearing config roots and endpoint overrides for Git, cloud SDKs,
-containers, NuGet, npm, pip, and uv are pinned or denied. Non-secret selectors
-such as `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AWS_PROFILE`, region/project
-selectors, and cache-control flags may pass through; pinned config roots and
-denied credential endpoints prevent them from selecting ambient credentials.
+It is also not an OS/native-code sandbox: executables found through `PATH`
+remain trusted, reflective access to CPython internals or native extensions can
+bypass Python monkey-patches, `file://` access is not confined by the OS, and
+hostile post-creation filesystem races are outside the contract.
+`GIT_ALLOW_PROTOCOL=file` and local `url.*.insteadOf` rewriting separately
+restrict Git transport in reviewed scenarios.
 
 Keep modules flat. Inside a pytest test with `tmp_path`, compose them directly:
 

@@ -112,85 +112,51 @@ builtins.__import__ = _guarded_import
 importlib.import_module = _guarded_import_module
 """
 
-_SECRET_ENV_NAMES = frozenset(
+_APM_AUTH_ENV_NAMES = frozenset(
     {
-        "ACTIONS_ID_TOKEN_REQUEST_URL",
-        "ARTIFACTS_CREDENTIALPROVIDER_FEED_ENDPOINTS",
-        "AWS_CONFIG_FILE",
-        "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
-        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "ADO_APM_PAT",
+        "COPILOT_GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GH_TOKEN",
+        "GITHUB_APM_PAT",
+        "GITHUB_COPILOT_PAT",
+        "GITHUB_ENTERPRISE_TOKEN",
         "GITHUB_MODELS_KEY",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_TOKEN",
         "GIT_ASKPASS",
         "GIT_HTTP_EXTRAHEADER",
         "GIT_TOKEN",
-        "AWS_SHARED_CREDENTIALS_FILE",
-        "AWS_WEB_IDENTITY_TOKEN_FILE",
-        "AZURE_CLIENT_CERTIFICATE_PATH",
-        "AZURE_AUTHORITY_HOST",
-        "AZURE_FEDERATED_TOKEN_FILE",
-        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
-        "CLOUDSDK_CONFIG",
-        "CONTAINERS_REGISTRIES_CONF",
-        "DBUS_SESSION_BUS_ADDRESS",
-        "DOCKER_AUTH_CONFIG",
-        "DOCKER_CERT_PATH",
-        "DOCKER_CONFIG",
-        "DOCKER_HOST",
-        "DOCKER_TLS_VERIFY",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
-        "GOOGLE_GHA_CREDS_PATH",
-        "GNOME_KEYRING_CONTROL",
-        "IDENTITY_ENDPOINT",
-        "IDENTITY_HEADER",
-        "IMDS_ENDPOINT",
-        "MSI_ENDPOINT",
-        "NPM_CONFIG_GLOBALCONFIG",
-        "NPM_CONFIG_PREFIX",
-        "NPM_CONFIG_USERCONFIG",
-        "PIP_CONFIG_FILE",
-        "PIP_EXTRA_INDEX_URL",
-        "PIP_INDEX_URL",
-        "REGISTRY_AUTH_FILE",
+        "GITLAB_APM_PAT",
+        "GITLAB_TOKEN",
         "SSH_AGENT_PID",
         "SSH_ASKPASS",
         "SSH_AUTH_SOCK",
-        "SYSTEM_ACCESSTOKEN",
-        "VSS_NUGET_EXTERNAL_FEED_ENDPOINTS",
-        "UV_EXTRA_INDEX_URL",
-        "UV_INDEX_URL",
-        "UV_KEYRING_PROVIDER",
     }
 )
-_CREDENTIAL_ENV_SUFFIXES = (
-    "_ACCESS_KEY_ID",
-    "_API_KEY",
-    "_INFERENCE_KEY",
-    "_PASSWORD",
-    "_PAT",
-    "_SECRET",
-    "_SECRET_ACCESS_KEY",
-    "_TOKEN",
-)
-_SECRET_ENV_PREFIXES = (
+_APM_AUTH_ENV_PREFIXES = (
     "APM_REGISTRY_PASS_",
     "APM_REGISTRY_TOKEN_",
     "APM_REGISTRY_USER_",
     "GITHUB_APM_PAT_",
 )
-_CREDENTIAL_STORE_ENV_NAMES = frozenset(
+_APM_CONFIG_ENV_NAMES = frozenset(
     {
         "AZURE_CONFIG_DIR",
         "GH_CONFIG_DIR",
     }
 )
-_TOOL_HOME_ENV_NAMES = frozenset(
+_APM_REMOTE_CONTROL_ENV_NAMES = frozenset(
     {
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "COPILOT_HOME",
-        "HERMES_HOME",
+        "APM_ALLOW_PROTOCOL_FALLBACK",
+        "APM_GIT_CREDENTIAL_TIMEOUT",
+        "APM_GIT_PROTOCOL",
+        "APM_GITLAB_HOSTS",
+        "APM_NO_CACHE",
+        "APM_POLICY_DISABLE",
+        "GITHUB_HOST",
+        "GITHUB_URL",
+        "GITLAB_HOST",
     }
 )
 _GIT_STATE_ENV_NAMES = frozenset(
@@ -244,76 +210,25 @@ _GIT_EXECUTION_ENV_NAMES = frozenset(
         "SSH_ASKPASS_REQUIRE",
     }
 )
-_CHILD_RUNTIME_INJECTION_ENV_NAMES = frozenset(
-    {
-        "BASH_ENV",
-        "CORECLR_ENABLE_PROFILING",
-        "CORECLR_PROFILER",
-        "CORECLR_PROFILER_PATH",
-        "CORECLR_PROFILER_PATH_32",
-        "CORECLR_PROFILER_PATH_64",
-        "DOTNET_ADDITIONAL_DEPS",
-        "DOTNET_STARTUP_HOOKS",
-        "DYLD_INSERT_LIBRARIES",
-        "DYLD_LIBRARY_PATH",
-        "ENV",
-        "JAVA_TOOL_OPTIONS",
-        "JDK_JAVA_OPTIONS",
-        "LD_AUDIT",
-        "LD_LIBRARY_PATH",
-        "LD_PRELOAD",
-        "NODE_OPTIONS",
-        "NODE_PATH",
-        "PERL5LIB",
-        "PERL5OPT",
-        "PYTHONBREAKPOINT",
-        "PYTHONHOME",
-        "PYTHONINSPECT",
-        "PYTHONSTARTUP",
-        "PYTHONUSERBASE",
-        "RUBYLIB",
-        "RUBYOPT",
-        "ZDOTDIR",
-        "_JAVA_OPTIONS",
-    }
-)
-_PROXY_ENV_NAMES = frozenset(
-    {
-        "ALL_PROXY",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "all_proxy",
-        "http_proxy",
-        "https_proxy",
-        "no_proxy",
-    }
-)
 _STRIPPED_ENV_NAMES = (
-    _SECRET_ENV_NAMES
-    | _PROXY_ENV_NAMES
+    _APM_AUTH_ENV_NAMES
     | _GIT_STATE_ENV_NAMES
     | _GIT_EXECUTION_ENV_NAMES
-    | _CHILD_RUNTIME_INJECTION_ENV_NAMES
-    | _CREDENTIAL_STORE_ENV_NAMES
-    | _TOOL_HOME_ENV_NAMES
+    | _APM_CONFIG_ENV_NAMES
+    | _APM_REMOTE_CONTROL_ENV_NAMES
 )
-_STRIPPED_ENV_PREFIXES = _SECRET_ENV_PREFIXES + _GIT_CONFIG_INJECTION_PREFIXES
+_STRIPPED_ENV_PREFIXES = _APM_AUTH_ENV_PREFIXES + _GIT_CONFIG_INJECTION_PREFIXES
 _PINNED_ENVIRONMENT_NAMES = (
     "HOME",
     "USERPROFILE",
     "XDG_CONFIG_HOME",
     "XDG_CACHE_HOME",
     "LOCALAPPDATA",
-    "APPDATA",
-    "XDG_DATA_HOME",
-    "XDG_RUNTIME_DIR",
     "APM_HOME",
     "APM_CACHE_DIR",
     "APM_TEMP_DIR",
     "GH_CONFIG_DIR",
     "AZURE_CONFIG_DIR",
-    "NUGET_PACKAGES",
     "TMPDIR",
     "TMP",
     "TEMP",
@@ -329,43 +244,7 @@ _PINNED_ENVIRONMENT_NAMES = (
     "GIT_COMMITTER_DATE",
     "PYTHONPATH",
 )
-_SECURITY_CONTROL_ENV_NAMES = frozenset(
-    {
-        "APM_ALLOW_PROTOCOL_FALLBACK",
-        "APM_COPILOT_APP_DB",
-        "APM_COPILOT_APP_WS_RUN_DIR",
-        "APM_COPILOT_COWORK_SKILLS_DIR",
-        "APM_DISABLE_TRUSTSTORE",
-        "APM_E2E_TESTS",
-        "APM_GITLAB_HOSTS",
-        "APM_GIT_PROTOCOL",
-        "APM_INSTALLER_BASE_URL",
-        "APM_NO_DIRECT_FALLBACK",
-        "APM_POLICY_DISABLE",
-        "APM_PYPI_INDEX_URL",
-        "APM_RELEASE_BASE_URL",
-        "APM_RELEASE_METADATA_URL",
-        "APM_REPO",
-        "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
-        "ARTIFACTORY_BASE_URL",
-        "ARTIFACTORY_MAX_ARCHIVE_MB",
-        "ARTIFACTORY_ONLY",
-        "CURL_CA_BUNDLE",
-        "GITHUB_HOST",
-        "GITHUB_URL",
-        "GITLAB_HOST",
-        "MCP_REGISTRY_ALLOW_HTTP",
-        "MCP_REGISTRY_URL",
-        "PROXY_REGISTRY_ALLOW_HTTP",
-        "PROXY_REGISTRY_ONLY",
-        "PROXY_REGISTRY_URL",
-        "REQUESTS_CA_BUNDLE",
-        "SSL_CERT_FILE",
-    }
-)
-_PROTECTED_OVERRIDE_NAMES = (
-    frozenset(_PINNED_ENVIRONMENT_NAMES) | _STRIPPED_ENV_NAMES | _SECURITY_CONTROL_ENV_NAMES
-)
+_PROTECTED_OVERRIDE_NAMES = frozenset(_PINNED_ENVIRONMENT_NAMES) | _STRIPPED_ENV_NAMES
 
 
 def _normalized_env_name(name: str) -> str:
@@ -375,20 +254,15 @@ def _normalized_env_name(name: str) -> str:
 
 def _is_protected_override(name: str) -> bool:
     normalized_name = _normalized_env_name(name)
-    return (
-        normalized_name in _PROTECTED_OVERRIDE_NAMES
-        or normalized_name.endswith(_CREDENTIAL_ENV_SUFFIXES)
-        or normalized_name.startswith(_STRIPPED_ENV_PREFIXES)
+    return normalized_name in _PROTECTED_OVERRIDE_NAMES or normalized_name.startswith(
+        _STRIPPED_ENV_PREFIXES
     )
 
 
 def _should_strip_inherited(name: str) -> bool:
     normalized_name = _normalized_env_name(name)
-    return (
-        normalized_name.startswith("APM_")
-        or normalized_name in _PROTECTED_OVERRIDE_NAMES
-        or normalized_name.endswith(_CREDENTIAL_ENV_SUFFIXES)
-        or normalized_name.startswith(_STRIPPED_ENV_PREFIXES)
+    return normalized_name in _PROTECTED_OVERRIDE_NAMES or normalized_name.startswith(
+        _STRIPPED_ENV_PREFIXES
     )
 
 
@@ -445,7 +319,7 @@ class IsolatedApmEnvironment:
         *,
         base_env: Mapping[str, str],
     ) -> IsolatedApmEnvironment:
-        """Create unique scenario roots and a sanitized process environment."""
+        """Create unique scenario roots and a bounded APM/Git process environment."""
         root.mkdir(parents=True, exist_ok=False)
         home = root / "home"
         config_root = home / ".apm"
@@ -458,12 +332,8 @@ class IsolatedApmEnvironment:
         xdg_config_root = root / "xdg-config"
         xdg_cache_root = root / "xdg-cache"
         local_app_data = root / "local-app-data"
-        roaming_app_data = root / "roaming-app-data"
-        xdg_data_root = root / "xdg-data"
-        xdg_runtime_root = root / "xdg-runtime"
         gh_config_root = root / "gh-config"
         azure_config_root = root / "azure-config"
-        nuget_packages_root = root / "nuget-packages"
         for directory in (
             home,
             config_root,
@@ -476,15 +346,10 @@ class IsolatedApmEnvironment:
             xdg_config_root,
             xdg_cache_root,
             local_app_data,
-            roaming_app_data,
-            xdg_data_root,
-            xdg_runtime_root,
             gh_config_root,
             azure_config_root,
-            nuget_packages_root,
         ):
             directory.mkdir(parents=True)
-        xdg_runtime_root.chmod(0o700)
 
         git_config = root / "gitconfig"
         git_config.write_text(
@@ -507,15 +372,11 @@ class IsolatedApmEnvironment:
             "XDG_CONFIG_HOME": str(xdg_config_root),
             "XDG_CACHE_HOME": str(xdg_cache_root),
             "LOCALAPPDATA": str(local_app_data),
-            "APPDATA": str(roaming_app_data),
-            "XDG_DATA_HOME": str(xdg_data_root),
-            "XDG_RUNTIME_DIR": str(xdg_runtime_root),
             "APM_HOME": str(config_root),
             "APM_CACHE_DIR": str(cache_root),
             "APM_TEMP_DIR": str(temp_root),
             "GH_CONFIG_DIR": str(gh_config_root),
             "AZURE_CONFIG_DIR": str(azure_config_root),
-            "NUGET_PACKAGES": str(nuget_packages_root),
             "TMPDIR": str(temp_root),
             "TMP": str(temp_root),
             "TEMP": str(temp_root),

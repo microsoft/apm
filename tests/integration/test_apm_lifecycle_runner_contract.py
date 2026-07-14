@@ -77,7 +77,7 @@ def test_runner_raises_when_configured_timeout_expires(tmp_path: Path) -> None:
             "time.sleep(10)"
         ),
     )
-    runner = ApmLifecycleRunner(command, timeout_seconds=0.05)
+    runner = ApmLifecycleRunner(command, timeout_seconds=1.0)
 
     with pytest.raises(subprocess.TimeoutExpired) as exc_info:
         runner.run(
@@ -88,12 +88,12 @@ def test_runner_raises_when_configured_timeout_expires(tmp_path: Path) -> None:
         )
 
     assert exc_info.value.cmd == command
-    assert exc_info.value.timeout == 0.05
+    assert exc_info.value.timeout == 1.0
     assert str(exc_info.value) == (
         "scenario='single-timeout'\n"
         f"cwd={str(tmp_path)!r}\n"
         f"command={command!r}\n"
-        "budget_seconds=0.05\n"
+        "budget_seconds=1.0\n"
         "stdout='before-timeout\\n'\n"
         "stderr='timeout-stderr\\n'"
     )
