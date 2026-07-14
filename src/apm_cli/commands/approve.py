@@ -27,6 +27,20 @@ from ..core.command_logger import CommandLogger
 from ..policy.schema import ApmPolicy
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 
+_POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
+    {
+        "cache_miss_fetch_fail",
+        "garbage_response",
+        "hash_mismatch",
+        "incomplete_chain",
+        "malformed",
+    }
+)
+_POLICY_RESOLUTION_WARNING = (
+    "Org policy could not be resolved; approval is proceeding without org "
+    "restrictions. Run 'apm policy status --no-cache' to diagnose."
+)
+
 
 def _find_manifest() -> Path:
     """Return the project's ``apm.yml`` path or exit."""
@@ -74,19 +88,18 @@ def _store_label(user_scope: bool) -> str:
 
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Best-effort load of the merged org policy. Returns a default on failure."""
+    should_warn = False
     try:
         from ..policy.discovery import discover_policy_with_chain
 
         result = discover_policy_with_chain(project_root)
         if getattr(result, "policy", None) is not None:
             return result.policy
+        should_warn = result.outcome in _POLICY_RESOLUTION_FAILURE_OUTCOMES
     except Exception:
-        pass
-    if logger is not None:
-        logger.warning(
-            "Org policy could not be resolved; approval is proceeding without org "
-            "restrictions. Run 'apm policy status --no-cache' to diagnose."
-        )
+        should_warn = True
+    if should_warn and logger is not None:
+        logger.warning(_POLICY_RESOLUTION_WARNING)
     return ApmPolicy()
 
 
@@ -142,31 +155,34 @@ def approve_cmd(
         apm approve --user owner/repo
     """
     logger = CommandLogger("approve")
-    manifest = _find_manifest()
+    try:
+        manifest = _find_manifest()
 
-    if list_decisions:
-        _list_decisions(manifest, logger=logger)
-        return
+        if list_decisions:
+            _list_decisions(manifest, logger=logger)
+            return
 
-    allow, deny = _load_store(manifest, user_scope)
+        allow, deny = _load_store(manifest, user_scope)
 
-    if pending:
-        _show_pending(manifest, allow)
-        return
+        if pending:
+            _show_pending(manifest, allow)
+            return
 
-    if recommended:
-        _approve_recommended(manifest, user_scope, allow, deny, logger=logger)
-        return
+        if recommended:
+            _approve_recommended(manifest, user_scope, allow, deny, logger=logger)
+            return
 
-    if approve_all:
-        _approve_all_pending(manifest, user_scope, allow, deny)
-        return
+        if approve_all:
+            _approve_all_pending(manifest, user_scope, allow, deny)
+            return
 
-    if not packages:
-        _rich_error("Specify at least one package, or use --pending / --all / --recommended.")
-        sys.exit(1)
+        if not packages:
+            _rich_error("Specify at least one package, or use --pending / --all / --recommended.")
+            sys.exit(1)
 
-    _approve_packages(manifest, user_scope, allow, deny, packages)
+        _approve_packages(manifest, user_scope, allow, deny, packages)
+    finally:
+        logger.render_summary()
 
 
 @click.command("deny")

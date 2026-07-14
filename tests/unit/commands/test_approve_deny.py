@@ -8,8 +8,9 @@ to ``~/.apm/config.json`` only with ``--user`` (personal, lowest authority).
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -20,6 +21,7 @@ from apm_cli.commands.approve import (
     load_org_policy,
 )
 from apm_cli.commands.policy import policy as policy_group
+from apm_cli.core.command_logger import CommandLogger
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 
@@ -85,6 +87,51 @@ def test_approval_policy_uses_chain_aware_discovery(tmp_path: Path) -> None:
     mock_chain.assert_called_once_with(tmp_path)
 
 
+@pytest.mark.parametrize("outcome", ["absent", "no_git_remote", "disabled", "empty"])
+def test_approval_policy_benign_miss_does_not_warn(tmp_path: Path, outcome: str) -> None:
+    logger = MagicMock(spec=CommandLogger)
+    result = PolicyFetchResult(policy=None, outcome=outcome)
+
+    with patch(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        return_value=result,
+    ):
+        loaded = load_org_policy(tmp_path, logger=logger)
+
+    assert loaded == ApmPolicy()
+    logger.warning.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        "incomplete_chain",
+        "malformed",
+        "hash_mismatch",
+        "cache_miss_fetch_fail",
+        "garbage_response",
+    ],
+)
+def test_approval_policy_resolution_failure_warns(
+    tmp_path: Path,
+    outcome: str,
+) -> None:
+    logger = MagicMock(spec=CommandLogger)
+    result = PolicyFetchResult(policy=None, outcome=outcome)
+
+    with patch(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        return_value=result,
+    ):
+        loaded = load_org_policy(tmp_path, logger=logger)
+
+    assert loaded == ApmPolicy()
+    logger.warning.assert_called_once_with(
+        "Org policy could not be resolved; approval is proceeding without org "
+        "restrictions. Run 'apm policy status --no-cache' to diagnose."
+    )
+
+
 def test_approve_recommended_warns_when_org_policy_chain_fails() -> None:
     runner = CliRunner()
     warning = (
@@ -136,6 +183,31 @@ class TestFindMatchingKey:
 
 
 class TestApproveCmd:
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ("--pending",),
+            ("--recommended",),
+            ("--all",),
+            ("--list",),
+            ("hook-pkg",),
+        ],
+    )
+    def test_renders_logger_summary_on_success_paths(self, args: tuple[str, ...]) -> None:
+        runner = CliRunner()
+        logger = MagicMock(spec=CommandLogger)
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+            with (
+                patch("apm_cli.commands.approve.CommandLogger", return_value=logger),
+                patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()),
+            ):
+                result = runner.invoke(approve_cmd, list(args))
+
+        assert result.exit_code == 0
+        logger.render_summary.assert_called_once_with()
+
     def test_no_manifest_exits_1(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
