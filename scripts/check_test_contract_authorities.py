@@ -617,6 +617,48 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
     return sorted(lines)
 
 
+def _implicit_lifecycle_runner_lines(tree: ast.AST) -> list[int]:
+    """Find lifecycle runners that would choose an APM executable locally."""
+    runner_aliases: set[str] = set()
+    module_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == ("tests.utils.apm_lifecycle_runner"):
+            runner_aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "ApmLifecycleRunner"
+            )
+        elif isinstance(node, ast.Import):
+            module_aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "tests.utils.apm_lifecycle_runner"
+            )
+
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = _attribute_name(node.func)
+        if called not in runner_aliases and not any(
+            called == f"{alias}.ApmLifecycleRunner" for alias in module_aliases
+        ):
+            continue
+        command_keyword = next(
+            (keyword.value for keyword in node.keywords if keyword.arg == "command"),
+            None,
+        )
+        implicit = not node.args and command_keyword is None
+        explicit_none = (
+            bool(node.args)
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value is None
+        ) or (isinstance(command_keyword, ast.Constant) and command_keyword.value is None)
+        if implicit or explicit_none:
+            lines.add(node.lineno)
+    return sorted(lines)
+
+
 def _defined_functions(tree: ast.AST) -> set[str]:
     return {
         node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -681,6 +723,11 @@ def find_binary_selection_violations(root: Path) -> list[str]:
             diagnostics.append(
                 f"[x] direct apm subprocess selection outside {BINARY_OWNER}: "
                 f"{relative}:{line}; inject apm_binary_path directly"
+            )
+        for line in _implicit_lifecycle_runner_lines(tree):
+            diagnostics.append(
+                f"[x] implicit lifecycle runner APM selection outside {BINARY_OWNER}: "
+                f"{relative}:{line}; pass apm_binary_path as the runner command"
             )
         if path.parent == integration_root and "_resolve_apm_binary" in _defined_functions(tree):
             diagnostics.append(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
@@ -12,28 +13,27 @@ import pytest
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 
 
-def test_default_runner_executes_apm_console_script(tmp_path: Path) -> None:
-    result = ApmLifecycleRunner().run(
+def test_runner_executes_injected_apm_binary(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    result = ApmLifecycleRunner((str(apm_binary_path),)).run(
         ("--help",),
         cwd=tmp_path,
         env=os.environ,
     )
 
-    assert result.command == ("apm", "--help")
+    assert result.command == (str(apm_binary_path), "--help")
     assert result.returncode == 0
     assert "Usage: apm [OPTIONS] COMMAND [ARGS]..." in result.stdout
     assert "Agent Package Manager (APM)" in result.stdout
     assert result.cwd == tmp_path
 
 
-def test_explicit_command_can_execute_source_module(tmp_path: Path) -> None:
-    runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+def test_runner_requires_explicit_command() -> None:
+    command = inspect.signature(ApmLifecycleRunner).parameters["command"]
 
-    result = runner.run(("--help",), cwd=tmp_path, env=os.environ)
-
-    assert result.command == (sys.executable, "-m", "apm_cli.cli", "--help")
-    assert result.returncode == 0
-    assert "Usage: python -m apm_cli.cli [OPTIONS] COMMAND [ARGS]..." in result.stdout
+    assert command.default is inspect.Parameter.empty
 
 
 def test_runner_passes_explicit_cwd_and_environment(tmp_path: Path) -> None:
@@ -129,8 +129,12 @@ def test_run_sequence_enforces_one_scenario_deadline(tmp_path: Path) -> None:
 
 def test_expired_scenario_deadline_reports_context_before_spawn(
     tmp_path: Path,
+    apm_binary_path: Path,
 ) -> None:
-    runner = ApmLifecycleRunner(scenario_timeout_seconds=0)
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),),
+        scenario_timeout_seconds=0,
+    )
 
     with pytest.raises(subprocess.TimeoutExpired) as exc_info:
         runner.run_sequence(
@@ -144,7 +148,7 @@ def test_expired_scenario_deadline_reports_context_before_spawn(
     assert str(exc_info.value) == (
         "scenario='already-expired'\n"
         f"cwd={str(tmp_path)!r}\n"
-        "command=('apm', '--help')\n"
+        f"command={(str(apm_binary_path), '--help')!r}\n"
         "budget_seconds=0\n"
         "stdout=''\n"
         "stderr=''"
@@ -248,7 +252,7 @@ def test_run_sequence_stops_at_first_unexpected_result_with_evidence(
 
 
 def test_run_sequence_rejects_misaligned_expectations(tmp_path: Path) -> None:
-    runner = ApmLifecycleRunner()
+    runner = ApmLifecycleRunner(("unused",))
 
     with pytest.raises(ValueError, match="equal length"):
         runner.run_sequence(

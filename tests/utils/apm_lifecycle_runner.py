@@ -51,19 +51,19 @@ class _LifecycleTimeoutExpired(subprocess.TimeoutExpired):
 class ApmLifecycleRunner:
     """Run an APM entry point with explicit process inputs and captured evidence.
 
-    The default resolves the development environment's ``apm`` console script.
-    Pass an explicit command tuple to exercise a source module or packaged
-    standalone binary instead.
+    Integration tests pass the command selected by the canonical
+    ``apm_binary_path`` fixture. Tests for runner mechanics may instead pass an
+    unrelated explicit command such as the current Python interpreter.
     """
 
     def __init__(
         self,
-        command: Sequence[str] | None = None,
+        command: Sequence[str],
         *,
         timeout_seconds: float = 120.0,
         scenario_timeout_seconds: float = 300.0,
     ) -> None:
-        self._command = tuple(command or ("apm",))
+        self._command = tuple(command)
         self._timeout_seconds = timeout_seconds
         self._scenario_timeout_seconds = scenario_timeout_seconds
 

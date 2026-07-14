@@ -77,6 +77,37 @@ def test_binary_fixture_delegation_is_allowed(tmp_path: Path) -> None:
     assert _load_checker().find_binary_selection_violations(tmp_path) == []
 
 
+def test_implicit_lifecycle_runner_selection_is_rejected(tmp_path: Path) -> None:
+    """Deleting the lifecycle-runner detector must fail independently."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "lifecycle_duplicate.py"
+    duplicate.write_text(
+        "from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner\n"
+        "def run():\n"
+        "    return ApmLifecycleRunner(timeout_seconds=30)\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "implicit lifecycle runner APM selection" in violations[0]
+
+
+def test_lifecycle_runner_fixture_delegation_is_allowed(tmp_path: Path) -> None:
+    """An explicit fixture-backed runner command remains a consumer."""
+    _write_owner_stubs(tmp_path)
+    consumer = tmp_path / "tests" / "integration" / "lifecycle_consumer.py"
+    consumer.write_text(
+        "from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner\n"
+        "def run(apm_binary_path):\n"
+        "    return ApmLifecycleRunner((str(apm_binary_path),))\n",
+        encoding="utf-8",
+    )
+
+    assert _load_checker().find_binary_selection_violations(tmp_path) == []
+
+
 def test_direct_os_getenv_binary_read_is_rejected(tmp_path: Path) -> None:
     """Deleting the os.getenv detector must fail independently."""
     _write_owner_stubs(tmp_path)

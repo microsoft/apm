@@ -66,6 +66,7 @@ def _run_lifecycle_scenario(
     root: Path,
     scenario_id: str,
     *,
+    apm_binary_path: Path,
     base_env: dict[str, str],
 ) -> _LifecycleReceipt:
     scenario_deadline = time.monotonic() + _SCENARIO_TIMEOUT_SECONDS
@@ -153,10 +154,11 @@ def _run_lifecycle_scenario(
     )
 
     results = ApmLifecycleRunner(
+        (str(apm_binary_path),),
         scenario_timeout_seconds=max(
             0.001,
             scenario_deadline - time.monotonic(),
-        )
+        ),
     ).run_sequence(
         tuple(action.args for action in row.lifecycle_actions),
         expected_returncodes=tuple(action.expected_returncode for action in row.lifecycle_actions),
@@ -299,6 +301,7 @@ def test_concurrent_real_lifecycles_are_worker_isolated(
     tmp_path: Path,
     worker_id: str,
     batch: str,
+    apm_binary_path: Path,
 ) -> None:
     parent_environment = dict(os.environ)
     poisoned_environment = {
@@ -319,6 +322,7 @@ def test_concurrent_real_lifecycles_are_worker_isolated(
                 _run_lifecycle_scenario,
                 scenario_parent / scenario_id,
                 scenario_id,
+                apm_binary_path=apm_binary_path,
                 base_env=poisoned_environment,
             )
             for scenario_id in scenario_ids
@@ -358,11 +362,13 @@ def test_concurrent_real_lifecycles_are_worker_isolated(
 def test_generated_artifact_tampering_reports_cause_and_recovers(
     tmp_path: Path,
     mutation: str,
+    apm_binary_path: Path,
 ) -> None:
     scenario_id = mutation
     receipt = _run_lifecycle_scenario(
         tmp_path / scenario_id,
         scenario_id,
+        apm_binary_path=apm_binary_path,
         base_env=dict(os.environ),
     )
     _assert_lifecycle_receipt(receipt)
@@ -392,10 +398,11 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         dump_yaml(lock, lock_path)
 
     runner = ApmLifecycleRunner(
+        (str(apm_binary_path),),
         scenario_timeout_seconds=max(
             0.001,
             receipt.scenario_deadline - time.monotonic(),
-        )
+        ),
     )
     environment = receipt.isolated.subprocess_env()
     if mutation == "content-hash":
