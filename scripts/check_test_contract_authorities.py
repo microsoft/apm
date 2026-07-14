@@ -116,6 +116,48 @@ def _path_binary_fallback_lines(tree: ast.AST) -> list[int]:
     )
 
 
+def _list_literal_values(node: ast.AST) -> list[str | None]:
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return []
+    return [_literal_string(element) for element in node.elts]
+
+
+def _standalone_binary_selector_lines(tree: ast.AST) -> list[int]:
+    lines: set[int] = set()
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        strings = {
+            value for child in ast.walk(function) if (value := _literal_string(child)) is not None
+        }
+        runs_subprocess = any(
+            isinstance(child, ast.Call) and _attribute_name(child.func) == "subprocess.run"
+            for child in ast.walk(function)
+        )
+        if runs_subprocess and {"apm", "./apm", "./dist/apm"}.issubset(strings):
+            lines.add(function.lineno)
+
+        for call in (child for child in ast.walk(function) if isinstance(child, ast.Call)):
+            if (
+                isinstance(call.func, ast.Attribute)
+                and call.func.attr == "with_name"
+                and bool(call.args)
+                and _literal_string(call.args[0]) == "apm"
+            ):
+                lines.add(call.lineno)
+            if _attribute_name(call.func) != "subprocess.run" or not call.args:
+                continue
+            command = _list_literal_values(call.args[0])
+            if command and command[0] == "apm":
+                lines.add(call.lineno)
+            compact = [value for value in command if value is not None]
+            if any(
+                compact[index : index + 3] == ["uv", "run", "apm"] for index in range(len(compact))
+            ):
+                lines.add(call.lineno)
+    return sorted(lines)
+
+
 def _defined_functions(tree: ast.AST) -> set[str]:
     return {
         node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -164,6 +206,11 @@ def find_binary_selection_violations(root: Path) -> list[str]:
         for line in _path_binary_fallback_lines(tree):
             diagnostics.append(
                 f"[x] direct shutil.which('apm') fallback outside {BINARY_OWNER}: "
+                f"{relative}:{line}; consume the apm_binary_path fixture"
+            )
+        for line in _standalone_binary_selector_lines(tree):
+            diagnostics.append(
+                f"[x] standalone APM subprocess selector outside {BINARY_OWNER}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
         if path.parent == integration_root and "_resolve_apm_binary" in _defined_functions(tree):

@@ -124,6 +124,38 @@ def test_path_fallback_without_venv_is_rejected(tmp_path: Path) -> None:
     assert "direct shutil.which('apm') fallback" in violations[0]
 
 
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import subprocess\ndef run():\n    return subprocess.run(['apm', '--version'])\n",
+        "import subprocess\ndef run():\n"
+        "    return subprocess.run(['uv', 'run', 'apm', '--version'])\n",
+        "import subprocess\nimport sys\nfrom pathlib import Path\n"
+        "def run():\n"
+        "    executable = Path(sys.executable).with_name('apm')\n"
+        "    return subprocess.run([str(executable), '--version'])\n",
+        "import subprocess\ndef probe():\n"
+        "    possible = ['apm', './apm', './dist/apm']\n"
+        "    for path in possible:\n"
+        "        result = subprocess.run([path, '--version'])\n"
+        "        if result.returncode == 0:\n"
+        "            return path\n",
+    ),
+)
+def test_standalone_binary_selector_shapes_are_rejected(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Known bare, uv, sibling, and probe selectors must stay retired."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "selector.py"
+    duplicate.write_text(source, encoding="utf-8")
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert any("standalone APM subprocess selector" in item for item in violations)
+
+
 def test_renamed_binary_resolver_is_rejected(tmp_path: Path) -> None:
     """A renamed resolver still fails because it reads the owned variable."""
     _write_owner_stubs(tmp_path)
