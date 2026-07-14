@@ -51,26 +51,42 @@ def _literal_string(node: ast.AST) -> str | None:
     return None
 
 
-def _is_environment_get(call: ast.Call, variable: str) -> bool:
-    called = _attribute_name(call.func)
-    return (
-        called in {"os.environ.get", "os.getenv"}
-        and bool(call.args)
-        and _literal_string(call.args[0]) == variable
-    )
-
-
-def _is_environment_subscript(node: ast.Subscript, variable: str) -> bool:
-    return _attribute_name(node.value) == "os.environ" and _literal_string(node.slice) == variable
-
-
 def _direct_binary_env_read_lines(tree: ast.AST) -> list[int]:
+    os_aliases = {"os"}
+    environ_aliases: set[str] = set()
+    getenv_aliases: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            os_aliases.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "os"
+            )
+        elif isinstance(node, ast.ImportFrom) and node.module == "os":
+            for alias in node.names:
+                local_name = alias.asname or alias.name
+                if alias.name == "environ":
+                    environ_aliases.add(local_name)
+                elif alias.name == "getenv":
+                    getenv_aliases.add(local_name)
+
     lines: set[int] = set()
     for node in ast.walk(tree):
-        if (isinstance(node, ast.Call) and _is_environment_get(node, "APM_BINARY_PATH")) or (
-            isinstance(node, ast.Subscript) and _is_environment_subscript(node, "APM_BINARY_PATH")
-        ):
-            lines.add(node.lineno)
+        if isinstance(node, ast.Call) and node.args:
+            called = _attribute_name(node.func)
+            reads_variable = _literal_string(node.args[0]) == "APM_BINARY_PATH"
+            if reads_variable and (
+                called in getenv_aliases
+                or any(
+                    called in {f"{alias}.getenv", f"{alias}.environ.get"} for alias in os_aliases
+                )
+                or any(called == f"{alias}.get" for alias in environ_aliases)
+            ):
+                lines.add(node.lineno)
+        elif isinstance(node, ast.Subscript) and _literal_string(node.slice) == "APM_BINARY_PATH":
+            target = _attribute_name(node.value)
+            if target in environ_aliases or any(
+                target == f"{alias}.environ" for alias in os_aliases
+            ):
+                lines.add(node.lineno)
     return sorted(lines)
 
 
@@ -156,7 +172,19 @@ def _is_commands_items(call: ast.Call) -> bool:
 def _registry_projection_lines(tree: ast.AST) -> list[int]:
     lines: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and _is_commands_items(node):
+        if not isinstance(
+            node,
+            (ast.DictComp, ast.GeneratorExp, ast.ListComp, ast.SetComp),
+        ):
+            continue
+        projects_commands = any(
+            isinstance(generator.iter, ast.Call) and _is_commands_items(generator.iter)
+            for generator in node.generators
+        )
+        filters_hidden = any(
+            isinstance(child, ast.Attribute) and child.attr == "hidden" for child in ast.walk(node)
+        )
+        if projects_commands and filters_hidden:
             lines.add(node.lineno)
     return sorted(lines)
 

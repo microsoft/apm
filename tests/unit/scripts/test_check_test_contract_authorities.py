@@ -39,8 +39,11 @@ def _write_owner_stubs(root: Path) -> None:
     "source",
     (
         "import os\ndef renamed():\n    return os.environ.get('APM_BINARY_PATH') or 'apm'\n",
+        "import os as _os\ndef renamed():\n    return _os.environ.get('APM_BINARY_PATH')\n",
         "import os\ndef choose():\n    return os.getenv('APM_BINARY_PATH')\n",
         "import os\ndef choose():\n    return os.environ['APM_BINARY_PATH']\n",
+        "from os import environ\ndef choose():\n    return environ.get('APM_BINARY_PATH')\n",
+        "from os import environ as env\ndef choose():\n    return env['APM_BINARY_PATH']\n",
     ),
 )
 def test_any_direct_binary_environment_read_is_rejected(
@@ -133,6 +136,21 @@ def test_direct_registry_projection_is_rejected_without_comparison(tmp_path: Pat
 
     assert len(violations) == 1
     assert "direct Click command registry projection" in violations[0]
+
+
+def test_unrelated_recursive_registry_walk_is_allowed(tmp_path: Path) -> None:
+    """A recursive help audit is not a rendered parity projection."""
+    _write_owner_stubs(tmp_path)
+    consumer = tmp_path / "tests" / "help_audit.py"
+    consumer.parent.mkdir(exist_ok=True)
+    consumer.write_text(
+        "def walk(group):\n"
+        "    for name, command in group.commands.items():\n"
+        "        yield name, command\n",
+        encoding="utf-8",
+    )
+
+    assert _load_checker().find_rendered_parity_violations(tmp_path) == []
 
 
 def test_direct_rendered_inventory_is_rejected_with_imported_registry(
