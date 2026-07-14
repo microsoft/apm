@@ -155,6 +155,46 @@ _PROTECTED_OVERRIDE_NAMES = (
 )
 
 
+def _normalized_env_name(name: str) -> str:
+    """Normalize an environment name using Windows-compatible semantics."""
+    return name.upper()
+
+
+def _is_protected_name(name: str) -> bool:
+    normalized_name = _normalized_env_name(name)
+    return normalized_name in _PROTECTED_OVERRIDE_NAMES or normalized_name.startswith(
+        _STRIPPED_ENV_PREFIXES
+    )
+
+
+def _deduplicate_environment(base_env: Mapping[str, str]) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    spellings: dict[str, str] = {}
+    for name, value in base_env.items():
+        normalized_name = _normalized_env_name(name)
+        existing_name = spellings.get(normalized_name)
+        if existing_name is None:
+            environment[name] = value
+            spellings[normalized_name] = name
+        elif name == normalized_name and existing_name != name:
+            environment.pop(existing_name)
+            environment[name] = value
+            spellings[normalized_name] = name
+    return environment
+
+
+def _set_environment_value(
+    environment: dict[str, str],
+    name: str,
+    value: str,
+) -> None:
+    normalized_name = _normalized_env_name(name)
+    for existing_name in tuple(environment):
+        if _normalized_env_name(existing_name) == normalized_name:
+            environment.pop(existing_name)
+    environment[name] = value
+
+
 @dataclass(frozen=True)
 class IsolatedApmEnvironment:
     """Filesystem roots and immutable child environment for one test scenario."""
@@ -218,11 +258,10 @@ class IsolatedApmEnvironment:
             encoding="utf-8",
         )
 
-        environment = dict(base_env)
+        environment = _deduplicate_environment(base_env)
         for name in list(environment):
-            if name in _STRIPPED_ENV_NAMES or name.startswith(_STRIPPED_ENV_PREFIXES):
+            if _is_protected_name(name):
                 environment.pop(name, None)
-        environment.pop("PYTHONPATH", None)
 
         environment.update(
             {
@@ -272,13 +311,10 @@ class IsolatedApmEnvironment:
         """Return a child environment with only non-protected overrides applied."""
         environment = dict(self.process_environment)
         if overrides:
-            protected = {
-                name
-                for name in overrides
-                if name in _PROTECTED_OVERRIDE_NAMES or name.startswith(_STRIPPED_ENV_PREFIXES)
-            }
+            protected = {name for name in overrides if _is_protected_name(name)}
             if protected:
                 names = ", ".join(sorted(protected))
                 raise ValueError(f"Cannot override protected environment variables: {names}")
-            environment.update(overrides)
+            for name, value in overrides.items():
+                _set_environment_value(environment, name, value)
         return environment

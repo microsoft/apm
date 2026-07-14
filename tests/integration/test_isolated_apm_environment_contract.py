@@ -59,13 +59,28 @@ def test_environment_does_not_mutate_parent_process(tmp_path: Path) -> None:
     parent_environment = os.environ.copy()
     parent_cwd = Path.cwd()
 
-    isolated = IsolatedApmEnvironment.create(
-        tmp_path / "scenario",
-        base_env=os.environ,
+    canonical_first = IsolatedApmEnvironment.create(
+        tmp_path / "canonical-first",
+        base_env={"PATH": "canonical-path", "Path": "case-variant-path"},
     )
-    child_environment = isolated.subprocess_env(overrides={"SCENARIO": "one"})
+    canonical_last = IsolatedApmEnvironment.create(
+        tmp_path / "canonical-last",
+        base_env={"Path": "case-variant-path", "PATH": "canonical-path"},
+    )
+    for isolated in (canonical_first, canonical_last):
+        environment = isolated.subprocess_env()
+        assert environment["PATH"] == "canonical-path"
+        assert "Path" not in environment
+
+    child_environment = canonical_first.subprocess_env(
+        overrides={"Path": "scenario-path", "SCENARIO": "one"}
+    )
 
     assert child_environment["SCENARIO"] == "one"
+    assert child_environment["Path"] == "scenario-path"
+    assert "PATH" not in child_environment
+    normalized_names = [name.upper() for name in child_environment]
+    assert len(normalized_names) == len(set(normalized_names))
     assert os.environ == parent_environment
     assert Path.cwd() == parent_cwd
 
@@ -89,6 +104,10 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             "GIT_DIR": "/ambient/git",
             "HERMES_HOME": "/ambient/hermes",
             "HTTPS_PROXY": "https://ambient.invalid",
+            "Git_Config_Value_1": "ambient",
+            "github_token": "ambient",
+            "git_config_key_1": "credential.helper",
+            "home": "/ambient/home",
         }
     )
     isolated = IsolatedApmEnvironment.create(
@@ -113,8 +132,15 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_DIR",
         "HERMES_HOME",
         "HTTPS_PROXY",
+        "Git_Config_Value_1",
+        "github_token",
+        "git_config_key_1",
     )
-    assert set(stripped_names).isdisjoint(environment)
+    normalized_environment_names = {name.upper() for name in environment}
+    assert {name.upper() for name in stripped_names}.isdisjoint(normalized_environment_names)
+    assert len(environment) == len(normalized_environment_names)
+    assert "home" not in environment
+    assert environment["HOME"] == str(isolated.home)
     for name in ("GH_CONFIG_DIR", "AZURE_CONFIG_DIR", "GIT_CONFIG_GLOBAL"):
         assert Path(environment[name]).resolve().is_relative_to(isolated.root.resolve())
 
@@ -124,8 +150,12 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GITHUB_APM_PAT_ACME",
         "APM_REGISTRY_TOKEN_INTERNAL",
         "GIT_CONFIG_KEY_0",
+        "github_apm_pat_acme",
+        "apm_registry_token_internal",
+        "git_config_key_0",
     )
-    for name in exact_names + tool_home_names + dynamic_names:
+    case_variant_exact_names = ("home", "github_token", "Git_Allow_Protocol")
+    for name in exact_names + case_variant_exact_names + tool_home_names + dynamic_names:
         with pytest.raises(ValueError, match="protected environment"):
             isolated.subprocess_env(overrides={name: "unsafe"})
 
