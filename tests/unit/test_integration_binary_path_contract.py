@@ -49,6 +49,22 @@ def test_missing_explicit_binary_path_fails_without_fallback(
         integration_conftest._resolve_apm_binary()
 
 
+def test_empty_explicit_binary_path_fails_without_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A present empty configuration must not enable fallback discovery."""
+    fallback = tmp_path / "fallback-apm"
+    fallback.write_text("#!/bin/sh\n", encoding="utf-8")
+    fallback.chmod(0o755)
+    monkeypatch.setenv("APM_BINARY_PATH", "")
+    monkeypatch.setattr(integration_conftest, "_local_dist_apm_binary", lambda: fallback)
+    monkeypatch.setattr(integration_conftest.shutil, "which", lambda _name: str(fallback))
+
+    with pytest.raises(pytest.UsageError, match=r"APM_BINARY_PATH is set but empty"):
+        integration_conftest._resolve_apm_binary()
+
+
 def test_non_executable_explicit_binary_path_fails_without_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

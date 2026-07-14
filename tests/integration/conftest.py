@@ -168,7 +168,12 @@ def _resolve_apm_binary() -> Path | None:
     contributor is trying to validate.
     """
     env_path = os.environ.get("APM_BINARY_PATH")
-    if env_path:
+    if env_path is not None:
+        if not env_path:
+            raise pytest.UsageError(
+                "APM_BINARY_PATH is set but empty. "
+                "Set it to the expected executable or remove the variable."
+            )
         candidate = Path(env_path)
         if not candidate.is_file():
             raise pytest.UsageError(
