@@ -138,6 +138,7 @@ def _run_lifecycle_scenario(
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
 
     project_factory = LocalPackageFactory(isolated.work_root)
@@ -284,7 +285,15 @@ def _assert_lifecycle_receipt(receipt: _LifecycleReceipt) -> None:
     assert locked_dependency["content_hash"].startswith("sha256:")
 
     report = json.loads((project_root / "reports" / "audit.json").read_text())
-    assert isinstance(report, dict)
+    assert report["passed"] is True
+    assert report["summary"] == {
+        "total": len(report["checks"]),
+        "passed": len(report["checks"]),
+        "failed": 0,
+    }
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["content-integrity"]["passed"] is True
+    assert checks["drift"]["passed"] is True
     environment = receipt.isolated.process_environment
     assert environment["GIT_ALLOW_PROTOCOL"] == "file"
     assert environment["GIT_TERMINAL_PROMPT"] == "0"
