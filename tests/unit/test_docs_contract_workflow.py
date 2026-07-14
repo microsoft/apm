@@ -22,6 +22,7 @@ def test_docs_contract_runs_for_every_cli_registration_owner() -> None:
     assert "'src/apm_cli/commands/**'" in pull_request
     assert "'scripts/check_cli_docs.py'" in pull_request
     assert "'tests/unit/test_cli_docs_contract.py'" in pull_request
+    assert "'tests/integration/test_cli_docs_contract.py'" in pull_request
 
 
 def test_docs_build_has_read_only_permissions() -> None:
@@ -46,5 +47,7 @@ def test_docs_python_operations_are_frozen() -> None:
     build_job = workflow[workflow.index("  build:") : workflow.index("  deploy:")]
 
     assert "uv sync --frozen --extra dev" in build_job
-    assert "uv run --frozen pytest tests/unit/test_cli_docs_contract.py -q" in build_job
+    assert "tests/unit/test_cli_docs_contract.py" in build_job
+    assert "tests/integration/test_cli_docs_contract.py" in build_job
+    assert "uv run --frozen pytest" in build_job
     assert "uv run --frozen python scripts/check_cli_docs.py docs/dist" in build_job

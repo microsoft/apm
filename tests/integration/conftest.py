@@ -171,12 +171,12 @@ def _resolve_apm_binary() -> Path | None:
     if env_path:
         candidate = Path(env_path)
         if not candidate.is_file():
-            raise RuntimeError(
+            raise pytest.UsageError(
                 f"APM_BINARY_PATH does not exist or is not a file: {candidate}. "
                 "Build the expected artifact or correct APM_BINARY_PATH."
             )
         if not os.access(candidate, os.X_OK):
-            raise RuntimeError(
+            raise pytest.UsageError(
                 f"APM_BINARY_PATH is not executable: {candidate}. "
                 "Make the expected artifact executable and rerun the test."
             )

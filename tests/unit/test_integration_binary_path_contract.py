@@ -45,7 +45,7 @@ def test_missing_explicit_binary_path_fails_without_fallback(
     monkeypatch.setattr(integration_conftest, "_local_dist_apm_binary", lambda: fallback)
     monkeypatch.setattr(integration_conftest.shutil, "which", lambda _name: str(fallback))
 
-    with pytest.raises(RuntimeError, match=r"APM_BINARY_PATH does not exist"):
+    with pytest.raises(pytest.UsageError, match=r"APM_BINARY_PATH does not exist"):
         integration_conftest._resolve_apm_binary()
 
 
@@ -64,5 +64,5 @@ def test_non_executable_explicit_binary_path_fails_without_fallback(
     monkeypatch.setattr(integration_conftest.shutil, "which", lambda _name: str(fallback))
     monkeypatch.setattr(integration_conftest.os, "access", lambda _path, _mode: False)
 
-    with pytest.raises(RuntimeError, match=r"APM_BINARY_PATH is not executable"):
+    with pytest.raises(pytest.UsageError, match=r"APM_BINARY_PATH is not executable"):
         integration_conftest._resolve_apm_binary()

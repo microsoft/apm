@@ -25,6 +25,7 @@ on:
       - 'src/apm_cli/commands/**'
       - 'scripts/check_cli_docs.py'
       - 'tests/unit/test_cli_docs_contract.py'
+      - 'tests/integration/test_cli_docs_contract.py'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -71,7 +72,11 @@ jobs:
         run: npm run test:links
 
       - name: Test CLI registry contract
-        run: uv run --frozen pytest tests/unit/test_cli_docs_contract.py -q
+        run: >-
+          uv run --frozen pytest
+          tests/unit/test_cli_docs_contract.py
+          tests/integration/test_cli_docs_contract.py
+          -q
 
       - name: Build documentation
         working-directory: ./docs
