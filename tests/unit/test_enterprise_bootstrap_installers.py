@@ -208,12 +208,16 @@ def test_windows_pip_fallback_scopes_native_stderr_error_action_guard() -> None:
     previous_guard = "$previousErrorActionPreference = $ErrorActionPreference"
     continue_guard = '$ErrorActionPreference = "Continue"'
     restore_guard = "$ErrorActionPreference = $previousErrorActionPreference"
-    python_pip_call = "$output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1"
-    pip_call = "$output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1"
+    pinned_package_spec = "$pipPackageSpec = \"apm-cli==$($pinnedVersion.TrimStart('v'))\""
+    python_pip_call = (
+        "$output = & $pythonCmd -m pip install --user --upgrade @pipIndexArgs $pipPackageSpec 2>&1"
+    )
+    pip_call = "$output = & $pipCmd install --user --upgrade @pipIndexArgs $pipPackageSpec 2>&1"
 
     assert previous_guard in body
     assert continue_guard in body
     assert restore_guard in body
+    assert pinned_package_spec in body
     assert body.count(continue_guard) == 1
     assert body.index(previous_guard) < body.index(continue_guard)
     assert body.index(continue_guard) < body.index(python_pip_call)
@@ -221,6 +225,23 @@ def test_windows_pip_fallback_scopes_native_stderr_error_action_guard() -> None:
     assert body.index(python_pip_call) < body.index("finally {")
     assert body.index(pip_call) < body.index("finally {")
     assert body.index("finally {") < body.index(restore_guard)
+
+
+def test_unix_pip_fallback_pins_selected_release() -> None:
+    """install.sh must convert VERSION into an exact pip requirement."""
+    text = _read_repo_file("install.sh")
+
+    assert 'PIP_PACKAGE_SPEC="apm-cli==${VERSION#v}"' in text
+
+
+def test_unix_pip_fallback_upgrades_public_and_mirror_installs() -> None:
+    """install.sh must upgrade apm-cli through either pip index path."""
+    text = _read_repo_file("install.sh")
+
+    assert '$PIP_CMD install --user --upgrade "$PIP_PACKAGE_SPEC"' in text
+    assert (
+        '$PIP_CMD install --user --upgrade --index-url "$APM_PYPI_INDEX_URL" "$PIP_PACKAGE_SPEC"'
+    ) in text
 
 
 def test_windows_installer_uses_auth_on_first_ghes_metadata_fetch() -> None:

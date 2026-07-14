@@ -263,17 +263,21 @@ function Install-ViaPip {
         Write-Host "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
         return $false
     }
+    $pipPackageSpec = "apm-cli"
+    if ($pinnedVersion) {
+        $pipPackageSpec = "apm-cli==$($pinnedVersion.TrimStart('v'))"
+    }
     $pipIndexArgs = Get-PipIndexArgs
     try {
         $previousErrorActionPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
             if ($pipCmd -like "* -m pip") {
-                $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
+                $output = & $pythonCmd -m pip install --user --upgrade @pipIndexArgs $pipPackageSpec 2>&1
                 $pipExitCode = $LASTEXITCODE
                 $output | Write-Host
             } else {
-                $output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1
+                $output = & $pipCmd install --user --upgrade @pipIndexArgs $pipPackageSpec 2>&1
                 $pipExitCode = $LASTEXITCODE
                 $output | Write-Host
             }

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm self-update` pip fallback now upgrades an existing `apm-cli`
+  installation to the selected release instead of reporting success while
+  leaving the previous version installed.
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)

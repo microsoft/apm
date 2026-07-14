@@ -155,7 +155,7 @@ def _build_self_update_installer_env(latest_version: str) -> dict[str, str]:
     channel = _get_effective_self_update_channel()
     if _ENV_SELF_UPDATE_CHANNEL not in env:
         env[_ENV_SELF_UPDATE_CHANNEL] = channel
-    if channel == "prerelease" and _ENV_VERSION not in env:
+    if _ENV_VERSION not in env:
         env[_ENV_VERSION] = f"v{latest_version}"
     return env
 

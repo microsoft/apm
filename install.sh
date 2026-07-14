@@ -180,6 +180,11 @@ check_python_requirements() {
 # Function to attempt pip installation
 try_pip_installation() {
     echo -e "${BLUE}Attempting installation via pip...${NC}"
+
+    PIP_PACKAGE_SPEC="apm-cli"
+    if [ -n "$VERSION" ]; then
+        PIP_PACKAGE_SPEC="apm-cli==${VERSION#v}"
+    fi
     
     # Determine pip command
     PIP_CMD=""
@@ -196,12 +201,12 @@ try_pip_installation() {
     if [ -n "$APM_PYPI_INDEX_URL" ]; then
         echo -e "${BLUE}Using APM_PYPI_INDEX_URL mirror for pip install.${NC}"
         PIP_INSTALL_OK=0
-        $PIP_CMD install --user --index-url "$APM_PYPI_INDEX_URL" apm-cli || PIP_INSTALL_OK=$?
+        $PIP_CMD install --user --upgrade --index-url "$APM_PYPI_INDEX_URL" "$PIP_PACKAGE_SPEC" || PIP_INSTALL_OK=$?
     elif is_truthy "$APM_NO_DIRECT_FALLBACK"; then
         fail_closed_error APM_PYPI_INDEX_URL "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
     else
         PIP_INSTALL_OK=0
-        $PIP_CMD install --user apm-cli || PIP_INSTALL_OK=$?
+        $PIP_CMD install --user --upgrade "$PIP_PACKAGE_SPEC" || PIP_INSTALL_OK=$?
     fi
 
     if [ "$PIP_INSTALL_OK" -eq 0 ]; then

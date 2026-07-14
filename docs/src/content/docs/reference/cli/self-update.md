@@ -136,6 +136,8 @@ The installer scripts accept a version pin via environment variable -- see [Quic
 
 If GitHub or a configured mirror is unreachable, the download fails, or the installer exits non-zero, `apm self-update` exits with code `1` and prints the next mirror or manual update action. Your existing binary is unaffected.
 
+If the standalone binary is incompatible with the host, the installer falls back to pip when Python is available. The fallback upgrades an existing `apm-cli` installation to the release selected by `self-update` instead of treating the installed version as already satisfied.
+
 ## Startup update notification
 
 APM checks for new releases at most once per day during normal command execution. When a newer version is available, you see:

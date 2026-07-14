@@ -357,3 +357,5 @@ class TestEnterpriseBootstrapSelfUpdate:
             "/apm/installers/install.sh",
         ]
         mock_run.assert_called_once()
+        installer_env = mock_run.call_args.kwargs["env"]
+        assert installer_env["VERSION"] == "v1.1.0"
