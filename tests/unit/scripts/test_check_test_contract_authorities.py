@@ -44,6 +44,7 @@ def _write_owner_stubs(root: Path) -> None:
         "import os\ndef choose():\n    return os.environ['APM_BINARY_PATH']\n",
         "from os import environ\ndef choose():\n    return environ.get('APM_BINARY_PATH')\n",
         "from os import environ as env\ndef choose():\n    return env['APM_BINARY_PATH']\n",
+        "import os\ndef choose():\n    env = os.environ\n    return env.get('APM_BINARY_PATH')\n",
         "def choose():\n"
         "    import os as nested_os\n"
         "    return nested_os.environ.get('APM_BINARY_PATH')\n",
@@ -121,6 +122,42 @@ def test_aliased_path_lookup_is_rejected(tmp_path: Path) -> None:
     assert "direct PATH lookup for apm" in violations[0]
 
 
+def test_assigned_path_lookup_alias_is_rejected(tmp_path: Path) -> None:
+    """A simple assignment alias must preserve shutil.which authority."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "path_assignment.py"
+    duplicate.write_text(
+        "import shutil\nlocate = shutil.which\ndef choose():\n    return locate('apm')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct PATH lookup for apm" in violations[0]
+
+
+def test_shadowed_shutil_binding_does_not_duplicate_diagnostics(tmp_path: Path) -> None:
+    """Parameter/local shadowing must not inherit the outer import binding."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "shadowed.py"
+    duplicate.write_text(
+        "import shutil\n"
+        "outer = shutil.which('apm')\n"
+        "def parameter_shadow(shutil):\n"
+        "    return shutil.which('apm')\n"
+        "def local_shadow():\n"
+        "    shutil = object()\n"
+        "    return shutil.which('apm')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct PATH lookup for apm" in violations[0]
+
+
 def test_venv_fallback_without_env_or_which_is_rejected(tmp_path: Path) -> None:
     """Deleting the .venv detector must fail independently."""
     _write_owner_stubs(tmp_path)
@@ -144,6 +181,8 @@ def test_venv_fallback_without_env_or_which_is_rejected(tmp_path: Path) -> None:
     (
         "Path('.venv', 'bin', 'apm')",
         "Path('.venv').joinpath('Scripts', 'apm.exe')",
+        "PurePosixPath('.venv', 'bin', 'apm')",
+        "PureWindowsPath('.venv', 'Scripts', 'apm.exe')",
         "os.path.join('.venv', 'bin', 'apm')",
     ),
 )
@@ -155,7 +194,9 @@ def test_standalone_venv_constructor_forms_are_rejected(
     _write_owner_stubs(tmp_path)
     duplicate = tmp_path / "tests" / "integration" / "venv_constructor.py"
     duplicate.write_text(
-        f"import os\nfrom pathlib import Path\ndef choose():\n    return {selector}\n",
+        "import os\n"
+        "from pathlib import Path, PurePosixPath, PureWindowsPath\n"
+        f"def choose():\n    return {selector}\n",
         encoding="utf-8",
     )
 
@@ -215,11 +256,31 @@ def test_interpreter_relative_apm_selector_is_rejected(tmp_path: Path) -> None:
     assert "interpreter-relative apm selection" in violations[0]
 
 
+def test_interpreter_parent_apm_selector_is_rejected(tmp_path: Path) -> None:
+    """Parent-directory construction from sys.executable is still selection."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "parent_duplicate.py"
+    duplicate.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "def choose():\n"
+        "    return Path(sys.executable).parent / 'apm'\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "interpreter-relative apm selection" in violations[0]
+
+
 @pytest.mark.parametrize(
     "source",
     (
         "import subprocess\nsubprocess.run(['apm', '--version'])\n",
         "import subprocess\nsubprocess.Popen(['apm', '--version'])\n",
+        "import subprocess\nsubprocess.run('apm --version', shell=True)\n",
+        "import subprocess\ncommand = 'apm --version'\nsubprocess.run(command, shell=True)\n",
         "import subprocess\nsubprocess.run(['uv', 'run', 'apm'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'apm_cli'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'uv', 'run', 'apm'])\n",
@@ -277,6 +338,46 @@ def test_fixture_forwarding_facade_is_rejected(tmp_path: Path) -> None:
 
     assert len(violations) == 1
     assert "local apm binary fixture or facade" in violations[0]
+
+
+def test_multistatement_forwarding_fixture_is_rejected(tmp_path: Path) -> None:
+    """Extra statements cannot disguise a duplicate forwarding fixture."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "facade.py"
+    duplicate.write_text(
+        "import pytest\n"
+        "@pytest.fixture\n"
+        "def binary(apm_binary_path):\n"
+        "    selected = str(apm_binary_path)\n"
+        "    return selected\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "local apm binary fixture or facade" in violations[0]
+
+
+def test_nested_binary_owner_definitions_are_rejected(tmp_path: Path) -> None:
+    """Resolver and fixture ownership cannot hide in nested scopes."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "nested.py"
+    duplicate.write_text(
+        "import pytest\n"
+        "def outer():\n"
+        "    def _resolve_apm_binary():\n"
+        "        return None\n"
+        "    @pytest.fixture\n"
+        "    def apm_binary_path():\n"
+        "        return None\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert any("local apm binary fixture or facade" in item for item in violations)
+    assert len(violations) >= 2
 
 
 def test_renamed_binary_resolver_is_rejected(tmp_path: Path) -> None:

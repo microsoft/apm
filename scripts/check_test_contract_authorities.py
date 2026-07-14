@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import shlex
 import sys
 from pathlib import Path
 
@@ -57,66 +58,150 @@ def _literal_string(node: ast.AST) -> str | None:
     return None
 
 
-def _direct_binary_env_read_lines(tree: ast.AST) -> list[int]:
-    os_aliases = {"os"}
-    environ_aliases: set[str] = set()
-    getenv_aliases: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            os_aliases.update(
-                alias.asname or alias.name for alias in node.names if alias.name == "os"
-            )
-        elif isinstance(node, ast.ImportFrom) and node.module == "os":
-            for alias in node.names:
-                local_name = alias.asname or alias.name
-                if alias.name == "environ":
-                    environ_aliases.add(local_name)
-                elif alias.name == "getenv":
-                    getenv_aliases.add(local_name)
+def _bound_names(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return {name for element in node.elts for name in _bound_names(element)}
+    return set()
 
+
+def _resolve_binding(node: ast.AST, bindings: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id)
+    if isinstance(node, ast.Attribute):
+        base = _resolve_binding(node.value, bindings)
+        return f"{base}.{node.attr}" if base is not None else None
+    return None
+
+
+def _scope_binding_maps(
+    tree: ast.Module,
+) -> tuple[dict[int, dict[str, str]], dict[int, ast.AST]]:
+    bindings_by_scope: dict[int, dict[str, str]] = {}
+    scope_by_node: dict[int, ast.AST] = {}
+
+    def map_scope(scope: ast.AST, inherited: dict[str, str]) -> None:
+        body = (
+            scope.body
+            if isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
+            else []
+        )
+        bindings = dict(inherited)
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            local_names = {
+                argument.arg
+                for argument in (
+                    *scope.args.posonlyargs,
+                    *scope.args.args,
+                    *scope.args.kwonlyargs,
+                )
+            }
+            local_names.update(
+                name
+                for statement in body
+                if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                for child in ast.walk(statement)
+                if isinstance(child, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+                for target in (child.targets if isinstance(child, ast.Assign) else [child.target])
+                for name in _bound_names(target)
+            )
+            for name in local_names:
+                bindings.pop(name, None)
+
+        for statement in body:
+            if isinstance(statement, ast.Import):
+                for alias in statement.names:
+                    if alias.name in {"os", "shutil", "sys"}:
+                        bindings[alias.asname or alias.name] = alias.name
+            elif isinstance(statement, ast.ImportFrom) and statement.module in {
+                "os",
+                "shutil",
+            }:
+                for alias in statement.names:
+                    bindings[alias.asname or alias.name] = f"{statement.module}.{alias.name}"
+
+        for _ in range(len(body) + 1):
+            changed = False
+            for statement in body:
+                if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                    continue
+                value = statement.value
+                if value is None:
+                    continue
+                resolved = _resolve_binding(value, bindings)
+                targets = (
+                    statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                )
+                for target in targets:
+                    for name in _bound_names(target):
+                        if resolved is None:
+                            bindings.pop(name, None)
+                        elif bindings.get(name) != resolved:
+                            bindings[name] = resolved
+                            changed = True
+            if not changed:
+                break
+
+        bindings_by_scope[id(scope)] = bindings
+
+        def mark(node: ast.AST) -> None:
+            scope_by_node[id(node)] = scope
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    map_scope(child, bindings)
+                elif isinstance(child, ast.ClassDef):
+                    for nested in child.body:
+                        if isinstance(nested, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            map_scope(nested, bindings)
+                else:
+                    mark(child)
+
+        for statement in body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                map_scope(statement, bindings)
+            elif isinstance(statement, ast.ClassDef):
+                for nested in statement.body:
+                    if isinstance(nested, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        map_scope(nested, bindings)
+            else:
+                mark(statement)
+
+    map_scope(tree, {})
+    return bindings_by_scope, scope_by_node
+
+
+def _direct_binary_env_read_lines(tree: ast.AST) -> list[int]:
+    bindings_by_scope, scope_by_node = _scope_binding_maps(tree)
     lines: set[int] = set()
     for node in ast.walk(tree):
+        scope = scope_by_node.get(id(node), tree)
+        bindings = bindings_by_scope.get(id(scope), {})
         if isinstance(node, ast.Call) and node.args:
-            called = _attribute_name(node.func)
+            called = _resolve_binding(node.func, bindings)
             reads_variable = _literal_string(node.args[0]) == "APM_BINARY_PATH"
-            if reads_variable and (
-                called in getenv_aliases
-                or any(
-                    called in {f"{alias}.getenv", f"{alias}.environ.get"} for alias in os_aliases
-                )
-                or any(called == f"{alias}.get" for alias in environ_aliases)
-            ):
+            if reads_variable and called in {"os.environ.get", "os.getenv"}:
                 lines.add(node.lineno)
         elif isinstance(node, ast.Subscript) and _literal_string(node.slice) == "APM_BINARY_PATH":
-            target = _attribute_name(node.value)
-            if target in environ_aliases or any(
-                target == f"{alias}.environ" for alias in os_aliases
-            ):
+            if _resolve_binding(node.value, bindings) == "os.environ":
                 lines.add(node.lineno)
     return sorted(lines)
 
 
 def _direct_binary_path_lookup_lines(tree: ast.AST) -> list[int]:
-    shutil_aliases: set[str] = set()
-    which_aliases: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            shutil_aliases.update(
-                alias.asname or alias.name for alias in node.names if alias.name == "shutil"
-            )
-        elif isinstance(node, ast.ImportFrom) and node.module == "shutil":
-            which_aliases.update(
-                alias.asname or alias.name for alias in node.names if alias.name == "which"
-            )
-
+    bindings_by_scope, scope_by_node = _scope_binding_maps(tree)
     lines: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
-        called = _attribute_name(node.func)
+        scope = scope_by_node.get(id(node), tree)
+        called = _resolve_binding(
+            node.func,
+            bindings_by_scope.get(id(scope), {}),
+        )
         if _literal_string(node.args[0]) not in APM_EXECUTABLE_NAMES:
             continue
-        if called in which_aliases or any(called == f"{alias}.which" for alias in shutil_aliases):
+        if called == "shutil.which":
             lines.add(node.lineno)
     return sorted(lines)
 
@@ -177,6 +262,8 @@ def _venv_binary_fallback_lines(tree: ast.AST) -> list[int]:
         return called in {
             "Path",
             "PurePath",
+            "PurePosixPath",
+            "PureWindowsPath",
             "join",
             "joinpath",
         }
@@ -224,15 +311,59 @@ def _python_sibling_binary_lines(tree: ast.AST) -> list[int]:
         }
         if any(f"{alias}.executable" in names for alias in sys_aliases):
             lines.add(node.lineno)
+    known = _assignment_string_tokens(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp):
+            continue
+        tokens = _expression_string_tokens(node, known)
+        names = {
+            _attribute_name(child) for child in ast.walk(node) if isinstance(child, ast.Attribute)
+        }
+        if tokens.intersection(APM_EXECUTABLE_NAMES) and any(
+            name is not None and name.endswith(".executable") for name in names
+        ):
+            lines.add(node.lineno)
     return sorted(lines)
 
 
 def _local_binary_facade_lines(tree: ast.AST) -> list[int]:
     lines: set[int] = set()
-    for node in tree.body:
+
+    def returns_binary_value(
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> bool:
+        tainted = {"apm_binary_path"}
+        for _ in range(len(function.body) + 1):
+            changed = False
+            for child in ast.walk(function):
+                if not isinstance(child, (ast.Assign, ast.AnnAssign)):
+                    continue
+                value = child.value
+                if value is None or not any(
+                    isinstance(node, ast.Name) and node.id in tainted for node in ast.walk(value)
+                ):
+                    continue
+                targets = child.targets if isinstance(child, ast.Assign) else [child.target]
+                for target in targets:
+                    for name in _bound_names(target):
+                        if name not in tainted:
+                            tainted.add(name)
+                            changed = True
+            if not changed:
+                break
+        return any(
+            isinstance(child, ast.Return)
+            and child.value is not None
+            and any(
+                isinstance(node, ast.Name) and node.id in tainted for node in ast.walk(child.value)
+            )
+            for child in ast.walk(function)
+        )
+
+    for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if node.name in LOCAL_BINARY_FACADES:
+        if node.name in {*LOCAL_BINARY_FACADES, "_resolve_apm_binary", "apm_binary_path"}:
             lines.add(node.lineno)
             continue
         fixture = any(
@@ -251,25 +382,7 @@ def _local_binary_facade_lines(tree: ast.AST) -> list[int]:
                 *node.args.kwonlyargs,
             )
         }
-        executable_body = [
-            statement
-            for statement in node.body
-            if not (
-                isinstance(statement, ast.Expr)
-                and isinstance(statement.value, ast.Constant)
-                and isinstance(statement.value.value, str)
-            )
-        ]
-        forwards_fixture = (
-            len(executable_body) == 1
-            and isinstance(executable_body[0], ast.Return)
-            and executable_body[0].value is not None
-            and any(
-                isinstance(child, ast.Name) and child.id == "apm_binary_path"
-                for child in ast.walk(executable_body[0].value)
-            )
-        )
-        if fixture and "apm_binary_path" in parameter_names and forwards_fixture:
+        if fixture and "apm_binary_path" in parameter_names and returns_binary_value(node):
             lines.add(node.lineno)
     return sorted(lines)
 
@@ -316,8 +429,38 @@ def _list_literal_values(node: ast.AST) -> list[str | None]:
     return [_literal_string(element) for element in node.elts]
 
 
+def _assignment_command_values(
+    tree: ast.AST,
+) -> tuple[dict[str, list[str | None]], dict[str, str]]:
+    lists: dict[str, list[str | None]] = {}
+    strings: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = [name for target in targets for name in _bound_names(target)]
+        list_value = _list_literal_values(node.value)
+        string_value = _literal_string(node.value)
+        for name in names:
+            if list_value:
+                lists[name] = list_value
+            elif string_value is not None:
+                strings[name] = string_value
+    return lists, strings
+
+
+def _shell_enabled(call: ast.Call) -> bool:
+    return any(
+        keyword.arg == "shell"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+        for keyword in call.keywords
+    )
+
+
 def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
     module_aliases, call_aliases = _subprocess_aliases(tree)
+    assigned_lists, assigned_strings = _assignment_command_values(tree)
     lines: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.List, ast.Tuple)):
@@ -357,8 +500,21 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
             continue
         command = node.args[0]
         values = _list_literal_values(command)
+        if not values and isinstance(command, ast.Name):
+            values = assigned_lists.get(command.id, [])
         if values and values[0] in APM_EXECUTABLE_NAMES:
             lines.add(node.lineno)
+        if _shell_enabled(node):
+            shell_command = _literal_string(command)
+            if shell_command is None and isinstance(command, ast.Name):
+                shell_command = assigned_strings.get(command.id)
+            if shell_command is not None:
+                try:
+                    shell_tokens = shlex.split(shell_command, posix=True)
+                except ValueError:
+                    shell_tokens = []
+                if shell_tokens and shell_tokens[0] in APM_EXECUTABLE_NAMES:
+                    lines.add(node.lineno)
         noncanonical_names = {
             child.id
             for child in ast.walk(command)
