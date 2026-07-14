@@ -80,7 +80,7 @@ uv run pytest tests/integration -m requires_github_token -v
 ### Hermetic lifecycle fixtures
 
 `tests/integration/test_hermetic_lifecycle_foundation.py` is the cross-module
-contract. Complete the [development setup](./development-guide/) first, then
+contract. Complete the [development setup](../development-guide/) first, then
 directly import the flat utility that owns each concern:
 
 | Utility | Contract test |
