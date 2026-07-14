@@ -12,13 +12,14 @@ Covers:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import time
 import unittest
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -58,6 +59,7 @@ from apm_cli.policy.schema import (
 # ---------------------------------------------------------------------------
 
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
+POLICY_FIXTURES = Path(__file__).parents[2] / "fixtures" / "policy_url_chain"
 
 
 def _make_policy(**kwargs) -> ApmPolicy:
@@ -155,6 +157,81 @@ class TestCacheMergedPolicy(unittest.TestCase):
             self.assertIn("banned/x", entry.policy.dependencies.deny)
             self.assertIn("local-bad/y", entry.policy.dependencies.deny)
             self.assertEqual(entry.chain_refs, chain_refs)
+
+
+class TestURLChainCache:
+    """URL inheritance persists only complete merged policies."""
+
+    @staticmethod
+    def _response(content: str, status_code: int = 200) -> MagicMock:
+        response = MagicMock()
+        response.status_code = status_code
+        response.text = content
+        response.headers = {}
+        return response
+
+    def test_complete_url_chain_persists_merged_leaf_and_reuses_cache(self, tmp_path: Path) -> None:
+        leaf_url = "https://policy.example.com/leaf.yml"
+        parent_url = "https://policy.example.com/parent.yml"
+        leaf_yaml = (POLICY_FIXTURES / "leaf.yml").read_text(encoding="utf-8")
+        parent_yaml = (POLICY_FIXTURES / "parent.yml").read_text(encoding="utf-8")
+        responses = {
+            leaf_url: self._response(leaf_yaml),
+            parent_url: self._response(parent_yaml),
+        }
+
+        with patch(
+            "apm_cli.policy.discovery.requests.get",
+            side_effect=lambda url, **_kwargs: responses[url],
+        ) as transport:
+            cold = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
+            assert cold.policy is not None
+            assert cold.policy.enforcement == "block"
+            assert cold.policy.dependencies.deny == (
+                "parent/blocked-one",
+                "parent/blocked-two",
+                "leaf/blocked",
+            )
+
+            entry = _read_cache_entry(leaf_url, tmp_path)
+            assert entry is not None
+            assert entry.policy == cold.policy
+            assert (
+                entry.raw_bytes_hash
+                == "sha256:" + hashlib.sha256(leaf_yaml.encode("utf-8")).hexdigest()
+            )
+
+            transport.side_effect = AssertionError("warm URL lookup reached the network")
+            warm = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
+
+        assert warm.cached is True
+        assert warm.policy == cold.policy
+        assert transport.call_count == 2
+
+    def test_failed_url_parent_leaves_no_weak_leaf_cache(self, tmp_path: Path) -> None:
+        leaf_url = "https://policy.example.com/leaf.yml"
+        parent_url = "https://policy.example.com/parent.yml"
+        leaf_yaml = (POLICY_FIXTURES / "leaf.yml").read_text(encoding="utf-8")
+        responses = {
+            leaf_url: self._response(leaf_yaml),
+            parent_url: self._response("", status_code=503),
+        }
+
+        with patch(
+            "apm_cli.policy.discovery.requests.get",
+            side_effect=lambda url, **_kwargs: responses[url],
+        ) as transport:
+            first = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
+            assert first.outcome == "incomplete_chain"
+            assert first.policy is None
+            assert _read_cache_entry(leaf_url, tmp_path) is None
+
+            second = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
+
+        assert second.outcome == "incomplete_chain"
+        assert second.policy is None
+        assert _read_cache_entry(leaf_url, tmp_path) is None
+        assert transport.call_count == 4
 
 
 # ---------------------------------------------------------------------------
@@ -476,45 +553,127 @@ class TestIsPolicyEmpty(unittest.TestCase):
         self.assertTrue(_is_policy_empty(p))
 
 
+ACTIONABLE_POLICY_CASES = {
+    ("fetch_failure",): "fetch_failure: block\n",
+    ("dependencies", "allow"): "dependencies:\n  allow: [acme/*]\n",
+    ("dependencies", "deny"): "dependencies:\n  deny: [evil/*]\n",
+    ("dependencies", "require"): "dependencies:\n  require: [corp/base]\n",
+    (
+        "dependencies",
+        "require_resolution",
+    ): "dependencies:\n  require_resolution: block\n",
+    ("dependencies", "max_depth"): "dependencies:\n  max_depth: 1\n",
+    (
+        "dependencies",
+        "require_pinned_constraint",
+    ): "dependencies:\n  require_pinned_constraint: true\n",
+    ("mcp", "allow"): "mcp:\n  allow: [corp-mcp]\n",
+    ("mcp", "deny"): "mcp:\n  deny: [bad-mcp]\n",
+    ("mcp", "transport", "allow"): "mcp:\n  transport:\n    allow: [stdio]\n",
+    ("mcp", "self_defined"): "mcp:\n  self_defined: deny\n",
+    ("mcp", "trust_transitive"): "mcp:\n  trust_transitive: true\n",
+    (
+        "compilation",
+        "target",
+        "allow",
+    ): "compilation:\n  target:\n    allow: [vscode]\n",
+    (
+        "compilation",
+        "target",
+        "enforce",
+    ): "compilation:\n  target:\n    enforce: vscode\n",
+    (
+        "compilation",
+        "strategy",
+        "enforce",
+    ): "compilation:\n  strategy:\n    enforce: distributed\n",
+    (
+        "compilation",
+        "source_attribution",
+    ): "compilation:\n  source_attribution: true\n",
+    ("manifest", "required_fields"): "manifest:\n  required_fields: [version]\n",
+    ("manifest", "scripts"): "manifest:\n  scripts: deny\n",
+    (
+        "manifest",
+        "content_types",
+    ): "manifest:\n  content_types:\n    allow: [skill]\n",
+    (
+        "manifest",
+        "require_explicit_includes",
+    ): "manifest:\n  require_explicit_includes: true\n",
+    ("unmanaged_files", "action"): "unmanaged_files:\n  action: deny\n",
+    (
+        "unmanaged_files",
+        "directories",
+    ): "unmanaged_files:\n  directories: [.github]\n",
+    (
+        "unmanaged_files",
+        "exclude",
+    ): "unmanaged_files:\n  exclude: [.github/generated/**]\n",
+    ("registry_source", "require"): "registry_source:\n  require: [corp]\n",
+    (
+        "registry_source",
+        "allow_non_registry",
+    ): "registry_source:\n  allow_non_registry: false\n",
+    (
+        "security",
+        "audit",
+        "on_install",
+    ): "security:\n  audit:\n    on_install: block\n",
+    (
+        "security",
+        "audit",
+        "external",
+    ): "security:\n  audit:\n    external: [skillspector]\n",
+    (
+        "security",
+        "audit",
+        "scanners",
+    ): "security:\n  audit:\n    scanners:\n      skillspector:\n        allow_args: false\n",
+    (
+        "security",
+        "audit",
+        "fail_on_drift",
+    ): "security:\n  audit:\n    fail_on_drift: true\n",
+    (
+        "security",
+        "integrity",
+        "require_hashes",
+    ): "security:\n  integrity:\n    require_hashes: true\n",
+    ("bin_deploy", "deny_all"): "bin_deploy:\n  deny_all: true\n",
+    ("bin_deploy", "deny"): "bin_deploy:\n  deny: [legacy/tool]\n",
+    ("executables", "deny_all"): "executables:\n  deny_all: true\n",
+    ("executables", "deny"): "executables:\n  deny: [blocked/tool]\n",
+    ("executables", "require"): "executables:\n  require: [required/tool]\n",
+    ("executables", "recommend"): "executables:\n  recommend: [approved/tool]\n",
+    ("executables", "enforce"): "executables:\n  enforce: [mandated/tool]\n",
+}
+
+NON_ACTIONABLE_POLICY_LEAVES = {
+    ("name",),
+    ("version",),
+    ("extends",),
+    ("enforcement",),
+    ("cache", "ttl"),
+}
+
+
+def test_policy_empty_cases_cover_every_actionable_dataclass_leaf() -> None:
+    declared = _dataclass_leaf_paths(ApmPolicy())
+    assert set(ACTIONABLE_POLICY_CASES) == declared - NON_ACTIONABLE_POLICY_LEAVES
+
+
 @pytest.mark.parametrize(
-    "policy_yaml",
+    ("field_path", "policy_yaml"),
     [
-        pytest.param(
-            "dependencies:\n  require_pinned_constraint: true\n",
-            id="pinned-constraint",
-        ),
-        pytest.param(
-            "manifest:\n  require_explicit_includes: true\n",
-            id="explicit-includes",
-        ),
-        pytest.param(
-            "registry_source:\n  allow_non_registry: false\n",
-            id="registry-source",
-        ),
-        pytest.param(
-            "security:\n  integrity:\n    require_hashes: true\n",
-            id="integrity",
-        ),
-        pytest.param(
-            "security:\n  audit:\n    on_install: block\n",
-            id="audit",
-        ),
-        pytest.param(
-            "bin_deploy:\n  deny_all: true\n",
-            id="bin-deploy",
-        ),
-        pytest.param(
-            "executables:\n  deny_all: true\n",
-            id="executables",
-        ),
-        pytest.param(
-            "fetch_failure: block\n",
-            id="fetch-failure",
-        ),
+        pytest.param(field_path, policy_yaml, id=".".join(field_path))
+        for field_path, policy_yaml in ACTIONABLE_POLICY_CASES.items()
     ],
 )
-def test_modern_only_policy_is_not_empty(policy_yaml: str) -> None:
-    policy, _warnings = load_policy("name: modern-only\n" + policy_yaml)
+def test_every_actionable_policy_leaf_is_not_empty(
+    field_path: tuple[str, ...], policy_yaml: str
+) -> None:
+    policy, _warnings = load_policy("name: actionable-leaf\n" + policy_yaml)
     assert not _is_policy_empty(policy)
 
 

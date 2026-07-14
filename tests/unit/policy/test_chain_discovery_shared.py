@@ -160,6 +160,7 @@ class TestChainResolution:
 
         assert result.outcome == "empty"
         assert result.policy is not None
+        mock_write_cache.assert_called_once()
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)

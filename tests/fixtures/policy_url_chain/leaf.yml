@@ -1,0 +1,5 @@
+name: url-leaf
+extends: https://policy.example.com/parent.yml
+dependencies:
+  deny:
+    - leaf/blocked
