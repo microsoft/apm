@@ -124,7 +124,6 @@ def test_root_hook_source_drift_heals_on_reinstall(
     settings_rel: str,
     sidecar_rel: str | None,
     event_key: str,
-    apm_binary_path: Path,
 ) -> None:
     """After a checkout rename, a second `apm install` heals stale source markers.
 
