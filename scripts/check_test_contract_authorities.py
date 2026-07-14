@@ -112,11 +112,12 @@ def _scope_binding_maps(
         for statement in body:
             if isinstance(statement, ast.Import):
                 for alias in statement.names:
-                    if alias.name in {"os", "shutil", "sys"}:
+                    if alias.name in {"os", "shutil", "subprocess", "sys"}:
                         bindings[alias.asname or alias.name] = alias.name
             elif isinstance(statement, ast.ImportFrom) and statement.module in {
                 "os",
                 "shutil",
+                "subprocess",
             }:
                 for alias in statement.names:
                     bindings[alias.asname or alias.name] = f"{statement.module}.{alias.name}"
@@ -387,40 +388,17 @@ def _local_binary_facade_lines(tree: ast.AST) -> list[int]:
     return sorted(lines)
 
 
-def _subprocess_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
-    module_aliases: set[str] = set()
-    call_aliases: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            module_aliases.update(
-                alias.asname or alias.name for alias in node.names if alias.name == "subprocess"
-            )
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-            call_aliases.update(
-                alias.asname or alias.name
-                for alias in node.names
-                if alias.name in {"Popen", "call", "check_call", "check_output", "run"}
-            )
-    return module_aliases, call_aliases
-
-
 def _is_subprocess_call(
     node: ast.Call,
-    module_aliases: set[str],
-    call_aliases: set[str],
+    bindings: dict[str, str],
 ) -> bool:
-    called = _attribute_name(node.func)
-    return called in call_aliases or any(
-        called
-        in {
-            f"{alias}.Popen",
-            f"{alias}.call",
-            f"{alias}.check_call",
-            f"{alias}.check_output",
-            f"{alias}.run",
-        }
-        for alias in module_aliases
-    )
+    return _resolve_binding(node.func, bindings) in {
+        "subprocess.Popen",
+        "subprocess.call",
+        "subprocess.check_call",
+        "subprocess.check_output",
+        "subprocess.run",
+    }
 
 
 def _list_literal_values(node: ast.AST) -> list[str | None]:
@@ -459,7 +437,7 @@ def _shell_enabled(call: ast.Call) -> bool:
 
 
 def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
-    module_aliases, call_aliases = _subprocess_aliases(tree)
+    bindings_by_scope, scope_by_node = _scope_binding_maps(tree)
     assigned_lists, assigned_strings = _assignment_command_values(tree)
     lines: set[int] = set()
     for node in ast.walk(tree):
@@ -496,7 +474,11 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
                 lines.add(node.lineno)
         if not isinstance(node, ast.Call) or not node.args:
             continue
-        if not _is_subprocess_call(node, module_aliases, call_aliases):
+        scope = scope_by_node.get(id(node), tree)
+        if not _is_subprocess_call(
+            node,
+            bindings_by_scope.get(id(scope), {}),
+        ):
             continue
         command = node.args[0]
         values = _list_literal_values(command)
@@ -530,7 +512,6 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
         }
         if noncanonical_names:
             lines.add(node.lineno)
-    module_aliases, call_aliases = _subprocess_aliases(tree)
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -538,7 +519,14 @@ def _direct_apm_subprocess_lines(tree: ast.AST) -> list[int]:
             value for child in ast.walk(function) if (value := _literal_string(child)) is not None
         }
         runs_subprocess = any(
-            isinstance(child, ast.Call) and _is_subprocess_call(child, module_aliases, call_aliases)
+            isinstance(child, ast.Call)
+            and _is_subprocess_call(
+                child,
+                bindings_by_scope.get(
+                    id(scope_by_node.get(id(child), tree)),
+                    {},
+                ),
+            )
             for child in ast.walk(function)
         )
         if runs_subprocess and {"apm", "./apm", "./dist/apm"}.issubset(strings):

@@ -158,6 +158,27 @@ def test_shadowed_shutil_binding_does_not_duplicate_diagnostics(tmp_path: Path) 
     assert "direct PATH lookup for apm" in violations[0]
 
 
+def test_shadowed_os_binding_does_not_duplicate_diagnostics(tmp_path: Path) -> None:
+    """Only the genuine outer os binding may own an environment read."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "shadowed_os.py"
+    duplicate.write_text(
+        "import os\n"
+        "outer = os.getenv('APM_BINARY_PATH')\n"
+        "def parameter_shadow(os):\n"
+        "    return os.getenv('APM_BINARY_PATH')\n"
+        "def local_shadow():\n"
+        "    os = object()\n"
+        "    return os.getenv('APM_BINARY_PATH')\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct APM_BINARY_PATH read" in violations[0]
+
+
 def test_venv_fallback_without_env_or_which_is_rejected(tmp_path: Path) -> None:
     """Deleting the .venv detector must fail independently."""
     _write_owner_stubs(tmp_path)
@@ -281,6 +302,7 @@ def test_interpreter_parent_apm_selector_is_rejected(tmp_path: Path) -> None:
         "import subprocess\nsubprocess.Popen(['apm', '--version'])\n",
         "import subprocess\nsubprocess.run('apm --version', shell=True)\n",
         "import subprocess\ncommand = 'apm --version'\nsubprocess.run(command, shell=True)\n",
+        "import subprocess\ncommand = ['apm', '--version']\nsubprocess.run(command)\n",
         "import subprocess\nsubprocess.run(['uv', 'run', 'apm'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'apm_cli'])\n",
         "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'uv', 'run', 'apm'])\n",
@@ -294,6 +316,29 @@ def test_direct_subprocess_selection_is_rejected(
     _write_owner_stubs(tmp_path)
     duplicate = tmp_path / "tests" / "integration" / "launcher_duplicate.py"
     duplicate.write_text(source, encoding="utf-8")
+
+    violations = _load_checker().find_binary_selection_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "direct apm subprocess selection" in violations[0]
+
+
+def test_shadowed_subprocess_binding_does_not_duplicate_diagnostics(
+    tmp_path: Path,
+) -> None:
+    """Only the genuine imported subprocess binding may launch APM."""
+    _write_owner_stubs(tmp_path)
+    duplicate = tmp_path / "tests" / "integration" / "shadowed_subprocess.py"
+    duplicate.write_text(
+        "import subprocess\n"
+        "outer = subprocess.run(['apm', '--version'])\n"
+        "def parameter_shadow(subprocess):\n"
+        "    return subprocess.run(['apm', '--version'])\n"
+        "def local_shadow():\n"
+        "    subprocess = object()\n"
+        "    return subprocess.run(['apm', '--version'])\n",
+        encoding="utf-8",
+    )
 
     violations = _load_checker().find_binary_selection_violations(tmp_path)
 
