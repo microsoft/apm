@@ -216,6 +216,25 @@ def test_relative_dependency_uses_portable_manifest_path(
     }
     _assert_source_tree(declared.root, {"apm.yml"})
 
+    string_declared = factory.create(
+        "string-declared",
+        dependencies=("microsoft/apm-sample-package#v1.0.0",),
+    )
+    assert load_yaml(string_declared.manifest_path) == {
+        "name": "string-declared",
+        "version": "0.1.0",
+        "description": "Hermetic test package string-declared",
+        "author": "APM Test",
+        "dependencies": {
+            "apm": ["microsoft/apm-sample-package#v1.0.0"],
+        },
+    }
+    _assert_source_tree(string_declared.root, {"apm.yml"})
+
+    with pytest.raises(TypeError, match="strings or mappings"):
+        factory.create("invalid-dependency-type", dependencies=(42,))
+    assert not (tmp_path / "packages/invalid-dependency-type").exists()
+
     minimal = factory.create("minimal")
     factory.add_relative_dependency(minimal, child)
     minimal_manifest = load_yaml(minimal.manifest_path)
@@ -243,13 +262,30 @@ def test_relative_dependency_uses_portable_manifest_path(
         },
         malformed.manifest_path,
     )
+    malformed_bytes = malformed.manifest_path.read_bytes()
     with pytest.raises(ValueError, match="Invalid dependencies mapping"):
         factory.add_relative_dependency(malformed, child)
+    assert malformed.manifest_path.read_bytes() == malformed_bytes
 
     malformed_yaml = factory.create("malformed-yaml")
     malformed_yaml.manifest_path.write_bytes(b"dependencies: [\n")
+    malformed_yaml_bytes = malformed_yaml.manifest_path.read_bytes()
     with pytest.raises(ValueError, match="Invalid manifest YAML"):
         factory.add_relative_dependency(malformed_yaml, child)
+    assert malformed_yaml.manifest_path.read_bytes() == malformed_yaml_bytes
+
+    malformed_apm = factory.create("malformed-apm")
+    dump_yaml(
+        {
+            "name": "malformed-apm",
+            "dependencies": {"apm": "../dependency"},
+        },
+        malformed_apm.manifest_path,
+    )
+    malformed_apm_bytes = malformed_apm.manifest_path.read_bytes()
+    with pytest.raises(ValueError, match="Invalid APM dependencies list"):
+        factory.add_relative_dependency(malformed_apm, child)
+    assert malformed_apm.manifest_path.read_bytes() == malformed_apm_bytes
 
     outside_manifest = tmp_path / "outside-manifest.yml"
     outside_manifest.write_text("name: outside\n", encoding="utf-8")
@@ -391,6 +427,31 @@ def test_relative_link_and_policy_are_source_inputs(tmp_path: Path) -> None:
             PurePosixPath("../assets/example.txt"),
         )
     assert not (outside_skill / "escaped.md").exists()
+
+    in_package_symlink = factory.create("in-package-symlink")
+    factory.add_skill(in_package_symlink, "linked", "# Linked\n")
+    _assert_source_tree(
+        in_package_symlink.root,
+        {
+            "apm.yml",
+            "skills",
+            "skills/linked",
+            "skills/linked/SKILL.md",
+        },
+    )
+    real_references = in_package_symlink.root / "skills/linked/references"
+    real_references.mkdir()
+    (in_package_symlink.root / "skills/linked/reference-alias").symlink_to(
+        real_references,
+        target_is_directory=True,
+    )
+    with pytest.raises(ValueError, match="symlink"):
+        factory.add_relative_link(
+            in_package_symlink,
+            PurePosixPath("skills/linked/reference-alias/escaped.md"),
+            PurePosixPath("../assets/example.txt"),
+        )
+    assert not (real_references / "escaped.md").exists()
 
     for unsafe_path in (
         PurePosixPath("."),
