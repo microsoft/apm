@@ -159,7 +159,9 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
             "CLAUDE_CONFIG_DIR": "/ambient/claude",
             "CODEX_HOME": "/ambient/codex",
             "COPILOT_HOME": "/ambient/copilot",
+            "GH_ENTERPRISE_TOKEN": "ambient",
             "GITHUB_APM_PAT_ACME": "ambient",
+            "GITHUB_ENTERPRISE_TOKEN": "ambient",
             "GITHUB_TOKEN": "ambient",
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "credential.helper",
@@ -189,7 +191,9 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
         "COPILOT_HOME",
+        "GH_ENTERPRISE_TOKEN",
         "GITHUB_APM_PAT_ACME",
+        "GITHUB_ENTERPRISE_TOKEN",
         "GITHUB_TOKEN",
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_KEY_0",
@@ -221,9 +225,13 @@ def test_protected_environment_overrides_are_rejected(tmp_path: Path) -> None:
         "GIT_CONFIG_VALUE_0",
     )
     case_variant_exact_names = ("home", "github_token", "Git_Allow_Protocol")
-    for name in exact_names + case_variant_exact_names + tool_home_names:
+    enterprise_token_names = ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+    for name in exact_names + case_variant_exact_names + tool_home_names + enterprise_token_names:
         with pytest.raises(ValueError, match="protected environment"):
             isolated.subprocess_env(overrides={name: "unsafe"})
+    for name in enterprise_token_names:
+        with pytest.raises(ValueError, match="protected environment"):
+            isolated.subprocess_env(overrides={name.lower(): "unsafe"})
     for name in dynamic_prefix_names:
         for variant in (name, name.lower()):
             with pytest.raises(ValueError, match="protected environment"):
