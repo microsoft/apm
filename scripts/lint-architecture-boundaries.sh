@@ -456,6 +456,15 @@ if [ "$test_contract_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC10: diagnostic printable-ASCII authority"
+diagnostic_ascii_output=$(python3 scripts/check_diagnostic_ascii_owner.py --root "$ROOT" 2>&1)
+diagnostic_ascii_status=$?
+if [ "$diagnostic_ascii_status" -ne 0 ]; then
+    echo "[x] Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text"
+    echo "$diagnostic_ascii_output"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1
