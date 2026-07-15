@@ -78,6 +78,34 @@ def test_renamed_local_ascii_implementation_is_rejected(repo_copy: Path, checker
     assert any("reimplement it locally" in violation.message for violation in violations)
 
 
+def test_decorative_owner_call_cannot_hide_regex_override(
+    repo_copy: Path,
+    checker,
+) -> None:
+    """A real rendered value must flow from the owner, not a decorative call."""
+    consumer = repo_copy / "src/apm_cli/integration/opencode_frontmatter.py"
+    source = consumer.read_text(encoding="utf-8")
+    source = source.replace(
+        "def validate_opencode_frontmatter(",
+        "def _display_safe(value: str) -> str:\n"
+        '    return re.sub(r"[^ -~]", "?", value)\n\n\n'
+        "def validate_opencode_frontmatter(",
+    )
+    source = source.replace(
+        "safe_name = printable_ascii_text(source.name)",
+        "safe_name = printable_ascii_text(source.name)\n    safe_name = _display_safe(source.name)",
+    )
+    consumer.write_text(source, encoding="utf-8")
+
+    violations = checker.check(repo_copy)
+
+    assert any("local normalization path" in violation.message for violation in violations)
+    assert any(
+        "derive rendered diagnostic identity directly" in violation.message
+        for violation in violations
+    )
+
+
 def test_missing_owner_call_is_rejected(repo_copy: Path, checker) -> None:
     consumer = repo_copy / "src/apm_cli/integration/opencode_frontmatter.py"
     source = consumer.read_text(encoding="utf-8").replace(
@@ -89,8 +117,7 @@ def test_missing_owner_call_is_rejected(repo_copy: Path, checker) -> None:
     violations = checker.check(repo_copy)
 
     assert any(
-        "validate_opencode_frontmatter must delegate" in violation.message
-        for violation in violations
+        "validate_opencode_frontmatter must derive" in violation.message for violation in violations
     )
 
 

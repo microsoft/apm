@@ -24,15 +24,14 @@ from pathlib import Path
 OWNER_MODULE = "apm_cli.utils.diagnostics"
 OWNER_SYMBOL = "printable_ascii_text"
 OWNER_PATH = Path("src/apm_cli/utils/diagnostics.py")
-CONSUMER_FUNCTIONS = {
-    Path("src/apm_cli/integration/agent_integrator.py"): {
-        "AgentIntegrator._warn_codex_unverified_scope": 2,
-        "AgentIntegrator._warn_codex_tools_dropped": 2,
-    },
-    Path("src/apm_cli/integration/opencode_frontmatter.py"): {
-        "validate_opencode_frontmatter": 2,
-    },
+AGENT_CONSUMER = Path("src/apm_cli/integration/agent_integrator.py")
+AGENT_DIAGNOSTIC_FUNCTIONS = {
+    "AgentIntegrator._warn_codex_unverified_scope",
+    "AgentIntegrator._warn_codex_tools_dropped",
 }
+OPENCODE_CONSUMER = Path("src/apm_cli/integration/opencode_frontmatter.py")
+OPENCODE_FUNCTION = "validate_opencode_frontmatter"
+CONSUMERS = (AGENT_CONSUMER, OPENCODE_CONSUMER)
 RETIRED_SYMBOL = "_ascii_safe_name"
 
 
@@ -93,14 +92,118 @@ def _imports_owner(tree: ast.Module) -> bool:
     )
 
 
-def _owner_call_count(function: ast.AST) -> int:
-    """Count direct calls to the canonical owner in one function."""
-    return sum(
+def _is_owner_call(node: ast.AST, argument: ast.AST | None = None) -> bool:
+    """Return whether ``node`` directly calls the owner on ``argument``."""
+    if not (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == OWNER_SYMBOL
-        for node in _walk_own_scope(function)
+        and len(node.args) == 1
+    ):
+        return False
+    return argument is None or ast.dump(node.args[0]) == ast.dump(argument)
+
+
+def _source_name() -> ast.Attribute:
+    """Return the expected ``source.name`` identity expression."""
+    return ast.Attribute(value=ast.Name(id="source", ctx=ast.Load()), attr="name", ctx=ast.Load())
+
+
+def _package_name() -> ast.Name:
+    """Return the expected ``package_name`` identity expression."""
+    return ast.Name(id="package_name", ctx=ast.Load())
+
+
+def _contains_name(node: ast.AST, name: str) -> bool:
+    """Return whether an expression contains a load of ``name``."""
+    return any(
+        isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load) and child.id == name
+        for child in ast.walk(node)
     )
+
+
+def _diagnostic_calls(function: ast.AST) -> list[ast.Call]:
+    """Return DiagnosticCollector calls that render one Codex warning."""
+    return [
+        node
+        for node in _walk_own_scope(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"warn", "lossy_agent_compilation"}
+    ]
+
+
+def _identity_is_directly_owned_in_diagnostic(function: ast.AST) -> bool:
+    """Return whether one diagnostic call owns source and package rendering."""
+    for call in _diagnostic_calls(function):
+        owner_calls = [node for node in ast.walk(call) if _is_owner_call(node)]
+        if any(_is_owner_call(node, _source_name()) for node in owner_calls) and any(
+            _is_owner_call(node, _package_name()) for node in owner_calls
+        ):
+            return True
+    return False
+
+
+def _assignments_to(function: ast.AST, name: str) -> list[ast.Assign]:
+    """Return simple assignments to ``name`` in one function scope."""
+    return [
+        node
+        for node in _walk_own_scope(function)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+    ]
+
+
+def _opencode_identity_flow_is_owned(function: ast.AST) -> bool:
+    """Return whether OpenCode messages derive identity only from the owner."""
+    safe_name_assignments = _assignments_to(function, "safe_name")
+    identifier_assignments = _assignments_to(function, "identifier")
+    if len(safe_name_assignments) != 1 or len(identifier_assignments) != 1:
+        return False
+    if not _is_owner_call(safe_name_assignments[0].value, _source_name()):
+        return False
+    identifier = identifier_assignments[0].value
+    if not any(_is_owner_call(node, _package_name()) for node in ast.walk(identifier)):
+        return False
+    if not _contains_name(identifier, "safe_name"):
+        return False
+    message_appends = [
+        node
+        for node in _walk_own_scope(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "messages"
+        and node.func.attr == "append"
+    ]
+    return bool(message_appends) and all(
+        _contains_name(call, "identifier") for call in message_appends
+    )
+
+
+def _is_identity(node: ast.AST) -> bool:
+    """Return whether ``node`` is source.name or package_name."""
+    return ast.dump(node) in {ast.dump(_source_name()), ast.dump(_package_name())}
+
+
+def _directly_consumes_identity(call: ast.Call) -> bool:
+    """Return whether a call directly receives a diagnostic identity value."""
+    if any(_is_identity(argument) for argument in call.args):
+        return True
+    if any(_is_identity(keyword.value) for keyword in call.keywords):
+        return True
+    return isinstance(call.func, ast.Attribute) and _is_identity(call.func.value)
+
+
+def _non_owner_identity_calls(function: ast.AST) -> list[ast.Call]:
+    """Return calls that locally transform diagnostic identity inputs."""
+    return [
+        node
+        for node in _walk_own_scope(function)
+        if isinstance(node, ast.Call)
+        and _directly_consumes_identity(node)
+        and not _is_owner_call(node)
+    ]
 
 
 def _ascii_codec_call(node: ast.AST) -> bool:
@@ -161,7 +264,7 @@ def check(root: Path) -> list[Violation]:
             )
         )
 
-    for relative_path, required_functions in CONSUMER_FUNCTIONS.items():
+    for relative_path in CONSUMERS:
         tree = _parse(root / relative_path)
         if not _imports_owner(tree):
             violations.append(
@@ -173,21 +276,37 @@ def check(root: Path) -> list[Violation]:
             )
 
         functions = _qualnamed_functions(tree)
-        for qualname, minimum_calls in required_functions.items():
+        expected_functions = (
+            AGENT_DIAGNOSTIC_FUNCTIONS if relative_path == AGENT_CONSUMER else {OPENCODE_FUNCTION}
+        )
+        for qualname in expected_functions:
             function = functions.get(qualname)
             if function is None:
                 violations.append(
                     Violation(relative_path, 1, f"required consumer function missing: {qualname}")
                 )
                 continue
-            call_count = _owner_call_count(function)
-            if call_count < minimum_calls:
+            flow_is_owned = (
+                _identity_is_directly_owned_in_diagnostic(function)
+                if relative_path == AGENT_CONSUMER
+                else _opencode_identity_flow_is_owned(function)
+            )
+            if not flow_is_owned:
                 violations.append(
                     Violation(
                         relative_path,
                         function.lineno,
-                        f"{qualname} must delegate diagnostic names to "
-                        f"{OWNER_MODULE}.{OWNER_SYMBOL} at least {minimum_calls} time(s)",
+                        f"{qualname} must derive rendered diagnostic identity directly from "
+                        f"{OWNER_MODULE}.{OWNER_SYMBOL}",
+                    )
+                )
+            for call in _non_owner_identity_calls(function):
+                violations.append(
+                    Violation(
+                        relative_path,
+                        call.lineno,
+                        f"{qualname} must not pass source.name or package_name through "
+                        "a local normalization path",
                     )
                 )
 
@@ -201,6 +320,18 @@ def check(root: Path) -> list[Violation]:
                         relative_path,
                         node.lineno,
                         f"must not define local diagnostic ASCII normalizer {node.name}",
+                    )
+                )
+            elif (
+                isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Store)
+                and node.id == OWNER_SYMBOL
+            ):
+                violations.append(
+                    Violation(
+                        relative_path,
+                        node.lineno,
+                        f"must not shadow canonical owner {OWNER_SYMBOL}",
                     )
                 )
             elif isinstance(node, ast.Name) and node.id == RETIRED_SYMBOL:

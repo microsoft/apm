@@ -597,13 +597,17 @@ def test_agent_diagnostic_ascii_guard_rejects_local_reimplementation(
             "node_modules",
         ),
     )
-    consumer = sandbox / "src/apm_cli/integration/agent_integrator.py"
+    consumer = sandbox / "src/apm_cli/integration/opencode_frontmatter.py"
     source = consumer.read_text(encoding="utf-8")
     source = source.replace(
-        "from apm_cli.utils.diagnostics import printable_ascii_text",
-        "def printable_ascii_text(value: str) -> str:\n"
-        '    ascii_only = value.encode("ascii", "replace").decode("ascii")\n'
-        "    return ''.join('?' if ord(char) < 0x20 else char for char in ascii_only)",
+        "def validate_opencode_frontmatter(",
+        "def _display_safe(value: str) -> str:\n"
+        '    return re.sub(r"[^ -~]", "?", value)\n\n\n'
+        "def validate_opencode_frontmatter(",
+    )
+    source = source.replace(
+        "safe_name = printable_ascii_text(source.name)",
+        "safe_name = printable_ascii_text(source.name)\n    safe_name = _display_safe(source.name)",
     )
     consumer.write_text(source, encoding="utf-8")
 
