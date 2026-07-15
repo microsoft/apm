@@ -52,6 +52,65 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
+def test_packed_marketplace_source_parsing_has_single_owner() -> None:
+    """Packed marketplace URL/ref/path parsing must use DependencyReference."""
+    root = Path(__file__).parents[2]
+    resolver = (root / "src/apm_cli/marketplace/resolver.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    helper = resolver.split(
+        "def _dependency_reference_from_packed_source(",
+        maxsplit=1,
+    )[1].split("\ndef ", maxsplit=1)[0]
+    assert "DependencyReference.parse_from_dict(entry)" in helper
+    assert "Packed marketplace sources must use DependencyReference.parse_from_dict" in guard
+
+
+def test_packed_marketplace_source_owner_guard_rejects_parallel_parser(
+    tmp_path: Path,
+) -> None:
+    """AC10 must reject bypassing the canonical dependency parser."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    resolver_path = sandbox / "src/apm_cli/marketplace/resolver.py"
+    resolver_source = resolver_path.read_text(encoding="utf-8")
+    resolver_path.write_text(
+        resolver_source.replace(
+            "dependency = DependencyReference.parse_from_dict(entry)",
+            "dependency = DependencyReference(repo_url=remote.strip())",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Packed marketplace sources must use DependencyReference.parse_from_dict" in (
+        result.stdout
+    )
+
+
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
     """Cleanup must route current deployed-file claims through the reconciler."""
     root = Path(__file__).parents[2]
