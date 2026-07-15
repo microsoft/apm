@@ -24,6 +24,7 @@ from apm_cli.deps.shared_clone_cache import SharedCloneCache
 from apm_cli.deps.tiered_ref_resolver import (
     L0PerRunCache,
     PerRunRefCache,
+    TieredRefResolver,
     _repository_cache_identity,
 )
 from apm_cli.models.dependency.reference import DependencyReference
@@ -295,6 +296,50 @@ def test_repository_identity_isolates_l0_cache_across_hosts():
     cache.put(_repository_cache_identity(github_dep), "main", "a" * 40)
 
     assert L0PerRunCache(cache=cache).try_resolve(gitlab_dep, "main") is None
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_isolates_same_host_nested_repositories_through_resolver():
+    """Real resolver dispatch stores distinct SHAs for sibling nested repositories."""
+    cache = PerRunRefCache()
+
+    class SourceTier:
+        name = "source"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def try_resolve(self, dep_ref: DependencyReference, _ref: str) -> str:
+            self.calls.append(dep_ref.repo_url)
+            return "a" * 40 if dep_ref.repo_url.endswith("repo-a") else "b" * 40
+
+    source = SourceTier()
+    legacy = type("UnusedLegacy", (), {"resolve_full": lambda *_args: None})()
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), source],
+        cache=cache,
+        legacy=legacy,
+    )
+    dep_a = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="gitlab.com",
+        reference="main",
+    )
+    dep_b = DependencyReference(
+        repo_url="acme/platform/team/repo-b",
+        host="gitlab.com",
+        reference="main",
+    )
+
+    first_a = resolver.resolve(dep_a)
+    first_b = resolver.resolve(dep_b)
+    warm_a = resolver.resolve(dep_a)
+
+    assert first_a.resolved_commit == "a" * 40
+    assert first_b.resolved_commit == "b" * 40
+    assert warm_a.resolved_commit == "a" * 40
+    assert source.calls == [dep_a.repo_url, dep_b.repo_url]
+    assert cache.size() == 2
 
 
 # --- req-pr-001..005: primitives ---------------------------------------

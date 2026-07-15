@@ -928,9 +928,10 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 6,
+      "test_count": 7,
       "tests": [
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_l0_cache_across_hosts",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_same_host_nested_repositories_through_resolver",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_normalizes_safe_syntax_dimensions",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_preserves_literal_path_distinctions",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_preserves_nondefault_port_and_path_case",

@@ -457,6 +457,14 @@ if [ "$test_contract_status" -ne 0 ]; then
 fi
 
 echo "[*] AC10: Git repository cache identity authority"
+cache_identity_output=$(python3 scripts/check_repository_cache_identity_owner.py \
+    --root "$ROOT" 2>&1)
+cache_identity_status=$?
+if [ "$cache_identity_status" -ne 0 ]; then
+    echo "[x] Git repository cache identity must route through canonical owners"
+    echo "$cache_identity_output"
+    violations=$((violations + 1))
+fi
 if ! grep -q 'repository = normalize_repo_url(repository_url)' \
     src/apm_cli/deps/shared_clone_cache.py; then
     echo "[x] SharedCloneCache must normalize the complete repository URL"
