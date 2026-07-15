@@ -234,24 +234,6 @@ if ! grep -q '^def should_force_ref_recheck(' "$ref_recheck_owner" \
     echo "[x] Existing-path ref rechecks must use drift.py::should_force_ref_recheck"
     violations=$((violations + 1))
 fi
-semver_transport_router="src/apm_cli/install/helpers/ref_reuse.py"
-semver_transport_executor="src/apm_cli/marketplace/ref_resolver.py"
-git_ref_transport_consumer="src/apm_cli/deps/git_reference_resolver.py"
-if ! grep -q 'transport_plan = transport_selector.select(' "$semver_transport_router" \
-    || ! grep -q \
-        'transport_scheme = "ssh" if selected_scheme == "ssh" else "https"' \
-        "$semver_transport_router" \
-    || ! grep -q 'transport_scheme=transport_scheme' "$semver_transport_router" \
-    || ! grep -q 'build_ssh_url(' "$semver_transport_executor" \
-    || grep -Eq \
-        'from .*transport_selection import|TransportSelector\(' \
-        "$semver_transport_executor" \
-    || ! grep -q \
-        'transport_plan = host._transport_selector.select(' \
-        "$git_ref_transport_consumer"; then
-    echo "[x] Git ref transport must route through TransportSelector into RefResolver"
-    violations=$((violations + 1))
-fi
 cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
 cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
 cleanup_claim_status=$?
@@ -550,6 +532,35 @@ check_pattern \
     "Repository cache keys must stay owned by cache/url_normalize.py" \
     'to_repository_cache_url' \
     src/apm_cli
+
+echo "[*] AC12: diagnostic printable-ASCII authority"
+diagnostic_ascii_output=$(python3 scripts/check_diagnostic_ascii_owner.py --root "$ROOT" 2>&1)
+diagnostic_ascii_status=$?
+if [ "$diagnostic_ascii_status" -ne 0 ]; then
+    echo "[x] Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text"
+    echo "$diagnostic_ascii_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC13: Git ref transport selection authority"
+semver_transport_router="src/apm_cli/install/helpers/ref_reuse.py"
+semver_transport_executor="src/apm_cli/marketplace/ref_resolver.py"
+git_ref_transport_consumer="src/apm_cli/deps/git_reference_resolver.py"
+if ! grep -q 'transport_plan = transport_selector.select(' "$semver_transport_router" \
+    || ! grep -q \
+        'transport_scheme = "ssh" if selected_scheme == "ssh" else "https"' \
+        "$semver_transport_router" \
+    || ! grep -q 'transport_scheme=transport_scheme' "$semver_transport_router" \
+    || ! grep -q 'build_ssh_url(' "$semver_transport_executor" \
+    || grep -Eq \
+        'from .*transport_selection import|TransportSelector\(' \
+        "$semver_transport_executor" \
+    || ! grep -q \
+        'transport_plan = host._transport_selector.select(' \
+        "$git_ref_transport_consumer"; then
+    echo "[x] Git ref transport must route through TransportSelector into RefResolver"
+    violations=$((violations + 1))
+fi
 
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"

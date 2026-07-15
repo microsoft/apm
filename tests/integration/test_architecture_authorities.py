@@ -136,8 +136,8 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
 
 
-def test_git_ref_transport_selection_has_single_owner() -> None:
-    """Git ref enumeration must consume, not reimplement, transport selection."""
+def test_ac13_git_ref_transport_selection_has_single_owner() -> None:
+    """AC13 makes Git ref enumeration consume canonical transport selection."""
     root = Path(__file__).parents[2]
     ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
     ref_resolver = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
@@ -150,6 +150,7 @@ def test_git_ref_transport_selection_has_single_owner() -> None:
     assert "build_ssh_url(" in ref_resolver
     assert "from apm_cli.deps.transport_selection import" not in ref_resolver
     assert "TransportSelector(" not in ref_resolver
+    assert "AC13: Git ref transport selection authority" in guard
     assert "Git ref transport must route through TransportSelector into RefResolver" in guard
 
 
@@ -261,6 +262,18 @@ def _load_windows_stable_path_checker(root: Path) -> ModuleType:
 def _load_test_contract_checker(root: Path) -> ModuleType:
     """Import the single scanner for executable test contract owners."""
     module_name = "check_test_contract_authorities"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_diagnostic_ascii_owner_checker(root: Path) -> ModuleType:
+    """Import the printable agent-diagnostic authority checker."""
+    module_name = "check_diagnostic_ascii_owner"
     script_path = root / "scripts" / f"{module_name}.py"
     spec = importlib.util.spec_from_file_location(module_name, script_path)
     assert spec is not None and spec.loader is not None
@@ -628,6 +641,67 @@ def test_executable_test_contracts_have_one_canonical_owner() -> None:
     checker = _load_test_contract_checker(root)
 
     assert checker.check(root) == []
+
+
+def test_agent_diagnostic_names_have_one_printable_ascii_owner() -> None:
+    """Codex and OpenCode diagnostic names must use the diagnostics owner."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    checker = _load_diagnostic_ascii_owner_checker(root)
+
+    assert "AC12: diagnostic printable-ASCII authority" in guard
+    assert "check_diagnostic_ascii_owner.py" in guard
+    assert "Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text" in guard
+    assert checker.check(root) == []
+
+
+def test_agent_diagnostic_ascii_guard_rejects_local_reimplementation(
+    tmp_path: Path,
+) -> None:
+    """AC12 must fail when a consumer shadows the canonical sanitizer."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/integration/opencode_frontmatter.py"
+    source = consumer.read_text(encoding="utf-8")
+    source = source.replace(
+        "def validate_opencode_frontmatter(",
+        "def _display_safe(value: str) -> str:\n"
+        '    return re.sub(r"[^ -~]", "?", value)\n\n\n'
+        "def validate_opencode_frontmatter(",
+    )
+    source = source.replace(
+        "safe_name = printable_ascii_text(source.name)",
+        "safe_name = printable_ascii_text(source.name)\n    safe_name = _display_safe(source.name)",
+    )
+    consumer.write_text(source, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text"
+        in result.stdout
+    )
 
 
 def test_quality_ratchets_route_through_shared_authorities() -> None:

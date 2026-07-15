@@ -159,9 +159,15 @@ for...
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
-verbatim. Codex receives a TOML translation. Windsurf, Kiro, and
-Gemini do not receive `.agent.md` files at all -- use skills for
-Windsurf or Kiro personas; Gemini CLI has no agents primitive.
+verbatim. Codex translates only `name`, `description`, and the Markdown
+body; APM does not yet generate the complete per-agent MCP transport
+definitions needed to preserve `model` or `tools`. When `tools` is
+present, `apm install` warns that the generated agent may inherit every
+project or session MCP server. Remove `tools` if unrestricted access is
+intentional; otherwise, do not use the generated agent with Codex.
+Windsurf, Kiro, and Gemini do not receive `.agent.md` files at all --
+use skills for Windsurf or Kiro personas; Gemini CLI has no agents
+primitive.
 
 OpenCode is the strictest of the verbatim targets: it requires
 `tools` as a `tool-name: boolean` **mapping** (not a list, not a
@@ -192,7 +198,7 @@ offending package and field so you can fix the source.
 | claude | `.claude/agents/<name>.md` | verbatim |
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
-| codex | `.codex/agents/<name>.toml` | YAML frontmatter -> TOML; body becomes `developer_instructions` |
+| codex | `.codex/agents/<name>.toml` | `name` and `description` -> TOML; body becomes `developer_instructions`; unsupported `tools` emits a warning |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
 | kiro | not deployed | Kiro target v1 ships personas as skills, not `.agent.md` files |
 | gemini | not deployed | Gemini CLI has no agents primitive |
