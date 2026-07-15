@@ -327,7 +327,7 @@ class AgentIntegrator(BaseIntegrator):
         """Warn that APM cannot preserve Codex agent tool restrictions."""
         if diagnostics is None:
             return
-        diagnostics.lossy_compilation(
+        diagnostics.lossy_agent_compilation(
             message=(
                 f"Codex agent {printable_ascii_text(source.name)}: frontmatter field 'tools' "
                 "was dropped; the agent may inherit all project/session MCP servers."
@@ -378,7 +378,8 @@ class AgentIntegrator(BaseIntegrator):
                         source,
                         package_name,
                         "YAML frontmatter must be a mapping and was ignored",
-                        "use a YAML mapping, then rerun 'apm install'",
+                        "fix the source agent frontmatter to a YAML mapping, "
+                        "then rerun 'apm install'",
                     )
                 if isinstance(fm, dict) and "tools" in fm:
                     AgentIntegrator._warn_codex_tools_dropped(

@@ -8,7 +8,7 @@ from unittest.mock import Mock
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import (
-    CATEGORY_LOSSY_COMPILATION,
+    CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_WARNING,
     DiagnosticCollector,
 )
@@ -1195,7 +1195,7 @@ class TestCodexAgentIntegration:
         assert result.files_integrated == 1
         warnings = [
             diagnostic
-            for diagnostic in diagnostics.by_category().get(CATEGORY_LOSSY_COMPILATION, [])
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
             if "scoped.agent.md" in diagnostic.message
         ]
         assert len(warnings) == 1
@@ -1315,7 +1315,7 @@ class TestCodexAgentIntegration:
             package_name="test-pkg",
         )
 
-        assert diagnostics.by_category().get(CATEGORY_LOSSY_COMPILATION, []) == []
+        assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
 
 
 # ==================================================================

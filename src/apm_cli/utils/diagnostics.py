@@ -21,7 +21,8 @@ from apm_cli.utils.console import (
 CATEGORY_COLLISION = "collision"
 CATEGORY_OVERWRITE = "overwrite"
 CATEGORY_WARNING = "warning"
-CATEGORY_LOSSY_COMPILATION = "lossy_compilation"
+# Reserved for agent source semantics dropped during target-format translation.
+CATEGORY_AGENT_LOSSY_COMPILATION = "agent_lossy_compilation"
 CATEGORY_ERROR = "error"
 CATEGORY_SECURITY = "security"
 CATEGORY_POLICY = "policy"
@@ -41,7 +42,7 @@ _CATEGORY_ORDER = [
     CATEGORY_DRIFT,
     CATEGORY_COLLISION,
     CATEGORY_OVERWRITE,
-    CATEGORY_LOSSY_COMPILATION,
+    CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_WARNING,
     CATEGORY_ERROR,
     CATEGORY_INFO,
@@ -117,13 +118,18 @@ class DiagnosticCollector:
                 )
             )
 
-    def lossy_compilation(self, message: str, package: str = "", detail: str = "") -> None:
-        """Record a warning that target conversion discarded source semantics."""
+    def lossy_agent_compilation(
+        self,
+        message: str,
+        package: str = "",
+        detail: str = "",
+    ) -> None:
+        """Record a warning that target conversion discarded agent semantics."""
         with self._lock:
             self._diagnostics.append(
                 Diagnostic(
                     message=message,
-                    category=CATEGORY_LOSSY_COMPILATION,
+                    category=CATEGORY_AGENT_LOSSY_COMPILATION,
                     package=package,
                     detail=detail,
                 )
@@ -327,8 +333,8 @@ class DiagnosticCollector:
                 self._render_collision_group(items)
             elif cat == CATEGORY_OVERWRITE:
                 self._render_overwrite_group(items)
-            elif cat == CATEGORY_LOSSY_COMPILATION:
-                self._render_lossy_compilation_group(items)
+            elif cat == CATEGORY_AGENT_LOSSY_COMPILATION:
+                self._render_lossy_agent_compilation_group(items)
             elif cat == CATEGORY_WARNING:
                 self._render_warning_group(items)
             elif cat == CATEGORY_ERROR:
@@ -451,7 +457,8 @@ class DiagnosticCollector:
             if d.detail and self.verbose:
                 _rich_echo(f"    +- {d.detail}", color="dim")
 
-    def _render_lossy_compilation_group(self, items: list[Diagnostic]) -> None:
+    def _render_lossy_agent_compilation_group(self, items: list[Diagnostic]) -> None:
+        """Render per-agent losses and deduplicate their shared remediation."""
         count = len(items)
         noun = "warning" if count == 1 else "warnings"
         _rich_warning(f"  [!] {count} lossy agent compilation {noun}")
