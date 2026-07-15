@@ -453,9 +453,7 @@ def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
         "same\neffective capability ceiling",
         "source agent and each discarded field",
         "may have broader capability access",
-        # Spec-guardian fold standardized the visibility term while retaining
-        # the parenthetical definition in the normative requirement.
-        "default-visible",
+        "default (non-verbose) output",
         "MUST be rendered before\nthe overall operation returns",
         "does not mandate a nonzero\nexit status",
     )
