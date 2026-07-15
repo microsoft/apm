@@ -53,6 +53,7 @@ from apm_cli.policy.parser import load_policy
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import (
     ApmPolicy,
+    BinDeployPolicy,
     DependencyPolicy,
     IntegrityPolicy,
     McpPolicy,
@@ -789,8 +790,14 @@ def _mapping_leaf_paths(value: object, prefix: tuple[str, ...] = ()) -> set[tupl
 
 
 def test_policy_serializer_covers_every_dataclass_leaf() -> None:
-    declared = _dataclass_leaf_paths(ApmPolicy())
-    serialized = _mapping_leaf_paths(_policy_to_dict(ApmPolicy()))
+    policy = ApmPolicy(
+        bin_deploy=BinDeployPolicy(
+            deny_all=True,
+            deny=("legacy/tool",),
+        )
+    )
+    declared = _dataclass_leaf_paths(policy)
+    serialized = _mapping_leaf_paths(_policy_to_dict(policy))
     assert serialized == declared, (
         f"cached policy shape differs from ApmPolicy: "
         f"missing={sorted(declared - serialized)}, "
@@ -859,6 +866,26 @@ class TestPolicyRoundTrip(unittest.TestCase):
         s2 = _serialize_policy(policy)
         self.assertEqual(s1, s2)
         self.assertEqual(_policy_fingerprint(s1), _policy_fingerprint(s2))
+
+    def test_default_legacy_alias_is_omitted_without_warning(self) -> None:
+        serialized = _serialize_policy(ApmPolicy())
+        _restored, warnings = load_policy(serialized)
+
+        self.assertNotIn("bin_deploy:", serialized)
+        self.assertEqual(warnings, [])
+
+    def test_non_default_legacy_alias_survives_round_trip(self) -> None:
+        original = ApmPolicy(
+            bin_deploy=BinDeployPolicy(
+                deny_all=True,
+                deny=("legacy/tool",),
+            )
+        )
+        serialized = _serialize_policy(original)
+        restored, _warnings = load_policy(serialized)
+
+        self.assertIn("bin_deploy:", serialized)
+        self.assertEqual(restored.bin_deploy, original.bin_deploy)
 
 
 class TestColdWarmEnforcementParity:

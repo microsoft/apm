@@ -1550,7 +1550,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
     def _opt_list(val: tuple[str, ...] | None) -> list | None:
         return None if val is None else list(val)
 
-    return {
+    serialized = {
         "name": policy.name,
         "version": policy.version,
         "extends": policy.extends,
@@ -1615,10 +1615,6 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
                 "require_hashes": policy.security.integrity.require_hashes,
             },
         },
-        "bin_deploy": {
-            "deny_all": policy.bin_deploy.deny_all,
-            "deny": list(policy.bin_deploy.deny),
-        },
         "executables": {
             "deny_all": policy.executables.deny_all,
             "deny": list(policy.executables.deny),
@@ -1627,6 +1623,12 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "enforce": list(policy.executables.enforce),
         },
     }
+    if policy.bin_deploy.deny_all or policy.bin_deploy.deny:
+        serialized["bin_deploy"] = {
+            "deny_all": policy.bin_deploy.deny_all,
+            "deny": list(policy.bin_deploy.deny),
+        }
+    return serialized
 
 
 def _serialize_policy(policy: ApmPolicy) -> str:

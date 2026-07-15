@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from apm_cli.policy.parser import load_policy
 from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
 from apm_cli.utils.yaml_io import load_yaml, load_yaml_str
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
@@ -50,6 +51,15 @@ class _PolicyMatrix:
     warm_cache_policy: bytes
     cold_cache_metadata: bytes
     warm_cache_metadata: bytes
+    cold_status_returncode: int
+    warm_status_returncode: int
+    cold_audit_returncode: int
+    warm_audit_returncode: int
+    cold_status_stderr: str
+    warm_status_stderr: str
+    cold_audit_stderr: str
+    warm_audit_stderr: str
+    expected_warm_extends_chain: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -221,13 +231,14 @@ def _run_policy_matrix(
     strict_policy: Path,
     expected_audit_returncode: int,
     scenario_id: str,
+    expected_status_returncode: int = 0,
 ) -> _PolicyMatrix:
     """Evaluate the same real project from local source and merged cache."""
     leaf = _write_policy_leaf(project_root, strict_policy)
     cold_status = _run_expected(
         runner,
         _policy_status_args(cold=True),
-        expected_returncode=0,
+        expected_returncode=expected_status_returncode,
         scenario_id=f"{scenario_id}-cold-status",
         cwd=project_root,
         env=env,
@@ -246,7 +257,7 @@ def _run_policy_matrix(
     warm_status = _run_expected(
         runner,
         _policy_status_args(cold=False),
-        expected_returncode=0,
+        expected_returncode=expected_status_returncode,
         scenario_id=f"{scenario_id}-warm-status",
         cwd=project_root,
         env=env,
@@ -270,6 +281,15 @@ def _run_policy_matrix(
         warm_cache_policy=warm_cache_policy,
         cold_cache_metadata=cold_cache_metadata,
         warm_cache_metadata=warm_cache_metadata,
+        cold_status_returncode=cold_status.returncode,
+        warm_status_returncode=warm_status.returncode,
+        cold_audit_returncode=cold_audit.returncode,
+        warm_audit_returncode=warm_audit.returncode,
+        cold_status_stderr=cold_status.stderr,
+        warm_status_stderr=warm_status.stderr,
+        cold_audit_stderr=cold_audit.stderr,
+        warm_audit_stderr=warm_audit.stderr,
+        expected_warm_extends_chain=(strict_policy.relative_to(project_root).as_posix(),),
     )
 
 
@@ -664,6 +684,30 @@ def _assert_policy_cache_contract(matrix: _PolicyMatrix) -> None:
     assert cached_policy["security"]["audit"]["fail_on_drift"] is True
 
 
+def _status_diagnostics(payload: dict[str, object]) -> dict[str, object]:
+    """Drop source- and temperature-specific status fields."""
+    ignored = {
+        "cache_age_human",
+        "cache_age_seconds",
+        "cached",
+        "extends_chain",
+        "source",
+    }
+    return {key: value for key, value in payload.items() if key not in ignored}
+
+
+def _assert_policy_observations_equal(matrix: _PolicyMatrix) -> None:
+    """Cold and warm public command observations must agree."""
+    assert matrix.cold_status_returncode == matrix.warm_status_returncode
+    assert matrix.cold_audit_returncode == matrix.warm_audit_returncode
+    assert matrix.cold_status_stderr == matrix.warm_status_stderr
+    assert matrix.cold_audit_stderr == matrix.warm_audit_stderr
+    assert matrix.cold_status["extends_chain"] == []
+    assert matrix.warm_status["extends_chain"] == list(matrix.expected_warm_extends_chain)
+    assert _status_diagnostics(matrix.cold_status) == _status_diagnostics(matrix.warm_status)
+    assert matrix.cold_audit == matrix.warm_audit
+
+
 def test_real_govern_core_contract(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -678,7 +722,7 @@ def test_real_govern_core_contract(
         govern_receipt.consumer_positive,
     ):
         _assert_policy_cache_contract(matrix)
-        assert matrix.cold_audit == matrix.warm_audit
+        _assert_policy_observations_equal(matrix)
 
     assert _failed_check_names(govern_receipt.positive.cold_audit) == set()
     assert _failed_check_names(govern_receipt.consumer_positive.cold_audit) == set()
@@ -752,3 +796,81 @@ def test_real_govern_core_contract(
         "Policy enforcement disabled by --no-policy"
         in govern_receipt.lockless_bypass_install.stdout
     )
+
+
+@pytest.mark.parametrize(
+    ("policy_data", "expected_warning_fragment"),
+    (
+        (
+            {
+                "name": "minimal",
+                "version": "1",
+            },
+            None,
+        ),
+        (
+            {
+                "name": "explicit-default-legacy",
+                "version": "1",
+                "bin_deploy": {
+                    "deny_all": False,
+                    "deny": [],
+                },
+            },
+            "'bin_deploy' is deprecated",
+        ),
+    ),
+    ids=("implicit-default", "explicit-default-legacy"),
+)
+def test_minimal_policy_cache_is_observationally_equivalent(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    policy_data: dict[str, object],
+    expected_warning_fragment: str | None,
+) -> None:
+    """A default policy stays warning-free across command and cache boundaries."""
+    isolated = IsolatedApmEnvironment.create(
+        _owned_path(tmp_path, "minimal-isolated"),
+        base_env=dict(os.environ),
+    )
+    env = isolated.subprocess_env()
+    project = LocalPackageFactory(isolated.work_root).create(
+        "minimal-policy-project",
+        targets=("copilot",),
+    )
+    _initialize_policy_remote(project.root, env=env)
+    policy_factory = LocalPackageFactory(project.root)
+    policy_package = policy_factory.create("minimal-policy")
+    policy_path = policy_factory.write_policy(
+        policy_package,
+        policy_data,
+    )
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),),
+        timeout_seconds=180,
+        scenario_timeout_seconds=300,
+    )
+
+    matrix = _run_policy_matrix(
+        runner,
+        project.root,
+        env=env,
+        strict_policy=policy_path,
+        expected_audit_returncode=0,
+        expected_status_returncode=1,
+        scenario_id="govern-minimal-policy",
+    )
+
+    _assert_policy_observations_equal(matrix)
+    assert matrix.cold_status["outcome"] == "empty"
+    assert matrix.warm_status["outcome"] == "empty"
+    cold_warnings = matrix.cold_status["warnings"]
+    warm_warnings = matrix.warm_status["warnings"]
+    assert cold_warnings == warm_warnings
+    if expected_warning_fragment is None:
+        assert cold_warnings == []
+    else:
+        assert any(expected_warning_fragment in str(warning) for warning in cold_warnings)
+    _cached_policy, cache_warnings = load_policy(matrix.warm_cache_policy.decode("utf-8"))
+    assert cache_warnings == []
+    assert "bin_deploy:" not in matrix.warm_cache_policy.decode("utf-8")
