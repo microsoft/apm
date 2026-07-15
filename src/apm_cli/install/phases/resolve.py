@@ -459,9 +459,11 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
     existing_lockfile = ctx.existing_lockfile
     downloader = ctx.downloader
 
-    # Hoist drift helpers so download_callback avoids per-call sys.modules
-    # lookups and static analysis can see the dependency.
-    from apm_cli.drift import build_download_ref, detect_ref_change
+    from apm_cli.drift import (
+        build_download_ref,
+        detect_ref_change,
+        should_force_ref_recheck,
+    )
 
     verbose = ctx.verbose  # noqa: F841
 
@@ -480,18 +482,14 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
                 package's directory rather than the root consumer (#857).
         """
         install_path = dep_ref.get_install_path(modules_dir)
-        # Cache short-circuit: skip the rest of the callback when the
-        # install path already exists. Git semver deps under update still
-        # fall through to ``_maybe_resolve_git_semver`` and the full
-        # download callback.
+        # Cache reuse stays behind the canonical ref-drift owner.
         if install_path.exists():
-            _force_semver_resolve = (
-                update_refs
-                and not dep_ref.is_local
-                and not getattr(dep_ref, "artifactory_prefix", None)
-                and getattr(dep_ref, "ref_kind", None) == "semver"
+            _locked_for_recheck = (
+                existing_lockfile.get_dependency(dep_ref.get_unique_key())
+                if existing_lockfile
+                else None
             )
-            if not _force_semver_resolve:
+            if not should_force_ref_recheck(dep_ref, _locked_for_recheck, update_refs=update_refs):
                 return install_path
         staging_session.prepare_path(install_path)
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
@@ -766,6 +764,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
         download_callback=download_callback,
         auth_resolver=ctx.auth_resolver,
         update_refs=update_refs,
+        existing_lockfile=existing_lockfile,
     )
 
     # Resolver reads ``<anchor>/apm.yml``. Preserve the original

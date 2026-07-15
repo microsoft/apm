@@ -372,6 +372,24 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
         assert duplicate not in source
 
 
+def test_existing_path_ref_rechecks_have_one_owner() -> None:
+    """Resolver gates must share the canonical ref-drift decision."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/drift.py").read_text()
+    resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text()
+    phase = (root / "src/apm_cli/install/phases/resolve.py").read_text()
+    legacy_test = (root / "tests/unit/test_install_update_refs.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def should_force_ref_recheck(" in owner
+    assert "should_force_ref_recheck(" in resolver
+    assert "should_force_ref_recheck(" in phase
+    assert "_force_semver_resolve" not in resolver
+    assert "_force_semver_resolve" not in phase
+    assert "def _force_semver_resolve" not in legacy_test
+    assert "Existing-path ref rechecks must use drift.py::should_force_ref_recheck" in guard
+
+
 def test_skill_subset_filtering_has_one_canonical_owner() -> None:
     """Install and pack must share one flattened skill-subset matcher."""
     root = Path(__file__).parents[2]
