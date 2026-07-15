@@ -135,7 +135,7 @@ def test_tm001_behavioral_marker_definitions_match_spec() -> None:
 
 def test_tm002_manifest_is_finite_unique_and_existing() -> None:
     modules = _manifest_modules()
-    assert len(modules) == 10
+    assert len(modules) == 12
     paths = [entry["path"] for entry in modules]
     assert len(paths) == len(set(paths))
     assert {entry["marker"] for entry in modules} == BEHAVIORAL_MARKERS
