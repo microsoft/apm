@@ -332,6 +332,16 @@ def test_skill_subset_filtering_has_one_canonical_owner() -> None:
     assert "def _skill_subset_name_filter" not in integrator
 
 
+def test_cached_update_resolution_stays_with_downloader_owner() -> None:
+    """Cached branch planning must reuse the production ref resolver."""
+    root = Path(__file__).parents[2]
+    resolve = (root / "src/apm_cli/install/phases/resolve.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "resolved = downloader.resolve_git_reference(dep_ref)" in resolve
+    assert "Cached update planning must resolve refs through the downloader owner" in guard
+
+
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
     """The Bash guard must invoke the semantic AST checker, not only grep.
 
