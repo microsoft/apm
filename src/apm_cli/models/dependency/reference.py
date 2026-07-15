@@ -1956,9 +1956,7 @@ class DependencyReference:
                     explicit_scheme = "http"
 
         # Phase 3: full validation (all hosts) + ADO field extraction.
-        # _validate_final_repo_fields runs character-set, segment-count, and
-        # virtual-extension checks for all hosts; canonical_ado_coordinates is
-        # only for consumers that already hold validated input (lockfile, outdated).
+        # canonical_ado_coordinates is for consumers with validated input only.
         ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(host, repo_url)
 
         if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
