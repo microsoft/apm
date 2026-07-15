@@ -126,6 +126,7 @@ Phase 5 (before shepherd-driver fan-out):
 ```
 test -f ../shepherd-driver/assets/shepherd-driver-prompt.md \
   && test -f ../shepherd-driver/assets/completion-schema.json \
+  && test -f ../shepherd-driver/scripts/owner_touch_gate.py \
   && echo "shepherd-driver present" \
   || echo "MISSING shepherd-driver - stop and ask the operator"
 ```
@@ -279,8 +280,23 @@ defer, push, CI watch) and returns a `completion_return` matching
 `../shepherd-driver/assets/completion-schema.json`. Caps: 4 outer
 iterations, 2 Copilot rounds, 3 CI recovery iterations.
 
-On each terminal return: schema-validate, then write `head_sha` and
-the `mergeable/merge_state_status/ci_status` projection into the row's
+On each terminal return: schema-validate, persist the returned JSON in
+session state, derive `BASE_SHA` with `git -C <row-worktree> merge-base
+<returned-head-sha> origin/main`, and independently run:
+
+```
+uv run python <row-worktree>/.agents/skills/shepherd-driver/scripts/owner_touch_gate.py verify \
+  --repo-root <row-worktree> --base $BASE_SHA \
+  --head <returned-head-sha> --completion <session-return-json>
+```
+
+Do not write terminal state until both gates pass. A schema or semantic
+failure gets one re-spawn; a second failure marks the row `blocked`
+with the verifier diagnostic. This prevents stale evidence or child
+self-classification from bypassing canonical owner detection.
+
+After both gates pass, write `head_sha` and the
+`mergeable/merge_state_status/ci_status` projection into the row's
 `head_sha` and `merge_state` columns (the crash-survivable A11 stop
 evidence), and remove ONLY the `status/shepherding` labels listed in
 the row's `labels_added` column (assignment stays). Also record the
@@ -360,6 +376,8 @@ Never auto-close an escalated issue.
   (Phase 1; probed before use).
 - [shepherd-driver](../shepherd-driver/SKILL.md) -- per-PR drive-to-
   merge loop + mergeability gate (Phases 5-6; probed before use).
+  Its declared completion schema and deterministic owner-touch gate
+  are re-run by this parent before terminal state is accepted.
   Transitively composes apm-review-panel.
 - [pr-description-skill](../pr-description-skill/SKILL.md) -- authors
   the Phase 4 issue-PR body (probed before the PR-open; never

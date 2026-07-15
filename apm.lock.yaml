@@ -1,6 +1,6 @@
 lockfile_version: '1'
-generated_at: '2026-07-12T05:33:40.045023+00:00'
-apm_version: 0.24.1
+generated_at: '2026-07-15T22:23:33.393882+00:00'
+apm_version: 0.25.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
   name: apm-issue-autopilot
@@ -38,7 +38,7 @@ dependencies:
   - .agents/skills/apm-issue-autopilot/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   deployed_file_hashes:
-    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:428fd804932b75977ee72ec9b820e0d300190cda095f4f38343f27dedbde6ef2
+    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:9872bd7ada9903073c663a5b1d1bfaa15743d4bcb2f450631a4da610b1fd0a6e
     .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
     .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json: sha256:35d672ce4584fb576b3c16ce4dffbe29de6b3f6711725855b3c6eb0f338d464d
     .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md: sha256:2d6eff739cd4ac1eb4533868cbdcf0c44d469ae247447f29595d05858b2d8a97
@@ -98,7 +98,7 @@ dependencies:
   - .agents/skills/batch-bug-shepherd/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
   deployed_file_hashes:
-    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:edb83e8214db6eeb7c850ea68ef093867101b297ad14c40e17d1485571562cc2
+    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:c5b0f8752e726d123f61491c959681134882dfddbc9f5d15ac5c47e55931375f
     .agents/skills/batch-bug-shepherd/assets/final-report-template.md: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
     .agents/skills/batch-bug-shepherd/assets/fix-prompt.md: sha256:ea4fde3d619f12fc7e05f27d6b440b48f3ef66cb9509b2efb85aed66439438f9
     .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md: sha256:981ebeee98596beb6a00db6edb35a8e871acdd52a938faa8d8915edfd01ba15b
@@ -216,17 +216,19 @@ dependencies:
   - .agents/skills/shepherd-driver/assets/pr-comment-templates.md
   - .agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md
   - .agents/skills/shepherd-driver/references/mergeability-gate.md
+  - .agents/skills/shepherd-driver/scripts/owner_touch_gate.py
   deployed_file_hashes:
-    .agents/skills/shepherd-driver/SKILL.md: sha256:81f62152a7ac0c04683356215f300250dd3e85316a8dcc04248a5cbc1245abea
+    .agents/skills/shepherd-driver/SKILL.md: sha256:71773e1ad047d7f12e9d4f416606e961a35dc7dc1cc92cb02ce4c10d1a33e32d
     .agents/skills/shepherd-driver/apm.yml: sha256:d53355a3862fee76c099f99eeb49ed6fd9ce1c24d648451ce9a2efdced9fda4b
     .agents/skills/shepherd-driver/assets/ci-recovery-checklist.md: sha256:21801867a8459d9713e45efe68e612c4d22a2cb577c23eceab55cd855bbd23ef
-    .agents/skills/shepherd-driver/assets/completion-schema.json: sha256:37e43e47e83b50a877d2aef51d30bfb0c372c5929a59b5dc68ed9df43a180fa2
+    .agents/skills/shepherd-driver/assets/completion-schema.json: sha256:11dd97df9308cd868ddb3c7c7c398f59f3b07d571d790d2a1ec8537f2feba4ca
     .agents/skills/shepherd-driver/assets/conflict-resolution-prompt.md: sha256:453237e56043e4008c37c5a89d9da5e77a1fa46b028ea172321dcc39a737c679
     .agents/skills/shepherd-driver/assets/copilot-classification-prompt.md: sha256:71c0ad6c5d2c422dcc7fc0c44e13d8b3b049b37c04418ade7daf9722fe115c1f
     .agents/skills/shepherd-driver/assets/fold-vs-defer-rubric.md: sha256:50ece018b83c70508ca3fc4b3d267e39df2de4497938ce4aa56d3b49c594f75f
     .agents/skills/shepherd-driver/assets/pr-comment-templates.md: sha256:24fe0ec64286c7b39037a5e93acfa607a43dbb4763d653f3955a1c4d65d68882
-    .agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md: sha256:1f122ecc6fedf96a79b7264c1c1a39745b61a2324af40715a8417e4b72192890
+    .agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md: sha256:48f5f9276f92984480dba4f0d54ecc5b612b6c72f313fd5222962dffd75ed0ed
     .agents/skills/shepherd-driver/references/mergeability-gate.md: sha256:90bf5cd838d1025dd0fa223a0843be926cd509c85c91ef683cc9bfc98b5e8785
+    .agents/skills/shepherd-driver/scripts/owner_touch_gate.py: sha256:103535226722d4ae673657ab4123bffc23c821ea319e6b5d8eda7f96e729f8b6
   source: local
   local_path: ../shepherd-driver
   declaring_parent: ./packages/apm-issue-autopilot
@@ -288,7 +290,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:428fd804932b75977ee72ec9b820e0d300190cda095f4f38343f27dedbde6ef2
+  content_hash: sha256:9872bd7ada9903073c663a5b1d1bfaa15743d4bcb2f450631a4da610b1fd0a6e
 - kind: project-relative
   target: agents
   value: .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md
@@ -792,7 +794,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:edb83e8214db6eeb7c850ea68ef093867101b297ad14c40e17d1485571562cc2
+  content_hash: sha256:c5b0f8752e726d123f61491c959681134882dfddbc9f5d15ac5c47e55931375f
 - kind: project-relative
   target: agents
   value: .agents/skills/batch-bug-shepherd/assets/final-report-template.md
@@ -2457,7 +2459,7 @@ deployments:
   owners:
   - local:packages/shepherd-driver
   active_owner: local:packages/shepherd-driver
-  content_hash: sha256:81f62152a7ac0c04683356215f300250dd3e85316a8dcc04248a5cbc1245abea
+  content_hash: sha256:71773e1ad047d7f12e9d4f416606e961a35dc7dc1cc92cb02ce4c10d1a33e32d
 - kind: project-relative
   target: agents
   value: .agents/skills/shepherd-driver/apm.yml
@@ -2484,7 +2486,7 @@ deployments:
   owners:
   - local:packages/shepherd-driver
   active_owner: local:packages/shepherd-driver
-  content_hash: sha256:37e43e47e83b50a877d2aef51d30bfb0c372c5929a59b5dc68ed9df43a180fa2
+  content_hash: sha256:11dd97df9308cd868ddb3c7c7c398f59f3b07d571d790d2a1ec8537f2feba4ca
 - kind: project-relative
   target: agents
   value: .agents/skills/shepherd-driver/assets/conflict-resolution-prompt.md
@@ -2529,7 +2531,7 @@ deployments:
   owners:
   - local:packages/shepherd-driver
   active_owner: local:packages/shepherd-driver
-  content_hash: sha256:1f122ecc6fedf96a79b7264c1c1a39745b61a2324af40715a8417e4b72192890
+  content_hash: sha256:48f5f9276f92984480dba4f0d54ecc5b612b6c72f313fd5222962dffd75ed0ed
 - kind: project-relative
   target: agents
   value: .agents/skills/shepherd-driver/references/mergeability-gate.md
@@ -2539,6 +2541,15 @@ deployments:
   - local:packages/shepherd-driver
   active_owner: local:packages/shepherd-driver
   content_hash: sha256:90bf5cd838d1025dd0fa223a0843be926cd509c85c91ef683cc9bfc98b5e8785
+- kind: project-relative
+  target: agents
+  value: .agents/skills/shepherd-driver/scripts/owner_touch_gate.py
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:103535226722d4ae673657ab4123bffc23c821ea319e6b5d8eda7f96e729f8b6
 - kind: project-relative
   target: agents
   value: .agents/skills/supply-chain-security
@@ -2763,7 +2774,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:bc588d89530362469502bfbea788df892a9a0b00e630cd0f3926d3dfd2c2a9e2
+  content_hash: sha256:48c2172d1f18a394fa83ef9dc2be0b9b921a4e51e976498165250fed66369711
 - kind: project-relative
   target: copilot
   value: .github/instructions/architecture.instructions.md
@@ -2772,7 +2783,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:035ac8d759391111c54548d80e5de4df1a7fa9e4da89714ebb868ae42ffcf71d
+  content_hash: sha256:7d3e70c2b95c099a9667fab0137eac97f11a4ef23cf7eb6ba76ae7bb507b9e53
 - kind: project-relative
   target: copilot
   value: .github/instructions/changelog.instructions.md
@@ -3278,8 +3289,8 @@ local_deployed_file_hashes:
   .github/agents/spec-swagger-editor.agent.md: sha256:51019f52b2a2aed2a269187b58e6a867802636a79d1410153dc9b5b28d5d1b25
   .github/agents/spec-tag-architect.agent.md: sha256:82907265c5e7cf1ac61ad96866fa7c5683b69c8f09b7a4c5f3cc241acc9568ca
   .github/agents/supply-chain-security-expert.agent.md: sha256:8fb8cc426d6af17ba084a28b3f026c2b475b62e3ca63ed2f88b83bd823f877af
-  .github/agents/test-coverage-expert.agent.md: sha256:bc588d89530362469502bfbea788df892a9a0b00e630cd0f3926d3dfd2c2a9e2
-  .github/instructions/architecture.instructions.md: sha256:035ac8d759391111c54548d80e5de4df1a7fa9e4da89714ebb868ae42ffcf71d
+  .github/agents/test-coverage-expert.agent.md: sha256:48c2172d1f18a394fa83ef9dc2be0b9b921a4e51e976498165250fed66369711
+  .github/instructions/architecture.instructions.md: sha256:7d3e70c2b95c099a9667fab0137eac97f11a4ef23cf7eb6ba76ae7bb507b9e53
   .github/instructions/changelog.instructions.md: sha256:1e51ec4c74e847967962bd279dc4c6e582c5d3578490b3c28d5f3acd3e05f73e
   .github/instructions/cicd.instructions.md: sha256:08d87b7d635761cb41deb8fc71d5d83f54678de463db484afb16d2d4f8713ecb
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a

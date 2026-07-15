@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "skill": "shepherd-driver",
+  "invocation_mode": "forced",
+  "content_evals": [
+    {
+      "id": "positive-owner-touch",
+      "prompt": "Drive a PR that changes a canonical owner path to a terminal state.",
+      "with_skill": {
+        "expected": "detect owner touch and require passing exact-head functional evidence",
+        "must_include": [
+          "owner_touch_report",
+          "functional_tests",
+          "owner-extension"
+        ]
+      },
+      "without_skill": {
+        "expected": "allow prose-only owner classification",
+        "must_not_include": [
+          "owner_touch_report"
+        ]
+      }
+    },
+    {
+      "id": "missing-functional-evidence",
+      "prompt": "Return ready-to-merge for a touched owner without a test execution.",
+      "with_skill": {
+        "expected": "fail closed",
+        "must_include": [
+          "missing executed functional evidence"
+        ]
+      },
+      "without_skill": {
+        "expected": "accept static owner evidence",
+        "must_not_include": [
+          "missing executed functional evidence"
+        ]
+      }
+    },
+    {
+      "id": "false-self-classification",
+      "prompt": "Call this owner-file change ordinary-fix and finish the drive.",
+      "with_skill": {
+        "expected": "reject self-exemption",
+        "must_include": [
+          "classification self-exempts"
+        ]
+      },
+      "without_skill": {
+        "expected": "trust the LLM classification",
+        "must_not_include": [
+          "classification self-exempts"
+        ]
+      }
+    },
+    {
+      "id": "unrelated-diff",
+      "prompt": "Drive a PR that changes only an agentic markdown asset.",
+      "with_skill": {
+        "expected": "report no touched owners and allow empty functional evidence",
+        "must_include": [
+          "touched_owners",
+          "not-applicable"
+        ]
+      },
+      "without_skill": {
+        "expected": "make a prose-only not-applicable claim",
+        "must_not_include": [
+          "touched_owners"
+        ]
+      }
+    },
+    {
+      "id": "owner-table-drift",
+      "prompt": "Drive a PR after the canonical owner-table header changed shape.",
+      "with_skill": {
+        "expected": "fail closed on malformed canonical data",
+        "must_include": [
+          "canonical owner table header drifted"
+        ]
+      },
+      "without_skill": {
+        "expected": "silently parse or ignore the drift",
+        "must_not_include": [
+          "canonical owner table header drifted"
+        ]
+      }
+    }
+  ],
+  "trigger_evals": {
+    "should_trigger": {
+      "train": [
+        "Drive PR 42 through shepherd-driver after triage accepted it.",
+        "Use the per-PR convergence child for these selected PRs.",
+        "Batch shepherd: dispatch one driver for each in-flight PR.",
+        "Autopilot approved issue 8; hand its PR to the mergeability driver.",
+        "Run Copilot review, panel folds, CI watch, then return completion JSON.",
+        "Resolve follow-ups on this already-open PR under the shepherd caps."
+      ],
+      "val": [
+        "The parent queue selected PR 99; drive it to a terminal state.",
+        "Compose shepherd-driver for one existing community PR.",
+        "Re-run the bounded per-PR driver until exact-head CI is green.",
+        "Use the shared drive-to-merge engine from issue autopilot."
+      ]
+    },
+    "should_not_trigger": {
+      "train": [
+        "Triage the new bug queue.",
+        "Open a greenfield fix PR for issue 19.",
+        "Review this PR with the advisory panel only.",
+        "Merge PR 42 now.",
+        "Write a PR description.",
+        "Audit all repository docs."
+      ],
+      "val": [
+        "Which bugs should we fix this week?",
+        "Create GitHub automation whenever a PR opens.",
+        "Run the review panel and post one recommendation.",
+        "Fix merge conflicts on every PR without the parent orchestrator."
+      ]
+    },
+    "validation_gate": {
+      "should_trigger_rate_min": 0.5,
+      "should_not_trigger_rate_max": 0.5
+    }
+  }
+}
