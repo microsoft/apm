@@ -17,6 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
+from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.deps.tiered_ref_resolver import (
     L0PerRunCache,
     L1CommitsAPI,
@@ -162,19 +163,28 @@ def test_l2_short_circuits_on_sha_input():
     assert tier.try_resolve(_dep(ref=SHA_A), SHA_A) == SHA_A
 
 
-def test_l2_rev_parse_returns_sha_on_branch_match(tmp_path):
-    bare = tmp_path / "some_shard"
-    bare.mkdir()
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        DependencyReference(repo_url="owner/repo", host="github.com", reference="main"),
+        DependencyReference(
+            repo_url="acme/platform/team/repo",
+            host="gitlab.com",
+            reference="main",
+        ),
+    ],
+)
+def test_l2_rev_parse_uses_git_cache_repository_identity(tmp_path, dependency):
+    bare = tmp_path / cache_shard_key(dependency.to_github_url())
+    bare.mkdir(parents=True)
     fake_cache = types.SimpleNamespace(_db_root=tmp_path)
     tier = L2BareRevParse(git_cache=fake_cache)
 
-    with (
-        patch("apm_cli.cache.url_normalize.cache_shard_key", return_value="some_shard"),
-        patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as rp,
-    ):
-        result = tier.try_resolve(_dep(), "main")
+    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as rp:
+        result = tier.try_resolve(dependency, "main")
+
     assert result == SHA_A
-    rp.assert_called_once()
+    rp.assert_called_once_with(bare, "main")
 
 
 # ---------------------------------------------------------------------------

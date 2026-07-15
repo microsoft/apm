@@ -347,6 +347,7 @@ class TestDownloadSubdirectoryPersistentCache:
         dep_ref.host = "github.com"
         dep_ref.virtual_path = "packages/my-pkg"
         dep_ref.reference = "main"
+        dep_ref.is_insecure = False
         dep_ref.get_unique_key.return_value = "owner/repo@main"
         dep_ref.to_github_url.return_value = f"https://gitlab.com/{repo_url}"
         return dep_ref
@@ -410,6 +411,7 @@ class TestDownloadSubdirectoryPersistentCache:
         # variant-keyed shard ((sha, sparse_paths)) is actually hit and
         # the cold-path bloat fix from #1433 is not silently bypassed.
         call_kwargs = persistent_cache.get_checkout.call_args.kwargs
+        assert call_kwargs["env"] == dl._git_env_dict()
         assert "sparse_paths" in call_kwargs
         assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
         # locked_sha is plumbed via the kwarg; presence (not value) is the

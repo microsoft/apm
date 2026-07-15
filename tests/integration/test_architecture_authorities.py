@@ -611,6 +611,7 @@ def test_cache_url_normalizer_owns_repository_cache_identity() -> None:
     root = Path(__file__).parents[2]
     downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text()
     shared_cache = (root / "src/apm_cli/deps/shared_clone_cache.py").read_text()
+    tiered_resolver = (root / "src/apm_cli/deps/tiered_ref_resolver.py").read_text()
     normalizer = (root / "src/apm_cli/cache/url_normalize.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
@@ -622,6 +623,8 @@ def test_cache_url_normalizer_owns_repository_cache_identity() -> None:
         "_persistent_cache.get_checkout(\n                    dep_ref.to_github_url(),"
         in downloader
     )
+    assert "cache_shard_key(dep_ref.to_github_url())" in tiered_resolver
+    assert "cache_shard_key(dep_ref.repo_url)" not in tiered_resolver
     assert "Repository cache identity must not truncate repository paths" in guard
     assert "to_repository_cache_url" not in downloader
     for retired_derivation in ("cache_owner", "cache_repo", '_canonical_url = f"https://'):

@@ -418,10 +418,19 @@ if ! grep -q 'repository_url = dep_ref.to_github_url()' \
     echo "[x] Downloader cache consumers must pass the complete canonical Git URL"
     violations=$((violations + 1))
 fi
+if ! grep -q 'cache_shard_key(dep_ref.to_github_url())' \
+    src/apm_cli/deps/tiered_ref_resolver.py; then
+    echo "[x] Tiered ref resolution must reuse the persistent Git cache identity"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Repository cache identity must not truncate repository paths" \
     'cache_(host|owner|repo)|_canonical_url[[:space:]]*=[[:space:]]*f?"https://' \
     src/apm_cli/deps/github_downloader.py
+check_pattern \
+    "Tiered ref resolution must not derive cache shards from repo_url" \
+    'cache_shard_key\(dep_ref\.repo_url\)' \
+    src/apm_cli/deps
 check_pattern \
     "Repository cache keys must stay owned by cache/url_normalize.py" \
     'to_repository_cache_url' \

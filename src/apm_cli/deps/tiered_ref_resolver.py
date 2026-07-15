@@ -220,7 +220,7 @@ class L2BareRevParse:
             return None
 
         try:
-            shard_key = cache_shard_key(dep_ref.repo_url)
+            shard_key = cache_shard_key(dep_ref.to_github_url())
         except Exception:
             return None
 
