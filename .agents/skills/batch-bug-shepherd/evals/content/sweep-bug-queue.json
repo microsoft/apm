@@ -131,6 +131,24 @@
       "pattern": "(?is)(second[- ]and[- ]final|exactly\\s+two\\s+comments|two[- ]comment\\s+cap)",
       "weight": 1,
       "description": "The two-comment-per-PR cap (one driver advisory comment + one resolution confirmation when Phase 5 resolves a conflict) is honored as a hard rule."
+    },
+    {
+      "id": "architecture-classification-gate",
+      "pattern": "(?is)(canonical[- ]owner|architecture)[^\\n]{0,120}(ordinary-fix|owner-extension|new-owner|split-authority)",
+      "weight": 2,
+      "description": "Every shepherded PR records an architecture classification (canonical-owner gate)."
+    },
+    {
+      "id": "dual-guardrail-evidence",
+      "pattern": "(?is)behavioral[^\\n]{0,100}static[^\\n]{0,100}architecture",
+      "weight": 2,
+      "description": "Authority-affecting fixes require both guardrail halves: behavioral regression + static boundary + architecture assertion."
+    },
+    {
+      "id": "architecture-fail-closed",
+      "pattern": "(?is)(blocked|cannot[^\\n]{0,40}ready)[^\\n]{0,120}(owner|guardrail|architecture)",
+      "weight": 2,
+      "description": "Missing architecture / canonical-owner evidence fails closed rather than reaching ready-to-merge."
     }
   ]
 }

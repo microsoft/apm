@@ -9,13 +9,11 @@ import pytest
 
 from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
 
-CLI = [sys.executable, "-m", "apm_cli.cli", "compile", "--single-agents"]
-
 
 @pytest.mark.skipif(
     sys.platform == "win32", reason="Windows handles read-only directories differently"
 )
-def test_permission_denied_graceful(tmp_path: Path):
+def test_permission_denied_graceful(tmp_path: Path, apm_binary_path: Path):
     # Use temp project with constitution to force write
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
         agents = Path(proj) / "AGENTS.md"
@@ -27,7 +25,12 @@ def test_permission_denied_graceful(tmp_path: Path):
         proj_path.chmod(stat.S_IREAD | stat.S_IEXEC)  # read + execute only, no write
 
         try:
-            proc = subprocess.run(CLI, cwd=str(proj), capture_output=True, text=True)
+            proc = subprocess.run(
+                [str(apm_binary_path), "compile", "--single-agents"],
+                cwd=str(proj),
+                capture_output=True,
+                text=True,
+            )
             # Expect non-zero exit due to write failure
             assert proc.returncode != 0
             combined = proc.stdout + proc.stderr

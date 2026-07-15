@@ -26,6 +26,7 @@ dependencies = [
     "colorama>=0.4.6",
     "pyyaml>=6.0.0",
     "requests>=2.31.0",
+    "truststore>=0.10.0",
     "python-frontmatter>=1.0.0",
     "llm>=0.28",
     "llm-github-models>=0.18.0",
@@ -62,6 +63,12 @@ apm = "apm_cli.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["apm_cli*"]
+
+[tool.setuptools.package-data]
+# Belt-and-suspenders: ship the child-TLS .pth alongside the bootstrap module.
+# Delivery no longer depends on this (ensure_child_tls_bootstrap generates the
+# .pth inline), but packaging it keeps the source tree and wheel in sync.
+"apm_cli.core._child_tls" = ["*.pth"]
 
 [tool.ruff]
 line-length = 100
@@ -155,6 +162,9 @@ exclude_lines = [
 [tool.pytest.ini_options]
 addopts = "-m 'not benchmark and not live'"
 markers = [
+    "unit: pure logic with no filesystem and no CLI",
+    "component: in-process behavior that touches a filesystem or one command boundary",
+    "e2e: a real installed CLI crossing at least one command boundary",
     "integration: marks tests as integration tests that may require network access",
     "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
     "slow: marks tests as slow running tests",
@@ -164,6 +174,7 @@ markers = [
     "requires_ado_pat: requires ADO_APM_PAT",
     "requires_ado_bearer: requires az CLI logged in + APM_TEST_ADO_BEARER=1",
     "requires_network_integration: requires APM_RUN_INTEGRATION_TESTS=1",
+    "requires_windows: requires a Windows host",
     "requires_apm_binary: requires built apm binary on PATH (or APM_BINARY_PATH)",
     "requires_runtime_codex: requires codex runtime installed",
     "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",

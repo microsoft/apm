@@ -229,6 +229,10 @@ The full marker reference (one row per `_MARKER_CHECKS` entry, with
 the env-var or `apm runtime setup` command that satisfies it) lives
 in
 [Integration Testing](docs/src/content/docs/contributing/integration-testing.md#the-marker-registry).
+For install, compile, pack, or audit lifecycle changes, reuse the
+[hermetic lifecycle fixtures](docs/src/content/docs/contributing/integration-testing.md#hermetic-lifecycle-fixtures)
+to exercise the real CLI with a sanitized child environment and reviewed local
+Git sources.
 A typical local run looks like:
 
 ```bash

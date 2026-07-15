@@ -2,10 +2,126 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from dataclasses import replace
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+
+
+def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
+    """Approval fallback outcomes must come from policy outcome routing."""
+    from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+
+    root = Path(__file__).parents[2]
+    approve_source = (root / "src/apm_cli/commands/approve.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    expected = {
+        "cache_miss_fetch_fail",
+        "garbage_response",
+        "hash_mismatch",
+        "incomplete_chain",
+        "malformed",
+    }
+
+    assert frozenset(expected) == POLICY_RESOLUTION_FAILURE_OUTCOMES
+    assert (
+        "from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES" in approve_source
+    )
+    assert not any(f'"{outcome}"' in approve_source for outcome in expected)
+    assert "Approval fallback outcomes must use policy/outcome_routing.py" in guard
+
+
+def test_object_git_dependency_fields_have_single_owner() -> None:
+    """Fixture authoring must consume the product parser's field vocabulary."""
+    root = Path(__file__).parents[2]
+    object_fields = (root / "src/apm_cli/models/dependency/object_fields.py").read_text()
+    parser = (root / "src/apm_cli/models/dependency/reference.py").read_text()
+    fixture = (root / "tests/utils/local_package.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def reject_unknown_git_fields" in object_fields
+    assert "reject_unknown_git_fields(entry, parent=True)" in parser
+    assert "reject_unknown_git_fields(entry, parent=False)" in parser
+    assert "reject_unknown_fields" not in fixture
+    assert "_GIT_DEPENDENCY_FIELDS" not in fixture
+    assert "Object-form Git dependency fields must come from the product parser" in guard
+
+
+def test_cleanup_current_claim_protection_has_single_owner() -> None:
+    """Cleanup must route current deployed-file claims through the reconciler."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/deployment_state.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_cleanup_claim_owner_checker(root)
+
+    assert "def current_claimed_paths" in owner
+    assert checker.analyze_path(root / "src/apm_cli/install/phases/cleanup.py") == []
+    assert "scripts/check_cleanup_claim_owner.py" in guard
+    assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
+
+
+def _load_cleanup_claim_owner_checker(root: Path) -> ModuleType:
+    """Import the semantic cleanup claim-authority checker."""
+    module_name = "check_cleanup_claim_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_skill_subset_owner_checker() -> ModuleType:
+    """Import scripts/check_skill_subset_owner.py as a standalone module.
+
+    The AST checker is the single detection owner for the semantic
+    renamed-helper case (see tests/unit/scripts/test_check_skill_subset_owner.py
+    for its own unit coverage); this integration test reuses it rather than
+    re-implementing any part of its algorithm.
+    """
+    root = Path(__file__).parents[2]
+    script_path = root / "scripts" / "check_skill_subset_owner.py"
+    spec = importlib.util.spec_from_file_location("check_skill_subset_owner", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_windows_stable_path_checker(root: Path) -> ModuleType:
+    """Import scripts/check_windows_stable_path_owner.py as a module.
+
+    This is the single scan owner for the Windows stable executable
+    path boundary (owner presence + duplicate-derivation detection).
+    Both this test and scripts/lint-architecture-boundaries.sh (AC8)
+    consume it directly instead of re-implementing its regexes, globs,
+    or exemption handling.
+    """
+    module_name = "check_windows_stable_path_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_test_contract_checker(root: Path) -> ModuleType:
+    """Import the single scanner for executable test contract owners."""
+    module_name = "check_test_contract_authorities"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
@@ -199,3 +315,219 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
         "nodes_at_depth.sort",
     ):
         assert duplicate not in source
+
+
+def test_skill_subset_filtering_has_one_canonical_owner() -> None:
+    """Install and pack must share one flattened skill-subset matcher."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/models/dependency/subsets.py").read_text()
+    integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text()
+    exporter = (root / "src/apm_cli/bundle/plugin_exporter.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def skill_subset_filter_tokens(" in owner
+    assert "skill_subset_filter_tokens(skill_subset)" in integrator
+    assert "skill_subset_filter_tokens(dep.skill_subset)" in exporter
+    assert "Skill subset filter tokens must come from models/dependency/subsets.py" in guard
+    assert "def _skill_subset_name_filter" not in integrator
+
+
+def test_cached_update_resolution_stays_with_downloader_owner() -> None:
+    """Cached branch planning must reuse the production ref resolver."""
+    root = Path(__file__).parents[2]
+    ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "resolved = downloader.resolve_git_reference(dep_ref)" in ref_reuse
+    assert "Cached update planning must resolve refs through the downloader owner" in guard
+
+
+def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
+    """The Bash guard must invoke the semantic AST checker, not only grep.
+
+    A lexical grep alone was empirically evaded by a renamed helper
+    containing the same normalization algorithm; the guard must also run
+    scripts/check_skill_subset_owner.py over both consumer files.
+    """
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "check_skill_subset_owner.py" in guard
+    assert "src/apm_cli/integration/skill_integrator.py" in guard
+    assert "src/apm_cli/bundle/plugin_exporter.py" in guard
+
+
+def test_skill_subset_ast_checker_passes_on_real_consumers() -> None:
+    """The real consumer files must be clean under the AST checker today.
+
+    This delegates entirely to scripts/check_skill_subset_owner.py
+    (imported directly, see tests/unit/scripts/test_check_skill_subset_owner.py
+    for the checker's own unit coverage of the renamed-helper detection
+    algorithm) so this test does not duplicate any of that logic.
+    """
+    root = Path(__file__).parents[2]
+    checker = _load_skill_subset_owner_checker()
+    integrator = root / "src/apm_cli/integration/skill_integrator.py"
+    exporter = root / "src/apm_cli/bundle/plugin_exporter.py"
+
+    violations = checker.find_violations([integrator, exporter])
+
+    assert violations == []
+
+
+def test_policy_cache_writer_routes_through_canonical_serializer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apm_cli.policy import discovery
+    from apm_cli.policy.schema import ApmPolicy
+
+    serialized = "name: serializer-owner\n"
+    calls: list[ApmPolicy] = []
+
+    def serialize(policy: ApmPolicy) -> str:
+        calls.append(policy)
+        return serialized
+
+    monkeypatch.setattr(discovery, "_serialize_policy", serialize)
+    policy = ApmPolicy(name="original")
+    repo_ref = "owner/.github"
+
+    discovery._write_cache(repo_ref, policy, tmp_path)
+
+    cache_file = discovery._get_cache_dir(tmp_path) / f"{discovery._cache_key(repo_ref)}.yml"
+    assert cache_file.read_text(encoding="utf-8") == serialized
+    assert calls == [policy]
+
+
+def test_policy_cache_serializer_boundary_is_registered() -> None:
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    owner_row = (
+        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |"
+    )
+    assert ("Cached policy shape must route through policy/discovery.py::_policy_to_dict") in guard
+    for token in ("_policy_to_dict", "_serialize_policy", "_write_cache"):
+        assert token in guard
+    assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
+    """install.ps1 alone may define the stable current/apm.exe location.
+
+    The Windows stable-path boundary (owner presence + duplicate
+    derivation) is scanned by exactly one checker,
+    scripts/check_windows_stable_path_owner.py. This test imports and
+    calls that checker directly -- it must not re-implement its
+    regexes, globs, or exemption handling -- and separately asserts
+    that the Bash AC8 guard actually shells out to it rather than
+    retaining a parallel scan.
+    """
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "Windows stable executable path belongs to install.ps1" in guard
+    assert "check_windows_stable_path_owner.py" in guard
+
+    checker = _load_windows_stable_path_checker(root)
+
+    assert checker.check(root) == []
+
+
+def test_executable_test_contracts_have_one_canonical_owner() -> None:
+    """Binary selection and rendered parity must use their canonical helpers."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "Integration binary selection and rendered CLI parity require canonical owners" in guard
+    assert "check_test_contract_authorities.py" in guard
+
+    checker = _load_test_contract_checker(root)
+
+    assert checker.check(root) == []
+
+
+def test_quality_ratchets_route_through_shared_authorities() -> None:
+    """Ratchet file discovery and baseline writes must have one owner each."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_test_contract_checker(root)
+
+    assert "check_test_contract_authorities.py" in guard
+    assert checker.find_ratchet_authority_violations(root) == []
+
+
+def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
+    """The new owner-table row must not silently drop on the next deploy.
+
+    ``.github/instructions/architecture.instructions.md`` is a compiled
+    artifact: ``.apm/instructions/architecture.instructions.md`` is its
+    canonical compile source (see docs/src/content/docs/producer/compile.md),
+    and apm.lock.yaml records a content hash of the deployed copy. If the
+    deployed file gains a row that the source lacks, the next
+    ``apm compile`` / ``apm install`` would regenerate the deployed file
+    from the (stale) source and silently remove the row; a stale lockfile
+    hash would additionally make ``apm audit`` report drift. This guards
+    all three legs of that contract using the project's own lockfile codec
+    and content-hash function rather than a bespoke comparison.
+    """
+    root = Path(__file__).parents[2]
+    source = root / ".apm/instructions/architecture.instructions.md"
+    deployed = root / ".github/instructions/architecture.instructions.md"
+
+    owner_rows = (
+        "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |",
+        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |",
+    )
+    source_text = source.read_text(encoding="utf-8")
+    for owner_row in owner_rows:
+        assert owner_row in source_text
+
+    # Source and deployed must be byte-identical: the deployed file is a
+    # compiled copy of the source, not an independently edited artifact.
+    assert source.read_bytes() == deployed.read_bytes()
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    lockfile = LockFile.load_or_create(root / "apm.lock.yaml")
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    locator_key = "copilot||project|.github/instructions/architecture.instructions.md"
+    record = ledger.records.get(locator_key)
+
+    assert record is not None, "lockfile must track the deployed architecture instruction"
+    assert record.content_hash == compute_file_hash(deployed), (
+        "apm.lock.yaml content_hash is stale relative to the deployed file; "
+        "the next 'apm audit' would report hash drift"
+    )
+
+
+def test_tls_injection_has_one_canonical_authority() -> None:
+    """Only the parent TLS owner and standalone child bootstrap may inject."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    allowed = {
+        root / "src/apm_cli/core/tls_trust.py",
+        root / "src/apm_cli/core/_child_tls/_apm_tls_bootstrap.py",
+    }
+    duplicate_owners = [
+        path.relative_to(root).as_posix()
+        for path in (root / "src/apm_cli").rglob("*.py")
+        if path not in allowed and "truststore.inject_into_ssl(" in path.read_text()
+    ]
+
+    assert "TLS trust injection belongs to canonical owners" in guard
+    assert duplicate_owners == []
+
+
+def test_link_resolver_owns_dependency_deployment_frame_mapping() -> None:
+    """Dependency asset links must use the canonical resolver frame mapping."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/compilation/link_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "candidate_in_deployment = ctx.deployment_package_root / package_relative" in source
+    assert "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" in guard

@@ -161,7 +161,7 @@ Each item in `dependencies` describes one resolved package.
 | `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
 | `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. A shared path has one canonical package owner; uninstall transfers ownership to a surviving provider. When the consumer manifest declares targets, reinstall preserves entries for other declared, gated, or dynamic targets and removes entries outside that target universe. Without a declared target set, reinstall preserves prior other-target entries. |
 | `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
-| `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](./cli/approve/). |
+| `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
@@ -236,7 +236,7 @@ dep added to the graph promotes the lockfile to `"2"`; if every registry dep is
 later removed, the next write demotes back to `"1"`. Both versions are valid
 on-disk formats; consumers MUST handle either.
 
-For the registry workflow this enables, see the [Registries guide](../guides/registries/).
+For the registry workflow this enables, see the [Registries guide](../../guides/registries/).
 
 ## Pack section
 
@@ -363,9 +363,9 @@ local_deployed_file_hashes:
 
 ## See also
 
-- [`apm install`](./cli/install/) - resolves and writes the lockfile
-- [`apm audit`](./cli/audit/) - validates the workspace against the lockfile
-- [`apm prune`](./cli/prune/) - removes orphan packages and files
-- [`apm view`](./cli/view/) - inspect resolved state (`--lock`)
-- [Baseline checks](./baseline-checks/) - the drift checks the lockfile feeds
-- [Manifest schema](./manifest-schema/) - the `apm.yml` it pins
+- [`apm install`](../cli/install/) - resolves and writes the lockfile
+- [`apm audit`](../cli/audit/) - validates the workspace against the lockfile
+- [`apm prune`](../cli/prune/) - removes orphan packages and files
+- [`apm view`](../cli/view/) - inspect resolved state (`--lock`)
+- [Baseline checks](../baseline-checks/) - the drift checks the lockfile feeds
+- [Manifest schema](../manifest-schema/) - the `apm.yml` it pins

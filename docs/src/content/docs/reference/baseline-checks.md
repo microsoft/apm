@@ -8,13 +8,13 @@ sidebar:
 `apm audit --ci` runs a fixed set of baseline checks against the project on
 disk. Baseline checks are always on -- they need no `apm-policy.yml`. With
 policy discovery active, the org policy contributes additional checks on
-top (see [`apm policy`](./cli/policy/) and the
-[policy schema](./policy-schema/)).
+top (see [`apm policy`](../cli/policy/) and the
+[policy schema](../policy-schema/)).
 
 This page documents the baseline set defined in
 `src/apm_cli/policy/ci_checks.py`. For the command surface, see
-[`apm audit`](./cli/audit/). For the CI wiring, see
-[Enforce in CI](../enterprise/enforce-in-ci/).
+[`apm audit`](../cli/audit/). For the CI wiring, see
+[Enforce in CI](../../enterprise/enforce-in-ci/).
 
 ## Exit-code contract
 
@@ -46,7 +46,7 @@ Policy checks (`dependency-allowlist`, `dependency-denylist`,
 `required-package-version`, `transitive-depth`, and others in
 `policy/policy_checks.py`) only run when an `apm-policy.yml` is resolved
 through discovery or `--policy`. They are out of scope for this page; see
-the [policy schema](./policy-schema/).
+the [policy schema](../policy-schema/).
 
 ## Baseline checks
 
@@ -128,7 +128,7 @@ With fail-fast on (the default), the runner stops at the first failing check. `a
 
 ## Related
 
-- [`apm audit`](./cli/audit/) -- the command surface and modes.
-- [`apm policy`](./cli/policy/) -- inspect, validate, and resolve org policy.
-- [Policy schema](./policy-schema/) -- the policy-gated checks layered on top of this baseline.
-- [Enforce in CI](../enterprise/enforce-in-ci/) -- wiring the gate into branch protection.
+- [`apm audit`](../cli/audit/) -- the command surface and modes.
+- [`apm policy`](../cli/policy/) -- inspect, validate, and resolve org policy.
+- [Policy schema](../policy-schema/) -- the policy-gated checks layered on top of this baseline.
+- [Enforce in CI](../../enterprise/enforce-in-ci/) -- wiring the gate into branch protection.

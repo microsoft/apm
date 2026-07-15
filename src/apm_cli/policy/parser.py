@@ -338,7 +338,11 @@ def _build_policy(data: dict) -> ApmPolicy:
     else:
         uf_data = raw_uf
         action = uf_data.get("action")
-        directories = _parse_tuple(uf_data.get("directories")) if "directories" in uf_data else None
+        directories = (
+            None
+            if ("directories" not in uf_data or uf_data["directories"] is None)
+            else _parse_tuple(uf_data["directories"])
+        )
         exclude = (
             None
             if ("exclude" not in uf_data or uf_data["exclude"] is None)

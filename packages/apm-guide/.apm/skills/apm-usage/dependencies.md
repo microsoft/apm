@@ -153,7 +153,14 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
+| `allow_insecure` | OPTIONAL | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
+| `skills` | OPTIONAL | Install only named skills from a skill bundle. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
+
+Unknown fields are rejected. A Git `version` field reports an actionable error
+to use `ref` for a branch, tag, or commit; `version` belongs to registry and
+marketplace objects. The `git: parent` form accepts only `git`, `path`, `ref`,
+and `alias`.
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git

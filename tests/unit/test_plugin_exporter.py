@@ -945,6 +945,32 @@ class TestExportPluginBundle:
         assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
         assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
 
+    def test_dependency_prefixed_skill_subset_matches_flattened_deployment(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+
+        deployed_files: list[str] = []
+        for skill in ("grill-me", "grilling"):
+            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
+        dep = LockedDependency(
+            repo_url="mattpocock/skills",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["productivity/grill-me", "productivity/grilling"],
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        skills_dir = result.bundle_path / "skills"
+        assert {path.name for path in skills_dir.iterdir()} == {"grill-me", "grilling"}
+        assert (skills_dir / "grill-me" / "SKILL.md").read_text(
+            encoding="utf-8"
+        ) == "deployed grill-me"
+        assert (skills_dir / "grilling" / "SKILL.md").read_text(
+            encoding="utf-8"
+        ) == "deployed grilling"
+
     def test_dependency_deployed_skills_survive_without_raw_cache(self, tmp_path):
         project = _setup_plugin_project(tmp_path)
 

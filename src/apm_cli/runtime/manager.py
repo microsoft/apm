@@ -3,6 +3,7 @@ Runtime management functionality for APM CLI.
 Handles installation, configuration, and management of AI runtimes.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -13,8 +14,11 @@ from pathlib import Path
 import click
 from colorama import Fore, Style
 
+from ..core.tls_trust import build_child_tls_env, ensure_child_tls_bootstrap
 from ..core.token_manager import setup_runtime_environment
 from .registry import get_runtime_descriptor, runtime_descriptors
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeManager:
@@ -171,6 +175,10 @@ class RuntimeManager:
                 # Setup GitHub tokens using centralized manager
                 env = setup_runtime_environment(env)  # Pass env to preserve CI tokens
 
+                # Wire OS-trust child shim so the setup subprocess (and any
+                # Python runtime it spawns) verifies HTTPS against the OS store.
+                env = build_child_tls_env(env)
+
                 result = subprocess.run(
                     cmd,
                     cwd=temp_dir,
@@ -236,6 +244,14 @@ class RuntimeManager:
             success = self.run_embedded_script(script_content, common_content, script_args)
 
             if success:
+                # Deliver the self-contained OS-trust bootstrap into the llm
+                # runtime venv so its interpreter (which has neither apm_cli nor
+                # truststore on PYTHONPATH) verifies HTTPS against the OS store.
+                # Done in Python -- not the shell script -- so the shipped
+                # bootstrap files resolve identically for source and frozen apm.
+                if runtime_name == "llm":
+                    self._install_llm_tls_bootstrap()
+
                 click.echo(
                     f"{Fore.GREEN}[+] Successfully set up {runtime_name} runtime{Style.RESET_ALL}"
                 )
@@ -252,6 +268,28 @@ class RuntimeManager:
                 f"{Fore.RED}[x] Error setting up {runtime_name}: {e}{Style.RESET_ALL}", err=True
             )
             return False
+
+    def _install_llm_tls_bootstrap(self) -> None:
+        """Drop the OS-trust bootstrap into the llm runtime venv (best-effort).
+
+        The llm venv is created by ``setup-llm.sh`` with ``truststore``
+        installed; this generates the ``.pth`` and copies the bootstrap module
+        into its site-packages so the child interpreter injects the OS trust
+        store at startup. Silent and non-fatal -- a bootstrap failure must not
+        fail runtime setup.
+        """
+        venv_path = self.runtime_dir / "llm-venv"
+        try:
+            if not ensure_child_tls_bootstrap(venv_path):
+                click.echo(
+                    f"{Fore.YELLOW}[!]  Could not install OS-trust bootstrap into the llm venv; "
+                    "use Python 3.10+ or set PIP_CERT to your proxy CA bundle, then re-run "
+                    "`apm runtime setup llm`. See: "
+                    "https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+                    f"{Style.RESET_ALL}"
+                )
+        except Exception as exc:
+            logger.debug("TLS bootstrap installation raised unexpectedly: %s", exc)
 
     def list_runtimes(self) -> dict[str, dict[str, str]]:
         """List available and installed runtimes."""

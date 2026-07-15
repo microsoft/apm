@@ -19,7 +19,6 @@ or GITHUB_TOKEN.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -34,17 +33,6 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def apm_command():
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
-
-
-@pytest.fixture
 def temp_project(tmp_path):
     project_dir = tmp_path / "update-test"
     project_dir.mkdir()
@@ -54,9 +42,9 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=180, stdin_input=None):
+def _run_apm(apm_binary_path, args, cwd, timeout=180, stdin_input=None):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -77,11 +65,11 @@ def _write_apm_yml(project_dir: Path, apm_packages: list[str]) -> None:
 
 
 class TestUpdateE2E:
-    def test_update_dry_run_writes_nothing(self, temp_project, apm_command):
+    def test_update_dry_run_writes_nothing(self, temp_project, apm_binary_path):
         """`apm update --dry-run` prints a plan and writes no artifacts."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
-        result = _run_apm(apm_command, ["update", "--dry-run"], temp_project)
+        result = _run_apm(apm_binary_path, ["update", "--dry-run"], temp_project)
 
         assert result.returncode == 0, (
             f"Dry-run failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
@@ -89,18 +77,18 @@ class TestUpdateE2E:
         assert "Dry run" in result.stdout or "plan" in result.stdout.lower()
         assert not (temp_project / "apm.lock.yaml").exists()
 
-    def test_update_after_install_no_changes_short_circuits(self, temp_project, apm_command):
+    def test_update_after_install_no_changes_short_circuits(self, temp_project, apm_binary_path):
         """After `apm install`, a follow-up `apm update --yes` with no
         manifest changes should report all-up-to-date and not fail."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
-        first = _run_apm(apm_command, ["install"], temp_project)
+        first = _run_apm(apm_binary_path, ["install"], temp_project)
         assert first.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {first.stdout}\nSTDERR: {first.stderr}"
         )
         assert (temp_project / "apm.lock.yaml").exists()
 
-        result = _run_apm(apm_command, ["update", "--yes"], temp_project)
+        result = _run_apm(apm_binary_path, ["update", "--yes"], temp_project)
 
         assert result.returncode == 0, (
             f"Update failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
@@ -108,32 +96,32 @@ class TestUpdateE2E:
 
 
 class TestFrozenE2E:
-    def test_frozen_succeeds_against_in_sync_lockfile(self, temp_project, apm_command):
+    def test_frozen_succeeds_against_in_sync_lockfile(self, temp_project, apm_binary_path):
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
-        first = _run_apm(apm_command, ["install"], temp_project)
+        first = _run_apm(apm_binary_path, ["install"], temp_project)
         assert first.returncode == 0, first.stderr
 
         # Re-run with --frozen on the same manifest+lockfile.
-        result = _run_apm(apm_command, ["install", "--frozen"], temp_project)
+        result = _run_apm(apm_binary_path, ["install", "--frozen"], temp_project)
 
         assert result.returncode == 0, (
             f"Frozen install failed on in-sync project:\n{result.stdout}\n{result.stderr}"
         )
 
-    def test_frozen_fails_when_lockfile_missing(self, temp_project, apm_command):
+    def test_frozen_fails_when_lockfile_missing(self, temp_project, apm_binary_path):
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
-        result = _run_apm(apm_command, ["install", "--frozen"], temp_project)
+        result = _run_apm(apm_binary_path, ["install", "--frozen"], temp_project)
 
         assert result.returncode != 0
         combined = result.stdout + result.stderr
         assert "frozen" in combined.lower() or "lock" in combined.lower()
 
-    def test_frozen_fails_when_manifest_adds_undeclared_dep(self, temp_project, apm_command):
+    def test_frozen_fails_when_manifest_adds_undeclared_dep(self, temp_project, apm_binary_path):
         """Lockfile present but manifest gained a dep that isn't in lock -> fail."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
-        first = _run_apm(apm_command, ["install"], temp_project)
+        first = _run_apm(apm_binary_path, ["install"], temp_project)
         assert first.returncode == 0, first.stderr
 
         _write_apm_yml(
@@ -141,16 +129,16 @@ class TestFrozenE2E:
             ["microsoft/apm-sample-package", "microsoft/some-other-not-in-lock"],
         )
 
-        result = _run_apm(apm_command, ["install", "--frozen"], temp_project)
+        result = _run_apm(apm_binary_path, ["install", "--frozen"], temp_project)
 
         assert result.returncode != 0
         combined = result.stdout + result.stderr
         assert "out of sync" in combined.lower() or "missing" in combined.lower()
 
-    def test_frozen_with_update_is_rejected(self, temp_project, apm_command):
+    def test_frozen_with_update_is_rejected(self, temp_project, apm_binary_path):
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
-        result = _run_apm(apm_command, ["install", "--frozen", "--update"], temp_project)
+        result = _run_apm(apm_binary_path, ["install", "--frozen", "--update"], temp_project)
 
         assert result.returncode != 0
         combined = result.stdout + result.stderr
@@ -173,7 +161,7 @@ class TestUpdateInteractiveDecline:
         sys.platform.startswith("win"),
         reason="pty.openpty is POSIX-only; decline path is covered by unit tests on Windows",
     )
-    def test_decline_at_prompt_leaves_lockfile_untouched(self, temp_project, apm_command):
+    def test_decline_at_prompt_leaves_lockfile_untouched(self, temp_project, apm_binary_path):
         """``apm update`` with TTY stdin and 'n' answer mutates nothing.
 
         Sequence:
@@ -190,7 +178,7 @@ class TestUpdateInteractiveDecline:
            state (the decline path performed no on-disk mutation).
         """
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
-        first = _run_apm(apm_command, ["install"], temp_project)
+        first = _run_apm(apm_binary_path, ["install"], temp_project)
         assert first.returncode == 0, first.stderr
 
         lockfile = temp_project / "apm.lock.yaml"
@@ -204,7 +192,7 @@ class TestUpdateInteractiveDecline:
         )
 
         rc, output = _run_apm_with_pty(
-            apm_command,
+            apm_binary_path,
             ["update"],
             cwd=temp_project,
             stdin_text="n\n",
@@ -238,7 +226,7 @@ def _write_apm_yml_with_ref(project_dir: Path, package: str, *, ref: str) -> Non
 
 
 def _run_apm_with_pty(
-    apm_command: str,
+    apm_binary_path: str,
     args: list[str],
     *,
     cwd: Path,
@@ -260,7 +248,7 @@ def _run_apm_with_pty(
     master_fd, slave_fd = pty.openpty()
     try:
         proc = subprocess.Popen(
-            [apm_command, *args],
+            [apm_binary_path, *args],
             cwd=str(cwd),
             stdin=slave_fd,
             stdout=slave_fd,

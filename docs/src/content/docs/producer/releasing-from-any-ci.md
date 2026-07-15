@@ -200,7 +200,7 @@ steps:
 | 0    | -                 | Pack succeeded; ship the artifacts.                                                              |
 | 1    | runtime           | Build or network error. Inspect the JSON report; rerun.                                          |
 | 2    | schema            | `apm.yml` is invalid. Fix the manifest before tagging.                                           |
-| 3    | `--check-versions`| Per-package versions disagree with `marketplace.versioning.strategy`. See [Versioning strategies](./versioning-strategies/). |
+| 3    | `--check-versions`| Per-package versions disagree with `marketplace.versioning.strategy`. See [Versioning strategies](../versioning-strategies/). |
 | 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack. Run `apm pack` locally, commit the diff (or `git commit --amend --no-edit` to fold into the current commit), then re-tag and push the updated tag (`git tag -f vX.Y.Z && git push --force-with-lease origin vX.Y.Z`). |
 
 The gates never write to disk -- they only refuse to release.

@@ -127,6 +127,7 @@ requirements:
     keyword: MUST
     section: "5.2"
     conformance_class: consumer
+    notes: "full-SHA manifest pins must match resolved_commit during conformance audit"
   - id: req-lk-004
     keyword: MUST
     section: "5.4"
@@ -196,7 +197,7 @@ requirements:
     keyword: MUST
     section: "5.2"
     conformance_class: consumer
-    notes: "target-scoped deployed-file reconciliation preserves legitimate and indeterminate paths while dropping inactive-target ghosts"
+    notes: "target and identity reconciliation preserves legitimate, indeterminate, and freshly redeployed paths while dropping inactive-target ghosts"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"

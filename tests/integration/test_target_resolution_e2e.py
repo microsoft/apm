@@ -27,7 +27,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -335,7 +334,7 @@ def test_s12_empty_repo_errors_no_silent_copilot(tmp_path):
     reason="#650 global copilot path resolution; handled by three-guard collapse",
     strict=False,
 )
-def test_s13_global_copilot_no_silent_skip(tmp_path, monkeypatch):
+def test_s13_global_copilot_no_silent_skip(tmp_path, monkeypatch, apm_binary_path: Path):
     """S13: Closes #650 - 'apm install -g --target copilot' must not silently skip."""
     project = _setup(tmp_path, "s13_global_copilot")
     fakehome = tmp_path / "fakehome"
@@ -346,7 +345,7 @@ def test_s13_global_copilot_no_silent_skip(tmp_path, monkeypatch):
     for var in ("APM_TARGET", "APM_CONFIG", "APM_HOME"):
         env.pop(var, None)
     result = subprocess.run(
-        [sys.executable, "-m", "apm_cli", "install", "-g", "--target", "copilot"],
+        [str(apm_binary_path), "install", "-g", "--target", "copilot"],
         cwd=project,
         env=env,
         capture_output=True,

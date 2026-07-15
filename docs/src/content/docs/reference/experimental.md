@@ -11,7 +11,7 @@ sidebar:
 Default APM behaviour never changes based on what is available here. A flag must be explicitly enabled to take effect, and every flag ships disabled.
 
 :::caution[Scope]
-Experimental flags are ergonomic and UX toggles only. They MUST NOT gate security-critical behaviour -- content scanning, path validation, lockfile integrity, token handling, MCP trust, or collision detection are never placed behind a flag. See [Security Model](../enterprise/security/).
+Experimental flags are ergonomic and UX toggles only. They MUST NOT gate security-critical behaviour -- content scanning, path validation, lockfile integrity, token handling, MCP trust, or collision detection are never placed behind a flag. See [Security Model](../../enterprise/security/).
 :::
 
 ## Subcommands
@@ -171,15 +171,15 @@ apm experimental reset verbose-version
 |-----------------------|----------------------------------------------------------------------------------|
 | `verbose-version`     | Show Python version, platform, and install path in `apm --version`.              |
 | `copilot-cowork`      | Deploy APM skills to Microsoft 365 Copilot Cowork via OneDrive.                  |
-| `copilot-app`         | Deploy APM prompts that carry workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day`) as workflows in the GitHub Copilot desktop App (`~/.copilot/data.db`). See [Copilot App integration](../integrations/copilot-app/). |
+| `copilot-app`         | Deploy APM prompts that carry workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day`) as workflows in the GitHub Copilot desktop App (`~/.copilot/data.db`). See [Copilot App integration](../../integrations/copilot-app/). |
 | `marketplace-authoring`| Enable marketplace authoring commands (init, build, publish, etc.).              |
 | `registries`          | Enable REST-based APM package registries in `apm.yml`.                           |
-| `external-scanners`   | Ingest third-party SARIF scanners into `apm audit` (`--external`, including SkillSpector LLM mode and allowlisted `--external-args`), the `external.<name>.{llm,args}` config keys, and the `security.audit.scanners` policy block. See [External scanners](../integrations/external-scanners/). |
-| `canvas`              | Ship Copilot CLI canvas extensions (`.apm/extensions/<name>/extension.mjs`) through APM packages. Dependency-provided canvases require executable-trust approval (`apm approve <pkg>`). See [Canvas extensions](../integrations/canvas/). |
+| `external-scanners`   | Ingest third-party SARIF scanners into `apm audit` (`--external`, including SkillSpector LLM mode and allowlisted `--external-args`), the `external.<name>.{llm,args}` config keys, and the `security.audit.scanners` policy block. See [External scanners](../../integrations/external-scanners/). |
+| `canvas`              | Ship Copilot CLI canvas extensions (`.apm/extensions/<name>/extension.mjs`) through APM packages. Dependency-provided canvases require executable-trust approval (`apm approve <pkg>`). See [Canvas extensions](../../integrations/canvas/). |
 | `hermes`              | Deploy skills, `AGENTS.md`, and MCP servers to the Hermes agent runtime.        |
 
 New flags are proposed via [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#how-to-add-an-experimental-feature-flag) and graduate to default when stable. See the contributor recipe for the full lifecycle.
-See also: [Cowork integration](../integrations/copilot-cowork/).
+See also: [Cowork integration](../../integrations/copilot-cowork/).
 
 ## Storage and scope
 

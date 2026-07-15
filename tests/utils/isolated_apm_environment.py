@@ -1,0 +1,425 @@
+"""Hermetic process environments for APM lifecycle integration tests."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
+
+_NETWORK_GUARD = """\
+import _socket
+import builtins
+import importlib
+import socket
+import sys
+
+_MESSAGE = "IP network disabled by test environment"
+_REAL_SOCKET = socket.socket
+_REAL_RAW_SOCKET = _socket.socket
+_REAL_IMPORT = builtins.__import__
+_REAL_IMPORT_MODULE = importlib.import_module
+
+
+class _GuardedSocketOperations:
+    def _accept(self):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super()._accept()
+
+    def bind(self, address):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().bind(address)
+
+    def connect(self, address):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().connect(address)
+
+    def connect_ex(self, address):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().connect_ex(address)
+
+    def listen(self, backlog=0):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().listen(backlog)
+
+    def sendto(self, *args, **kwargs):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().sendto(*args, **kwargs)
+
+    def sendmsg(self, *args, **kwargs):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().sendmsg(*args, **kwargs)
+
+
+class _GuardedSocket(_GuardedSocketOperations, _REAL_SOCKET):
+    def accept(self):
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            raise OSError(_MESSAGE)
+        return super().accept()
+
+
+class _GuardedRawSocket(_GuardedSocketOperations, _REAL_RAW_SOCKET):
+    pass
+
+
+def _deny_network(*args, **kwargs):
+    raise OSError(_MESSAGE)
+
+
+def _guard_raw_socket_module(module):
+    module.socket = _GuardedRawSocket
+    module.SocketType = _GuardedRawSocket
+    module.getaddrinfo = _deny_network
+    module.gethostbyaddr = _deny_network
+    module.gethostbyname = _deny_network
+    module.gethostbyname_ex = _deny_network
+    module.getnameinfo = _deny_network
+
+
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    imported = _REAL_IMPORT(name, globals, locals, fromlist, level)
+    if name == "_socket":
+        module = sys.modules.get("_socket")
+        if module is not None:
+            _guard_raw_socket_module(module)
+    return imported
+
+
+def _guarded_import_module(name, package=None):
+    imported = _REAL_IMPORT_MODULE(name, package)
+    if name == "_socket":
+        _guard_raw_socket_module(imported)
+    return imported
+
+
+socket.socket = _GuardedSocket
+socket.SocketType = _GuardedSocket
+_guard_raw_socket_module(_socket)
+socket.create_connection = _deny_network
+socket.getaddrinfo = _deny_network
+socket.gethostbyaddr = _deny_network
+socket.gethostbyname = _deny_network
+socket.gethostbyname_ex = _deny_network
+socket.getnameinfo = _deny_network
+builtins.__import__ = _guarded_import
+importlib.import_module = _guarded_import_module
+"""
+
+_APM_AUTH_ENV_NAMES = frozenset(
+    {
+        "ADO_APM_PAT",
+        "COPILOT_GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GH_TOKEN",
+        "GITHUB_APM_PAT",
+        "GITHUB_COPILOT_PAT",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "GITHUB_MODELS_KEY",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_TOKEN",
+        "GIT_ASKPASS",
+        "GIT_HTTP_EXTRAHEADER",
+        "GIT_TOKEN",
+        "GITLAB_APM_PAT",
+        "GITLAB_TOKEN",
+        "SSH_AGENT_PID",
+        "SSH_ASKPASS",
+        "SSH_AUTH_SOCK",
+    }
+)
+_APM_AUTH_ENV_PREFIXES = (
+    "APM_REGISTRY_PASS_",
+    "APM_REGISTRY_TOKEN_",
+    "APM_REGISTRY_USER_",
+    "GITHUB_APM_PAT_",
+)
+_APM_CONFIG_ENV_NAMES = frozenset(
+    {
+        "AZURE_CONFIG_DIR",
+        "GH_CONFIG_DIR",
+    }
+)
+_APM_REMOTE_CONTROL_ENV_NAMES = frozenset(
+    {
+        "APM_ALLOW_PROTOCOL_FALLBACK",
+        "APM_GIT_CREDENTIAL_TIMEOUT",
+        "APM_GIT_PROTOCOL",
+        "APM_GITLAB_HOSTS",
+        "APM_NO_CACHE",
+        "APM_POLICY_DISABLE",
+        "GITHUB_HOST",
+        "GITHUB_URL",
+        "GITLAB_HOST",
+    }
+)
+_GIT_STATE_ENV_NAMES = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_DIR",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_GRAFTS_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_INDEX_VERSION",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
+_GIT_CONFIG_INJECTION_PREFIXES = (
+    "GIT_CONFIG_KEY_",
+    "GIT_CONFIG_VALUE_",
+    "GIT_TRACE",
+)
+_GIT_EXECUTION_ENV_NAMES = frozenset(
+    {
+        "GIT_ATTR_NOSYSTEM",
+        "GIT_CLONE_PROTECTION_ACTIVE",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DEFAULT_BRANCH",
+        "GIT_DEFAULT_HASH",
+        "GIT_DEFAULT_REF_FORMAT",
+        "GIT_EDITOR",
+        "GIT_EXEC_PATH",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PAGER",
+        "GIT_PROTOCOL",
+        "GIT_PROTOCOL_FROM_USER",
+        "GIT_SEQUENCE_EDITOR",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSH_VARIANT",
+        "GIT_SSL_CAINFO",
+        "GIT_SSL_CAPATH",
+        "GIT_SSL_CERT",
+        "GIT_SSL_KEY",
+        "GIT_SSL_NO_VERIFY",
+        "GIT_TEMPLATE_DIR",
+        "SSH_ASKPASS_REQUIRE",
+    }
+)
+_STRIPPED_ENV_NAMES = (
+    _APM_AUTH_ENV_NAMES
+    | _GIT_STATE_ENV_NAMES
+    | _GIT_EXECUTION_ENV_NAMES
+    | _APM_CONFIG_ENV_NAMES
+    | _APM_REMOTE_CONTROL_ENV_NAMES
+)
+_STRIPPED_ENV_PREFIXES = _APM_AUTH_ENV_PREFIXES + _GIT_CONFIG_INJECTION_PREFIXES
+_PINNED_ENVIRONMENT_NAMES = (
+    "HOME",
+    "USERPROFILE",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "LOCALAPPDATA",
+    "APM_HOME",
+    "APM_CACHE_DIR",
+    "APM_TEMP_DIR",
+    "GH_CONFIG_DIR",
+    "AZURE_CONFIG_DIR",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_ALLOW_PROTOCOL",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_DATE",
+    "PYTHONPATH",
+)
+_PROTECTED_OVERRIDE_NAMES = frozenset(_PINNED_ENVIRONMENT_NAMES) | _STRIPPED_ENV_NAMES
+
+
+def _normalized_env_name(name: str) -> str:
+    """Normalize an environment name using Windows-compatible semantics."""
+    return name.upper()
+
+
+def _is_protected_override(name: str) -> bool:
+    normalized_name = _normalized_env_name(name)
+    return normalized_name in _PROTECTED_OVERRIDE_NAMES or normalized_name.startswith(
+        _STRIPPED_ENV_PREFIXES
+    )
+
+
+def _should_strip_inherited(name: str) -> bool:
+    normalized_name = _normalized_env_name(name)
+    return normalized_name in _PROTECTED_OVERRIDE_NAMES or normalized_name.startswith(
+        _STRIPPED_ENV_PREFIXES
+    )
+
+
+def _deduplicate_environment(base_env: Mapping[str, str]) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    spellings: dict[str, str] = {}
+    for name, value in base_env.items():
+        normalized_name = _normalized_env_name(name)
+        existing_name = spellings.get(normalized_name)
+        if existing_name is None:
+            environment[name] = value
+            spellings[normalized_name] = name
+        elif name == normalized_name and existing_name != name:
+            environment.pop(existing_name)
+            environment[name] = value
+            spellings[normalized_name] = name
+    return environment
+
+
+def _set_environment_value(
+    environment: dict[str, str],
+    name: str,
+    value: str,
+) -> None:
+    normalized_name = _normalized_env_name(name)
+    for existing_name in tuple(environment):
+        if _normalized_env_name(existing_name) == normalized_name:
+            environment.pop(existing_name)
+    environment[name] = value
+
+
+@dataclass(frozen=True)
+class IsolatedApmEnvironment:
+    """Filesystem roots and immutable child environment for one test scenario.
+
+    The caller owns native executable trust through PATH. File URL containment
+    and hostile post-creation filesystem races are outside this helper's scope.
+    """
+
+    root: Path
+    home: Path
+    config_root: Path
+    cache_root: Path
+    package_root: Path
+    repository_root: Path
+    work_root: Path
+    temp_root: Path
+    process_environment: Mapping[str, str]
+
+    @classmethod
+    def create(
+        cls,
+        root: Path,
+        *,
+        base_env: Mapping[str, str],
+    ) -> IsolatedApmEnvironment:
+        """Create unique scenario roots and a bounded APM/Git process environment."""
+        root.mkdir(parents=True, exist_ok=False)
+        home = root / "home"
+        config_root = home / ".apm"
+        cache_root = root / "cache"
+        package_root = root / "packages"
+        repository_root = root / "repositories"
+        work_root = root / "work"
+        temp_root = root / "tmp"
+        guard_root = root / "network_guard"
+        xdg_config_root = root / "xdg-config"
+        xdg_cache_root = root / "xdg-cache"
+        local_app_data = root / "local-app-data"
+        gh_config_root = root / "gh-config"
+        azure_config_root = root / "azure-config"
+        for directory in (
+            home,
+            config_root,
+            cache_root,
+            package_root,
+            repository_root,
+            work_root,
+            temp_root,
+            guard_root,
+            xdg_config_root,
+            xdg_cache_root,
+            local_app_data,
+            gh_config_root,
+            azure_config_root,
+        ):
+            directory.mkdir(parents=True)
+
+        git_config = root / "gitconfig"
+        git_config.write_text(
+            '[protocol "file"]\n\tallow = always\n',
+            encoding="utf-8",
+        )
+        (guard_root / "sitecustomize.py").write_text(
+            _NETWORK_GUARD,
+            encoding="utf-8",
+        )
+
+        environment = _deduplicate_environment(base_env)
+        for name in list(environment):
+            if _should_strip_inherited(name):
+                environment.pop(name, None)
+
+        pinned_environment = {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "XDG_CONFIG_HOME": str(xdg_config_root),
+            "XDG_CACHE_HOME": str(xdg_cache_root),
+            "LOCALAPPDATA": str(local_app_data),
+            "APM_HOME": str(config_root),
+            "APM_CACHE_DIR": str(cache_root),
+            "APM_TEMP_DIR": str(temp_root),
+            "GH_CONFIG_DIR": str(gh_config_root),
+            "AZURE_CONFIG_DIR": str(azure_config_root),
+            "TMPDIR": str(temp_root),
+            "TMP": str(temp_root),
+            "TEMP": str(temp_root),
+            "GIT_CONFIG_GLOBAL": str(git_config),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ALLOW_PROTOCOL": "file",
+            "GIT_AUTHOR_NAME": "APM Test",
+            "GIT_AUTHOR_EMAIL": "apm-test@example.invalid",
+            "GIT_COMMITTER_NAME": "APM Test",
+            "GIT_COMMITTER_EMAIL": "apm-test@example.invalid",
+            "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
+            "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+            "PYTHONPATH": str(guard_root),
+        }
+        if tuple(pinned_environment) != _PINNED_ENVIRONMENT_NAMES:
+            raise AssertionError("Pinned environment names are out of sync")
+        for name, value in pinned_environment.items():
+            _set_environment_value(environment, name, value)
+        return cls(
+            root=root,
+            home=home,
+            config_root=config_root,
+            cache_root=cache_root,
+            package_root=package_root,
+            repository_root=repository_root,
+            work_root=work_root,
+            temp_root=temp_root,
+            process_environment=MappingProxyType(environment),
+        )
+
+    def subprocess_env(
+        self,
+        *,
+        overrides: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Return a child environment with only non-protected overrides applied."""
+        environment = dict(self.process_environment)
+        if overrides:
+            protected = {name for name in overrides if _is_protected_override(name)}
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise ValueError(f"Cannot override protected environment variables: {names}")
+            for name, value in overrides.items():
+                _set_environment_value(environment, name, value)
+        return environment

@@ -13,27 +13,13 @@ Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
 import json  # noqa: F401
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
 
 # Skip all tests if no GitHub token is available
 pytestmark = pytest.mark.requires_github_token
-
-
-@pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 @pytest.fixture
@@ -60,10 +46,10 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=120):
+def _run_apm(apm_binary_path, args, cwd, timeout=120):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -105,9 +91,11 @@ def _get_locked_dep(lockfile, key):
 class TestCleanFilenames:
     """Verify installed files use clean names (no -apm suffix)."""
 
-    def test_prompts_have_clean_names(self, temp_project, apm_command):
+    def test_prompts_have_clean_names(self, temp_project, apm_binary_path):
         """Prompts should be deployed without -apm suffix."""
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         prompts_dir = temp_project / ".github" / "prompts"
@@ -116,9 +104,11 @@ class TestCleanFilenames:
             for f in prompt_files:
                 assert "-apm.prompt.md" not in f.name, f"Prompt {f.name} still uses -apm suffix"
 
-    def test_agents_have_clean_names(self, temp_project, apm_command):
+    def test_agents_have_clean_names(self, temp_project, apm_binary_path):
         """Agents should be deployed without -apm suffix."""
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         agents_dir = temp_project / ".github" / "agents"
@@ -136,9 +126,11 @@ class TestCleanFilenames:
 class TestDeployedFilesInLockfile:
     """Verify deployed_files are recorded in apm.lock after install."""
 
-    def test_lockfile_has_deployed_files_after_install(self, temp_project, apm_command):
+    def test_lockfile_has_deployed_files_after_install(self, temp_project, apm_binary_path):
         """apm.lock should contain deployed_files for each installed package."""
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         lockfile = _read_lockfile(temp_project)
@@ -149,9 +141,11 @@ class TestDeployedFilesInLockfile:
         assert "deployed_files" in dep, "deployed_files key missing from lockfile entry"
         assert len(dep["deployed_files"]) > 0, "deployed_files list is empty"
 
-    def test_deployed_files_point_to_existing_files(self, temp_project, apm_command):
+    def test_deployed_files_point_to_existing_files(self, temp_project, apm_binary_path):
         """Every path in deployed_files should exist on disk after install."""
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         lockfile = _read_lockfile(temp_project)
@@ -162,7 +156,7 @@ class TestDeployedFilesInLockfile:
             full_path = temp_project / rel_path
             assert full_path.exists(), f"Deployed file {rel_path} does not exist on disk"
 
-    def test_deployed_files_are_under_known_target_roots(self, temp_project, apm_command):
+    def test_deployed_files_are_under_known_target_roots(self, temp_project, apm_binary_path):
         """deployed_files must land under one of the known target roots.
 
         Plugin-style packages whose primitives include skills also deploy a
@@ -172,7 +166,9 @@ class TestDeployedFilesInLockfile:
         so the assertion must allow ``.agents/`` alongside ``.github/``
         and ``.claude/``.
         """
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         lockfile = _read_lockfile(temp_project)
@@ -185,9 +181,11 @@ class TestDeployedFilesInLockfile:
                 f"Deployed file {rel_path} is not under any of {allowed_roots}"
             )
 
-    def test_deployed_files_have_clean_names_in_lockfile(self, temp_project, apm_command):
+    def test_deployed_files_have_clean_names_in_lockfile(self, temp_project, apm_binary_path):
         """deployed_files paths in lockfile should use clean names (no -apm suffix)."""
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         lockfile = _read_lockfile(temp_project)
@@ -197,10 +195,10 @@ class TestDeployedFilesInLockfile:
         for rel_path in dep["deployed_files"]:
             assert "-apm." not in rel_path, f"Deployed file path {rel_path} still uses -apm suffix"
 
-    def test_skill_deployed_files_tracked(self, temp_project, apm_command):
+    def test_skill_deployed_files_tracked(self, temp_project, apm_binary_path):
         """Skill packages should have deployed_files entries for .agents/skills/."""
         result = _run_apm(
-            apm_command,
+            apm_binary_path,
             ["install", "anthropics/skills/skills/brand-guidelines"],
             temp_project,
         )
@@ -239,10 +237,12 @@ class TestDeployedFilesInLockfile:
 class TestCollisionDetection:
     """Test that user-authored files are not overwritten on re-install."""
 
-    def test_user_file_not_overwritten_on_reinstall(self, temp_project, apm_command):
+    def test_user_file_not_overwritten_on_reinstall(self, temp_project, apm_binary_path):
         """Pre-existing user-authored file should be preserved on re-install."""
         # First install to get the package
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"First install failed: {result.stderr}\n{result.stdout}"
 
         # Find a deployed prompt file
@@ -266,7 +266,9 @@ class TestCollisionDetection:
         target_file.write_text(user_content)
 
         # Re-install (should detect collision and skip)
-        result2 = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result2 = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result2.returncode == 0, f"Re-install failed: {result2.stderr}\n{result2.stdout}"
 
         # User content should be preserved
@@ -274,10 +276,12 @@ class TestCollisionDetection:
             "User-authored file was overwritten during re-install"
         )
 
-    def test_force_flag_overwrites_collision(self, temp_project, apm_command):
+    def test_force_flag_overwrites_collision(self, temp_project, apm_binary_path):
         """--force should overwrite even user-authored files."""
         # First install
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0
 
         prompts_dir = temp_project / ".github" / "prompts"
@@ -299,7 +303,7 @@ class TestCollisionDetection:
 
         # Re-install with --force
         result2 = _run_apm(
-            apm_command,
+            apm_binary_path,
             ["install", "microsoft/apm-sample-package", "--force"],
             temp_project,
         )
@@ -319,10 +323,12 @@ class TestCollisionDetection:
 class TestReinstallPreservesManifest:
     """Verify that re-install updates deployed_files correctly."""
 
-    def test_reinstall_same_package_updates_lockfile(self, temp_project, apm_command):
+    def test_reinstall_same_package_updates_lockfile(self, temp_project, apm_binary_path):
         """Re-installing the same package should keep deployed_files in lockfile."""
         # First install
-        result1 = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result1 = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result1.returncode == 0
 
         lockfile1 = _read_lockfile(temp_project)
@@ -330,7 +336,7 @@ class TestReinstallPreservesManifest:
         files1 = dep1.get("deployed_files", []) if dep1 else []
 
         # Second install
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0
 
         lockfile2 = _read_lockfile(temp_project)
@@ -351,10 +357,12 @@ class TestReinstallPreservesManifest:
 class TestPruneDeployedFiles:
     """Verify that prune removes deployed files for pruned packages."""
 
-    def test_prune_removes_deployed_files(self, temp_project, apm_command):
+    def test_prune_removes_deployed_files(self, temp_project, apm_binary_path):
         """After removing a package from apm.yml and pruning, deployed files should be cleaned."""
         # Install a package
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         # Read deployed files before prune
@@ -379,7 +387,7 @@ class TestPruneDeployedFiles:
         )
 
         # Run prune
-        result2 = _run_apm(apm_command, ["prune"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["prune"], temp_project)
         assert result2.returncode == 0, f"Prune failed: {result2.stderr}\n{result2.stdout}"
 
         # Verify deployed files were cleaned up
@@ -387,10 +395,12 @@ class TestPruneDeployedFiles:
             full_path = temp_project / rel_path
             assert not full_path.exists(), f"Deployed file {rel_path} was not cleaned up by prune"
 
-    def test_prune_removes_package_from_lockfile(self, temp_project, apm_command):
+    def test_prune_removes_package_from_lockfile(self, temp_project, apm_binary_path):
         """After prune, the pruned package should not be in apm.lock."""
         # Install
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0
 
         # Remove from apm.yml
@@ -398,7 +408,7 @@ class TestPruneDeployedFiles:
         apm_yml.write_text("name: deployed-files-test\nversion: 1.0.0\ndependencies:\n  apm: []\n")
 
         # Prune
-        result2 = _run_apm(apm_command, ["prune"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["prune"], temp_project)
         assert result2.returncode == 0
 
         # Lockfile should not have the pruned package
@@ -416,10 +426,12 @@ class TestPruneDeployedFiles:
 class TestUninstallDeployedFiles:
     """Verify that uninstall removes deployed files for the package."""
 
-    def test_uninstall_removes_deployed_files(self, temp_project, apm_command):
+    def test_uninstall_removes_deployed_files(self, temp_project, apm_binary_path):
         """Uninstalling a package should clean up its deployed files."""
         # Install
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
         # Record deployed files
@@ -432,7 +444,9 @@ class TestUninstallDeployedFiles:
         existing_before = [f for f in deployed if (temp_project / f).exists()]
 
         # Uninstall
-        result2 = _run_apm(apm_command, ["uninstall", "microsoft/apm-sample-package"], temp_project)
+        result2 = _run_apm(
+            apm_binary_path, ["uninstall", "microsoft/apm-sample-package"], temp_project
+        )
         assert result2.returncode == 0, f"Uninstall failed: {result2.stderr}\n{result2.stdout}"
 
         # Deployed files should be cleaned
@@ -442,17 +456,21 @@ class TestUninstallDeployedFiles:
                 f"Deployed file {rel_path} was not cleaned up by uninstall"
             )
 
-    def test_uninstall_removes_package_dir(self, temp_project, apm_command):
+    def test_uninstall_removes_package_dir(self, temp_project, apm_binary_path):
         """Uninstalling should remove the package from apm_modules/."""
         # Install
-        result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
+        result = _run_apm(
+            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        )
         assert result.returncode == 0
 
         pkg_dir = temp_project / "apm_modules" / "microsoft" / "apm-sample-package"
         assert pkg_dir.exists(), "Package not installed"
 
         # Uninstall
-        result2 = _run_apm(apm_command, ["uninstall", "microsoft/apm-sample-package"], temp_project)
+        result2 = _run_apm(
+            apm_binary_path, ["uninstall", "microsoft/apm-sample-package"], temp_project
+        )
         assert result2.returncode == 0
 
         assert not pkg_dir.exists(), "Package dir not removed after uninstall"

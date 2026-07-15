@@ -8,7 +8,6 @@ remote APM deps use.
 """
 
 import re
-import shutil
 import subprocess
 from itertools import pairwise
 from pathlib import Path
@@ -20,18 +19,6 @@ pytestmark = pytest.mark.requires_apm_binary
 
 TIMEOUT = 180
 DEEP_CHAIN_LENGTH = 8
-
-
-@pytest.fixture
-def apm_command():
-    """Resolve the APM CLI executable (PATH or local venv)."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 def _write_pkg(pkg_dir: Path, name: str, deps: list, primitive_name: str) -> None:
@@ -142,12 +129,12 @@ def _deps_by_name(lockfile: dict) -> dict:
     return out
 
 
-def test_three_level_apm_chain_resolves_all_levels(chain_workspace, apm_command):
+def test_three_level_apm_chain_resolves_all_levels(chain_workspace, apm_binary_path):
     """A->B->C chain installs all three packages and records the dep graph."""
     consumer = chain_workspace / "consumer"
 
     result = subprocess.run(
-        [apm_command, "install", "../pkg-a"],
+        [apm_binary_path, "install", "../pkg-a"],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -188,7 +175,7 @@ def test_three_level_apm_chain_resolves_all_levels(chain_workspace, apm_command)
 
 def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
     deep_chain_workspace: Path,
-    apm_command: str,
+    apm_binary_path: str,
 ) -> None:
     """CLI inventory follows every resolved edge but ignores parent-owned manifests."""
     consumer = deep_chain_workspace / "consumer"
@@ -198,7 +185,7 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
     embedded_names = ("embedded-shallow", "embedded-deep")
 
     installed = subprocess.run(
-        [apm_command, "install", f"../{package_names[0]}"],
+        [apm_binary_path, "install", f"../{package_names[0]}"],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -214,7 +201,7 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
         assert locked[key].get("resolved_by") in (expected_parent, "")
 
     listed = subprocess.run(
-        [apm_command, "deps", "list"],
+        [apm_binary_path, "deps", "list"],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -229,7 +216,7 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
     assert "orphaned package(s) found" not in list_output
 
     tree = subprocess.run(
-        [apm_command, "deps", "tree"],
+        [apm_binary_path, "deps", "tree"],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -261,7 +248,7 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
         assert not windows_abs.search(output), f"{label} leaked a Windows-absolute path:\n{output}"
 
     pruned = subprocess.run(
-        [apm_command, "prune"],
+        [apm_binary_path, "prune"],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -304,12 +291,12 @@ def test_deps_commands_follow_full_lock_graph_and_ignore_embedded_manifests(
     ).is_file()
 
 
-def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_command):
+def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_binary_path):
     """Uninstalling the root drops orphaned transitive deps and their primitives."""
     consumer = chain_workspace / "consumer"
 
     install = subprocess.run(
-        [apm_command, "install", "../pkg-a"],
+        [apm_binary_path, "install", "../pkg-a"],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -318,7 +305,7 @@ def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_command)
     assert install.returncode == 0, f"Install failed: {install.stderr}"
 
     uninstall = subprocess.run(
-        [apm_command, "uninstall", "../pkg-a"],
+        [apm_binary_path, "uninstall", "../pkg-a"],
         cwd=consumer,
         capture_output=True,
         text=True,
@@ -349,7 +336,7 @@ def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_command)
         assert not (deployed / fname).exists(), f"Primitive {fname} survived cascade uninstall"
 
 
-def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_command):
+def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_binary_path):
     """Regression for #857: a transitive ../sibling resolves against the
     DECLARING package's directory, not the consumer's project root.
 
@@ -384,7 +371,7 @@ def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_command):
     )
 
     result = subprocess.run(
-        [apm_command, "install"],
+        [apm_binary_path, "install"],
         cwd=consumer,
         capture_output=True,
         text=True,

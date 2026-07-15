@@ -105,16 +105,25 @@ body):
 3. Phase X.2 -- merge follow-ups (LEGIT Copilot + panel
    `recommended_followups`) and apply the fold-vs-defer rubric per
    [assets/fold-vs-defer-rubric.md](assets/fold-vs-defer-rubric.md).
-4. Phase X.3 -- edit code; fold every FOLD item. Run the mutation-
+4. Phase X.2.5 -- canonical-owner gate (FAIL CLOSED). Read
+   `.github/instructions/architecture.instructions.md`, classify the
+   PR (`ordinary-fix` / `owner-extension` / `new-owner` /
+   `split-authority-repair` / `not-applicable`), record each durable
+   decision's canonical owner and consumer routing, run
+   `bash scripts/lint-architecture-boundaries.sh` on the head, and --
+   for a new owner, centralization, or split repair -- require the full
+   dual guardrail. Missing evidence stays in the loop or returns
+   `blocked`; it is never deferred.
+5. Phase X.3 -- edit code; fold every FOLD item. Run the mutation-
    break gate on any new regression-trap test.
-5. Phase X.4 -- run the lint contract until silent.
-6. Phase X.5 -- push (head branch; fall back to a superseding PR that
+6. Phase X.4 -- run the lint contract until silent.
+7. Phase X.5 -- push (head branch; fall back to a superseding PR that
    preserves authorship via commit trailers).
-7. Phase X.6 -- CI watch + recovery per
+8. Phase X.6 -- CI watch + recovery per
    [assets/ci-recovery-checklist.md](assets/ci-recovery-checklist.md).
-8. Phase X.7 -- decide terminal vs next iteration.
-9. Phase X.8 -- at terminal, capture `head_sha`, `mergeable`,
-   `mergeStateStatus`, and CI status for the completion return.
+9. Phase X.7 -- decide terminal vs next iteration.
+10. Phase X.8 -- at terminal, capture `head_sha`, `mergeable`,
+    `mergeStateStatus`, and CI status for the completion return.
 
 ## Caps (hard limits)
 
@@ -132,7 +141,8 @@ The subagent returns exactly one schema-valid `completion_return`
 matching [assets/completion-schema.json](assets/completion-schema.json):
 
 - `ready-to-merge` -- clean convergence; CI observed green; lint
-  silent.
+  silent; canonical-owner gate passed with schema-valid
+  `architecture_evidence`.
 - `advisory-with-deferred` -- iteration cap hit with foldable items
   remaining (rare); each deferred item carries a scope-boundary note.
 - `superseded` -- push fell back to a superseding PR (records
@@ -152,6 +162,17 @@ ONCE; on a second malformed return, mark the row blocked and continue.
 - Mutation-break gate: every regression-trap test added is proven by
   deleting the guard it protects and confirming the test fails
   without it, then restoring the guard.
+- Canonical-owner gate: every PR gets exactly one architecture
+  classification against
+  `.github/instructions/architecture.instructions.md`, with each
+  durable decision's canonical owner and consumer routing recorded. A
+  new owner, a centralization, or a split-authority repair cannot reach
+  a terminal `ready-to-merge` / `advisory-with-deferred` return without
+  the full dual guardrail (behavioral regression test, static boundary
+  guard, matching `test_architecture_*.py` assertion, and mutation-break
+  evidence) plus a clean `scripts/lint-architecture-boundaries.sh`.
+  Missing evidence stays in the loop or returns `blocked` -- it is
+  never deferred as out of scope.
 - Lint contract: the canonical ruff pair
   (`uv run --extra dev ruff check src/ tests/` and
   `ruff format --check src/ tests/`) must be silent before any push.

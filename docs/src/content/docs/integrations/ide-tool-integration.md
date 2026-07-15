@@ -11,7 +11,7 @@ This page is a hub. It tells you which tools are supported, how detection works,
 
 ## Supported tools
 
-The full slot-by-slot capability table lives in [Targets matrix](../reference/targets-matrix/). At a glance, APM currently writes for:
+The full slot-by-slot capability table lives in [Targets matrix](../../reference/targets-matrix/). At a glance, APM currently writes for:
 
 | Target               | Marker / signal                     | Notes                                  |
 |----------------------|--------------------------------------|----------------------------------------|
@@ -27,7 +27,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | JetBrains Copilot    | user-scope config dir (global)       | MCP (user-scope path, `${env:VAR}` substitution); file primitives use the Copilot profile |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
-For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
+For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../../reference/targets-matrix/).
 
 ## How target detection works
 
@@ -38,7 +38,7 @@ apm targets                    # list detected and supported targets
 apm install --target claude    # force a specific target
 ```
 
-If no marker is present, APM emits the `[x] No harness detected` error - see [Common errors](../troubleshooting/common-errors/).
+If no marker is present, APM emits the `[x] No harness detected` error - see [Common errors](../../troubleshooting/common-errors/).
 
 To pin targets in the manifest:
 
@@ -50,7 +50,7 @@ target:
   - cursor
 ```
 
-The `target:` field accepts either a YAML list or a CSV string. See [Manifest schema](../reference/manifest-schema/#target).
+The `target:` field accepts either a YAML list or a CSV string. See [Manifest schema](../../reference/manifest-schema/#target).
 
 ## Primitive flow per target
 
@@ -65,9 +65,9 @@ Each primitive type maps to a target-specific slot:
 mcp: in apm.yml      ->   per target: .mcp.json / settings.json / equivalent
 ```
 
-Not every target supports every primitive type. When a primitive can't land on a target, APM emits a warning at install time. Skim [Targets matrix](../reference/targets-matrix/) to set expectations before adding a primitive.
+Not every target supports every primitive type. When a primitive can't land on a target, APM emits a warning at install time. Skim [Targets matrix](../../reference/targets-matrix/) to set expectations before adding a primitive.
 
-> **Deduplication**: When `.github/instructions/` already contains `.instructions.md` files (deployed by `apm install --target copilot`), `apm compile --target copilot` omits `AGENTS.md` entirely when its only content would be the duplicated instructions section. When `.claude/rules/` already contains `.md` files (deployed by `apm install --target claude`), `apm compile --target claude` omits the instructions section from `CLAUDE.md` for the same reason. The context file is still generated when it carries non-instruction content such as a constitution. See [Copilot deduplication](../producer/compile/#copilot-deduplication) for details.
+> **Deduplication**: When `.github/instructions/` already contains `.instructions.md` files (deployed by `apm install --target copilot`), `apm compile --target copilot` omits `AGENTS.md` entirely when its only content would be the duplicated instructions section. When `.claude/rules/` already contains `.md` files (deployed by `apm install --target claude`), `apm compile --target claude` omits the instructions section from `CLAUDE.md` for the same reason. The context file is still generated when it carries non-instruction content such as a constitution. See [Copilot deduplication](../../producer/compile/#copilot-deduplication) for details.
 
 ## Common workflows
 
@@ -88,7 +88,7 @@ Or pin in `apm.yml` and rerun install.
 2. `apm prune` to remove APM-managed files for the dropped target.
 3. `apm install && apm compile` to verify.
 
-See [Migration paths -> target migration](../troubleshooting/migration/#5-target-migration).
+See [Migration paths -> target migration](../../troubleshooting/migration/#5-target-migration).
 
 ### Cross-tool sharing via .agents/skills
 
@@ -116,7 +116,7 @@ MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies
   - `~/Library/Application Support/github-copilot/intellij/mcp.json` (macOS)
   - `~/.local/share/github-copilot/intellij/mcp.json` (Linux, honouring `XDG_DATA_HOME`)
 
-For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../consumer/install-mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
+For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../../consumer/install-mcp-servers/) and [`apm mcp`](../../reference/cli/mcp/).
 
 ### Kiro IDE
 
@@ -129,7 +129,7 @@ written to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for
 `--global`.
 
 This target covers the documented Kiro IDE layout. Kiro CLI configuration
-differences are tracked separately; see [the targets matrix](../reference/targets-matrix/#kiro).
+differences are tracked separately; see [the targets matrix](../../reference/targets-matrix/#kiro).
 
 ### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
 
@@ -164,28 +164,28 @@ Notes and limits:
 
 Pinpoint behaviour, slot layout, and known limits per target:
 
-- [Targets matrix](../reference/targets-matrix/) - capability grid
-- [`apm targets`](../reference/cli/targets/) - detection and listing
-- [`apm install`](../reference/cli/install/) - target selection flags
-- [`apm compile`](../reference/cli/compile/) - per-target output
-- [`apm mcp`](../reference/cli/mcp/) - MCP wiring per target
+- [Targets matrix](../../reference/targets-matrix/) - capability grid
+- [`apm targets`](../../reference/cli/targets/) - detection and listing
+- [`apm install`](../../reference/cli/install/) - target selection flags
+- [`apm compile`](../../reference/cli/compile/) - per-target output
+- [`apm mcp`](../../reference/cli/mcp/) - MCP wiring per target
 
 ## Troubleshooting
 
 | Symptom                                       | Where to look                                                              |
 |-----------------------------------------------|----------------------------------------------------------------------------|
-| `[x] No harness detected`                     | [Common errors](../troubleshooting/common-errors/)                          |
-| Compile produced no output                    | [Compile zero-output](../troubleshooting/compile-zero-output-warning/)      |
-| Wrong target picked, multiple harnesses       | [`apm targets`](../reference/cli/targets/)                                  |
-| MCP server not appearing in tool              | [MCP servers guide](../consumer/install-mcp-servers/)                       |
-| Cursor command file dropped                   | [Targets matrix](../reference/targets-matrix/) - `claude_command` transformer |
+| `[x] No harness detected`                     | [Common errors](../../troubleshooting/common-errors/)                          |
+| Compile produced no output                    | [Compile zero-output](../../troubleshooting/compile-zero-output-warning/)      |
+| Wrong target picked, multiple harnesses       | [`apm targets`](../../reference/cli/targets/)                                  |
+| MCP server not appearing in tool              | [MCP servers guide](../../consumer/install-mcp-servers/)                       |
+| Cursor command file dropped                   | [Targets matrix](../../reference/targets-matrix/) - `claude_command` transformer |
 
 ## Related resources
 
-- [Targets matrix](../reference/targets-matrix/)
-- [Manifest schema](../reference/manifest-schema/)
-- [MCP servers](../consumer/install-mcp-servers/)
-- [GitHub Agentic Workflows](./gh-aw/)
-- [Microsoft 365 Copilot Cowork](./copilot-cowork/)
-- [APM in CI/CD](./ci-cd/)
-- [Runtime compatibility](./runtime-compatibility/)
+- [Targets matrix](../../reference/targets-matrix/)
+- [Manifest schema](../../reference/manifest-schema/)
+- [MCP servers](../../consumer/install-mcp-servers/)
+- [GitHub Agentic Workflows](../gh-aw/)
+- [Microsoft 365 Copilot Cowork](../copilot-cowork/)
+- [APM in CI/CD](../ci-cd/)
+- [Runtime compatibility](../runtime-compatibility/)

@@ -52,6 +52,33 @@ def test_lockfile_carries_dependencies_block():
     assert "dependencies" in schema["required"]
 
 
+@pytest.mark.req("req-lk-003")
+def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.ci_checks import _check_ref_consistency
+
+    manifest_commit = "a" * 40
+    dependency = DependencyReference.parse(f"owner/repo#{manifest_commit}")
+    lock = LockFile(
+        dependencies={
+            dependency.get_unique_key(): LockedDependency(
+                repo_url="owner/repo",
+                resolved_ref=manifest_commit,
+                resolved_commit="b" * 40,
+            )
+        }
+    )
+    manifest = SimpleNamespace(get_all_apm_dependencies=lambda: [dependency])
+
+    result = _check_ref_consistency(manifest, lock)
+
+    assert not result.passed
+    assert "lockfile resolved_commit" in result.details[0]
+
+
 @pytest.mark.req("req-lk-004")
 def test_lockfile_v1_remains_parseable_under_v2_reader():
     validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V1))
@@ -262,10 +289,12 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
 
 
 @pytest.mark.req("req-lk-020")
-def test_lockfile_reconciles_inactive_target_paths_fail_safe():
+def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
     from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
 
     from apm_cli.install.manifest_reconcile import union_preserving
+    from apm_cli.install.phases import cleanup
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     def target(name: str, root_dir: str | None = None):
@@ -323,7 +352,36 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe():
     )
     assert declared_indeterminate == [indeterminate_path]
 
+    prior_dependency = SimpleNamespace(
+        deployed_files=["shared.md", "old-only.md"],
+        deployed_file_hashes={},
+    )
+    lockfile = SimpleNamespace(
+        dependencies={"prior-identity": prior_dependency},
+        get_dependency=lambda key: None,
+    )
+    diagnostics = MagicMock()
+    diagnostics.count_for_package.return_value = 0
+    context = SimpleNamespace(
+        existing_lockfile=lockfile,
+        only_packages=False,
+        intended_dep_keys={"active-identity"},
+        project_root=tmp_path,
+        targets=[],
+        diagnostics=diagnostics,
+        logger=MagicMock(),
+        package_deployed_files={"active-identity": ["shared.md"]},
+    )
+    removal = MagicMock(deleted=[], deleted_targets=[], skipped_user_edit=[])
+    with patch(
+        "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+        return_value=removal,
+    ) as remove:
+        cleanup.run(context)
+    assert remove.call_args.args[0] == ["old-only.md"]
+
     assert_spec_contains(
         "MUST remove a prior path attributable",
         "MUST preserve that path and its corresponding hash entry",
+        "MUST preserve any path freshly\ndeployed by an active dependency",
     )

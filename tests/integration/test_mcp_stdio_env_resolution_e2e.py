@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -13,18 +12,6 @@ import toml
 import yaml
 
 pytestmark = pytest.mark.xdist_group(name="home_env")
-
-
-@pytest.fixture
-def apm_command() -> str:
-    """Return the APM executable used by this integration test."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 def _write_apm_yml(project_dir: Path) -> None:
@@ -53,12 +40,12 @@ def _write_apm_yml(project_dir: Path) -> None:
 
 
 def _run_install(
-    apm_command: str, project_dir: Path, runtime: str, verbose: bool
+    apm_binary_path: str, project_dir: Path, runtime: str, verbose: bool
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["APM_NON_INTERACTIVE"] = "1"
-    args = [apm_command, "install"]
+    args = [apm_binary_path, "install"]
     if verbose:
         args.append("--verbose")
     args.extend(["--only", "mcp", "--runtime", runtime, "--target", runtime])
@@ -91,7 +78,7 @@ def _env_block(project_dir: Path, runtime: str) -> dict[str, str]:
 def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    apm_command: str,
+    apm_binary_path: str,
     runtime: str,
     signal_dir: str,
     verbose: bool,
@@ -106,7 +93,7 @@ def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
     monkeypatch.setenv("APM_STDIO_E2E_TOKEN", secret_value)
     monkeypatch.delenv("APM_STDIO_E2E_UNSET_TOKEN", raising=False)
 
-    result = _run_install(apm_command, project_dir, runtime, verbose)
+    result = _run_install(apm_binary_path, project_dir, runtime, verbose)
 
     assert result.returncode == 0, (
         f"apm install failed (rc={result.returncode}).\n"

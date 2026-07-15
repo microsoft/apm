@@ -11,7 +11,7 @@ sidebar:
 <dt>Format</dt><dd>JSON over HTTPS</dd>
 </dl>
 
-This document is the wire-level contract. It is self-contained — a server implementer should be able to build a conformant registry from this doc alone. For the client side and how to declare registries in `apm.yml`, see the [Registries guide](../guides/registries/).
+This document is the wire-level contract. It is self-contained — a server implementer should be able to build a conformant registry from this doc alone. For the client side and how to declare registries in `apm.yml`, see the [Registries guide](../../guides/registries/).
 
 ::::caution[Experimental client support]
 The HTTP API contract is implementable, but APM client consumption of package registries is currently behind an experimental flag. Users must run `apm experimental enable registries` before installing from `registries:` entries.

@@ -69,6 +69,18 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra build
 
+      # Keep the installer gate ahead of the broad unit suite so an unrelated
+      # platform test failure cannot hide installer-specific Windows evidence.
+      - name: Test install.ps1 end-to-end (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          APM_E2E_TESTS: "1"
+        run: >-
+          uv run --frozen pytest
+          tests/integration/test_windows_installer_launchers.py
+          -vv -ra --tb=short
+
       # Unit tests run on every push for fast platform-regression signal.
       # Smoke is intentionally NOT included here: it duplicates ci-integration.yml's
       # merge-time smoke gate and burns a real codex binary download per platform
@@ -108,14 +120,6 @@ jobs:
         shell: pwsh
         run: |
           uv run pwsh scripts/windows/build-binary.ps1
-
-      - name: Test install.ps1 end-to-end (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows/test-install-script.ps1
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
@@ -183,6 +187,16 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      - name: Test macOS non-shell binary startup
+        env:
+          APM_E2E_TESTS: "1"
+          APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-x86_64/apm
+        run: |
+          test -x "$APM_BINARY_PATH"
+          uv run --frozen pytest \
+            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
+            -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4

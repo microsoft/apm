@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Object-form Git dependencies now reject unsupported keys instead of silently
+  ignoring them; use `ref` rather than `version`, and omit inert `name` fields
+  from `git: parent`. CI audit also rejects full-SHA pins whose
+  `resolved_commit` was altered, while source-identity repair preserves files
+  freshly redeployed under the canonical identity; the existing lockfile
+  requirements in `openapm-v0.1.md` now cite both behaviors. Parser and audit
+  diagnostics name `ref` and `apm install --update` when those are the required
+  repair actions. (#2209)
+
+### Fixed
+
+- Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).
+  Cached inheritance chains no longer relabel stale strict parents as fresh or
+  bypass inherited policy in `apm policy status` and executable approval.
+- `apm pack` now matches source-relative skill selectors such as
+  `productivity/grill-me` against flattened deployed skill names. (closes
+  #2171; #2176)
+- `apm update` now converges for unchanged Git dependencies: semver dependencies already at their locked tag no longer report spurious updates (by @srobroek, #2165), and branch dependencies at the same tip no longer produce a plan or reinstall while real tip advances remain visible (#2212).
+- `apm audit` no longer reports drift for skills intentionally excluded by a
+  dependency's `skills:` subset filter. (#2177)
+- `apm update` now re-checks a transitive dependency's own semver range
+  against the remote at any depth, not just for direct dependencies.
+  Previously, `download_callback` only ran for a dependency whose install
+  path didn't already exist, so a transitive dependency already present on
+  disk (e.g. `pkg1 -> pkg2 -> pkg3`, all constrained by `^1.0.0`) never had
+  its own range re-evaluated -- publishing a new matching version of `pkg3`
+  was silently ignored by `apm update` in `pkg1` even though `pkg2`'s
+  manifest allowed it. (by @nadav-y)
+  
+### Added
+
+- Corporate proxy and internal-CA users can now use Python-based APM HTTPS paths
+  without per-shell TLS setup. APM verifies against the OS trust store through
+  `truststore` for `apm install`, the Python `llm` child runtime, and the frozen
+  binary, with `certifi` as fallback. `REQUESTS_CA_BUNDLE` /
+  `CURL_CA_BUNDLE` still wins, and `APM_DISABLE_TRUSTSTORE=1` restores
+  certifi-only behavior. Node (Copilot) and Rust (Codex) children are not yet covered
+  and retain their own trust configuration; tracked in #2034.
+  (closes #2004) (#2005)
+
 ## [0.25.0] - 2026-07-12
 
 ### Added
@@ -66,7 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   #2059, #2114)
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
-  (by @sergio-sisternes-epam, closes #1957, #2041)
+  (by @sergio-sisternes-epam; closes #1957) (#2041)
+- The Windows installer now exposes a version-stable `current\apm.exe` on
+  `PATH` (via a junction to the active release bundle) alongside the existing
+  `bin\apm.cmd` shim, so Git Bash and Python `subprocess.run(["apm", ...])`
+  resolve `apm` without `cmd.exe` PATHEXT expansion. (closes #2076) (#2094)
 
 ### Performance
 

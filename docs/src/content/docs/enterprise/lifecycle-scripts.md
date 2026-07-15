@@ -299,7 +299,7 @@ The log file is created automatically on first script execution.
 
 ## CLI commands
 
-For the full command reference, see [apm lifecycle](../reference/cli/lifecycle/).
+For the full command reference, see [apm lifecycle](../../reference/cli/lifecycle/).
 
 Key workflows:
 

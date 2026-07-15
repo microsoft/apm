@@ -10,9 +10,9 @@ each target's own format. Author them when the value to a specific
 harness justifies the per-target maintenance.
 
 This page covers both. For the cross-harness reach map, see
-[Primitives and targets](../../concepts/primitives-and-targets/).
+[Primitives and targets](../../../concepts/primitives-and-targets/).
 For dev-only versus prod separation in the manifest, see
-[Dev-only primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
+[Dev-only primitives](../../../concepts/primitives-and-targets/#dev-only-primitives).
 
 ## Why they are target-specific
 
@@ -105,9 +105,9 @@ integrates the `.apm/hooks/` copy once per target.
 
 :::note
 See the object-form dependency field in
-[Manifest Schema](../../reference/manifest-schema/#412-object-form) and
+[Manifest Schema](../../../reference/manifest-schema/#412-object-form) and
 the target vocabulary in
-[Primitives and targets](../../concepts/primitives-and-targets/).
+[Primitives and targets](../../../concepts/primitives-and-targets/).
 :::
 
 :::caution[Deprecated]
@@ -243,4 +243,4 @@ agent a procedure" fits a skill -- and reaches every harness.
 
 Once your hooks and commands are in place, run `apm install --dry-run`
 to preview what each target will receive, then `apm pack` to bundle.
-See [Compile](../compile/) and [Pack a bundle](../pack-a-bundle/).
+See [Compile](../../compile/) and [Pack a bundle](../../pack-a-bundle/).

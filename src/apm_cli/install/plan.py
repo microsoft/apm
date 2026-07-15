@@ -220,6 +220,20 @@ def build_update_plan(
         ):
             new_ref = old.resolved_ref
 
+        # Cached git-semver dep at its locked tag: the resolver rewrote
+        # ``dep.reference`` but did not attach the resolved SHA to
+        # ``dep.resolved_reference``, so ``new_commit`` is None. If the ref still
+        # matches a tag-pinned lock entry, borrow its locked SHA, which remains
+        # the integrity anchor. ``resolved_tag`` distinguishes tag resolutions
+        # from movable branches, whose freshly resolved SHAs must remain visible.
+        if (
+            new_commit is None
+            and old is not None
+            and getattr(old, "resolved_tag", None)
+            and new_ref == old.resolved_ref
+        ):
+            new_commit = old.resolved_commit
+
         if old is None:
             plan_entries.append(
                 PlanEntry(

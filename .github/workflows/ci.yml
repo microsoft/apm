@@ -85,6 +85,37 @@ jobs:
     - name: Lint - architecture authority boundaries
       run: bash scripts/lint-architecture-boundaries.sh
 
+  test-architecture:
+    name: Test Architecture Ratchets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Run ratchet contract tests
+      env:
+        APM_ALLOW_PROVISIONAL_BASELINES: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && '1' || '0' }}
+      run: |
+        uv run --extra dev pytest -p no:cacheprovider -q \
+          tests/unit/scripts/test_check_test_assertions.py \
+          tests/unit/scripts/test_check_exact_test_duplicates.py \
+          tests/quality/test_test_taxonomy.py \
+          tests/quality/test_quality_baselines.py \
+          tests/quality/test_ci_topology.py
+
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
   # Two-way sharded with pytest-split, mirroring the pattern proven in

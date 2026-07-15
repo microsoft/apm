@@ -9,7 +9,7 @@ sidebar:
 
 The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, `apm audit --ci`, `apm policy status`, and the install preflight before any package is written to disk.
 
-For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../enterprise/governance-guide/).
+For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](../cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../../enterprise/governance-guide/).
 
 ## What apm-policy.yml governs
 
@@ -442,8 +442,8 @@ first-match-wins ladder (org deny > user deny > project deny > project allow >
 user allow > org recommend > default-deny). Each locked dependency records the
 resolved state in the `exec_status` field of `apm.lock.yaml` (one of
 `deployed`, `gated_pending_approval`, `denied`, `absent`). For the consumer-side
-commands that write project and personal trust, see [apm approve / apm
-deny](./cli/approve/).
+commands that write project and personal trust, see
+[`apm approve`](../cli/approve/) and [`apm deny`](../cli/deny/).
 
 There is no `enforce` mandate runtime, no cryptographic signing, and no
 content-hash binding in this release: an `executables.enforce` rung is accepted
@@ -464,7 +464,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 
 **Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
 
-**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
+**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -492,7 +492,7 @@ No. apm-policy.yml controls what gets installed; your harness controls what runs
 
 ## See also
 
-- [apm policy](./cli/policy/) -- the `apm policy status` command.
-- [Govern with apm-policy.yml](../enterprise/apm-policy/) -- end-to-end rollout guide.
-- [Enforce in CI](../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
-- [Governance deep-dive](../enterprise/governance-guide/) -- the full enterprise control surface.
+- [apm policy](../cli/policy/) -- the `apm policy status` command.
+- [Govern with apm-policy.yml](../../enterprise/apm-policy/) -- end-to-end rollout guide.
+- [Enforce in CI](../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
+- [Governance deep-dive](../../enterprise/governance-guide/) -- the full enterprise control surface.

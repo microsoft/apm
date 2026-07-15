@@ -86,32 +86,11 @@ def run_command(
         pytest.fail(f"Command failed: {cmd}\nStdout: {e.stdout}\nStderr: {e.stderr}")
 
 
-@pytest.fixture(scope="module")
-def apm_binary():
-    """Get path to APM binary for testing."""
-    possible_paths = [
-        "apm",
-        "./apm",
-        "./dist/apm",
-        Path(__file__).parent.parent.parent / "dist" / "apm",
-    ]
-
-    for path in possible_paths:
-        try:
-            result = subprocess.run([str(path), "--version"], capture_output=True, text=True)
-            if result.returncode == 0:
-                return str(path)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-
-    pytest.skip("APM binary not found. Build it first with: python -m build")
-
-
 class TestGuardrailingHeroScenario:
     """Test README Hero Scenario 2: 2-Minute Guardrailing"""
 
     @pytest.mark.skipif(not PRIMARY_TOKEN, reason="GitHub token required for E2E tests")
-    def test_2_minute_guardrailing_flow(self, apm_binary):
+    def test_2_minute_guardrailing_flow(self, apm_binary_path):
         """Test the exact 2-minute guardrailing flow from README.
 
         Validates:
@@ -126,7 +105,7 @@ class TestGuardrailingHeroScenario:
             # Step 1: apm init my-project
             print("\n=== Step 1: apm init my-project ===")
             result = run_command(
-                f"{apm_binary} init my-project --yes --target copilot",
+                f"{apm_binary_path} init my-project --yes --target copilot",
                 cwd=workspace,
                 show_output=True,
             )
@@ -142,7 +121,7 @@ class TestGuardrailingHeroScenario:
             print("\n=== Step 2: apm install microsoft/apm-sample-package ===")
             env = os.environ.copy()
             result = run_command(
-                f"{apm_binary} install microsoft/apm-sample-package",
+                f"{apm_binary_path} install microsoft/apm-sample-package",
                 cwd=project_dir,
                 show_output=True,
                 env=env,
@@ -161,7 +140,7 @@ class TestGuardrailingHeroScenario:
                 "\n=== Step 3: apm install github/awesome-copilot/instructions/code-review-generic.instructions.md ==="
             )
             result = run_command(
-                f"{apm_binary} install github/awesome-copilot/instructions/code-review-generic.instructions.md",
+                f"{apm_binary_path} install github/awesome-copilot/instructions/code-review-generic.instructions.md",
                 cwd=project_dir,
                 show_output=True,
                 env=env,
@@ -184,7 +163,7 @@ class TestGuardrailingHeroScenario:
 
             # Step 4: apm compile
             print("\n=== Step 4: apm compile ===")
-            result = run_command(f"{apm_binary} compile", cwd=project_dir, show_output=True)
+            result = run_command(f"{apm_binary_path} compile", cwd=project_dir, show_output=True)
             assert result.returncode == 0, f"Compilation failed: {result.stderr}"
 
             # Copilot compile suppresses empty AGENTS.md shells when installed
@@ -226,7 +205,7 @@ class TestGuardrailingHeroScenario:
             # Use early termination pattern - we only need to verify prompt starts correctly
             # Don't wait for full Copilot CLI execution (takes minutes)
             process = subprocess.Popen(
-                f"{apm_binary} run design-review",
+                f"{apm_binary_path} run design-review",
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

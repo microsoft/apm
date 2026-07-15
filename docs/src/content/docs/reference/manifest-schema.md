@@ -79,7 +79,7 @@ the working draft's named map plus `default` selector.
 
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 
-Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](./cli/init/) for the templates.
+Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](../cli/init/) for the templates.
 
 ---
 
@@ -127,9 +127,9 @@ Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm ini
 | **Description** | SPDX license expression (e.g. `MIT`, `Apache-2.0`, `(MIT OR Apache-2.0)`) declaring the package license. |
 
 The value is recorded verbatim into a consumer's lockfile as
-[`declared_license`](./lockfile-spec/) at resolve time, syntax-validated
+[`declared_license`](../lockfile-spec/) at resolve time, syntax-validated
 offline against the bundled SPDX id set, and surfaced by
-[`apm lock export`](./cli/lock/#export-sbom-inventory). Special tokens
+[`apm lock export`](../cli/lock/#export-sbom-inventory). Special tokens
 (`UNLICENSED`, `SEE LICENSE IN <file>`) and unrecognized strings are accepted
 and recorded as a named license -- a declaration is never rejected and never
 blocks packing or publishing. APM records what the manifest *declares*; it
@@ -187,7 +187,7 @@ based on which tool folders exist on the local machine. The committed set silent
 whoever last ran `apm compile`. Setting `targets:` makes the output deterministic
 for every developer, CI runner, and cloud agent that relies on the checked-in
 generated files without running `apm compile` locally. See
-[Pin committed output with targets:](./cli/compile/#pin-committed-output-with-targets).
+[Pin committed output with targets:](../cli/compile/#pin-committed-output-with-targets).
 :::
 
 ### 3.7. `type`
@@ -272,9 +272,9 @@ includes: auto
 For plugin packing, `includes:` is allow-list only. There is no `exclude:`
 form. To keep maintainer-only primitives out of shipped artifacts, author them
 outside the selected source layout and reference them via a local-path
-devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
+devDependency. See [Dev-only Primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
 
-When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
+When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
 ### 3.10. `policy`
 
@@ -297,7 +297,7 @@ policy:
 | `hash` | `string` | unset | `<algo>:<hex-digest>` | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present. MD5 and SHA-1 are rejected at parse time. |
 
-Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../enterprise/policy-reference/).
+Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../../enterprise/policy-reference/).
 
 ### 3.11. `registries`
 
@@ -309,7 +309,7 @@ The `registries:` field and registry-routed APM dependency forms require `apm ex
 |---|---|
 | **Type** | `map<string, RegistryEntry>` with optional `default: <string>` key |
 | **Required** | OPTIONAL |
-| **Description** | Declares REST-based APM registries for the project. Strictly additive - absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../guides/registries/#user-level-config). |
+| **Description** | Declares REST-based APM registries for the project. Strictly additive - absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../../guides/registries/#user-level-config). |
 
 ```yaml
 registries:
@@ -328,7 +328,7 @@ Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
 
 **Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
 
-For full client semantics - auth, lockfile fields, and routing rules - see the [Registries guide](../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](./registry-http-api/).
+For full client semantics - auth, lockfile fields, and routing rules - see the [Registries guide](../../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](../registry-http-api/).
 
 ---
 
@@ -409,7 +409,7 @@ dependencies:
 
 #### 4.1.2. Object Form
 
-REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with virtual paths). NOT required for nested-group deps that route through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`): the install-time boundary probe HEAD-walks candidate splits against the proxy and locks in the first one whose archive responds. See [Registry proxy guide](../enterprise/registry-proxy/#nested-group-repos-gitlab-subgroups-behind-the-proxy).
+REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with virtual paths). NOT required for nested-group deps that route through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`): the install-time boundary probe HEAD-walks candidate splits against the proxy and locks in the first one whose archive responds. See [Registry proxy guide](../../enterprise/registry-proxy/#nested-group-repos-gitlab-subgroups-behind-the-proxy).
 
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
@@ -417,7 +417,14 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
+| `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
+| `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
+| `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a skill bundle. |
 | `targets` | `list<string>` | OPTIONAL | Subset of canonical target keys (`copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`) | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+
+Unknown object-form fields are rejected. On a Git object, `version` reports an
+actionable error to use `ref` for a branch, tag, or commit; `version` belongs
+to registry and marketplace dependency objects.
 
 `targets:` on a dependency is intersected with the active install targets
 (`--target`, config default, package-level `targets:`, or auto-detect).
@@ -463,7 +470,7 @@ Monorepo sibling reference (`git: parent`):
   path: skills/shared
 ```
 
-The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. `ref` and `alias` overrides are accepted; when `ref` is omitted the parent's resolved ref is inherited.
+The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. Only `git`, `path`, `ref`, and `alias` are accepted on this form. When `ref` is omitted the parent's resolved ref is inherited.
 
 Marketplace dependency (resolved at install time):
 
@@ -711,7 +718,7 @@ dependencies:
 
 #### 4.3.4. What Gets Written
 
-`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../consumer/install-lsp-servers/) for output formats and lifecycle details.
+`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats and lifecycle details.
 
 ---
 
@@ -723,7 +730,7 @@ dependencies:
 | **Required** | OPTIONAL |
 | **Known keys** | `apm`, `mcp`, `lsp` |
 
-Development-only dependencies installed locally but excluded from plugin bundles produced by [`apm pack`](./cli/pack/) (plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
+Development-only dependencies installed locally but excluded from plugin bundles produced by [`apm pack`](../cli/pack/) (plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
 
 ```yaml
 devDependencies:
@@ -732,7 +739,7 @@ devDependencies:
     - owner/lint-rules#v2.0.0
 ```
 
-Created automatically by [`apm plugin init`](./cli/plugin/). Use [`apm install --dev`](./cli/install/) to add packages:
+Created automatically by [`apm plugin init`](../cli/plugin/). Use [`apm install --dev`](../cli/install/) to add packages:
 
 ```bash
 apm install --dev owner/test-helpers
@@ -745,7 +752,7 @@ uses `.apm/` when present, otherwise supported plugin-native root directories;
 it does not consult the devDep marker. To keep maintainer-only primitives out
 of shipped artifacts, author them outside the selected source layout and
 reference them via a local-path devDependency. See [Dev-only
-Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
+Primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
 
 Local-path devDependency example:
 
@@ -759,7 +766,7 @@ devDependencies:
 
 ## 6. Compilation
 
-The `compilation` key is OPTIONAL. It controls [`apm compile`](./cli/compile/) behaviour. All fields have sensible defaults; omitting the entire section is valid.
+The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) behaviour. All fields have sensible defaults; omitting the entire section is valid.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
@@ -804,7 +811,7 @@ Controls how `apm compile` writes the root `AGENTS.md` output file. All fields a
 
 Both markers must appear **exactly once** in the file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content.
 
-See [Managed-section mode](../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
+See [Managed-section mode](../../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
 
 ```yaml
 compilation:
@@ -820,7 +827,7 @@ compilation:
 
 The OPTIONAL `marketplace:` block declares the metadata `apm pack` needs to emit a Claude-Code-compatible plugin marketplace (`marketplace.json`). It is read by `apm marketplace` subcommands and ignored by everything else. Repositories that do not publish a marketplace omit it entirely.
 
-The block was previously a standalone `marketplace.yml` file (still loadable for back-compat); the in-`apm.yml` form is canonical and is what [`apm marketplace init`](./cli/marketplace/) scaffolds.
+The block was previously a standalone `marketplace.yml` file (still loadable for back-compat); the in-`apm.yml` form is canonical and is what [`apm marketplace init`](../cli/marketplace/) scaffolds.
 
 ### 7.1. Inheritance
 
@@ -907,7 +914,7 @@ A relative `source` may use arbitrary path depth. A value whose leading segments
 
 `sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
 
-Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps -- authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host (an Azure DevOps `ADO_APM_PAT`, for example, is only ever offered to `dev.azure.com`).
+Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps -- authenticate via the standard APM token chain -- see the [authentication guide](../../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host (an Azure DevOps `ADO_APM_PAT`, for example, is only ever offered to `dev.azure.com`).
 
 ### 7.6. Complete Marketplace Block
 
@@ -962,7 +969,7 @@ The legacy standalone `marketplace.yml` (top-level keys, no `marketplace:` wrapp
 
 After successful dependency resolution, a conforming resolver MUST write a lockfile capturing the exact resolved state. The lockfile MUST be a YAML file named `apm.lock.yaml` at the project root and SHOULD be committed to version control.
 
-The full lockfile schema is specified in the [Lockfile specification](./lockfile-spec/). At a minimum, every resolver MUST record `lockfile_version`, `dependencies[].repo_url`, `dependencies[].resolved_commit`, and `dependencies[].deployed_files` so subsequent installs are reproducible and `apm uninstall` can remove every placed file.
+The full lockfile schema is specified in the [Lockfile specification](../lockfile-spec/). At a minimum, every resolver MUST record `lockfile_version`, `dependencies[].repo_url`, `dependencies[].resolved_commit`, and `dependencies[].deployed_files` so subsequent installs are reproducible and `apm uninstall` can remove every placed file.
 
 Resolver behaviour:
 
@@ -980,7 +987,7 @@ Any runtime adopting this format (e.g. GitHub Agentic Workflows, CI systems, IDE
 2. **Resolve `dependencies.apm`** -- For each entry, clone or fetch the git repo (respecting `ref`), locate the `.apm/` directory (or virtual path), and extract primitives.
 3. **Resolve `dependencies.mcp`** -- For each entry, resolve from the MCP registry or validate self-defined transport config per Section 4.2.3.
 4. **Transitive resolution** -- Resolved packages MAY contain their own `apm.yml` with further dependencies, forming a dependency tree. Resolvers MUST resolve transitively. Conflicts are merged at instruction level (by `applyTo` pattern), not file level.
-5. **Write lockfile** -- Record exact commit SHAs and deployed file paths in `apm.lock.yaml` per Section 8 and the [Lockfile specification](./lockfile-spec/).
+5. **Write lockfile** -- Record exact commit SHAs and deployed file paths in `apm.lock.yaml` per Section 8 and the [Lockfile specification](../lockfile-spec/).
 
 ---
 

@@ -23,7 +23,21 @@ from pathlib import Path
 
 import click
 
+from ..core.command_logger import CommandLogger
+from ..policy import outcome_routing as policy_outcomes
+from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+from ..policy.schema import ApmPolicy
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
+
+_POLICY_RESOLUTION_WARNING = (
+    "Org policy could not be resolved; approval is proceeding without org "
+    "restrictions. Run 'apm policy status --no-cache' to diagnose."
+)
+_POLICY_HASH_MISMATCH_WARNING = (
+    "Policy hash verification failed; this may indicate policy tampering. "
+    "Approval is proceeding without org restrictions. "
+    "Run 'apm policy status --no-cache' to verify the policy source."
+)
 
 
 def _find_manifest() -> Path:
@@ -70,24 +84,29 @@ def _store_label(user_scope: bool) -> str:
     return "~/.apm/config.json" if user_scope else "apm.yml executables block"
 
 
-def _load_org_policy(project_root: Path):
+def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Best-effort load of the merged org policy. Returns a default on failure."""
-    from ..policy.schema import ApmPolicy
-
+    warning: str | None = None
     try:
-        from ..policy.discovery import discover_policy
+        from ..policy.discovery import discover_policy_with_chain
 
-        result = discover_policy(project_root)
+        result = discover_policy_with_chain(project_root)
         if getattr(result, "policy", None) is not None:
             return result.policy
+        if result.outcome == policy_outcomes.POLICY_HASH_MISMATCH_OUTCOME:
+            warning = _POLICY_HASH_MISMATCH_WARNING
+        elif result.outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
+            warning = _POLICY_RESOLUTION_WARNING
     except Exception:
-        pass
+        warning = _POLICY_RESOLUTION_WARNING
+    if warning is not None and logger is not None:
+        logger.warning(warning)
     return ApmPolicy()
 
 
-def load_org_policy(project_root: Path):
+def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Public wrapper for best-effort merged org policy loading."""
-    return _load_org_policy(project_root)
+    return _load_org_policy(project_root, logger=logger)
 
 
 @click.command("approve")
@@ -136,31 +155,35 @@ def approve_cmd(
 
         apm approve --user owner/repo
     """
-    manifest = _find_manifest()
+    logger = CommandLogger("approve")
+    try:
+        manifest = _find_manifest()
 
-    if list_decisions:
-        _list_decisions(manifest)
-        return
+        if list_decisions:
+            _list_decisions(manifest, logger=logger)
+            return
 
-    allow, deny = _load_store(manifest, user_scope)
+        allow, deny = _load_store(manifest, user_scope)
 
-    if pending:
-        _show_pending(manifest, allow)
-        return
+        if pending:
+            _show_pending(manifest, allow)
+            return
 
-    if recommended:
-        _approve_recommended(manifest, user_scope, allow, deny)
-        return
+        if recommended:
+            _approve_recommended(manifest, user_scope, allow, deny, logger=logger)
+            return
 
-    if approve_all:
-        _approve_all_pending(manifest, user_scope, allow, deny)
-        return
+        if approve_all:
+            _approve_all_pending(manifest, user_scope, allow, deny)
+            return
 
-    if not packages:
-        _rich_error("Specify at least one package, or use --pending / --all / --recommended.")
-        sys.exit(1)
+        if not packages:
+            _rich_error("Specify at least one package, or use --pending / --all / --recommended.")
+            sys.exit(1)
 
-    _approve_packages(manifest, user_scope, allow, deny, packages)
+        _approve_packages(manifest, user_scope, allow, deny, packages)
+    finally:
+        logger.render_summary()
 
 
 @click.command("deny")
@@ -213,7 +236,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
 
 
-def explain_decision(package: str) -> None:
+def explain_decision(package: str, *, logger: CommandLogger) -> None:
     """Explain the effective executable-trust decision for a package.
 
     Shows, per executable type the package declares, whether it is allowed,
@@ -232,7 +255,7 @@ def explain_decision(package: str) -> None:
 
     data = load_yaml(manifest)
     project_data = data if isinstance(data, dict) else {}
-    policy = _load_org_policy(manifest.parent)
+    policy = _load_org_policy(manifest.parent, logger=logger)
     ctx = build_exec_trust_context(policy=policy, project_data=project_data)
 
     declarations = _scan_installed_packages(manifest)
@@ -275,14 +298,14 @@ def explain_decision(package: str) -> None:
         )
 
 
-def _list_decisions(manifest: Path) -> None:
+def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
     """Print the effective trust decision + deciding layer per installed package."""
     from ..security.executables import build_exec_trust_context, resolve_exec_decision
     from ..utils.yaml_io import load_yaml
 
     data = load_yaml(manifest)
     project_data = data if isinstance(data, dict) else {}
-    policy = _load_org_policy(manifest.parent)
+    policy = _load_org_policy(manifest.parent, logger=logger)
     ctx = build_exec_trust_context(policy=policy, project_data=project_data)
 
     declarations = [d for d in _scan_installed_packages(manifest) if d.has_executables]
@@ -364,9 +387,11 @@ def _approve_recommended(
     user_scope: bool,
     allow: dict[str, dict[str, bool]],
     deny: dict[str, dict[str, bool]],
+    *,
+    logger: CommandLogger,
 ) -> None:
     """Bulk-approve the org ``executables.recommend`` set."""
-    policy = _load_org_policy(manifest.parent)
+    policy = _load_org_policy(manifest.parent, logger=logger)
     recommend = set(getattr(getattr(policy, "executables", None), "recommend", ()) or ())
     if not recommend:
         _rich_info("No org-recommended executables to approve.", symbol="info")

@@ -103,8 +103,8 @@ What these checks do **not** cover, by design:
   described below.
 - Org policy (allow-listed sources, forbidden primitives, scope
   restrictions). Policy enforcement is an enterprise concern; see
-  [Security model](../enterprise/security/)
-  and [Drift detection](../enterprise/drift-detection/).
+  [Security model](../../enterprise/security/)
+  and [Drift detection](../../enterprise/drift-detection/).
 
 ## On-demand: `apm audit`
 
@@ -143,7 +143,7 @@ to your project. If the cache is missing the entries the lockfile
 references, the audit fails fast with a "run `apm install` first"
 message rather than guessing.
 
-For the full flag set, see [CLI audit](../reference/cli/audit/).
+For the full flag set, see [CLI audit](../../reference/cli/audit/).
 
 ## When something is off
 

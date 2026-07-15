@@ -84,6 +84,19 @@ check_pattern \
     "Install adapters must not classify diagnostics" \
     'classify_post_install_result' \
     src/apm_cli/commands/install.py
+approval_file="src/apm_cli/commands/approve.py"
+policy_outcome_owner="src/apm_cli/policy/outcome_routing.py"
+if ! grep -q '^POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(' \
+    "$policy_outcome_owner" \
+    || ! grep -q \
+        'from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES' \
+        "$approval_file" \
+    || grep -Eq \
+        '"(cache_miss_fetch_fail|garbage_response|hash_mismatch|incomplete_chain|malformed)"' \
+        "$approval_file"; then
+    echo "[x] Approval fallback outcomes must use policy/outcome_routing.py"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Audit policy sources must use chain-aware discovery" \
     'discover_policy\(' \
@@ -96,6 +109,38 @@ fi
 if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
     || ! grep -q 'incomplete_chain' src/apm_cli/policy/outcome_routing.py; then
     echo "[x] Incomplete policy chains must route through fail-closed outcome handling"
+    violations=$((violations + 1))
+fi
+policy_file="src/apm_cli/policy/discovery.py"
+policy_named_defs=$(grep -Ec \
+    '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
+    "$policy_file" || true)
+policy_serializer_body=$(awk '
+    /^def _serialize_policy\(/ {flag=1}
+    flag && /^def / && !/^def _serialize_policy\(/ {exit}
+    flag {print}
+' "$policy_file")
+policy_cache_write_body=$(awk '
+    /^def _write_cache\(/ {flag=1}
+    flag && /^def / && !/^def _write_cache\(/ {exit}
+    flag {print}
+' "$policy_file")
+policy_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
+        src/apm_cli/policy \
+        | grep -v "^${policy_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$policy_named_defs" -ne 2 ] \
+    || ! printf '%s\n' "$policy_serializer_body" \
+        | grep -Eq '^[[:space:]]*[^#]*_policy_to_dict\(policy\)' \
+    || ! printf '%s\n' "$policy_cache_write_body" \
+        | grep -Eq '^[[:space:]]*serialized[[:space:]]*=[[:space:]]*_serialize_policy\(policy\)' \
+    || [ -n "$policy_duplicate_hits" ]; then
+    echo "[x] Cached policy shape must route through policy/discovery.py::_policy_to_dict"
+    [ -n "$policy_duplicate_hits" ] && echo "$policy_duplicate_hits"
     violations=$((violations + 1))
 fi
 
@@ -118,6 +163,53 @@ if [ "$winner_selector_calls" -ne 3 ]; then
     echo "[x] Dependency dispatch and flattening must share _select_dependency_winners"
     violations=$((violations + 1))
 fi
+# Skill subset filter tokens: two layers of defense. The cheap lexical grep
+# catches the exact retired shape (literal helper name / pattern); it is kept
+# as defense in depth even though it is not sufficient on its own -- a
+# renamed helper reimplementing the same normalization algorithm evades a
+# grep by construction. The AST checker (scripts/check_skill_subset_owner.py)
+# is the semantic detector: it flags ANY local function, in these same two
+# files, that combines slash normalization + path-leaf extraction +
+# token-set collection, regardless of naming. Both feed one label and
+# increment violations at most once.
+skill_subset_files=(
+    src/apm_cli/integration/skill_integrator.py
+    src/apm_cli/bundle/plugin_exporter.py
+)
+skill_subset_lexical_hits=$(grep -En \
+    'def _skill_subset_name_filter|set\(dep\.skill_subset\)|Path\(normalized_path\)\.name' \
+    "${skill_subset_files[@]}" 2>/dev/null \
+    | grep -v 'architecture-authority-exempt:' || true)
+skill_subset_ast_hits=$(python3 scripts/check_skill_subset_owner.py "${skill_subset_files[@]}" 2>&1)
+skill_subset_ast_status=$?
+if [ -n "$skill_subset_lexical_hits" ] || [ "$skill_subset_ast_status" -ne 0 ]; then
+    echo "[x] Skill subset filter tokens must come from models/dependency/subsets.py"
+    [ -n "$skill_subset_lexical_hits" ] && echo "$skill_subset_lexical_hits"
+    [ "$skill_subset_ast_status" -ne 0 ] && echo "$skill_subset_ast_hits"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" \
+    'deployment_package_root' \
+    $(find src/apm_cli -name '*.py' \
+        ! -path 'src/apm_cli/models/apm_package.py' \
+        ! -path 'src/apm_cli/integration/base_integrator.py' \
+        ! -path 'src/apm_cli/compilation/link_resolver.py' \
+        ! -path 'src/apm_cli/install/drift.py')
+if ! grep -q \
+    'candidate_in_deployment = ctx.deployment_package_root / package_relative' \
+    src/apm_cli/compilation/link_resolver.py; then
+    echo "[x] UnifiedLinkResolver must project source assets into the deployment frame"
+    violations=$((violations + 1))
+fi
+cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
+cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
+cleanup_claim_status=$?
+if [ "$cleanup_claim_status" -ne 0 ]; then
+    echo "[x] Cleanup current-claim protection must use DeploymentReconciler"
+    echo "$cleanup_claim_output"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
@@ -135,6 +227,73 @@ check_pattern \
 if ! grep -A25 'if plugin.registry:' src/apm_cli/marketplace/resolver.py \
     | grep -q 'source="registry"'; then
     echo "[x] Marketplace registry intent must create a registry dependency"
+    violations=$((violations + 1))
+fi
+lockfile_to_ref_body=$(awk '
+    /^    def to_dependency_ref\(/ {flag=1}
+    flag && /^    def / && !/to_dependency_ref/ {exit}
+    flag && /^class / {exit}
+    flag {print}
+' src/apm_cli/deps/lockfile.py)
+# Checked as two separate function-scoped greps (rather than requiring both
+# the keyword and the owner attribute on one physical line) so that ruff/
+# manual formatting wrapping the ``skill_subset=`` expression across lines
+# does not produce a false positive.
+if ! echo "$lockfile_to_ref_body" | grep -q 'DependencyReference(' \
+    || ! echo "$lockfile_to_ref_body" | grep -q 'skill_subset=' \
+    || ! echo "$lockfile_to_ref_body" | grep -q 'self\.skill_subset'; then
+    echo "[x] LockedDependency.to_dependency_ref must reconstruct skill_subset from self.skill_subset"
+    violations=$((violations + 1))
+fi
+run_replay_body=$(awk '
+    /^def run_replay\(/ {flag=1}
+    flag && /^def / && !/run_replay/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+# Same rationale as the lockfile guard above: keyword and owner attribute
+# are checked as independent function-scoped greps so multiline formatting
+# of the ``skill_subset=`` expression is still accepted.
+if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
+    || ! echo "$run_replay_body" | grep -q 'skill_subset=' \
+    || ! echo "$run_replay_body" | grep -q 'package_info\.dependency_ref\.skill_subset'; then
+    echo "[x] Audit replay must preserve locked skill subset intent"
+    violations=$((violations + 1))
+fi
+update_plan_ref_body=$(awk '
+    /^def annotate_update_plan_refs\(/ {flag=1}
+    flag && /^def / && !/annotate_update_plan_refs/ {exit}
+    flag {print}
+' src/apm_cli/install/helpers/ref_reuse.py)
+if ! echo "$update_plan_ref_body" | grep -q 'downloader\.resolve_git_reference(dep_ref)' \
+    || ! echo "$update_plan_ref_body" | grep -q 'dep_ref\.resolved_reference = resolved'; then
+    echo "[x] Cached update planning must resolve refs through the downloader owner"
+    violations=$((violations + 1))
+fi
+dependency_field_owner="src/apm_cli/models/dependency/object_fields.py"
+dependency_parser="src/apm_cli/models/dependency/reference.py"
+dependency_field_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'def reject_unknown_git_fields|_(REMOTE|PARENT)_GIT_DEPENDENCY_FIELDS' \
+        src tests \
+        | grep -v "^${dependency_field_owner}:" \
+        | grep -v '^tests/integration/test_architecture_authorities.py:' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+fixture_dependency_field_hits=$(
+    grep -En \
+        'reject_unknown_fields|_(REMOTE|PARENT)?_?GIT_DEPENDENCY_FIELDS' \
+        tests/utils/local_package.py \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'reject_unknown_git_fields(entry, parent=True)' "$dependency_parser" \
+    || ! grep -q 'reject_unknown_git_fields(entry, parent=False)' "$dependency_parser" \
+    || [ -n "$dependency_field_duplicate_hits" ] \
+    || [ -n "$fixture_dependency_field_hits" ]; then
+    echo "[x] Object-form Git dependency fields must come from the product parser"
+    [ -n "$dependency_field_duplicate_hits" ] && echo "$dependency_field_duplicate_hits"
+    [ -n "$fixture_dependency_field_hits" ] && echo "$fixture_dependency_field_hits"
     violations=$((violations + 1))
 fi
 
@@ -156,6 +315,12 @@ if ! grep -q '_clear_git_auth_env(env)' src/apm_cli/core/auth.py; then
     echo "[x] AuthResolver must scrub inherited Git authorization state"
     violations=$((violations + 1))
 fi
+check_pattern \
+    "TLS trust injection belongs to canonical owners" \
+    'truststore\.inject_into_ssl\(' \
+    $(find src/apm_cli -name '*.py' \
+        ! -path 'src/apm_cli/core/tls_trust.py' \
+        ! -path 'src/apm_cli/core/_child_tls/_apm_tls_bootstrap.py')
 
 echo "[*] AC6: neutral IR and schema contracts"
 check_pattern \
@@ -186,6 +351,27 @@ if ! grep -A8 'def add_marketplace' src/apm_cli/marketplace/registry.py \
     || ! grep -A12 'def remove_marketplace' src/apm_cli/marketplace/registry.py \
     | grep -q '_marketplace_mutation'; then
     echo "[x] Marketplace mutations must lock the full load-modify-save transaction"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC8: Windows installer authorities"
+# Owner presence + duplicate-derivation scanning both live in the single
+# canonical checker so this guard and the architecture test suite cannot
+# drift apart. See scripts/check_windows_stable_path_owner.py.
+windows_owner_output=$(python3 scripts/check_windows_stable_path_owner.py --root "$ROOT" 2>&1)
+windows_owner_status=$?
+if [ "$windows_owner_status" -ne 0 ]; then
+    echo "[x] Windows stable executable path belongs to install.ps1"
+    echo "$windows_owner_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC9: executable test contract authorities"
+test_contract_output=$(python3 scripts/check_test_contract_authorities.py --root "$ROOT" 2>&1)
+test_contract_status=$?
+if [ "$test_contract_status" -ne 0 ]; then
+    echo "[x] Integration binary selection and rendered CLI parity require canonical owners"
+    echo "$test_contract_output"
     violations=$((violations + 1))
 fi
 

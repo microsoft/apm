@@ -113,7 +113,7 @@ Org-side posture when consumers cannot fetch this policy AND have a stale cached
 | `warn` | Loud warning emitted; install proceeds with the cached policy (or with no policy if cache is empty). Default. |
 | `block` | Fail-closed when a cached policy is available but a refresh fails. |
 
-Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../reference/manifest-schema/#39-policy) for the consumer-side fields.
+Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../../reference/manifest-schema/#39-policy) for the consumer-side fields.
 
 ---
 
@@ -191,7 +191,7 @@ dependencies:
   require_pinned_constraint: true
 ```
 
-Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
+Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
@@ -597,7 +597,7 @@ dependencies:
 ## Install-time enforcement
 
 :::note[Non-goal: structured output]
-Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../reference/cli/audit/) in the CLI reference.
+Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli/audit/) in the CLI reference.
 :::
 
 ### 1. What APM policy is
@@ -972,6 +972,6 @@ manifest:
 
 ## Related
 
-- [Governance](./governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
-- [Enforce in CI](./enforce-in-ci/) -- step-by-step CI setup tutorial
-- [GitHub Rulesets](../integrations/github-rulesets/) -- enforce policy as a required status check
+- [Governance](../governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
+- [Enforce in CI](../enforce-in-ci/) -- step-by-step CI setup tutorial
+- [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check

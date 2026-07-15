@@ -91,9 +91,9 @@ The scope matrix below is the contract. Every row maps a security or operational
 | Transitive MCP trust (policy field) | `mcp.trust_transitive` | -- | `[!] parsed but not enforced` (gate is the `--trust-transitive-mcp` CLI flag) | -- |
 | Manifest content types | `manifest.content_types` | -- | `[!] parsed but not enforced` | -- |
 
-The full schema and the canonical 8+20 check enumeration live in the [Policy Reference](./policy-reference/). The 8 baseline lockfile checks (lockfile presence, ref consistency, deployed files present, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity, includes consent) run on every `apm audit --ci` regardless of policy and are non-bypassable -- they are covered in section 7.
+The full schema and the canonical 8+20 check enumeration live in the [Policy Reference](../policy-reference/). The 8 baseline lockfile checks (lockfile presence, ref consistency, deployed files present, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity, includes consent) run on every `apm audit --ci` regardless of policy and are non-bypassable -- they are covered in section 7.
 
-`manifest.require_explicit_includes` (`bool`, default `false`) deserves a callout: when set to `true`, the `explicit-includes` check rejects any `apm.yml` that omits `includes:` or sets `includes: auto`. Use this when every published local file must be enumerated in the manifest and reviewable in PR diffs. See the [`includes` field](../reference/manifest-schema/#39-includes) for the three accepted forms.
+`manifest.require_explicit_includes` (`bool`, default `false`) deserves a callout: when set to `true`, the `explicit-includes` check rejects any `apm.yml` that omits `includes:` or sets `includes: auto`. Use this when every published local file must be enumerated in the manifest and reviewable in PR diffs. See the [`includes` field](../../reference/manifest-schema/#39-includes) for the three accepted forms.
 
 ---
 
@@ -109,7 +109,7 @@ Be clear with stakeholders about what is out of scope today:
 - **Token scopes and OAuth scopes.** APM does not audit the scope of the GitHub PAT or app token used to fetch policies and packages. Manage that through the standard GitHub controls on the token issuer.
 - **Anything `apm compile` or `apm run` does.** Those commands trust whatever `apm install` placed on disk. They do not re-check policy.
 
-For the underlying threat model (what the content scanner protects against, MCP trust boundary, dependency provenance), see the [Security Model](./security/).
+For the underlying threat model (what the content scanner protects against, MCP trust boundary, dependency provenance), see the [Security Model](../security/).
 
 ---
 
@@ -264,7 +264,7 @@ policy:
 
 The merge rule for `enforcement` is `max(parent, child)` ordered `warn < block`, so the org's `block` wins. The child's `warn` is silently dropped from the effective policy. The same applies to allow-list widening (intersect rule) and deny-list removal (union rule): tightening flows down, relaxation does not.
 
-For the full 12-row merge rule table, see [Tighten-only merge rules](./policy-reference/#tighten-only-merge-rules) in the Policy Reference.
+For the full 12-row merge rule table, see [Tighten-only merge rules](../policy-reference/#tighten-only-merge-rules) in the Policy Reference.
 
 ---
 
@@ -325,7 +325,7 @@ You are NOT guaranteed:
 
 ## 9. Air-gapped and offline
 
-This section covers offline **policy** enforcement (the `apm-policy.yml` cache). For offline **dependency traffic** (routing installs through Artifactory), see [Registry Proxy & Air-gapped](./registry-proxy/).
+This section covers offline **policy** enforcement (the `apm-policy.yml` cache). For offline **dependency traffic** (routing installs through Artifactory), see [Registry Proxy & Air-gapped](../registry-proxy/).
 
 **For air-gapped CI, run `apm audit --ci --policy ./vendored-policy.yml` as your gating check; do not rely on `apm install` enforcement.**
 
@@ -349,12 +349,12 @@ Workarounds when the network is unreliable:
 
 | Outcome | Default behavior | Override to fail-closed | Citation |
 |---|---|---|---|
-| Network failure (`cache_miss_fetch_fail`) | Fail-OPEN, log warning, install proceeds with no policy | `policy.fetch_failure_default: block` in `apm.yml` | [policy-reference#95-network-failure-semantics](./policy-reference/#95-network-failure-semantics) |
-| Cached stale (1h - 7d, refresh failed) | Warn and proceed with cached policy | `policy.fetch_failure: block` set in the cached policy itself | [policy-reference#95-network-failure-semantics](./policy-reference/#95-network-failure-semantics) |
+| Network failure (`cache_miss_fetch_fail`) | Fail-OPEN, log warning, install proceeds with no policy | `policy.fetch_failure_default: block` in `apm.yml` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
+| Cached stale (1h - 7d, refresh failed) | Warn and proceed with cached policy | `policy.fetch_failure: block` set in the cached policy itself | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed YAML (`malformed`) (org policy file) | Fail-OPEN by default | `policy.fetch_failure_default: block` | `policy/parser.py` |
-| **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN, log warning** | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](./policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
-| Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](./policy-reference/#95-network-failure-semantics) |
-| Garbage response | Fail-OPEN by default | `policy.fetch_failure_default: block` | [policy-reference#95-network-failure-semantics](./policy-reference/#95-network-failure-semantics) |
+| **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN, log warning** | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](../policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
+| Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
+| Garbage response | Fail-OPEN by default | `policy.fetch_failure_default: block` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed project manifest (`manifest_parse`) | **Always fail-CLOSED** | n/a (cannot be relaxed) | `policy/policy_checks.py`, `policy/ci_checks.py` |
 | `extends:` cycle detected | Fail-CLOSED, raises `PolicyInheritanceError` | n/a | `policy/inheritance.py` |
 | Cross-host `extends:` rejected | Fail-CLOSED, raises before any fetch | n/a (security mitigation, cannot be relaxed) | `policy/discovery.py` |
@@ -417,7 +417,7 @@ jobs:
         with: { sarif_file: apm-audit.sarif }
 ```
 
-For richer customization (matrix builds, monorepo splits, vendored policy paths) see the [Enforce in CI guide](./enforce-in-ci/).
+For richer customization (matrix builds, monorepo splits, vendored policy paths) see the [Enforce in CI guide](../enforce-in-ci/).
 
 :::caution[Warn mode does not fail CI]
 `apm audit --ci` in warn mode rewrites violations to `passed=True` (audit.py:589-598), so the audit command exits 0 even on policy violations. Visibility is in the SARIF upload + Code Scanning UI, not in branch-protection status. To gate merges on policy violations, you must run in `block` mode.
@@ -429,7 +429,7 @@ For richer customization (matrix builds, monorepo splits, vendored policy paths)
 
 **Circuit-breaker rollout for large fleets.** For 100+ repos, do not flip block org-wide in one commit. Stage: enable `block` for 10% of repos for 1 week (via team-level extends), monitor SARIF alert volume and on-call pages, expand to 50% for 1 week, then 100%. If SARIF volume spikes or on-call escalations cluster, revert to `warn` at the org level (one commit) while you triage.
 
-For step-by-step CI YAML and SARIF upload examples beyond the snippet above, see the [Enforce in CI guide](./enforce-in-ci/).
+For step-by-step CI YAML and SARIF upload examples beyond the snippet above, see the [Enforce in CI guide](../enforce-in-ci/).
 
 ---
 
@@ -439,7 +439,7 @@ The org policy file is the trust root. Protecting it is on you, not on APM.
 
 - **CODEOWNERS on `<org>/.github-private/apm-policy.yml`** (or `<org>/.github/apm-policy.yml`) -- restrict to a security team. Every change requires their review.
 - **Branch protection on `<org>/.github-private` main** (or `<org>/.github`) -- required reviewers, no force push, no direct push to main, dismiss stale approvals on new commits.
-- **GitHub Ruleset on the org `.github-private` repo** (recommended) -- requires approval from a specific team for any change to policy files. See [GitHub Rulesets](../integrations/github-rulesets/).
+- **GitHub Ruleset on the org `.github-private` repo** (recommended) -- requires approval from a specific team for any change to policy files. See [GitHub Rulesets](../../integrations/github-rulesets/).
 - **Change history is `git log apm-policy.yml`.** Rationale lives in commit messages and PR descriptions. Make commit-message rationale a CODEOWNERS-checked review item.
 - **Policy change cooling period** (recommended) -- every change to `apm-policy.yml` requires a PR with rationale and a 24-72 hour waiting period before merge. This is a process control, not a code control, but it is the single most important thing you can add.
 
@@ -461,7 +461,7 @@ When a reviewer asks "who approved this policy change and why?", the forensic an
 git -C <org>/.github log --follow --patch -- apm-policy.yml
 ```
 
-For lockfile-side forensic recipes (`git log apm.lock.yaml`, `git show <sha>:apm.lock.yaml`, etc.), see the [Lockfile Spec](../reference/lockfile-spec/).
+For lockfile-side forensic recipes (`git log apm.lock.yaml`, `git show <sha>:apm.lock.yaml`, etc.), see the [Lockfile Spec](../../reference/lockfile-spec/).
 
 ---
 
@@ -604,11 +604,11 @@ policy:
 **15-minute path:** copy `templates/apm-policy-starter.yml` to `<your-org>/.github-private/apm-policy.yml` (or `<your-org>/.github/apm-policy.yml`), wire the CI YAML from section 11 Phase 2, ship in warn mode. Flip to block once SARIF is clean.
 :::
 
-- [`apm-policy.yml`](./apm-policy/) -- the file's mental model.
-- [Enforce in CI](./enforce-in-ci/) -- step-by-step CI wiring with YAML.
-- [Policy Reference](./policy-reference/) -- complete schema, the canonical 8+20 check enumeration, the 12-row merge rule table, exit codes.
-- [Security Model](./security/) -- threat model, MCP trust boundary, content scanning, token handling.
-- [Adoption Playbook](./adoption-playbook/) -- broader APM rollout (governance is one phase).
-- [Lockfile Spec](../reference/lockfile-spec/) -- lockfile schema for forensic queries.
-- [GitHub Rulesets](../integrations/github-rulesets/) -- enforcing audit as a required check.
-- [Lockfile Spec](../reference/lockfile-spec/) -- companion reference covering the lockfile audit trail and forensic recipes.
+- [`apm-policy.yml`](../apm-policy/) -- the file's mental model.
+- [Enforce in CI](../enforce-in-ci/) -- step-by-step CI wiring with YAML.
+- [Policy Reference](../policy-reference/) -- complete schema, the canonical 8+20 check enumeration, the 12-row merge rule table, exit codes.
+- [Security Model](../security/) -- threat model, MCP trust boundary, content scanning, token handling.
+- [Adoption Playbook](../adoption-playbook/) -- broader APM rollout (governance is one phase).
+- [Lockfile Spec](../../reference/lockfile-spec/) -- lockfile schema for forensic queries.
+- [GitHub Rulesets](../../integrations/github-rulesets/) -- enforcing audit as a required check.
+- [Lockfile Spec](../../reference/lockfile-spec/) -- companion reference covering the lockfile audit trail and forensic recipes.
