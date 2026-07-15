@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Anthropic marketplace schema and the existing Codex output. It stays optional
   (omitted when unset). Previously `category` was silently stripped from the
   Claude output even though the `apm.yml` schema accepts and validates it.
-  (closes #2188)
+  -- by @mbeacom (closes #2188)
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)

@@ -193,7 +193,8 @@ form (`outputs: [claude, codex]`) still parses with a deprecation
 warning. When `codex` is selected, every package must define
 `category`. Codex output maps local entries to `source: local`,
 remote entries to `source: url`, and remote subdirectory entries to
-`source: git-subdir`.
+`source: git-subdir`. Claude output also emits `category` on any
+package where it is set, even though only `codex` requires it.
 
 ## Build
 
