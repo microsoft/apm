@@ -439,6 +439,16 @@ def test_executable_test_contracts_have_one_canonical_owner() -> None:
     assert checker.check(root) == []
 
 
+def test_quality_ratchets_route_through_shared_authorities() -> None:
+    """Ratchet file discovery and baseline writes must have one owner each."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_test_contract_checker(root)
+
+    assert "check_test_contract_authorities.py" in guard
+    assert checker.find_ratchet_authority_violations(root) == []
+
+
 def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
     """The new owner-table row must not silently drop on the next deploy.
 

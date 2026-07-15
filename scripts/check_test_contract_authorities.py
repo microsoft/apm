@@ -27,6 +27,25 @@ LOCAL_BINARY_FACADES = {
     "apm_binary",
     "apm_command",
 }
+TEST_FILE_INVENTORY_OWNER = Path("scripts/test_file_inventory.py")
+RATCHET_BASELINE_OWNER = Path("scripts/ratchet_baseline.py")
+# Manual allowlist: every new ratchet consumer must enroll here for AC9.
+RATCHET_AUTHORITY_CONSUMERS = {
+    Path("scripts/check_test_assertions.py"): (
+        "from test_file_inventory import tracked_python_paths",
+        "from ratchet_baseline import",
+    ),
+    Path("scripts/check_exact_test_duplicates.py"): (
+        "from test_file_inventory import tracked_python_paths",
+        "from ratchet_baseline import",
+    ),
+    Path("tests/quality/repository_python_inventory.py"): (
+        "from scripts.test_file_inventory import tracked_python_paths",
+    ),
+    Path("tests/quality/test_ci_topology.py"): (
+        "from scripts.test_file_inventory import is_test_module_path",
+    ),
+}
 
 
 def _python_files(root: Path, locations: tuple[str, ...]) -> list[Path]:
@@ -916,11 +935,53 @@ def find_rendered_parity_violations(root: Path) -> list[str]:
     return sorted(set(diagnostics))
 
 
+def find_ratchet_authority_violations(root: Path) -> list[str]:
+    """Require ratchet consumers to route through shared file/baseline owners."""
+    diagnostics: list[str] = []
+    for owner in (TEST_FILE_INVENTORY_OWNER, RATCHET_BASELINE_OWNER):
+        if not (root / owner).is_file():
+            diagnostics.append(f"[x] missing ratchet authority owner: {owner}")
+
+    for relative, required_imports in RATCHET_AUTHORITY_CONSUMERS.items():
+        path = root / relative
+        if not path.is_file():
+            diagnostics.append(f"[x] missing ratchet authority consumer: {relative}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        for required_import in required_imports:
+            if required_import not in text:
+                diagnostics.append(
+                    f"[x] {relative} must consume ratchet authority: {required_import}"
+                )
+
+    local_inventory_shapes = {
+        Path("scripts/check_test_assertions.py"): (
+            'rglob("*.py")',
+            '"ls-files"',
+        ),
+        Path("scripts/check_exact_test_duplicates.py"): ('"ls-files"',),
+        Path("tests/quality/repository_python_inventory.py"): ('"ls-files"',),
+    }
+    for relative, forbidden_shapes in local_inventory_shapes.items():
+        path = root / relative
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for forbidden in forbidden_shapes:
+            if forbidden in text:
+                diagnostics.append(
+                    f"[x] duplicate tracked Python inventory in {relative}: "
+                    f"{forbidden}; owner is {TEST_FILE_INVENTORY_OWNER}"
+                )
+    return sorted(diagnostics)
+
+
 def check(root: Path) -> list[str]:
     """Return all canonical-owner violations for the repository."""
     return [
         *find_binary_selection_violations(root),
         *find_rendered_parity_violations(root),
+        *find_ratchet_authority_violations(root),
     ]
 
 

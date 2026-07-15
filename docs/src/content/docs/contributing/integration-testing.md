@@ -64,6 +64,61 @@ invocation is silent rather than red: every test is collected and
 reported as `SKIPPED` with a one-line reason, so you can see exactly
 what is missing and why.
 
+### Three marker axes
+
+Pytest markers compose across independent axes:
+
+| Axis | Question | Markers |
+| --- | --- | --- |
+| Behavioral | What boundary does the test cross? | `unit`, `component`, `e2e` |
+| Scheduling | When is the test selected? | `integration`, `slow`, `benchmark`, `live` |
+| Prerequisite | What environment must exist? | `requires_*` |
+
+`live` is both an opt-in scheduling marker and an external-service
+prerequisite. Behavioral markers do not replace prerequisite markers.
+
+The behavioral definitions are:
+
+| Marker | Definition |
+| --- | --- |
+| `unit` | Pure logic with no filesystem and no CLI |
+| `component` | In-process behavior that touches a filesystem or one command boundary |
+| `e2e` | A real installed CLI crossing at least one command boundary |
+
+`pyproject.toml` owns these definitions, while
+`tests/quality/critical_suite.toml` owns the finite classified module set.
+Directory names and `_e2e.py` suffixes are not proof of behavior.
+`test_policy_pinned_constraint_e2e.py` is `component` because it uses Click
+in-process; `test_core_smoke.py` is `e2e` because it invokes an installed
+binary through subprocess boundaries.
+
+To extend the manifest:
+
+1. Confirm the whole module has one behavioral boundary.
+2. Add its literal path and marker to `critical_suite.toml`.
+3. Add the module-level behavioral `pytestmark`, preserving any scheduling and
+   prerequisite markers.
+4. Document why behavior wins if the filename suggests another boundary.
+5. Run the contracts:
+
+```bash
+uv run --extra dev pytest -p no:cacheprovider -q tests/quality
+uv run --frozen python scripts/check_test_assertions.py
+uv run --frozen python scripts/check_exact_test_duplicates.py
+```
+
+The assertion and exact-duplicate baseline updaters only accept reductions.
+
+```bash
+uv run --frozen python scripts/check_test_assertions.py --update-baseline
+uv run --frozen python scripts/check_exact_test_duplicates.py --update-baseline
+```
+
+Provisional mode is CI-only and allowed only on draft pull requests.
+Contributor commands, ready pull requests, merge queue runs, and final
+validation are strict. Do not pass the internal provisional flag manually;
+remove `provisional` metadata after remeasurement and review.
+
 ### Common invocations
 
 ```bash
