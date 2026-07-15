@@ -29,6 +29,21 @@ _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
+
+
+def _split_shorthand_host_port(host_segment: str) -> tuple[str, int | None]:
+    """Split and validate the host segment used by DependencyReference shorthand."""
+    if ":" not in host_segment:
+        return host_segment, None
+    host, _, raw_port = host_segment.rpartition(":")
+    error = f"Invalid shorthand port '{raw_port}'. Expected an integer from 1 to 65535"
+    if not host or not re.fullmatch(r"[0-9]{1,5}", raw_port):
+        raise ValueError(error)
+    port = int(raw_port)
+    if not 1 <= port <= 65535:
+        raise ValueError(error)
+    return host, None if port == _DEFAULT_SCHEME_PORTS["https"] else port
 
 
 def normalize_package_repo_url(

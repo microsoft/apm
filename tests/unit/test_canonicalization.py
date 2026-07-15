@@ -811,7 +811,7 @@ class TestHttpInsecureDeps:
         assert http_dep.get_identity() == https_dep.get_identity()
 
 
-# ── HTTPS custom-port shorthand round-trip (#2203) ───────────────────────────
+# HTTPS custom-port shorthand round-trip (#2203)
 
 
 class TestHttpsCustomPortShorthand:
@@ -831,13 +831,20 @@ class TestHttpsCustomPortShorthand:
         assert dep.repo_url == "owner/repo"
 
     def test_apm_yml_entry_round_trips(self):
-        """parse -> to_apm_yml_entry -> parse preserves host and port (#2203)."""
+        """Manifest write/reparse preserves the backend HTTPS URL (#2203)."""
         dep = DependencyReference.parse("https://git.example.com:8443/owner/repo")
         entry = dep.to_apm_yml_entry()
         assert entry == "git.example.com:8443/owner/repo"
         reparsed = DependencyReference.parse(entry)
         assert reparsed.host == "git.example.com"
         assert reparsed.port == 8443
+        backend_url = urlparse(reparsed.to_clone_url())
+        assert (
+            backend_url.scheme,
+            backend_url.hostname,
+            backend_url.port,
+            backend_url.path,
+        ) == ("https", "git.example.com", 8443, "/owner/repo")
         # Serialization is idempotent: what APM writes, it can read and rewrite.
         assert reparsed.to_canonical() == entry
 
@@ -860,6 +867,18 @@ class TestHttpsCustomPortShorthand:
         dep = DependencyReference.parse("git.example.com:443/owner/repo")
         assert dep.port is None
         assert dep.to_canonical() == "git.example.com/owner/repo"
+        backend_url = urlparse(dep.to_clone_url())
+        assert (backend_url.scheme, backend_url.hostname, backend_url.port) == (
+            "https",
+            "git.example.com",
+            None,
+        )
+
+    @pytest.mark.parametrize("port", ["", "0", "65536", "not-a-port"])
+    def test_malformed_shorthand_port_is_rejected(self, port):
+        """Malformed ports cannot be reinterpreted as a different dependency."""
+        with pytest.raises(ValueError, match=r"Invalid shorthand port"):
+            DependencyReference.parse(f"git.example.com:{port}/owner/repo")
 
     def test_plain_shorthand_has_no_port(self):
         """Portless shorthand is unaffected by the port-splitting branch."""

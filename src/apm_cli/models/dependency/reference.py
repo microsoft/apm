@@ -26,11 +26,13 @@ from ...utils.path_security import (
 )
 from ..validation import InvalidVirtualPackageExtensionError
 from .identity import (
+    _DEFAULT_SCHEME_PORTS,
     _NON_ADO_PATH_SEGMENT_RE,
     InvalidSemverRangeError,
     _is_valid_registry_semver_range,
     _looks_like_invalid_semver_range,
     _path_segment_pattern,
+    _split_shorthand_host_port,
     build_canonical_dependency_string,
     build_dependency_unique_key,
     normalize_package_repo_url,
@@ -43,13 +45,6 @@ from .object_fields import (
     reject_unknown_git_fields,
 )
 from .types import VirtualPackageType
-
-# Identity/semver helpers re-exported from .identity for back-compat imports.
-# Default ports per URI scheme -- used to normalise away redundant
-# explicit ports (e.g. https://host:443/...) so that lockfile keys
-# and error messages stay consistent regardless of how the user
-# spelled the URL.
-_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
@@ -1523,8 +1518,7 @@ class DependencyReference:
         Validates path components before returning.
 
         Returns:
-            ``(parsed_url, host, port)`` -- *port* is the custom port split off
-            the leading ``host:port`` segment, or ``None``.
+            ``(parsed_url, host, port)`` with any custom shorthand port.
         """
         parts = repo_url.split("/")
 
@@ -1532,20 +1526,7 @@ class DependencyReference:
             git_idx = parts.index("_git")
             parts = parts[:git_idx] + parts[git_idx + 1 :]
 
-        # Accept a custom port on the leading host segment
-        # (``git.example.com:8443/owner/repo``). to_canonical()/get_identity()
-        # emit this form for non-default-port HTTPS deps, so parse() must be
-        # able to read back what APM itself wrote (#2203).
-        port = None
-        if parts and ":" in parts[0]:
-            maybe_host, _, maybe_port = parts[0].rpartition(":")
-            if maybe_host and maybe_port.isdigit() and 1 <= int(maybe_port) <= 65535:
-                parsed_port = int(maybe_port)
-                parts = [maybe_host, *parts[1:]]
-                # Drop a redundant HTTPS default port for canonical consistency
-                # with the URL-form parser (https://host:443 -> port None).
-                if parsed_port != _DEFAULT_SCHEME_PORTS.get("https"):
-                    port = parsed_port
+        parts[0], port = _split_shorthand_host_port(parts[0])
 
         if len(parts) >= 3 and is_supported_git_host(parts[0]):
             host = parts[0]
