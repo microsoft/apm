@@ -14,6 +14,7 @@ from pathlib import Path
 from .models import CheckResult, CIAuditResult
 
 _logger = logging.getLogger(__name__)
+FAIL_CLOSED_POLICY_CHECKS = frozenset({"dependency-content-hashes"})
 
 
 # -- Helpers -------------------------------------------------------
@@ -1092,6 +1093,59 @@ def _check_pinned_constraints(
     )
 
 
+def _check_dependency_content_hashes(
+    lockfile,
+    policy: IntegrityPolicy,
+) -> CheckResult:
+    """Check that persisted non-local dependencies carry required hashes.
+
+    The integrity decision remains owned by
+    :func:`apm_cli.install.integrity.enforce_require_hashes`; this adapter only
+    translates its fail-closed result into the public audit check vocabulary.
+    A missing lockfile is handled by the baseline ``lockfile-exists`` check, and
+    a project with no lockfile dependencies satisfies this rule vacuously.
+    """
+    check_name = "dependency-content-hashes"
+    from apm_cli.install.integrity import (
+        enforce_require_hashes,
+        require_hashes_enabled,
+    )
+
+    if not require_hashes_enabled(policy):
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="Dependency content hashes not required by policy",
+        )
+    if lockfile is None:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message=("No lockfile available -- see lockfile-exists for required remediation"),
+        )
+
+    try:
+        enforce_require_hashes(
+            lockfile.get_package_dependencies(),
+            enabled=True,
+        )
+    except RuntimeError as exc:
+        return CheckResult(
+            name=check_name,
+            passed=False,
+            message=(
+                "Locked dependencies are missing required content hashes -- "
+                "run 'apm install' to regenerate them"
+            ),
+            details=[str(exc)],
+        )
+    return CheckResult(
+        name=check_name,
+        passed=True,
+        message="All locked dependencies carry required content hashes",
+    )
+
+
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -1304,6 +1358,14 @@ def run_policy_checks(
 
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:
+        return result
+
+    hash_check = _check_dependency_content_hashes(
+        lock,
+        policy.security.integrity,
+    )
+    result.checks.append(hash_check)
+    if fail_fast and not hash_check.passed:
         return result
 
     def _run(check: CheckResult) -> bool:

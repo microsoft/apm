@@ -15,7 +15,17 @@ package ``content_hash``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ..deps.lockfile import LockedDependency
+
+if TYPE_CHECKING:
+    from ..policy.schema import IntegrityPolicy
+
+
+def require_hashes_enabled(policy: IntegrityPolicy | None) -> bool:
+    """Return the canonical enablement decision for dependency hash policy."""
+    return policy is not None and policy.require_hashes
 
 
 def unhashed_dependencies(

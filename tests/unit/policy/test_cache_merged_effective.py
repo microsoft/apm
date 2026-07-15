@@ -53,8 +53,11 @@ from apm_cli.policy.parser import load_policy
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import (
     ApmPolicy,
+    BinDeployPolicy,
     DependencyPolicy,
+    IntegrityPolicy,
     McpPolicy,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -787,8 +790,14 @@ def _mapping_leaf_paths(value: object, prefix: tuple[str, ...] = ()) -> set[tupl
 
 
 def test_policy_serializer_covers_every_dataclass_leaf() -> None:
-    declared = _dataclass_leaf_paths(ApmPolicy())
-    serialized = _mapping_leaf_paths(_policy_to_dict(ApmPolicy()))
+    policy = ApmPolicy(
+        bin_deploy=BinDeployPolicy(
+            deny_all=True,
+            deny=("legacy/tool",),
+        )
+    )
+    declared = _dataclass_leaf_paths(policy)
+    serialized = _mapping_leaf_paths(_policy_to_dict(policy))
     assert serialized == declared, (
         f"cached policy shape differs from ApmPolicy: "
         f"missing={sorted(declared - serialized)}, "
@@ -858,8 +867,124 @@ class TestPolicyRoundTrip(unittest.TestCase):
         self.assertEqual(s1, s2)
         self.assertEqual(_policy_fingerprint(s1), _policy_fingerprint(s2))
 
+    def test_default_legacy_alias_is_omitted_without_warning(self) -> None:
+        serialized = _serialize_policy(ApmPolicy())
+        _restored, warnings = load_policy(serialized)
+
+        self.assertNotIn("bin_deploy:", serialized)
+        self.assertEqual(warnings, [])
+
+    def test_non_default_legacy_alias_survives_round_trip(self) -> None:
+        original = ApmPolicy(
+            bin_deploy=BinDeployPolicy(
+                deny_all=True,
+                deny=("legacy/tool",),
+            )
+        )
+        serialized = _serialize_policy(original)
+        restored, _warnings = load_policy(serialized)
+
+        self.assertIn("bin_deploy:", serialized)
+        self.assertEqual(restored.bin_deploy, original.bin_deploy)
+
 
 class TestColdWarmEnforcementParity:
+    def test_cache_only_repo_discovery_never_calls_transport(self, tmp_path: Path) -> None:
+        """Offline bundle policy lookup serves stale cache or an absent result."""
+        repo_ref = "contoso/.github"
+        policy = ApmPolicy(
+            enforcement="block",
+            security=SecurityPolicy(
+                integrity=IntegrityPolicy(require_hashes=True),
+            ),
+        )
+        _write_cache(repo_ref, policy, tmp_path)
+        cache_dir = _get_cache_dir(tmp_path)
+        meta_path = cache_dir / f"{_cache_key(repo_ref)}.meta.json"
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        metadata["cached_at"] = time.time() - DEFAULT_CACHE_TTL - 1
+        meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+        with patch(
+            "apm_cli.policy.discovery._fetch_github_contents",
+            side_effect=AssertionError("cache-only policy lookup reached transport"),
+        ) as transport:
+            stale = _fetch_from_repo(repo_ref, tmp_path, cache_only=True)
+            missing = _fetch_from_repo("contoso/missing", tmp_path, cache_only=True)
+            mismatch = _fetch_from_repo(
+                repo_ref,
+                tmp_path,
+                cache_only=True,
+                expected_hash="sha256:" + "0" * 64,
+            )
+
+        assert transport.call_count == 0
+        assert stale.outcome == "cached_stale"
+        assert stale.cached is True
+        assert stale.policy == policy
+        assert missing.outcome == "absent"
+        assert missing.policy is None
+        assert mismatch.outcome == "hash_mismatch"
+        assert mismatch.policy is None
+
+        (tmp_path / "apm.yml").write_text(
+            "name: invalid-pin\npolicy:\n  hash: not-a-digest\n",
+            encoding="utf-8",
+        )
+        malformed = discover_policy_with_chain(tmp_path, cache_only=True)
+        assert malformed.outcome == "hash_mismatch"
+        assert malformed.policy is None
+
+        unrelated_root = tmp_path / "unrelated-cache"
+        unrelated_root.mkdir()
+        _write_cache("other/.github", policy, unrelated_root)
+        unrelated = discover_policy_with_chain(
+            unrelated_root,
+            policy_override=repo_ref,
+            expected_hash="sha256:" + "0" * 64,
+            cache_only=True,
+        )
+        assert unrelated.outcome == "hash_mismatch"
+        assert unrelated.policy is None
+
+        local_root = tmp_path / "local-override"
+        local_root.mkdir()
+        local_policy = local_root / "apm-policy.yml"
+        local_policy.write_text(
+            "name: local\nenforcement: block\nsecurity:\n  integrity:\n    require_hashes: true\n",
+            encoding="utf-8",
+        )
+        local = discover_policy_with_chain(
+            local_root,
+            policy_override=str(local_policy),
+            cache_only=True,
+        )
+        assert local.outcome == "found"
+        assert local.cached is False
+
+        chained_policy = local_root / "chained-policy.yml"
+        chained_policy.write_text(
+            "name: chained\n"
+            "extends: contoso/parent\n"
+            "enforcement: block\n"
+            "security:\n"
+            "  integrity:\n"
+            "    require_hashes: true\n",
+            encoding="utf-8",
+        )
+        with patch(
+            "apm_cli.policy.discovery._fetch_github_contents",
+            side_effect=AssertionError("cache-only parent lookup reached transport"),
+        ) as parent_transport:
+            chained = discover_policy_with_chain(
+                local_root,
+                policy_override=str(chained_policy),
+                cache_only=True,
+            )
+        assert parent_transport.call_count == 0
+        assert chained.outcome == "incomplete_chain"
+        assert chained.policy is None
+
     def test_merged_strict_policy_denials_survive_warm_cache(self, tmp_path: Path) -> None:
         payloads = {
             "contoso/.github": """
