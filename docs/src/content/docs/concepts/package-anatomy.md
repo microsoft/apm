@@ -230,7 +230,7 @@ Per-dependency fields:
 | `content_hash`         | SHA-256 of the package file tree.              |
 | `is_dev`               | True for `devDependencies` entries.            |
 
-See the [lockfile specification](../reference/lockfile-spec/#per-entry-fields)
+See the [lockfile specification](../../reference/lockfile-spec/#per-entry-fields)
 for package-type-specific `name` and `version` semantics.
 
 `apm audit` rehashes everything in `deployed_file_hashes` and
