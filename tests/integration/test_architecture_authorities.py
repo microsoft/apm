@@ -52,6 +52,24 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
+def test_ado_lock_coordinates_have_single_owner() -> None:
+    """Lock persistence must consume DependencyReference's ADO parser."""
+    import inspect
+
+    from apm_cli.deps.lockfile import LockedDependency
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    root = Path(__file__).parents[2]
+    lockfile_source = (root / "src/apm_cli/deps/lockfile.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    reconstruction = inspect.getsource(LockedDependency.to_dependency_ref)
+
+    assert hasattr(DependencyReference, "canonical_ado_coordinates")
+    assert "DependencyReference.canonical_ado_coordinates" in lockfile_source
+    assert "repo_url.split" not in reconstruction
+    assert "ADO lock coordinates must use DependencyReference" in guard
+
+
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
     """Cleanup must route current deployed-file claims through the reconciler."""
     root = Path(__file__).parents[2]

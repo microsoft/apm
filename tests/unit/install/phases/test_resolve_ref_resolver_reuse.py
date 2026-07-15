@@ -30,6 +30,13 @@ def _semver_dep(repo_url: str, virtual_path: str) -> DependencyReference:
     )
 
 
+def _ado_semver_dep() -> DependencyReference:
+    """Return a production-shaped ADO semver reference."""
+    dep = DependencyReference.parse("https://dev.azure.com/example/project/_git/package#^1.0.0")
+    dep.source = "git"
+    return dep
+
+
 def _patched_resolver_env():
     """Patch RefResolver (counting ctor) + GitSemverResolver (no-op resolve)."""
     made = []
@@ -247,13 +254,7 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
         )
 
     deps = [
-        DependencyReference(
-            host="dev.azure.com",
-            repo_url="example/project/_git/package",
-            reference="^1.0.0",
-            source="git",
-            explicit_scheme="https",
-        ),
+        _ado_semver_dep(),
         DependencyReference(
             host="github.com",
             repo_url="example/package",
@@ -307,13 +308,7 @@ def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
         def resolve_for_dep(self, dep_ref):
             return SimpleNamespace(token="", auth_scheme="bearer")
 
-    dep = DependencyReference(
-        host="dev.azure.com",
-        repo_url="example/project/_git/package",
-        reference="^1.0.0",
-        source="git",
-        explicit_scheme="https",
-    )
+    dep = _ado_semver_dep()
 
     assert resolve_dep_auth(dep, _NoTokenBearerResolver()) == (None, "basic", None)
     assert resolve_dep_auth(dep, _EmptyTokenBearerResolver()) == (None, "basic", None)
@@ -331,13 +326,7 @@ def test_resolve_dep_auth_preserves_sanitized_git_environment():
                 git_env=sanitized,
             )
 
-    dep = DependencyReference(
-        host="dev.azure.com",
-        repo_url="example/project/_git/package",
-        reference="^1.0.0",
-        source="git",
-        explicit_scheme="https",
-    )
+    dep = _ado_semver_dep()
 
     assert resolve_dep_auth(dep, _Resolver()) == ("pat", "basic", sanitized)
 
@@ -381,13 +370,7 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
             stderr="fatal: The requested URL returned error: 401",
         )
 
-    dep = DependencyReference(
-        host="dev.azure.com",
-        repo_url="example/project/_git/package",
-        reference="^1.0.0",
-        source="git",
-        explicit_scheme="https",
-    )
+    dep = _ado_semver_dep()
 
     with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
         resolution = _maybe_resolve_git_semver(

@@ -21,6 +21,7 @@ import re
 import subprocess
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass
 
 from ..utils.github_host import (
@@ -70,7 +71,7 @@ class _CacheEntry:
 
 
 class RefCache:
-    """In-memory cache keyed on ``owner/repo``.
+    """In-memory cache keyed on the effective remote identity.
 
     TTL defaults to 5 minutes.  Not thread-safe on its own; callers
     should use external synchronisation (``RefResolver`` does this via
@@ -189,7 +190,12 @@ class RefResolver:
                 self._remote_locks[owner_repo] = threading.Lock()
             return self._remote_locks[owner_repo]
 
-    def _git_url_and_env(self, owner_repo: str) -> tuple[str, dict[str, str]]:
+    def _git_url_and_env(
+        self,
+        owner_repo: str,
+        *,
+        remote_url: str | None = None,
+    ) -> tuple[str, dict[str, str]]:
         """Build the remote URL and auth environment for one git operation."""
         requested_bearer = self._auth_scheme == "bearer"
         ado_host = is_azure_devops_hostname(self._host)
@@ -201,7 +207,24 @@ class RefResolver:
             )
         bearer = requested_bearer and ado_host
         url_token = None if requested_bearer else self._token
-        if ado_host:
+        if remote_url is not None:
+            parsed_remote = urllib.parse.urlparse(remote_url)
+            if (
+                not ado_host
+                or parsed_remote.scheme != "https"
+                or parsed_remote.hostname != self._host
+                or parsed_remote.username is not None
+                or parsed_remote.password is not None
+                or parsed_remote.query
+                or parsed_remote.fragment
+            ):
+                raise GitLsRemoteError(
+                    package="",
+                    summary="The canonical remote URL does not match the configured host.",
+                    hint="Rebuild the dependency reference from its declared source.",
+                )
+            url = remote_url
+        elif ado_host:
             url = f"https://{self._host}/{owner_repo}"
         else:
             url = build_https_clone_url(self._host, owner_repo, token=url_token)
@@ -226,7 +249,12 @@ class RefResolver:
             env.update(build_authorization_header_git_env("Basic", credential))
         return url, env
 
-    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
+    def list_remote_refs(
+        self,
+        owner_repo: str,
+        *,
+        remote_url: str | None = None,
+    ) -> list[RemoteRef]:
         """Fetch all tags and heads from the configured Git host.
 
         Results are cached; subsequent calls for the same remote return
@@ -236,6 +264,8 @@ class RefResolver:
         ----------
         owner_repo:
             ``"owner/repo"`` string (no host, no ``.git`` suffix).
+        remote_url:
+            Canonical ADO URL from ``DependencyReference.to_github_url``.
 
         Returns
         -------
@@ -249,17 +279,18 @@ class RefResolver:
         GitLsRemoteError
             When the ``git ls-remote`` subprocess fails.
         """
-        lock = self._remote_lock(owner_repo)
+        cache_key = remote_url or owner_repo
+        lock = self._remote_lock(cache_key)
         with lock:
             # Check cache first
-            cached = self._cache.get(owner_repo)
+            cached = self._cache.get(cache_key)
             if cached is not None:
                 return cached
 
             if self._offline:
                 raise OfflineMissError(package="", remote=owner_repo)
 
-            url, env = self._git_url_and_env(owner_repo)
+            url, env = self._git_url_and_env(owner_repo, remote_url=remote_url)
             try:
                 result = subprocess.run(
                     ["git", "ls-remote", "--tags", "--heads", url],
@@ -281,9 +312,13 @@ class RefResolver:
                     hint=f"Ensure git is installed and on PATH. Error: {exc}",
                 )
 
-            fallback_refs = self._retry_rejected_ado_pat(result, owner_repo)
+            fallback_refs = self._retry_rejected_ado_pat(
+                result,
+                owner_repo,
+                remote_url=remote_url,
+            )
             if fallback_refs is not None:
-                self._cache.put(owner_repo, fallback_refs)
+                self._cache.put(cache_key, fallback_refs)
                 return fallback_refs
 
             if result.returncode != 0:
@@ -307,13 +342,15 @@ class RefResolver:
                 )
 
             refs = _parse_ls_remote_output(result.stdout)
-            self._cache.put(owner_repo, refs)
+            self._cache.put(cache_key, refs)
             return refs
 
     def _retry_rejected_ado_pat(
         self,
         result: subprocess.CompletedProcess,
         owner_repo: str,
+        *,
+        remote_url: str | None = None,
     ) -> list[RemoteRef] | None:
         """Retry one rejected ADO basic credential with an Azure CLI bearer."""
         eligible = (
@@ -347,7 +384,7 @@ class RefResolver:
                 git_env=bearer_env,
             )
             try:
-                return resolver.list_remote_refs(owner_repo)
+                return resolver.list_remote_refs(owner_repo, remote_url=remote_url)
             finally:
                 resolver.close()
 

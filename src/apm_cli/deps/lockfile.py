@@ -137,6 +137,9 @@ class LockedDependency:
     host_type: str | None = None
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     registry_prefix: str | None = None  # Registry path prefix, e.g. "artifactory/github"
+    ado_organization: str | None = None
+    ado_project: str | None = None
+    ado_repo: str | None = None
     resolved_commit: str | None = None
     resolved_ref: str | None = None
     version: str | None = None
@@ -259,6 +262,12 @@ class LockedDependency:
             result["port"] = self.port
         if self.registry_prefix:
             result["registry_prefix"] = self.registry_prefix
+        if self.ado_organization:
+            result["ado_organization"] = self.ado_organization
+        if self.ado_project:
+            result["ado_project"] = self.ado_project
+        if self.ado_repo:
+            result["ado_repo"] = self.ado_repo
         if self.resolved_commit:
             result["resolved_commit"] = self.resolved_commit
         if self.resolved_ref:
@@ -368,6 +377,9 @@ class LockedDependency:
             "host_type",
             "port",
             "registry_prefix",
+            "ado_organization",
+            "ado_project",
+            "ado_repo",
             "resolved_commit",
             "resolved_ref",
             "version",
@@ -411,6 +423,9 @@ class LockedDependency:
             host_type=host_type,
             port=port,
             registry_prefix=data.get("registry_prefix"),
+            ado_organization=data.get("ado_organization"),
+            ado_project=data.get("ado_project"),
+            ado_repo=data.get("ado_repo"),
             resolved_commit=data.get("resolved_commit"),
             resolved_ref=data.get("resolved_ref"),
             version=data.get("version"),
@@ -532,6 +547,16 @@ class LockedDependency:
         else:
             resolved_ref_val = dep_ref.reference
 
+        canonical_ado = DependencyReference.canonical_ado_coordinates(host, dep_ref.repo_url)
+        if isinstance(dep_ref, DependencyReference):
+            supplied_ado = (dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo)
+            if supplied_ado != canonical_ado:
+                raise ValueError(
+                    "Azure DevOps reference coordinates do not match the canonical repository path"
+                )
+            ado_organization, ado_project, ado_repo = supplied_ado
+        else:
+            ado_organization, ado_project, ado_repo = canonical_ado
         if registry_resolution is not None:
             version_value = registry_resolution.version
         elif git_semver_resolution is not None:
@@ -547,6 +572,9 @@ class LockedDependency:
             host_type=dep_ref.host_type,
             port=dep_ref.port,
             registry_prefix=registry_prefix,
+            ado_organization=ado_organization,
+            ado_project=ado_project,
+            ado_repo=ado_repo,
             resolved_commit=resolved_commit,
             resolved_ref=resolved_ref_val,
             version=version_value,
@@ -599,6 +627,18 @@ class LockedDependency:
         # range (e.g. ``^1.2.0`` -> ``1.5.3``).
         is_registry = self.source == "registry"
         ref = self.version if (is_registry and self.version) else self.resolved_ref
+        supplied_ado = (self.ado_organization, self.ado_project, self.ado_repo)
+        supplied_count = sum(value is not None for value in supplied_ado)
+        if supplied_count not in (0, 3):
+            raise ValueError("Partial Azure DevOps lock coordinates are not allowed")
+        canonical_ado = DependencyReference.canonical_ado_coordinates(self.host, self.repo_url)
+        if supplied_count == 3 and supplied_ado != canonical_ado:
+            raise ValueError(
+                "Azure DevOps lock coordinates do not match the canonical repository path"
+            )
+        ado_organization, ado_project, ado_repo = (
+            supplied_ado if supplied_count == 3 else canonical_ado
+        )
         return DependencyReference(
             repo_url=self.repo_url,
             host=self.host,
@@ -607,6 +647,9 @@ class LockedDependency:
             reference=ref,
             virtual_path=self.virtual_path,
             is_virtual=self.is_virtual,
+            ado_organization=ado_organization,
+            ado_project=ado_project,
+            ado_repo=ado_repo,
             artifactory_prefix=self.registry_prefix,
             is_local=(self.source == "local"),
             local_path=self.local_path,

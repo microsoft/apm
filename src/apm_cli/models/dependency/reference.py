@@ -218,6 +218,19 @@ class DependencyReference:
 
         return self.host is not None and is_azure_devops_hostname(self.host)
 
+    @classmethod
+    def canonical_ado_coordinates(
+        cls,
+        host: str | None,
+        repo_url: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return canonical ADO coordinates for a host and repository path."""
+        return (
+            cls._validate_final_repo_fields(host, repo_url)
+            if host and is_azure_devops_hostname(host)
+            else (None, None, None)
+        )
+
     @property
     def virtual_type(self) -> "VirtualPackageType | None":
         """Return the type of virtual package, or None if not virtual.
@@ -1793,15 +1806,7 @@ class DependencyReference:
 
     @classmethod
     def _validate_final_repo_fields(cls, host, repo_url):
-        """Validate the final repo_url and extract ADO organisation fields.
-
-        Performs character-set and segment-count validation appropriate for
-        the detected host type (Azure DevOps vs generic git host).
-
-        Returns:
-            ``(ado_organization, ado_project, ado_repo)`` -- all ``None``
-            for non-ADO hosts.
-        """
+        """Validate a repository path and return its ADO coordinates when applicable."""
         is_ado_final = host and is_azure_devops_hostname(host)
         if is_ado_final:
             if not re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._\- ]+/[a-zA-Z0-9._\- ]+$", repo_url):
@@ -1951,7 +1956,7 @@ class DependencyReference:
                     explicit_scheme = "http"
 
         # Phase 3: final validation and ADO field extraction
-        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(host, repo_url)
+        ado_organization, ado_project, ado_repo = cls.canonical_ado_coordinates(host, repo_url)
 
         if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
             raise ValueError(
@@ -2038,29 +2043,24 @@ class DependencyReference:
         return self.to_canonical()
 
     def to_github_url(self) -> str:
-        """Convert to full repository URL.
-
-        For Azure DevOps, generates: https://dev.azure.com/org/project/_git/repo
-        For GitHub, generates: https://github.com/owner/repo
-        For local packages, returns the local path.
-        """
+        """Convert to the canonical repository URL, or return a local path."""
         if self.is_local and self.local_path:
             return self.local_path
 
         host = self.host or default_host()
         netloc = f"{host}:{self.port}" if self.port else host
-
         scheme = "http" if self.is_insecure else "https"
-
         if self.is_azure_devops():
-            # ADO format: https://dev.azure.com/org/project/_git/repo
-            project = urllib.parse.quote(self.ado_project, safe="")
-            repo = urllib.parse.quote(self.ado_repo, safe="")
-            return f"https://{netloc}/{self.ado_organization}/{project}/_git/{repo}"
+            coordinates = (self.ado_organization, self.ado_project, self.ado_repo)
+            if coordinates != self.canonical_ado_coordinates(self.host, self.repo_url):
+                raise ValueError("Incomplete or mismatched Azure DevOps reference coordinates")
+            organization, ado_project, ado_repo = coordinates
+            project = urllib.parse.quote(ado_project, safe="")
+            repo = urllib.parse.quote(ado_repo, safe="")
+            return f"https://{netloc}/{organization}/{project}/_git/{repo}"
         elif self.artifactory_prefix:
             return f"{scheme}://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
         else:
-            # Git host format: https://github.com/owner/repo
             return f"{scheme}://{netloc}/{self.repo_url}"
 
     def to_clone_url(self) -> str:

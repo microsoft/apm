@@ -137,6 +137,38 @@ class TestMaybeResolveGitSemver:
 
         assert resolution is fresh
 
+    def test_ado_resolution_routes_canonical_remote_url(self):
+        """ADO semver listing must reuse DependencyReference's URL owner."""
+        dep = DependencyReference.parse(
+            "https://dev.azure.com/apm-org/apm-project/_git/widget#^1.2.0"
+        )
+        fresh = GitSemverResolution(
+            constraint="^1.2.0",
+            resolved_version="1.6.0",
+            resolved_tag="v1.6.0",
+            resolved_sha="b" * 40,
+            matched_pattern="v{version}",
+            resolved_at="2025-02-01T00:00:00Z",
+        )
+        with patch("apm_cli.deps.git_semver_resolver.GitSemverResolver") as resolver_cls:
+            instance = MagicMock()
+            instance.resolve.return_value = fresh
+            resolver_cls.return_value = instance
+
+            resolution = _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+            )
+
+        assert resolution is fresh
+        instance.resolve.assert_called_once_with(
+            owner_repo="apm-org/apm-project/widget",
+            package_name="widget",
+            constraint="^1.2.0",
+            remote_url="https://dev.azure.com/apm-org/apm-project/_git/widget",
+        )
+
     def test_lockfile_replay_skipped_when_constraint_changed(self):
         """If the manifest constraint differs from the locked constraint,
         replay is skipped and a fresh resolution kicks in."""

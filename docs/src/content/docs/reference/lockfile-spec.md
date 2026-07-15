@@ -146,6 +146,9 @@ Each item in `dependencies` describes one resolved package.
 | `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
 | `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
 | `host_type` | string | no | Explicit host-kind hint, currently `gitlab`, copied from object-form `type: gitlab`. |
+| `ado_organization` | string | ADO only | Azure DevOps organization parsed from the canonical dependency reference. Persisted so lock consumers reconstruct the same remote coordinates. |
+| `ado_project` | string | ADO only | Azure DevOps project parsed from the canonical dependency reference. |
+| `ado_repo` | string | ADO only | Azure DevOps repository parsed from the canonical dependency reference. |
 | `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
 | `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
