@@ -899,6 +899,7 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | `author` | `string` or `object` | OPTIONAL | Either a non-empty string (treated as `name`) or an object with `name` (REQUIRED), `email`, `url`. |
 | `license` | `string` | OPTIONAL | Pass-through (SPDX identifier). |
 | `repository` | `string` | OPTIONAL | Pass-through. |
+| `category` | `string` | Conditional | Pass-through to `marketplace.json` for both the Claude and Codex outputs when set. REQUIRED when `marketplace.outputs` includes `codex`. |
 
 Remote packages MUST declare at least one of `version` or `ref`. Local packages (sources beginning with `./`) skip git resolution and have no version requirement.
 

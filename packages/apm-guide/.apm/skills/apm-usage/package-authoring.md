@@ -503,6 +503,12 @@ marketplace:
       ref: 3f2a9b1c
 ```
 
+`apm pack` emits remote repositories as `source: url` and remote
+subdirectories as `source: git-subdir`.
+`apm install <package>@<marketplace>` accepts both generated forms and preserves the
+package host, subdirectory, and ref even when the marketplace itself is
+registered from another host or a local path.
+
 ## Step-by-step: create and publish
 
 ```bash

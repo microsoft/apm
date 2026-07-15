@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **99 normative statements** indexed in
+- OpenAPM v0.1 carries **100 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -792,7 +792,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 
 | Field                     | Notes                                                                           |
 |---------------------------|---------------------------------------------------------------------------------|
-| `repo_url`                | Canonical repo identity. REQUIRED for git-sourced entries.                       |
+| `repo_url`                | Canonical repo identity. REQUIRED for git-sourced entries. Cache isolation additionally follows [req-rs-016](#req-rs-016). |
 | `host`                    | FQDN when not inferable from `repo_url`.                                        |
 | `port`                    | Non-standard port. Validated to `1..65535` on read.                             |
 | `registry_prefix`         | Path prefix when resolved via registry proxy.                                   |
@@ -1564,6 +1564,49 @@ the conflicting entry, separated by `->`. Both chains MUST be
 named; the diagnostic MUST be deterministic for a given install
 plan.
 
+<a id="req-rs-016"></a>
+**[req-rs-016]** A conforming **consumer** implementation MUST
+preserve a **minimum safe repository identity** through dependency
+resolution, every in-memory or persistent cache layer, shared clone
+reuse, and materialisation. This identity is an implementation-private
+safety boundary, not a wire artifact. It consists of:
+
+1. the literal authority hostname, compared case-insensitively after
+   ASCII lowercasing and independently of the Host class or `aliases:`
+   equivalence used for credential scope;
+2. an explicit non-default port, where `:443` for HTTPS, `:22` for
+   SSH, `:80` for HTTP, and `:9418` for git transport are equivalent
+   to an absent port; and
+3. the complete repository path after first removing all trailing
+   U+002F (`/`) characters and then removing at most one trailing
+   literal `.git` suffix. Path comparison MUST be case-sensitive by
+   default. A consumer MAY case-fold paths for a host it documents as
+   case-insensitive in its conformance statement (see
+   [Section 11.2](#112-how-to-claim-conformance)) only when every cache
+   layer applies the same rule. Before comparison, a consumer MUST NOT
+   percent-decode the path, collapse `.` or `..` segments, or coalesce
+   repeated internal slashes; traversal-bearing dependency paths remain
+   subject to parse-time rejection.
+
+Credential material in URL userinfo, query strings, and fragments MUST
+NOT contribute to repository identity; credential handling remains
+subject to [req-sc-007](#req-sc-007). An implementation MAY
+over-partition its private cache by non-credential transport context
+(for example scheme or SSH username), but MUST NOT omit any minimum
+identity component above. This cache identity is distinct from the
+manifest canonicalisation in [req-mf-009](#req-mf-009).
+
+Two dependency declarations whose minimum identities differ MUST NOT
+share cached source material solely because they use the same ref or
+have a common repository-path prefix. A consumer MAY reuse cached
+source material only when minimum identity and resolved commit are
+equal, or, before a commit is known within one resolution operation,
+when the literal ref tokens are character-equal. Identity and ref
+equality MUST NOT override a failed integrity check; the consumer MUST
+discard or re-fetch material that fails the applicable integrity
+obligations in [req-lk-013](#req-lk-013) and
+[req-lk-015](#req-lk-015).
+
 <a id="req-rs-006"></a>
 **[req-rs-006]** A conforming **consumer** implementation MUST stop
 transitive resolution at a configurable depth cap whose default value
@@ -1946,7 +1989,7 @@ This section's normative statements are:
   [req-rs-009](#req-rs-009), [req-rs-010](#req-rs-010),
   [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
   [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
-  [req-rs-015](#req-rs-015).
+  [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016).
 - Producer: [req-pr-004](#req-pr-004).
 - Producer (SHOULD): [req-pr-005](#req-pr-005).
 
@@ -2239,6 +2282,13 @@ explicitly, surfacing the dependency for review. A v0.2
 `registry_source.allow_non_registry: false` toggle closes the
 bypass in-band; v0.1 relies on policy review.
 
+**Consumer-default cache isolation.** Cross-repository cache
+substitution is distinct from registry name confusion: a consumer
+that keys cached source material by a path prefix or ref alone can
+serve bytes from one repository for a different declared repository.
+[req-rs-016](#req-rs-016) requires complete minimum repository
+identity at every cache layer and forbids that reuse.
+
 ### 10.2 Typosquatting
 
 **Threat.** A lookalike package name (`acm/security-baseline` instead
@@ -2453,7 +2503,8 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 12| Approval grant propagation via VCS           | [req-sc-010](#req-sc-010)                                         | Consumer-default  |
 | 13| Org executable denial bypassed by project/user grant | [req-sc-011](#req-sc-011)                                 | Consumer-default  |
 | 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
-| 15| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
+| 15| Cross-repository cache substitution                  | [req-rs-016](#req-rs-016)                                         | Consumer-default  |
+| 16| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2622,7 +2673,7 @@ conformance statement identifying:
 [req-rs-009](#req-rs-009), [req-rs-010](#req-rs-010),
 [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
 [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
-[req-rs-015](#req-rs-015),
+[req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
@@ -3028,6 +3079,7 @@ renumbering of conformance classes.
 | [req-rs-013](#req-rs-013)                | MUST    | 7.2     | consumer    |
 | [req-rs-014](#req-rs-014)                | MUST    | 7.3.1   | consumer    |
 | [req-rs-015](#req-rs-015)                | MUST    | 7.5     | consumer    |
+| [req-rs-016](#req-rs-016)                | MUST    | 7.2     | consumer    |
 | [req-pr-001](#req-pr-001)                | MUST    | 8.2     | consumer    |
 | [req-pr-002](#req-pr-002)                | MUST    | 8.3     | consumer    |
 | [req-pr-003](#req-pr-003)                | MUST    | 8.3     | consumer    |
@@ -3055,7 +3107,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 99** (94 MUST, 5 SHOULD).
+**Total normative statements: 100** (95 MUST, 5 SHOULD).
 
 ---
 
@@ -3078,7 +3130,8 @@ renumbering of conformance classes.
 | 0.1.11  | 2026-07-09 | Spec-guardian editorial+defensive fold on the Antigravity instruction-rule contract (no new normative statements; statement count remains 97 (92 MUST, 5 SHOULD)). Section 4.2.1: defined the **auto-detectable** vs **explicit-only** target taxonomy deterministically (a target is auto-detectable when the OpenAPM Target Registry publishes at least one detection predicate) and rewrote the `all` expansion to key off it, naming `agent-skills` and `antigravity` as the v0.1 explicit-only set (with a Section 8.4 cross-reference). [req-tg-001] extended: a target registered without a detection predicate MUST NOT be auto-detected and MUST be excluded from `all`, generalising the prior `agent-skills`-only clause to cover `antigravity`. [req-tg-005] extended: pinned a canonical `globs` representation (YAML scalar for exactly one glob, YAML block sequence for two or more, no frontmatter block when `applyTo` is absent) so deployed-file content hashes are reproducible across implementations; redefined the deduplication scope from "expected Antigravity rule filenames" to filenames derived from the currently-resolved instruction primitives recorded in `apm.lock.yaml` and the manifest, closing a fail-open interpretation where an unrelated `.agents/rules/*.md` file could suppress `AGENTS.md` content; lowercased the `antigravity` identifier and added an editorial note scoping the normative citation of the concrete deploy path. [req-tg-002] subdirectory-partition list updated to include `.agents/rules/`. No normative count change. |
 | 0.1.12  | 2026-07-10 | Spec-citation fold for inactive-target lockfile reconciliation. Added [req-lk-020] (Section 5.2, consumer MUST): a non-frozen rewrite with a declared target set preserves paths attributable to current, another declared, or implementation-recognized targets that activate outside the manifest; removes prior paths attributable to none of them; applies the same decision to per-entry and top-level deployed-file lists and hash maps; and preserves prior paths when no target set is declared or attribution is indeterminate. Statement count: 97 -> 98 (93 MUST, 5 SHOULD). |
 | 0.1.13  | 2026-07-14 | Defensive clarification of existing lockfile requirements (no new normative statements; statement count remains 98 (93 MUST, 5 SHOULD)). [req-lk-003] now requires a conformance audit to reject disagreement between a full-SHA manifest pin and `resolved_commit`. [req-lk-020] now preserves paths freshly deployed by an active dependency when orphan cleanup encounters the same path under a prior dependency identity. |
-| 0.1.14  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
+| 0.1.14  | 2026-07-15 | Spec-citation fold for complete repository identity through resolution and materialization (closes #2191). Added [req-rs-016] (Section 7.2, consumer MUST): repository identity includes normalized host, explicit port, and the complete credential-free repository path; distinct identities MUST NOT share cached source material merely because they use the same ref or a common path prefix; identical identity and ref MAY reuse cached source material. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
+| 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

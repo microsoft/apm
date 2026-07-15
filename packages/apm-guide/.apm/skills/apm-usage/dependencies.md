@@ -216,6 +216,13 @@ resolution and override the source ref directly. The lockfile records the
 resolved ref, not the marketplace placeholder. Unknown keys in a marketplace
 entry are rejected.
 
+Producer-emitted `source: url` and `source: git-subdir` objects resolve
+through the same Git dependency parser as direct object-form dependencies.
+The package URL owns the host; `git-subdir.path` owns the contained package
+path. Both survive into the concrete `git:`, `path:`, and `ref:` manifest
+entry and the lockfile. Invalid URLs or unsafe paths fail before durable
+project writes.
+
 If the marketplace plugin entry declares `registry`, APM creates a
 registry-sourced dependency instead of Git coordinates. Enable registry support
 with `apm experimental enable registries` and configure the named registry.

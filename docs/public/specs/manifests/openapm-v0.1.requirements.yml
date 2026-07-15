@@ -318,6 +318,11 @@ requirements:
     keyword: MUST
     section: "7.5"
     conformance_class: consumer
+  - id: req-rs-016
+    keyword: MUST
+    section: "7.2"
+    conformance_class: consumer
+    notes: "minimum repository identity binds every cache layer; distinct identities must not share source material"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"

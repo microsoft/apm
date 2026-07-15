@@ -66,6 +66,13 @@ _log = logging.getLogger(__name__)
 _SHA_RE = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
 
 
+def _repository_cache_identity(dep_ref: DependencyReference) -> str:
+    """Return the full normalized repository identity shared by all cache tiers."""
+    from ..cache.url_normalize import normalize_repo_url
+
+    return normalize_repo_url(dep_ref.to_github_url())
+
+
 def is_tiered_resolver_enabled() -> bool:
     """Read the ``APM_TIERED_RESOLVER`` env flag. Default ON.
 
@@ -133,7 +140,7 @@ class L0PerRunCache:
     name: str = "per_run_cache"
 
     def try_resolve(self, dep_ref: DependencyReference, ref: str) -> str | None:
-        return self.cache.get(dep_ref.repo_url, ref)
+        return self.cache.get(_repository_cache_identity(dep_ref), ref)
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +227,7 @@ class L2BareRevParse:
             return None
 
         try:
-            shard_key = cache_shard_key(dep_ref.repo_url)
+            shard_key = cache_shard_key(dep_ref.to_github_url())
         except Exception:
             return None
 
@@ -342,7 +349,7 @@ class TieredRefResolver:
         # so verbose tier stats do not inflate the commits-API count.
         self.stats["sha_passthrough"] = 0
 
-    def seed(self, repo_url: str, ref: str, sha: str) -> bool:
+    def seed(self, repo_ref: str | DependencyReference, ref: str, sha: str) -> bool:
         """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
 
         Used by the resolve phase to inject a lockfile-recorded commit
@@ -360,7 +367,8 @@ class TieredRefResolver:
         """
         if not ref or not sha or not _SHA_RE.match(sha):
             return False
-        self._cache.put(repo_url, ref, sha.lower())
+        dep_ref = self._normalize(repo_ref)
+        self._cache.put(_repository_cache_identity(dep_ref), ref, sha.lower())
         return True
 
     def resolve(self, repo_ref: str | DependencyReference) -> ResolvedReference:
@@ -387,7 +395,7 @@ class TieredRefResolver:
             self.stats["sha_passthrough"] = self.stats.get("sha_passthrough", 0) + 1
             return self._build_result(dep_ref, ref, ref.lower(), tier_name="sha_passthrough")
 
-        key = (dep_ref.repo_url, ref)
+        key = (_repository_cache_identity(dep_ref), ref)
 
         # Fast path: cache hit avoids both tier dispatch and the
         # coalesce lock entirely.

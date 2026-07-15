@@ -16,6 +16,7 @@ import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+from apm_cli.models.dependency.reference import DependencyReference
 
 _FAKE_SHA_RE = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
 
@@ -30,12 +31,17 @@ class _FakeResolver:
         # Mirror the real guard: full 40-char hex SHA + non-empty ref.
         if not ref or not sha or not _FAKE_SHA_RE.match(sha):
             return False
-        self.seeded.append((repo_url, ref, sha))
+        self.seeded.append((repo_url.repo_url, repo_url.host, ref, sha))
         return True
 
 
-def _locked(repo_url, ref, sha):
-    return types.SimpleNamespace(repo_url=repo_url, resolved_ref=ref, resolved_commit=sha)
+def _locked(repo_url, ref, sha, *, host="github.com"):
+    return types.SimpleNamespace(
+        repo_url=repo_url,
+        resolved_ref=ref,
+        resolved_commit=sha,
+        to_dependency_ref=lambda: DependencyReference(repo_url=repo_url, host=host, reference=ref),
+    )
 
 
 class _FakeLockfile:
@@ -69,8 +75,8 @@ def test_seeds_branch_and_tag_refs():
     )
     seed_ref_resolver_from_lockfile(_ctx(resolver=resolver, lockfile=lockfile))
     assert resolver.seeded == [
-        ("owner/repo", "main", SHA),
-        ("owner/repo", "pkg--v1.2.3", "b" * 40),
+        ("owner/repo", "github.com", "main", SHA),
+        ("owner/repo", "github.com", "pkg--v1.2.3", "b" * 40),
     ]
 
 
@@ -109,7 +115,7 @@ def test_skips_entries_missing_ref_or_commit():
         ]
     )
     seed_ref_resolver_from_lockfile(_ctx(resolver=resolver, lockfile=lockfile))
-    assert resolver.seeded == [("owner/repo", "main", SHA)]
+    assert resolver.seeded == [("owner/repo", "github.com", "main", SHA)]
 
 
 def test_skips_non_hex_commit_of_correct_length():
@@ -123,4 +129,4 @@ def test_skips_non_hex_commit_of_correct_length():
         ]
     )
     seed_ref_resolver_from_lockfile(_ctx(resolver=resolver, lockfile=lockfile))
-    assert resolver.seeded == [("owner/repo", "release", SHA)]
+    assert resolver.seeded == [("owner/repo", "github.com", "release", SHA)]
