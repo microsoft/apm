@@ -153,6 +153,30 @@ def test_sanitized_identifier_cannot_share_message_with_raw_name(
     assert any("must not render raw source.name" in item.message for item in violations)
 
 
+def test_opencode_wrapper_package_field_must_use_owner(
+    repo_copy: Path,
+    checker,
+) -> None:
+    """The wrapper's Diagnostic.package field is also terminal output."""
+    consumer = repo_copy / "src/apm_cli/integration/agent_integrator.py"
+    source = consumer.read_text(encoding="utf-8").replace(
+        "package=printable_ascii_text(package_name),",
+        "package=package_name,",
+        1,
+    )
+    consumer.write_text(source, encoding="utf-8")
+
+    violations = checker.check(repo_copy)
+
+    assert any(
+        "AgentIntegrator._warn_opencode_frontmatter must derive" in item.message
+        for item in violations
+    )
+    assert any(
+        "must not render raw source.name or package_name" in item.message for item in violations
+    )
+
+
 def test_missing_owner_call_is_rejected(repo_copy: Path, checker) -> None:
     consumer = repo_copy / "src/apm_cli/integration/opencode_frontmatter.py"
     source = consumer.read_text(encoding="utf-8").replace(

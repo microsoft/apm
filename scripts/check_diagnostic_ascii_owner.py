@@ -26,8 +26,12 @@ OWNER_SYMBOL = "printable_ascii_text"
 OWNER_PATH = Path("src/apm_cli/utils/diagnostics.py")
 AGENT_CONSUMER = Path("src/apm_cli/integration/agent_integrator.py")
 AGENT_DIAGNOSTIC_FUNCTIONS = {
-    "AgentIntegrator._warn_codex_unverified_scope",
-    "AgentIntegrator._warn_codex_tools_dropped",
+    "AgentIntegrator._warn_codex_unverified_scope": True,
+    "AgentIntegrator._warn_codex_tools_dropped": True,
+    "AgentIntegrator._warn_opencode_frontmatter": False,
+}
+ALLOWED_IDENTITY_DELEGATES = {
+    "AgentIntegrator._warn_opencode_frontmatter": {"validate_opencode_frontmatter"},
 }
 OPENCODE_CONSUMER = Path("src/apm_cli/integration/opencode_frontmatter.py")
 OPENCODE_FUNCTION = "validate_opencode_frontmatter"
@@ -133,13 +137,17 @@ def _diagnostic_calls(function: ast.AST) -> list[ast.Call]:
     ]
 
 
-def _identity_is_directly_owned_in_diagnostic(function: ast.AST) -> bool:
+def _identity_is_directly_owned_in_diagnostic(
+    function: ast.AST,
+    *,
+    require_source: bool,
+) -> bool:
     """Return whether one diagnostic call owns source and package rendering."""
     for call in _diagnostic_calls(function):
         owner_calls = [node for node in ast.walk(call) if _is_owner_call(node)]
-        if any(_is_owner_call(node, _source_name()) for node in owner_calls) and any(
-            _is_owner_call(node, _package_name()) for node in owner_calls
-        ):
+        source_owned = any(_is_owner_call(node, _source_name()) for node in owner_calls)
+        package_owned = any(_is_owner_call(node, _package_name()) for node in owner_calls)
+        if package_owned and (source_owned or not require_source):
             return True
     return False
 
@@ -220,7 +228,19 @@ def _raw_identity_lines(node: ast.AST) -> list[int]:
     return lines
 
 
-def _non_owner_identity_calls(function: ast.AST) -> list[ast.Call]:
+def _call_name(call: ast.Call) -> str | None:
+    """Return the simple name of one call target."""
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return None
+
+
+def _non_owner_identity_calls(
+    function: ast.AST,
+    allowed_delegates: set[str],
+) -> list[ast.Call]:
     """Return calls that locally transform diagnostic identity inputs."""
     return [
         node
@@ -228,6 +248,7 @@ def _non_owner_identity_calls(function: ast.AST) -> list[ast.Call]:
         if isinstance(node, ast.Call)
         and _directly_consumes_identity(node)
         and not _is_owner_call(node)
+        and _call_name(node) not in allowed_delegates
     ]
 
 
@@ -302,7 +323,9 @@ def check(root: Path) -> list[Violation]:
 
         functions = _qualnamed_functions(tree)
         expected_functions = (
-            AGENT_DIAGNOSTIC_FUNCTIONS if relative_path == AGENT_CONSUMER else {OPENCODE_FUNCTION}
+            AGENT_DIAGNOSTIC_FUNCTIONS.keys()
+            if relative_path == AGENT_CONSUMER
+            else {OPENCODE_FUNCTION}
         )
         for qualname in expected_functions:
             function = functions.get(qualname)
@@ -312,7 +335,10 @@ def check(root: Path) -> list[Violation]:
                 )
                 continue
             flow_is_owned = (
-                _identity_is_directly_owned_in_diagnostic(function)
+                _identity_is_directly_owned_in_diagnostic(
+                    function,
+                    require_source=AGENT_DIAGNOSTIC_FUNCTIONS[qualname],
+                )
                 if relative_path == AGENT_CONSUMER
                 else _opencode_identity_flow_is_owned(function)
             )
@@ -363,7 +389,8 @@ def check(root: Path) -> list[Violation]:
                             f"{qualname} must not assign raw diagnostic identity for later use",
                         )
                     )
-            for call in _non_owner_identity_calls(function):
+            allowed_delegates = ALLOWED_IDENTITY_DELEGATES.get(qualname, set())
+            for call in _non_owner_identity_calls(function, allowed_delegates):
                 violations.append(
                     Violation(
                         relative_path,

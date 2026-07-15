@@ -287,7 +287,10 @@ class AgentIntegrator(BaseIntegrator):
         if not isinstance(fm, dict):
             return
         for message in validate_opencode_frontmatter(fm, source, package_name=package_name):
-            diagnostics.warn(message=message, package=package_name)
+            diagnostics.warn(
+                message=message,
+                package=printable_ascii_text(package_name),
+            )
 
     # ------------------------------------------------------------------
     # Codex agent transformer (MD -> TOML)
