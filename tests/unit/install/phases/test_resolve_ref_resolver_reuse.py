@@ -228,6 +228,42 @@ def test_https_semver_resolution_preserves_custom_port():
     assert made[0][3]["port"] == 8443
 
 
+def test_cache_separates_transport_identity_for_same_host_and_token():
+    """Scheme, SSH user, and port must each select a distinct resolver."""
+    from apm_cli.install.helpers.ref_reuse import get_shared_ref_resolver
+
+    class _FakeRefResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    cache: dict = {}
+    with patch("apm_cli.marketplace.ref_resolver.RefResolver", _FakeRefResolver):
+        https = get_shared_ref_resolver("github.com", "token", cache)
+        ssh = get_shared_ref_resolver(
+            "github.com",
+            "token",
+            cache,
+            transport_scheme="ssh",
+        )
+        ssh_port = get_shared_ref_resolver(
+            "github.com",
+            "token",
+            cache,
+            transport_scheme="ssh",
+            port=2222,
+        )
+        ssh_user = get_shared_ref_resolver(
+            "github.com",
+            "token",
+            cache,
+            transport_scheme="ssh",
+            ssh_user="deploy",
+        )
+
+    assert len({id(https), id(ssh), id(ssh_port), id(ssh_user)}) == 4
+    assert len(cache) == 4
+
+
 def test_cache_key_does_not_contain_raw_token():
     """The raw PAT must never appear in a cache key (leak prevention)."""
     from apm_cli.install.helpers.ref_reuse import get_shared_ref_resolver
