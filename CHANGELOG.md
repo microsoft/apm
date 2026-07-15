@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Marketplace packages emitted as remote URL or subdirectory sources now
+  preserve the package host, path, and ref through `apm install`, fixing
+  cross-host enterprise validation and self-hosted GitLab monorepo installs.
+  (closes #2190, #2216; #2228)
 - Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
   `apm install` re-resolves the new ref and preserves the last good deployment
   when the new ref is invalid. (#2219)
