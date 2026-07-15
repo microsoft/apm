@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
+  `apm install` re-resolves the new ref and preserves the last good deployment
+  when the new ref is invalid. (#2219)
 - `apm pack` and local-bundle install now have a real binary parity contract,
   and `apm audit --ci` no longer reports clean bundle deployments as orphaned. (#2215)
 - Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).

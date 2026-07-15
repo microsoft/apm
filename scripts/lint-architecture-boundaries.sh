@@ -219,6 +219,21 @@ if ! grep -q \
     echo "[x] UnifiedLinkResolver must project source assets into the deployment frame"
     violations=$((violations + 1))
 fi
+ref_recheck_owner="src/apm_cli/drift.py"
+ref_recheck_consumers=(
+    src/apm_cli/deps/apm_resolver.py
+    src/apm_cli/install/phases/resolve.py
+)
+if ! grep -q '^def should_force_ref_recheck(' "$ref_recheck_owner" \
+    || ! grep -q 'should_force_ref_recheck(' "${ref_recheck_consumers[0]}" \
+    || ! grep -q 'should_force_ref_recheck(' "${ref_recheck_consumers[1]}" \
+    || grep -Eq '_force_semver_resolve|def should_force_ref_recheck' \
+        "${ref_recheck_consumers[@]}" \
+    || grep -rEq --include='*.py' --exclude='test_architecture_authorities.py' \
+        'def _force_semver_resolve|def should_force_ref_recheck' tests; then
+    echo "[x] Existing-path ref rechecks must use drift.py::should_force_ref_recheck"
+    violations=$((violations + 1))
+fi
 cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
 cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
 cleanup_claim_status=$?
