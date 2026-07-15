@@ -4,10 +4,11 @@ Extracted from :mod:`apm_cli.commands.install` to keep that module under the
 architecture invariant LOC budget enforced by
 ``tests/unit/install/test_architecture_invariants.py``.
 
-The handler owns the imperative deploy path for local bundles -- it does NOT
-go through the dependency resolver, registry, or org-policy gate.  Local
-bundles are intentionally a separate code path because they short-circuit
-network I/O (proven by the air-gap E2E test).
+The handler owns the imperative deploy path for local bundles. It does not go
+through the dependency resolver or registry, but it must route policy discovery
+and enforcement through the shared preflight owner before any deployment.
+Local bundles remain a separate path because they short-circuit package network
+I/O (proven by the air-gap E2E test).
 
 MCP wiring (#1207): bundles MAY ship a ``.mcp.json`` (Anthropic plugin
 format) describing MCP servers.  After the per-target deploy loop, the
@@ -40,6 +41,7 @@ def install_local_bundle(
     force: bool,
     dry_run: bool,
     verbose: bool,
+    no_policy: bool,
     alias: str | None,
     logger,
     legacy_skill_paths: bool = False,
@@ -70,8 +72,8 @@ def install_local_bundle(
             "The following flag(s) are not valid with a local bundle install "
             f"({bundle_arg}): {', '.join(bad)}.\n"
             "Local-bundle install is an imperative deploy and does not "
-            "interact with the dependency resolver, MCP, registry, or "
-            "policy machinery."
+            "interact with the dependency resolver or registry machinery; "
+            "bundle .mcp.json metadata is handled separately."
         )
 
     # ``verbose`` is consumed by the InstallLogger on construction (the
@@ -85,8 +87,75 @@ def install_local_bundle(
     logger.start(f"Installing local bundle from {bundle_arg}")
 
     try:
+        # Resolve targets before policy preflight so target restrictions apply
+        # to the actual deployment set, including auto-detected targets.
+        explicit = target if target else None
+        targets = resolve_targets(
+            project_root,
+            user_scope=global_,
+            explicit_target=explicit,
+        )
+        if not targets:
+            logger.warning(
+                "No active targets resolved -- nothing will be deployed. "
+                "Pass --target to select one explicitly."
+            )
+            return
+
+        # Apply --legacy-skill-paths before policy evaluation. The target names
+        # remain canonical; only their deployment paths change.
+        if legacy_skill_paths:
+            from ..integration.targets import apply_legacy_skill_paths
+
+            targets = apply_legacy_skill_paths(targets)
+
+        bundle_mcp_declared = False
+        if bundle_info.lockfile is not None:
+            pack = bundle_info.lockfile.get("pack") or {}
+            bundle_files = pack.get("bundle_files") or {}
+            if isinstance(bundle_files, dict):
+                bundle_mcp_declared = any(str(path).lower() == ".mcp.json" for path in bundle_files)
+        elif bundle_info.source_dir is not None:
+            bundle_mcp_declared = any(
+                path.is_file() and path.name.lower() == ".mcp.json"
+                for path in bundle_info.source_dir.iterdir()
+            )
+        bundle_mcp_deps = (
+            _parse_bundle_mcp_servers(bundle_info.source_dir)
+            if bundle_mcp_declared and bundle_info.source_dir is not None
+            else []
+        )
+        from ..policy.install_preflight import run_policy_preflight
+
+        policy_fetch, _enforcement_active = run_policy_preflight(
+            project_root=project_root,
+            apm_deps=(),
+            mcp_deps=bundle_mcp_deps,
+            no_policy=no_policy,
+            logger=logger,
+            dry_run=dry_run,
+            effective_target=[resolved.name for resolved in targets],
+            cache_only=True,
+        )
+        policy = policy_fetch.policy if policy_fetch is not None else None
+        from .integrity import require_hashes_enabled
+
+        require_bundle_hashes = require_hashes_enabled(
+            policy.security.integrity if policy is not None else None
+        )
         # Integrity verification (skipped when bundle has no lockfile).
         if bundle_info.lockfile is None:
+            if require_bundle_hashes:
+                from .errors import InstallFailureAlreadyRendered
+
+                logger.error(
+                    "Bundle has no apm.lock.yaml, but org policy requires "
+                    "integrity hashes. Repack it with the current APM version "
+                    "and retry."
+                )
+                raise InstallFailureAlreadyRendered(
+                    "Org policy requires integrity hashes for this bundle"
+                )
             logger.warning(
                 "Bundle has no apm.lock.yaml -- skipping integrity check. "
                 "This bundle was produced by an older APM version."
@@ -101,26 +170,7 @@ def install_local_bundle(
                 raise click.Abort()
             logger.verbose_detail("Bundle integrity verified")
 
-        # Resolve targets and warn on bundle/install target mismatch.
-        explicit = target if target else None
-        targets = resolve_targets(
-            project_root,
-            user_scope=global_,
-            explicit_target=explicit,
-        )
-        if not targets:
-            logger.warning(
-                "No active targets resolved -- nothing will be deployed. "
-                "Pass --target to select one explicitly."
-            )
-            return
-
-        # Apply --legacy-skill-paths override to resolved targets.
-        if legacy_skill_paths:
-            from ..integration.targets import apply_legacy_skill_paths
-
-            targets = apply_legacy_skill_paths(targets)
-
+        # Warn on bundle/install target mismatch.
         warning = check_target_mismatch(
             bundle_targets=bundle_info.pack_targets,
             install_targets=[t.name for t in targets],
@@ -164,19 +214,7 @@ def install_local_bundle(
         # (each resolved target's native MCP config gets the servers in
         # its own format/location).  ``.mcp.json`` itself is metadata and
         # never deployed verbatim.
-        bundle_mcp_present = False
-        if bundle_info.lockfile:
-            pack = bundle_info.lockfile.get("pack") or {}
-            bf = pack.get("bundle_files") or {}
-            if isinstance(bf, dict):
-                bundle_mcp_present = any(str(k).lower() == ".mcp.json" for k in bf)
-        # Fallback: walk bundle source dir if lockfile manifest is absent.
-        if not bundle_mcp_present and bundle_info.source_dir is not None:
-            bundle_mcp_present = any(
-                p.name.lower() == ".mcp.json"
-                for p in bundle_info.source_dir.iterdir()
-                if p.is_file()
-            )
+        bundle_mcp_present = bool(bundle_mcp_deps)
 
         if dry_run:
             logger.dry_run_notice(f"Would deploy {len(deployed)} file(s) from local bundle")
@@ -286,6 +324,7 @@ def install_local_bundle(
                 user_scope=global_,
                 verbose=getattr(logger, "verbose", False),
                 logger=logger,
+                deps=bundle_mcp_deps,
             )
 
     finally:
@@ -353,6 +392,7 @@ def _wire_bundle_mcp_servers(
     user_scope: bool,
     verbose: bool,
     logger,
+    deps: list[MCPDependency] | None = None,
 ) -> int:
     """Wire bundle ``.mcp.json`` servers through ``MCPIntegrator.install``.
 
@@ -360,7 +400,8 @@ def _wire_bundle_mcp_servers(
     resolved targets.  The function is best-effort: any per-target failure
     is logged and the remaining targets continue to be processed.
     """
-    deps = _parse_bundle_mcp_servers(bundle_dir)
+    if deps is None:
+        deps = _parse_bundle_mcp_servers(bundle_dir)
     if not deps:
         return 0
 

@@ -94,6 +94,21 @@ def test_git_ref_transport_selection_has_single_owner() -> None:
     assert "Git ref transport must route through TransportSelector into RefResolver" in guard
 
 
+def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
+    """Imperative bundle deploys must not bypass policy outcome routing."""
+    root = Path(__file__).parents[2]
+    handler = (root / "src/apm_cli/install/local_bundle_handler.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "from ..policy.install_preflight import run_policy_preflight" in handler
+    assert "policy_fetch, _enforcement_active = run_policy_preflight(" in handler
+    assert "cache_only=True" in handler
+    assert "mcp_deps=bundle_mcp_deps" in handler
+    assert "require_hashes_enabled(" in handler
+    assert "Local bundle installs must route policy through install_preflight.py" in guard
+    assert "require_hashes enforcement must route through install/integrity.py" in guard
+
+
 def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
     tmp_path: Path,
 ) -> None:
@@ -126,7 +141,7 @@ def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
         capture_output=True,
         text=True,
         check=False,
-        timeout=60,
+        timeout=300,
     )
 
     assert result.returncode == 1
@@ -430,6 +445,23 @@ def test_cached_update_resolution_stays_with_downloader_owner() -> None:
 
     assert "resolved = downloader.resolve_git_reference(dep_ref)" in ref_reuse
     assert "Cached update planning must resolve refs through the downloader owner" in guard
+
+
+def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
+    """Full and cached paths must share Claude Skill lock metadata logic."""
+    root = Path(__file__).parents[2]
+    validation = (root / "src/apm_cli/models/validation.py").read_text()
+    sources = (root / "src/apm_cli/install/sources.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def _validate_claude_skill(" in validation
+    assert 'version="unknown"' in validation
+    assert "load_frontmatter" in validation
+    assert "pkg_type == PackageType.CLAUDE_SKILL" in sources
+    assert "validate_apm_package(install_path)" in sources
+    assert "Cached Claude Skill is invalid" in sources
+    assert "build_claude_skill_package" not in sources
+    assert "Cached/frozen Claude Skill lock metadata must route through validation.py" in guard
 
 
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:

@@ -415,7 +415,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 
 ### Policy checks (run with `--ci --policy`)
 
-There are 20 policy checks in APM 0.22.0.
+There are 21 policy checks.
 
 **Dependencies:**
 
@@ -430,6 +430,12 @@ There are 20 policy checks in APM 0.22.0.
 | `transitive-depth` | No dependency exceeds `max_depth` |
 | `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
 | `registry-source` | Dependencies come from required registries when `registry_source` is configured |
+
+**Integrity:**
+
+| Check | Validates |
+|-------|-----------|
+| `dependency-content-hashes` | Every non-local locked dependency has `content_hash` when `security.integrity.require_hashes: true`; local dependencies are exempt |
 
 **MCP:**
 
@@ -606,7 +612,11 @@ Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-re
 
 ### 2. Discovery and applicability
 
-APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub remote — both `github.com` and GitHub Enterprise (GHE). Repositories on non-GitHub remotes (ADO, GitLab, plain git) currently fall through with no policy applied; this is tracked as a follow-up. Repositories with no detectable git remote (unpacked bundles, temp directories) emit an explicit "could not determine org" line and skip discovery.
+APM auto-discovers policy from `<org>/.github/apm-policy.yml` for GitHub and
+GitHub Enterprise remotes. Azure DevOps remotes use the org `_apm` project and
+`_apm` repository. GitLab and plain git remotes currently fall through with no
+policy applied. Repositories with no detectable git remote emit an explicit
+"could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
 
@@ -772,7 +782,7 @@ $ echo $?
 
 | Hatch | Scope |
 |-------|-------|
-| `--no-policy` flag | Available on `apm install`, `apm install <pkg>`, and `apm install --mcp`. Skips discovery and enforcement for one invocation; emits a loud warning. Not currently exposed on `apm deps update`. |
+| `--no-policy` flag | Available on `apm install`, `apm install <pkg>`, `apm install <bundle>`, and `apm install --mcp`. Skips discovery and enforcement for one invocation; emits a loud warning. Not currently exposed on `apm deps update`. |
 | `APM_POLICY_DISABLE=1` env var | Equivalent to `--no-policy`. Same loud warning. |
 
 `APM_POLICY` is reserved for a future override env var and is **not** equivalent to `APM_POLICY_DISABLE`.

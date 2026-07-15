@@ -143,6 +143,23 @@ if [ "$policy_named_defs" -ne 2 ] \
     [ -n "$policy_duplicate_hits" ] && echo "$policy_duplicate_hits"
     violations=$((violations + 1))
 fi
+local_bundle_handler="src/apm_cli/install/local_bundle_handler.py"
+if ! grep -q \
+    'from ..policy.install_preflight import run_policy_preflight' \
+    "$local_bundle_handler" \
+    || ! grep -q 'policy_fetch, _enforcement_active = run_policy_preflight(' \
+        "$local_bundle_handler" \
+    || ! grep -q 'cache_only=True' "$local_bundle_handler" \
+    || ! grep -q 'mcp_deps=bundle_mcp_deps' "$local_bundle_handler"; then
+    echo "[x] Local bundle installs must route policy through install_preflight.py"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "require_hashes enforcement must route through install/integrity.py" \
+    'policy(\.security\.integrity)?\.require_hashes' \
+    src/apm_cli/install/pipeline.py \
+    src/apm_cli/install/local_bundle_handler.py \
+    src/apm_cli/policy/policy_checks.py
 
 echo "[*] AC4: declared-intent preservation"
 check_pattern \
@@ -260,6 +277,38 @@ check_pattern \
 if ! grep -A25 'if plugin.registry:' src/apm_cli/marketplace/resolver.py \
     | grep -q 'source="registry"'; then
     echo "[x] Marketplace registry intent must create a registry dependency"
+    violations=$((violations + 1))
+fi
+claude_skill_metadata_owner="src/apm_cli/models/validation.py"
+claude_skill_metadata_consumer="src/apm_cli/install/sources.py"
+claude_skill_owner_body=$(awk '
+    /^def _validate_claude_skill\(/ {flag=1}
+    flag && /^def / && !/^def _validate_claude_skill\(/ {exit}
+    flag {print}
+' "$claude_skill_metadata_owner")
+claude_skill_cached_body=$(awk '
+    /^class CachedDependencySource\(/ {flag=1}
+    /^class FreshDependencySource\(/ {flag=0}
+    flag {print}
+' "$claude_skill_metadata_consumer")
+claude_skill_cached_branch=$(printf '%s\n' "$claude_skill_cached_body" | awk '
+    /elif pkg_type == PackageType.CLAUDE_SKILL:/ {flag=1}
+    flag && /^        else:/ {exit}
+    flag {print}
+')
+if ! printf '%s\n' "$claude_skill_owner_body" | grep -q 'load_frontmatter' \
+    || ! printf '%s\n' "$claude_skill_owner_body" | grep -q 'version="unknown"' \
+    || ! printf '%s\n' "$claude_skill_cached_body" \
+        | grep -q 'pkg_type == PackageType.CLAUDE_SKILL' \
+    || ! printf '%s\n' "$claude_skill_cached_branch" \
+        | grep -q 'validate_apm_package(install_path)' \
+    || ! printf '%s\n' "$claude_skill_cached_branch" \
+        | grep -q 'not validation_result.is_valid or validation_result.package is None' \
+    || ! printf '%s\n' "$claude_skill_cached_branch" \
+        | grep -q 'Cached Claude Skill is invalid' \
+    || printf '%s\n' "$claude_skill_cached_branch" \
+        | grep -Eq 'APMPackage\(|repo_url\.split'; then
+    echo "[x] Cached/frozen Claude Skill lock metadata must route through validation.py"
     violations=$((violations + 1))
 fi
 lockfile_to_ref_body=$(awk '

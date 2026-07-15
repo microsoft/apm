@@ -38,10 +38,16 @@ full schema see [Package anatomy](../../concepts/package-anatomy/).
 
 The optional `apm.lock.yaml` carries `pack.bundle_files` -- a SHA-256
 manifest written by `apm pack --format plugin`. When present, APM verifies
-every file against it before deploying. When absent (older bundles), APM
-warns and proceeds.
+every listed file before deploying. When absent, older bundles still install
+with a warning unless policy requires hashes. With
+`security.integrity.require_hashes: true`, APM fails closed before deploy.
 
 ## How the install works
+
+:::note[Governed offline installs]
+When the policy cache is warm, offline bundles still apply target, MCP, and
+integrity rules without network access.
+:::
 
 ```
 $ apm install ./dist/my-pkg-1.0.0.zip --target copilot
@@ -54,16 +60,22 @@ Steps APM runs:
 
 1. **Detect.** Path exists and contains `plugin.json` at the bundle root
    (zip archives and legacy tarballs are extracted to a temp directory first).
-2. **Verify integrity.** Hash every file listed in `pack.bundle_files`;
+2. **Apply cached policy.** Resolve the actual targets, then apply any cached
+   org policy to bundle MCP entries and targets before files are written.
+   Bundle install never fetches policy from the network. `--no-policy` skips
+   this local gate for one invocation.
+3. **Verify integrity.** Hash every file listed in `pack.bundle_files`;
    reject any symlink, hash mismatch, or unlisted file.
-3. **Deploy.** Map `agents/`, `skills/`, `commands/`, `hooks/` into the
+4. **Deploy.** Map `agents/`, `skills/`, `commands/`, `hooks/` into the
    harness layout for each `--target` you passed.
-4. **Record.** Write a lockfile entry under the project's `apm.lock.yaml`
+5. **Record.** Write a lockfile entry under the project's `apm.lock.yaml`
    so [drift detection](../drift-and-secure-by-default/) can audit the
    deployed files later.
 
 `apm.yml` is never touched. Re-running the same command re-deploys (use
 `--force` to overwrite locally-edited files).
+For centrally governed installs, warm the policy cache before distributing an
+offline bundle. See [APM policy](../../enterprise/apm-policy/).
 
 ## Flags that apply
 
@@ -77,13 +89,14 @@ that *do* work:
 | `--global`, `-g`     | Deploy to `~/.apm/` instead of the current project. |
 | `--force`            | Overwrite locally-edited files on collision. |
 | `--dry-run`          | Show what would be deployed; write nothing. |
+| `--no-policy`        | Skip policy preflight for this invocation only. |
 | `--verbose`, `-v`    | Print per-file deploy details. |
 | `--as ALIAS`         | Override the display label in logs (local-bundle only). |
 
 Flags like `--update`, `--only`, `--dev`, `--mcp`, `--registry`, and
 `--allow-insecure` are not meaningful here -- the imperative deploy path
-does not run the resolver, MCP registry lookup, or policy chain that those
-flags configure. APM rejects them up front with one consolidated error.
+does not run the dependency resolver or registry lookup that those flags
+configure. APM rejects them up front with one consolidated error.
 
 For the full flag list see the [`apm install` reference](../../reference/cli/install/).
 
