@@ -58,5 +58,16 @@ def test_tiered_l0_indirect_truncation_fixture_fails(tmp_path: Path) -> None:
     assert any("without indirect truncation" in item.message for item in violations)
 
 
+def test_tiered_l0_keyword_truncation_fixture_fails(tmp_path: Path) -> None:
+    root = _mutation_root(
+        tmp_path,
+        shared_source=_source(ROOT / SHARED_CACHE_PATH),
+        tiered_source=_source(FIXTURES / "tiered_l0_keyword_truncation.py.txt"),
+    )
+    violations = check(root)
+
+    assert any("without indirect truncation" in item.message for item in violations)
+
+
 def test_missing_configured_owner_path_fails_closed(tmp_path: Path) -> None:
     assert check(tmp_path)

@@ -18,7 +18,10 @@ This checker validates the load-bearing AST shapes instead:
 
 The check is intentionally narrow. It guards two canonical consumer modules,
 not arbitrary repository code, and fails closed on missing files, syntax
-errors, methods, or expected owner expressions.
+errors, methods, or expected owner expressions. Behavioral coverage remains
+the second guardrail for normalizer internals and bare materialization:
+``test_nested_gitlab_repositories_with_same_group_install_independently`` and
+the req-rs-016 tests must stay paired with this structural check.
 """
 
 from __future__ import annotations
@@ -64,6 +67,7 @@ def _is_call(node: ast.AST, name: str, args: tuple[str, ...]) -> bool:
         isinstance(node, ast.Call)
         and _call_name(node.func) == name
         and len(node.args) == len(args)
+        and not node.keywords
         and all(
             _is_name(argument, expected) for argument, expected in zip(node.args, args, strict=True)
         )
@@ -143,7 +147,7 @@ def _identity_ref_tuple(node: ast.AST) -> bool:
 def _direct_identity_composition(node: ast.AST) -> bool:
     if not isinstance(node, ast.Call) or _call_name(node.func) != "normalize_repo_url":
         return False
-    if len(node.args) != 1:
+    if len(node.args) != 1 or node.keywords:
         return False
     url_call = node.args[0]
     return (
