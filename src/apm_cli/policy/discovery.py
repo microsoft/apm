@@ -250,6 +250,7 @@ def discover_policy_with_chain(
     expected_hash: str | None = None,
     policy_override: str | None = None,
     no_cache: bool = False,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Discover policy with full inheritance chain resolution.
 
@@ -309,12 +310,20 @@ def discover_policy_with_chain(
         if pin is not None:
             expected_hash = pin.normalized
 
+    local_override = bool(policy_override and Path(policy_override).is_file())
+    if cache_only and not local_override and not policy_cache_available(project_root):
+        if expected_hash is not None:
+            return _unverifiable_cache_pin(expected_hash, "")
+        return PolicyFetchResult(outcome="absent")
+
     # -- Base discovery ------------------------------------------------
+    discovery_kwargs = {"cache_only": True} if cache_only else {}
     fetch_result = discover_policy(
         project_root,
         policy_override=policy_override,
         no_cache=no_cache,
         expected_hash=expected_hash,
+        **discovery_kwargs,
     )
 
     # -- Chain resolution if leaf has extends: -------------------------
@@ -689,6 +698,7 @@ def discover_policy(
     policy_override: str | None = None,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Discover and load the applicable policy for a project.
 
@@ -720,23 +730,36 @@ def discover_policy(
                 source=f"url:{policy_override}",
             )
         if policy_override.startswith("https://"):
-            return _fetch_from_url(
+            result = _fetch_from_url(
                 policy_override,
                 project_root,
                 no_cache=no_cache,
                 expected_hash=expected_hash,
+                cache_only=cache_only,
             )
+            if cache_only and expected_hash is not None and result.outcome == "absent":
+                return _unverifiable_cache_pin(expected_hash, result.source)
+            return result
         if policy_override != "org":
             # Try as owner/repo reference
-            return _fetch_from_repo(
+            result = _fetch_from_repo(
                 policy_override,
                 project_root,
                 no_cache=no_cache,
                 expected_hash=expected_hash,
+                cache_only=cache_only,
             )
+            if cache_only and expected_hash is not None and result.outcome == "absent":
+                return _unverifiable_cache_pin(expected_hash, result.source)
+            return result
 
     # Auto-discover from git remote
-    return _auto_discover(project_root, no_cache=no_cache, expected_hash=expected_hash)
+    return _auto_discover(
+        project_root,
+        no_cache=no_cache,
+        expected_hash=expected_hash,
+        cache_only=cache_only,
+    )
 
 
 def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFetchResult:
@@ -784,6 +807,7 @@ def _auto_discover(
     *,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Auto-discover policy by cascading through candidate repos.
 
@@ -818,13 +842,18 @@ def _auto_discover(
                 project_root=project_root,
                 no_cache=no_cache,
                 expected_hash=expected_hash,
+                cache_only=cache_only,
             )
         else:
             repo_ref = f"{org}/{candidate_repo}"
             if host and host != "github.com":
                 repo_ref = f"{host}/{repo_ref}"
             result = _fetch_from_repo(
-                repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash
+                repo_ref,
+                project_root,
+                no_cache=no_cache,
+                expected_hash=expected_hash,
+                cache_only=cache_only,
             )
 
         # 404 / absent -> try the next candidate
@@ -851,10 +880,9 @@ def _auto_discover(
         return result
 
     # All candidates exhausted: no policy published anywhere.
-    return PolicyFetchResult(
-        error=None,
-        outcome="absent",
-    )
+    if cache_only and expected_hash is not None:
+        return _unverifiable_cache_pin(expected_hash, "")
+    return PolicyFetchResult(error=None, outcome="absent")
 
 
 def _extract_org_from_git_remote(
@@ -939,10 +967,12 @@ def _fetch_from_url(
     *,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Fetch policy YAML from a direct URL."""
     source_label = f"url:{url}"
     cache_entry: _CacheEntry | None = None
+    cache_entry_persisted = _cache_entry_files_exist(url, project_root)
 
     # Use URL as cache key
     if not no_cache:
@@ -959,6 +989,14 @@ def _fetch_from_url(
                 expected_hash=expected_hash,
                 warnings=cache_entry.warnings,
             )
+
+    if cache_only:
+        return _cache_only_policy_result(
+            cache_entry,
+            source_label=source_label,
+            expected_hash=expected_hash,
+            cache_entry_persisted=cache_entry_persisted,
+        )
 
     fetch_error: str | None = None
     content: str | None = None
@@ -1044,6 +1082,7 @@ def _fetch_from_repo(
     *,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Fetch apm-policy.yml from a GitHub repo via Contents API.
 
@@ -1051,6 +1090,7 @@ def _fetch_from_repo(
     """
     source_label = f"org:{repo_ref}"
     cache_entry: _CacheEntry | None = None
+    cache_entry_persisted = _cache_entry_files_exist(repo_ref, project_root)
 
     if not no_cache:
         cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
@@ -1066,6 +1106,14 @@ def _fetch_from_repo(
                 expected_hash=expected_hash,
                 warnings=cache_entry.warnings,
             )
+
+    if cache_only:
+        return _cache_only_policy_result(
+            cache_entry,
+            source_label=source_label,
+            expected_hash=expected_hash,
+            cache_entry_persisted=cache_entry_persisted,
+        )
 
     content, error = _fetch_github_contents(repo_ref, "apm-policy.yml")
 
@@ -1197,6 +1245,7 @@ def _fetch_from_ado_repo(
     project_root: Path,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Fetch apm-policy.yml from an Azure DevOps repo.
 
@@ -1206,6 +1255,7 @@ def _fetch_from_ado_repo(
     repo_ref = f"{host}/{org}/{project}/{repo}"
     source_label = f"org:{repo_ref}"
     cache_entry: _CacheEntry | None = None
+    cache_entry_persisted = _cache_entry_files_exist(repo_ref, project_root)
 
     if not no_cache:
         cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
@@ -1221,6 +1271,14 @@ def _fetch_from_ado_repo(
                 expected_hash=expected_hash,
                 warnings=cache_entry.warnings,
             )
+
+    if cache_only:
+        return _cache_only_policy_result(
+            cache_entry,
+            source_label=source_label,
+            expected_hash=expected_hash,
+            cache_entry_persisted=cache_entry_persisted,
+        )
 
     content, error = _fetch_ado_contents(org, project, repo, "apm-policy.yml", host=host)
 
@@ -1377,6 +1435,49 @@ class _CacheEntry:
     raw_bytes_hash: str = ""  # "<algo>:<hex>" of leaf bytes off wire (#827)
 
 
+def _cache_only_policy_result(
+    cache_entry: _CacheEntry | None,
+    *,
+    source_label: str,
+    expected_hash: str | None,
+    cache_entry_persisted: bool,
+) -> PolicyFetchResult:
+    """Return a cached policy or an offline-safe absent outcome."""
+    if cache_entry is None:
+        if expected_hash is not None and cache_entry_persisted:
+            return PolicyFetchResult(
+                source=source_label,
+                outcome="hash_mismatch",
+                error="Cached policy bytes do not match the project policy.hash pin",
+                expected_hash=expected_hash,
+            )
+        return PolicyFetchResult(source=source_label, outcome="absent")
+    return PolicyFetchResult(
+        policy=cache_entry.policy,
+        source=cache_entry.source,
+        cached=True,
+        cache_stale=True,
+        cache_age_seconds=cache_entry.age_seconds,
+        outcome="cached_stale",
+        raw_bytes_hash=cache_entry.raw_bytes_hash or None,
+        expected_hash=expected_hash,
+        warnings=cache_entry.warnings,
+    )
+
+
+def _unverifiable_cache_pin(
+    expected_hash: str,
+    source: str,
+) -> PolicyFetchResult:
+    """Fail closed when cache-only discovery cannot verify a project pin."""
+    return PolicyFetchResult(
+        source=source,
+        outcome="hash_mismatch",
+        error="Policy hash pin cannot be verified without cached policy bytes",
+        expected_hash=expected_hash,
+    )
+
+
 def _get_cache_dir(project_root: Path) -> Path:
     """Get the policy cache directory.
 
@@ -1410,6 +1511,25 @@ def _get_cache_dir(project_root: Path) -> Path:
 def _cache_key(repo_ref: str) -> str:
     """Generate a deterministic cache filename from repo ref."""
     return hashlib.sha256(repo_ref.encode()).hexdigest()[:16]
+
+
+def _cache_entry_files_exist(repo_ref: str, project_root: Path) -> bool:
+    """Return whether both persisted files exist for one policy source."""
+    cache_dir = _get_cache_dir(project_root)
+    key = _cache_key(repo_ref)
+    return (cache_dir / f"{key}.yml").is_file() and (cache_dir / f"{key}.meta.json").is_file()
+
+
+def policy_cache_available(project_root: Path) -> bool:
+    """Return whether the project has any complete persisted policy entry."""
+    cache_dir = _get_cache_dir(project_root)
+    if not cache_dir.is_dir():
+        return False
+    for policy_file in cache_dir.glob("*.yml"):
+        metadata_file = cache_dir / f"{policy_file.stem}.meta.json"
+        if metadata_file.is_file():
+            return True
+    return False
 
 
 def _policy_to_dict(policy: ApmPolicy) -> dict:

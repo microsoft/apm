@@ -108,13 +108,27 @@ Policy is evaluated at two points. Both use the same policy file and the same me
 
 ### Install time (preflight gate)
 
-`apm install` resolves the dependency tree, then runs the policy gate against the resolved set, then writes any files. A blocking violation halts the install with a non-zero exit code; nothing is written to disk. This protects developers who run `apm install` locally — they cannot accidentally deploy a denied package even without CI.
+`apm install` resolves dependencies, runs policy preflight against the resolved
+set, then writes files. Local bundle installs remain zero-network: they apply
+an already-cached policy to bundle MCP entries and the resolved target set
+before bundle verification and deployment. A blocking violation exits non-zero
+before anything is written.
 
-> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. The env var also skips all 20 policy checks when `apm audit --ci` runs in the same shell; the 8 baseline lockfile checks still run. See the [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
+> **Bypass note:** `apm install --no-policy` skips this local gate for one
+> invocation. `APM_POLICY_DISABLE=1` also disables policy evaluation for
+> `apm audit --ci` in the same shell, but the 8 baseline lockfile checks still
+> run. Today that means 21 policy checks are skipped. See the
+> [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract)
+> for the full surface.
 
 ### CI time (audit gate)
 
-`apm audit --ci --policy org` runs the same checks (plus 8 baseline lockfile checks) and is intended as a required status check on pull requests. It produces SARIF output that GitHub Code Scanning renders inline on the PR diff.
+`apm audit --ci --policy org` runs 21 policy checks plus 8 baseline lockfile
+checks and is intended as a required status check on pull requests. With
+`security.integrity.require_hashes: true`, the `dependency-content-hashes`
+check fails when a non-local locked dependency lacks `content_hash`; local
+dependencies are exempt. SARIF output renders findings through GitHub Code
+Scanning.
 
 For setup, see [Enforce in CI](../enforce-in-ci/).
 

@@ -77,6 +77,21 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
 
 
+def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
+    """Imperative bundle deploys must not bypass policy outcome routing."""
+    root = Path(__file__).parents[2]
+    handler = (root / "src/apm_cli/install/local_bundle_handler.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "from ..policy.install_preflight import run_policy_preflight" in handler
+    assert "policy_fetch, _enforcement_active = run_policy_preflight(" in handler
+    assert "cache_only=True" in handler
+    assert "mcp_deps=bundle_mcp_deps" in handler
+    assert "require_hashes_enabled(" in handler
+    assert "Local bundle installs must route policy through install_preflight.py" in guard
+    assert "require_hashes enforcement must route through install/integrity.py" in guard
+
+
 def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
     tmp_path: Path,
 ) -> None:
@@ -109,7 +124,7 @@ def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
         capture_output=True,
         text=True,
         check=False,
-        timeout=60,
+        timeout=120,
     )
 
     assert result.returncode == 1

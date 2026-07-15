@@ -70,6 +70,7 @@ def run_policy_preflight(
     dry_run: bool = False,
     registries: dict[str, str] | None = None,
     effective_target: str | list[str] | None = None,
+    cache_only: bool = False,
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -119,7 +120,8 @@ def run_policy_preflight(
         return None, False
 
     # -- Discovery (chain-aware: resolves extends: + merges) -----------
-    fetch_result = discover_policy_with_chain(project_root)
+    discovery_kwargs = {"cache_only": True} if cache_only else {}
+    fetch_result = discover_policy_with_chain(project_root, **discovery_kwargs)
 
     # -- Route the outcome through the shared 9-outcome table ---------
     # Logging + fail-closed gating live in ``policy/outcome_routing.py``

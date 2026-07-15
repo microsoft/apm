@@ -143,6 +143,23 @@ if [ "$policy_named_defs" -ne 2 ] \
     [ -n "$policy_duplicate_hits" ] && echo "$policy_duplicate_hits"
     violations=$((violations + 1))
 fi
+local_bundle_handler="src/apm_cli/install/local_bundle_handler.py"
+if ! grep -q \
+    'from ..policy.install_preflight import run_policy_preflight' \
+    "$local_bundle_handler" \
+    || ! grep -q 'policy_fetch, _enforcement_active = run_policy_preflight(' \
+        "$local_bundle_handler" \
+    || ! grep -q 'cache_only=True' "$local_bundle_handler" \
+    || ! grep -q 'mcp_deps=bundle_mcp_deps' "$local_bundle_handler"; then
+    echo "[x] Local bundle installs must route policy through install_preflight.py"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "require_hashes enforcement must route through install/integrity.py" \
+    'policy(\.security\.integrity)?\.require_hashes' \
+    src/apm_cli/install/pipeline.py \
+    src/apm_cli/install/local_bundle_handler.py \
+    src/apm_cli/policy/policy_checks.py
 
 echo "[*] AC4: declared-intent preservation"
 check_pattern \

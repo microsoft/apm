@@ -31,3 +31,7 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_real_consume_contracts.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_govern_core_contract.py"
+marker = "e2e"
