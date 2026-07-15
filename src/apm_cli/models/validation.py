@@ -462,9 +462,9 @@ def _validate_claude_skill(
 
 
 def build_claude_skill_package(package_path: Path, skill_md_path: Path) -> APMPackage:
-    """Build canonical package metadata for a root Claude Skill.
+    """Build canonical package metadata for a Claude Skill package.
 
-    Root Claude Skills do not declare an APM-owned package version in
+    Claude Skills do not declare an APM-owned package version in
     ``SKILL.md``. The SKILL.md frontmatter owns the display name and
     description; the package version stays ``unknown``.
     """

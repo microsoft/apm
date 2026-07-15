@@ -677,6 +677,7 @@ class TestValidateClaudeSkill:
         assert returned.is_valid is True
         assert returned.package is not None
         assert returned.package.name == "my-skill"
+        assert returned.package.version == "unknown"
 
     def test_skill_md_without_name_uses_dir_name(self, tmp_path: Path) -> None:
         """SKILL.md with no 'name' in frontmatter uses directory name."""
