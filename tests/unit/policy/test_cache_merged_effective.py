@@ -924,11 +924,7 @@ class TestColdWarmEnforcementParity:
         local_root.mkdir()
         local_policy = local_root / "apm-policy.yml"
         local_policy.write_text(
-            "name: local\n"
-            "enforcement: block\n"
-            "security:\n"
-            "  integrity:\n"
-            "    require_hashes: true\n",
+            "name: local\nenforcement: block\nsecurity:\n  integrity:\n    require_hashes: true\n",
             encoding="utf-8",
         )
         local = discover_policy_with_chain(
