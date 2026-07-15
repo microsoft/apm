@@ -1829,6 +1829,8 @@ def _read_cache_entry(
             if raw_bytes_hash.lower() != expected_norm:
                 return None
 
+        # The sidecar preserves warnings from the authored cold input. Parser
+        # warnings from canonical cache YAML are intentionally not user-facing.
         policy, _warnings = load_policy(policy_file)
         cached_warnings = meta.get("warnings", [])
         if not isinstance(cached_warnings, list):
