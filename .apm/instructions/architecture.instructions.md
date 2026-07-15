@@ -40,6 +40,7 @@ instead of re-deriving the answer locally.
 | Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators |
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) |
+| Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) |
 | Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |
 
 If you are about to compute one of these locally, stop and call the
