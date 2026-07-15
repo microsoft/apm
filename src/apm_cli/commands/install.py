@@ -1226,6 +1226,7 @@ def install(  # noqa: PLR0913
                     force=force,
                     dry_run=dry_run,
                     verbose=verbose,
+                    no_policy=no_policy,
                     alias=alias,
                     logger=logger,
                     legacy_skill_paths=legacy_skill_paths,
@@ -1246,7 +1247,6 @@ def install(  # noqa: PLR0913
                         "--parallel-downloads": parallel_downloads != 4,
                         "--allow-insecure": allow_insecure,
                         "--allow-insecure-host": bool(allow_insecure_hosts),
-                        "--no-policy": no_policy,
                     },
                 )
                 # Local bundle install renders its own summary; mark

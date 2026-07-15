@@ -733,6 +733,58 @@ class TestLocalBundleHashFormatCrossFlow:
 class TestLocalInstallAirGap:
     """Prove that local-bundle install does zero network I/O."""
 
+    @pytest.mark.parametrize(
+        ("policy_config", "expected_message"),
+        (
+            (
+                {"fetch_failure_default": "block"},
+                "policy.fetch_failure_default=block",
+            ),
+            (
+                {"hash": "not-a-digest"},
+                "policy hash mismatch",
+            ),
+        ),
+        ids=("fetch-failure-block", "malformed-hash-pin"),
+    )
+    def test_cold_cache_honors_block_without_network(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        policy_config: dict[str, str],
+        expected_message: str,
+    ) -> None:
+        """A cold offline policy cache fails closed when the project requires it."""
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        project = _make_project(tmp_path / "dst")
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["policy"] = policy_config
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        with (
+            patch("subprocess.run", side_effect=_network_sentinel_subprocess_run),
+            patch("subprocess.Popen", side_effect=_network_sentinel_subprocess_popen),
+            patch(
+                "requests.Session.send",
+                side_effect=AssertionError("Unexpected network I/O: requests"),
+            ),
+        ):
+            result = _invoke_install(
+                project,
+                str(bundle),
+                "--target",
+                "copilot",
+                monkeypatch=monkeypatch,
+            )
+
+        assert result.exit_code != 0
+        assert expected_message in result.output.lower()
+        assert not (project / ".agents" / "skills" / "coding" / "SKILL.md").exists()
+
     def test_local_install_zero_network_io(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1086,6 +1138,7 @@ class TestBundleMcpWiringE2E:
         is called once with the bundle's servers and the resolved
         targets as a CSV string in ``explicit_target``."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.policy.install_preflight import run_policy_preflight
 
         bundle = self._make_mcp_bundle(tmp_path)
         project = _make_project(tmp_path / "dst")
@@ -1100,9 +1153,19 @@ class TestBundleMcpWiringE2E:
             captured["kwargs"] = dict(kwargs)
             return len(mcp_deps)
 
-        with patch(
-            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
-            side_effect=_capture,
+        def _capture_preflight(**kwargs):
+            captured["preflight_deps"] = list(kwargs["mcp_deps"])
+            return run_policy_preflight(**kwargs)
+
+        with (
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+                side_effect=_capture,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.run_policy_preflight",
+                side_effect=_capture_preflight,
+            ),
         ):
             result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
@@ -1126,6 +1189,7 @@ class TestBundleMcpWiringE2E:
         assert "deps" in captured, "MCPIntegrator.install was not called"
         names = sorted(d.name for d in captured["deps"])
         assert names == ["filesystem", "github"]
+        assert sorted(d.name for d in captured["preflight_deps"]) == names
 
         # Resolved targets reach the integrator via ``explicit_target``,
         # which accepts either a CSV string or a list of canonical names.

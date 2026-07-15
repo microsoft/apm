@@ -40,9 +40,11 @@ from apm_cli.policy.schema import (
     CompilationTargetPolicy,
     DependencyPolicy,
     ExecutablesPolicy,
+    IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -1171,8 +1173,8 @@ class TestUnmanagedNonDuplication:
 
 # -- Integration: run_policy_checks ---------------------------------
 class TestRunPolicyChecks:
-    def test_returns_all_18_checks(self, tmp_path):
-        """Full run should produce exactly 20 checks."""
+    def test_returns_all_21_checks(self, tmp_path):
+        """Full run should produce exactly 21 checks."""
         _write_apm_yml(
             tmp_path,
             {
@@ -1196,9 +1198,62 @@ class TestRunPolicyChecks:
 
         policy = ApmPolicy()
         result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 20
+        assert len(result.checks) == 21
         # Default policy = all checks pass
         assert result.passed
+
+    @pytest.mark.parametrize(
+        ("enabled", "source", "expected_pass"),
+        (
+            (False, None, True),
+            (True, "local", True),
+            (True, None, False),
+        ),
+        ids=("disabled", "local-exempt", "non-local-missing"),
+    )
+    def test_dependency_content_hash_policy_uses_integrity_owner(
+        self,
+        tmp_path: Path,
+        enabled: bool,
+        source: str | None,
+        expected_pass: bool,
+    ) -> None:
+        """Audit hash verdicts match the canonical install integrity rule."""
+        _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test",
+                "version": "1.0.0",
+                "dependencies": {"apm": ["owner/repo#v1.0.0"]},
+            },
+        )
+        dependency = {
+            "repo_url": "owner/repo",
+            "resolved_ref": "v1.0.0",
+            "resolved_commit": "a" * 40,
+        }
+        if source is not None:
+            dependency["source"] = source
+        _write_lockfile(
+            tmp_path,
+            {
+                "lockfile_version": "1",
+                "generated_at": "2025-01-01T00:00:00Z",
+                "dependencies": [dependency],
+            },
+        )
+        policy = ApmPolicy(
+            security=SecurityPolicy(
+                integrity=IntegrityPolicy(require_hashes=enabled),
+            )
+        )
+
+        result = run_policy_checks(tmp_path, policy, fail_fast=False)
+        check = next(check for check in result.checks if check.name == "dependency-content-hashes")
+
+        assert check.passed is expected_pass
+        if not expected_pass:
+            assert "require_hashes" in check.details[0]
 
     def test_mixed_pass_fail(self, tmp_path):
         """Denied dep should fail while other checks pass."""

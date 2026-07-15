@@ -456,7 +456,6 @@ def _validate_claude_skill(
     from .apm_package import APMPackage
 
     try:
-        # Parse SKILL.md to extract metadata
         with open(skill_md_path, encoding="utf-8") as f:
             post = load_frontmatter(f)
 
@@ -464,17 +463,14 @@ def _validate_claude_skill(
         skill_description = post.metadata.get("description", f"Claude Skill: {skill_name}")
         skill_license = post.metadata.get("license")
 
-        # Create APMPackage directly from SKILL.md metadata - no file generation needed
-        package = APMPackage(
+        result.package = APMPackage(
             name=skill_name,
-            version="1.0.0",
+            version="unknown",
             description=skill_description,
             license=skill_license,
             package_path=package_path,
             type=PackageContentType.SKILL,
         )
-        result.package = package
-
     except Exception as e:
         result.add_error(f"Failed to process {SKILL_MD_FILENAME}: {e}")
         return result

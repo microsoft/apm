@@ -134,6 +134,42 @@ class TestCiWithPolicyFlag:
         )
         assert result.exit_code == 1
 
+    def test_require_hashes_stays_fail_closed_in_warn_mode(
+        self,
+        runner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Integrity hash failures are not downgraded by warn enforcement."""
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(
+            tmp_path,
+            enforcement="warn",
+            security={"integrity": {"require_hashes": True}},
+        )
+
+        result = runner.invoke(
+            audit,
+            [
+                "--ci",
+                "--no-drift",
+                "--no-fail-fast",
+                "--policy",
+                str(policy_path),
+                "--format",
+                "json",
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        hash_check = next(
+            check for check in payload["checks"] if check["name"] == "dependency-content-hashes"
+        )
+        assert hash_check["passed"] is False
+
 
 class TestCiWithPolicyOrg:
     def test_ci_policy_org_discovery(self, runner, tmp_path, monkeypatch):
