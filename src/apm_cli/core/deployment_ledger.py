@@ -31,6 +31,22 @@ _LEGACY_TARGET_PREFIXES = {
     ".opencode/": "opencode",
     ".agents/": "agents",
 }
+_LOCAL_BUNDLE_OWNER = "local-bundle"
+_SHA256_PREFIX = "sha256:"
+_LOWER_HEX = frozenset("0123456789abcdef")
+
+
+def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
+    """Reject imperative provenance without one canonical SHA-256 digest."""
+    digest = (
+        content_hash.removeprefix(_SHA256_PREFIX)
+        if isinstance(content_hash, str) and content_hash.startswith(_SHA256_PREFIX)
+        else ""
+    )
+    if len(digest) != 64 or any(character not in _LOWER_HEX for character in digest):
+        raise ValueError(
+            f"Local bundle deployment {path!r} requires a canonical sha256:<hex> content hash"
+        )
 
 
 class DeploymentLedgerCodec:
@@ -137,6 +153,7 @@ class DeploymentLedgerCodec:
         hashes: dict[str, str],
     ) -> None:
         """Update one compatibility ownership view and invalidate its projection."""
+        prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
         if owner == ".":
             lockfile.local_deployed_files = list(files)
             lockfile.local_deployed_file_hashes = dict(hashes)
@@ -144,10 +161,46 @@ class DeploymentLedgerCodec:
             dependency = lockfile.dependencies[owner]
             dependency.deployed_files = list(files)
             dependency.deployed_file_hashes = dict(hashes)
-        lockfile.deployment_ledger = DeploymentLedger(records={})
-        lockfile._deployments_present = False
-        lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
-        lockfile._deployments_present = True
+        DeploymentLedgerCodec._rebuild_from_legacy(lockfile, prior_bundle_paths)
+
+    @staticmethod
+    def record_local_bundle_files(
+        lockfile: LockFile,
+        files: list[str],
+        hashes: dict[str, str],
+    ) -> None:
+        """Persist imperative bundle files without making them replayable source."""
+        prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        for path in files:
+            _require_local_bundle_hash(path, hashes.get(path))
+        merged_files = sorted(set(lockfile.local_deployed_files).union(files))
+        merged_hashes = dict(lockfile.local_deployed_file_hashes)
+        merged_hashes.update(hashes)
+        DeploymentLedgerCodec.replace_legacy_owner(
+            lockfile,
+            ".",
+            merged_files,
+            merged_hashes,
+        )
+
+        DeploymentLedgerCodec._mark_local_bundle_paths(
+            lockfile,
+            prior_bundle_paths.union(files),
+        )
+        DeploymentLedgerCodec.apply_to_lockfile(lockfile.deployment_ledger, lockfile)
+
+    @staticmethod
+    def local_bundle_paths(lockfile: LockFile) -> frozenset[str]:
+        """Return paths whose active provenance is an imperative local bundle."""
+        ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+        paths: set[str] = set()
+        for record in ledger.records.values():
+            if record.active_owner != _LOCAL_BUNDLE_OWNER:
+                continue
+            path = DeploymentLedgerCodec._legacy_value(record.locator)
+            _require_local_bundle_hash(path, record.content_hash)
+            paths.add(path)
+        return frozenset(paths)
 
     @staticmethod
     def replace_mcp_target_servers(
@@ -159,10 +212,7 @@ class DeploymentLedgerCodec:
             runtime: list(servers) for runtime, servers in target_servers.items()
         }
         lockfile._mcp_target_servers_present = True
-        lockfile.deployment_ledger = DeploymentLedger(records={})
-        lockfile._deployments_present = False
-        lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
-        lockfile._deployments_present = True
+        DeploymentLedgerCodec.refresh_from_legacy(lockfile)
 
     @staticmethod
     def replace_context_local_files(context: Any, files: list[str]) -> None:
@@ -172,9 +222,87 @@ class DeploymentLedgerCodec:
     @staticmethod
     def refresh_from_legacy(lockfile: LockFile) -> None:
         """Rebuild canonical rows after a compatibility view mutates in place."""
+        prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        DeploymentLedgerCodec._rebuild_from_legacy(lockfile, prior_bundle_paths)
+
+    @staticmethod
+    def invalidate_legacy_projection(lockfile: LockFile) -> None:
+        """Invalidate compatibility rows while preserving imperative provenance."""
+        prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        lockfile.deployment_ledger = DeploymentLedger(records={})
+        lockfile._deployments_present = False
+        if prior_bundle_paths:
+            DeploymentLedgerCodec._rebuild_from_legacy(lockfile, prior_bundle_paths)
+
+    @staticmethod
+    def rename_local_deployed_path(
+        lockfile: LockFile,
+        old_value: str,
+        new_value: str,
+    ) -> None:
+        """Rename one local path while preserving imperative provenance."""
+        if old_value not in lockfile.local_deployed_files:
+            return
+        prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        was_local_bundle = old_value in prior_bundle_paths
+        lockfile.local_deployed_files = [
+            value for value in lockfile.local_deployed_files if value != old_value
+        ]
+        if new_value not in lockfile.local_deployed_files:
+            lockfile.local_deployed_files.append(new_value)
+        if old_value in lockfile.local_deployed_file_hashes:
+            old_hash = lockfile.local_deployed_file_hashes.pop(old_value)
+            lockfile.local_deployed_file_hashes.setdefault(new_value, old_hash)
+        if was_local_bundle:
+            renamed_bundle_paths = (prior_bundle_paths - {old_value}) | {new_value}
+            DeploymentLedgerCodec._rebuild_from_legacy(
+                lockfile,
+                frozenset(renamed_bundle_paths),
+            )
+        else:
+            lockfile.deployment_ledger = DeploymentLedger(records={})
+            lockfile._deployments_present = False
+
+    @staticmethod
+    def _rebuild_from_legacy(
+        lockfile: LockFile,
+        prior_bundle_paths: frozenset[str],
+    ) -> None:
+        """Rebuild compatibility rows and restore surviving bundle provenance."""
         lockfile.deployment_ledger = DeploymentLedger(records={})
         lockfile._deployments_present = False
         lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+        lockfile._deployments_present = True
+        surviving_paths = prior_bundle_paths.intersection(lockfile.local_deployed_files)
+        DeploymentLedgerCodec._mark_local_bundle_paths(lockfile, surviving_paths)
+
+    @staticmethod
+    def _mark_local_bundle_paths(
+        lockfile: LockFile,
+        bundle_paths: frozenset[str],
+    ) -> None:
+        """Mark existing ledger rows as hash-audited imperative bundle output."""
+        if not bundle_paths:
+            return
+        records = dict(lockfile.deployment_ledger.records)
+        marked_paths: set[str] = set()
+        for key, record in records.items():
+            path = DeploymentLedgerCodec._legacy_value(record.locator)
+            if path not in bundle_paths:
+                continue
+            _require_local_bundle_hash(path, record.content_hash)
+            owners = tuple(owner for owner in record.owners if owner != _LOCAL_BUNDLE_OWNER)
+            records[key] = DeploymentRecord(
+                locator=record.locator,
+                owners=(*owners, _LOCAL_BUNDLE_OWNER),
+                active_owner=_LOCAL_BUNDLE_OWNER,
+                content_hash=record.content_hash,
+            )
+            marked_paths.add(path)
+        missing = bundle_paths - marked_paths
+        if missing:
+            raise ValueError(f"Local bundle deployment rows are missing: {sorted(missing)}")
+        lockfile.deployment_ledger = DeploymentLedger(records=records)
         lockfile._deployments_present = True
 
     @staticmethod

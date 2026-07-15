@@ -25,5 +25,17 @@ path = "tests/integration/test_core_smoke.py"
 marker = "e2e"
 
 [[modules]]
+path = "tests/integration/test_produce_consume_contract.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_materialization_matrix_contract.py"
+marker = "e2e"
+
+[[modules]]
 path = "tests/integration/test_real_consume_contracts.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_consume_source_ref_cache_matrix.py"
 marker = "e2e"

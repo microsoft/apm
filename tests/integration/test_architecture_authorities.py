@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -61,6 +63,59 @@ def test_cleanup_current_claim_protection_has_single_owner() -> None:
     assert checker.analyze_path(root / "src/apm_cli/install/phases/cleanup.py") == []
     assert "scripts/check_cleanup_claim_owner.py" in guard
     assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
+
+
+def test_local_bundle_replay_provenance_has_single_owner() -> None:
+    """Bundle persistence and drift exclusion must consume the deployment ledger."""
+    root = Path(__file__).parents[2]
+    handler = (root / "src/apm_cli/install/local_bundle_handler.py").read_text()
+    drift = (root / "src/apm_cli/install/drift.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "DeploymentLedgerCodec.record_local_bundle_files" in handler
+    assert "DeploymentLedgerCodec.local_bundle_paths" in drift
+    assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
+
+
+def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
+    tmp_path: Path,
+) -> None:
+    """AC4 must reject a consumer that interprets the persisted marker itself."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    drift_path = sandbox / "src/apm_cli/install/drift.py"
+    with drift_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n\ndef _parallel_bundle_owner(record):\n"
+            '    return record.active_owner != "local-bundle"\n'
+        )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert result.returncode == 1
+    assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in (
+        result.stdout
+    )
 
 
 def _load_cleanup_claim_owner_checker(root: Path) -> ModuleType:
@@ -315,6 +370,24 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
         "nodes_at_depth.sort",
     ):
         assert duplicate not in source
+
+
+def test_existing_path_ref_rechecks_have_one_owner() -> None:
+    """Resolver gates must share the canonical ref-drift decision."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/drift.py").read_text()
+    resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text()
+    phase = (root / "src/apm_cli/install/phases/resolve.py").read_text()
+    legacy_test = (root / "tests/unit/test_install_update_refs.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def should_force_ref_recheck(" in owner
+    assert "should_force_ref_recheck(" in resolver
+    assert "should_force_ref_recheck(" in phase
+    assert "_force_semver_resolve" not in resolver
+    assert "_force_semver_resolve" not in phase
+    assert "def _force_semver_resolve" not in legacy_test
+    assert "Existing-path ref rechecks must use drift.py::should_force_ref_recheck" in guard
 
 
 def test_skill_subset_filtering_has_one_canonical_owner() -> None:
