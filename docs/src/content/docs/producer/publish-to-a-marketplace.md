@@ -137,6 +137,13 @@ full HTTPS URLs, and local `./` paths remain per-entry overrides. If
 See the [manifest schema](../../reference/manifest-schema/#75-marketplacepackages)
 for the full validation and override rules.
 
+The generated source object is also a producer-to-consumer contract.
+`apm pack` emits `source: url` for a remote repository and
+`source: git-subdir` when `subdir` is set.
+`apm install <package>@<marketplace>` accepts both forms, derives the package host from
+the generated entry rather than from the marketplace host, and preserves
+the generated path and ref.
+
 For an Azure DevOps marketplace, point `sourceBase` at the
 `https://dev.azure.com/{org}/{project}/_git` base; relative sources compose
 onto it and the `dev.azure.com` host is kept on the consumer side:
@@ -193,7 +200,8 @@ form (`outputs: [claude, codex]`) still parses with a deprecation
 warning. When `codex` is selected, every package must define
 `category`. Codex output maps local entries to `source: local`,
 remote entries to `source: url`, and remote subdirectory entries to
-`source: git-subdir`.
+`source: git-subdir`. Claude output also emits `category` on any
+package where it is set, even though only `codex` requires it.
 
 ## Build
 

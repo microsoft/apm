@@ -456,7 +456,33 @@ if [ "$test_contract_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
-echo "[*] AC10: Git repository cache identity authority"
+echo "[*] AC10: marketplace source parsing authority"
+packed_source_body=$(awk '
+    /^def _dependency_reference_from_packed_source\(/ {flag=1}
+    flag && /^def / && !/^def _dependency_reference_from_packed_source\(/ {exit}
+    flag {print}
+' src/apm_cli/marketplace/resolver.py)
+packed_source_parallel_hits=$(printf '%s\n' "$packed_source_body" \
+    | grep -En 'urlparse\(|urllib\.parse|DependencyReference\(' \
+    | grep -v 'DependencyReference\.parse_from_dict' \
+    | grep -v 'architecture-authority-exempt:' || true)
+if ! printf '%s\n' "$packed_source_body" \
+        | grep -Fq 'entry: dict[str, object] = {"git": remote.strip()}' \
+    || ! printf '%s\n' "$packed_source_body" \
+        | grep -Fq 'entry["path"] = path' \
+    || ! printf '%s\n' "$packed_source_body" \
+        | grep -Fq 'entry["ref"] = declared_ref' \
+    || ! printf '%s\n' "$packed_source_body" \
+        | grep -Fq 'dependency = DependencyReference.parse_from_dict(entry)' \
+    || ! printf '%s\n' "$packed_source_body" \
+        | grep -Fq 'if dependency.is_local:' \
+    || [ -n "$packed_source_parallel_hits" ]; then
+    echo "[x] Packed marketplace sources must use DependencyReference.parse_from_dict"
+    [ -n "$packed_source_parallel_hits" ] && echo "$packed_source_parallel_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC11: Git repository cache identity authority"
 cache_identity_output=$(python3 scripts/check_repository_cache_identity_owner.py \
     --root "$ROOT" 2>&1)
 cache_identity_status=$?

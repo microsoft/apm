@@ -45,5 +45,9 @@ path = "tests/integration/test_consume_source_ref_cache_matrix.py"
 marker = "e2e"
 
 [[modules]]
+path = "tests/integration/test_marketplace_producer_consumer_closure.py"
+marker = "e2e"
+
+[[modules]]
 path = "tests/integration/test_virtual_claude_skill_lock_convergence.py"
 marker = "component"

@@ -97,6 +97,13 @@ browse / install / update workflow works against:
   `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain
   HTTPS.
 
+Remote package entries keep their own source identity independently of the
+marketplace registration. This includes a GitHub.com marketplace that points
+to a package on a self-hosted Git server and a generated `git-subdir` entry
+for a self-hosted GitLab monorepo. APM preserves the package host, path, and
+ref in `apm.yml` and `apm.lock.yaml`. Invalid URLs and unsafe subdirectory
+paths fail before manifest, lockfile, or deployment writes.
+
 Marketplace publishers can route an entry through a configured APM package
 registry with the entry's `registry` and semver `version` fields. Enable the
 feature first with `apm experimental enable registries`; see
@@ -118,11 +125,13 @@ non-GitLab hosts. Authentication falls through to the host's matching
 helper when one is configured. See
 [Authentication](../../getting-started/authentication/).
 
-**Lockfile note.** Installs from a local marketplace record a
-local-path source in `apm.lock.yaml`. Lockfiles produced this way
-are machine-specific -- do not commit them into a shared repo. Remote
-`marketplace.json` installs record `source_url` and `source_digest`
-provenance. See [lockfile reference](../../reference/lockfile-spec/).
+**Lockfile note.** Relative package sources from a local marketplace record a
+local-path source in `apm.lock.yaml`; lockfiles produced this way are
+machine-specific -- do not commit them into a shared repo. Remote
+package entries in the same local marketplace remain remote, host-qualified
+dependencies. Remote `marketplace.json` installs record `source_url` and
+`source_digest` provenance. See
+[lockfile reference](../../reference/lockfile-spec/).
 
 ## Where next
 

@@ -203,6 +203,8 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                 plugin["repository"] = entry.repository
             if pkg.tags:
                 plugin["tags"] = list(pkg.tags)
+            if entry and entry.category:
+                plugin["category"] = entry.category
             if is_local and entry.homepage:
                 plugin["homepage"] = entry.homepage
 

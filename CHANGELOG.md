@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Marketplace packages emitted as remote URL or subdirectory sources now
+  preserve the package host, path, and ref through `apm install`, fixing
+  cross-host enterprise validation and self-hosted GitLab monorepo installs.
+  (closes #2190, #2216; #2228)
 - HTTP git dependency URLs now preserve custom ports when persisted to
   `apm.yml`, so later commands reconnect to the exact endpoint the user
   specified. (closes #2202) -- by @atulya-singh (#2210)
@@ -39,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   common group prefix from reusing the wrong repository. (closes #2191; #2192)
   OpenAPM `openapm-v0.1.md` now normatively binds complete repository identity
   through resolution, cache reuse, and materialization.
+- `apm pack` now emits the `category` field in the Claude marketplace output
+  (`.claude-plugin/marketplace.json`) when a package sets it, matching the
+  Anthropic marketplace schema and the existing Codex output. It stays optional
+  (omitted when unset). Previously `category` was silently stripped from the
+  Claude output even though the `apm.yml` schema accepts and validates it.
+  -- by @mbeacom (closes #2188)
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)
