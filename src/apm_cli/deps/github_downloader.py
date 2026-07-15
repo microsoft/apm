@@ -1168,7 +1168,7 @@ class GitHubPackageDownloader:
         # share one clone; different refs always get independent clones.
         shared_cache = self.shared_clone_cache
         use_shared = shared_cache is not None
-        repository_cache_url = dep_ref.to_repository_cache_url()
+        repository_url = dep_ref.to_github_url()
 
         # WS3 (#1116): try persistent cross-run cache first.
         # Build a canonical URL for cache key derivation.
@@ -1194,7 +1194,7 @@ class GitHubPackageDownloader:
                 # same SHA land in separate variant shards; bare cache
                 # is unchanged so they still share object data.
                 _persistent_checkout = _persistent_cache.get_checkout(
-                    repository_cache_url,
+                    repository_url,
                     _resolved_sha_for_cache or ref,
                     locked_sha=_resolved_sha_for_cache,
                     env=self._cache_git_env(dep_ref),
@@ -1264,7 +1264,7 @@ class GitHubPackageDownloader:
 
                 try:
                     shared_bare_path = shared_cache.get_or_clone(
-                        repository_cache_url,
+                        repository_url,
                         ref,
                         _shared_bare_clone_fn,
                         fetch_fn=_shared_bare_fetch_fn if is_commit_sha else None,
@@ -1656,7 +1656,7 @@ class GitHubPackageDownloader:
         if _persistent_cache is not None:
             try:
                 _cached = _persistent_cache.get_checkout(
-                    dep_ref.to_repository_cache_url(),
+                    dep_ref.to_github_url(),
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                     env=self._cache_git_env(dep_ref),

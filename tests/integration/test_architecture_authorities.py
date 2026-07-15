@@ -523,15 +523,23 @@ def test_link_resolver_owns_dependency_deployment_frame_mapping() -> None:
     assert "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" in guard
 
 
-def test_dependency_reference_owns_repository_cache_identity() -> None:
-    """Downloader cache tiers must consume one complete repository identity."""
+def test_cache_url_normalizer_owns_repository_cache_identity() -> None:
+    """Cache tiers must normalize one complete URL without a downloader-side owner."""
     root = Path(__file__).parents[2]
     downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text()
-    reference = (root / "src/apm_cli/models/dependency/reference.py").read_text()
+    shared_cache = (root / "src/apm_cli/deps/shared_clone_cache.py").read_text()
+    normalizer = (root / "src/apm_cli/cache/url_normalize.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
-    assert "def to_repository_cache_url(" in reference
-    assert downloader.count("to_repository_cache_url()") >= 2
+    assert "def normalize_repo_url(" in normalizer
+    assert "def cache_shard_key(" in normalizer
+    assert "repository = normalize_repo_url(repository_url)" in shared_cache
+    assert "repository_url = dep_ref.to_github_url()" in downloader
+    assert (
+        "_persistent_cache.get_checkout(\n                    dep_ref.to_github_url(),"
+        in downloader
+    )
     assert "Repository cache identity must not truncate repository paths" in guard
+    assert "to_repository_cache_url" not in downloader
     for retired_derivation in ("cache_owner", "cache_repo", '_canonical_url = f"https://'):
         assert retired_derivation not in downloader

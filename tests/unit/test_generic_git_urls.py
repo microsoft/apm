@@ -759,13 +759,9 @@ class TestNestedGroupSupport:
         dep = DependencyReference.parse("gitlab.com/group/subgroup/repo")
         assert dep.to_github_url() == "https://gitlab.com/group/subgroup/repo"
 
-    def test_repository_cache_url_preserves_nested_group(self):
-        dep = DependencyReference.parse("gitlab.com/group/subgroup/repo")
-        assert dep.to_repository_cache_url() == "https://gitlab.com/group/subgroup/repo"
-
-    def test_repository_cache_url_does_not_include_https_credentials(self):
+    def test_github_url_does_not_include_https_credentials(self):
         dep = DependencyReference.parse("https://oauth2:secret@gitlab.com/group/subgroup/repo.git")
-        assert dep.to_repository_cache_url() == "https://gitlab.com/group/subgroup/repo"
+        assert dep.to_github_url() == "https://gitlab.com/group/subgroup/repo"
 
     # --- GitHub unchanged ---
 

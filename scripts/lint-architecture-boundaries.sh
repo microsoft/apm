@@ -366,14 +366,24 @@ if [ "$test_contract_status" -ne 0 ]; then
 fi
 
 echo "[*] AC10: Git repository cache identity authority"
-if [ "$(grep -c 'to_repository_cache_url()' src/apm_cli/deps/github_downloader.py)" -lt 2 ]; then
-    echo "[x] Repository cache identity must come from DependencyReference.to_repository_cache_url"
+if ! grep -q 'repository = normalize_repo_url(repository_url)' \
+    src/apm_cli/deps/shared_clone_cache.py; then
+    echo "[x] SharedCloneCache must normalize the complete repository URL"
+    violations=$((violations + 1))
+fi
+if ! grep -q 'repository_url = dep_ref.to_github_url()' \
+    src/apm_cli/deps/github_downloader.py; then
+    echo "[x] Downloader cache consumers must pass the complete canonical Git URL"
     violations=$((violations + 1))
 fi
 check_pattern \
     "Repository cache identity must not truncate repository paths" \
     'cache_(host|owner|repo)|_canonical_url[[:space:]]*=[[:space:]]*f?"https://' \
     src/apm_cli/deps/github_downloader.py
+check_pattern \
+    "Repository cache keys must stay owned by cache/url_normalize.py" \
+    'to_repository_cache_url' \
+    src/apm_cli
 
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"

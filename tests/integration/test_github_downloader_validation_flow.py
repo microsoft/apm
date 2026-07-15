@@ -348,16 +348,14 @@ class TestDownloadSubdirectoryPersistentCache:
         dep_ref.virtual_path = "packages/my-pkg"
         dep_ref.reference = "main"
         dep_ref.get_unique_key.return_value = "owner/repo@main"
-        dep_ref.to_repository_cache_url.return_value = f"https://gitlab.com/{repo_url}"
+        dep_ref.to_github_url.return_value = f"https://gitlab.com/{repo_url}"
         return dep_ref
 
     def test_persistent_cache_hit_used(self, tmp_path):
         """Lines 1082-1090: persistent cache hit -> uses cached checkout."""
         dep_ref = self._make_dep_ref("spiritt/tenants/spiritt/agent-cfg")
         dep_ref.is_insecure = True
-        dep_ref.to_repository_cache_url.return_value = (
-            "http://gitlab.com/spiritt/tenants/spiritt/agent-cfg"
-        )
+        dep_ref.to_github_url.return_value = "http://gitlab.com/spiritt/tenants/spiritt/agent-cfg"
 
         cached_checkout = tmp_path / "cached"
         cached_checkout.mkdir()
