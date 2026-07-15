@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm pack` and local-bundle install now have a real binary parity contract,
+  and `apm audit --ci` no longer reports clean bundle deployments as orphaned. (#2215)
 - Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).
   Cached inheritance chains no longer relabel stale strict parents as fresh or
   bypass inherited policy in `apm policy status` and executable approval.

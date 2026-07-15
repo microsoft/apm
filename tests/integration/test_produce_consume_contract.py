@@ -341,6 +341,7 @@ def test_real_pack_output_matches_installed_artifacts_and_identity(
     assert set(bundle_rows) == expected_deployed
     assert {row["active_owner"] for row in bundle_rows.values()} == {"local-bundle"}
 
+    # Regression trap: a clean local-bundle install must not report orphaned drift.
     assert receipt.audit_report["passed"] is True
     assert receipt.audit_report["summary"] == {
         "total": len(receipt.audit_report["checks"]),

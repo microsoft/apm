@@ -669,8 +669,9 @@ def diff_scratch_against_project(
 
     # Imperative local bundles have no authored source tree for replay. Their
     # deployed bytes are already bound by local_deployed_file_hashes and the
-    # content-integrity check, so comparing them to an empty scratch projection
-    # would misclassify every clean bundle file as orphaned.
+    # policy/ci_checks.py::_check_content_integrity check, so comparing them to
+    # an empty scratch projection would misclassify every clean bundle file as
+    # orphaned.
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     local_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
