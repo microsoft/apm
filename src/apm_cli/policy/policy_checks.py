@@ -1121,7 +1121,7 @@ def _check_dependency_content_hashes(
         return CheckResult(
             name=check_name,
             passed=True,
-            message="No locked dependencies require content hashes",
+            message=("No lockfile available -- see lockfile-exists for required remediation"),
         )
 
     try:

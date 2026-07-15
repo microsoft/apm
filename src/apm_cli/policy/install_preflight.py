@@ -85,6 +85,9 @@ def run_policy_preflight(
         Iterable of ``MCPDependency``, or ``None`` to skip MCP checks.
     effective_target:
         Resolved scalar or plural target selection for compilation policy.
+    cache_only:
+        Resolve policy from persisted cache or local-file sources without
+        remote transport. Used by offline local-bundle installs.
     no_policy:
         CLI ``--no-policy`` flag value.
     logger:
