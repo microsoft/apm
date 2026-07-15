@@ -1141,7 +1141,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 70,
+      "active": 71,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
