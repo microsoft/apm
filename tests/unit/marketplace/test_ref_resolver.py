@@ -348,6 +348,25 @@ class TestRefResolver:
         resolver.close()
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_with_custom_port_uses_explicit_url(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            transport_scheme="ssh",
+            port=2222,
+        )
+
+        resolver.list_remote_refs("acme/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "ssh://git@github.com:2222/acme/tools.git"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_ado_ssh_transport_uses_azure_devops_remote_shape(
         self,
         mock_run: MagicMock,
