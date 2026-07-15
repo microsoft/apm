@@ -659,8 +659,9 @@ class LockFile:
         dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
         self.dependencies[dep.get_unique_key()] = dep
         if dep.deployed_files or dep.deployed_file_hashes:
-            self.deployment_ledger = DeploymentLedger(records={})
-            self._deployments_present = False
+            from ..core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.invalidate_legacy_projection(self)
         if self.lockfile_version == "1" and (
             dep.source == "registry" or dep.constraint or dep.resolved_tag or dep.resolved_at
         ):
@@ -672,18 +673,9 @@ class LockFile:
 
     def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
         """Rename one locally deployed path and carry its content hash."""
-        if old_value not in self.local_deployed_files:
-            return
-        self.local_deployed_files = [
-            value for value in self.local_deployed_files if value != old_value
-        ]
-        if new_value not in self.local_deployed_files:
-            self.local_deployed_files.append(new_value)
-        if old_value in self.local_deployed_file_hashes:
-            old_hash = self.local_deployed_file_hashes.pop(old_value)
-            self.local_deployed_file_hashes.setdefault(new_value, old_hash)
-        self.deployment_ledger = DeploymentLedger(records={})
-        self._deployments_present = False
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        DeploymentLedgerCodec.rename_local_deployed_path(self, old_value, new_value)
 
     def has_dependency(self, key: str) -> bool:
         """Check if a dependency exists."""

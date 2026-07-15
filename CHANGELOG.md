@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
+  `apm install` re-resolves the new ref and preserves the last good deployment
+  when the new ref is invalid. (#2219)
+- `apm pack` and local-bundle install now have a real binary parity contract,
+  and `apm audit --ci` no longer reports clean bundle deployments as orphaned. (#2215)
 - Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).
   Cached inheritance chains no longer relabel stale strict parents as fresh or
   bypass inherited policy in `apm policy status` and executable approval.
@@ -29,9 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)
-- `apm update` now converges for git-source semver dependencies already at
-  their locked tag instead of reporting a spurious update on every run. Branch
-  dependencies remain unaffected. (by @srobroek, #2165)
+- `apm update` now converges for unchanged Git dependencies: semver dependencies already at their locked tag no longer report spurious updates (by @srobroek, #2165), and branch dependencies at the same tip no longer produce a plan or reinstall while real tip advances remain visible (#2212).
 - `apm audit` no longer reports drift for skills intentionally excluded by a
   dependency's `skills:` subset filter. (#2177)
 - `apm update` now re-checks a transitive dependency's own semver range
