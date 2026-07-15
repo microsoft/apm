@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix #2184 so Git-source semver ranges honor explicit SSH and `prefer-ssh`
   during tag enumeration instead of invoking HTTPS. (#2229)
+- Codex agent generation now warns when `.agent.md` `tools` restrictions cannot
+  be preserved, instead of silently widening effective MCP access;
+  `openapm-v0.1.md` now requires semantic preservation or a default-visible
+  diagnostic for lossy agent target conversion -- by @jstar0 (#2186).
 - Marketplace packages emitted as remote URL or subdirectory sources now
   preserve the package host, path, and ref through `apm install`, fixing
   cross-host enterprise validation and self-hosted GitLab monorepo installs.
