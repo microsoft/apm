@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository coordinates, so `apm outdated` reports real tag status and bounded
   `apm update` runs resolve and materialize the matching tag. (closes #2197;
   #2226)
+- Virtual Claude Skill subpath dependencies now keep `SKILL.md`-derived names
+  and unversioned metadata stable across install, frozen cache replay, and
+  update, avoiding spurious lockfile rewrites. (#2217)
 - Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
   `apm install` re-resolves the new ref and preserves the last good deployment
   when the new ref is invalid. (#2219)
