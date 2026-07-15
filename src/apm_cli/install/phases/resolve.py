@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.install.helpers.ref_reuse import annotate_update_plan_refs
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
@@ -480,16 +481,9 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
         """
         install_path = dep_ref.get_install_path(modules_dir)
         # Cache short-circuit: skip the rest of the callback when the
-        # install path already exists. Exception: for git-source semver
-        # deps under ``--update`` / ``--refresh`` (``update_refs=True``),
-        # fall through so ``_maybe_resolve_git_semver`` re-runs
-        # ``git ls-remote`` and the lockfile gets rewritten with the
-        # latest matching tag. Matches npm/cargo/bundler: ``--update``
-        # is the explicit re-resolve trigger and must not be swallowed
-        # by the on-disk cache (Bug 1 fix on #1496). The downstream
-        # ``downloader.download_package`` rmtrees and re-clones the
-        # install path when the resolved tag changes, so refetching is
-        # safe.
+        # install path already exists. Git semver deps under update still
+        # fall through to ``_maybe_resolve_git_semver`` and the full
+        # download callback.
         if install_path.exists():
             _force_semver_resolve = (
                 update_refs
@@ -691,6 +685,8 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
             if result and hasattr(result, "resolved_reference") and result.resolved_reference:
+                # Download wins over cached pre-plan state; tiered re-resolution is cheap.
+                dep_ref.resolved_reference = result.resolved_reference
                 resolved_sha = result.resolved_reference.resolved_commit
             callback_downloaded_value = resolved_sha
             with callback_lock:
@@ -846,7 +842,11 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
         allow_insecure_hosts=ctx.allow_insecure_hosts,
     )
 
-    ctx.deps_to_install = deps_to_install
+    ctx.deps_to_install = annotate_update_plan_refs(
+        deps_to_install,
+        downloader,
+        update_refs=update_refs,
+    )
 
     # ------------------------------------------------------------------
     # 7.5 Build dep_key -> parent source_path map for transitive locals

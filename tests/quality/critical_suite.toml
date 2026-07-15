@@ -9,6 +9,10 @@ path = "tests/unit/deps/test_lockfile_git_semver.py"
 marker = "unit"
 
 [[modules]]
+path = "tests/unit/deps/test_lockfile_consumer_contract.py"
+marker = "unit"
+
+[[modules]]
 path = "tests/integration/test_install_content_hash_roundtrip.py"
 marker = "component"
 
@@ -22,4 +26,8 @@ marker = "e2e"
 
 [[modules]]
 path = "tests/integration/test_produce_consume_contract.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_real_consume_contracts.py"
 marker = "e2e"
