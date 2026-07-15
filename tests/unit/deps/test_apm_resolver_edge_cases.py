@@ -28,6 +28,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
 # ---------------------------------------------------------------------------
@@ -649,10 +650,9 @@ class TestShouldForceRecheck:
     chance to run for a dep whose install path already exists on disk --
     the fix for transitive semver deps never being re-evaluated against the
     remote during ``apm update`` unless something *above* them in the tree
-    also happened to change. Mirrors download_callback's own
-    ``_force_semver_resolve`` predicate (see install/phases/resolve.py)
-    exactly -- kept in sync deliberately, since without this widened gate
-    that check is otherwise unreachable for any dep whose path exists."""
+    also happened to change. The method delegates to the same canonical drift
+    owner as ``download_callback`` so literal manifest ref changes also reach
+    the callback on a plain install."""
 
     def _dep(self, *, is_local=False, artifactory_prefix=None, ref_kind="semver"):
         ref = MagicMock()
@@ -692,6 +692,34 @@ class TestShouldForceRecheck:
         must not accidentally force re-checks."""
         resolver = APMDependencyResolver()
         assert resolver._should_force_recheck(self._dep()) is False
+
+    def test_true_for_changed_literal_ref_on_plain_install(self) -> None:
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref="a" * 40,
+                resolved_commit="a" * 40,
+            )
+        )
+        resolver = APMDependencyResolver(existing_lockfile=lockfile)
+        dep = DependencyReference(repo_url="org/pkg", reference="b" * 40)
+
+        assert resolver._should_force_recheck(dep) is True
+
+    def test_false_for_unchanged_literal_ref_on_plain_install(self) -> None:
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref="a" * 40,
+                resolved_commit="a" * 40,
+            )
+        )
+        resolver = APMDependencyResolver(existing_lockfile=lockfile)
+        dep = DependencyReference(repo_url="org/pkg", reference="a" * 40)
+
+        assert resolver._should_force_recheck(dep) is False
 
 
 class TestTryLoadDependencyPackageForceRecheck:
@@ -755,6 +783,38 @@ class TestTryLoadDependencyPackageForceRecheck:
 
         assert len(call_log) == 0
         assert result is not None
+
+    def test_existing_path_calls_callback_for_changed_literal_ref(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref="a" * 40,
+                resolved_commit="a" * 40,
+            )
+        )
+        calls: list[DependencyReference] = []
+
+        def cb(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+            calls.append(dep_ref)
+            return pkg_dir
+
+        ref = DependencyReference(repo_url="org/pkg", reference="b" * 40)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=cb,
+            existing_lockfile=lockfile,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is not None
+        assert calls == [ref]
 
     def test_existing_path_skips_callback_for_literal_ref_even_with_update_refs(
         self, tmp_path: Path

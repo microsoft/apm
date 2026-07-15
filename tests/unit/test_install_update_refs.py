@@ -11,8 +11,11 @@ Covers two code paths fixed in issue #548:
    short-circuit the download.  Only lockfile_match (SHA comparison) may skip.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
+from apm_cli.drift import should_force_ref_recheck
 from apm_cli.install.phases._skip_logic import (
     _compute_skip_download,
     _should_use_locked_ref,
@@ -330,31 +333,29 @@ class TestAlreadyResolvedSkipLogic:
 
 
 # ===========================================================================
-# TestForceSemverResolve -- BFS callback early-return guard
+# TestForceRefRecheck -- BFS callback early-return guard
 # ===========================================================================
 
 
-def _force_semver_resolve(
+def _recheck_dep(
     *,
-    update_refs: bool,
     is_local: bool,
-    source: str | None,
     artifactory_prefix: str | None,
     ref_kind: str | None,
-) -> bool:
-    """Mirror of the _force_semver_resolve expression in download_callback.
+) -> SimpleNamespace:
+    """Build the minimal dependency shape consumed by the canonical owner."""
+    return SimpleNamespace(
+        is_local=is_local,
+        artifactory_prefix=artifactory_prefix,
+        ref_kind=ref_kind,
+    )
 
-    Kept in sync with resolve.py so that any change to the production
-    condition surfaces here as a test failure.
-    """
-    return update_refs and not is_local and not artifactory_prefix and ref_kind == "semver"
 
-
-class TestForceSemverResolve:
-    """BFS download_callback must re-resolve semver deps on --update.
+class TestForceRefRecheck:
+    """BFS download callback must re-resolve semver deps on update.
 
     When install_path exists the callback short-circuits UNLESS
-    _force_semver_resolve is True.  Regression guard for the bug where
+    ``should_force_ref_recheck`` is true. Regression guard for the bug where
     registry deps with semver constraints were excluded from re-resolution,
     causing 'apm update' to silently keep the old version even when a newer
     one satisfying the range was available.
@@ -363,12 +364,14 @@ class TestForceSemverResolve:
     def test_registry_semver_forces_resolve_on_update(self) -> None:
         """Registry dep with ^1.0.0 must re-resolve when update_refs=True."""
         assert (
-            _force_semver_resolve(
+            should_force_ref_recheck(
+                _recheck_dep(
+                    is_local=False,
+                    artifactory_prefix=None,
+                    ref_kind="semver",
+                ),
+                None,
                 update_refs=True,
-                is_local=False,
-                source="registry",
-                artifactory_prefix=None,
-                ref_kind="semver",
             )
             is True
         )
@@ -376,12 +379,14 @@ class TestForceSemverResolve:
     def test_registry_semver_no_force_on_normal_install(self) -> None:
         """Registry semver dep must NOT re-resolve on a plain install."""
         assert (
-            _force_semver_resolve(
+            should_force_ref_recheck(
+                _recheck_dep(
+                    is_local=False,
+                    artifactory_prefix=None,
+                    ref_kind="semver",
+                ),
+                None,
                 update_refs=False,
-                is_local=False,
-                source="registry",
-                artifactory_prefix=None,
-                ref_kind="semver",
             )
             is False
         )
@@ -389,12 +394,14 @@ class TestForceSemverResolve:
     def test_git_semver_forces_resolve_on_update(self) -> None:
         """Git-source semver dep continues to re-resolve (pre-existing behavior)."""
         assert (
-            _force_semver_resolve(
+            should_force_ref_recheck(
+                _recheck_dep(
+                    is_local=False,
+                    artifactory_prefix=None,
+                    ref_kind="semver",
+                ),
+                None,
                 update_refs=True,
-                is_local=False,
-                source=None,
-                artifactory_prefix=None,
-                ref_kind="semver",
             )
             is True
         )
@@ -402,12 +409,14 @@ class TestForceSemverResolve:
     def test_registry_literal_ref_no_force(self) -> None:
         """Registry dep with a literal ref (e.g. 'stable') is never force-resolved."""
         assert (
-            _force_semver_resolve(
+            should_force_ref_recheck(
+                _recheck_dep(
+                    is_local=False,
+                    artifactory_prefix=None,
+                    ref_kind="literal",
+                ),
+                None,
                 update_refs=True,
-                is_local=False,
-                source="registry",
-                artifactory_prefix=None,
-                ref_kind="literal",
             )
             is False
         )
@@ -415,12 +424,14 @@ class TestForceSemverResolve:
     def test_local_dep_never_force_resolved(self) -> None:
         """Local deps are excluded regardless of ref_kind."""
         assert (
-            _force_semver_resolve(
+            should_force_ref_recheck(
+                _recheck_dep(
+                    is_local=True,
+                    artifactory_prefix=None,
+                    ref_kind="semver",
+                ),
+                None,
                 update_refs=True,
-                is_local=True,
-                source=None,
-                artifactory_prefix=None,
-                ref_kind="semver",
             )
             is False
         )
@@ -428,12 +439,14 @@ class TestForceSemverResolve:
     def test_artifactory_dep_never_force_resolved(self) -> None:
         """Artifactory-proxied deps are excluded regardless of ref_kind."""
         assert (
-            _force_semver_resolve(
+            should_force_ref_recheck(
+                _recheck_dep(
+                    is_local=False,
+                    artifactory_prefix="artifactory/github",
+                    ref_kind="semver",
+                ),
+                None,
                 update_refs=True,
-                is_local=False,
-                source=None,
-                artifactory_prefix="artifactory/github",
-                ref_kind="semver",
             )
             is False
         )
