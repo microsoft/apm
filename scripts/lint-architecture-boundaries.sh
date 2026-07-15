@@ -238,7 +238,9 @@ semver_transport_router="src/apm_cli/install/helpers/ref_reuse.py"
 semver_transport_executor="src/apm_cli/marketplace/ref_resolver.py"
 git_ref_transport_consumer="src/apm_cli/deps/git_reference_resolver.py"
 if ! grep -q 'transport_plan = transport_selector.select(' "$semver_transport_router" \
-    || ! grep -q 'transport_scheme = selected_scheme' "$semver_transport_router" \
+    || ! grep -q \
+        'transport_scheme = "ssh" if selected_scheme == "ssh" else "https"' \
+        "$semver_transport_router" \
     || ! grep -q 'transport_scheme=transport_scheme' "$semver_transport_router" \
     || ! grep -q 'build_ssh_url(' "$semver_transport_executor" \
     || grep -Eq \

@@ -127,7 +127,7 @@ def _maybe_resolve_git_semver(
         has_token=bool(token),
     )
     selected_scheme = transport_plan.attempts[0].scheme
-    transport_scheme = selected_scheme
+    transport_scheme = "ssh" if selected_scheme == "ssh" else "https"
     ref_resolver = get_shared_ref_resolver(
         dep_ref.host,
         token,
@@ -197,10 +197,11 @@ def get_shared_ref_resolver(
             auth_resolver=auth_resolver,
             auth_target=auth_target,
         )
-    if transport_scheme != "https":
-        resolver_kwargs["transport_scheme"] = transport_scheme
     if transport_scheme == "ssh":
-        resolver_kwargs["ssh_user"] = ssh_user
+        resolver_kwargs.update(
+            transport_scheme=transport_scheme,
+            ssh_user=ssh_user,
+        )
     if port is not None:
         resolver_kwargs["port"] = port
 

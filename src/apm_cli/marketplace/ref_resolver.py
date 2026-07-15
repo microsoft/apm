@@ -27,7 +27,6 @@ from ..utils.github_host import (
     build_ado_bearer_git_env,
     build_ado_ssh_url,
     build_authorization_header_git_env,
-    build_http_clone_url,
     build_https_clone_url,
     build_ssh_url,
     default_host,
@@ -152,9 +151,9 @@ class RefResolver:
     auth_scheme:
         ``"basic"`` (default) or ``"bearer"`` from ``AuthContext``.
     transport_scheme:
-        Primary transport selected by ``TransportSelector``. ``"ssh"`` and
-        ``"http"`` use their matching URL builders and remove HTTP
-        authorization channels; ``"https"`` preserves authenticated behavior.
+        Primary transport selected by ``TransportSelector``. ``"ssh"`` uses
+        the SSH URL builder and removes HTTP authorization channels; every
+        other value preserves the existing HTTPS behavior.
     """
 
     def __init__(
@@ -205,7 +204,6 @@ class RefResolver:
     def _git_url_and_env(self, owner_repo: str) -> tuple[str, dict[str, str]]:
         """Build the remote URL and auth environment for one git operation."""
         use_ssh = self._transport_scheme == "ssh"
-        use_http = self._transport_scheme == "http"
         requested_bearer = self._auth_scheme == "bearer"
         ado_host = is_azure_devops_hostname(self._host)
         if requested_bearer and not ado_host:
@@ -214,8 +212,8 @@ class RefResolver:
                 summary=f"Bearer authentication is not supported for host '{self._host}'.",
                 hint="Use bearer authentication only with an Azure DevOps host.",
             )
-        bearer = requested_bearer and ado_host and not use_ssh and not use_http
-        url_token = None if requested_bearer or use_ssh or use_http else self._token
+        bearer = requested_bearer and ado_host and not use_ssh
+        url_token = None if requested_bearer or use_ssh else self._token
         if use_ssh and ado_host:
             parts = owner_repo.split("/")
             if len(parts) == 4 and parts[2] == "_git":
@@ -237,18 +235,6 @@ class RefResolver:
                 port=self._port,
                 user=self._ssh_user,
             )
-        elif use_http and ado_host:
-            raise GitLsRemoteError(
-                package="",
-                summary="Azure DevOps does not support plain HTTP Git remotes.",
-                hint="Use an HTTPS or SSH Azure DevOps dependency URL.",
-            )
-        elif use_http:
-            url = build_http_clone_url(
-                self._host,
-                owner_repo,
-                port=self._port,
-            )
         elif ado_host:
             url = f"https://{self._host}/{owner_repo}"
         else:
@@ -269,22 +255,13 @@ class RefResolver:
                 scheme=self._auth_scheme,
                 host_kind=host_kind,
             )
-        if use_ssh or use_http:
+        if use_ssh:
             from apm_cli.core.auth import AuthResolver
 
             AuthResolver._clear_git_auth_env(env)
-        if use_ssh:
             env.pop("GIT_ASKPASS", None)
-        elif use_http:
-            from apm_cli.deps.git_auth_env import GitAuthEnvBuilder
-
-            env = GitAuthEnvBuilder.noninteractive_env(
-                env,
-                preserve_config_isolation=True,
-                suppress_credential_helpers=True,
-            )
         env["GIT_TERMINAL_PROMPT"] = "0"
-        if not use_ssh and not use_http:
+        if not use_ssh:
             env["GIT_ASKPASS"] = "echo"
         if bearer and self._token:
             env.pop("GIT_TOKEN", None)
@@ -391,7 +368,7 @@ class RefResolver:
             and self._auth_scheme == "basic"
             and bool(self._token)
             and is_azure_devops_hostname(self._host)
-            and self._transport_scheme == "https"
+            and self._transport_scheme != "ssh"
         )
         if not eligible:
             return None

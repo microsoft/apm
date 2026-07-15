@@ -367,16 +367,6 @@ def build_ssh_url(
     return f"{safe_user}@{host}:{repo_ref}.git"
 
 
-def build_http_clone_url(
-    host: str,
-    repo_ref: str,
-    port: int | None = None,
-) -> str:
-    """Build an unauthenticated plain-HTTP clone URL."""
-    netloc = f"{host}:{port}" if port else host
-    return f"http://{netloc}/{repo_ref}.git"
-
-
 def build_https_clone_url(
     host: str,
     repo_ref: str,
