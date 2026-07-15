@@ -461,7 +461,7 @@ class DiagnosticCollector:
         """Render per-agent losses and deduplicate their shared remediation."""
         count = len(items)
         noun = "warning" if count == 1 else "warnings"
-        _rich_warning(f"  [!] {count} lossy agent compilation {noun}")
+        _rich_warning(f"  [!] {count} agent conversion {noun}")
         for diagnostic in items:
             package = f"[{diagnostic.package}] " if diagnostic.package else ""
             _rich_echo(f"    +- {package}{diagnostic.message}", color="yellow")

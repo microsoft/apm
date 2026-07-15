@@ -35,8 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP git dependency URLs now preserve custom ports when persisted to
   `apm.yml`, so later commands reconnect to the exact endpoint the user
   specified. (closes #2202) -- by @atulya-singh (#2210)
-- Fix #2184 so Git-source semver ranges honor explicit SSH and `prefer-ssh`
-  during tag enumeration instead of invoking HTTPS. (#2229)
+- Git-source semver ranges now honor explicit SSH and `prefer-ssh` during tag
+  enumeration instead of invoking HTTPS. (#2229)
 - Virtual Claude Skill subpath dependencies now keep `SKILL.md`-derived names
   and unversioned metadata stable across install, frozen cache replay, and
   update, avoiding spurious lockfile rewrites. (#2217)

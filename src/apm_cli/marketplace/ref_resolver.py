@@ -230,7 +230,11 @@ class RefResolver:
                 raise GitLsRemoteError(
                     package="",
                     summary="Azure DevOps SSH resolution requires org/project/repo coordinates.",
-                    hint="Use a standard Azure DevOps dependency URL.",
+                    hint=(
+                        "Expected org/project/repo or org/project/_git/repo. "
+                        "Re-add the dependency with 'apm install <source>' "
+                        "to regenerate the lock entry."
+                    ),
                 )
             ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
             url = build_ado_ssh_url(org, project, repo, host=ssh_host)
