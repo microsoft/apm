@@ -244,6 +244,35 @@ if ! grep -A25 'if plugin.registry:' src/apm_cli/marketplace/resolver.py \
     echo "[x] Marketplace registry intent must create a registry dependency"
     violations=$((violations + 1))
 fi
+claude_skill_metadata_owner="src/apm_cli/models/validation.py"
+claude_skill_metadata_consumer="src/apm_cli/install/sources.py"
+claude_skill_owner_body=$(awk '
+    /^def build_claude_skill_package\(/ {flag=1}
+    flag && /^def / && !/^def build_claude_skill_package\(/ {exit}
+    flag {print}
+' "$claude_skill_metadata_owner")
+claude_skill_validate_body=$(awk '
+    /^def _validate_claude_skill\(/ {flag=1}
+    flag && /^def / && !/^def _validate_claude_skill\(/ {exit}
+    flag {print}
+' "$claude_skill_metadata_owner")
+claude_skill_cached_body=$(awk '
+    /^class CachedDependencySource\(/ {flag=1}
+    /^class FreshDependencySource\(/ {flag=0}
+    flag {print}
+' "$claude_skill_metadata_consumer")
+if ! printf '%s\n' "$claude_skill_owner_body" | grep -q 'load_frontmatter' \
+    || ! printf '%s\n' "$claude_skill_owner_body" | grep -q 'version="unknown"' \
+    || ! printf '%s\n' "$claude_skill_validate_body" \
+        | grep -q 'build_claude_skill_package(package_path, skill_md_path)' \
+    || printf '%s\n' "$claude_skill_validate_body" | grep -Eq 'load_frontmatter|APMPackage\(' \
+    || ! printf '%s\n' "$claude_skill_cached_body" \
+        | grep -q 'pkg_type == PackageType.CLAUDE_SKILL' \
+    || ! printf '%s\n' "$claude_skill_cached_body" \
+        | grep -q 'build_claude_skill_package('; then
+    echo "[x] Cached/frozen Claude Skill lock metadata must route through validation.py"
+    violations=$((violations + 1))
+fi
 lockfile_to_ref_body=$(awk '
     /^    def to_dependency_ref\(/ {flag=1}
     flag && /^    def / && !/to_dependency_ref/ {exit}

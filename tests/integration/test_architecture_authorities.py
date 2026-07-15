@@ -415,6 +415,21 @@ def test_cached_update_resolution_stays_with_downloader_owner() -> None:
     assert "Cached update planning must resolve refs through the downloader owner" in guard
 
 
+def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
+    """Full and cached paths must share Claude Skill lock metadata logic."""
+    root = Path(__file__).parents[2]
+    validation = (root / "src/apm_cli/models/validation.py").read_text()
+    sources = (root / "src/apm_cli/install/sources.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def build_claude_skill_package(" in validation
+    assert 'version="unknown"' in validation
+    assert "build_claude_skill_package(package_path, skill_md_path)" in validation
+    assert "pkg_type == PackageType.CLAUDE_SKILL" in sources
+    assert "build_claude_skill_package(" in sources
+    assert "Cached/frozen Claude Skill lock metadata must route through validation.py" in guard
+
+
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
     """The Bash guard must invoke the semantic AST checker, not only grep.
 

@@ -547,6 +547,88 @@ class TestCachedDependencySourceWithApmYml:
         assert result.deltas.get("unpinned") == 1
 
 
+class TestCachedDependencySourceClaudeSkillLockMetadata:
+    def test_virtual_claude_skill_lock_metadata_matches_full_resolution(
+        self, tmp_path: Path
+    ) -> None:
+        """Cached/frozen and full resolution must not churn lock metadata."""
+        from apm_cli.deps.installed_package import InstalledPackage
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.sources import CachedDependencySource
+        from apm_cli.models.apm_package import DependencyReference
+        from apm_cli.models.validation import validate_apm_package
+
+        install_path = tmp_path / "apm_modules" / "mattpocock" / "skills"
+        install_path = install_path / "skills" / "productivity" / "grilling"
+        install_path.mkdir(parents=True)
+        (install_path / "SKILL.md").write_text(
+            "\n".join(
+                (
+                    "---",
+                    "name: grilling",
+                    "description: How to grill food",
+                    "---",
+                    "# Grilling",
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        dep_ref = DependencyReference(
+            repo_url="mattpocock/skills",
+            reference="a" * 40,
+            virtual_path="skills/productivity/grilling",
+            is_virtual=True,
+        )
+        dep_key = dep_ref.get_unique_key()
+        commit = "b" * 40
+
+        full_result = validate_apm_package(install_path)
+        assert full_result.is_valid
+        assert full_result.package is not None
+        full_lock = LockFile.from_installed_packages(
+            [
+                InstalledPackage(
+                    dep_ref=dep_ref,
+                    resolved_commit=commit,
+                    depth=1,
+                    resolved_by=None,
+                    package_name=full_result.package.name,
+                    package_version=full_result.package.version,
+                )
+            ],
+            MagicMock(),
+        )
+        full_locked = full_lock.get_dependency(dep_key)
+        assert full_locked is not None
+
+        ctx = _make_ctx(project_root=tmp_path, existing_lockfile=full_lock)
+        ctx.git_semver_resolutions = {}
+        ctx.package_declared_licenses = {}
+        ctx.lockfile_only = False
+        source = CachedDependencySource(
+            ctx=ctx,
+            dep_ref=dep_ref,
+            install_path=install_path,
+            dep_key=dep_key,
+            resolved_ref=None,
+            dep_locked_chk=full_locked,
+        )
+
+        result = source.acquire()
+
+        assert result is not None
+        cached_lock = LockFile.from_installed_packages(ctx.installed_packages, MagicMock())
+        cached_locked = cached_lock.get_dependency(dep_key)
+        assert cached_locked is not None
+        assert (full_locked.name, full_locked.version) == ("grilling", "unknown")
+        assert (cached_locked.name, cached_locked.version) == (
+            full_locked.name,
+            full_locked.version,
+        )
+
+
 # ---------------------------------------------------------------------------
 # LocalDependencySource.acquire -- real install pipeline symlink dereference
 #
