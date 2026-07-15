@@ -106,10 +106,8 @@ registry_source:
 | `require` | `[]` | Registry names that MUST appear in the merged registry map (project `apm.yml` + workspace `~/.apm/apm.yml` + `~/.apm/config.json`). Fail-closed if a listed name has no URL. |
 | `allow_non_registry` | `true` | When `false`, every dep MUST be routed through a configured registry; git-shorthand and `- git:` deps are blocked at install time. |
 
-The check fires from all four call sites (`policy_gate`,
-`policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
-`apm install`, `apm install <pkg>`, `apm deps update`, and
-`apm audit --ci` all enforce the same gate.
+The same registry-source rule applies to `apm install`,
+`apm install <pkg>`, `apm deps update`, and `apm audit --ci`.
 
 ## Integrity and drift enforcement
 
@@ -120,14 +118,14 @@ namespace, both backed by enforcement that exists today.
 # .github/apm-policy.yml
 security:
   integrity:
-    require_hashes: true    # fail install closed if any locked entry lacks a hash
+    require_hashes: true    # fail install/audit closed when a non-local dep lacks a hash
   audit:
     fail_on_drift: true     # `apm audit` exits non-zero on workspace drift
 ```
 
 | Field | Default | Behavior |
 |-------|---------|----------|
-| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash; a missing or empty hash fails `apm install` closed. Asserts hash-presence on the freshly-built lockfile (no second hashing pass). Local deps are exempt. Logical OR on inheritance. |
+| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle with cached policy but no embedded `apm.lock.yaml` fails closed; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs never fetch policy from the network. Logical OR on inheritance. |
 | `audit.fail_on_drift` | `false` | When `true`, a bare `apm audit` exits non-zero when workspace content drifts from the lockfile (default-off keeps drift advisory at exit 0). Only changes the exit code; `apm audit --ci` already gates on drift. Logical OR on inheritance. |
 
 ## External scanner governance (experimental)
@@ -523,7 +521,7 @@ fail the PR for the same policy violation.
 
 | Hatch | Scope |
 |-------|-------|
-| `--no-policy` | On `apm install`, `apm install <pkg>`, `apm install --mcp`. Skips discovery + enforcement; loud warning. Not on `apm deps update`. |
+| `--no-policy` | On `apm install`, `apm install <pkg>`, `apm install <bundle>`, `apm install --mcp`. Skips install-time discovery + enforcement for one invocation; loud warning. Not on `apm deps update`. |
 | `APM_POLICY_DISABLE=1` | Env var equivalent. Same loud warning. |
 
 `APM_POLICY` is reserved for a future override env var and is **not**

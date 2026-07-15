@@ -413,9 +413,10 @@ class CachedDependencySource(DependencySource):
             APMPackage,
             GitReferenceType,
             PackageInfo,
+            PackageType,
             ResolvedReference,
         )
-        from apm_cli.models.validation import detect_package_type
+        from apm_cli.models.validation import detect_package_type, validate_apm_package
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
@@ -479,12 +480,20 @@ class CachedDependencySource(DependencySource):
         # so transitive ``local_path`` deps inside this remote package resolve
         # from there (#857).
         apm_yml_path = install_path / APM_YML_FILENAME
+        pkg_type, _ = detect_package_type(install_path)
         if apm_yml_path.exists():
             cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
             # TODO(#940): see note in _materialize_local for the same caveat
             # about post-construction mutation of .source.
             if not cached_package.source:
                 cached_package.source = dep_ref.repo_url
+        elif pkg_type == PackageType.CLAUDE_SKILL:
+            validation_result = validate_apm_package(install_path)
+            if not validation_result.is_valid or validation_result.package is None:
+                details = "; ".join(validation_result.errors) or "validator returned no package"
+                raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
+            cached_package = validation_result.package
+            cached_package.source = dep_ref.repo_url
         else:
             cached_package = APMPackage(
                 name=dep_ref.repo_url.split("/")[-1],
@@ -512,7 +521,6 @@ class CachedDependencySource(DependencySource):
             dependency_ref=dep_ref,
         )
 
-        pkg_type, _ = detect_package_type(install_path)
         cached_package_info.package_type = pkg_type
 
         # Collect for lockfile
