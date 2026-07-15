@@ -355,6 +355,47 @@ def test_manifestless_virtual_package_is_skipped(tmp_path: Path) -> None:
     assert view.problems == ()
 
 
+def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) -> None:
+    """A Claude-skill filesystem shape does not waive non-virtual manifests."""
+    root = _write_manifest(tmp_path, name="root")
+    skill_dir = tmp_path / "packages" / "skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    locked = LockedDependency(
+        repo_url="_local/skill",
+        source="local",
+        local_path="./packages/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_virtual_package_without_skill_shape_records_problem(
+    tmp_path: Path,
+) -> None:
+    """A virtual lock bit does not waive an unrecognized installed shape."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="angular/skills",
+        virtual_path="angular-developer",
+        is_virtual=True,
+        package_type="claude_skill",
+        depth=1,
+    )
+    locked.to_dependency_ref().get_install_path(modules_root).mkdir(parents=True)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
 def test_stale_directory_absent_from_lockfile_is_never_scanned(tmp_path: Path) -> None:
     """Only lockfile entries bound package-manifest traversal."""
     root = _write_manifest(tmp_path, name="root", mcp=["root-server"])

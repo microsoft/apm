@@ -16,6 +16,7 @@ from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_
 from apm_cli.integration._shared import deduplicate_deps
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
+from apm_cli.models.validation import PackageType, detect_package_type
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -155,6 +156,22 @@ def _package_manifest_path(
     return (package_dir / "apm.yml").resolve()
 
 
+def _allows_missing_manifest(
+    dependency: LockedDependency,
+    package_dir: Path,
+) -> bool:
+    """Return whether the package contract permits an absent apm.yml."""
+    if dependency.package_type == PackageType.SKILL_BUNDLE.value:
+        return True
+
+    dependency_ref = dependency.to_dependency_ref()
+    if not dependency_ref.is_virtual_subdirectory():
+        return False
+
+    package_type, _ = detect_package_type(package_dir)
+    return package_type is PackageType.CLAUDE_SKILL
+
+
 def _collect_locked_dependencies(
     lockfile: LockFile | None,
     modules_root: Path,
@@ -204,11 +221,7 @@ def _collect_locked_dependencies(
             continue
 
         if not manifest_path.exists():
-            # Virtual packages (a git+path skill pointing at a bare
-            # sub-directory) and skill bundles have no apm.yml of their own by
-            # design -- install never deploys one, so a missing manifest is
-            # expected rather than a consistency problem.
-            if dependency.package_type == "skill_bundle" or dependency.is_virtual:
+            if _allows_missing_manifest(dependency, manifest_path.parent):
                 continue
             problems.append(
                 McpSourceProblem(
