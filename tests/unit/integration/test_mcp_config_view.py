@@ -336,6 +336,7 @@ def test_manifestless_skill_bundle_is_skipped(tmp_path: Path) -> None:
 def test_manifestless_virtual_package_is_skipped(tmp_path: Path) -> None:
     """Virtual (git+path) skills have no apm.yml by design and must not fail."""
     root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
     locked = LockedDependency(
         repo_url="angular/skills",
         virtual_path="angular-developer",
@@ -343,9 +344,13 @@ def test_manifestless_virtual_package_is_skipped(tmp_path: Path) -> None:
         package_type="claude_skill",
         depth=1,
     )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Angular Developer\n", encoding="utf-8")
 
-    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+    view = _derive(root, _lock(locked), modules_root)
 
+    assert not (skill_dir / "apm.yml").exists()
     assert view.dependencies == ()
     assert view.problems == ()
 
