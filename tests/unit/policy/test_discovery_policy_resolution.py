@@ -44,6 +44,7 @@ from apm_cli.policy.discovery import (
     _is_github_host,
     _parse_remote_url,
     _read_cache_entry,
+    _resolve_ado_parent_ref,
     _resolve_and_persist_chain,
     _split_hash_pin,
     _validate_extends_host,
@@ -279,6 +280,81 @@ class TestValidateExtendsHost:
         """owner/repo shorthand is intrinsically same-host, always passes."""
         _validate_extends_host("github.com", "owner/repo")
         _validate_extends_host(None, "owner/repo")
+
+
+# ---------------------------------------------------------------------------
+# _resolve_ado_parent_ref
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("parent_ref", "current_source", "leaf_host", "expected"),
+    [
+        (
+            "org",
+            "org:dev.azure.com/contoso/_apm/_apm",
+            "dev.azure.com",
+            ("contoso", "_apm", "_apm", "dev.azure.com"),
+        ),
+        (
+            "governance/policy",
+            "org:dev.azure.com/contoso/_apm/_apm",
+            "dev.azure.com",
+            ("contoso", "governance", "policy", "dev.azure.com"),
+        ),
+        (
+            "dev.azure.com/contoso/governance/policy",
+            "org:dev.azure.com/contoso/_apm/_apm",
+            "dev.azure.com",
+            ("contoso", "governance", "policy", "dev.azure.com"),
+        ),
+        (
+            "contoso.visualstudio.com/governance/policy",
+            "org:contoso.visualstudio.com/contoso/_apm/_apm",
+            "contoso.visualstudio.com",
+            ("contoso", "governance", "policy", "contoso.visualstudio.com"),
+        ),
+        (
+            "org",
+            "org:contoso.visualstudio.com/contoso/team/policy",
+            "contoso.visualstudio.com",
+            ("contoso", "_apm", "_apm", "contoso.visualstudio.com"),
+        ),
+    ],
+)
+def test_resolve_ado_parent_ref_supported_forms(
+    parent_ref: str,
+    current_source: str,
+    leaf_host: str,
+    expected: tuple[str, str, str, str],
+) -> None:
+    assert _resolve_ado_parent_ref(parent_ref, current_source, leaf_host) == expected
+
+
+@pytest.mark.parametrize(
+    ("parent_ref", "current_source", "leaf_host"),
+    [
+        ("", "org:dev.azure.com/contoso/_apm/_apm", "dev.azure.com"),
+        ("governance", "org:dev.azure.com/contoso/_apm/_apm", "dev.azure.com"),
+        (
+            "dev.azure.com/contoso/governance",
+            "org:dev.azure.com/contoso/_apm/_apm",
+            "dev.azure.com",
+        ),
+        (
+            "github.example.com/contoso/policy",
+            "org:dev.azure.com/contoso/_apm/_apm",
+            "dev.azure.com",
+        ),
+        ("org", "org:malformed", "dev.azure.com"),
+    ],
+)
+def test_resolve_ado_parent_ref_rejects_invalid_forms(
+    parent_ref: str,
+    current_source: str,
+    leaf_host: str,
+) -> None:
+    assert _resolve_ado_parent_ref(parent_ref, current_source, leaf_host) is None
 
 
 # ---------------------------------------------------------------------------

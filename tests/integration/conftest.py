@@ -158,7 +158,8 @@ def _resolve_apm_binary() -> Path | None:
     """Resolve the apm binary used by integration tests.
 
     Resolution order (prefers the build under test over a system install):
-      1. ``APM_BINARY_PATH`` env var (CI sets this after the build step).
+      1. ``APM_BINARY_PATH`` env var (CI sets this after the build step). When
+         set, this path is authoritative and invalid values fail closed.
       2. ``./dist/<platform>/apm`` (local build convention).
       3. ``shutil.which("apm")`` lookup on ``PATH``.
 
@@ -167,10 +168,24 @@ def _resolve_apm_binary() -> Path | None:
     contributor is trying to validate.
     """
     env_path = os.environ.get("APM_BINARY_PATH")
-    if env_path:
+    if env_path is not None:
+        if not env_path:
+            raise pytest.UsageError(
+                "APM_BINARY_PATH is set but empty. "
+                "Set it to the expected executable or remove the variable."
+            )
         candidate = Path(env_path)
-        if candidate.is_file():
-            return candidate.resolve()
+        if not candidate.is_file():
+            raise pytest.UsageError(
+                f"APM_BINARY_PATH does not exist or is not a file: {candidate}. "
+                "Build the expected artifact or correct APM_BINARY_PATH."
+            )
+        if not os.access(candidate, os.X_OK):
+            raise pytest.UsageError(
+                f"APM_BINARY_PATH is not executable: {candidate}. "
+                "Make the expected artifact executable and rerun the test."
+            )
+        return candidate.resolve()
 
     local = _local_dist_apm_binary()
     if local is not None:

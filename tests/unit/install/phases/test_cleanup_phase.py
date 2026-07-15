@@ -174,6 +174,38 @@ class TestOrphanCleanupFullRun:
 
         ctx.logger.orphan_cleanup.assert_called_once_with(1)
 
+    def test_orphan_cleanup_preserves_freshly_redeployed_paths(self, tmp_path):
+        """A repaired dependency identity must not delete its new deployment."""
+        orphan_dep = _make_orphan_dep(
+            ["shared.md", "old-only.md"],
+            file_hashes={
+                "shared.md": "shared-hash",
+                "old-only.md": "old-hash",
+            },
+        )
+        lf = _make_lockfile({"tampered-identity": orphan_dep})
+        ctx = _make_ctx(
+            existing_lockfile=lf,
+            only_packages=False,
+            intended_dep_keys={"canonical-identity"},
+            package_deployed_files={"canonical-identity": ["shared.md"]},
+            project_root=tmp_path,
+        )
+        mock_result = MagicMock(
+            deleted=["old-only.md"],
+            deleted_targets=[],
+            skipped_user_edit=[],
+        )
+
+        with patch(
+            "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+            return_value=mock_result,
+        ) as mock_remove:
+            cleanup.run(ctx)
+
+        mock_remove.assert_called_once()
+        assert mock_remove.call_args.args[0] == ["old-only.md"]
+
     def test_orphan_cleanup_calls_cleanup_empty_parents_when_deleted_targets(self, tmp_path):
         """cleanup_empty_parents is called when deleted_targets is non-empty."""
         orphan_dep = _make_orphan_dep(["x/y.md"])

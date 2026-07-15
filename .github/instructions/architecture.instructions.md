@@ -41,6 +41,7 @@ instead of re-deriving the answer locally.
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) |
 | Git repository cache identity | DependencyReference.to_repository_cache_url() -> cache/url_normalize.py |
+| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |
 
 If you are about to compute one of these locally, stop and call the
 owner. If the owner is missing a case you need, EXTEND the owner --

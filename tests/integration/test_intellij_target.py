@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -40,24 +39,6 @@ from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 _BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
-
-
-@pytest.fixture()
-def apm_command() -> str:
-    """Return the APM executable used by the end-to-end test."""
-    executable_name = "apm.exe" if sys.platform == "win32" else "apm"
-    venv_apm = (
-        Path(__file__).parents[2]
-        / ".venv"
-        / ("Scripts" if sys.platform == "win32" else "bin")
-        / executable_name
-    )
-    if venv_apm.exists():
-        return str(venv_apm)
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    pytest.fail("APM executable not found in the project virtualenv or PATH")
 
 
 @pytest.fixture()
@@ -166,7 +147,7 @@ class TestIntelliJCliE2E:
     def test_mcp_install_respects_composed_target_set(
         self,
         tmp_path: Path,
-        apm_command: str,
+        apm_binary_path: str,
         target: str,
         expect_claude: bool,
     ) -> None:
@@ -193,7 +174,7 @@ class TestIntelliJCliE2E:
 
         result = subprocess.run(
             [
-                apm_command,
+                apm_binary_path,
                 "install",
                 "--mcp",
                 "test-http-server",

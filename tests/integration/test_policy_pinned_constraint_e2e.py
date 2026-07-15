@@ -17,6 +17,8 @@ from click.testing import CliRunner
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.component
+
 _PATCH_DISCOVER_GATE = "apm_cli.policy.discovery.discover_policy_with_chain"
 _PATCH_DISCOVER_PREFLIGHT = "apm_cli.policy.install_preflight.discover_policy_with_chain"
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"

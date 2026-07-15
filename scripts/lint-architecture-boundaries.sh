@@ -84,6 +84,19 @@ check_pattern \
     "Install adapters must not classify diagnostics" \
     'classify_post_install_result' \
     src/apm_cli/commands/install.py
+approval_file="src/apm_cli/commands/approve.py"
+policy_outcome_owner="src/apm_cli/policy/outcome_routing.py"
+if ! grep -q '^POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(' \
+    "$policy_outcome_owner" \
+    || ! grep -q \
+        'from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES' \
+        "$approval_file" \
+    || grep -Eq \
+        '"(cache_miss_fetch_fail|garbage_response|hash_mismatch|incomplete_chain|malformed)"' \
+        "$approval_file"; then
+    echo "[x] Approval fallback outcomes must use policy/outcome_routing.py"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Audit policy sources must use chain-aware discovery" \
     'discover_policy\(' \
@@ -96,6 +109,38 @@ fi
 if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
     || ! grep -q 'incomplete_chain' src/apm_cli/policy/outcome_routing.py; then
     echo "[x] Incomplete policy chains must route through fail-closed outcome handling"
+    violations=$((violations + 1))
+fi
+policy_file="src/apm_cli/policy/discovery.py"
+policy_named_defs=$(grep -Ec \
+    '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
+    "$policy_file" || true)
+policy_serializer_body=$(awk '
+    /^def _serialize_policy\(/ {flag=1}
+    flag && /^def / && !/^def _serialize_policy\(/ {exit}
+    flag {print}
+' "$policy_file")
+policy_cache_write_body=$(awk '
+    /^def _write_cache\(/ {flag=1}
+    flag && /^def / && !/^def _write_cache\(/ {exit}
+    flag {print}
+' "$policy_file")
+policy_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
+        src/apm_cli/policy \
+        | grep -v "^${policy_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$policy_named_defs" -ne 2 ] \
+    || ! printf '%s\n' "$policy_serializer_body" \
+        | grep -Eq '^[[:space:]]*[^#]*_policy_to_dict\(policy\)' \
+    || ! printf '%s\n' "$policy_cache_write_body" \
+        | grep -Eq '^[[:space:]]*serialized[[:space:]]*=[[:space:]]*_serialize_policy\(policy\)' \
+    || [ -n "$policy_duplicate_hits" ]; then
+    echo "[x] Cached policy shape must route through policy/discovery.py::_policy_to_dict"
+    [ -n "$policy_duplicate_hits" ] && echo "$policy_duplicate_hits"
     violations=$((violations + 1))
 fi
 
@@ -157,6 +202,14 @@ if ! grep -q \
     echo "[x] UnifiedLinkResolver must project source assets into the deployment frame"
     violations=$((violations + 1))
 fi
+cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
+cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
+cleanup_claim_status=$?
+if [ "$cleanup_claim_status" -ne 0 ]; then
+    echo "[x] Cleanup current-claim protection must use DeploymentReconciler"
+    echo "$cleanup_claim_output"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
@@ -204,6 +257,33 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
     || ! echo "$run_replay_body" | grep -q 'skill_subset=' \
     || ! echo "$run_replay_body" | grep -q 'package_info\.dependency_ref\.skill_subset'; then
     echo "[x] Audit replay must preserve locked skill subset intent"
+    violations=$((violations + 1))
+fi
+dependency_field_owner="src/apm_cli/models/dependency/object_fields.py"
+dependency_parser="src/apm_cli/models/dependency/reference.py"
+dependency_field_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'def reject_unknown_git_fields|_(REMOTE|PARENT)_GIT_DEPENDENCY_FIELDS' \
+        src tests \
+        | grep -v "^${dependency_field_owner}:" \
+        | grep -v '^tests/integration/test_architecture_authorities.py:' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+fixture_dependency_field_hits=$(
+    grep -En \
+        'reject_unknown_fields|_(REMOTE|PARENT)?_?GIT_DEPENDENCY_FIELDS' \
+        tests/utils/local_package.py \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'reject_unknown_git_fields(entry, parent=True)' "$dependency_parser" \
+    || ! grep -q 'reject_unknown_git_fields(entry, parent=False)' "$dependency_parser" \
+    || [ -n "$dependency_field_duplicate_hits" ] \
+    || [ -n "$fixture_dependency_field_hits" ]; then
+    echo "[x] Object-form Git dependency fields must come from the product parser"
+    [ -n "$dependency_field_duplicate_hits" ] && echo "$dependency_field_duplicate_hits"
+    [ -n "$fixture_dependency_field_hits" ] && echo "$fixture_dependency_field_hits"
     violations=$((violations + 1))
 fi
 
@@ -276,7 +356,16 @@ if [ "$windows_owner_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
-echo "[*] AC9: Git repository cache identity authority"
+echo "[*] AC9: executable test contract authorities"
+test_contract_output=$(python3 scripts/check_test_contract_authorities.py --root "$ROOT" 2>&1)
+test_contract_status=$?
+if [ "$test_contract_status" -ne 0 ]; then
+    echo "[x] Integration binary selection and rendered CLI parity require canonical owners"
+    echo "$test_contract_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC10: Git repository cache identity authority"
 if [ "$(grep -c 'to_repository_cache_url()' src/apm_cli/deps/github_downloader.py)" -lt 2 ]; then
     echo "[x] Repository cache identity must come from DependencyReference.to_repository_cache_url"
     violations=$((violations + 1))

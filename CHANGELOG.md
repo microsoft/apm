@@ -7,11 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Object-form Git dependencies now reject unsupported keys instead of silently
+  ignoring them; use `ref` rather than `version`, and omit inert `name` fields
+  from `git: parent`. CI audit also rejects full-SHA pins whose
+  `resolved_commit` was altered, while source-identity repair preserves files
+  freshly redeployed under the canonical identity; the existing lockfile
+  requirements in `openapm-v0.1.md` now cite both behaviors. Parser and audit
+  diagnostics name `ref` and `apm install --update` when those are the required
+  repair actions. (#2209)
+
 ### Fixed
 
+- Preserve every enforceable policy field and strict denial across warm-cache reads (#2193).
+  Cached inheritance chains no longer relabel stale strict parents as fresh or
+  bypass inherited policy in `apm policy status` and executable approval.
 - `apm install` now keeps complete nested GitLab project paths in its shared
   and persistent clone-cache identities, preventing sibling projects under a
-  common group prefix from reusing the wrong repository. (closes #2191; #2192)
+  common group prefix from reusing the wrong repository. (#2192)
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)

@@ -134,6 +134,21 @@ def test_legacy_package_claims_share_one_handoff_decision() -> None:
     assert claims["winner"].current_files == (shared,)
 
 
+def test_current_claimed_paths_come_from_canonical_handoff() -> None:
+    """Cleanup protection must consume the canonical current-claim owner."""
+    shared = ".claude/skills/shared/SKILL.md"
+    unique = ".claude/skills/loser-only/SKILL.md"
+
+    claimed = DeploymentReconciler.current_claimed_paths(
+        {
+            "loser": [shared, unique],
+            "winner": [shared],
+        }
+    )
+
+    assert claimed == frozenset({shared, unique})
+
+
 def test_last_successful_writer_is_active_and_order_is_deterministic(tmp_path: Path) -> None:
     locator = _locator()
     results = [

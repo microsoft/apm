@@ -112,13 +112,26 @@ production code must follow (see
 
 The integration suite uses **declarative gating** via pytest markers,
 not per-file orchestrator enumeration. Adding a new integration test
-is two steps.
+does not require editing `scripts/test-integration.sh`.
+
+### Three independent marker axes
+
+Markers compose across three axes:
+
+| Axis | Question | Markers |
+|---|---|---|
+| Behavioral | What boundary does the test cross? | `unit`, `component`, `e2e` |
+| Scheduling | When is the test selected? | `integration`, `slow`, `benchmark`, `live` |
+| Prerequisite | What environment must exist? | `requires_*` |
+
+`live` is both an opt-in scheduling marker and an external-service
+prerequisite. Behavioral markers do not replace prerequisite markers.
 
 ### Procedure
 
 1. Drop the file under `tests/integration/test_<feature>.py`.
-2. At the top of the module, declare the runtime / network / E2E
-   prerequisites as a single `pytestmark`:
+2. At the top of the module, declare any scheduling and prerequisite
+   markers as a single `pytestmark`:
 
    ```python
    import pytest
@@ -135,10 +148,10 @@ That is it. The orchestrator (`scripts/test-integration.sh`) and the
 CI integration job collect everything under `tests/integration/` in
 a single `pytest` invocation; markers are honored automatically.
 
-### Marker selection
+### Prerequisite selection
 
-Pick the marker that matches the **strongest** prerequisite the test
-has. The full registry lives in `pyproject.toml` under
+Declare every prerequisite the test needs. The full registry lives in
+`pyproject.toml` under
 `[tool.pytest.ini_options].markers` and is documented (with the
 opt-in commands) in
 [`docs/src/content/docs/contributing/integration-testing.md`](../../docs/src/content/docs/contributing/integration-testing.md).
@@ -157,6 +170,50 @@ Quick map for the common cases:
 Need a marker that does not exist yet? Register it in
 `pyproject.toml` AND add a row to the docs registry table in the
 same PR. Both must stay in sync.
+
+### Behavioral classification for the critical suite
+
+| Marker | Definition |
+|---|---|
+| `unit` | Pure logic with no filesystem and no CLI |
+| `component` | In-process behavior that touches a filesystem or one command boundary |
+| `e2e` | A real installed CLI crossing at least one command boundary |
+
+`pyproject.toml` owns these definitions.
+`tests/quality/critical_suite.toml` owns the finite classified module set.
+Directory names and filename suffixes are not behavioral evidence. For
+example, `test_policy_pinned_constraint_e2e.py` is `component` because it uses
+Click in-process; `test_core_smoke.py` is `e2e` because it invokes an installed
+binary through subprocess boundaries.
+
+To extend the finite manifest:
+
+1. Confirm every test in the module crosses the same behavioral boundary.
+2. Add the literal module path and marker to `critical_suite.toml`.
+3. Add the module-level behavioral `pytestmark`; preserve independent
+   scheduling and prerequisite markers.
+4. If the filename suggests a different boundary, document why behavior wins.
+5. Run the taxonomy and quality contracts:
+
+```bash
+uv run --extra dev pytest -p no:cacheprovider -q tests/quality
+uv run --frozen python scripts/check_test_assertions.py
+uv run --frozen python scripts/check_exact_test_duplicates.py
+```
+
+Baseline updates may only tighten reductions. A new duplicate or assertion
+violation must be fixed, not accepted by an updater:
+
+```bash
+uv run --frozen python scripts/check_test_assertions.py --update-baseline
+uv run --frozen python scripts/check_exact_test_duplicates.py --update-baseline
+```
+
+Provisional mode is CI-only and permitted only while a pull request is a draft.
+Contributor commands, ready pull requests, merge queue runs, and final
+validation are strict and reject `provisional` metadata. Do not pass the
+internal provisional flag manually; remove the metadata after remeasurement
+and review.
 
 ### Anti-patterns (will land as `recommended` findings on review)
 

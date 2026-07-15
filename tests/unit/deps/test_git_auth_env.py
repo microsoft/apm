@@ -197,7 +197,7 @@ class TestNoninteractiveEnv:
         assert "GIT_CONFIG_KEY_1" not in env
         assert "GIT_CONFIG_VALUE_1" not in env
 
-    def test_suppress_credential_helpers_is_effective_in_real_git(self):
+    def test_suppress_credential_helpers_is_effective_in_real_git(self, tmp_path):
         base = {
             **os.environ,
             **self._base(),
@@ -210,6 +210,7 @@ class TestNoninteractiveEnv:
         helpers = subprocess.run(
             ["git", "config", "--get-all", "credential.helper"],
             env=env,
+            cwd=tmp_path,
             capture_output=True,
             text=True,
             check=False,
@@ -217,6 +218,7 @@ class TestNoninteractiveEnv:
         headers = subprocess.run(
             ["git", "config", "--get-all", "http.extraheader"],
             env=env,
+            cwd=tmp_path,
             capture_output=True,
             text=True,
             check=False,

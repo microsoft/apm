@@ -27,7 +27,6 @@ import os
 import shlex
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -67,21 +66,17 @@ pytestmark = pytest.mark.requires_ado_bearer
 
 
 def run_apm(
-    cmd: str, cwd: Path, env_overrides: dict, timeout: int = 90
+    apm_binary_path: Path,
+    cmd: str,
+    cwd: Path,
+    env_overrides: dict,
+    timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     """Run apm with a controlled env dict.
 
     env_overrides is merged into a copy of os.environ; values of None DELETE
     that key from the merged env.
     """
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        apm_path = apm_on_path
-    elif sys.platform == "win32":
-        apm_path = str(Path(__file__).parent.parent.parent / ".venv" / "Scripts" / "apm.exe")
-    else:
-        apm_path = str(Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm")
-
     env = {**os.environ}
     for k, v in env_overrides.items():
         if v is None:
@@ -92,7 +87,7 @@ def run_apm(
     return subprocess.run(
         # B4 #852: list-form (shell=False) avoids command injection via
         # CI-supplied repo names that may contain shell metacharacters.
-        [apm_path, *shlex.split(cmd)],
+        [str(apm_binary_path), *shlex.split(cmd)],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -161,11 +156,12 @@ EXPECTED_PATH_PARTS = _expected_path_parts_from_repo(ADO_TEST_REPO)
 class TestBearerOnly:
     """Install an ADO package with NO ADO_APM_PAT set; bearer is the only path."""
 
-    def test_install_via_bearer_only(self, tmp_path):
+    def test_install_via_bearer_only(self, tmp_path, apm_binary_path: Path):
         project_dir = tmp_path / "bearer-only"
         _init_project(project_dir)
 
         result = run_apm(
+            apm_binary_path,
             f'install --only apm "{ADO_TEST_REPO}"',
             project_dir,
             env_overrides={"ADO_APM_PAT": None},
@@ -185,12 +181,13 @@ class TestBearerOnly:
         )
         assert installed.exists(), f"Expected {installed} to exist after bearer install"
 
-    def test_verbose_shows_bearer_source(self, tmp_path):
+    def test_verbose_shows_bearer_source(self, tmp_path, apm_binary_path: Path):
         """apm install --verbose should reveal 'bearer from az cli' as the token source."""
         project_dir = tmp_path / "bearer-verbose"
         _init_project(project_dir)
 
         result = run_apm(
+            apm_binary_path,
             f'install --only apm --verbose "{ADO_TEST_REPO}"',
             project_dir,
             env_overrides={"ADO_APM_PAT": None},
@@ -209,7 +206,7 @@ class TestBearerOnly:
 class TestStalePatFallback:
     """A bogus PAT triggers 401, then bearer fallback succeeds with a [!] warning."""
 
-    def test_bogus_pat_falls_back_to_bearer(self, tmp_path):
+    def test_bogus_pat_falls_back_to_bearer(self, tmp_path, apm_binary_path: Path):
         project_dir = tmp_path / "stale-pat"
         _init_project(project_dir)
 
@@ -217,6 +214,7 @@ class TestStalePatFallback:
         bogus = "x" * 52
 
         result = run_apm(
+            apm_binary_path,
             f'install --only apm "{ADO_TEST_REPO}"',
             project_dir,
             env_overrides={"ADO_APM_PAT": bogus},
@@ -271,12 +269,13 @@ class TestPatRegression:
         not os.getenv("ADO_APM_PAT"),
         reason="ADO_APM_PAT not set; regression test requires real PAT",
     )
-    def test_pat_install_unchanged(self, tmp_path):
+    def test_pat_install_unchanged(self, tmp_path, apm_binary_path: Path):
         project_dir = tmp_path / "pat-regress"
         _init_project(project_dir)
 
         # Use the user's real PAT as-is
         result = run_apm(
+            apm_binary_path,
             f'install --only apm "{ADO_TEST_REPO}"',
             project_dir,
             env_overrides={},
@@ -303,12 +302,13 @@ class TestPatRegression:
 class TestIssue1015BearerInstallRegression:
     """#1015 bug repro: bearer-only install (no PAT) should succeed."""
 
-    def test_bearer_only_install_succeeds(self, tmp_path):
+    def test_bearer_only_install_succeeds(self, tmp_path, apm_binary_path: Path):
         """With ADO_APM_PAT deleted, install via az cli bearer should work."""
         project_dir = tmp_path / "issue-1015-repro"
         _init_project(project_dir)
 
         result = run_apm(
+            apm_binary_path,
             f'install --only apm "{ADO_TEST_REPO}"',
             project_dir,
             env_overrides={"ADO_APM_PAT": None},
@@ -332,7 +332,7 @@ class TestIssue1015BearerInstallRegression:
 class TestIssue1015DiagnosticOnAuthFailure:
     """#1015: auth failure surfaces actionable diagnostics, not legacy wording."""
 
-    def test_bogus_pat_no_az_shows_diagnostic(self, tmp_path):
+    def test_bogus_pat_no_az_shows_diagnostic(self, tmp_path, apm_binary_path: Path):
         """With a bogus PAT and az NOT available, stderr shows diagnostics."""
         project_dir = tmp_path / "issue-1015-diag"
         _init_project(project_dir)
@@ -341,6 +341,7 @@ class TestIssue1015DiagnosticOnAuthFailure:
         # vars so az-cli bearer is unavailable for fallback.
         bogus = "x" * 52
         result = run_apm(
+            apm_binary_path,
             f'install --only apm "{ADO_TEST_REPO}"',
             project_dir,
             env_overrides={
@@ -375,7 +376,7 @@ class TestIssue1015DiagnosticOnAuthFailure:
 class TestIssue1015UpdatePreflightAbort:
     """#1015: apm install --update aborts cleanly on auth failure."""
 
-    def test_update_aborts_no_files_modified(self, tmp_path):
+    def test_update_aborts_no_files_modified(self, tmp_path, apm_binary_path: Path):
         """--update with no auth must exit non-zero and not modify files."""
         import hashlib
 
@@ -394,6 +395,7 @@ class TestIssue1015UpdatePreflightAbort:
         # Use a made-up ADO repo that the bearer cannot access
         # and suppress all auth so it fails cleanly.
         result = run_apm(
+            apm_binary_path,
             'install --only apm --update "dev.azure.com/nonexistent-org-xyzzy/fake/_git/fake"',
             project_dir,
             env_overrides={
@@ -436,11 +438,12 @@ class TestIssue1015PatRegressionExplicit:
         not os.getenv("ADO_APM_PAT"),
         reason="ADO_APM_PAT not set; PAT regression test requires real PAT",
     )
-    def test_pat_still_works_after_bearer_fix(self, tmp_path):
+    def test_pat_still_works_after_bearer_fix(self, tmp_path, apm_binary_path: Path):
         project_dir = tmp_path / "issue-1015-pat"
         _init_project(project_dir)
 
         result = run_apm(
+            apm_binary_path,
             f'install --only apm "{ADO_TEST_REPO}"',
             project_dir,
             env_overrides={},  # Use real PAT from env

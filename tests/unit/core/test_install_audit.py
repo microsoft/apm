@@ -20,6 +20,8 @@ from apm_cli.core.install_audit import (
     resolve_install_audit_mode,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestResolveInstallAuditMode:
     """Precedence ladder: flag master switch > policy floor > CLI > config."""

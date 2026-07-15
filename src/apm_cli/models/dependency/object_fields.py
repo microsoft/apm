@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from typing import Any
 
 from .subsets import parse_skill_subset, parse_target_subset
 
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+_REMOTE_GIT_DEPENDENCY_FIELDS = frozenset(
+    {
+        "alias",
+        "allow_insecure",
+        "git",
+        "path",
+        "ref",
+        "skills",
+        "targets",
+        "type",
+    }
+)
+_PARENT_GIT_DEPENDENCY_FIELDS = frozenset({"alias", "git", "path", "ref"})
 
 
 def parse_alias_override(raw: object) -> str | None:
@@ -25,12 +39,28 @@ def parse_alias_override(raw: object) -> str | None:
     return alias
 
 
-def reject_unknown_fields(entry: dict, allowed: set[str], dependency_type: str) -> None:
+def reject_unknown_fields(
+    entry: dict,
+    allowed: Collection[str],
+    dependency_type: str,
+) -> None:
     """Reject inert typos in object-form dependency declarations."""
     unknown = sorted(set(entry) - allowed)
     if unknown:
         fields = ", ".join(repr(field) for field in unknown)
         raise ValueError(f"Unsupported field(s) for {dependency_type} dependency: {fields}")
+
+
+def reject_unknown_git_fields(entry: dict, *, parent: bool) -> None:
+    """Reject fields outside the canonical remote or parent Git vocabulary."""
+    allowed = _PARENT_GIT_DEPENDENCY_FIELDS if parent else _REMOTE_GIT_DEPENDENCY_FIELDS
+    dependency_type = "parent git" if parent else "git"
+    unknown = set(entry) - set(allowed)
+    if "version" in unknown:
+        raise ValueError(
+            "Git dependency field 'version' is unsupported; use 'ref' for a branch, tag, or commit"
+        )
+    reject_unknown_fields(entry, allowed, dependency_type)
 
 
 def apply_optional_dependency_fields(dep: Any, entry: dict) -> None:

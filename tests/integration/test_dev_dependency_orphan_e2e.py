@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -11,14 +10,13 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 
-CLI = [sys.executable, "-m", "apm_cli.cli"]
 TIMEOUT = 180
 
 
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the APM CLI in *cwd* and return the completed subprocess."""
     return subprocess.run(
-        CLI + list(args),
+        [str(apm_binary_path), *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -28,7 +26,7 @@ def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 @pytest.mark.integration
-def test_dev_dependency_survives_audit_and_prune(tmp_path: Path) -> None:
+def test_dev_dependency_survives_audit_and_prune(tmp_path: Path, apm_binary_path: Path) -> None:
     """A clean install must not classify its dev dependency as orphaned."""
     package = tmp_path / "dev-package"
     package.mkdir()
@@ -51,7 +49,7 @@ def test_dev_dependency_survives_audit_and_prune(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    install = _run(project, "install")
+    install = _run(apm_binary_path, project, "install")
     assert install.returncode == 0, (
         f"install stdout:\n{install.stdout}\ninstall stderr:\n{install.stderr}"
     )
@@ -64,10 +62,10 @@ def test_dev_dependency_survives_audit_and_prune(tmp_path: Path) -> None:
     locked_dependency = next(iter(lockfile.dependencies.values()))
     assert locked_dependency.is_dev is True
 
-    audit = _run(project, "audit", "--ci")
+    audit = _run(apm_binary_path, project, "audit", "--ci")
     assert audit.returncode == 0, f"audit stdout:\n{audit.stdout}\naudit stderr:\n{audit.stderr}"
 
-    prune = _run(project, "prune")
+    prune = _run(apm_binary_path, project, "prune")
     assert prune.returncode == 0, f"prune stdout:\n{prune.stdout}\nprune stderr:\n{prune.stderr}"
     assert installed_package.is_dir(), (
         "apm prune removed a package declared under devDependencies.apm"

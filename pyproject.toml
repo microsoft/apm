@@ -162,6 +162,9 @@ exclude_lines = [
 [tool.pytest.ini_options]
 addopts = "-m 'not benchmark and not live'"
 markers = [
+    "unit: pure logic with no filesystem and no CLI",
+    "component: in-process behavior that touches a filesystem or one command boundary",
+    "e2e: a real installed CLI crossing at least one command boundary",
     "integration: marks tests as integration tests that may require network access",
     "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
     "slow: marks tests as slow running tests",

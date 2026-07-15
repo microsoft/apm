@@ -394,9 +394,9 @@ class TestPolicyStatus:
         result_mock = self._make_fetch_result(outcome="absent")
         with (
             patch(
-                "apm_cli.commands.policy.discover_policy",
+                "apm_cli.commands.policy.discover_policy_with_chain",
                 return_value=result_mock,
-            ),
+            ) as mock_discover,
             patch("apm_cli.commands.policy._read_cache_entry", return_value=None),
         ):
             result = runner.invoke(
@@ -407,6 +407,8 @@ class TestPolicyStatus:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert "outcome" in data
+        _, kwargs = mock_discover.call_args
+        assert kwargs == {"policy_override": None, "no_cache": False}
 
     def test_policy_status_table_output(self, runner: CliRunner) -> None:
         """``apm policy status`` renders a table by default."""
@@ -479,7 +481,7 @@ class TestPolicyStatus:
         """``apm policy status --no-cache`` calls discover_policy with no_cache=True."""
         result_mock = self._make_fetch_result(outcome="absent")
         with patch(
-            "apm_cli.commands.policy.discover_policy",
+            "apm_cli.commands.policy.discover_policy_with_chain",
             return_value=result_mock,
         ) as mock_discover:
             result = runner.invoke(
@@ -490,13 +492,13 @@ class TestPolicyStatus:
         assert result.exit_code == 0
         mock_discover.assert_called_once()
         _, kwargs = mock_discover.call_args
-        assert kwargs.get("no_cache") is True
+        assert kwargs == {"policy_override": None, "no_cache": True}
 
     def test_policy_status_with_policy_source(self, runner: CliRunner) -> None:
         """``apm policy status --policy-source`` calls discover_policy with override."""
         result_mock = self._make_fetch_result(outcome="found")
         with patch(
-            "apm_cli.commands.policy.discover_policy",
+            "apm_cli.commands.policy.discover_policy_with_chain",
             return_value=result_mock,
         ) as mock_discover:
             runner.invoke(
@@ -506,7 +508,7 @@ class TestPolicyStatus:
             )
         mock_discover.assert_called_once()
         _, kwargs = mock_discover.call_args
-        assert kwargs.get("policy_override") == "org:myorg"
+        assert kwargs == {"policy_override": "org:myorg", "no_cache": False}
 
 
 # ===========================================================================

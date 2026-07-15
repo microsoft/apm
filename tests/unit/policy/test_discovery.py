@@ -30,6 +30,7 @@ from apm_cli.policy.discovery import (
     _parse_remote_url,
     _policy_repo_candidates,
     _read_cache,
+    _read_cache_entry,
     _write_cache,
     discover_policy,
 )
@@ -493,6 +494,20 @@ class TestFetchFromRepo(unittest.TestCase):
             self.assertTrue(result.found)
             self.assertEqual(result.source, "org:contoso/.github")
             self.assertFalse(result.cached)
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_extending_leaf_waits_for_completed_chain_before_cache(self, mock_fetch):
+        mock_fetch.return_value = (
+            "name: child\nextends: parent/.github\n",
+            None,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+            result = _fetch_from_repo(repo_ref, root, no_cache=True)
+            self.assertIsNotNone(result.policy)
+            self.assertEqual(result.policy.extends, "parent/.github")
+            self.assertIsNone(_read_cache_entry(repo_ref, root))
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
     def test_404_no_error(self, mock_fetch):
@@ -1052,6 +1067,29 @@ class TestFetchFromAdoRepo(unittest.TestCase):
             self.assertTrue(result.found)
             self.assertEqual(result.source, "org:dev.azure.com/contoso/_apm/_apm")
             self.assertFalse(result.cached)
+
+    @patch("apm_cli.policy.discovery._fetch_ado_contents")
+    def test_extending_leaf_waits_for_completed_chain_before_cache(
+        self, mock_fetch: MagicMock
+    ) -> None:
+        mock_fetch.return_value = (
+            "name: child\nextends: parent/.github\n",
+            None,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "dev.azure.com/contoso/_apm/_apm"
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="_apm",
+                repo="_apm",
+                host="dev.azure.com",
+                project_root=root,
+                no_cache=True,
+            )
+            self.assertIsNotNone(result.policy)
+            self.assertEqual(result.policy.extends, "parent/.github")
+            self.assertIsNone(_read_cache_entry(repo_ref, root))
 
     @patch("apm_cli.policy.discovery._fetch_ado_contents")
     def test_404_no_error(self, mock_fetch):
