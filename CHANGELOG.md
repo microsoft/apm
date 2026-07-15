@@ -20,9 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Git-source semver ranges now use the selected SSH or HTTPS transport for tag
-  enumeration, so explicit SSH and `prefer-ssh` installs no longer invoke
-  HTTPS while resolving refs. (closes #2184; #2229)
+- Fix #2184 so Git-source semver ranges use the selected transport for tag
+  enumeration instead of always invoking HTTPS. (#2229)
 - Virtual Claude Skill subpath dependencies now keep `SKILL.md`-derived names
   and unversioned metadata stable across install, frozen cache replay, and
   update, avoiding spurious lockfile rewrites. (#2217)

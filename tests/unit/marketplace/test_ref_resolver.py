@@ -365,6 +365,43 @@ class TestRefResolver:
         assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
         resolver.close()
 
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_http_transport_uses_plain_url_without_auth_channels(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="git.example.com",
+            token="secret-token",
+            git_env={
+                "GIT_TOKEN": "secret-token",
+                "GIT_HTTP_EXTRAHEADER": "Authorization: ******",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraheader",
+                "GIT_CONFIG_VALUE_0": "Authorization: ******",
+            },
+            transport_scheme="http",
+            port=8080,
+        )
+
+        resolver.list_remote_refs("acme/tools")
+
+        args, kwargs = mock_run.call_args
+        parsed = urllib.parse.urlparse(args[0][4])
+        assert (parsed.scheme, parsed.hostname, parsed.port, parsed.path) == (
+            "http",
+            "git.example.com",
+            8080,
+            "/acme/tools.git",
+        )
+        assert "GIT_TOKEN" not in kwargs["env"]
+        assert "GIT_HTTP_EXTRAHEADER" not in kwargs["env"]
+        assert "Authorization:" not in set(kwargs["env"].values())
+        assert "credential.helper" in set(kwargs["env"].values())
+        resolver.close()
+
     def test_close_clears_cache(self) -> None:
         resolver = RefResolver(timeout_seconds=5.0)
         resolver.cache.put("acme/tools", [])

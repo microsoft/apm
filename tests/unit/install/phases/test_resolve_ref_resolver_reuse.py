@@ -228,6 +228,32 @@ def test_https_semver_resolution_preserves_custom_port():
     assert made[0][3]["port"] == 8443
 
 
+def test_semver_resolution_propagates_explicit_http_transport():
+    """Plain-HTTP dependencies must enumerate tags over plain HTTP."""
+    made, fake_ref, fake_semver = _patched_resolver_env()
+    dep = DependencyReference(
+        repo_url="owner/repo",
+        host="git.example.com",
+        explicit_scheme="http",
+        is_insecure=True,
+        allow_insecure=True,
+        reference="^1.0.0",
+    )
+
+    with (
+        patch("apm_cli.marketplace.ref_resolver.RefResolver", fake_ref),
+        patch("apm_cli.deps.git_semver_resolver.GitSemverResolver", fake_semver),
+    ):
+        _maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=None,
+            update_refs=False,
+        )
+
+    assert len(made) == 1
+    assert made[0][3]["transport_scheme"] == "http"
+
+
 def test_cache_separates_transport_identity_for_same_host_and_token():
     """Scheme, SSH user, and port must each select a distinct resolver."""
     from apm_cli.install.helpers.ref_reuse import get_shared_ref_resolver

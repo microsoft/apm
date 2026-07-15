@@ -47,6 +47,7 @@ from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
     build_gitlab_https_clone_url,
+    build_http_clone_url,
     build_https_clone_url,
     build_ssh_url,
     default_host,
@@ -201,8 +202,7 @@ class _GitHubFamilyBase:
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
         host = self._url_host(dep_ref)
-        netloc = f"{host}:{port}" if port else host
-        return f"http://{netloc}/{dep_ref.repo_url}.git"
+        return build_http_clone_url(host, dep_ref.repo_url, port=port)
 
     def _url_host(self, dep_ref: DependencyReference) -> str:
         # Prefer the host carried on the dependency reference itself, but
@@ -405,8 +405,7 @@ class GitLabBackend:
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        netloc = f"{host}:{port}" if port else host
-        return f"http://{netloc}/{dep_ref.repo_url}.git"
+        return build_http_clone_url(host, dep_ref.repo_url, port=port)
 
     def build_commits_api_url(self, dep_ref: DependencyReference, ref: str) -> str | None:
         # GitLab REST v4 commits endpoint: requires URL-encoded "namespace/project".
@@ -486,8 +485,7 @@ class GenericGitBackend:
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        netloc = f"{host}:{port}" if port else host
-        return f"http://{netloc}/{dep_ref.repo_url}.git"
+        return build_http_clone_url(host, dep_ref.repo_url, port=port)
 
     def build_commits_api_url(self, dep_ref: DependencyReference, ref: str) -> str | None:
         # No standardized cheap commit-resolution endpoint across generic
