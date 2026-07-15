@@ -253,6 +253,41 @@ class TestResolveGitSubdirSource:
         )
         assert result == "owner/primary/pkg"
 
+    def test_full_https_url_non_default_host(self):
+        """Full HTTPS URL for a non-default host preserves the host in the canonical."""
+        result = _resolve_git_subdir_source(
+            {
+                "url": "https://git.example.com/ept/ai-tools/lsp-infra-hub",
+                "path": "packages/apm-skill-creator",
+                "ref": "apm-skill-creator/0.1.1",
+            }
+        )
+        assert result == (
+            "git.example.com/ept/ai-tools/lsp-infra-hub"
+            "/packages/apm-skill-creator#apm-skill-creator/0.1.1"
+        )
+
+    def test_full_https_url_github_strips_host(self):
+        """Full HTTPS URL for github.com strips the default host from the canonical."""
+        result = _resolve_git_subdir_source(
+            {
+                "url": "https://github.com/owner/monorepo",
+                "path": "packages/plugin-a",
+                "ref": "v1.0",
+            }
+        )
+        assert result == "owner/monorepo/packages/plugin-a#v1.0"
+
+    def test_full_url_no_subdir(self):
+        """Full URL without subdir returns host-prefixed canonical."""
+        result = _resolve_git_subdir_source({"url": "https://gitlab.com/acme/rules", "ref": "v2.0"})
+        assert result == "gitlab.com/acme/rules#v2.0"
+
+    def test_full_url_invalid_path_rejected(self):
+        """Full URL with a single-segment path (not owner/repo) is rejected."""
+        with pytest.raises(ValueError, match=r"Invalid git-subdir source URL"):
+            _resolve_git_subdir_source({"url": "https://evil.example.com/payload", "path": "x"})
+
 
 class TestResolveRelativeSource:
     """Resolve relative path source type."""
@@ -476,8 +511,25 @@ class TestOldFormatIntegration:
         result = resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
         assert result == "acme/monorepo/tools/helper#v2.0"
 
-    def test_old_format_url_with_scheme_rejected(self) -> None:
-        """A full URL in the url field is rejected by the scheme guard."""
+    def test_full_url_in_url_field_is_accepted(self) -> None:
+        """A valid full URL in the url field is accepted and the host is preserved."""
+        plugin = MarketplacePlugin(
+            name="my-plugin",
+            source={
+                "type": "git-subdir",
+                "url": "https://git.example.com/ept/ai-tools/lsp-infra-hub",
+                "path": "packages/my-plugin",
+                "ref": "my-plugin/0.1.0",
+            },
+        )
+        result = resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
+        assert (
+            result
+            == "git.example.com/ept/ai-tools/lsp-infra-hub/packages/my-plugin#my-plugin/0.1.0"
+        )
+
+    def test_full_url_with_invalid_path_rejected(self) -> None:
+        """A full URL with an invalid repository path (single segment) is rejected."""
         plugin = MarketplacePlugin(
             name="bad-url",
             source={
@@ -487,7 +539,7 @@ class TestOldFormatIntegration:
                 "ref": "main",
             },
         )
-        with pytest.raises(ValueError, match=r"expected 'owner/repo' but got a URL"):
+        with pytest.raises(ValueError, match=r"Invalid git-subdir source URL"):
             resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
 
 
@@ -891,6 +943,93 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         dep = result.dependency_reference
         assert dep.virtual_path == "registry/pkg"
         assert dep.repo_url == "epm-ease/ai-apm-registry"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_git_subdir_full_url_on_self_hosted_gitlab_builds_dep_ref(
+        self, mock_get, mock_fetch, self_managed_git_fqdn_source
+    ):
+        """Regression #2216: git-subdir with full HTTPS URL (emitted by apm pack for
+        self-hosted GitLab) must build a structured dep_ref so install succeeds."""
+        plugin = MarketplacePlugin(
+            name="apm-skill-creator",
+            source={
+                "source": "git-subdir",
+                "url": "https://git.epam.com/ept/ai-tools/lsp-infra-hub",
+                "path": "packages/apm-skill-creator",
+                "ref": "apm-skill-creator/0.1.1",
+                "sha": "0d292a52466673f539702118b97d1c9c5fcf10bf",
+            },
+        )
+        mock_get.return_value = self_managed_git_fqdn_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("apm-skill-creator", "apm-reg")
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.host == "git.epam.com"
+        assert dep.repo_url == "ept/ai-tools/lsp-infra-hub"
+        assert dep.virtual_path == "packages/apm-skill-creator"
+        assert dep.is_virtual is True
+        assert dep.reference == "apm-skill-creator/0.1.1"
+        assert (
+            result.canonical
+            == "git.epam.com/ept/ai-tools/lsp-infra-hub/packages/apm-skill-creator#apm-skill-creator/0.1.1"
+        )
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_git_subdir_full_url_version_spec_overrides_ref(
+        self, mock_get, mock_fetch, self_managed_git_fqdn_source
+    ):
+        """version_spec replaces the source ref for git-subdir full-URL entries."""
+        plugin = MarketplacePlugin(
+            name="apm-skill-creator",
+            source={
+                "source": "git-subdir",
+                "url": "https://git.epam.com/ept/ai-tools/lsp-infra-hub",
+                "path": "packages/apm-skill-creator",
+                "ref": "apm-skill-creator/0.1.0",
+            },
+        )
+        mock_get.return_value = self_managed_git_fqdn_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin(
+            "apm-skill-creator", "apm-reg", version_spec="apm-skill-creator/0.2.0"
+        )
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.reference == "apm-skill-creator/0.2.0"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_git_subdir_full_url_on_github_host_no_dep_ref(self, mock_get, mock_fetch):
+        """git-subdir with full GitHub URL on a GitHub marketplace does NOT build dep_ref."""
+        gh_source = MarketplaceSource(
+            name="gh-mkt",
+            owner="owner",
+            repo="marketplace-repo",
+            host="github.com",
+            branch="main",
+        )
+        plugin = MarketplacePlugin(
+            name="pkg",
+            source={
+                "source": "git-subdir",
+                "url": "https://github.com/owner/monorepo",
+                "path": "packages/pkg",
+                "ref": "v1.0",
+            },
+        )
+        mock_get.return_value = gh_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("pkg", "gh-mkt")
+        # github.com does not need explicit git path -> no dep_ref built
+        assert result.dependency_reference is None
+        # canonical still correctly uses shorthand (github host stripped)
+        assert result.canonical == "owner/monorepo/packages/pkg#v1.0"
 
 
 class TestResolveMarketplacePluginGHECloud:

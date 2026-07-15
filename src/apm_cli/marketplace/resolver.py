@@ -563,12 +563,20 @@ def _resolve_url_source(source: dict) -> str:
 def _resolve_git_subdir_source(source: dict) -> str:
     """Resolve a ``git-subdir`` source type to ``owner/repo[/subdir][#ref]``."""
     repo = source.get("repo", "") or source.get("url", "")
-    # Reject full URLs -- the url fallback accepts owner/repo strings only
+    # When ``url`` is a full URL (e.g. emitted by ``apm pack`` for self-hosted
+    # GitLab/Gitea/GHES marketplaces), extract the scheme-free canonical base
+    # via ``DependencyReference.parse()`` so the host is preserved in the
+    # returned canonical and downstream auth routes correctly.
     if "://" in repo:
-        raise ValueError(
-            f"Invalid git-subdir source: expected 'owner/repo' but got a URL '{repo}'. "
-            f"Use source type 'url' for full URL references."
-        )
+        try:
+            dep = DependencyReference.parse(repo)
+        except ValueError as exc:
+            raise ValueError(f"Invalid git-subdir source URL '{repo}': {exc}") from exc
+        if dep.is_local:
+            raise ValueError(f"Invalid git-subdir source: URL '{repo}' resolves to a local path.")
+        # e.g. "git.example.com/ept/ai-tools/lsp-infra-hub" for non-default hosts,
+        # or "owner/repo" for github.com (default host stripped by to_canonical).
+        repo = dep.to_canonical().split("#", 1)[0]
     ref = source.get("ref", "")
     subdir = (source.get("subdir", "") or source.get("path", "")).strip("/")
     if not repo or "/" not in repo:
@@ -887,6 +895,36 @@ def resolve_marketplace_plugin(
                     canonical = dep_ref.to_canonical()
                     logger.debug(
                         "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
+                        plugin_name,
+                        marketplace_name,
+                        canonical,
+                    )
+            elif _src_type == "git-subdir":
+                # When ``apm pack`` emits a ``git-subdir`` source with a full URL
+                # (non-default host such as self-hosted GitLab/Gitea/GHES), build a
+                # structured dep_ref so downstream auth and virtual-path resolution
+                # work correctly.  Only applies when the url field is a full URL
+                # (contains "://"); bare ``owner/repo`` forms are handled by the
+                # canonical string path.
+                _url = (plugin.source.get("url", "") or "").strip()
+                if _url and "://" in _url:
+                    _subdir = (
+                        plugin.source.get("path", "") or plugin.source.get("subdir", "") or ""
+                    ).strip("/")
+                    _ref = plugin.source.get("ref", "")
+                    _effective_ref = version_spec or (
+                        _ref.strip() if isinstance(_ref, str) and _ref.strip() else ""
+                    )
+                    _gs_entry: dict = {"git": _url}
+                    if _subdir:
+                        _gs_entry["path"] = _subdir
+                    if _effective_ref:
+                        _gs_entry["ref"] = _effective_ref
+                    dep_ref = DependencyReference.parse_from_dict(_gs_entry)
+                    canonical = dep_ref.to_canonical()
+                    logger.debug(
+                        "Built dep_ref from git-subdir URL source for %s@%s -> %s"
+                        " (non-github-host git-subdir source)",
                         plugin_name,
                         marketplace_name,
                         canonical,
