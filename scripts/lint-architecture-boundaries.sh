@@ -246,12 +246,6 @@ check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
     src/apm_cli/deps/apm_resolver.py
-if ! grep -q 'DependencyReference.canonical_ado_coordinates' \
-    src/apm_cli/deps/lockfile.py \
-    || grep -Eq '(self\.)?repo_url\.split\(' src/apm_cli/deps/lockfile.py; then
-    echo "[x] ADO lock coordinates must use DependencyReference"
-    violations=$((violations + 1))
-fi
 if ! grep -A12 'if source == "local"' src/apm_cli/models/dependency/identity.py \
     | grep -q 'anchored_local_path' \
     || ! grep -q 'declaring_parent' src/apm_cli/deps/lockfile.py; then
@@ -545,6 +539,34 @@ diagnostic_ascii_status=$?
 if [ "$diagnostic_ascii_status" -ne 0 ]; then
     echo "[x] Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text"
     echo "$diagnostic_ascii_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC13: Git reference transport authority"
+semver_transport_router="src/apm_cli/install/helpers/ref_reuse.py"
+semver_transport_executor="src/apm_cli/marketplace/ref_resolver.py"
+git_ref_transport_consumer="src/apm_cli/deps/git_reference_resolver.py"
+if ! grep -q 'transport_plan = transport_selector.select(' "$semver_transport_router" \
+    || ! grep -q \
+        'transport_scheme = "ssh" if selected_scheme == "ssh" else "https"' \
+        "$semver_transport_router" \
+    || ! grep -q 'transport_scheme=transport_scheme' "$semver_transport_router" \
+    || ! grep -q 'build_ssh_url(' "$semver_transport_executor" \
+    || grep -Eq \
+        'from .*transport_selection import|TransportSelector\(' \
+        "$semver_transport_executor" \
+    || ! grep -q \
+        'transport_plan = host._transport_selector.select(' \
+        "$git_ref_transport_consumer"; then
+    echo "[x] Git ref transport must route through TransportSelector into RefResolver"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC14: ADO lock-coordinate authority"
+if ! grep -q 'DependencyReference.canonical_ado_coordinates' \
+    src/apm_cli/deps/lockfile.py \
+    || grep -Eq '(self\.)?repo_url\.split\(' src/apm_cli/deps/lockfile.py; then
+    echo "[x] ADO lock coordinates must use DependencyReference"
     violations=$((violations + 1))
 fi
 

@@ -53,7 +53,7 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
 
 
 def test_ado_lock_coordinates_have_single_owner() -> None:
-    """Lock persistence must consume DependencyReference's ADO parser."""
+    """AC14 lock persistence must consume DependencyReference's ADO parser."""
     import inspect
 
     from apm_cli.deps.lockfile import LockedDependency
@@ -67,6 +67,7 @@ def test_ado_lock_coordinates_have_single_owner() -> None:
     assert hasattr(DependencyReference, "canonical_ado_coordinates")
     assert "DependencyReference.canonical_ado_coordinates" in lockfile_source
     assert "repo_url.split" not in reconstruction
+    assert "AC14: ADO lock-coordinate authority" in guard
     assert "ADO lock coordinates must use DependencyReference" in guard
 
 
@@ -152,6 +153,24 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "DeploymentLedgerCodec.record_local_bundle_files" in handler
     assert "DeploymentLedgerCodec.local_bundle_paths" in drift
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
+
+
+def test_git_ref_transport_selection_has_single_owner() -> None:
+    """AC13 Git ref enumeration must consume canonical transport selection."""
+    root = Path(__file__).parents[2]
+    ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
+    ref_resolver = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
+    git_ref_resolver = (root / "src/apm_cli/deps/git_reference_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "transport_plan = transport_selector.select(" in ref_reuse
+    assert "transport_scheme=transport_scheme" in ref_reuse
+    assert "transport_plan = host._transport_selector.select(" in git_ref_resolver
+    assert "build_ssh_url(" in ref_resolver
+    assert "from apm_cli.deps.transport_selection import" not in ref_resolver
+    assert "TransportSelector(" not in ref_resolver
+    assert "AC13: Git reference transport authority" in guard
+    assert "Git ref transport must route through TransportSelector into RefResolver" in guard
 
 
 def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
@@ -644,12 +663,12 @@ def test_executable_test_contracts_have_one_canonical_owner() -> None:
 
 
 def test_agent_diagnostic_names_have_one_printable_ascii_owner() -> None:
-    """Codex and OpenCode diagnostic names must use the diagnostics owner."""
+    """AC12 Codex and OpenCode diagnostic names must use the diagnostics owner."""
     root = Path(__file__).parents[2]
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     checker = _load_diagnostic_ascii_owner_checker(root)
 
-    assert "AC10: diagnostic printable-ASCII authority" in guard
+    assert "AC12: diagnostic printable-ASCII authority" in guard
     assert "check_diagnostic_ascii_owner.py" in guard
     assert "Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text" in guard
     assert checker.check(root) == []
@@ -658,7 +677,7 @@ def test_agent_diagnostic_names_have_one_printable_ascii_owner() -> None:
 def test_agent_diagnostic_ascii_guard_rejects_local_reimplementation(
     tmp_path: Path,
 ) -> None:
-    """AC10 must fail when a consumer shadows the canonical sanitizer."""
+    """AC12 must fail when a consumer shadows the canonical sanitizer."""
     root = Path(__file__).parents[2]
     sandbox = tmp_path / "repo"
     shutil.copytree(

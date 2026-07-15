@@ -26,8 +26,10 @@ from dataclasses import dataclass
 
 from ..utils.github_host import (
     build_ado_bearer_git_env,
+    build_ado_ssh_url,
     build_authorization_header_git_env,
     build_https_clone_url,
+    build_ssh_url,
     default_host,
     is_ado_auth_failure_signal,
     is_azure_devops_hostname,
@@ -149,6 +151,10 @@ class RefResolver:
         the URL; ADO bearer credentials are sent through ``http.extraheader``.
     auth_scheme:
         ``"basic"`` (default) or ``"bearer"`` from ``AuthContext``.
+    transport_scheme:
+        Primary transport selected by ``TransportSelector``. ``"ssh"`` uses
+        the SSH URL builder and removes HTTP authorization channels; every
+        other value preserves the existing HTTPS behavior.
     """
 
     def __init__(
@@ -163,6 +169,9 @@ class RefResolver:
         git_env: dict[str, str] | None = None,
         auth_resolver=None,
         auth_target=None,
+        transport_scheme: str = "https",
+        ssh_user: str = "git",
+        port: int | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
@@ -173,6 +182,9 @@ class RefResolver:
         self._git_env = dict(git_env) if git_env is not None else None
         self._auth_resolver = auth_resolver
         self._auth_target = auth_target
+        self._transport_scheme = transport_scheme
+        self._ssh_user = ssh_user
+        self._port = port
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
@@ -197,6 +209,7 @@ class RefResolver:
         remote_url: str | None = None,
     ) -> tuple[str, dict[str, str]]:
         """Build the remote URL and auth environment for one git operation."""
+        use_ssh = self._transport_scheme == "ssh"
         requested_bearer = self._auth_scheme == "bearer"
         ado_host = is_azure_devops_hostname(self._host)
         if requested_bearer and not ado_host:
@@ -205,9 +218,30 @@ class RefResolver:
                 summary=f"Bearer authentication is not supported for host '{self._host}'.",
                 hint="Use bearer authentication only with an Azure DevOps host.",
             )
-        bearer = requested_bearer and ado_host
-        url_token = None if requested_bearer else self._token
-        if remote_url is not None:
+        bearer = requested_bearer and ado_host and not use_ssh
+        url_token = None if requested_bearer or use_ssh else self._token
+        if use_ssh and ado_host:
+            parts = owner_repo.split("/")
+            if len(parts) == 4 and parts[2] == "_git":
+                org, project, repo = parts[0], parts[1], parts[3]
+            elif len(parts) == 3:
+                org, project, repo = parts
+            else:
+                raise GitLsRemoteError(
+                    package="",
+                    summary="Azure DevOps SSH resolution requires org/project/repo coordinates.",
+                    hint="Use a standard Azure DevOps dependency URL.",
+                )
+            ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
+            url = build_ado_ssh_url(org, project, repo, host=ssh_host)
+        elif use_ssh:
+            url = build_ssh_url(
+                self._host,
+                owner_repo,
+                port=self._port,
+                user=self._ssh_user,
+            )
+        elif remote_url is not None:
             parsed_remote = urllib.parse.urlparse(remote_url)
             # urlparse lowercases hostname per RFC 3986 3.2.2; normalize both sides.
             if (
@@ -222,17 +256,25 @@ class RefResolver:
                 raise GitLsRemoteError(
                     package="",
                     summary=(
-                        f"The canonical remote URL does not match the configured host "
+                        "The canonical remote URL does not match the configured host "
                         f"(expected '{self._host.lower()}', "
                         f"got '{parsed_remote.hostname}')."
                     ),
-                    hint="Re-add the dependency with 'apm install <source>' to regenerate the lock entry.",
+                    hint=(
+                        "Re-add the dependency with 'apm install <source>' "
+                        "to regenerate the lock entry."
+                    ),
                 )
             url = remote_url
         elif ado_host:
             url = f"https://{self._host}/{owner_repo}"
         else:
-            url = build_https_clone_url(self._host, owner_repo, token=url_token)
+            url = build_https_clone_url(
+                self._host,
+                owner_repo,
+                token=url_token,
+                port=self._port,
+            )
         if self._git_env is not None:
             env = dict(self._git_env)
         else:
@@ -244,8 +286,14 @@ class RefResolver:
                 scheme=self._auth_scheme,
                 host_kind=host_kind,
             )
+        if use_ssh:
+            from apm_cli.core.auth import AuthResolver
+
+            AuthResolver._clear_git_auth_env(env)
+            env.pop("GIT_ASKPASS", None)
         env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_ASKPASS"] = "echo"
+        if not use_ssh:
+            env["GIT_ASKPASS"] = "echo"
         if bearer and self._token:
             env.pop("GIT_TOKEN", None)
             env.update(build_ado_bearer_git_env(self._token))
@@ -365,6 +413,7 @@ class RefResolver:
             and self._auth_scheme == "basic"
             and bool(self._token)
             and is_azure_devops_hostname(self._host)
+            and self._transport_scheme != "ssh"
         )
         if not eligible:
             return None

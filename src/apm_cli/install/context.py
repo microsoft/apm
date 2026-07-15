@@ -126,7 +126,10 @@ class InstallContext:
     # so semver deps sharing an upstream repo reuse one ``git ls-remote`` tag
     # listing (RefResolver memoizes per instance) instead of one per dep.
     # Populated lazily in _maybe_resolve_git_semver during the resolve phase.
-    ref_resolver_cache: dict[tuple[str | None, str | None], Any] = field(default_factory=dict)
+    ref_resolver_cache: dict[
+        tuple[str | None, str | None, str, tuple[str, str | None, int | None]],
+        Any,
+    ] = field(default_factory=dict)
     managed_files: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------

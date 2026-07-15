@@ -397,6 +397,52 @@ class TestRefResolver:
         assert kwargs["text"] is True
         resolver.close()
 
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_uses_ssh_url_without_http_auth(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            token="secret-token",
+            git_env={
+                "GIT_TOKEN": "secret-token",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraheader",
+                "GIT_CONFIG_VALUE_0": "Authorization: Bearer secret-token",
+            },
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("acme/tools")
+
+        args, kwargs = mock_run.call_args
+        assert args[0][4] == "git@github.com:acme/tools.git"
+        assert "GIT_TOKEN" not in kwargs["env"]
+        assert "GIT_CONFIG_COUNT" not in kwargs["env"]
+        assert "GIT_CONFIG_VALUE_0" not in kwargs["env"]
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_ssh_transport_uses_azure_devops_remote_shape(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("contoso/platform/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
+        resolver.close()
+
     def test_close_clears_cache(self) -> None:
         resolver = RefResolver(timeout_seconds=5.0)
         resolver.cache.put("acme/tools", [])
