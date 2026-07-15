@@ -451,42 +451,31 @@ def _validate_claude_skill(
     Returns:
         ValidationResult: Updated validation result
     """
-    try:
-        result.package = build_claude_skill_package(package_path, skill_md_path)
+    from apm_cli.utils.yaml_io import load_frontmatter
 
+    from .apm_package import APMPackage
+
+    try:
+        with open(skill_md_path, encoding="utf-8") as f:
+            post = load_frontmatter(f)
+
+        skill_name = post.metadata.get("name", package_path.name)
+        skill_description = post.metadata.get("description", f"Claude Skill: {skill_name}")
+        skill_license = post.metadata.get("license")
+
+        result.package = APMPackage(
+            name=skill_name,
+            version="unknown",
+            description=skill_description,
+            license=skill_license,
+            package_path=package_path,
+            type=PackageContentType.SKILL,
+        )
     except Exception as e:
         result.add_error(f"Failed to process {SKILL_MD_FILENAME}: {e}")
         return result
 
     return result
-
-
-def build_claude_skill_package(package_path: Path, skill_md_path: Path) -> APMPackage:
-    """Build canonical package metadata for a Claude Skill package.
-
-    Claude Skills do not declare an APM-owned package version in
-    ``SKILL.md``. The SKILL.md frontmatter owns the display name and
-    description; the package version stays ``unknown``.
-    """
-    from apm_cli.utils.yaml_io import load_frontmatter
-
-    from .apm_package import APMPackage
-
-    with open(skill_md_path, encoding="utf-8") as f:
-        post = load_frontmatter(f)
-
-    skill_name = post.metadata.get("name", package_path.name)
-    skill_description = post.metadata.get("description", f"Claude Skill: {skill_name}")
-    skill_license = post.metadata.get("license")
-
-    return APMPackage(
-        name=skill_name,
-        version="unknown",
-        description=skill_description,
-        license=skill_license,
-        package_path=package_path,
-        type=PackageContentType.SKILL,
-    )
 
 
 def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> ValidationResult:

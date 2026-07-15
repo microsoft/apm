@@ -422,11 +422,13 @@ def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
     sources = (root / "src/apm_cli/install/sources.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
-    assert "def build_claude_skill_package(" in validation
+    assert "def _validate_claude_skill(" in validation
     assert 'version="unknown"' in validation
-    assert "build_claude_skill_package(package_path, skill_md_path)" in validation
+    assert "load_frontmatter" in validation
     assert "pkg_type == PackageType.CLAUDE_SKILL" in sources
-    assert "build_claude_skill_package(" in sources
+    assert "validate_apm_package(install_path)" in sources
+    assert "Cached Claude Skill is invalid" in sources
+    assert "build_claude_skill_package" not in sources
     assert "Cached/frozen Claude Skill lock metadata must route through validation.py" in guard
 
 

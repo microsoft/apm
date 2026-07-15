@@ -407,7 +407,7 @@ class CachedDependencySource(DependencySource):
         return cached_commit
 
     def acquire(self) -> Materialization | None:
-        from apm_cli.constants import APM_YML_FILENAME, SKILL_MD_FILENAME
+        from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.models.apm_package import (
             APMPackage,
@@ -416,7 +416,7 @@ class CachedDependencySource(DependencySource):
             PackageType,
             ResolvedReference,
         )
-        from apm_cli.models.validation import build_claude_skill_package, detect_package_type
+        from apm_cli.models.validation import detect_package_type, validate_apm_package
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
@@ -488,10 +488,11 @@ class CachedDependencySource(DependencySource):
             if not cached_package.source:
                 cached_package.source = dep_ref.repo_url
         elif pkg_type == PackageType.CLAUDE_SKILL:
-            cached_package = build_claude_skill_package(
-                install_path,
-                install_path / SKILL_MD_FILENAME,
-            )
+            validation_result = validate_apm_package(install_path)
+            if not validation_result.is_valid or validation_result.package is None:
+                details = "; ".join(validation_result.errors) or "validator returned no package"
+                raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
+            cached_package = validation_result.package
             cached_package.source = dep_ref.repo_url
         else:
             cached_package = APMPackage(

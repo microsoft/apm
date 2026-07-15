@@ -689,6 +689,7 @@ class TestValidateClaudeSkill:
         returned: ValidationResult = _validate_claude_skill(tmp_path, skill_md, result)
         assert returned.package is not None
         assert returned.package.name == tmp_path.name
+        assert returned.package.version == "unknown"
 
     def test_unreadable_skill_md_adds_error(self, tmp_path: Path) -> None:
         """Unreadable SKILL.md triggers an error on the result."""
