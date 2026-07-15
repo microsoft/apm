@@ -245,7 +245,7 @@ class TestListRemoteRefs:
             "owner/repo",
             use_ssh=False,
             dep_ref=dep,
-            token="",
+            token=None,
             auth_scheme="basic",
         )
 

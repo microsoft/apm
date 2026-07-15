@@ -164,7 +164,7 @@ class GitReferenceResolver:
             repo_url_base,
             use_ssh=use_ssh,
             dep_ref=dep_ref,
-            token=dep_token if transport_attempt.use_token else "",
+            token=dep_token if transport_attempt.use_token else ("" if use_ssh else None),
             auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
         )
 
