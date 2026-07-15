@@ -103,6 +103,71 @@ def test_repository_baseline_finalization_state_is_consistent() -> None:
     )
 
 
+def test_duplicate_checker_reports_new_tracked_module_count(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    tests.mkdir(parents=True)
+    baseline = root / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "algorithm": "sha256-bytes-v1",
+                "duplicate_groups": [],
+                "schema_version": 1,
+                "scope": [
+                    "tests/**/test_*.py",
+                    "tests/**/*_test.py",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+    first = tests / "test_first.py"
+    first.write_text("def test_first():\n    assert 1 == 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "tests"], check=True)
+    first_result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "check_exact_test_duplicates.py"),
+            "--root",
+            str(root),
+            "--baseline",
+            str(baseline),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    second = tests / "second_test.py"
+    second.write_text("def test_second():\n    assert 2 == 2\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "tests"], check=True)
+    second_result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "check_exact_test_duplicates.py"),
+            "--root",
+            str(root),
+            "--baseline",
+            str(baseline),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert first_result.returncode == 0
+    assert "1 files, 0 allowed duplicate group(s)" in first_result.stdout
+    assert second_result.returncode == 0
+    assert "2 files, 0 allowed duplicate group(s)" in second_result.stdout
+
+
 @pytest.mark.parametrize(
     ("provisional", "env_value", "passes"),
     [

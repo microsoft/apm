@@ -130,19 +130,64 @@ def _write_ratchet_authority_stubs(root: Path) -> None:
         path.write_text(content, encoding="utf-8")
 
 
-def test_ratchet_consumers_must_import_inventory_owner(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("relative", "replacement"),
+    [
+        (
+            "scripts/check_test_assertions.py",
+            "from ratchet_baseline import load_baseline\n",
+        ),
+        (
+            "scripts/check_exact_test_duplicates.py",
+            "from ratchet_baseline import load_baseline\n",
+        ),
+        ("tests/quality/repository_python_inventory.py", ""),
+        ("tests/quality/test_ci_topology.py", ""),
+    ],
+)
+def test_ratchet_consumers_must_import_inventory_owner(
+    tmp_path: Path,
+    relative: str,
+    replacement: str,
+) -> None:
     """Removing canonical inventory routing must fail the authority checker."""
     _write_ratchet_authority_stubs(tmp_path)
-    consumer = tmp_path / "scripts" / "check_test_assertions.py"
+    consumer = tmp_path / relative
     consumer.write_text(
-        'from ratchet_baseline import load_baseline\nfiles = root.rglob("*.py")\n',
+        replacement,
         encoding="utf-8",
     )
 
     violations = _load_checker().find_ratchet_authority_violations(tmp_path)
 
     assert any("must consume ratchet authority" in item for item in violations)
-    assert any("duplicate tracked Python inventory" in item for item in violations)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "scripts/check_test_assertions.py",
+        "scripts/check_exact_test_duplicates.py",
+    ],
+)
+def test_ratchet_consumers_must_import_baseline_owner(
+    tmp_path: Path,
+    relative: str,
+) -> None:
+    """Removing shared baseline lifecycle routing must fail AC9."""
+    _write_ratchet_authority_stubs(tmp_path)
+    consumer = tmp_path / relative
+    consumer.write_text(
+        "from test_file_inventory import tracked_python_paths\n",
+        encoding="utf-8",
+    )
+
+    violations = _load_checker().find_ratchet_authority_violations(tmp_path)
+
+    assert any(
+        f"{relative} must consume ratchet authority: from ratchet_baseline import" in item
+        for item in violations
+    )
 
 
 def test_implicit_lifecycle_runner_selection_is_rejected(tmp_path: Path) -> None:
