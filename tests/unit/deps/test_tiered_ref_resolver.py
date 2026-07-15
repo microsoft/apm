@@ -25,6 +25,7 @@ from apm_cli.deps.tiered_ref_resolver import (
     L3LegacyClone,
     PerRunRefCache,
     TieredRefResolver,
+    _repository_cache_identity,
     build_tiered_ref_resolver,
     is_tiered_resolver_enabled,
 )
@@ -83,9 +84,27 @@ def test_per_run_cache_roundtrip():
 
 def test_l0_per_run_cache_tier_hits_cache():
     cache = PerRunRefCache()
-    cache.put("owner/repo", "main", SHA_A)
+    cache.put(_repository_cache_identity(_dep()), "main", SHA_A)
     tier = L0PerRunCache(cache=cache)
     assert tier.try_resolve(_dep(), "main") == SHA_A
+
+
+def test_l0_per_run_cache_keeps_same_path_on_different_hosts_separate():
+    cache = PerRunRefCache()
+    github_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="github.com",
+        reference="main",
+    )
+    gitlab_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="gitlab.com",
+        reference="main",
+    )
+    cache.put(_repository_cache_identity(github_dep), "main", SHA_A)
+    tier = L0PerRunCache(cache=cache)
+
+    assert tier.try_resolve(gitlab_dep, "main") is None
 
 
 def test_l0_per_run_cache_tier_misses_when_cold():
@@ -406,7 +425,7 @@ def test_orchestrator_falls_through_when_all_tiers_return_none():
 
 def test_orchestrator_handles_string_input():
     cache = PerRunRefCache()
-    cache.put("owner/repo", "main", SHA_A)
+    cache.put(_repository_cache_identity(_dep()), "main", SHA_A)
     legacy = _make_legacy_with(SHA_A)
     resolver = TieredRefResolver(
         tiers=[L0PerRunCache(cache=cache), legacy],

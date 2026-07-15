@@ -21,6 +21,12 @@ import pytest
 
 from apm_cli.cache.url_normalize import normalize_repo_url
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
+from apm_cli.deps.tiered_ref_resolver import (
+    L0PerRunCache,
+    PerRunRefCache,
+    _repository_cache_identity,
+)
+from apm_cli.models.dependency.reference import DependencyReference
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -270,6 +276,25 @@ def test_repository_identity_survives_full_install_and_persistent_cache(
 ):
     """Bind the real install/cache/lock/deployment contract to req-rs-016."""
     _run_nested_install_contract(tmp_path, monkeypatch)
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_isolates_l0_cache_across_hosts():
+    """The in-memory ref cache includes authority hostname in identity."""
+    cache = PerRunRefCache()
+    github_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="github.com",
+        reference="main",
+    )
+    gitlab_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="gitlab.com",
+        reference="main",
+    )
+    cache.put(_repository_cache_identity(github_dep), "main", "a" * 40)
+
+    assert L0PerRunCache(cache=cache).try_resolve(gitlab_dep, "main") is None
 
 
 # --- req-pr-001..005: primitives ---------------------------------------

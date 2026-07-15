@@ -657,6 +657,9 @@ def test_cache_url_normalizer_owns_repository_cache_identity() -> None:
     )
     assert "cache_shard_key(dep_ref.to_github_url())" in tiered_resolver
     assert "cache_shard_key(dep_ref.repo_url)" not in tiered_resolver
+    assert tiered_resolver.count("_repository_cache_identity(dep_ref)") >= 2
+    assert "return normalize_repo_url(dep_ref.to_github_url())" in tiered_resolver
+    assert "key = (dep_ref.repo_url, ref)" not in tiered_resolver
     assert "Repository cache identity must not truncate repository paths" in guard
     assert "to_repository_cache_url" not in downloader
     for retired_derivation in ("cache_owner", "cache_repo", '_canonical_url = f"https://'):
