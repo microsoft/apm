@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **98 normative statements** indexed in
+- OpenAPM v0.1 carries **99 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -225,6 +225,7 @@ type"), the definition section is cross-linked.
 | **Primitive** | A typed unit of agent configuration (instruction, prompt, agent, skill, command, hook, or mcp server). Defined in [Section 8.1](#81-primitive-types). |
 | **Target** | A named runtime harness (for example `copilot`, `claude`, `cursor`). Defined in [Section 8.4](#84-target-detection-signals-normative). |
 | **Deploy directory** | The on-disk root under which a target's primitives are placed by `apm install`. Defined in [Section 8.5](#85-deploy-directory-contract-normative). |
+| **Source-declared capability restriction** | An agent-primitive field whose documented purpose is to narrow the tools, actions, or resources the converted agent may invoke (for example, a `tools` allowlist). |
 | **Direct dependency** | A dependency declared in the consumer's own `apm.yml`. |
 | **Transitive dependency** | A dependency declared in the `apm.yml` of a resolved package, not in the consumer's own `apm.yml`. |
 | **Virtual package** | A dependency targeting a subdirectory or file within a repository rather than the whole repository. Defined in [Section 4.3.3](#433-virtual-packages). |
@@ -2093,6 +2094,35 @@ suppress instruction content in `AGENTS.md`.
 > registered, retaining only the target-agnostic honour and dedup
 > MUSTs here.
 
+#### 8.5.1 Lossy agent conversion
+
+<a id="req-tg-006"></a>
+**[req-tg-006]** A conforming **consumer** implementation that converts
+an agent primitive into a target-native format MUST either preserve each
+[source-declared capability restriction](#3-terminology) semantically or
+emit an actionable diagnostic. Semantic preservation requires the same
+effective capability ceiling (the maximal set of tools, actions, or resources
+the restriction permits); a translation that widens, narrows, or cannot
+represent the restriction exactly is non-preserving. The diagnostic MUST
+identify the source agent and each discarded field and MUST state that exact
+preservation failed. For a widening or an unrepresentable restriction, it
+MUST state that the generated agent may have broader capability access; for a
+verified narrowing, it MUST state that access is narrower than declared. When
+several fields are discarded, one diagnostic enumerating all of them or
+separate diagnostics for each field MAY be used. The diagnostic MUST appear
+in the consumer's default (non-verbose) output and MUST be rendered before
+the overall operation returns; this requirement does not mandate a nonzero
+exit status. If source agent frontmatter cannot be parsed as a mapping, the
+consumer MUST instead emit a default-visible diagnostic stating that
+capability restrictions could not be verified before the overall operation
+returns.
+
+> **Editorial note.** Concrete target-native encodings for capability
+> restrictions are intentionally unspecified in v0.1. A future revision
+> may register them through the Target Registry companion or the amendment
+> process in [Section 9.3](#93-amendment-process) without weakening the
+> preservation-or-diagnostic contract above.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2105,7 +2135,8 @@ without a spec revision. The current matrix is in the companion
 - Consumer: [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
   [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
-  [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005).
+  [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
+  [req-tg-006](#req-tg-006).
 
 ---
 
@@ -2422,6 +2453,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 12| Approval grant propagation via VCS           | [req-sc-010](#req-sc-010)                                         | Consumer-default  |
 | 13| Org executable denial bypassed by project/user grant | [req-sc-011](#req-sc-011)                                 | Consumer-default  |
 | 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
+| 15| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2594,7 +2626,8 @@ conformance statement identifying:
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
-[req-tg-004](#req-tg-004), [req-sc-001](#req-sc-001),
+[req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
+[req-tg-006](#req-tg-006), [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
@@ -3005,6 +3038,7 @@ renumbering of conformance classes.
 | [req-tg-003](#req-tg-003)                | MUST    | 8.5     | consumer    |
 | [req-tg-004](#req-tg-004)                | MUST    | 4.2.1   | consumer    |
 | [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
+| [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3021,7 +3055,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 98** (93 MUST, 5 SHOULD).
+**Total normative statements: 99** (94 MUST, 5 SHOULD).
 
 ---
 
@@ -3044,6 +3078,7 @@ renumbering of conformance classes.
 | 0.1.11  | 2026-07-09 | Spec-guardian editorial+defensive fold on the Antigravity instruction-rule contract (no new normative statements; statement count remains 97 (92 MUST, 5 SHOULD)). Section 4.2.1: defined the **auto-detectable** vs **explicit-only** target taxonomy deterministically (a target is auto-detectable when the OpenAPM Target Registry publishes at least one detection predicate) and rewrote the `all` expansion to key off it, naming `agent-skills` and `antigravity` as the v0.1 explicit-only set (with a Section 8.4 cross-reference). [req-tg-001] extended: a target registered without a detection predicate MUST NOT be auto-detected and MUST be excluded from `all`, generalising the prior `agent-skills`-only clause to cover `antigravity`. [req-tg-005] extended: pinned a canonical `globs` representation (YAML scalar for exactly one glob, YAML block sequence for two or more, no frontmatter block when `applyTo` is absent) so deployed-file content hashes are reproducible across implementations; redefined the deduplication scope from "expected Antigravity rule filenames" to filenames derived from the currently-resolved instruction primitives recorded in `apm.lock.yaml` and the manifest, closing a fail-open interpretation where an unrelated `.agents/rules/*.md` file could suppress `AGENTS.md` content; lowercased the `antigravity` identifier and added an editorial note scoping the normative citation of the concrete deploy path. [req-tg-002] subdirectory-partition list updated to include `.agents/rules/`. No normative count change. |
 | 0.1.12  | 2026-07-10 | Spec-citation fold for inactive-target lockfile reconciliation. Added [req-lk-020] (Section 5.2, consumer MUST): a non-frozen rewrite with a declared target set preserves paths attributable to current, another declared, or implementation-recognized targets that activate outside the manifest; removes prior paths attributable to none of them; applies the same decision to per-entry and top-level deployed-file lists and hash maps; and preserves prior paths when no target set is declared or attribution is indeterminate. Statement count: 97 -> 98 (93 MUST, 5 SHOULD). |
 | 0.1.13  | 2026-07-14 | Defensive clarification of existing lockfile requirements (no new normative statements; statement count remains 98 (93 MUST, 5 SHOULD)). [req-lk-003] now requires a conformance audit to reject disagreement between a full-SHA manifest pin and `resolved_commit`. [req-lk-020] now preserves paths freshly deployed by an active dependency when orphan cleanup encounters the same path under a prior dependency identity. |
+| 0.1.14  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Codex agent generation now warns when `.agent.md` `tools` restrictions cannot
-  be preserved, instead of silently widening effective MCP access -- by @jstar0
-  (#2186).
+  be preserved, instead of silently widening effective MCP access;
+  `openapm-v0.1.md` now requires semantic preservation or a default-visible
+  diagnostic for lossy agent target conversion -- by @jstar0 (#2186).
 - Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
   `apm install` re-resolves the new ref and preserves the last good deployment
   when the new ref is invalid. (#2219)

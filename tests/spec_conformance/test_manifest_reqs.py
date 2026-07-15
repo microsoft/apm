@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
-req-tg-001..005, req-cf-001..002.
+req-tg-001..006, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -14,6 +14,12 @@ from __future__ import annotations
 import jsonschema
 import pytest
 
+from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.utils.diagnostics import (
+    CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_WARNING,
+    DiagnosticCollector,
+)
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     load_schema,
@@ -395,6 +401,61 @@ def test_consumer_deploys_antigravity_rules_with_expected_dedup():
         "as a YAML block sequence when it resolves to two or more",
         "names derive from the currently-resolved",
         "MUST NOT be treated as a deployed rule and MUST NOT",
+    )
+
+
+@pytest.mark.req("req-tg-006")
+def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
+    source = tmp_path / "scoped.agent.md"
+    source.write_text(
+        "---\nname: scoped\ntools: [read]\n---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "scoped.toml"
+    diagnostics = DiagnosticCollector()
+
+    AgentIntegrator._write_codex_agent(
+        source,
+        target,
+        diagnostics=diagnostics,
+        package_name="spec-fixture",
+    )
+
+    losses = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert len(losses) == 1
+    assert "scoped.agent.md" in losses[0].message
+    assert "field 'tools' was dropped" in losses[0].message
+    assert "may inherit all project/session MCP servers" in losses[0].message
+    assert losses[0].detail.startswith("Fix:")
+    diagnostics.render_summary()
+    output = capsys.readouterr().out
+    assert "[!]" in output
+    assert "scoped.agent.md" in output
+    assert "Fix:" in output
+
+    non_mapping = tmp_path / "non-mapping.agent.md"
+    non_mapping.write_text(
+        "---\n- tools: [read]\n---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    unverified = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        non_mapping,
+        tmp_path / "non-mapping.toml",
+        diagnostics=unverified,
+        package_name="spec-fixture",
+    )
+    warnings = unverified.by_category().get(CATEGORY_WARNING, [])
+    assert len(warnings) == 1
+    assert "could not be verified" in warnings[0].message
+
+    assert_spec_contains(
+        "same\neffective capability ceiling",
+        "source agent and each discarded field",
+        "may have broader capability access",
+        "default (non-verbose) output",
+        "MUST be rendered before\nthe overall operation returns",
+        "does not mandate a nonzero\nexit status",
     )
 
 
