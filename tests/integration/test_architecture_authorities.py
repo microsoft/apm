@@ -77,6 +77,23 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
 
 
+def test_git_ref_transport_selection_has_single_owner() -> None:
+    """Git ref enumeration must consume, not reimplement, transport selection."""
+    root = Path(__file__).parents[2]
+    ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
+    ref_resolver = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
+    git_ref_resolver = (root / "src/apm_cli/deps/git_reference_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "transport_plan = transport_selector.select(" in ref_reuse
+    assert "transport_scheme=transport_scheme" in ref_reuse
+    assert "transport_plan = host._transport_selector.select(" in git_ref_resolver
+    assert "build_ssh_url(" in ref_resolver
+    assert "from apm_cli.deps.transport_selection import" not in ref_resolver
+    assert "TransportSelector(" not in ref_resolver
+    assert "Git ref transport must route through TransportSelector into RefResolver" in guard
+
+
 def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
     tmp_path: Path,
 ) -> None:

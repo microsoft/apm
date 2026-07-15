@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Git-source semver ranges now use the selected SSH or HTTPS transport for tag
+  enumeration, so explicit SSH and `prefer-ssh` installs no longer invoke
+  HTTPS while resolving refs. (closes #2184)
 - Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
   `apm install` re-resolves the new ref and preserves the last good deployment
   when the new ref is invalid. (#2219)

@@ -23,6 +23,11 @@ from git.exc import GitCommandError
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
 from apm_cli.deps.git_reference_resolver import GitReferenceResolver
+from apm_cli.deps.transport_selection import (
+    NoOpInsteadOfResolver,
+    ProtocolPreference,
+    TransportSelector,
+)
 from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
@@ -91,6 +96,8 @@ def _ctx(
     host._resolve_dep_auth_ctx.return_value = auth_ctx
     host._build_noninteractive_git_env.return_value = {"GIT_TERMINAL_PROMPT": "0"}
     host._build_repo_url.return_value = "https://example.com/owner/repo.git"
+    host._transport_selector = TransportSelector(NoOpInsteadOfResolver())
+    host._protocol_pref = ProtocolPreference.NONE
     host._sanitize_git_error.side_effect = lambda s: s
     host._parse_artifactory_base_url.return_value = artifactory_base
     host._should_use_artifactory_proxy.return_value = is_artifactory_proxy
@@ -233,6 +240,36 @@ class TestListRemoteRefs:
             resolver = GitReferenceResolver(host)
             resolver.list_remote_refs(_dep(host="github.com"))
         host._build_noninteractive_git_env.assert_called_once()
+
+    def test_ssh_preference_selects_ssh_without_token_auth(self):
+        host = _ctx(token="ghp_xxx")
+        host._protocol_pref = ProtocolPreference.SSH
+        host._build_noninteractive_git_env.return_value = {
+            "GIT_TOKEN": "ghp_xxx",
+            "GIT_HTTP_EXTRAHEADER": "Authorization: ******",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: ******",
+        }
+        dep = _dep(host="github.com")
+        with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
+            MockGit.return_value.ls_remote.return_value = self.SAMPLE
+            resolver = GitReferenceResolver(host)
+            resolver.list_remote_refs(dep)
+
+        host._build_repo_url.assert_called_once_with(
+            "owner/repo",
+            use_ssh=True,
+            dep_ref=dep,
+            token="",
+            auth_scheme="basic",
+        )
+        host._build_noninteractive_git_env.assert_called_once()
+        host.auth_resolver.execute_with_bearer_fallback.assert_not_called()
+        git_env = MockGit.return_value.ls_remote.call_args.kwargs["env"]
+        assert "GIT_TOKEN" not in git_env
+        assert "GIT_HTTP_EXTRAHEADER" not in git_env
+        assert "GIT_CONFIG_COUNT" not in git_env
 
     def test_error_message_sanitized(self):
         host = _ctx(token="ghp_xxx")

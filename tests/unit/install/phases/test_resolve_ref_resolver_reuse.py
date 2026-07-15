@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
+from apm_cli.deps.transport_selection import ProtocolPreference
 from apm_cli.install.helpers.ref_reuse import resolve_dep_auth
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
@@ -35,8 +36,8 @@ def _patched_resolver_env():
     made = []
 
     class _FakeRefResolver:
-        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
-            made.append((host, token, auth_scheme))
+        def __init__(self, *, host=None, token=None, auth_scheme="basic", **kwargs):
+            made.append((host, token, auth_scheme, kwargs))
 
     fake_semver = MagicMock()
     fake_semver.return_value.resolve.return_value = "RESOLUTION"
@@ -105,12 +106,12 @@ def test_concurrent_same_repo_deps_share_one_resolver_under_lock():
     errors_lock = threading.Lock()
 
     class _SlowFakeRefResolver:
-        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
+        def __init__(self, *, host=None, token=None, auth_scheme="basic", **kwargs):
             # Small delay to widen the construction window. With a working
             # lock only one thread ever reaches here; without it, several
             # would slip in during this sleep and append multiple entries.
             time.sleep(0.02)
-            made.append((host, token, auth_scheme))
+            made.append((host, token, auth_scheme, kwargs))
 
     fake_semver = MagicMock()
     fake_semver.return_value.resolve.return_value = "R"
@@ -180,6 +181,51 @@ def test_distinct_hosts_get_distinct_resolvers():
     # Different host -> different cache key -> two resolvers.
     assert len(made) == 2
     assert len(cache) == 2
+
+
+def test_semver_resolution_propagates_prefer_ssh_to_ref_resolver():
+    """The canonical transport selector must drive semver tag enumeration."""
+    made, fake_ref, fake_semver = _patched_resolver_env()
+    dep = _semver_dep("owner/repo", "packages/a")
+
+    with (
+        patch("apm_cli.marketplace.ref_resolver.RefResolver", fake_ref),
+        patch("apm_cli.deps.git_semver_resolver.GitSemverResolver", fake_semver),
+    ):
+        _maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=None,
+            update_refs=False,
+            protocol_pref=ProtocolPreference.SSH,
+        )
+
+    assert len(made) == 1
+    assert made[0][3]["transport_scheme"] == "ssh"
+
+
+def test_https_semver_resolution_preserves_custom_port():
+    """Custom HTTPS ports must survive the shared RefResolver boundary."""
+    made, fake_ref, fake_semver = _patched_resolver_env()
+    dep = DependencyReference(
+        repo_url="owner/repo",
+        host="git.example.com",
+        port=8443,
+        explicit_scheme="https",
+        reference="^1.0.0",
+    )
+
+    with (
+        patch("apm_cli.marketplace.ref_resolver.RefResolver", fake_ref),
+        patch("apm_cli.deps.git_semver_resolver.GitSemverResolver", fake_semver),
+    ):
+        _maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=None,
+            update_refs=False,
+        )
+
+    assert len(made) == 1
+    assert made[0][3]["port"] == 8443
 
 
 def test_cache_key_does_not_contain_raw_token():

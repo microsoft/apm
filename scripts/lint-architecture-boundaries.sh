@@ -217,6 +217,24 @@ if ! grep -q '^def should_force_ref_recheck(' "$ref_recheck_owner" \
     echo "[x] Existing-path ref rechecks must use drift.py::should_force_ref_recheck"
     violations=$((violations + 1))
 fi
+semver_transport_router="src/apm_cli/install/helpers/ref_reuse.py"
+semver_transport_executor="src/apm_cli/marketplace/ref_resolver.py"
+git_ref_transport_consumer="src/apm_cli/deps/git_reference_resolver.py"
+if ! grep -q 'transport_plan = transport_selector.select(' "$semver_transport_router" \
+    || ! grep -q \
+        'transport_scheme = "ssh" if selected_scheme == "ssh" else "https"' \
+        "$semver_transport_router" \
+    || ! grep -q 'transport_scheme=transport_scheme' "$semver_transport_router" \
+    || ! grep -q 'build_ssh_url(' "$semver_transport_executor" \
+    || grep -Eq \
+        'from .*transport_selection import|TransportSelector\(' \
+        "$semver_transport_executor" \
+    || ! grep -q \
+        'transport_plan = host._transport_selector.select(' \
+        "$git_ref_transport_consumer"; then
+    echo "[x] Git ref transport must route through TransportSelector into RefResolver"
+    violations=$((violations + 1))
+fi
 cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
 cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
 cleanup_claim_status=$?
