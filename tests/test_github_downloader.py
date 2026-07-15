@@ -1838,6 +1838,81 @@ class TestVirtualFilePackageYamlGeneration:
         parsed = yaml.safe_load(content)
         assert parsed["description"] == "A simple agent without special chars"
 
+    def test_synthetic_manifest_is_canonical_before_package_hash(self, tmp_path):
+        """Synthetic metadata is LF-stable while source bytes stay hash-visible."""
+        from apm_cli.utils.content_hash import compute_package_hash
+
+        source_bytes = b"# Fixture\nsame payload\n"
+        original_write_text = Path.write_text
+
+        def materialize(
+            label: str,
+            newline_domain: str,
+            content: bytes = source_bytes,
+        ) -> tuple[str, bytes, bytes]:
+            target_path = tmp_path / label
+            dep_ref = self._make_dep_ref("instructions/fixture.instructions.md")
+            downloader = GitHubPackageDownloader()
+
+            def write_with_platform_newlines(
+                path,
+                data,
+                encoding=None,
+                errors=None,
+                newline=None,
+            ):
+                canonical = data.replace("\r\n", "\n")
+                rendered = (
+                    canonical.replace("\n", "\r\n") if newline_domain == "crlf" else canonical
+                )
+                return original_write_text(
+                    path,
+                    rendered,
+                    encoding=encoding,
+                    errors=errors,
+                    newline="",
+                )
+
+            with (
+                patch.object(
+                    downloader,
+                    "_resolve_commit_sha_for_ref",
+                    return_value="a" * 40,
+                ),
+                patch.object(downloader, "download_raw_file", return_value=content),
+                patch.object(Path, "write_text", new=write_with_platform_newlines),
+            ):
+                downloader.download_virtual_file_package(dep_ref, target_path)
+
+            return (
+                compute_package_hash(target_path),
+                (target_path / "apm.yml").read_bytes(),
+                (target_path / ".apm" / "instructions" / "fixture.instructions.md").read_bytes(),
+            )
+
+        lf_hash, lf_manifest, lf_source = materialize("lf", "lf")
+        crlf_hash, crlf_manifest, crlf_source = materialize("crlf", "crlf")
+
+        assert lf_source == crlf_source == source_bytes
+        assert b"\r\n" not in lf_manifest
+        assert crlf_manifest == lf_manifest
+        assert crlf_hash == lf_hash
+
+        changed_hash, _, _ = materialize(
+            "changed-content",
+            "lf",
+            b"# Fixture\nchanged payload\n",
+        )
+        assert changed_hash != lf_hash
+
+        user_crlf_hash, _, user_crlf_source = materialize(
+            "user-crlf",
+            "lf",
+            source_bytes.replace(b"\n", b"\r\n"),
+        )
+        assert user_crlf_source != lf_source
+        assert user_crlf_hash != lf_hash
+
 
 class TestRefExistsViaLsRemote:
     """Tests for ``_clone_with_fallback``'s auth path so validation

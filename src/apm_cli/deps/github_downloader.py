@@ -29,6 +29,7 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
+from ..utils.atomic_io import atomic_write_text
 from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
 )
@@ -1001,7 +1002,7 @@ class GitHubPackageDownloader:
         apm_yml_content = yaml_to_str(apm_yml_data)
 
         apm_yml_path = target_path / "apm.yml"
-        apm_yml_path.write_text(apm_yml_content, encoding="utf-8")
+        atomic_write_text(apm_yml_path, apm_yml_content)
 
         # Create APMPackage object
         package = APMPackage(
