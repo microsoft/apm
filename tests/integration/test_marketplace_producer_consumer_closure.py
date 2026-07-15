@@ -24,6 +24,9 @@ pytestmark = [
 ]
 
 _MARKETPLACE_NAME = "closure-marketplace"
+_MARKETPLACE_GIT_HOST = "git.example.invalid"
+_MARKETPLACE_GIT_REPO = "catalog/closure-marketplace"
+_MARKETPLACE_GIT_URL = f"https://{_MARKETPLACE_GIT_HOST}/{_MARKETPLACE_GIT_REPO}"
 _CROSS_HOST = "github.enterprise.example.invalid"
 _CROSS_REPO = "acme/cross-host-package"
 _CROSS_PACKAGE = "cross-host-package"
@@ -62,6 +65,7 @@ class _ClosureFixture:
     runner: ApmLifecycleRunner
     producer_root: Path
     marketplace_path: Path
+    remote_marketplace_url: str
     commits: dict[str, GitCommit]
 
 
@@ -187,6 +191,11 @@ def _create_closure_fixture(
         source_tree=cross_package.root,
     )
     cross_commit = repositories.commit(cross_repository, message="seed cross-host package")
+    repositories.tag(
+        cross_repository,
+        f"{_CROSS_PACKAGE}--v1.0.0",
+        cross_commit,
+    )
     _configure_local_rewrite(
         f"https://{_CROSS_HOST}/{_CROSS_REPO}",
         cross_repository.file_url,
@@ -208,6 +217,11 @@ def _create_closure_fixture(
     gitlab_commit = repositories.commit(
         gitlab_repository,
         message="seed GitLab monorepo package",
+    )
+    repositories.tag(
+        gitlab_repository,
+        f"{_GITLAB_PACKAGE}--v1.0.0",
+        gitlab_commit,
     )
     _configure_local_rewrite(
         f"https://{_GITLAB_HOST}/{_GITLAB_REPO}",
@@ -257,12 +271,35 @@ def _create_closure_fixture(
     marketplace_path = producer.root / ".claude-plugin" / "marketplace.json"
     assert marketplace_path.is_file()
 
+    marketplace_repository = repositories.create(
+        _MARKETPLACE_NAME,
+        source_tree=producer.root,
+    )
+    marketplace_commit = repositories.commit(
+        marketplace_repository,
+        message="seed packed marketplace",
+    )
+    for case in _CASES:
+        # Marketplace version selectors resolve catalog tags and apply the
+        # selected tag name to the package source, so publish it on both repos.
+        repositories.tag(
+            marketplace_repository,
+            f"{case.package_name}--v1.0.0",
+            marketplace_commit,
+        )
+    _configure_local_rewrite(
+        _MARKETPLACE_GIT_URL,
+        marketplace_repository.file_url,
+        environment=environment,
+    )
+
     return _ClosureFixture(
         isolated=isolated,
         environment=environment,
         runner=runner,
         producer_root=producer.root,
         marketplace_path=marketplace_path,
+        remote_marketplace_url=_MARKETPLACE_GIT_URL,
         commits={
             _CROSS_PACKAGE: cross_commit,
             _GITLAB_PACKAGE: gitlab_commit,
@@ -402,6 +439,50 @@ def test_every_pack_emitted_remote_source_installs_and_audits(
         audit_report = json.loads((consumer.root / "reports" / "audit.json").read_text())
         assert audit_report["passed"] is True
         assert audit_report["summary"]["failed"] == 0
+
+
+def test_pack_emitted_remote_sources_resolve_marketplace_version_constraint(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Bare marketplace versions resolve to package tags before install."""
+    fixture = _create_closure_fixture(tmp_path, apm_binary_path)
+    marketplace_name = "closure-versioned"
+
+    for case in _CASES:
+        consumer = LocalPackageFactory(fixture.isolated.work_root).create(
+            f"versioned-{case.source_type}",
+            targets=("copilot",),
+        )
+        fixture.runner.run_sequence(
+            (
+                (
+                    "marketplace",
+                    "add",
+                    fixture.remote_marketplace_url,
+                    "--name",
+                    marketplace_name,
+                    "--ref",
+                    "main",
+                ),
+                (
+                    "install",
+                    f"{case.package_name}@{marketplace_name}#1.0.0",
+                    "--target",
+                    "copilot",
+                    "--no-policy",
+                ),
+                _AUDIT_ARGS,
+            ),
+            expected_returncodes=(0, 0, 0),
+            scenario_id=f"marketplace-version-{case.source_type}",
+            cwd=consumer.root,
+            env=fixture.environment,
+        )
+        lock = load_yaml(consumer.root / "apm.lock.yaml")
+        dependency = lock["dependencies"][0]
+        assert dependency["resolved_ref"] == f"{case.package_name}--v1.0.0"
+        assert dependency["resolved_commit"] == fixture.commits[case.package_name].sha
 
 
 def test_tampered_pack_output_fails_closed_before_project_writes(

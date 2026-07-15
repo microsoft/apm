@@ -858,6 +858,140 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         with pytest.raises(ValueError, match="resolves to a local path"):
             resolve_marketplace_plugin("pkg", "local-mkt")
 
+    @pytest.mark.parametrize(
+        "source",
+        (
+            {
+                "source": "url",
+                "url": "https://git.example.invalid/team/repo",
+                "ref": "old-ref",
+            },
+            {
+                "source": "git-subdir",
+                "url": "https://git.example.invalid/team/monorepo",
+                "path": "packages/pkg",
+                "ref": "old-ref",
+            },
+        ),
+        ids=("url", "git-subdir"),
+    )
+    @patch(
+        "apm_cli.marketplace.version_resolver.resolve_version_constraint",
+        return_value=("pkg--v1.0.0", "c" * 40),
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_remote_source_resolves_marketplace_version_constraint(
+        self,
+        mock_get,
+        mock_fetch,
+        mock_resolve_version,
+        source,
+    ):
+        """Bare marketplace versions resolve to tags before structured install."""
+        marketplace_source = MarketplaceSource(
+            name="remote-mkt",
+            owner="catalog",
+            repo="remote-mkt",
+            host="git.example.invalid",
+        )
+        mock_get.return_value = marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(name="pkg", source=source)
+        )
+
+        result = resolve_marketplace_plugin(
+            "pkg",
+            "remote-mkt",
+            version_spec="1.0.0",
+        )
+
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference == "pkg--v1.0.0"
+        assert result.canonical.endswith("#pkg--v1.0.0")
+        mock_resolve_version.assert_called_once_with(
+            "pkg",
+            "catalog/remote-mkt",
+            "1.0.0",
+            host="git.example.invalid",
+            token=None,
+            auth_scheme="basic",
+            auth_resolver=None,
+        )
+
+    @pytest.mark.parametrize(
+        "source",
+        (
+            {
+                "source": "url",
+                "url": "https://git.example.invalid/team/repo",
+            },
+            {
+                "source": "git-subdir",
+                "url": "https://git.example.invalid/team/monorepo",
+                "path": "packages/pkg",
+            },
+        ),
+        ids=("url", "git-subdir"),
+    )
+    @pytest.mark.parametrize(
+        ("version_spec", "expected_ref"),
+        (
+            ("1.0.0", "1.0.0"),
+            ("~9.9.9", None),
+        ),
+        ids=("bare-fallback", "range-reraise"),
+    )
+    @patch("apm_cli.marketplace.version_resolver.resolve_version_constraint")
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_remote_source_version_constraint_no_match(
+        self,
+        mock_get,
+        mock_fetch,
+        mock_resolve_version,
+        version_spec,
+        expected_ref,
+        source,
+    ):
+        """Bare no-match falls back to a ref while range no-match stays fatal."""
+        from apm_cli.marketplace.errors import NoMatchingVersionError
+
+        marketplace_source = MarketplaceSource(
+            name="remote-mkt",
+            owner="catalog",
+            repo="remote-mkt",
+            host="git.example.invalid",
+        )
+        mock_get.return_value = marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(name="pkg", source=source)
+        )
+        mock_resolve_version.side_effect = NoMatchingVersionError(
+            "pkg",
+            version_spec,
+        )
+
+        if expected_ref is None:
+            with pytest.raises(NoMatchingVersionError):
+                resolve_marketplace_plugin(
+                    "pkg",
+                    "remote-mkt",
+                    version_spec=version_spec,
+                )
+            return
+
+        result = resolve_marketplace_plugin(
+            "pkg",
+            "remote-mkt",
+            version_spec=version_spec,
+        )
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference == expected_ref
+        assert result.canonical.endswith(f"#{expected_ref}")
+
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
     def test_external_gitlab_dict_type_no_monorepo_rule(

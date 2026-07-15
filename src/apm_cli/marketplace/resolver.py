@@ -590,7 +590,6 @@ def _resolve_git_subdir_source(source: dict) -> str:
 
 def _dependency_reference_from_packed_source(
     plugin: MarketplacePlugin,
-    version_spec: str | None,
 ) -> DependencyReference | None:
     """Parse producer-emitted remote source objects through the reference owner."""
     source = plugin.source
@@ -615,9 +614,8 @@ def _dependency_reference_from_packed_source(
         if path:
             entry["path"] = path
     declared_ref = source.get("ref")
-    effective_ref = version_spec if version_spec is not None else declared_ref
-    if effective_ref:
-        entry["ref"] = effective_ref
+    if declared_ref:
+        entry["ref"] = declared_ref
     dependency = DependencyReference.parse_from_dict(entry)
     if dependency.is_local:
         raise ValueError(
@@ -876,9 +874,7 @@ def resolve_marketplace_plugin(
             source_digest=manifest.source_digest,
         )
 
-    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(
-        plugin, version_spec
-    )
+    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(plugin)
     if dep_ref is not None:
         canonical = dep_ref.to_canonical()
     else:
@@ -903,7 +899,7 @@ def resolve_marketplace_plugin(
             # "main" / "HEAD" are excluded because they represent the default
             # branch -- appending them would be a no-op at best and misleading
             # when the repo's actual default branch has a different name.
-            effective_ref = version_spec or path_ref
+            effective_ref = path_ref
             if not effective_ref and source.ref and source.ref not in ("main", "HEAD"):
                 effective_ref = source.ref
             dep_ref = _gitlab_in_marketplace_dependency_reference(
@@ -968,11 +964,13 @@ def resolve_marketplace_plugin(
     # ---- Version spec override ----
     # When version_spec is provided it either triggers semver-aware tag
     # resolution (for range expressions like ~2.1.0) or a raw ref override
-    # (for plain tags/branches/SHAs like v2.0.0).
-    if version_spec and dep_ref is None:
+    # (for plain tags/branches/SHAs like v2.0.0). The tag lookup uses the
+    # marketplace catalog host; structured package fetches still use dep_ref.host.
+    if version_spec:
         from .version_resolver import is_semver_range, is_version_constraint
 
         base = canonical.split("#", 1)[0]
+        resolved_override = version_spec
         if is_version_constraint(version_spec):
             from .errors import NoMatchingVersionError
             from .version_resolver import resolve_version_constraint
@@ -989,7 +987,7 @@ def resolve_marketplace_plugin(
                     auth_scheme=auth_scheme,
                     auth_resolver=auth_resolver,
                 )
-                canonical = f"{base}#{tag_name}"
+                resolved_override = tag_name
                 logger.debug(
                     "Version constraint '%s' for %s@%s resolved to tag '%s'",
                     version_spec,
@@ -1000,7 +998,6 @@ def resolve_marketplace_plugin(
             except NoMatchingVersionError:
                 if is_semver_range(version_spec):
                     raise
-                canonical = f"{base}#{version_spec}"
                 logger.debug(
                     "No '%s--v*' tags matched '%s' on %s@%s, falling back to raw git ref",
                     plugin_name,
@@ -1009,13 +1006,17 @@ def resolve_marketplace_plugin(
                     marketplace_name,
                 )
         else:
-            canonical = f"{base}#{version_spec}"
             logger.debug(
                 "Using raw git ref '%s' for %s@%s",
                 version_spec,
                 plugin_name,
                 marketplace_name,
             )
+        if dep_ref is not None:
+            dep_ref.reference = resolved_override
+            canonical = dep_ref.to_canonical()
+        else:
+            canonical = f"{base}#{resolved_override}"
 
     # ---- Ref immutability check (advisory) ----
     # Record the plugin -> ref mapping (scoped by version) and warn if
