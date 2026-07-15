@@ -195,6 +195,31 @@ def _directly_consumes_identity(call: ast.Call) -> bool:
     return isinstance(call.func, ast.Attribute) and _is_identity(call.func.value)
 
 
+def _raw_identity_lines(node: ast.AST) -> list[int]:
+    """Return raw identity loads not owned by ``printable_ascii_text``.
+
+    ``IfExp.test`` is control flow rather than rendered data, so a predicate
+    such as ``... if package_name else ...`` is allowed. Both branches remain
+    checked because either may contribute bytes to output.
+    """
+    lines: list[int] = []
+
+    def visit(current: ast.AST, parent: ast.AST | None = None) -> None:
+        if _is_identity(current):
+            if not (isinstance(parent, ast.Call) and _is_owner_call(parent)):
+                lines.append(getattr(current, "lineno", 1))
+            return
+        if isinstance(current, ast.IfExp):
+            visit(current.body, current)
+            visit(current.orelse, current)
+            return
+        for child in ast.iter_child_nodes(current):
+            visit(child, current)
+
+    visit(node)
+    return lines
+
+
 def _non_owner_identity_calls(function: ast.AST) -> list[ast.Call]:
     """Return calls that locally transform diagnostic identity inputs."""
     return [
@@ -300,6 +325,44 @@ def check(root: Path) -> list[Violation]:
                         f"{OWNER_MODULE}.{OWNER_SYMBOL}",
                     )
                 )
+            output_calls = (
+                _diagnostic_calls(function)
+                if relative_path == AGENT_CONSUMER
+                else [
+                    node
+                    for node in _walk_own_scope(function)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "messages"
+                    and node.func.attr == "append"
+                ]
+            )
+            for output_call in output_calls:
+                for line in _raw_identity_lines(output_call):
+                    violations.append(
+                        Violation(
+                            relative_path,
+                            line,
+                            f"{qualname} must not render raw source.name or package_name",
+                        )
+                    )
+            for assignment in (
+                node
+                for node in _walk_own_scope(function)
+                if isinstance(node, ast.Assign | ast.AnnAssign | ast.NamedExpr)
+            ):
+                value = assignment.value
+                if value is None:
+                    continue
+                for line in _raw_identity_lines(value):
+                    violations.append(
+                        Violation(
+                            relative_path,
+                            line,
+                            f"{qualname} must not assign raw diagnostic identity for later use",
+                        )
+                    )
             for call in _non_owner_identity_calls(function):
                 violations.append(
                     Violation(

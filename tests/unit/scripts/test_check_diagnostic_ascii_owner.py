@@ -106,6 +106,53 @@ def test_decorative_owner_call_cannot_hide_regex_override(
     )
 
 
+def test_dead_branch_owner_call_cannot_hide_raw_agent_alias(
+    repo_copy: Path,
+    checker,
+) -> None:
+    """An unreachable owner call must not legitimize a live raw alias."""
+    consumer = repo_copy / "src/apm_cli/integration/agent_integrator.py"
+    source = consumer.read_text(encoding="utf-8")
+    source = source.replace(
+        "        if diagnostics is None:\n"
+        "            return\n"
+        "        diagnostics.warn(\n"
+        "            message=(\n"
+        '                f"Codex agent {printable_ascii_text(source.name)}: {issue}. "\n',
+        "        if diagnostics is None:\n"
+        "            return\n"
+        "        raw_name = source.name\n"
+        "        diagnostics.warn(\n"
+        "            message=(\n"
+        '                f"Codex agent '
+        '{raw_name if True else printable_ascii_text(source.name)}: {issue}. "\n',
+        1,
+    )
+    consumer.write_text(source, encoding="utf-8")
+
+    violations = checker.check(repo_copy)
+
+    assert any("assign raw diagnostic identity" in item.message for item in violations)
+
+
+def test_sanitized_identifier_cannot_share_message_with_raw_name(
+    repo_copy: Path,
+    checker,
+) -> None:
+    """A sanitized prefix must not excuse a second raw interpolation."""
+    consumer = repo_copy / "src/apm_cli/integration/opencode_frontmatter.py"
+    source = consumer.read_text(encoding="utf-8").replace(
+        "f\"OpenCode agent '{identifier}' has tools as {kind}; \"",
+        "f\"OpenCode agent '{identifier}' (raw file: {source.name}) has tools as {kind}; \"",
+        1,
+    )
+    consumer.write_text(source, encoding="utf-8")
+
+    violations = checker.check(repo_copy)
+
+    assert any("must not render raw source.name" in item.message for item in violations)
+
+
 def test_missing_owner_call_is_rejected(repo_copy: Path, checker) -> None:
     consumer = repo_copy / "src/apm_cli/integration/opencode_frontmatter.py"
     source = consumer.read_text(encoding="utf-8").replace(
