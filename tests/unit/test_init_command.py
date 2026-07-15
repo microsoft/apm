@@ -923,3 +923,213 @@ class TestInitAgentrcSuggestion:
                 result = self.runner.invoke(cli, ["init", "--plugin", "--yes", "my-plugin"])
             assert result.exit_code == 0
             assert "agentrc" not in result.output
+
+
+class TestInitMetadataFlags:
+    """Non-interactive metadata flags for `apm init` (issue #2146)."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+        try:
+            self.original_dir = os.getcwd()
+        except FileNotFoundError:
+            self.original_dir = str(Path(__file__).parent.parent.parent)
+            os.chdir(self.original_dir)
+
+    def teardown_method(self):
+        try:
+            os.chdir(self.original_dir)
+        except (FileNotFoundError, OSError):
+            os.chdir(str(Path(__file__).parent.parent.parent))
+
+    def _read_yaml(self, path="apm.yml"):
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def test_description_flag_overrides_boilerplate(self):
+        """--description wins over the auto-detected boilerplate."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(
+                    cli, ["init", "myproj", "--yes", "--description", "My cool project"]
+                )
+
+                assert result.exit_code == 0
+                config = self._read_yaml(Path(tmp_dir) / "myproj" / "apm.yml")
+                assert config["description"] == "My cool project"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_version_flag_overrides_default(self):
+        """--version replaces the hardcoded 1.0.0."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "myproj", "--yes", "--version", "0.1.0"])
+
+                assert result.exit_code == 0
+                config = self._read_yaml(Path(tmp_dir) / "myproj" / "apm.yml")
+                assert config["version"] == "0.1.0"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_author_flag_overrides_git_detection(self):
+        """--author wins over git config user.name auto-detection."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(
+                    cli, ["init", "myproj", "--yes", "--author", "Jane Dev"]
+                )
+
+                assert result.exit_code == 0
+                config = self._read_yaml(Path(tmp_dir) / "myproj" / "apm.yml")
+                assert config["author"] == "Jane Dev"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_all_metadata_flags_together(self):
+        """The full scripted-init invocation from the issue writes exact values."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(
+                    cli,
+                    [
+                        "init",
+                        "myproj",
+                        "--yes",
+                        "--description",
+                        "My cool project",
+                        "--version",
+                        "0.1.0",
+                        "--author",
+                        "Jane Dev",
+                    ],
+                )
+
+                assert result.exit_code == 0
+                config = self._read_yaml(Path(tmp_dir) / "myproj" / "apm.yml")
+                assert config["name"] == "myproj"
+                assert config["version"] == "0.1.0"
+                assert config["description"] == "My cool project"
+                assert config["author"] == "Jane Dev"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_name_flag_names_project_in_place(self):
+        """--name sets the manifest name without creating a subdirectory."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--yes", "--name", "custom-name"])
+
+                assert result.exit_code == 0
+                assert Path("apm.yml").exists(), "apm.yml must be written in place"
+                assert not Path("custom-name").exists(), "--name must not mkdir"
+                assert self._read_yaml()["name"] == "custom-name"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_name_flag_applies_with_explicit_dot(self):
+        """`apm init . --name x` is still the in-place case."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", ".", "--yes", "--name", "dot-name"])
+
+                assert result.exit_code == 0
+                assert self._read_yaml()["name"] == "dot-name"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_positional_arg_wins_over_name_flag_with_warning(self):
+        """Positional arg keeps its mkdir contract; --name is reported, not dropped."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(
+                    cli, ["init", "myproj", "--yes", "--name", "ignored-name"]
+                )
+
+                assert result.exit_code == 0
+                config = self._read_yaml(Path(tmp_dir) / "myproj" / "apm.yml")
+                assert config["name"] == "myproj"
+                output = " ".join(result.output.split())
+                assert "--name" in output and "ignored" in output.lower()
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_name_flag_rejects_path_separators(self):
+        """--name gets the same validation the interactive prompt enforces."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--yes", "--name", "../evil"])
+
+                assert result.exit_code == 1
+                assert not Path("apm.yml").exists()
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_flags_seed_interactive_prompts(self):
+        """Outside --yes the flags seed prompt defaults instead of being dropped."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                # Accept every default, then: target prompt (y/done) + confirm.
+                result = self.runner.invoke(
+                    cli,
+                    [
+                        "init",
+                        "--name",
+                        "seeded-name",
+                        "--version",
+                        "9.9.9",
+                        "--description",
+                        "Seeded description",
+                        "--author",
+                        "Seeded Author",
+                    ],
+                    input="\n\n\n\ny\ndone\ny\n",
+                )
+
+                assert result.exit_code == 0
+                config = self._read_yaml()
+                assert config["name"] == "seeded-name"
+                assert config["version"] == "9.9.9"
+                assert config["description"] == "Seeded description"
+                assert config["author"] == "Seeded Author"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_plugin_init_unaffected_by_new_params(self):
+        """`apm plugin init` does not pass metadata flags; it must still work."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["plugin", "init", "my-plugin", "--yes"])
+
+                assert result.exit_code == 0
+                config = self._read_yaml(Path(tmp_dir) / "my-plugin" / "apm.yml")
+                assert config["name"] == "my-plugin"
+                # Plugin mode keeps its own 0.1.0 default.
+                assert config["version"] == "0.1.0"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_explicit_version_survives_plugin_default(self):
+        """--version must not be clobbered by the plugin-mode 0.1.0 default."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(
+                    cli, ["init", "my-plugin", "--plugin", "--yes", "--version", "2.0.0"]
+                )
+
+                assert result.exit_code == 0
+                config = self._read_yaml(Path(tmp_dir) / "my-plugin" / "apm.yml")
+                assert config["version"] == "2.0.0"
+            finally:
+                os.chdir(self.original_dir)

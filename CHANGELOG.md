@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   
 ### Added
 
+- `apm init` now accepts `--name`, `--description`, `--version`, and `--author`,
+  so scripted and CI init can write a finished `apm.yml` without hand-editing it
+  afterwards. `--name` labels the manifest in place and is reported as ignored
+  when a positional project name is given; outside `--yes` the flags seed the
+  matching prompt defaults instead of being discarded. (closes #2146)
+  -- by @atulya-singh
 - Corporate proxy and internal-CA users can now use Python-based APM HTTPS paths
   without per-shell TLS setup. APM verifies against the OS trust store through
   `truststore` for `apm install`, the Python `llm` child runtime, and the frozen
