@@ -40,6 +40,7 @@ from .object_fields import (
     local_path_apm_yml_entry,
     parse_alias_override,
     reject_unknown_fields,
+    reject_unknown_git_fields,
 )
 from .types import VirtualPackageType
 
@@ -853,12 +854,10 @@ class DependencyReference:
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
-        host_type = cls._parse_host_type(entry.get("type"))
 
         # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
         if git_url == "parent":
-            if host_type is not None:
-                raise ValueError("'type' is only supported for remote git dependencies")
+            reject_unknown_git_fields(entry, parent=True)
             path_raw = entry.get("path")
             if path_raw is None:
                 raise ValueError(
@@ -885,6 +884,8 @@ class DependencyReference:
                 is_parent_repo_inheritance=True,
             )
 
+        reject_unknown_git_fields(entry, parent=False)
+        host_type = cls._parse_host_type(entry.get("type"))
         sub_path = entry.get("path")
         ref_override = entry.get("ref")
         allow_insecure = entry.get("allow_insecure", False)

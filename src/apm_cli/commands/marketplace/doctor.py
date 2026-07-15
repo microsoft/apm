@@ -21,7 +21,9 @@ from . import (
 )
 
 
-def _executable_trust_drift_check(project_root: Path) -> _DoctorCheck | None:
+def _executable_trust_drift_check(
+    project_root: Path, logger: CommandLogger | None = None
+) -> _DoctorCheck | None:
     """Fleet-level executable-trust drift probe for ``apm doctor``.
 
     Flags packages whose project/user *allow* is overridden by the org
@@ -48,7 +50,8 @@ def _executable_trust_drift_check(project_root: Path) -> _DoctorCheck | None:
         data = load_yaml(apm_path)
         project_data = data if isinstance(data, dict) else {}
         ctx = build_exec_trust_context(
-            policy=load_org_policy(project_root), project_data=project_data
+            policy=load_org_policy(project_root, logger=logger),
+            project_data=project_data,
         )
     except Exception:
         return None
@@ -313,7 +316,7 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
             )
         )
 
-    drift_check = _executable_trust_drift_check(Path.cwd())
+    drift_check = _executable_trust_drift_check(Path.cwd(), logger=logger)
     if drift_check is not None:
         checks.append(drift_check)
 

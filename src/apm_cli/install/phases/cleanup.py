@@ -9,9 +9,10 @@ Two distinct cleanup passes run in sequence:
 
 **Block A -- Orphan cleanup**
     For every dependency in the *previous* lockfile whose key is NOT in
-    ``ctx.intended_dep_keys``, all deployed files are removed.  ``targets=None``
-    is passed deliberately so the helper validates against *all*
-    ``KNOWN_TARGETS``, not just the active install's target set.
+    ``ctx.intended_dep_keys``, deployed files not freshly claimed by an active
+    package are removed. ``targets=None`` is passed deliberately so the helper
+    validates against *all* ``KNOWN_TARGETS``, not just the active install's
+    target set.
 
 **Block B -- Intra-package stale-file cleanup**
     For every dependency still in the manifest, files present in the old
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.deployment_state import DeploymentReconciler
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.cleanup import remove_stale_deployed_files
@@ -69,6 +71,7 @@ def run(ctx: InstallContext) -> None:
         # deployed files even though it is still in apm.yml.
         from apm_cli.deps.lockfile import _SELF_KEY
 
+        freshly_deployed_files = DeploymentReconciler.current_claimed_paths(package_deployed_files)
         _orphan_total_deleted = 0
         _orphan_deleted_targets: list = []
         for _orphan_key, _orphan_dep in existing_lockfile.dependencies.items():
@@ -80,10 +83,15 @@ def run(ctx: InstallContext) -> None:
                 continue
             if _orphan_key in intended_dep_keys:
                 continue  # still in manifest -- handled by stale-cleanup below
-            if not _orphan_dep.deployed_files:
+            orphan_only_files = [
+                deployed_file
+                for deployed_file in _orphan_dep.deployed_files
+                if deployed_file not in freshly_deployed_files
+            ]
+            if not orphan_only_files:
                 continue
             _orphan_result = remove_stale_deployed_files(
-                _orphan_dep.deployed_files,
+                orphan_only_files,
                 project_root,
                 dep_key=_orphan_key,
                 # targets=None -> validate against all KNOWN_TARGETS, not
@@ -118,9 +126,7 @@ def run(ctx: InstallContext) -> None:
     # packages that left the manifest entirely.
     # ------------------------------------------------------------------
     if existing_lockfile and package_deployed_files:
-        all_deployed_files: set[str] = set()
-        for deployed_files in package_deployed_files.values():
-            all_deployed_files.update(deployed_files)
+        all_deployed_files = set(DeploymentReconciler.current_claimed_paths(package_deployed_files))
 
         for dep_key, new_deployed in package_deployed_files.items():
             # Skip packages whose integration reported errors this run --

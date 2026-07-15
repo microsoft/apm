@@ -76,9 +76,10 @@ jobs:
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          uv run pytest tests/integration/test_windows_installer_launchers.py -q
+        run: >-
+          uv run --frozen pytest
+          tests/integration/test_windows_installer_launchers.py
+          -vv -ra --tb=short
 
       # Unit tests run on every push for fast platform-regression signal.
       # Smoke is intentionally NOT included here: it duplicates ci-integration.yml's
@@ -186,6 +187,16 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      - name: Test macOS non-shell binary startup
+        env:
+          APM_E2E_TESTS: "1"
+          APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-x86_64/apm
+        run: |
+          test -x "$APM_BINARY_PATH"
+          uv run --frozen pytest \
+            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
+            -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4

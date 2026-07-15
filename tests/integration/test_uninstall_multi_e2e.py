@@ -10,9 +10,7 @@ Uses two real public APM packages from GitHub:
   - github/awesome-copilot/skills/aspire
 """
 
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
@@ -28,17 +26,6 @@ PKG_B = "github/awesome-copilot/skills/aspire"
 
 
 @pytest.fixture
-def apm_command():
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
-
-
-@pytest.fixture
 def temp_project(tmp_path):
     project_dir = tmp_path / "uninstall-multi-test"
     project_dir.mkdir()
@@ -47,9 +34,9 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, timeout=180):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -105,9 +92,9 @@ def _deployed_files_for(lockfile, repo_substr):
 class TestUninstallMultiplePackages:
     """Verify that `apm uninstall pkg1 pkg2` removes both in a single command."""
 
-    def test_uninstall_multiple_packages_in_one_command(self, temp_project, apm_command):
+    def test_uninstall_multiple_packages_in_one_command(self, temp_project, apm_binary_path):
         _write_apm_yml(temp_project, [PKG_A, PKG_B])
-        result_install = _run_apm(apm_command, ["install"], temp_project)
+        result_install = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result_install.returncode == 0, (
             f"Install failed:\nSTDOUT: {result_install.stdout}\nSTDERR: {result_install.stderr}"
         )
@@ -126,7 +113,7 @@ class TestUninstallMultiplePackages:
         if not files_a_before or not files_b_before:
             pytest.skip("One of the packages deployed no files; cannot verify cleanup")
 
-        result_un = _run_apm(apm_command, ["uninstall", PKG_A, PKG_B], temp_project)
+        result_un = _run_apm(apm_binary_path, ["uninstall", PKG_A, PKG_B], temp_project)
         assert result_un.returncode == 0, (
             f"Uninstall failed:\nSTDOUT: {result_un.stdout}\nSTDERR: {result_un.stderr}"
         )
@@ -156,16 +143,16 @@ class TestUninstallMultiplePackages:
                 f"Deployed file {rel_path} not cleaned up by multi-uninstall"
             )
 
-    def test_uninstall_partial_unknown_continues_safely(self, temp_project, apm_command):
+    def test_uninstall_partial_unknown_continues_safely(self, temp_project, apm_binary_path):
         """Engine warns on unknown package but still removes the known one (exit 0)."""
         _write_apm_yml(temp_project, [PKG_A])
-        result_install = _run_apm(apm_command, ["install"], temp_project)
+        result_install = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result_install.returncode == 0, (
             f"Install failed:\nSTDOUT: {result_install.stdout}\nSTDERR: {result_install.stderr}"
         )
 
         result_un = _run_apm(
-            apm_command,
+            apm_binary_path,
             ["uninstall", PKG_A, "some/unknown-pkg-xyz789"],
             temp_project,
         )

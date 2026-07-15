@@ -20,10 +20,7 @@ git, no registry.
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
-
-_INSTALL = [sys.executable, "-m", "apm_cli.cli", "install"]
 
 
 def _make_local_dep(pkg: Path) -> None:
@@ -40,7 +37,7 @@ def _make_local_dep(pkg: Path) -> None:
 
 
 def test_install_root_resolves_sources_from_pwd_and_writes_under_root(
-    tmp_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     pkg = tmp_path / "pkg"
     _make_local_dep(pkg)
@@ -61,7 +58,14 @@ def test_install_root_resolves_sources_from_pwd_and_writes_under_root(
     deploy.mkdir()
 
     result = subprocess.run(
-        [*_INSTALL, "--root", str(deploy), "--target", "copilot"],
+        [
+            str(apm_binary_path),
+            "install",
+            "--root",
+            str(deploy),
+            "--target",
+            "copilot",
+        ],
         cwd=str(consumer),
         capture_output=True,
         text=True,

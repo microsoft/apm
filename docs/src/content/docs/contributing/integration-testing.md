@@ -64,6 +64,61 @@ invocation is silent rather than red: every test is collected and
 reported as `SKIPPED` with a one-line reason, so you can see exactly
 what is missing and why.
 
+### Three marker axes
+
+Pytest markers compose across independent axes:
+
+| Axis | Question | Markers |
+| --- | --- | --- |
+| Behavioral | What boundary does the test cross? | `unit`, `component`, `e2e` |
+| Scheduling | When is the test selected? | `integration`, `slow`, `benchmark`, `live` |
+| Prerequisite | What environment must exist? | `requires_*` |
+
+`live` is both an opt-in scheduling marker and an external-service
+prerequisite. Behavioral markers do not replace prerequisite markers.
+
+The behavioral definitions are:
+
+| Marker | Definition |
+| --- | --- |
+| `unit` | Pure logic with no filesystem and no CLI |
+| `component` | In-process behavior that touches a filesystem or one command boundary |
+| `e2e` | A real installed CLI crossing at least one command boundary |
+
+`pyproject.toml` owns these definitions, while
+`tests/quality/critical_suite.toml` owns the finite classified module set.
+Directory names and `_e2e.py` suffixes are not proof of behavior.
+`test_policy_pinned_constraint_e2e.py` is `component` because it uses Click
+in-process; `test_core_smoke.py` is `e2e` because it invokes an installed
+binary through subprocess boundaries.
+
+To extend the manifest:
+
+1. Confirm the whole module has one behavioral boundary.
+2. Add its literal path and marker to `critical_suite.toml`.
+3. Add the module-level behavioral `pytestmark`, preserving any scheduling and
+   prerequisite markers.
+4. Document why behavior wins if the filename suggests another boundary.
+5. Run the contracts:
+
+```bash
+uv run --extra dev pytest -p no:cacheprovider -q tests/quality
+uv run --frozen python scripts/check_test_assertions.py
+uv run --frozen python scripts/check_exact_test_duplicates.py
+```
+
+The assertion and exact-duplicate baseline updaters only accept reductions.
+
+```bash
+uv run --frozen python scripts/check_test_assertions.py --update-baseline
+uv run --frozen python scripts/check_exact_test_duplicates.py --update-baseline
+```
+
+Provisional mode is CI-only and allowed only on draft pull requests.
+Contributor commands, ready pull requests, merge queue runs, and final
+validation are strict. Do not pass the internal provisional flag manually;
+remove `provisional` metadata after remeasurement and review.
+
 ### Common invocations
 
 ```bash
@@ -75,6 +130,77 @@ uv run pytest tests/integration/test_golden_scenario_e2e.py -v
 
 # Run only a marker family
 uv run pytest tests/integration -m requires_github_token -v
+```
+
+### Hermetic lifecycle fixtures
+
+`tests/integration/test_hermetic_lifecycle_foundation.py` is the cross-module
+contract. Complete the [development setup](../development-guide/) first.
+
+| Utility | Owns | Contract test |
+| --- | --- | --- |
+| `isolated_apm_environment.py` | Child roots, environment, Python socket tripwire | `test_isolated_apm_environment_contract.py` |
+| `local_git_repository.py` | Deterministic local Git origins | `test_local_git_repository_factory_contract.py` |
+| `local_package.py` | Source-only package inputs | `test_local_package_factory_contract.py` |
+| `apm_lifecycle_runner.py` | Bounded process execution and evidence | `test_apm_lifecycle_runner_contract.py` |
+| `artifact_snapshot.py` | Read-only filesystem observations | `test_artifact_snapshot_contract.py` |
+| `scenario_rows.py` | Immutable scenario data | `test_scenario_rows_contract.py` |
+
+Source fixtures author only source inputs; the real APM CLI creates lockfiles,
+deployed trees, compiled output, bundles, hashes, cache state, and audit
+reports.
+
+`IsolatedApmEnvironment` builds deterministic child environments for APM and
+its Git/GitHub/ADO/GitLab/SSH flows, then installs a best-effort Python socket
+tripwire. The environment contract is deliberately bounded: it isolates the
+APM, Git, GH, Azure, home, cache, and temporary roots used by these tests. It
+does not scan arbitrary variables or act as a general credential scrubber.
+
+It is also not an OS/native-code sandbox: executables found through `PATH`
+remain trusted, reflective access to CPython internals or native extensions can
+bypass Python monkey-patches, `file://` access is not confined by the OS, and
+hostile post-creation filesystem races are outside the contract.
+`GIT_ALLOW_PROTOCOL=file` and local `url.*.insteadOf` rewriting separately
+restrict Git transport in reviewed scenarios.
+
+Keep modules flat. Inside a pytest test with `tmp_path`, compose them directly:
+
+```python
+import os
+
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.artifact_snapshot import ArtifactSnapshot
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.local_package import LocalPackageFactory
+
+isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=os.environ)
+environment = isolated.subprocess_env()
+sources = LocalPackageFactory(isolated.package_root)
+project = sources.create("consumer", targets=("copilot",))
+sources.add_skill(
+    project,
+    "example",
+    "---\nname: example\ndescription: Fixture\n---\n# Example\n",
+)
+result = ApmLifecycleRunner().run(
+    ("install", "--target", "copilot"),
+    cwd=project.root,
+    env=environment,
+)
+snapshot = ArtifactSnapshot.capture(project.root)
+assert result.returncode == 0
+assert "apm.lock.yaml" in snapshot.paths
+```
+
+For remote-package scenarios, add `LocalGitRepositoryFactory` and `ScenarioRow`
+as shown in the cross-module contract. `ApmLifecycleRunner()` invokes `apm`
+through `PATH`; packaged-binary tests use the
+[binary-resolution fixture](#apm-binary-resolution).
+
+```bash
+uv run pytest tests/integration/test_local_package_factory_contract.py -v
+uv run pytest tests/integration/test_hermetic_lifecycle_foundation.py -v
+uv run pytest -n auto tests/integration/test_hermetic_lifecycle_foundation.py -v
 ```
 
 ### Apm binary resolution

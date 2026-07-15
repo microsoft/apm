@@ -3,12 +3,131 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+
+def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
+    """Approval fallback outcomes must come from policy outcome routing."""
+    from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+
+    root = Path(__file__).parents[2]
+    approve_source = (root / "src/apm_cli/commands/approve.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    expected = {
+        "cache_miss_fetch_fail",
+        "garbage_response",
+        "hash_mismatch",
+        "incomplete_chain",
+        "malformed",
+    }
+
+    assert frozenset(expected) == POLICY_RESOLUTION_FAILURE_OUTCOMES
+    assert (
+        "from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES" in approve_source
+    )
+    assert not any(f'"{outcome}"' in approve_source for outcome in expected)
+    assert "Approval fallback outcomes must use policy/outcome_routing.py" in guard
+
+
+def test_object_git_dependency_fields_have_single_owner() -> None:
+    """Fixture authoring must consume the product parser's field vocabulary."""
+    root = Path(__file__).parents[2]
+    object_fields = (root / "src/apm_cli/models/dependency/object_fields.py").read_text()
+    parser = (root / "src/apm_cli/models/dependency/reference.py").read_text()
+    fixture = (root / "tests/utils/local_package.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def reject_unknown_git_fields" in object_fields
+    assert "reject_unknown_git_fields(entry, parent=True)" in parser
+    assert "reject_unknown_git_fields(entry, parent=False)" in parser
+    assert "reject_unknown_fields" not in fixture
+    assert "_GIT_DEPENDENCY_FIELDS" not in fixture
+    assert "Object-form Git dependency fields must come from the product parser" in guard
+
+
+def test_cleanup_current_claim_protection_has_single_owner() -> None:
+    """Cleanup must route current deployed-file claims through the reconciler."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/deployment_state.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_cleanup_claim_owner_checker(root)
+
+    assert "def current_claimed_paths" in owner
+    assert checker.analyze_path(root / "src/apm_cli/install/phases/cleanup.py") == []
+    assert "scripts/check_cleanup_claim_owner.py" in guard
+    assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
+
+
+def test_local_bundle_replay_provenance_has_single_owner() -> None:
+    """Bundle persistence and drift exclusion must consume the deployment ledger."""
+    root = Path(__file__).parents[2]
+    handler = (root / "src/apm_cli/install/local_bundle_handler.py").read_text()
+    drift = (root / "src/apm_cli/install/drift.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "DeploymentLedgerCodec.record_local_bundle_files" in handler
+    assert "DeploymentLedgerCodec.local_bundle_paths" in drift
+    assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
+
+
+def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
+    tmp_path: Path,
+) -> None:
+    """AC4 must reject a consumer that interprets the persisted marker itself."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    drift_path = sandbox / "src/apm_cli/install/drift.py"
+    with drift_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n\ndef _parallel_bundle_owner(record):\n"
+            '    return record.active_owner != "local-bundle"\n'
+        )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert result.returncode == 1
+    assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in (
+        result.stdout
+    )
+
+
+def _load_cleanup_claim_owner_checker(root: Path) -> ModuleType:
+    """Import the semantic cleanup claim-authority checker."""
+    module_name = "check_cleanup_claim_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_skill_subset_owner_checker() -> ModuleType:
@@ -39,6 +158,18 @@ def _load_windows_stable_path_checker(root: Path) -> ModuleType:
     or exemption handling.
     """
     module_name = "check_windows_stable_path_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_test_contract_checker(root: Path) -> ModuleType:
+    """Import the single scanner for executable test contract owners."""
+    module_name = "check_test_contract_authorities"
     script_path = root / "scripts" / f"{module_name}.py"
     spec = importlib.util.spec_from_file_location(module_name, script_path)
     assert spec is not None and spec.loader is not None
@@ -241,6 +372,24 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
         assert duplicate not in source
 
 
+def test_existing_path_ref_rechecks_have_one_owner() -> None:
+    """Resolver gates must share the canonical ref-drift decision."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/drift.py").read_text()
+    resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text()
+    phase = (root / "src/apm_cli/install/phases/resolve.py").read_text()
+    legacy_test = (root / "tests/unit/test_install_update_refs.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def should_force_ref_recheck(" in owner
+    assert "should_force_ref_recheck(" in resolver
+    assert "should_force_ref_recheck(" in phase
+    assert "_force_semver_resolve" not in resolver
+    assert "_force_semver_resolve" not in phase
+    assert "def _force_semver_resolve" not in legacy_test
+    assert "Existing-path ref rechecks must use drift.py::should_force_ref_recheck" in guard
+
+
 def test_skill_subset_filtering_has_one_canonical_owner() -> None:
     """Install and pack must share one flattened skill-subset matcher."""
     root = Path(__file__).parents[2]
@@ -254,6 +403,16 @@ def test_skill_subset_filtering_has_one_canonical_owner() -> None:
     assert "skill_subset_filter_tokens(dep.skill_subset)" in exporter
     assert "Skill subset filter tokens must come from models/dependency/subsets.py" in guard
     assert "def _skill_subset_name_filter" not in integrator
+
+
+def test_cached_update_resolution_stays_with_downloader_owner() -> None:
+    """Cached branch planning must reuse the production ref resolver."""
+    root = Path(__file__).parents[2]
+    ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "resolved = downloader.resolve_git_reference(dep_ref)" in ref_reuse
+    assert "Cached update planning must resolve refs through the downloader owner" in guard
 
 
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
@@ -289,6 +448,45 @@ def test_skill_subset_ast_checker_passes_on_real_consumers() -> None:
     assert violations == []
 
 
+def test_policy_cache_writer_routes_through_canonical_serializer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apm_cli.policy import discovery
+    from apm_cli.policy.schema import ApmPolicy
+
+    serialized = "name: serializer-owner\n"
+    calls: list[ApmPolicy] = []
+
+    def serialize(policy: ApmPolicy) -> str:
+        calls.append(policy)
+        return serialized
+
+    monkeypatch.setattr(discovery, "_serialize_policy", serialize)
+    policy = ApmPolicy(name="original")
+    repo_ref = "owner/.github"
+
+    discovery._write_cache(repo_ref, policy, tmp_path)
+
+    cache_file = discovery._get_cache_dir(tmp_path) / f"{discovery._cache_key(repo_ref)}.yml"
+    assert cache_file.read_text(encoding="utf-8") == serialized
+    assert calls == [policy]
+
+
+def test_policy_cache_serializer_boundary_is_registered() -> None:
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    owner_row = (
+        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |"
+    )
+    assert ("Cached policy shape must route through policy/discovery.py::_policy_to_dict") in guard
+    for token in ("_policy_to_dict", "_serialize_policy", "_write_cache"):
+        assert token in guard
+    assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
     """install.ps1 alone may define the stable current/apm.exe location.
 
@@ -311,6 +509,29 @@ def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
     assert checker.check(root) == []
 
 
+def test_executable_test_contracts_have_one_canonical_owner() -> None:
+    """Binary selection and rendered parity must use their canonical helpers."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "Integration binary selection and rendered CLI parity require canonical owners" in guard
+    assert "check_test_contract_authorities.py" in guard
+
+    checker = _load_test_contract_checker(root)
+
+    assert checker.check(root) == []
+
+
+def test_quality_ratchets_route_through_shared_authorities() -> None:
+    """Ratchet file discovery and baseline writes must have one owner each."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_test_contract_checker(root)
+
+    assert "check_test_contract_authorities.py" in guard
+    assert checker.find_ratchet_authority_violations(root) == []
+
+
 def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
     """The new owner-table row must not silently drop on the next deploy.
 
@@ -329,8 +550,13 @@ def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
     source = root / ".apm/instructions/architecture.instructions.md"
     deployed = root / ".github/instructions/architecture.instructions.md"
 
-    owner_row = "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |"
-    assert owner_row in source.read_text(encoding="utf-8")
+    owner_rows = (
+        "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |",
+        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |",
+    )
+    source_text = source.read_text(encoding="utf-8")
+    for owner_row in owner_rows:
+        assert owner_row in source_text
 
     # Source and deployed must be byte-identical: the deployed file is a
     # compiled copy of the source, not an independently edited artifact.

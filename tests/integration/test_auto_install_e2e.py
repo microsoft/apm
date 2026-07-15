@@ -25,12 +25,31 @@ E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 
 pytestmark = [
     pytest.mark.requires_e2e_mode,
+    pytest.mark.requires_apm_binary,
     # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
     # Requires --dist loadgroup in the xdist invocation (the only
     # scheduler that honors xdist_group); without it the marker is
     # silently ignored and tests would race on global env state.
     pytest.mark.xdist_group(name="home_env"),
 ]
+
+
+def _start_apm(
+    apm_binary_path: Path,
+    args: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str],
+) -> subprocess.Popen[str]:
+    """Start the injected APM executable with streaming output."""
+    return subprocess.Popen(
+        [str(apm_binary_path), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        cwd=cwd,
+        env=env,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -92,7 +111,7 @@ author: test
                 else:
                     raise
 
-    def test_auto_install_virtual_prompt_first_run(self, temp_e2e_home):
+    def test_auto_install_virtual_prompt_first_run(self, temp_e2e_home, apm_binary_path: Path):
         """Test auto-install on first run with virtual package reference.
 
         This is the exact README hero scenario:
@@ -114,11 +133,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # Run the exact README command with streaming output monitoring
-        process = subprocess.Popen(
-            ["apm", "run", "github/awesome-copilot/skills/architecture-blueprint-generator"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        process = _start_apm(
+            apm_binary_path,
+            [
+                "run",
+                "github/awesome-copilot/skills/architecture-blueprint-generator",
+            ],
             cwd=self.test_dir,
             env=env,
         )
@@ -179,7 +199,7 @@ author: test
 
         print(f"[+] Auto-install successful: {package_path}")
 
-    def test_auto_install_uses_cache_on_second_run(self, temp_e2e_home):
+    def test_auto_install_uses_cache_on_second_run(self, temp_e2e_home, apm_binary_path: Path):
         """Test that second run uses cached package (no re-download).
 
         Expected behavior:
@@ -192,11 +212,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # First run - install with early termination
-        process = subprocess.Popen(
-            ["apm", "run", "github/awesome-copilot/skills/architecture-blueprint-generator"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        process = _start_apm(
+            apm_binary_path,
+            [
+                "run",
+                "github/awesome-copilot/skills/architecture-blueprint-generator",
+            ],
             cwd=self.test_dir,
             env=env,
         )
@@ -226,11 +247,12 @@ author: test
         assert package_path.exists(), "Package should exist after first run"
 
         # Second run - should use cache with early termination
-        process = subprocess.Popen(
-            ["apm", "run", "github/awesome-copilot/skills/architecture-blueprint-generator"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        process = _start_apm(
+            apm_binary_path,
+            [
+                "run",
+                "github/awesome-copilot/skills/architecture-blueprint-generator",
+            ],
             cwd=self.test_dir,
             env=env,
         )
@@ -261,7 +283,7 @@ author: test
 
         print("[+] Second run used cached package (no re-download)")
 
-    def test_simple_name_works_after_install(self, temp_e2e_home):
+    def test_simple_name_works_after_install(self, temp_e2e_home, apm_binary_path: Path):
         """Test that simple name works after package is installed.
 
         Expected behavior:
@@ -274,11 +296,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # First install with full path - early termination
-        process = subprocess.Popen(
-            ["apm", "run", "github/awesome-copilot/skills/architecture-blueprint-generator"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        process = _start_apm(
+            apm_binary_path,
+            [
+                "run",
+                "github/awesome-copilot/skills/architecture-blueprint-generator",
+            ],
             cwd=self.test_dir,
             env=env,
         )
@@ -298,11 +321,9 @@ author: test
             process.stdout.close()
 
         # Run with simple name - early termination
-        process = subprocess.Popen(
-            ["apm", "run", "architecture-blueprint-generator"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        process = _start_apm(
+            apm_binary_path,
+            ["run", "architecture-blueprint-generator"],
             cwd=self.test_dir,
             env=env,
         )
@@ -332,7 +353,7 @@ author: test
 
         print("[+] Simple name works after installation")
 
-    def test_auto_install_with_qualified_path(self, temp_e2e_home):
+    def test_auto_install_with_qualified_path(self, temp_e2e_home, apm_binary_path: Path):
         """Test auto-install works with qualified path format.
 
         Tests both formats:
@@ -344,11 +365,12 @@ author: test
         env["HOME"] = temp_e2e_home
 
         # Test with qualified path (without .prompt.md extension) - early termination
-        process = subprocess.Popen(
-            ["apm", "run", "github/awesome-copilot/skills/architecture-blueprint-generator"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        process = _start_apm(
+            apm_binary_path,
+            [
+                "run",
+                "github/awesome-copilot/skills/architecture-blueprint-generator",
+            ],
             cwd=self.test_dir,
             env=env,
         )

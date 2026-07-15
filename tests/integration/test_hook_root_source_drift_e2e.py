@@ -10,16 +10,18 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-CLI = [sys.executable, "-m", "apm_cli.cli"]
 
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(CLI + list(args), cwd=str(cwd), capture_output=True, text=True)
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(apm_binary_path), *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+    )
 
 
 # Per-target on-disk layout descriptors:
@@ -117,6 +119,7 @@ def _rewrite_source(
 @pytest.mark.parametrize("target, settings_rel, sidecar_rel, event_key", _HARNESS_CASES)
 def test_root_hook_source_drift_heals_on_reinstall(
     tmp_path: Path,
+    apm_binary_path: Path,
     target: str,
     settings_rel: str,
     sidecar_rel: str | None,
@@ -155,7 +158,7 @@ def test_root_hook_source_drift_heals_on_reinstall(
     )
 
     # First install: produces target-shaped entries marked `_local/myapp`.
-    first = _run(project, "install")
+    first = _run(apm_binary_path, project, "install")
     assert first.returncode == 0, first.stderr or first.stdout
     assert _load_sources(project, settings_rel, sidecar_rel, event_key) == ["_local/myapp"], (
         "First install must produce a single _local/myapp entry; "
@@ -184,7 +187,7 @@ def test_root_hook_source_drift_heals_on_reinstall(
     settings_path.write_text(json.dumps(settings_data), encoding="utf-8")
 
     # Second install: must heal the stale marker without touching the user-owned entry.
-    second = _run(project, "install")
+    second = _run(apm_binary_path, project, "install")
     assert second.returncode == 0, second.stderr or second.stdout
 
     sources = _load_sources(project, settings_rel, sidecar_rel, event_key)

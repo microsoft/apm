@@ -149,28 +149,6 @@ def temp_e2e_home():
             del os.environ["HOME"]
 
 
-@pytest.fixture(scope="module")
-def apm_binary():
-    """Get path to APM binary for testing."""
-    # Try to find APM binary in common locations
-    possible_paths = [
-        "apm",  # In PATH
-        "./apm",  # Local directory
-        "./dist/apm",  # Build directory
-        Path(__file__).parent.parent.parent / "dist" / "apm",  # Relative to test
-    ]
-
-    for path in possible_paths:
-        try:
-            result = subprocess.run([str(path), "--version"], capture_output=True, text=True)
-            if result.returncode == 0:
-                return str(path)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-
-    pytest.skip("APM binary not found. Build it first with: python -m build")
-
-
 class TestGoldenScenarioE2E:
     """End-to-end tests for the exact README hero quick start scenario."""
 
@@ -178,7 +156,7 @@ class TestGoldenScenarioE2E:
         not PRIMARY_TOKEN,
         reason="GitHub token (GITHUB_APM_PAT or GITHUB_TOKEN) required for E2E tests",
     )
-    def test_complete_golden_scenario_copilot(self, temp_e2e_home, apm_binary):
+    def test_complete_golden_scenario_copilot(self, temp_e2e_home, apm_binary_path):
         """Test the complete hero quick start from README using Copilot CLI runtime.
 
         Validates the exact 6-step flow:
@@ -194,7 +172,9 @@ class TestGoldenScenarioE2E:
         print("\n=== Step 2: Set up your GitHub PAT and an Agent CLI ===")
         print("GitHub token: ✓ (set via environment - GITHUB_APM_PAT preferred)")
         print("Installing Copilot CLI runtime...")
-        result = run_command(f"{apm_binary} runtime setup copilot", timeout=300, show_output=True)
+        result = run_command(
+            f"{apm_binary_path} runtime setup copilot", timeout=300, show_output=True
+        )
         assert result.returncode == 0, f"Runtime setup failed: {result.stderr}"
 
         # Verify copilot is available and GitHub configuration was created
@@ -228,7 +208,7 @@ class TestGoldenScenarioE2E:
 
             print("\n=== Step 3: Transform your project with AI-Native structure ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project --yes --target copilot",
+                f"{apm_binary_path} init my-ai-native-project --yes --target copilot",
                 cwd=project_workspace,
                 show_output=True,
             )
@@ -307,7 +287,7 @@ Basic instructions for E2E testing.
 
             # Step 4: Compile Agent Primitives for any coding agent (equivalent to: apm compile)
             print("\n=== Step 4: Compile Agent Primitives for any coding agent ===")
-            result = run_command(f"{apm_binary} compile", cwd=project_dir, show_output=True)
+            result = run_command(f"{apm_binary_path} compile", cwd=project_dir, show_output=True)
             assert result.returncode == 0, f"Agent Primitives compilation failed: {result.stderr}"
 
             # Verify agents.md was generated
@@ -328,7 +308,7 @@ Basic instructions for E2E testing.
             # Leave ado_org unset to avoid connecting to real organization
 
             result = run_command(
-                f"{apm_binary} install", cwd=project_dir, show_output=True, env=env
+                f"{apm_binary_path} install", cwd=project_dir, show_output=True, env=env
             )
             assert result.returncode == 0, f"Dependency install failed: {result.stderr}"
 
@@ -353,7 +333,7 @@ Basic instructions for E2E testing.
                 env["COPILOT_GITHUB_TOKEN"] = os.environ["GITHUB_TOKEN"]
 
             # Run with real-time output streaming (using 'start' script which calls Copilot CLI)
-            cmd = f'{apm_binary} run start --param name="developer"'
+            cmd = f'{apm_binary_path} run start --param name="developer"'
             print(f"Executing: {cmd}")
 
             try:
@@ -430,7 +410,7 @@ Basic instructions for E2E testing.
         not PRIMARY_TOKEN,
         reason="GitHub token (GITHUB_APM_PAT or GITHUB_TOKEN) required for E2E tests",
     )
-    def test_complete_golden_scenario_codex(self, temp_e2e_home, apm_binary):
+    def test_complete_golden_scenario_codex(self, temp_e2e_home, apm_binary_path):
         """Test the complete golden scenario using Codex CLI runtime.
 
         This test uses the 'debug' script which actually calls Codex CLI.
@@ -438,7 +418,9 @@ Basic instructions for E2E testing.
 
         # Step 1: Setup Codex runtime
         print("\n=== Setting up Codex CLI runtime ===")
-        result = run_command(f"{apm_binary} runtime setup codex", timeout=300, show_output=True)
+        result = run_command(
+            f"{apm_binary_path} runtime setup codex", timeout=300, show_output=True
+        )
         assert result.returncode == 0, f"Codex runtime setup failed: {result.stderr}"
 
         # Verify codex is available and GitHub configuration was created
@@ -463,7 +445,7 @@ Basic instructions for E2E testing.
 
             print("\n=== Initializing Codex test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-codex --yes --target copilot",
+                f"{apm_binary_path} init my-ai-native-project-codex --yes --target copilot",
                 cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
@@ -517,7 +499,7 @@ Instructions for Codex E2E testing.
 
             # Step 3: Compile Agent Primitives
             print("\n=== Compiling Agent Primitives ===")
-            result = run_command(f"{apm_binary} compile", cwd=project_dir)
+            result = run_command(f"{apm_binary_path} compile", cwd=project_dir)
             assert result.returncode == 0, f"Compilation failed: {result.stderr}"
 
             # Step 4: Install dependencies
@@ -528,7 +510,7 @@ Instructions for Codex E2E testing.
             env["ado_domain"] = "core"  # Limit to core domain only
             env["HOME"] = temp_e2e_home
 
-            result = run_command(f"{apm_binary} install", cwd=project_dir, env=env)
+            result = run_command(f"{apm_binary_path} install", cwd=project_dir, env=env)
             assert result.returncode == 0, f"Dependency install failed: {result.stderr}"
 
             # Step 5: Run with Codex CLI (equivalent to: apm run debug --param name="<YourGitHubHandle>")
@@ -540,7 +522,7 @@ Instructions for Codex E2E testing.
             env["HOME"] = temp_e2e_home
 
             # Run the Codex command with proper environment (use 'debug' script which calls Codex CLI)
-            cmd = f'{apm_binary} run debug --param name="developer"'
+            cmd = f'{apm_binary_path} run debug --param name="developer"'
             process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -589,12 +571,12 @@ Instructions for Codex E2E testing.
         not PRIMARY_TOKEN,
         reason="GitHub token (GITHUB_APM_PAT or GITHUB_TOKEN) required for E2E tests",
     )
-    def test_complete_golden_scenario_llm(self, temp_e2e_home, apm_binary):
+    def test_complete_golden_scenario_llm(self, temp_e2e_home, apm_binary_path):
         """Test the complete golden scenario using LLM runtime."""
 
         # Step 1: Setup LLM runtime (equivalent to: apm runtime setup llm)
         print("\\n=== Setting up LLM runtime ===")
-        result = run_command(f"{apm_binary} runtime setup llm", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup llm", timeout=300)
         assert result.returncode == 0, f"LLM runtime setup failed: {result.stderr}"
 
         # Verify LLM is available
@@ -614,7 +596,7 @@ Instructions for Codex E2E testing.
 
             print("\\n=== Initializing LLM test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-llm --yes --target copilot",
+                f"{apm_binary_path} init my-ai-native-project-llm --yes --target copilot",
                 cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
@@ -668,7 +650,7 @@ Instructions for LLM E2E testing.
 
             # Step 3: Compile Agent Primitives
             print("\\n=== Compiling Agent Primitives ===")
-            result = run_command(f"{apm_binary} compile", cwd=project_dir)
+            result = run_command(f"{apm_binary_path} compile", cwd=project_dir)
             assert result.returncode == 0, f"Compilation failed: {result.stderr}"
 
             # Step 4: Install dependencies
@@ -679,7 +661,7 @@ Instructions for LLM E2E testing.
             env["ado_domain"] = "core"  # Limit to core domain only
             env["HOME"] = temp_e2e_home
 
-            result = run_command(f"{apm_binary} install", cwd=project_dir, env=env)
+            result = run_command(f"{apm_binary_path} install", cwd=project_dir, env=env)
             assert result.returncode == 0, f"Dependency install failed: {result.stderr}"
 
             # Step 5: Run with LLM runtime (equivalent to: apm run llm --param name="<YourGitHubHandle>")
@@ -696,7 +678,7 @@ Instructions for LLM E2E testing.
                     env["GITHUB_MODELS_KEY"] = github_token
 
             # Run the LLM command with proper environment (use 'llm' script, not 'start')
-            cmd = f'{apm_binary} run llm --param name="developer"'
+            cmd = f'{apm_binary_path} run llm --param name="developer"'
             process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -732,7 +714,7 @@ Instructions for LLM E2E testing.
         not PRIMARY_TOKEN,
         reason="GitHub token (GITHUB_APM_PAT or GITHUB_TOKEN) required for E2E tests",
     )
-    def test_complete_golden_scenario_gemini(self, temp_e2e_home, apm_binary):
+    def test_complete_golden_scenario_gemini(self, temp_e2e_home, apm_binary_path):
         """Test the complete golden scenario using Gemini CLI runtime.
 
         This test uses the 'review' script which calls Gemini CLI.
@@ -742,7 +724,9 @@ Instructions for LLM E2E testing.
 
         # Step 1: Setup Gemini runtime (npm install -g @google/gemini-cli)
         print("\n=== Setting up Gemini CLI runtime ===")
-        result = run_command(f"{apm_binary} runtime setup gemini", timeout=300, show_output=True)
+        result = run_command(
+            f"{apm_binary_path} runtime setup gemini", timeout=300, show_output=True
+        )
         assert result.returncode == 0, f"Gemini runtime setup failed: {result.stderr}"
 
         # Verify gemini is available (npm global install, not in ~/.apm/runtimes)
@@ -771,7 +755,7 @@ Instructions for LLM E2E testing.
 
             print("\n=== Initializing Gemini test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-gemini --yes --target copilot",
+                f"{apm_binary_path} init my-ai-native-project-gemini --yes --target copilot",
                 cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
@@ -826,7 +810,7 @@ Instructions for Gemini CLI E2E testing.
 
             # Step 3: Compile Agent Primitives
             print("\n=== Compiling Agent Primitives ===")
-            result = run_command(f"{apm_binary} compile", cwd=project_dir)
+            result = run_command(f"{apm_binary_path} compile", cwd=project_dir)
             assert result.returncode == 0, f"Compilation failed: {result.stderr}"
 
             # Step 4: Install dependencies (targets gemini since .gemini/ exists)
@@ -834,7 +818,7 @@ Instructions for Gemini CLI E2E testing.
             env = os.environ.copy()
             env["HOME"] = temp_e2e_home
 
-            result = run_command(f"{apm_binary} install", cwd=project_dir, env=env)
+            result = run_command(f"{apm_binary_path} install", cwd=project_dir, env=env)
             assert result.returncode == 0, f"Dependency install failed: {result.stderr}"
 
             # Step 5: Run with Gemini CLI
@@ -843,7 +827,7 @@ Instructions for Gemini CLI E2E testing.
             env["HOME"] = temp_e2e_home
             env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
 
-            cmd = f'{apm_binary} run review --param name="developer"'
+            cmd = f'{apm_binary_path} run review --param name="developer"'
             process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -889,10 +873,10 @@ Instructions for Gemini CLI E2E testing.
                         f"Gemini CLI execution failed with return code {return_code}: {full_output}"
                     )
 
-    def test_runtime_list_command(self, temp_e2e_home, apm_binary):
+    def test_runtime_list_command(self, temp_e2e_home, apm_binary_path):
         """Test that APM can list installed runtimes."""
         print("\\n=== Testing runtime list command ===")
-        result = run_command(f"{apm_binary} runtime list")
+        result = run_command(f"{apm_binary_path} runtime list")
 
         # Should succeed even if no runtimes installed
         assert result.returncode == 0, f"Runtime list failed: {result.stderr}"
@@ -905,17 +889,17 @@ Instructions for Gemini CLI E2E testing.
 
         print(f"Runtime list output: {result.stdout}")
 
-    def test_apm_version_and_help(self, apm_binary):
+    def test_apm_version_and_help(self, apm_binary_path):
         """Test basic APM CLI functionality."""
         print("\\n=== Testing APM CLI basics ===")
 
         # Test version
-        result = run_command(f"{apm_binary} --version")
+        result = run_command(f"{apm_binary_path} --version")
         assert result.returncode == 0, f"Version command failed: {result.stderr}"
         assert result.stdout.strip(), "Version output is empty"
 
         # Test help
-        result = run_command(f"{apm_binary} --help")
+        result = run_command(f"{apm_binary_path} --help")
         assert result.returncode == 0, f"Help command failed: {result.stderr}"
         assert "usage:" in result.stdout.lower() or "apm" in result.stdout.lower(), (
             "Help output doesn't look correct"
@@ -923,7 +907,7 @@ Instructions for Gemini CLI E2E testing.
 
         print(f"APM version: {result.stdout}")
 
-    def test_init_command_minimal_mode(self, temp_e2e_home, apm_binary):
+    def test_init_command_minimal_mode(self, temp_e2e_home, apm_binary_path):
         """Test apm init command in minimal mode (new behavior)."""
         print("\\n=== Testing APM init command (minimal mode) ===")
 
@@ -932,7 +916,7 @@ Instructions for Gemini CLI E2E testing.
 
             # Test apm init
             result = run_command(
-                f"{apm_binary} init template-test-project --yes --target copilot",
+                f"{apm_binary_path} init template-test-project --yes --target copilot",
                 cwd=workspace,
                 show_output=True,
             )
@@ -956,17 +940,17 @@ Instructions for Gemini CLI E2E testing.
 class TestRuntimeInteroperability:
     """Test that both runtimes can be installed and work together."""
 
-    def test_dual_runtime_installation(self, temp_e2e_home, apm_binary):
+    def test_dual_runtime_installation(self, temp_e2e_home, apm_binary_path):
         """Test installing both runtimes in the same environment."""
 
         # Install Codex
         print("\\n=== Installing Codex runtime ===")
-        result = run_command(f"{apm_binary} runtime setup codex", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup codex", timeout=300)
         assert result.returncode == 0, f"Codex setup failed: {result.stderr}"
 
         # Install LLM
         print("\\n=== Installing LLM runtime ===")
-        result = run_command(f"{apm_binary} runtime setup llm", timeout=300)
+        result = run_command(f"{apm_binary_path} runtime setup llm", timeout=300)
         assert result.returncode == 0, f"LLM setup failed: {result.stderr}"
 
         # Verify both are available
@@ -975,7 +959,7 @@ class TestRuntimeInteroperability:
         assert (runtime_dir / "llm").exists(), "LLM not found after dual install"
 
         # Test runtime list shows both
-        result = run_command(f"{apm_binary} runtime list")
+        result = run_command(f"{apm_binary_path} runtime list")
         assert result.returncode == 0, f"Runtime list failed: {result.stderr}"
 
         output = result.stdout.lower()  # noqa: F841

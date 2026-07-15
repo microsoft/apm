@@ -135,6 +135,15 @@ This is optional -- CI is the authoritative gate. The pre-commit hook rev may la
 ## Documentation
 
 If your changes affect how users interact with the project, update the documentation accordingly.
+Public top-level CLI commands and rendered reference pages are a matched contract. When you add,
+remove, or rename a command, create, remove, or rename its matching page under
+`docs/src/content/docs/reference/cli/` and update the command table in
+`docs/src/content/docs/reference/index.md`, then run:
+
+```bash
+npm --prefix docs run build
+uv run --frozen python scripts/check_cli_docs.py docs/dist
+```
 
 ## License
 

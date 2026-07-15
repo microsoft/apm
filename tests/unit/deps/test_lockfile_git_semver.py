@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.git_semver_resolver import GitSemverResolution
 from apm_cli.deps.installed_package import InstalledPackage
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _make_dep_ref(repo_url: str = "acme/some-skills", reference: str = "^1.2.0"):
