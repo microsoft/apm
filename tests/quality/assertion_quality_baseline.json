@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "AQ001_constant_assertion": {
+      "tests/integration/test_integrators_end_to_end.py": 1,
+      "tests/integration/test_integrators_phase3.py": 1,
+      "tests/red_team/http/test_header_injection.py": 1,
+      "tests/unit/compilation/test_compile_cli_phase3.py": 1,
+      "tests/unit/compilation/test_compile_cli_surface.py": 1
+    },
+    "AQ002_broad_pytest_raises": {
+      "tests/integration/test_download_strategies_phase3w5.py": 1,
+      "tests/integration/test_download_strategies_selection.py": 1,
+      "tests/unit/deps/test_shared_clone_cache.py": 1,
+      "tests/unit/install/test_mcp_registry_module.py": 6,
+      "tests/unit/registry/test_resolver.py": 2,
+      "tests/unit/registry/test_resolver_e2e_http.py": 1
+    }
+  },
+  "schema_version": 1
+}

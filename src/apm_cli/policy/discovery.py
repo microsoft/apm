@@ -197,7 +197,7 @@ def _verify_hash_pin(
 POLICY_CACHE_DIR = ".policy-cache"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "4"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "5"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -320,11 +320,10 @@ def discover_policy_with_chain(
     # -- Chain resolution if leaf has extends: -------------------------
     if (
         fetch_result.policy is not None
-        and fetch_result.outcome in ("found", "cached_stale")
         and fetch_result.policy.extends is not None
         and not fetch_result.cached  # Don't re-resolve if served from cache
     ):
-        _resolve_and_persist_chain(fetch_result, project_root)
+        _resolve_and_persist_chain(fetch_result, project_root, no_cache=no_cache)
 
     return fetch_result
 
@@ -440,9 +439,104 @@ def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
         )
 
 
+def _resolve_ado_parent_ref(
+    parent_ref: str,
+    current_source: str,
+    leaf_host: str,
+) -> tuple[str, str, str, str] | None:
+    """Normalize an ADO parent ref to ``(org, project, repo, host)``."""
+    current_parts = _strip_source_prefix(current_source).split("/")
+    if is_visualstudio_legacy_hostname(leaf_host):
+        current_org = leaf_host[: -len(".visualstudio.com")]
+    elif len(current_parts) >= 2:
+        current_org = current_parts[1]
+    else:
+        current_org = ""
+
+    if parent_ref == "org":
+        resolved = (current_org, ADO_POLICY_PROJECT, "_apm", leaf_host)
+    else:
+        parts = parent_ref.strip("/").split("/")
+        explicit_host = _extract_extends_host(parent_ref)
+        if explicit_host is None and len(parts) == 2:
+            resolved = (current_org, parts[0], parts[1], leaf_host)
+        elif explicit_host and is_visualstudio_legacy_hostname(explicit_host) and len(parts) >= 3:
+            resolved = (
+                explicit_host[: -len(".visualstudio.com")],
+                parts[1],
+                "/".join(parts[2:]),
+                explicit_host,
+            )
+        elif explicit_host and is_azure_devops_hostname(explicit_host) and len(parts) >= 4:
+            resolved = (
+                parts[1],
+                parts[2],
+                "/".join(parts[3:]),
+                explicit_host,
+            )
+        else:
+            return None
+
+    return resolved if all(resolved[:3]) else None
+
+
+def _fetch_chain_parent(
+    parent_ref: str,
+    *,
+    current_source: str,
+    leaf_host: str | None,
+    project_root: Path,
+    no_cache: bool,
+) -> PolicyFetchResult:
+    """Fetch one parent without losing the leaf's host or backend.
+
+    GitHub-style ``owner/repo`` refs are qualified with a non-default leaf
+    host. On ADO, ``project/repo`` means a repo in the current ancestor's org,
+    while explicit refs use ``host/org/project/repo`` on ``dev.azure.com`` or
+    ``host/project/repo`` on legacy ``*.visualstudio.com`` hosts. URLs and
+    local-file refs continue through the public single-policy owner.
+    """
+    if parent_ref.startswith(("http://", "https://")) or Path(parent_ref).is_file():
+        return discover_policy(
+            project_root,
+            policy_override=parent_ref,
+            no_cache=no_cache,
+        )
+
+    if leaf_host and is_azure_devops_hostname(leaf_host):
+        resolved = _resolve_ado_parent_ref(parent_ref, current_source, leaf_host)
+        if resolved is None:
+            return PolicyFetchResult(
+                source=f"org:{parent_ref}",
+                error=f"Invalid Azure DevOps policy reference: {parent_ref}",
+                outcome="cache_miss_fetch_fail",
+            )
+        org, project, repo, host = resolved
+        return _fetch_from_ado_repo(
+            org=org,
+            project=project,
+            repo=repo,
+            host=host,
+            project_root=project_root,
+            no_cache=no_cache,
+        )
+
+    normalized_ref = parent_ref
+    if leaf_host and leaf_host != "github.com" and _extract_extends_host(parent_ref) is None:
+        if "/" in parent_ref:
+            normalized_ref = f"{leaf_host}/{parent_ref}"
+    return discover_policy(
+        project_root,
+        policy_override=normalized_ref,
+        no_cache=no_cache,
+    )
+
+
 def _resolve_and_persist_chain(
     fetch_result: PolicyFetchResult,
     project_root: Path,
+    *,
+    no_cache: bool = False,
 ) -> None:
     """Resolve inheritance chain and update cache with merged policy + chain_refs.
 
@@ -481,6 +575,7 @@ def _resolve_and_persist_chain(
 
     current = leaf_policy
     incomplete_chain: tuple[str, int, int] | None = None
+    stale_ancestor: PolicyFetchResult | None = None
 
     while current.extends:
         next_ref = current.extends
@@ -504,10 +599,12 @@ def _resolve_and_persist_chain(
                 f"(chain: {' -> '.join(visited)} -> {next_ref})"
             )
 
-        parent_result = discover_policy(
-            project_root,
-            policy_override=next_ref,
-            no_cache=False,
+        parent_result = _fetch_chain_parent(
+            next_ref,
+            current_source=chain_sources[-1],
+            leaf_host=leaf_host,
+            project_root=project_root,
+            no_cache=no_cache,
         )
         fetch_result.warnings.extend(parent_result.warnings)
 
@@ -517,6 +614,12 @@ def _resolve_and_persist_chain(
             resolved = len(chain_policies)
             incomplete_chain = (next_ref, resolved, attempted)
             break
+
+        # Keep the nearest stale ancestor's refresh diagnostic. Continue
+        # merging its usable cached policy, but never relabel that ancestry
+        # as fresh or replace a nearer failure with a farther one.
+        if parent_result.outcome == "cached_stale" and stale_ancestor is None:
+            stale_ancestor = parent_result
 
         chain_policies.append(parent_result.policy)
         chain_sources.append(parent_result.source)
@@ -549,12 +652,13 @@ def _resolve_and_persist_chain(
     chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
 
     cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
-    if cache_key and incomplete_chain is None:
+    if cache_key and incomplete_chain is None and stale_ancestor is None:
         _write_cache(
             cache_key,
             merged,
             project_root,
             chain_refs=chain_refs,
+            raw_bytes_hash=fetch_result.raw_bytes_hash,
             warnings=fetch_result.warnings,
         )
 
@@ -569,6 +673,14 @@ def _resolve_and_persist_chain(
         return
 
     fetch_result.policy = merged
+    if stale_ancestor is not None:
+        fetch_result.outcome = "cached_stale"
+        fetch_result.fetch_error = stale_ancestor.fetch_error or stale_ancestor.error
+        fetch_result.cached = True
+        fetch_result.cache_stale = True
+        fetch_result.cache_age_seconds = stale_ancestor.cache_age_seconds
+        return
+    fetch_result.outcome = "empty" if _is_policy_empty(merged) else "found"
 
 
 def discover_policy(
@@ -906,14 +1018,15 @@ def _fetch_from_url(
 
     chain_refs = [url]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        url,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-        warnings=warnings,
-    )
+    if policy.extends is None:
+        _write_cache(
+            url,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -988,14 +1101,15 @@ def _fetch_from_repo(
 
     chain_refs = [repo_ref]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        repo_ref,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-        warnings=warnings,
-    )
+    if policy.extends is None:
+        _write_cache(
+            repo_ref,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -1138,14 +1252,15 @@ def _fetch_from_ado_repo(
 
     chain_refs = [repo_ref]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        repo_ref,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-        warnings=warnings,
-    )
+    if policy.extends is None:
+        _write_cache(
+            repo_ref,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -1306,6 +1421,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
     return {
         "name": policy.name,
         "version": policy.version,
+        "extends": policy.extends,
         "enforcement": policy.enforcement,
         "fetch_failure": policy.fetch_failure,
         "cache": {"ttl": policy.cache.ttl},
@@ -1315,6 +1431,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "require": _opt_list(policy.dependencies.require),
             "require_resolution": policy.dependencies.require_resolution,
             "max_depth": policy.dependencies.max_depth,
+            "require_pinned_constraint": policy.dependencies.require_pinned_constraint,
         },
         "mcp": {
             "allow": _opt_list(policy.mcp.allow),
@@ -1339,11 +1456,43 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "required_fields": list(policy.manifest.required_fields),
             "scripts": policy.manifest.scripts,
             "content_types": policy.manifest.content_types,
+            "require_explicit_includes": policy.manifest.require_explicit_includes,
         },
         "unmanaged_files": {
             "action": policy.unmanaged_files.action,
-            "directories": list(policy.unmanaged_files.directories or ()),
-            "exclude": list(policy.unmanaged_files.exclude or ()),
+            "directories": _opt_list(policy.unmanaged_files.directories),
+            "exclude": _opt_list(policy.unmanaged_files.exclude),
+        },
+        "registry_source": {
+            "require": list(policy.registry_source.require),
+            "allow_non_registry": policy.registry_source.allow_non_registry,
+        },
+        "security": {
+            "audit": {
+                "on_install": policy.security.audit.on_install,
+                "external": _opt_list(policy.security.audit.external),
+                "scanners": None
+                if policy.security.audit.scanners is None
+                else {
+                    name: {"allow_args": governance.allow_args}
+                    for name, governance in policy.security.audit.scanners
+                },
+                "fail_on_drift": policy.security.audit.fail_on_drift,
+            },
+            "integrity": {
+                "require_hashes": policy.security.integrity.require_hashes,
+            },
+        },
+        "bin_deploy": {
+            "deny_all": policy.bin_deploy.deny_all,
+            "deny": list(policy.bin_deploy.deny),
+        },
+        "executables": {
+            "deny_all": policy.executables.deny_all,
+            "deny": list(policy.executables.deny),
+            "require": list(policy.executables.require),
+            "recommend": list(policy.executables.recommend),
+            "enforce": list(policy.executables.enforce),
         },
     }
 
@@ -1361,23 +1510,47 @@ def _policy_fingerprint(serialized: str) -> str:
 
 
 def _is_policy_empty(policy: ApmPolicy) -> bool:
-    """Return True if a policy has no actionable restrictions.
-
-    An 'empty' policy is syntactically valid but imposes no constraints
-    beyond the permissive defaults.
-    """
-    return (
-        not policy.dependencies.effective_deny
-        and policy.dependencies.allow is None
-        and not policy.dependencies.effective_require
-        and not policy.mcp.deny
-        and policy.mcp.allow is None
-        and policy.mcp.transport.allow is None
-        and policy.compilation.target.allow is None
-        and not policy.manifest.required_fields
-        and policy.manifest.scripts == "allow"
-        and policy.manifest.content_types is None
-        and policy.unmanaged_files.effective_action == "ignore"
+    """Return True only when the policy has no actionable restrictions."""
+    return not any(
+        (
+            policy.fetch_failure != "warn",
+            policy.dependencies.effective_deny,
+            policy.dependencies.allow is not None,
+            policy.dependencies.effective_require,
+            policy.dependencies.require_resolution != "project-wins",
+            policy.dependencies.max_depth != 50,
+            policy.dependencies.require_pinned_constraint,
+            policy.mcp.deny,
+            policy.mcp.allow is not None,
+            policy.mcp.transport.allow is not None,
+            policy.mcp.self_defined != "warn",
+            policy.mcp.trust_transitive,
+            policy.compilation.target.allow is not None,
+            policy.compilation.target.enforce is not None,
+            policy.compilation.strategy.enforce is not None,
+            policy.compilation.source_attribution,
+            policy.manifest.required_fields,
+            policy.manifest.scripts != "allow",
+            policy.manifest.content_types is not None,
+            policy.manifest.require_explicit_includes,
+            policy.unmanaged_files.effective_action != "ignore",
+            policy.unmanaged_files.directories is not None,
+            policy.unmanaged_files.exclude is not None,
+            policy.registry_source.require,
+            not policy.registry_source.allow_non_registry,
+            policy.security.audit.on_install is not None,
+            policy.security.audit.external is not None,
+            policy.security.audit.scanners is not None,
+            policy.security.audit.fail_on_drift,
+            policy.security.integrity.require_hashes,
+            policy.bin_deploy.deny_all,
+            policy.bin_deploy.deny,
+            policy.executables.deny_all,
+            policy.executables.deny,
+            policy.executables.require,
+            policy.executables.recommend,
+            policy.executables.enforce,
+        )
     )
 
 

@@ -33,6 +33,19 @@ if TYPE_CHECKING:  # pragma: no cover - type-checking only
     from apm_cli.policy.schema import ApmPolicy
 
 
+# Genuine resolution failures with no policy usable by approval fallback.
+POLICY_HASH_MISMATCH_OUTCOME = "hash_mismatch"
+POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
+    {
+        "cache_miss_fetch_fail",
+        "garbage_response",
+        POLICY_HASH_MISMATCH_OUTCOME,
+        "incomplete_chain",
+        "malformed",
+    }
+)
+
+
 # Outcomes that honour the project-side ``policy.fetch_failure_default``
 # knob.  Despite the historical name "fetch failure", this set ALSO
 # includes the no-policy outcomes ``no_git_remote`` / ``absent`` /

@@ -826,6 +826,9 @@ both `repo_url` and `resolved_commit` for every git-sourced
 dependency entry. For every registry-sourced dependency entry the
 consumer MUST instead record `resolved_url` and `resolved_hash`
 (in addition to `repo_url`, which carries package identity).
+When the manifest reference is a full 40-character commit SHA, a
+conformance audit MUST treat a different lockfile `resolved_commit` as
+a consistency failure.
 
 <a id="req-lk-011"></a>
 **[req-lk-011]** A conforming **consumer** implementation MUST omit
@@ -912,6 +915,10 @@ consumer cannot determine which target governs a prior path, the
 consumer MUST preserve that path and its corresponding hash entry
 rather than remove it solely because it was not written by the current
 install.
+During orphan cleanup, the consumer MUST preserve any path freshly
+deployed by an active dependency in the current install, even when the
+same path is also recorded by a prior lockfile entry under a different
+dependency identity.
 
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit
@@ -3036,6 +3043,7 @@ renumbering of conformance classes.
 | 0.1.10  | 2026-07-04 | Spec-citation fold for Antigravity native instruction rules (closes the #1984 Mode-B silent-extension gate). Added [req-tg-005] (Section 8.5, consumer MUST): Antigravity instruction rules are deployed under `.agents/rules/<name>.md`, `applyTo` is rendered as `trigger: glob` plus `globs` (scalar or sequence), and compile-time deduplication only treats expected Antigravity rule filenames as deployed rules so unrelated `.md` files cannot suppress `AGENTS.md` content. Added `antigravity` to the Section 4.2.1 canonical target set and clarified that `all` excludes explicit-only targets. Statement count: 96 -> 97 (92 MUST, 5 SHOULD). |
 | 0.1.11  | 2026-07-09 | Spec-guardian editorial+defensive fold on the Antigravity instruction-rule contract (no new normative statements; statement count remains 97 (92 MUST, 5 SHOULD)). Section 4.2.1: defined the **auto-detectable** vs **explicit-only** target taxonomy deterministically (a target is auto-detectable when the OpenAPM Target Registry publishes at least one detection predicate) and rewrote the `all` expansion to key off it, naming `agent-skills` and `antigravity` as the v0.1 explicit-only set (with a Section 8.4 cross-reference). [req-tg-001] extended: a target registered without a detection predicate MUST NOT be auto-detected and MUST be excluded from `all`, generalising the prior `agent-skills`-only clause to cover `antigravity`. [req-tg-005] extended: pinned a canonical `globs` representation (YAML scalar for exactly one glob, YAML block sequence for two or more, no frontmatter block when `applyTo` is absent) so deployed-file content hashes are reproducible across implementations; redefined the deduplication scope from "expected Antigravity rule filenames" to filenames derived from the currently-resolved instruction primitives recorded in `apm.lock.yaml` and the manifest, closing a fail-open interpretation where an unrelated `.agents/rules/*.md` file could suppress `AGENTS.md` content; lowercased the `antigravity` identifier and added an editorial note scoping the normative citation of the concrete deploy path. [req-tg-002] subdirectory-partition list updated to include `.agents/rules/`. No normative count change. |
 | 0.1.12  | 2026-07-10 | Spec-citation fold for inactive-target lockfile reconciliation. Added [req-lk-020] (Section 5.2, consumer MUST): a non-frozen rewrite with a declared target set preserves paths attributable to current, another declared, or implementation-recognized targets that activate outside the manifest; removes prior paths attributable to none of them; applies the same decision to per-entry and top-level deployed-file lists and hash maps; and preserves prior paths when no target set is declared or attribution is indeterminate. Statement count: 97 -> 98 (93 MUST, 5 SHOULD). |
+| 0.1.13  | 2026-07-14 | Defensive clarification of existing lockfile requirements (no new normative statements; statement count remains 98 (93 MUST, 5 SHOULD)). [req-lk-003] now requires a conformance audit to reject disagreement between a full-SHA manifest pin and `resolved_commit`. [req-lk-020] now preserves paths freshly deployed by an active dependency when orphan cleanup encounters the same path under a prior dependency identity. |
 
 Errata (none at publication).
 

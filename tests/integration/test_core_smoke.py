@@ -47,6 +47,7 @@ from pathlib import Path
 import pytest
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.requires_e2e_mode,
     pytest.mark.requires_apm_binary,
 ]

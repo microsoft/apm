@@ -146,6 +146,21 @@ class DeploymentReconciler:
         self.diagnostics = diagnostics
 
     @staticmethod
+    def current_claimed_paths(
+        current_claims: Mapping[str, Iterable[str]],
+    ) -> frozenset[str]:
+        """Return paths claimed after canonical last-writer handoff."""
+        claims = DeploymentReconciler.reconcile_package_claims(
+            package_keys=current_claims,
+            current_claims=current_claims,
+            prior_files={},
+            prior_hashes={},
+        )
+        return frozenset(
+            path for package_claims in claims.values() for path in package_claims.current_files
+        )
+
+    @staticmethod
     def reconcile_package_claims(
         *,
         package_keys: Iterable[str],

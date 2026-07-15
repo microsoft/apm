@@ -1,0 +1,41 @@
+schema_version = 1
+
+[[modules]]
+path = "tests/unit/core/test_install_audit.py"
+marker = "unit"
+
+[[modules]]
+path = "tests/unit/deps/test_lockfile_git_semver.py"
+marker = "unit"
+
+[[modules]]
+path = "tests/unit/deps/test_lockfile_consumer_contract.py"
+marker = "unit"
+
+[[modules]]
+path = "tests/integration/test_install_content_hash_roundtrip.py"
+marker = "component"
+
+[[modules]]
+path = "tests/integration/test_policy_pinned_constraint_e2e.py"
+marker = "component"
+
+[[modules]]
+path = "tests/integration/test_core_smoke.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_produce_consume_contract.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_materialization_matrix_contract.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_real_consume_contracts.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_consume_source_ref_cache_matrix.py"
+marker = "e2e"

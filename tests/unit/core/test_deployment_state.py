@@ -134,6 +134,21 @@ def test_legacy_package_claims_share_one_handoff_decision() -> None:
     assert claims["winner"].current_files == (shared,)
 
 
+def test_current_claimed_paths_come_from_canonical_handoff() -> None:
+    """Cleanup protection must consume the canonical current-claim owner."""
+    shared = ".claude/skills/shared/SKILL.md"
+    unique = ".claude/skills/loser-only/SKILL.md"
+
+    claimed = DeploymentReconciler.current_claimed_paths(
+        {
+            "loser": [shared, unique],
+            "winner": [shared],
+        }
+    )
+
+    assert claimed == frozenset({shared, unique})
+
+
 def test_last_successful_writer_is_active_and_order_is_deterministic(tmp_path: Path) -> None:
     locator = _locator()
     results = [
@@ -354,6 +369,97 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
 
     assert rebuilt.deployment_ledger == ledger
     assert rebuilt.is_semantically_equivalent(lockfile)
+
+
+def test_local_bundle_provenance_round_trips_beside_authored_local_files() -> None:
+    authored = ".github/instructions/authored.instructions.md"
+    bundled = ".agents/skills/bundled/SKILL.md"
+    lockfile = LockFile()
+    lockfile.local_deployed_files = [authored]
+    lockfile.local_deployed_file_hashes = {authored: "sha256:authored"}
+
+    DeploymentLedgerCodec.record_local_bundle_files(
+        lockfile,
+        [bundled],
+        {bundled: f"sha256:{'b' * 64}"},
+    )
+    rebuilt = LockFile.from_yaml(lockfile.to_yaml())
+
+    assert rebuilt.local_deployed_files == [bundled, authored]
+    assert rebuilt.local_deployed_file_hashes == {
+        bundled: f"sha256:{'b' * 64}",
+        authored: "sha256:authored",
+    }
+    assert DeploymentLedgerCodec.local_bundle_paths(rebuilt) == frozenset({bundled})
+    records = {
+        record.locator.value: record for record in rebuilt.deployment_ledger.records.values()
+    }
+    assert records[bundled].owners == (".", "local-bundle")
+    assert records[bundled].active_owner == "local-bundle"
+    assert records[authored].owners == (".",)
+    assert records[authored].active_owner == "."
+
+
+def test_local_bundle_provenance_survives_canonical_ledger_rebuilds() -> None:
+    bundled = ".agents/skills/bundled/SKILL.md"
+    sibling = ".agents/skills/sibling/SKILL.md"
+    renamed = ".agents/skills/renamed/SKILL.md"
+    lockfile = LockFile()
+    DeploymentLedgerCodec.record_local_bundle_files(
+        lockfile,
+        [bundled, sibling],
+        {
+            bundled: f"sha256:{'a' * 64}",
+            sibling: f"sha256:{'c' * 64}",
+        },
+    )
+
+    dependency = LockedDependency(
+        repo_url="owner/package",
+        deployed_files=[".github/agents/demo.agent.md"],
+        deployed_file_hashes={".github/agents/demo.agent.md": f"sha256:{'b' * 64}"},
+    )
+    lockfile.add_dependency(dependency)
+    DeploymentLedgerCodec.replace_mcp_target_servers(lockfile, {"vscode": ["demo"]})
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        dependency.get_unique_key(),
+        dependency.deployed_files,
+        dependency.deployed_file_hashes,
+    )
+    DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+
+    assert DeploymentLedgerCodec.local_bundle_paths(lockfile) == frozenset({bundled, sibling})
+
+    lockfile.rename_local_deployed_path(bundled, renamed)
+
+    assert DeploymentLedgerCodec.local_bundle_paths(lockfile) == frozenset({renamed, sibling})
+    rebuilt = LockFile.from_yaml(lockfile.to_yaml())
+    assert DeploymentLedgerCodec.local_bundle_paths(rebuilt) == frozenset({renamed, sibling})
+
+
+def test_local_bundle_provenance_rejects_missing_or_malformed_hashes() -> None:
+    bundled = ".agents/skills/bundled/SKILL.md"
+    lockfile = LockFile()
+
+    with pytest.raises(ValueError, match="requires a canonical sha256"):
+        DeploymentLedgerCodec.record_local_bundle_files(lockfile, [bundled], {})
+
+    locator = _locator(bundled, target="agents")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            locator.key: DeploymentRecord(
+                locator=locator,
+                owners=(".", "local-bundle"),
+                active_owner="local-bundle",
+                content_hash=None,
+            )
+        }
+    )
+    lockfile._deployments_present = True
+
+    with pytest.raises(ValueError, match="requires a canonical sha256"):
+        DeploymentLedgerCodec.local_bundle_paths(lockfile)
 
 
 def test_from_rows_preserves_hashless_legacy_ownership_row() -> None:

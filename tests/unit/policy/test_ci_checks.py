@@ -168,6 +168,35 @@ class TestRefConsistency:
         assert not result.passed
         assert any("v2.0.0" in d and "v1.0.0" in d for d in result.details)
 
+    def test_fail_full_revision_pin_resolved_commit_mismatch(self, tmp_path):
+        manifest_commit = "a" * 40
+        _write_apm_yml(tmp_path, deps=[f"owner/repo#{manifest_commit}"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    resolved_ref: {manifest_commit}
+                    resolved_commit: {"b" * 40}
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_ref_consistency(manifest, lock)
+
+        assert not result.passed
+        assert "run 'apm install --update'" in result.message
+        assert result.details == [
+            "owner/repo: manifest commit "
+            f"'{manifest_commit}' != lockfile resolved_commit '{'b' * 40}'"
+        ]
+
     def test_fail_dep_not_in_lockfile(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo"])
         _write_lockfile(

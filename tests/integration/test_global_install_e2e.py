@@ -13,10 +13,8 @@ Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
 import os
-import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 import yaml
@@ -25,18 +23,6 @@ pytestmark = pytest.mark.requires_github_token
 
 
 SAMPLE_PKG = "microsoft/apm-sample-package"
-
-
-@pytest.fixture
-def apm_command():
-    """Resolve the apm CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 @pytest.fixture
@@ -55,9 +41,9 @@ def _env_with_home(fake_home):
     return env
 
 
-def _run_apm(apm_command, args, cwd, fake_home, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=180):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -117,13 +103,13 @@ class TestGlobalInstallDeploysRealPackage:
     """Verify `apm install -g` actually deploys primitive files under ~/.apm/."""
 
     def test_install_global_deploys_real_package_to_user_scope(
-        self, apm_command, fake_home, tmp_path
+        self, apm_binary_path, fake_home, tmp_path
     ):
         _write_user_manifest(fake_home, [SAMPLE_PKG])
         work_dir = tmp_path / "workdir"
         work_dir.mkdir()
 
-        result = _run_apm(apm_command, ["install", "-g"], work_dir, fake_home)
+        result = _run_apm(apm_binary_path, ["install", "-g"], work_dir, fake_home)
         assert result.returncode == 0, (
             f"global install failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )
@@ -146,12 +132,12 @@ class TestGlobalInstallDeploysRealPackage:
         assert not (work_dir / "apm.lock.yaml").exists(), "lockfile leaked into cwd"
         assert not (work_dir / "apm_modules").exists(), "apm_modules leaked into cwd"
 
-    def test_uninstall_global_removes_deployed_files(self, apm_command, fake_home, tmp_path):
+    def test_uninstall_global_removes_deployed_files(self, apm_binary_path, fake_home, tmp_path):
         _write_user_manifest(fake_home, [SAMPLE_PKG])
         work_dir = tmp_path / "workdir"
         work_dir.mkdir()
 
-        install_result = _run_apm(apm_command, ["install", "-g"], work_dir, fake_home)
+        install_result = _run_apm(apm_binary_path, ["install", "-g"], work_dir, fake_home)
         assert install_result.returncode == 0, (
             f"setup install failed:\nSTDOUT: {install_result.stdout}\n"
             f"STDERR: {install_result.stderr}"
@@ -165,7 +151,7 @@ class TestGlobalInstallDeploysRealPackage:
             pytest.skip("Sample package deployed no files; nothing to verify removal of")
 
         uninstall_result = _run_apm(
-            apm_command,
+            apm_binary_path,
             ["uninstall", SAMPLE_PKG, "-g"],
             work_dir,
             fake_home,
@@ -196,13 +182,13 @@ class TestGlobalInstallDeploysRealPackage:
             )
 
     def test_install_global_then_project_install_does_not_collide(
-        self, apm_command, fake_home, tmp_path
+        self, apm_binary_path, fake_home, tmp_path
     ):
         # Install globally first.
         _write_user_manifest(fake_home, [SAMPLE_PKG])
         global_workdir = tmp_path / "global-workdir"
         global_workdir.mkdir()
-        global_result = _run_apm(apm_command, ["install", "-g"], global_workdir, fake_home)
+        global_result = _run_apm(apm_binary_path, ["install", "-g"], global_workdir, fake_home)
         assert global_result.returncode == 0, (
             f"global install failed:\nSTDOUT: {global_result.stdout}\n"
             f"STDERR: {global_result.stderr}"
@@ -229,7 +215,7 @@ class TestGlobalInstallDeploysRealPackage:
             encoding="utf-8",
         )
 
-        local_result = _run_apm(apm_command, ["install"], project_dir, fake_home)
+        local_result = _run_apm(apm_binary_path, ["install"], project_dir, fake_home)
         assert local_result.returncode == 0, (
             f"project install failed:\nSTDOUT: {local_result.stdout}\nSTDERR: {local_result.stderr}"
         )

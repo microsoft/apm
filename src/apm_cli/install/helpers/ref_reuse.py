@@ -1,4 +1,4 @@
-"""Run-scoped RefResolver reuse for semver resolution.
+"""Run-scoped Git reference resolution helpers.
 
 Extracted from :mod:`apm_cli.install.phases.resolve` to keep that phase
 module within its LOC budget (see
@@ -12,7 +12,11 @@ once per repo instead of once per dep.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.models.dependency.reference import DependencyReference
 
 
 def _token_fingerprint(token: str | None) -> str | None:
@@ -117,3 +121,25 @@ def get_shared_ref_resolver(
         resolver = RefResolver(**resolver_kwargs)
         cache[key] = resolver
     return resolver
+
+
+def annotate_update_plan_refs(
+    deps_to_install: list[DependencyReference],
+    downloader: GitHubPackageDownloader,
+    *,
+    update_refs: bool,
+) -> list[DependencyReference]:
+    """Resolve Git refs needed by the update plan through the downloader owner."""
+    if not update_refs:
+        return deps_to_install
+    for dep_ref in deps_to_install:
+        if (
+            getattr(dep_ref, "resolved_reference", None) is not None
+            or dep_ref.is_local
+            or getattr(dep_ref, "source", None) == "registry"
+            or getattr(dep_ref, "artifactory_prefix", None)
+        ):
+            continue
+        resolved = downloader.resolve_git_reference(dep_ref)
+        dep_ref.resolved_reference = resolved
+    return deps_to_install

@@ -1,0 +1,66 @@
+{
+  "algorithm": "sha256-bytes-v1",
+  "duplicate_groups": [
+    {
+      "paths": [
+        "tests/integration/test_deps_resolver_phase3b.py",
+        "tests/integration/test_deps_resolver_resolution.py"
+      ],
+      "sha256": "228e15b22951f92a6b91f278be05b58775b4f0b3671060259719f15ce0f70726"
+    },
+    {
+      "paths": [
+        "tests/unit/test_output_formatters_phase3.py",
+        "tests/unit/test_output_formatters_rendering.py"
+      ],
+      "sha256": "403ac8e70abd0546fcf212de19c77c6d451b351ffd00ddc98fb77469372a2ea7"
+    },
+    {
+      "paths": [
+        "tests/integration/test_mcp_integrator_characterisation.py",
+        "tests/integration/test_mcp_integrator_phase3w5.py"
+      ],
+      "sha256": "608d378e361fa7b91b5ae307cefbc36d30c77a7a43394860bed518416c760d5a"
+    },
+    {
+      "paths": [
+        "tests/integration/test_commands_mcp_flow.py",
+        "tests/integration/test_commands_mcp_phase3c.py"
+      ],
+      "sha256": "90abcd6c6ac4d79f1bfce4a236cb1ab74346089401ee891921cfafa389a2cf45"
+    },
+    {
+      "paths": [
+        "tests/integration/test_uninstall_policy_pack_flow.py",
+        "tests/integration/test_uninstall_policy_pack_phase3.py"
+      ],
+      "sha256": "a80fc52b42decf8ae8dcf3b78a45b1cc0c9f6e554eb0c9848b8e6dcd58d1dc1c"
+    },
+    {
+      "paths": [
+        "tests/integration/test_command_integrator_hermetic.py",
+        "tests/integration/test_command_integrator_phase3w5.py"
+      ],
+      "sha256": "b9917ef5c16f8d2e3587fe635baca0dd08ce56bbc6914c5ef2917443f69600a3"
+    },
+    {
+      "paths": [
+        "tests/integration/test_yml_schema_phase3w5.py",
+        "tests/integration/test_yml_schema_validation.py"
+      ],
+      "sha256": "dedfae8f8c7d10355d2042afe89a55190a3a0a22eafdb4d30d7d3e2d9a437e22"
+    },
+    {
+      "paths": [
+        "tests/integration/test_validation_phase3w5.py",
+        "tests/integration/test_validation_rules.py"
+      ],
+      "sha256": "f85beaf48104869412c0189e7f0eef9cf6c2eb368b9efb198e94bc05f75dda24"
+    }
+  ],
+  "schema_version": 1,
+  "scope": [
+    "tests/**/test_*.py",
+    "tests/**/*_test.py"
+  ]
+}

@@ -41,6 +41,31 @@ def test_windows_installer_e2e_covers_bare_subprocess_resolution() -> None:
     assert "Stable executable directory precedes command shim directory in user PATH" in test_script
 
 
+def test_windows_installer_e2e_covers_missing_stable_executable_negative_twin() -> None:
+    """The native-process proof must fail when only the cmd shim remains."""
+    test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(encoding="utf-8")
+
+    helper_name = "Assert-MissingStableExecutableFailsForNativeProcess"
+    assert f"function {helper_name}" in test_script
+
+    helper_start = test_script.index(f"function {helper_name}")
+    helper_end = test_script.index(
+        "# ---------------------------------------------------------------------------",
+        helper_start,
+    )
+    helper = test_script[helper_start:helper_end]
+    assert 'Join-Path $BinDir "apm.cmd"' in helper
+    assert '["apm", "--version"],' in helper
+    assert 'cwd=os.environ["APM_LAUNCH_TEST_CWD"]' in helper
+    assert "except FileNotFoundError:" in helper
+    assert '$env:Path = "$CurrentDir;$BinDir"' in helper
+    assert 'throw "Python subprocess unexpectedly resolved' in helper
+
+    e2e_start = test_script.index("function Test-EndToEndInstall")
+    e2e_end = test_script.index("function Test-NonJunctionCollision")
+    assert helper_name in test_script[e2e_start:e2e_end]
+
+
 def test_windows_installer_e2e_covers_non_junction_collision() -> None:
     """The Windows release gate must prove collision failures preserve data."""
     test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(encoding="utf-8")

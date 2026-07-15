@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, patch  # noqa: F401
@@ -195,9 +194,9 @@ def mock_ref_resolver():
 
     Usage in tests::
 
-        def test_something(mkt_repo_root, mock_ref_resolver):
+        def test_something(mkt_repo_root, mock_ref_resolver, apm_binary_path):
             # mock_ref_resolver.list_remote_refs is already patched
-            result = run_cli(["marketplace", "build"], cwd=mkt_repo_root)
+            result = run_cli(apm_binary_path, ["marketplace", "build"], cwd=mkt_repo_root)
             assert result.returncode == 0
     """
     with patch(
@@ -282,12 +281,13 @@ def live_marketplace_repo() -> str:
 
 
 def run_cli(
+    apm_binary_path: Path,
     args: list[str],
     cwd: Path | None = None,
     env: dict | None = None,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess:
-    """Invoke ``uv run apm <args>`` via subprocess.
+    """Invoke the canonical integration APM executable via subprocess.
 
     The subprocess inherits a curated env containing PATH and HOME.
     Additional env vars can be passed via *env*; they are merged on top.
@@ -328,24 +328,11 @@ def run_cli(
     if env:
         base_env.update(env)
 
-    cmd = [sys.executable, "-m", "uv", "run", "apm"] + args  # noqa: RUF005
-    # Prefer the project-local uv wrapper if available
-    uv_bin = _project_uv_bin()
-    if uv_bin:
-        cmd = [uv_bin, "run", "apm"] + args  # noqa: RUF005
-
     return subprocess.run(
-        cmd,
+        [str(apm_binary_path), *args],
         cwd=str(cwd) if cwd else str(_PROJECT_ROOT),
         capture_output=True,
         text=True,
         timeout=timeout,
         env=base_env,
     )
-
-
-def _project_uv_bin() -> str | None:
-    """Return path to uv if it is on PATH, else None."""
-    import shutil
-
-    return shutil.which("uv")

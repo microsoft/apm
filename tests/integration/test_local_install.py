@@ -5,11 +5,9 @@ These tests create real file structures and invoke CLI commands via subprocess.
 """
 
 import os  # noqa: F401
-import shutil
 import subprocess
 import sys  # noqa: F401
 import tempfile  # noqa: F401
-from pathlib import Path
 
 import pytest
 import yaml
@@ -19,18 +17,6 @@ pytestmark = pytest.mark.requires_apm_binary
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 @pytest.fixture
@@ -124,11 +110,11 @@ def temp_workspace(tmp_path):
 class TestLocalInstall:
     """Test `apm install ./local/path` workflow."""
 
-    def test_install_local_package_relative_path(self, temp_workspace, apm_command):
+    def test_install_local_package_relative_path(self, temp_workspace, apm_binary_path):
         """Install a local package using a relative path."""
         consumer = temp_workspace / "consumer"
         result = subprocess.run(
-            [apm_command, "install", "../packages/local-skills"],
+            [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -157,12 +143,12 @@ class TestLocalInstall:
         # Local deps have source: local
         assert any(d.get("source") == "local" for d in deps), f"No local source in lockfile: {deps}"
 
-    def test_install_local_package_absolute_path(self, temp_workspace, apm_command):
+    def test_install_local_package_absolute_path(self, temp_workspace, apm_binary_path):
         """Install a local package using an absolute path."""
         consumer = temp_workspace / "consumer"
         abs_path = str(temp_workspace / "packages" / "local-skills")
         result = subprocess.run(
-            [apm_command, "install", abs_path],
+            [apm_binary_path, "install", abs_path],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -176,11 +162,11 @@ class TestLocalInstall:
         apm_deps = data.get("dependencies", {}).get("apm", [])
         assert abs_path in apm_deps
 
-    def test_install_local_deploys_instructions(self, temp_workspace, apm_command):
+    def test_install_local_deploys_instructions(self, temp_workspace, apm_binary_path):
         """Verify that instructions from a local package are deployed to .github/instructions/."""
         consumer = temp_workspace / "consumer"
         result = subprocess.run(
-            [apm_command, "install", "../packages/local-skills"],
+            [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -195,11 +181,11 @@ class TestLocalInstall:
             f"Instructions not deployed. Files in .github/: {all_files}\nstdout: {result.stdout}"
         )
 
-    def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_command):
+    def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_binary_path):
         """Installing a path with no apm.yml or SKILL.md should fail gracefully."""
         consumer = temp_workspace / "consumer"
         result = subprocess.run(
-            [apm_command, "install", "../packages/no-manifest"],
+            [apm_binary_path, "install", "../packages/no-manifest"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -214,11 +200,11 @@ class TestLocalInstall:
             or "failed validation" in combined.lower()
         ), f"Expected failure message. stdout: {result.stdout}, stderr: {result.stderr}"
 
-    def test_install_nonexistent_local_path_fails(self, temp_workspace, apm_command):
+    def test_install_nonexistent_local_path_fails(self, temp_workspace, apm_binary_path):
         """Installing a non-existent path should fail."""
         consumer = temp_workspace / "consumer"
         result = subprocess.run(
-            [apm_command, "install", "./does-not-exist"],
+            [apm_binary_path, "install", "./does-not-exist"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -232,7 +218,7 @@ class TestLocalInstall:
             or "failed validation" in combined.lower()
         )
 
-    def test_install_local_from_apm_yml(self, temp_workspace, apm_command):
+    def test_install_local_from_apm_yml(self, temp_workspace, apm_binary_path):
         """Install local deps declared in apm.yml (bare `apm install`)."""
         consumer = temp_workspace / "consumer"
 
@@ -250,7 +236,7 @@ class TestLocalInstall:
         )
 
         result = subprocess.run(
-            [apm_command, "install"],
+            [apm_binary_path, "install"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -262,13 +248,13 @@ class TestLocalInstall:
         install_dir = consumer / "apm_modules" / "_local" / "local-skills"
         assert install_dir.exists()
 
-    def test_reinstall_copies_fresh(self, temp_workspace, apm_command):
+    def test_reinstall_copies_fresh(self, temp_workspace, apm_binary_path):
         """Re-running `apm install` on local deps should re-copy (no SHA to cache)."""
         consumer = temp_workspace / "consumer"
 
         # First install
         subprocess.run(
-            [apm_command, "install", "../packages/local-skills"],
+            [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -290,7 +276,7 @@ class TestLocalInstall:
 
         # Re-install
         result = subprocess.run(
-            [apm_command, "install"],
+            [apm_binary_path, "install"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -314,13 +300,13 @@ class TestLocalInstall:
 class TestLocalUninstall:
     """Test `apm uninstall ./local/path` workflow."""
 
-    def test_uninstall_local_package(self, temp_workspace, apm_command):
+    def test_uninstall_local_package(self, temp_workspace, apm_binary_path):
         """Uninstall a previously installed local package."""
         consumer = temp_workspace / "consumer"
 
         # Install first
         subprocess.run(
-            [apm_command, "install", "../packages/local-skills"],
+            [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -332,7 +318,7 @@ class TestLocalUninstall:
 
         # Uninstall
         result = subprocess.run(
-            [apm_command, "uninstall", "../packages/local-skills"],
+            [apm_binary_path, "uninstall", "../packages/local-skills"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -353,13 +339,13 @@ class TestLocalUninstall:
 class TestLocalDeps:
     """Test `apm deps` with local dependencies."""
 
-    def test_deps_shows_local_packages(self, temp_workspace, apm_command):
+    def test_deps_shows_local_packages(self, temp_workspace, apm_binary_path):
         """The `apm deps list` command should list local dependencies."""
         consumer = temp_workspace / "consumer"
 
         # Install a local package
         subprocess.run(
-            [apm_command, "install", "../packages/local-skills"],
+            [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -367,7 +353,7 @@ class TestLocalDeps:
         )
 
         result = subprocess.run(
-            [apm_command, "deps", "list"],
+            [apm_binary_path, "deps", "list"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -384,7 +370,7 @@ class TestLocalDeps:
 class TestLocalPackMixed:
     """Test that `apm pack` rejects local deps."""
 
-    def test_pack_rejects_with_local_deps(self, temp_workspace, apm_command):
+    def test_pack_rejects_with_local_deps(self, temp_workspace, apm_binary_path):
         """apm pack should refuse when apm.yml has local deps."""
         consumer = temp_workspace / "consumer"
 
@@ -416,7 +402,7 @@ class TestLocalPackMixed:
         _lock.write(consumer / "apm.lock.yaml")
 
         result = subprocess.run(
-            [apm_command, "pack"],
+            [apm_binary_path, "pack"],
             cwd=consumer,
             capture_output=True,
             text=True,
@@ -461,7 +447,7 @@ class TestRootProjectPrimitives:
         (project / ".claude" / "rules").mkdir(parents=True)
         return project
 
-    def test_root_apm_primitives_deployed_with_no_deps(self, tmp_path, apm_command):
+    def test_root_apm_primitives_deployed_with_no_deps(self, tmp_path, apm_binary_path):
         """root apm.yml with no deps + root .apm/ -> rules deployed.
 
         Before the fix, apm install returned early with nothing to install
@@ -470,7 +456,7 @@ class TestRootProjectPrimitives:
         project = self._make_project(tmp_path)
 
         result = subprocess.run(
-            [apm_command, "install"],
+            [apm_binary_path, "install"],
             cwd=project,
             capture_output=True,
             text=True,
@@ -485,7 +471,7 @@ class TestRootProjectPrimitives:
         )
         assert "Local Rules" in deployed.read_text()
 
-    def test_root_apm_primitives_deployed_alongside_external_dep(self, tmp_path, apm_command):
+    def test_root_apm_primitives_deployed_alongside_external_dep(self, tmp_path, apm_binary_path):
         """root apm.yml with external dep + root .apm/ -> both rule sets deployed.
 
         This is the exact scenario from #714: external dependencies in apm.yml
@@ -511,7 +497,7 @@ class TestRootProjectPrimitives:
         project = self._make_project(tmp_path, apm_deps=["../ext-pkg"])
 
         result = subprocess.run(
-            [apm_command, "install"],
+            [apm_binary_path, "install"],
             cwd=project,
             capture_output=True,
             text=True,
@@ -528,7 +514,7 @@ class TestRootProjectPrimitives:
             f"External dep rule NOT deployed. Files: {deployed_names}\nOutput:\n{combined}"
         )
 
-    def test_workaround_sub_package_still_works(self, tmp_path, apm_command):
+    def test_workaround_sub_package_still_works(self, tmp_path, apm_binary_path):
         """Old ./agent/apm.yml workaround continues to work (regression guard)."""
         project = tmp_path / "project"
         project.mkdir()
@@ -561,7 +547,7 @@ class TestRootProjectPrimitives:
         (project / ".claude" / "rules").mkdir(parents=True)
 
         result = subprocess.run(
-            [apm_command, "install"],
+            [apm_binary_path, "install"],
             cwd=project,
             capture_output=True,
             text=True,
@@ -573,13 +559,13 @@ class TestRootProjectPrimitives:
             f"Sub-package rules NOT deployed.\nOutput:\n{combined}"
         )
 
-    def test_root_apm_primitives_idempotent(self, tmp_path, apm_command):
+    def test_root_apm_primitives_idempotent(self, tmp_path, apm_binary_path):
         """Running apm install twice with root .apm/ is idempotent."""
         project = self._make_project(tmp_path)
 
         for run in range(2):
             result = subprocess.run(
-                [apm_command, "install"],
+                [apm_binary_path, "install"],
                 cwd=project,
                 capture_output=True,
                 text=True,
@@ -589,7 +575,7 @@ class TestRootProjectPrimitives:
 
         assert (project / ".claude" / "rules" / "local-rules.md").exists()
 
-    def test_root_apm_hooks_deployed(self, tmp_path, apm_command):
+    def test_root_apm_hooks_deployed(self, tmp_path, apm_binary_path):
         """root .apm/hooks/ is detected and integrated (not just instructions).
 
         Guards the _ROOT_PRIM_SUBDIRS list: a project that only has .apm/hooks/
@@ -617,7 +603,7 @@ class TestRootProjectPrimitives:
         (project / ".claude").mkdir(parents=True)
 
         result = subprocess.run(
-            [apm_command, "install"],
+            [apm_binary_path, "install"],
             cwd=project,
             capture_output=True,
             text=True,
@@ -632,7 +618,7 @@ class TestRootProjectPrimitives:
             f"have triggered early return.\nOutput:\n{combined}"
         )
 
-    def test_root_skill_md_detected(self, tmp_path, apm_command):
+    def test_root_skill_md_detected(self, tmp_path, apm_binary_path):
         """A root SKILL.md alone triggers the integration path.
 
         Guards the (project_root / "SKILL.md").exists() branch in the
@@ -655,7 +641,7 @@ class TestRootProjectPrimitives:
         (project / ".claude").mkdir(parents=True)
 
         result = subprocess.run(
-            [apm_command, "install"],
+            [apm_binary_path, "install"],
             cwd=project,
             capture_output=True,
             text=True,
@@ -672,13 +658,13 @@ class TestRootProjectPrimitives:
 class TestLocalMixedWithRemote:
     """Test mixing local and remote dependencies."""
 
-    def test_install_local_alongside_remote_in_apm_yml(self, temp_workspace, apm_command):
+    def test_install_local_alongside_remote_in_apm_yml(self, temp_workspace, apm_binary_path):
         """Both local and remote deps in apm.yml should install correctly."""
         consumer = temp_workspace / "consumer"
 
         # First install local
         result = subprocess.run(
-            [apm_command, "install", "../packages/local-skills"],
+            [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
             capture_output=True,
             text=True,

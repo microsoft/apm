@@ -20,16 +20,12 @@ full code path, not just the formatter unit.
 from __future__ import annotations
 
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from apm_cli.compilation.constitution import clear_constitution_cache
-
-CLI = [sys.executable, "-m", "apm_cli.cli"]
-
 
 # ---------------------------------------------------------------------------
 # Module-level cache isolation
@@ -68,9 +64,9 @@ INSTRUCTION_BODY = (
 )
 
 
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        CLI + list(args),
+        [str(apm_binary_path), *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -90,14 +86,16 @@ def project_with_instruction():
 
 
 @pytest.mark.integration
-def test_install_then_compile_skips_duplicated_instructions(project_with_instruction):
+def test_install_then_compile_skips_duplicated_instructions(
+    project_with_instruction, apm_binary_path: Path
+):
     """After install populates .claude/rules/, compile must drop the
     instructions section from CLAUDE.md. Pre-PR-#1146 the section was
     duplicated into both files on every compile.
     """
     proj = project_with_instruction
 
-    install_res = _run(proj, "install", "--target", "claude")
+    install_res = _run(apm_binary_path, proj, "install", "--target", "claude")
     assert install_res.returncode == 0, (
         f"install stdout:\n{install_res.stdout}\ninstall stderr:\n{install_res.stderr}"
     )
@@ -109,7 +107,7 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
     rule_files = sorted(rules_dir.glob("*.md"))
     assert rule_files, "install must emit at least one *.md rule file"
 
-    compile_res = _run(proj, "compile", "--target", "claude")
+    compile_res = _run(apm_binary_path, proj, "compile", "--target", "claude")
     assert compile_res.returncode == 0, (
         f"compile stdout:\n{compile_res.stdout}\ncompile stderr:\n{compile_res.stderr}"
     )
@@ -128,7 +126,9 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
 
 
 @pytest.mark.integration
-def test_clean_flag_removes_stale_apm_generated_claude_md(project_with_instruction):
+def test_clean_flag_removes_stale_apm_generated_claude_md(
+    project_with_instruction, apm_binary_path: Path
+):
     """apm compile --target claude --clean must remove a stale APM-generated
     CLAUDE.md when .claude/rules/ is already populated.
 
@@ -150,7 +150,7 @@ def test_clean_flag_removes_stale_apm_generated_claude_md(project_with_instructi
         encoding="utf-8",
     )
 
-    compile_res = _run(proj, "compile", "--target", "claude", "--clean")
+    compile_res = _run(apm_binary_path, proj, "compile", "--target", "claude", "--clean")
     assert compile_res.returncode == 0, (
         f"compile --clean stdout:\n{compile_res.stdout}\n"
         f"compile --clean stderr:\n{compile_res.stderr}"
@@ -164,7 +164,9 @@ def test_clean_flag_removes_stale_apm_generated_claude_md(project_with_instructi
 
 
 @pytest.mark.integration
-def test_compile_alone_then_compile_again_skips_on_second_run(project_with_instruction):
+def test_compile_alone_then_compile_again_skips_on_second_run(
+    project_with_instruction, apm_binary_path: Path
+):
     """`apm compile` itself also writes per-file rules into
     ``.claude/rules/``; running it twice must trigger the dedup on the
     second pass even if `apm install` was never invoked. Locks in the
@@ -172,7 +174,7 @@ def test_compile_alone_then_compile_again_skips_on_second_run(project_with_instr
     """
     proj = project_with_instruction
 
-    first = _run(proj, "compile", "--target", "claude")
+    first = _run(apm_binary_path, proj, "compile", "--target", "claude")
     assert first.returncode == 0, first.stderr
 
     rules_dir = proj / ".claude" / "rules"
@@ -182,7 +184,7 @@ def test_compile_alone_then_compile_again_skips_on_second_run(project_with_instr
             "build; install->compile path is covered by the sibling test"
         )
 
-    second = _run(proj, "compile", "--target", "claude")
+    second = _run(apm_binary_path, proj, "compile", "--target", "claude")
     assert second.returncode == 0, second.stderr
 
     claude_md = proj / "CLAUDE.md"
