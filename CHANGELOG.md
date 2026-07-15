@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- HTTP git dependency URLs now preserve custom ports when persisted to
+  `apm.yml`, so later commands reconnect to the exact endpoint the user
+  specified. (closes #2202) -- by @atulya-singh (#2210)
 - Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
   `apm install` re-resolves the new ref and preserves the last good deployment
   when the new ref is invalid. (#2219)
