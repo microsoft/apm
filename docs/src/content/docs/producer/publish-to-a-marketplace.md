@@ -139,8 +139,8 @@ for the full validation and override rules.
 
 The generated source object is also a producer-to-consumer contract.
 `apm pack` emits `source: url` for a remote repository and
-`source: git-subdir` when `subdir` is set. `apm install
-<package>@<marketplace>` accepts both forms, derives the package host from
+`source: git-subdir` when `subdir` is set.
+`apm install <package>@<marketplace>` accepts both forms, derives the package host from
 the generated entry rather than from the marketplace host, and preserves
 the generated path and ref.
 
