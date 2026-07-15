@@ -451,11 +451,13 @@ def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
 
     assert_spec_contains(
         "same\neffective capability ceiling",
-        "source agent and each non-preserved field by field name only",
-        "may have broader capability\naccess",
-        "default (non-verbose) output",
-        "MUST be rendered before\nthe top-level user-initiated operation returns",
-        "does not\nmandate a nonzero exit status",
+        "source agent and each discarded field",
+        "may have broader capability access",
+        # Spec-guardian fold standardized the visibility term while retaining
+        # the parenthetical definition in the normative requirement.
+        "default-visible",
+        "MUST be rendered before\nthe overall operation returns",
+        "does not mandate a nonzero\nexit status",
     )
 
 

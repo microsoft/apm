@@ -155,8 +155,8 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
 
 
-def test_git_ref_transport_selection_has_single_owner() -> None:
-    """AC13 Git ref enumeration must consume canonical transport selection."""
+def test_ac13_git_ref_transport_selection_has_single_owner() -> None:
+    """AC13 makes Git ref enumeration consume canonical transport selection."""
     root = Path(__file__).parents[2]
     ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
     ref_resolver = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
@@ -169,7 +169,7 @@ def test_git_ref_transport_selection_has_single_owner() -> None:
     assert "build_ssh_url(" in ref_resolver
     assert "from apm_cli.deps.transport_selection import" not in ref_resolver
     assert "TransportSelector(" not in ref_resolver
-    assert "AC13: Git reference transport authority" in guard
+    assert "AC13: Git ref transport selection authority" in guard
     assert "Git ref transport must route through TransportSelector into RefResolver" in guard
 
 
@@ -663,7 +663,7 @@ def test_executable_test_contracts_have_one_canonical_owner() -> None:
 
 
 def test_agent_diagnostic_names_have_one_printable_ascii_owner() -> None:
-    """AC12 Codex and OpenCode diagnostic names must use the diagnostics owner."""
+    """Codex and OpenCode diagnostic names must use the diagnostics owner."""
     root = Path(__file__).parents[2]
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     checker = _load_diagnostic_ascii_owner_checker(root)

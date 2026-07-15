@@ -235,11 +235,19 @@ class TestListRemoteRefs:
 
     def test_unauthenticated_uses_noninteractive_env(self):
         host = _ctx(token=None)
+        dep = _dep(host="github.com")
         with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
             MockGit.return_value.ls_remote.return_value = self.SAMPLE
             resolver = GitReferenceResolver(host)
-            resolver.list_remote_refs(_dep(host="github.com"))
+            resolver.list_remote_refs(dep)
         host._build_noninteractive_git_env.assert_called_once()
+        host._build_repo_url.assert_called_once_with(
+            "owner/repo",
+            use_ssh=False,
+            dep_ref=dep,
+            token=None,
+            auth_scheme="basic",
+        )
 
     def test_ssh_preference_selects_ssh_without_token_auth(self):
         host = _ctx(token="ghp_xxx")

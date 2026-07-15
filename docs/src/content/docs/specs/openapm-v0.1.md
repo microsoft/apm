@@ -225,7 +225,7 @@ type"), the definition section is cross-linked.
 | **Primitive** | A typed unit of agent configuration (instruction, prompt, agent, skill, command, hook, or mcp server). Defined in [Section 8.1](#81-primitive-types). |
 | **Target** | A named runtime harness (for example `copilot`, `claude`, `cursor`). Defined in [Section 8.4](#84-target-detection-signals-normative). |
 | **Deploy directory** | The on-disk root under which a target's primitives are placed by `apm install`. Defined in [Section 8.5](#85-deploy-directory-contract-normative). |
-| **Source-declared capability restriction** | An agent-primitive frontmatter field whose documented purpose in the source agent format is to narrow the tools, actions, or resources the converted agent may invoke (for example, a `tools` allowlist). |
+| **Source-declared capability restriction** | An agent-primitive field whose documented purpose is to narrow the tools, actions, or resources the converted agent may invoke (for example, a `tools` allowlist). Elaborated normatively in [Section 8.5.1](#851-lossy-agent-conversion). |
 | **Direct dependency** | A dependency declared in the consumer's own `apm.yml`. |
 | **Transitive dependency** | A dependency declared in the `apm.yml` of a resolved package, not in the consumer's own `apm.yml`. |
 | **Virtual package** | A dependency targeting a subdirectory or file within a repository rather than the whole repository. Defined in [Section 4.3.3](#433-virtual-packages). |
@@ -2143,36 +2143,29 @@ suppress instruction content in `AGENTS.md`.
 **[req-tg-006]** A conforming **consumer** implementation that converts
 an agent primitive into a target-native format MUST either preserve each
 [source-declared capability restriction](#3-terminology) semantically or
-emit an actionable diagnostic. Semantic preservation requires the same
+emit a diagnostic meeting the requirements below. Semantic preservation requires the same
 effective capability ceiling (the maximal set of tools, actions, or resources
 the restriction permits); a translation that widens, narrows, or cannot
 represent the restriction exactly is non-preserving. The diagnostic MUST
-identify the source agent and each non-preserved field by field name only,
-subject to the redaction obligations of [req-sc-007](#req-sc-007), and MUST
-state that exact preservation failed. For a widening or an unrepresentable
-restriction, it MUST state that the generated agent may have broader capability
-access; for a verified narrowing, it MUST state that access is narrower than
-declared. When
-several fields are non-preserved, one diagnostic enumerating all of them or
-separate diagnostics for each field MAY be used. A diagnostic is required
-whenever a source-declared restriction cannot be preserved exactly in the
-target-native form. The diagnostic MUST appear
-in the consumer's default (non-verbose) output and MUST be rendered before
-the top-level user-initiated operation returns; this requirement does not
-mandate a nonzero exit status. If source agent frontmatter cannot be parsed
-as a YAML mapping, whether because parsing fails or the parsed root is another
-type, the consumer MUST instead emit a default-visible diagnostic stating
-that capability restrictions could not be verified before the top-level
-user-initiated operation returns.
+identify the source agent and each discarded field and MUST state that exact
+preservation failed. For a widening or an unrepresentable restriction, it
+MUST state that the generated agent may have broader capability access; for a
+verified narrowing, it MUST state that access is narrower than declared. When
+several fields are discarded, one diagnostic enumerating all of them or
+separate diagnostics for each field MAY be used. The diagnostic MUST be
+default-visible (that is, it MUST appear in the consumer's default,
+non-verbose output) and MUST be rendered before
+the overall operation returns; this requirement does not mandate a nonzero
+exit status. If source agent frontmatter cannot be parsed as a mapping, the
+consumer MUST instead emit a default-visible diagnostic stating that
+capability restrictions could not be verified before the overall operation
+returns.
 
 > **Editorial note.** Concrete target-native encodings for capability
 > restrictions are intentionally unspecified in v0.1. A future revision
-> may register them through the Target Registry companion or the amendment
+> MAY register them through the Target Registry companion or the amendment
 > process in [Section 9.3](#93-amendment-process) without weakening the
-> preservation-or-diagnostic contract above. Consequently, target-native
-> deployed bytes may differ across conforming consumers when one can preserve
-> a restriction that another cannot; each consumer remains responsible for
-> recording and verifying its own deployed-file hashes.
+> preservation-or-diagnostic contract above.
 
 ### 8.6 Per-target primitive support (informational)
 
@@ -2512,7 +2505,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 13| Org executable denial bypassed by project/user grant | [req-sc-011](#req-sc-011)                                 | Consumer-default  |
 | 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
 | 15| Cross-repository cache substitution                  | [req-rs-016](#req-rs-016)                                         | Consumer-default  |
-| 16| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006)                                         | Consumer-default  |
+| 16| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2721,8 +2714,7 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-007](#req-pl-007), [req-pl-008](#req-pl-008),
 [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
 [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
-[req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
-[req-pl-015](#req-pl-015).
+[req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -3140,7 +3132,7 @@ renumbering of conformance classes.
 | 0.1.12  | 2026-07-10 | Spec-citation fold for inactive-target lockfile reconciliation. Added [req-lk-020] (Section 5.2, consumer MUST): a non-frozen rewrite with a declared target set preserves paths attributable to current, another declared, or implementation-recognized targets that activate outside the manifest; removes prior paths attributable to none of them; applies the same decision to per-entry and top-level deployed-file lists and hash maps; and preserves prior paths when no target set is declared or attribution is indeterminate. Statement count: 97 -> 98 (93 MUST, 5 SHOULD). |
 | 0.1.13  | 2026-07-14 | Defensive clarification of existing lockfile requirements (no new normative statements; statement count remains 98 (93 MUST, 5 SHOULD)). [req-lk-003] now requires a conformance audit to reject disagreement between a full-SHA manifest pin and `resolved_commit`. [req-lk-020] now preserves paths freshly deployed by an active dependency when orphan cleanup encounters the same path under a prior dependency identity. |
 | 0.1.14  | 2026-07-15 | Spec-citation fold for complete repository identity through resolution and materialization (closes #2191). Added [req-rs-016] (Section 7.2, consumer MUST): repository identity includes normalized host, explicit port, and the complete credential-free repository path; distinct identities MUST NOT share cached source material merely because they use the same ref or a common path prefix; identical identity and ref MAY reuse cached source material. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
-| 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5.1, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each non-preserved field, and the broader-access risk before the top-level user-initiated operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
+| 0.1.15  | 2026-07-15 | Sequential spec-citation fold after 0.1.14 for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5.1, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. Corrected the Section 11.3.2 Consumer enumeration to include the previously omitted [req-tg-005]. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

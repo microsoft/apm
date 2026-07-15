@@ -97,7 +97,7 @@ def test_codex_agent_tool_scope_is_never_silently_lost(
     assert "tools" not in scoped_agent
     assert "mcp_servers" not in scoped_agent
     assert "[!]" in scoped_output
-    assert "1 agent conversion warning" in scoped_normalized
+    assert "1 lossy agent compilation warning" in scoped_normalized
     assert "scoped-reviewer.agent.md" in scoped_normalized
     assert "frontmatter field 'tools' was dropped" in scoped_normalized
     assert "may inherit all project/session MCP servers" in scoped_normalized
@@ -117,5 +117,5 @@ def test_codex_agent_tool_scope_is_never_silently_lost(
     assert "tools" not in unscoped_agent
     assert "mcp_servers" not in unscoped_agent
     assert "[!]" not in unscoped_output
-    assert "agent conversion" not in unscoped_output
+    assert "lossy agent compilation" not in unscoped_output
     assert "frontmatter field 'tools' was dropped" not in " ".join(unscoped_output.split())
