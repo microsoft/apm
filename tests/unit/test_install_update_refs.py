@@ -377,7 +377,7 @@ class TestForceRefRecheck:
         )
 
     def test_registry_semver_no_force_on_normal_install(self) -> None:
-        """Registry semver dep must NOT re-resolve on a plain install."""
+        """A dependency without lock provenance must re-resolve on plain install."""
         assert (
             should_force_ref_recheck(
                 _recheck_dep(
@@ -388,7 +388,7 @@ class TestForceRefRecheck:
                 None,
                 update_refs=False,
             )
-            is False
+            is True
         )
 
     def test_git_semver_forces_resolve_on_update(self) -> None:
@@ -415,7 +415,7 @@ class TestForceRefRecheck:
                     artifactory_prefix=None,
                     ref_kind="literal",
                 ),
-                None,
+                SimpleNamespace(),
                 update_refs=True,
             )
             is False

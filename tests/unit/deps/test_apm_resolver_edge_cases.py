@@ -661,23 +661,22 @@ class TestShouldForceRecheck:
         ref.ref_kind = ref_kind
         return ref
 
-    def test_false_when_update_refs_is_false(self) -> None:
+    def test_true_without_lock_provenance_on_plain_install(self) -> None:
         resolver = APMDependencyResolver(update_refs=False)
-        assert resolver._should_force_recheck(self._dep()) is False
+        assert resolver._should_force_recheck(self._dep()) is True
 
     def test_true_for_semver_dep_when_update_refs_true(self) -> None:
         resolver = APMDependencyResolver(update_refs=True)
         assert resolver._should_force_recheck(self._dep()) is True
 
-    def test_false_for_literal_ref_kind(self) -> None:
-        """An exact/literal ref (e.g. a pinned tag) has nowhere else to
-        resolve to -- no point re-checking it."""
+    def test_true_without_lock_even_for_literal_ref(self) -> None:
+        """No lock provenance wins over literal-ref update optimization."""
         resolver = APMDependencyResolver(update_refs=True)
-        assert resolver._should_force_recheck(self._dep(ref_kind="literal")) is False
+        assert resolver._should_force_recheck(self._dep(ref_kind="literal")) is True
 
-    def test_false_for_none_ref_kind(self) -> None:
+    def test_true_without_lock_for_default_ref(self) -> None:
         resolver = APMDependencyResolver(update_refs=True)
-        assert resolver._should_force_recheck(self._dep(ref_kind=None)) is False
+        assert resolver._should_force_recheck(self._dep(ref_kind=None)) is True
 
     def test_false_for_local_dep(self) -> None:
         resolver = APMDependencyResolver(update_refs=True)
@@ -688,10 +687,9 @@ class TestShouldForceRecheck:
         assert resolver._should_force_recheck(self._dep(artifactory_prefix="proxy")) is False
 
     def test_default_constructor_is_update_refs_false(self) -> None:
-        """Callers that don't pass update_refs (e.g. plain apm install)
-        must not accidentally force re-checks."""
+        """A remote existing path without lock provenance must be rechecked."""
         resolver = APMDependencyResolver()
-        assert resolver._should_force_recheck(self._dep()) is False
+        assert resolver._should_force_recheck(self._dep()) is True
 
     def test_true_for_changed_literal_ref_on_plain_install(self) -> None:
         lockfile = LockFile()
@@ -761,9 +759,11 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert len(call_log) == 1
         assert result is not None
 
-    def test_existing_path_skips_callback_when_update_refs_false(self, tmp_path: Path) -> None:
-        """Plain apm install (update_refs=False, the default) must not pay
-        the re-check cost -- this is the existing, unaffected fast path."""
+    def test_existing_path_without_lock_calls_callback_on_plain_install(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Plain install must not trust an existing path without provenance."""
         mods = tmp_path / "apm_modules"
         pkg_dir = mods / "org" / "pkg"
         pkg_dir.mkdir(parents=True)
@@ -781,7 +781,7 @@ class TestTryLoadDependencyPackageForceRecheck:
         )
         result = resolver._try_load_dependency_package(ref)
 
-        assert len(call_log) == 0
+        assert len(call_log) == 1
         assert result is not None
 
     def test_existing_path_calls_callback_for_changed_literal_ref(
@@ -816,11 +816,10 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert resolver._try_load_dependency_package(ref) is not None
         assert calls == [ref]
 
-    def test_existing_path_skips_callback_for_literal_ref_even_with_update_refs(
+    def test_existing_path_without_lock_calls_callback_for_literal_ref(
         self, tmp_path: Path
     ) -> None:
-        """A dep pinned to a literal ref (not a semver range) has nothing to
-        re-resolve to -- re-checking it would be pure waste."""
+        """Missing provenance wins over literal-ref update optimization."""
         mods = tmp_path / "apm_modules"
         pkg_dir = mods / "org" / "pkg"
         pkg_dir.mkdir(parents=True)
@@ -839,5 +838,5 @@ class TestTryLoadDependencyPackageForceRecheck:
         )
         result = resolver._try_load_dependency_package(ref)
 
-        assert len(call_log) == 0
+        assert len(call_log) == 1
         assert result is not None

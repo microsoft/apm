@@ -186,6 +186,8 @@ def should_force_ref_recheck(
     """
     if dep_ref.is_local or getattr(dep_ref, "artifactory_prefix", None):
         return False
+    if locked_dep is None:
+        return True
     if update_refs:
         return getattr(dep_ref, "ref_kind", None) == "semver"
     return detect_ref_change(dep_ref, locked_dep, update_refs=False)
