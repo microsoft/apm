@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Govern policy cache freshness now honors the effective policy's `cache.ttl`;
+  bounded property coverage protects all 39 enforceable fields, cold/warm parity,
+  canonical serialization, and last-good bytes after malformed refreshes. (#2235)
 - Marketplace packages emitted as remote URL or subdirectory sources now
   preserve the package host, path, and ref through `apm install`, fixing
   cross-host enterprise validation and self-hosted GitLab monorepo installs.
