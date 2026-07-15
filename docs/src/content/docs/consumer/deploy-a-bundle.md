@@ -44,6 +44,11 @@ with a warning unless policy requires hashes. With
 
 ## How the install works
 
+:::note[Governed offline installs]
+When the policy cache is warm, offline bundles still apply target, MCP, and
+integrity rules without network access.
+:::
+
 ```
 $ apm install ./dist/my-pkg-1.0.0.zip --target copilot
 [>] Installing local bundle from ./dist/my-pkg-1.0.0.zip

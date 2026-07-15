@@ -72,7 +72,8 @@ def install_local_bundle(
             "The following flag(s) are not valid with a local bundle install "
             f"({bundle_arg}): {', '.join(bad)}.\n"
             "Local-bundle install is an imperative deploy and does not "
-            "interact with the dependency resolver, MCP, or registry machinery."
+            "interact with the dependency resolver or registry machinery; "
+            "bundle .mcp.json metadata is handled separately."
         )
 
     # ``verbose`` is consumed by the InstallLogger on construction (the
@@ -108,9 +109,20 @@ def install_local_bundle(
 
             targets = apply_legacy_skill_paths(targets)
 
+        bundle_mcp_declared = False
+        if bundle_info.lockfile is not None:
+            pack = bundle_info.lockfile.get("pack") or {}
+            bundle_files = pack.get("bundle_files") or {}
+            if isinstance(bundle_files, dict):
+                bundle_mcp_declared = any(str(path).lower() == ".mcp.json" for path in bundle_files)
+        elif bundle_info.source_dir is not None:
+            bundle_mcp_declared = any(
+                path.is_file() and path.name.lower() == ".mcp.json"
+                for path in bundle_info.source_dir.iterdir()
+            )
         bundle_mcp_deps = (
             _parse_bundle_mcp_servers(bundle_info.source_dir)
-            if bundle_info.source_dir is not None
+            if bundle_mcp_declared and bundle_info.source_dir is not None
             else []
         )
         from ..policy.install_preflight import run_policy_preflight
@@ -134,12 +146,16 @@ def install_local_bundle(
         # Integrity verification (skipped when bundle has no lockfile).
         if bundle_info.lockfile is None:
             if require_bundle_hashes:
+                from .errors import InstallFailureAlreadyRendered
+
                 logger.error(
                     "Bundle has no apm.lock.yaml, but org policy requires "
                     "integrity hashes. Repack it with the current APM version "
                     "and retry."
                 )
-                raise click.Abort()
+                raise InstallFailureAlreadyRendered(
+                    "Org policy requires integrity hashes for this bundle"
+                )
             logger.warning(
                 "Bundle has no apm.lock.yaml -- skipping integrity check. "
                 "This bundle was produced by an older APM version."

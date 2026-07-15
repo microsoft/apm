@@ -935,6 +935,29 @@ class TestColdWarmEnforcementParity:
         assert local.outcome == "found"
         assert local.cached is False
 
+        chained_policy = local_root / "chained-policy.yml"
+        chained_policy.write_text(
+            "name: chained\n"
+            "extends: contoso/parent\n"
+            "enforcement: block\n"
+            "security:\n"
+            "  integrity:\n"
+            "    require_hashes: true\n",
+            encoding="utf-8",
+        )
+        with patch(
+            "apm_cli.policy.discovery._fetch_github_contents",
+            side_effect=AssertionError("cache-only parent lookup reached transport"),
+        ) as parent_transport:
+            chained = discover_policy_with_chain(
+                local_root,
+                policy_override=str(chained_policy),
+                cache_only=True,
+            )
+        assert parent_transport.call_count == 0
+        assert chained.outcome == "incomplete_chain"
+        assert chained.policy is None
+
     def test_merged_strict_policy_denials_survive_warm_cache(self, tmp_path: Path) -> None:
         payloads = {
             "contoso/.github": """

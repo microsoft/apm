@@ -14,6 +14,7 @@ from pathlib import Path
 from .models import CheckResult, CIAuditResult
 
 _logger = logging.getLogger(__name__)
+FAIL_CLOSED_POLICY_CHECKS = frozenset({"dependency-content-hashes"})
 
 
 # -- Helpers -------------------------------------------------------
@@ -1132,7 +1133,10 @@ def _check_dependency_content_hashes(
         return CheckResult(
             name=check_name,
             passed=False,
-            message="Locked dependencies are missing required content hashes",
+            message=(
+                "Locked dependencies are missing required content hashes -- "
+                "run 'apm install' to regenerate them"
+            ),
             details=[str(exc)],
         )
     return CheckResult(

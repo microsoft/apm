@@ -332,7 +332,12 @@ def discover_policy_with_chain(
         and fetch_result.policy.extends is not None
         and not fetch_result.cached  # Don't re-resolve if served from cache
     ):
-        _resolve_and_persist_chain(fetch_result, project_root, no_cache=no_cache)
+        _resolve_and_persist_chain(
+            fetch_result,
+            project_root,
+            no_cache=no_cache,
+            cache_only=cache_only,
+        )
 
     return fetch_result
 
@@ -496,6 +501,7 @@ def _fetch_chain_parent(
     leaf_host: str | None,
     project_root: Path,
     no_cache: bool,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Fetch one parent without losing the leaf's host or backend.
 
@@ -505,11 +511,13 @@ def _fetch_chain_parent(
     ``host/project/repo`` on legacy ``*.visualstudio.com`` hosts. URLs and
     local-file refs continue through the public single-policy owner.
     """
+    cache_kwargs = {"cache_only": True} if cache_only else {}
     if parent_ref.startswith(("http://", "https://")) or Path(parent_ref).is_file():
         return discover_policy(
             project_root,
             policy_override=parent_ref,
             no_cache=no_cache,
+            **cache_kwargs,
         )
 
     if leaf_host and is_azure_devops_hostname(leaf_host):
@@ -528,6 +536,7 @@ def _fetch_chain_parent(
             host=host,
             project_root=project_root,
             no_cache=no_cache,
+            **cache_kwargs,
         )
 
     normalized_ref = parent_ref
@@ -538,6 +547,7 @@ def _fetch_chain_parent(
         project_root,
         policy_override=normalized_ref,
         no_cache=no_cache,
+        **cache_kwargs,
     )
 
 
@@ -546,6 +556,7 @@ def _resolve_and_persist_chain(
     project_root: Path,
     *,
     no_cache: bool = False,
+    cache_only: bool = False,
 ) -> None:
     """Resolve inheritance chain and update cache with merged policy + chain_refs.
 
@@ -614,6 +625,7 @@ def _resolve_and_persist_chain(
             leaf_host=leaf_host,
             project_root=project_root,
             no_cache=no_cache,
+            cache_only=cache_only,
         )
         fetch_result.warnings.extend(parent_result.warnings)
 

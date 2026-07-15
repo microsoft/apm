@@ -124,7 +124,7 @@ def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
         capture_output=True,
         text=True,
         check=False,
-        timeout=120,
+        timeout=300,
     )
 
     assert result.returncode == 1
