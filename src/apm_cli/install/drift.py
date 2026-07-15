@@ -667,6 +667,25 @@ def diff_scratch_against_project(
     project_files = _walk_managed(project_root, governed)
     tracked = _collect_tracked_files(lockfile)
 
+    # Imperative local bundles have no authored source tree for replay. Their
+    # deployed bytes are already bound by local_deployed_file_hashes and the
+    # content-integrity check, so comparing them to an empty scratch projection
+    # would misclassify every clean bundle file as orphaned.
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    local_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+    if local_bundle_paths:
+        scratch_files = {
+            relative_path: path
+            for relative_path, path in scratch_files.items()
+            if relative_path not in local_bundle_paths
+        }
+        project_files = {
+            relative_path: path
+            for relative_path, path in project_files.items()
+            if relative_path not in local_bundle_paths
+        }
+
     # Canvas extensions are executable bundles that the drift replay does
     # not re-integrate (their integrator is intentionally omitted from the
     # replay bundle). Exclude their deploy prefixes from BOTH trees so a

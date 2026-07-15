@@ -259,6 +259,23 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
     echo "[x] Audit replay must preserve locked skill subset intent"
     violations=$((violations + 1))
 fi
+local_bundle_marker_hits=$(
+    grep -rEn --include='*.py' \
+        '_LOCAL_BUNDLE_OWNER|active_owner.*["'\'']local-bundle["'\'']|["'\'']local-bundle["'\''].*active_owner|owners.*["'\'']local-bundle["'\'']' \
+        src/apm_cli \
+        | grep -v '^src/apm_cli/core/deployment_ledger.py:' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'DeploymentLedgerCodec.record_local_bundle_files' \
+    src/apm_cli/install/local_bundle_handler.py \
+    || ! grep -q 'DeploymentLedgerCodec.local_bundle_paths' \
+    src/apm_cli/install/drift.py \
+    || [ -n "$local_bundle_marker_hits" ]; then
+    echo "[x] Local-bundle replay provenance must route through DeploymentLedgerCodec"
+    [ -n "$local_bundle_marker_hits" ] && echo "$local_bundle_marker_hits"
+    violations=$((violations + 1))
+fi
 dependency_field_owner="src/apm_cli/models/dependency/object_fields.py"
 dependency_parser="src/apm_cli/models/dependency/reference.py"
 dependency_field_duplicate_hits=$(

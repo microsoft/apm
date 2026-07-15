@@ -19,3 +19,7 @@ marker = "component"
 [[modules]]
 path = "tests/integration/test_core_smoke.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_produce_consume_contract.py"
+marker = "e2e"
