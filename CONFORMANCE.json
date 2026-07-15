@@ -924,6 +924,21 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-rs-016",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_normalizes_safe_syntax_dimensions",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_preserves_literal_path_distinctions",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_preserves_nondefault_port_and_path_case",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_survives_full_install_and_persistent_cache",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_cache_preserves_complete_repository_identity"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-sc-001",
       "keyword": "MUST",
       "section": "10.4",
@@ -1113,7 +1128,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 69,
+      "active": 70,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1137,5 +1152,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 98
+  "total_requirements": 99
 }

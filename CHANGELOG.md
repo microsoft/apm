@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now keeps complete nested GitLab project paths in its shared
   and persistent clone-cache identities, preventing sibling projects under a
   common group prefix from reusing the wrong repository. (closes #2191; #2192)
+  OpenAPM `openapm-v0.1.md` now normatively binds complete repository identity
+  through resolution, cache reuse, and materialization.
 - `apm pack` now matches source-relative skill selectors such as
   `productivity/grill-me` against flattened deployed skill names. (closes
   #2171; #2176)
