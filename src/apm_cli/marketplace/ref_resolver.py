@@ -209,10 +209,11 @@ class RefResolver:
         url_token = None if requested_bearer else self._token
         if remote_url is not None:
             parsed_remote = urllib.parse.urlparse(remote_url)
+            # urlparse lowercases hostname per RFC 3986 3.2.2; normalize both sides.
             if (
                 not ado_host
                 or parsed_remote.scheme != "https"
-                or parsed_remote.hostname != self._host
+                or parsed_remote.hostname != self._host.lower()
                 or parsed_remote.username is not None
                 or parsed_remote.password is not None
                 or parsed_remote.query
@@ -220,8 +221,12 @@ class RefResolver:
             ):
                 raise GitLsRemoteError(
                     package="",
-                    summary="The canonical remote URL does not match the configured host.",
-                    hint="Rebuild the dependency reference from its declared source.",
+                    summary=(
+                        f"The canonical remote URL does not match the configured host "
+                        f"(expected '{self._host.lower()}', "
+                        f"got '{parsed_remote.hostname}')."
+                    ),
+                    hint="Re-add the dependency with 'apm install <source>' to regenerate the lock entry.",
                 )
             url = remote_url
         elif ado_host:
@@ -288,7 +293,7 @@ class RefResolver:
                 return cached
 
             if self._offline:
-                raise OfflineMissError(package="", remote=owner_repo)
+                raise OfflineMissError(package="", remote=cache_key)
 
             url, env = self._git_url_and_env(owner_repo, remote_url=remote_url)
             try:

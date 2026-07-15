@@ -548,15 +548,12 @@ class LockedDependency:
             resolved_ref_val = dep_ref.reference
 
         canonical_ado = DependencyReference.canonical_ado_coordinates(host, dep_ref.repo_url)
-        if isinstance(dep_ref, DependencyReference):
-            supplied_ado = (dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo)
-            if supplied_ado != canonical_ado:
-                raise ValueError(
-                    "Azure DevOps reference coordinates do not match the canonical repository path"
-                )
-            ado_organization, ado_project, ado_repo = supplied_ado
-        else:
-            ado_organization, ado_project, ado_repo = canonical_ado
+        supplied_ado = (dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo)
+        if supplied_ado != canonical_ado:
+            raise ValueError(
+                "Azure DevOps reference coordinates do not match the canonical repository path"
+            )
+        ado_organization, ado_project, ado_repo = supplied_ado
         if registry_resolution is not None:
             version_value = registry_resolution.version
         elif git_semver_resolution is not None:
