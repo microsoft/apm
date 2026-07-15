@@ -204,7 +204,11 @@ def _collect_locked_dependencies(
             continue
 
         if not manifest_path.exists():
-            if dependency.package_type == "skill_bundle":
+            # Virtual packages (a git+path skill pointing at a bare
+            # sub-directory) and skill bundles have no apm.yml of their own by
+            # design -- install never deploys one, so a missing manifest is
+            # expected rather than a consistency problem.
+            if dependency.package_type == "skill_bundle" or dependency.is_virtual:
                 continue
             problems.append(
                 McpSourceProblem(
