@@ -94,7 +94,7 @@ the [policy schema](../policy-schema/).
 ### `config-consistency`
 
 - **What it verifies.** That MCP server configs derived from the root `dependencies.mcp` and `devDependencies.mcp`, plus every current local or installed-remote package manifest bounded by the lockfile, match the `mcp_configs` baseline.
-- **Fails when.** A server's resolved config differs from the lockfile, a server exists on only one side, or a locked package manifest is missing or unreadable. `mcp_config_provenance` identifies the package in lock-only diagnostics but never exempts a removed declaration.
+- **Fails when.** A server's resolved config differs from the lockfile, a server exists on only one side, or a locked package manifest is unreadable. A missing manifest also fails unless the lockfile records a skill bundle, or declares a virtual subdirectory that APM detects as a Claude skill at that location. `mcp_config_provenance` identifies the package in lock-only diagnostics but never exempts a removed declaration.
 - **Remediation.** Run `apm install` to reconcile the MCP configuration or restore an unreadable package source.
 
 ### `content-integrity`
