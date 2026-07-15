@@ -204,7 +204,8 @@ def _run_produce_contract(
 
     source_after = ArtifactSnapshot.capture(source.root)
     producer_snapshot = ArtifactSnapshot.capture(producer.root)
-    bundle = producer.root / "build" / "produce-contract-producer-0.1.0"
+    producer_manifest = load_yaml(producer.manifest_path)
+    bundle = producer.root / "build" / f"{producer.name}-{producer_manifest['version']}"
     bundle_before_install = ArtifactSnapshot.capture(bundle)
     producer_observation = ScenarioObservation(
         source_inputs=producer_row.source_inputs,

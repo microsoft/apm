@@ -261,7 +261,7 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
 fi
 local_bundle_marker_hits=$(
     grep -rEn --include='*.py' \
-        '_LOCAL_BUNDLE_OWNER|active_owner.*["'\'']local-bundle["'\'']|["'\'']local-bundle["'\''].*active_owner|owners.*["'\'']local-bundle["'\'']' \
+        "_LOCAL_BUNDLE_OWNER|active_owner.*[\"']local-bundle[\"']|[\"']local-bundle[\"'].*active_owner|owners.*[\"']local-bundle[\"']" \
         src/apm_cli \
         | grep -v '^src/apm_cli/core/deployment_ledger.py:' \
         | grep -v 'architecture-authority-exempt:' \
