@@ -37,7 +37,7 @@ def _split_shorthand_host_port(host_segment: str) -> tuple[str, int | None]:
     if ":" not in host_segment:
         return host_segment, None
     host, _, raw_port = host_segment.rpartition(":")
-    error = f"Invalid shorthand port '{raw_port}'. Expected an integer from 1 to 65535"
+    error = "Invalid shorthand port. Expected an integer from 1 to 65535"
     if not host or not re.fullmatch(r"[0-9]{1,5}", raw_port):
         raise ValueError(error)
     port = int(raw_port)

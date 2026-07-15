@@ -880,6 +880,18 @@ class TestHttpsCustomPortShorthand:
         with pytest.raises(ValueError, match=r"Invalid shorthand port"):
             DependencyReference.parse(f"git.example.com:{port}/owner/repo")
 
+    def test_non_ascii_shorthand_port_error_is_printable_ascii(self):
+        """Untrusted port text cannot escape into the rendered parser error."""
+        with pytest.raises(ValueError) as exc_info:
+            DependencyReference.parse("git.example.com:\U0001f680/owner/repo")
+
+        message = str(exc_info.value)
+        assert (message, message.isascii(), message.isprintable()) == (
+            "Invalid shorthand port. Expected an integer from 1 to 65535",
+            True,
+            True,
+        )
+
     def test_plain_shorthand_has_no_port(self):
         """Portless shorthand is unaffected by the port-splitting branch."""
         assert DependencyReference.parse("owner/repo").port is None
