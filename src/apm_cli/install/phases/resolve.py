@@ -21,7 +21,7 @@ from __future__ import annotations
 import builtins
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.transaction import resolution_for_context
@@ -29,6 +29,7 @@ from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
     from apm_cli.install.context import InstallContext
     from apm_cli.install.resolution_staging import ResolutionStagingSession
     from apm_cli.models.dependency.reference import DependencyReference
@@ -370,7 +371,7 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
 
 def _annotate_update_plan_refs(
     deps_to_install: list[DependencyReference],
-    downloader: Any,
+    downloader: GitHubPackageDownloader,
     *,
     update_refs: bool,
 ) -> list[DependencyReference]:
@@ -706,6 +707,9 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
             if result and hasattr(result, "resolved_reference") and result.resolved_reference:
+                # Pre-plan resolution may have populated this carrier already.
+                # The download result wins so lock state stays tied to the
+                # materialized bytes; the tiered resolver makes re-resolution cheap.
                 dep_ref.resolved_reference = result.resolved_reference
                 resolved_sha = result.resolved_reference.resolved_commit
             callback_downloaded_value = resolved_sha
