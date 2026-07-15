@@ -618,6 +618,7 @@ def _audit_ci_gate(
             pass  # Policy checks disabled
         else:
             from ..policy.models import CheckResult
+            from ..policy.policy_checks import FAIL_CLOSED_POLICY_CHECKS
 
             policy_result = run_policy_checks(cfg.project_root, policy_obj, fail_fast=fail_fast)
             if policy_obj.enforcement == "block":
@@ -625,6 +626,9 @@ def _audit_ci_gate(
             else:
                 # enforcement == "warn": include results but don't fail
                 for check in policy_result.checks:
+                    if check.name in FAIL_CLOSED_POLICY_CHECKS and not check.passed:
+                        ci_result.checks.append(check)
+                        continue
                     ci_result.checks.append(
                         CheckResult(
                             name=check.name,

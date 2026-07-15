@@ -337,7 +337,9 @@ def _enforce_require_hashes(ctx) -> None:
     policy = getattr(policy_fetch, "policy", None) if policy_fetch else None
     if policy is None:
         return
-    if not policy.security.integrity.require_hashes:
+    from .integrity import require_hashes_enabled
+
+    if not require_hashes_enabled(policy.security.integrity):
         return
 
     from ..deps.lockfile import LockFile, get_lockfile_path
