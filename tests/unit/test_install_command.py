@@ -6,6 +6,7 @@ import tempfile
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -1456,19 +1457,14 @@ class TestAllowInsecureFlag:
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
-    @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
     def test_http_dep_addition_passes_with_allow_insecure_flag(
-        self, mock_install_apm, mock_apm_package, mock_validate
+        self, mock_install_apm, mock_validate
     ):
-        """HTTP dependency can be added when the CLI flag is passed."""
+        """CLI install persists and reloads the custom HTTP port."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 os.chdir(tmp_dir)
-                mock_pkg_instance = MagicMock()
-                mock_pkg_instance.get_apm_dependencies.return_value = []
-                mock_pkg_instance.get_mcp_dependencies.return_value = []
-                mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
                 mock_install_apm.return_value = InstallResult(
                     diagnostics=MagicMock(
                         has_diagnostics=False, has_critical_security=False, error_count=0
@@ -1476,19 +1472,43 @@ class TestAllowInsecureFlag:
                 )
 
                 result = self.runner.invoke(
-                    cli, ["install", "--allow-insecure", "http://my-server.example.com/owner/repo"]
+                    cli,
+                    [
+                        "install",
+                        "--allow-insecure",
+                        "http://my-server.example.com:8080/owner/repo",
+                    ],
                 )
 
                 assert result.exit_code == 0
                 with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
 
-                assert config["dependencies"]["apm"] == [
-                    {
-                        "git": "http://my-server.example.com/owner/repo",
-                        "allow_insecure": True,
-                    }
-                ]
+                persisted_entry = config["dependencies"]["apm"][0]
+                persisted_url = urlparse(persisted_entry["git"])
+                assert (
+                    persisted_url.scheme,
+                    persisted_url.hostname,
+                    persisted_url.port,
+                    persisted_url.path,
+                ) == ("http", "my-server.example.com", 8080, "/owner/repo")
+                assert persisted_entry["allow_insecure"] is True
+                installed_package = mock_install_apm.call_args.args[0]
+                installed_ref = installed_package.get_apm_dependencies()[0]
+                assert installed_ref.get_identity() == "my-server.example.com:8080/owner/repo"
+                assert installed_ref.port == 8080
+                from apm_cli.core.auth import AuthResolver
+                from apm_cli.deps.host_backends import backend_for
+
+                clone_url = urlparse(
+                    backend_for(installed_ref, AuthResolver()).build_clone_http_url(installed_ref)
+                )
+                assert (
+                    clone_url.scheme,
+                    clone_url.hostname,
+                    clone_url.port,
+                    clone_url.path,
+                ) == ("http", "my-server.example.com", 8080, "/owner/repo.git")
                 assert mock_install_apm.call_args.kwargs["allow_insecure"] is True
                 assert mock_install_apm.call_args.kwargs["allow_insecure_hosts"] == ()
             finally:

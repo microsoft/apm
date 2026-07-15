@@ -11,6 +11,7 @@ Covers:
 
 from pathlib import Path  # noqa: F401
 from unittest.mock import MagicMock, patch  # noqa: F401
+from urllib.parse import urlparse
 
 import pytest
 
@@ -458,6 +459,106 @@ class TestNormalizeOnWrite:
 
         assert validated == ["microsoft/apm-sample-package#v1.0.0"]
 
+    @pytest.mark.parametrize(
+        ("raw_url", "expected_port"),
+        [
+            ("http://mirror.example.com:8080/owner/repo", 8080),
+            ("http://mirror.example.com:80/owner/repo", None),
+            ("http://mirror.example.com/owner/repo", None),
+        ],
+        ids=["custom-port", "default-port", "no-port"],
+    )
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    def test_http_port_round_trips_through_apm_yml(
+        self,
+        mock_validate,
+        raw_url,
+        expected_port,
+        tmp_path,
+        monkeypatch,
+    ):
+        """HTTP transport identity survives install write and manifest reload."""
+        from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+        from apm_cli.models.apm_package import APMPackage
+        from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+
+        apm_yml = tmp_path / "apm.yml"
+        dump_yaml(
+            {"name": "test", "version": "0.1.0", "dependencies": {"apm": []}},
+            apm_yml,
+        )
+        monkeypatch.chdir(tmp_path)
+        input_ref = DependencyReference.parse(raw_url)
+
+        validated, _outcome = _validate_and_add_packages_to_apm_yml(
+            [raw_url],
+            allow_insecure=True,
+        )
+
+        assert validated == [input_ref.to_canonical()]
+        persisted = load_yaml(apm_yml)
+        persisted_url = urlparse(persisted["dependencies"]["apm"][0]["git"])
+        reloaded_ref = APMPackage.from_apm_yml(apm_yml).get_apm_dependencies()[0]
+        assert (
+            persisted_url.scheme,
+            persisted_url.hostname,
+            persisted_url.port,
+            reloaded_ref.port,
+            reloaded_ref.get_identity(),
+        ) == (
+            "http",
+            "mirror.example.com",
+            expected_port,
+            expected_port,
+            input_ref.get_identity(),
+        )
+
+    @pytest.mark.parametrize(
+        ("raw_url", "allow_insecure"),
+        [
+            ("http://mirror.example.com:8080/owner/repo", False),
+            ("http://mirror.example.com:not-a-port/owner/repo", True),
+        ],
+        ids=["unsafe-without-opt-in", "invalid-port"],
+    )
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    def test_rejected_http_input_preserves_last_good_manifest(
+        self,
+        mock_validate,
+        raw_url,
+        allow_insecure,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Unsafe or invalid HTTP input cannot replace the last-good manifest."""
+        from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+        from apm_cli.models.apm_package import APMPackage
+        from apm_cli.utils.yaml_io import dump_yaml
+
+        apm_yml = tmp_path / "apm.yml"
+        dump_yaml(
+            {
+                "name": "test",
+                "version": "0.1.0",
+                "dependencies": {"apm": ["owner/last-good"]},
+            },
+            apm_yml,
+        )
+        monkeypatch.chdir(tmp_path)
+        last_good = apm_yml.read_bytes()
+
+        validated, outcome = _validate_and_add_packages_to_apm_yml(
+            [raw_url],
+            allow_insecure=allow_insecure,
+        )
+
+        assert validated == []
+        assert len(outcome.invalid) == 1
+        assert apm_yml.read_bytes() == last_good
+        reloaded = APMPackage.from_apm_yml(apm_yml).get_apm_dependencies()
+        assert [dep.get_identity() for dep in reloaded] == ["owner/last-good"]
+        mock_validate.assert_not_called()
+
 
 # ── Uninstall identity matching ─────────────────────────────────────────────
 
@@ -624,7 +725,12 @@ class TestHttpInsecureDeps:
         dep.allow_insecure = True
         assert dep.port == 8080  # parsed correctly
         entry = dep.to_apm_yml_entry()
-        assert entry["git"] == "http://192.168.1.10:8080/owner/repo"
+        persisted_url = urlparse(entry["git"])
+        assert (persisted_url.scheme, persisted_url.hostname, persisted_url.port) == (
+            "http",
+            "192.168.1.10",
+            8080,
+        )
 
     def test_http_to_apm_yml_entry_custom_port_round_trips(self):
         """The persisted entry re-parses back to the same host and port (#2202)."""
@@ -634,7 +740,14 @@ class TestHttpInsecureDeps:
         reparsed = DependencyReference.parse_from_dict(dep.to_apm_yml_entry())
         assert reparsed.host == "192.168.1.10"
         assert reparsed.port == 8080
-        assert reparsed.to_github_url() == original
+        input_url = urlparse(original)
+        reloaded_url = urlparse(reparsed.to_github_url())
+        assert (
+            reloaded_url.scheme,
+            reloaded_url.hostname,
+            reloaded_url.port,
+            reloaded_url.path,
+        ) == (input_url.scheme, input_url.hostname, input_url.port, input_url.path)
 
     def test_https_to_apm_yml_entry_returns_string(self):
         """to_apm_yml_entry() for HTTPS dep returns canonical string (not dict)."""
