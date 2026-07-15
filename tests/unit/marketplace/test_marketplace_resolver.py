@@ -747,8 +747,8 @@ class TestResolveMarketplacePluginGitLabMonorepo:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_url_source_on_github_no_dep_ref(self, mock_get, mock_fetch):
-        """url-type source on github.com marketplace should NOT build dep_ref (existing behaviour)."""
+    def test_cross_host_url_source_on_github_preserves_package_host(self, mock_get, mock_fetch):
+        """A package URL owns its host even when the marketplace is on github.com."""
         github_source = MarketplaceSource(
             name="gh-mkt",
             owner="owner",
@@ -760,15 +760,103 @@ class TestResolveMarketplacePluginGitLabMonorepo:
             name="pkg",
             source={
                 "source": "url",
-                "url": "https://github.com/other/repo",
+                "url": "https://github.enterprise.example.invalid/other/repo",
+                "ref": "a" * 40,
             },
         )
         mock_get.return_value = github_source
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
         result = resolve_marketplace_plugin("pkg", "gh-mkt")
-        # github.com marketplace does not need explicit git path -> no dep_ref built
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.host == "github.enterprise.example.invalid"
+        assert dep.repo_url == "other/repo"
+        assert dep.reference == "a" * 40
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_pack_emitted_git_subdir_url_builds_structured_reference(self, mock_get, mock_fetch):
+        """A git-subdir URL emitted by pack routes through the dependency parser."""
+        local_source = MarketplaceSource(
+            name="local-mkt",
+            url="file:///tmp/local-mkt",
+        )
+        plugin = MarketplacePlugin(
+            name="pkg",
+            source={
+                "source": "git-subdir",
+                "url": "https://gitlab.example.invalid/team/platform/repo",
+                "path": "packages/pkg",
+                "ref": "b" * 40,
+            },
+        )
+        mock_get.return_value = local_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("pkg", "local-mkt")
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.host == "gitlab.example.invalid"
+        assert dep.repo_url == "team/platform/repo"
+        assert dep.virtual_path == "packages/pkg"
+        assert dep.reference == "b" * 40
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_hand_authored_git_subdir_repo_keeps_repo_precedence(self, mock_get, mock_fetch):
+        """The existing repo field owner wins over the pack-specific url route."""
+        local_source = MarketplaceSource(
+            name="local-mkt",
+            url="file:///tmp/local-mkt",
+        )
+        plugin = MarketplacePlugin(
+            name="pkg",
+            source={
+                "source": "git-subdir",
+                "repo": "owner/primary",
+                "url": "https://fallback.example.invalid/owner/fallback",
+                "path": "packages/pkg",
+                "ref": "main",
+            },
+        )
+        mock_get.return_value = local_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("pkg", "local-mkt")
         assert result.dependency_reference is None
+        assert result.canonical == "owner/primary/packages/pkg#main"
+
+    @pytest.mark.parametrize(
+        "source",
+        (
+            {
+                "source": "url",
+                "url": "../local-package",
+            },
+            {
+                "source": "git-subdir",
+                "url": "~/local-monorepo",
+                "path": "packages/pkg",
+            },
+        ),
+        ids=("url", "git-subdir"),
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_remote_source_rejects_local_path(self, mock_get, mock_fetch, source):
+        """Remote marketplace source objects cannot read consumer-local packages."""
+        local_source = MarketplaceSource(
+            name="local-mkt",
+            url="file:///tmp/local-mkt",
+        )
+        mock_get.return_value = local_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(name="pkg", source=source)
+        )
+
+        with pytest.raises(ValueError, match="resolves to a local path"):
+            resolve_marketplace_plugin("pkg", "local-mkt")
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")

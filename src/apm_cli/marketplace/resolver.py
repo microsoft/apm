@@ -542,9 +542,9 @@ def _resolve_url_source(source: dict) -> str:
 
     Delegates to ``DependencyReference.parse()`` to extract the
     ``owner/repo`` coordinate from any valid Git URL (GitHub, GHES, GitLab,
-    Bitbucket, ADO, SSH).  The URL's host is *not* preserved -- downstream
-    resolution (``RefResolver``) uses the configured ``GITHUB_HOST`` for
-    ``git ls-remote``.  True cross-host resolution is tracked in #1010.
+    Bitbucket, ADO, SSH). This legacy string projection does not preserve
+    the URL host. ``resolve_marketplace_plugin`` routes producer-emitted URL
+    objects through ``DependencyReference`` before reaching this projection.
     """
     url = source.get("url", "")
     if not url:
@@ -586,6 +586,44 @@ def _resolve_git_subdir_source(source: dict) -> str:
     if ref:
         return f"{base}#{ref}"
     return base
+
+
+def _dependency_reference_from_packed_source(
+    plugin: MarketplacePlugin,
+    version_spec: str | None,
+) -> DependencyReference | None:
+    """Parse producer-emitted remote source objects through the reference owner."""
+    source = plugin.source
+    if not isinstance(source, dict):
+        return None
+
+    source_type = _coerce_dict_plugin_type(source)
+    if source_type == "url":
+        remote = source.get("url")
+    elif source_type == "git-subdir" and not source.get("repo"):
+        # Pack emits git-subdir repository identity in ``url``. Hand-authored
+        # ``repo`` forms retain the existing marketplace-relative routing.
+        remote = source.get("url")
+    else:
+        return None
+    if not isinstance(remote, str) or not remote.strip():
+        return None
+
+    entry: dict[str, object] = {"git": remote.strip()}
+    if source_type == "git-subdir":
+        path = source.get("subdir", "") or source.get("path", "")
+        if path:
+            entry["path"] = path
+    declared_ref = source.get("ref")
+    effective_ref = version_spec if version_spec is not None else declared_ref
+    if effective_ref:
+        entry["ref"] = effective_ref
+    dependency = DependencyReference.parse_from_dict(entry)
+    if dependency.is_local:
+        raise ValueError(
+            f"{source_type} source '{remote}' resolves to a local path, not a Git coordinate."
+        )
+    return dependency
 
 
 def _resolve_relative_source(
@@ -838,15 +876,24 @@ def resolve_marketplace_plugin(
             source_digest=manifest.source_digest,
         )
 
-    canonical = resolve_plugin_source(
-        plugin,
-        marketplace_owner=source.owner,
-        marketplace_repo=source.repo,
-        plugin_root=manifest.plugin_root,
+    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(
+        plugin, version_spec
     )
+    if dep_ref is not None:
+        canonical = dep_ref.to_canonical()
+    else:
+        canonical = resolve_plugin_source(
+            plugin,
+            marketplace_owner=source.owner,
+            marketplace_repo=source.repo,
+            plugin_root=manifest.plugin_root,
+        )
 
-    dep_ref: DependencyReference | None = None
-    if _source_needs_explicit_git_path(source) and _is_in_marketplace_source(plugin, source):
+    if (
+        dep_ref is None
+        and _source_needs_explicit_git_path(source)
+        and _is_in_marketplace_source(plugin, source)
+    ):
         in_repo_path, path_ref = _extract_in_repo_path_and_ref(
             plugin, plugin_root=manifest.plugin_root
         )
@@ -863,34 +910,6 @@ def resolve_marketplace_plugin(
                 source, in_repo_path, effective_ref
             )
             canonical = dep_ref.to_canonical()
-
-    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts ----
-    # When the plugin declares a ``url`` source and the marketplace is on a
-    # host that needs explicit git paths (GitLab, generic git), the URL
-    # already carries the full clone target.  Build a structured dep_ref so
-    # downstream auth resolves at the correct host instead of defaulting to
-    # github.com.
-    if dep_ref is None and _source_needs_explicit_git_path(source):
-        if isinstance(plugin.source, dict):
-            _src_type = _coerce_dict_plugin_type(plugin.source)
-            if _src_type == "url":
-                _url = (plugin.source.get("url", "") or "").strip()
-                if _url:
-                    _ref = plugin.source.get("ref", "")
-                    _effective_ref = version_spec or (
-                        _ref.strip() if isinstance(_ref, str) and _ref.strip() else ""
-                    )
-                    _entry: dict = {"git": _url}
-                    if _effective_ref:
-                        _entry["ref"] = _effective_ref
-                    dep_ref = DependencyReference.parse_from_dict(_entry)
-                    canonical = dep_ref.to_canonical()
-                    logger.debug(
-                        "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
-                        plugin_name,
-                        marketplace_name,
-                        canonical,
-                    )
 
     # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
     # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)
