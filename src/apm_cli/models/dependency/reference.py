@@ -2013,8 +2013,6 @@ class DependencyReference:
             return self.to_canonical()
         if self.is_insecure:
             host = self.host or default_host()
-            # A custom port is part of the transport and must round-trip into
-            # apm.yml, matching to_canonical()/get_identity()/to_github_url().
             netloc = f"{host}:{self.port}" if self.port else host
             entry = {"git": f"http://{netloc}/{self.repo_url}"}
             if self.reference:
