@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm update` now converges for git-source semver dependencies already at
   their locked tag instead of reporting a spurious update on every run. Branch
   dependencies remain unaffected. (by @srobroek, #2165)
+- `apm update` now resolves branch tips before rendering the plan, so unchanged branches converge without repeated installs while real tip advances remain visible. (#2212)
 - `apm audit` no longer reports drift for skills intentionally excluded by a
   dependency's `skills:` subset filter. (#2177)
 - `apm update` now re-checks a transitive dependency's own semver range
