@@ -335,10 +335,10 @@ def test_skill_subset_filtering_has_one_canonical_owner() -> None:
 def test_cached_update_resolution_stays_with_downloader_owner() -> None:
     """Cached branch planning must reuse the production ref resolver."""
     root = Path(__file__).parents[2]
-    resolve = (root / "src/apm_cli/install/phases/resolve.py").read_text()
+    ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
-    assert "resolved = downloader.resolve_git_reference(dep_ref)" in resolve
+    assert "resolved = downloader.resolve_git_reference(dep_ref)" in ref_reuse
     assert "Cached update planning must resolve refs through the downloader owner" in guard
 
 

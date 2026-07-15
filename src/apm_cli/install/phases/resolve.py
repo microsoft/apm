@@ -23,13 +23,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.install.helpers.ref_reuse import annotate_update_plan_refs
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
-    from apm_cli.deps.github_downloader import GitHubPackageDownloader
     from apm_cli.install.context import InstallContext
     from apm_cli.install.resolution_staging import ResolutionStagingSession
     from apm_cli.models.dependency.reference import DependencyReference
@@ -369,28 +369,6 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     )
 
 
-def _annotate_update_plan_refs(
-    deps_to_install: list[DependencyReference],
-    downloader: GitHubPackageDownloader,
-    *,
-    update_refs: bool,
-) -> list[DependencyReference]:
-    """Resolve Git refs needed by the update plan through the downloader owner."""
-    if not update_refs:
-        return deps_to_install
-    for dep_ref in deps_to_install:
-        if (
-            getattr(dep_ref, "resolved_reference", None) is not None
-            or dep_ref.is_local
-            or getattr(dep_ref, "source", None) == "registry"
-            or getattr(dep_ref, "artifactory_prefix", None)
-        ):
-            continue
-        resolved = downloader.resolve_git_reference(dep_ref)
-        dep_ref.resolved_reference = resolved
-    return deps_to_install
-
-
 def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     """Raise when the resolver recorded fatal dependency-resolution errors."""
     if not dependency_graph.resolution_errors:
@@ -707,9 +685,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
             if result and hasattr(result, "resolved_reference") and result.resolved_reference:
-                # Pre-plan resolution may have populated this carrier already.
-                # The download result wins so lock state stays tied to the
-                # materialized bytes; the tiered resolver makes re-resolution cheap.
+                # Download wins over cached pre-plan state; tiered re-resolution is cheap.
                 dep_ref.resolved_reference = result.resolved_reference
                 resolved_sha = result.resolved_reference.resolved_commit
             callback_downloaded_value = resolved_sha
@@ -866,7 +842,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
         allow_insecure_hosts=ctx.allow_insecure_hosts,
     )
 
-    ctx.deps_to_install = _annotate_update_plan_refs(
+    ctx.deps_to_install = annotate_update_plan_refs(
         deps_to_install,
         downloader,
         update_refs=update_refs,

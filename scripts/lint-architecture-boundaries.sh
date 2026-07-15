@@ -260,10 +260,10 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
     violations=$((violations + 1))
 fi
 update_plan_ref_body=$(awk '
-    /^def _annotate_update_plan_refs\(/ {flag=1}
-    flag && /^def / && !/_annotate_update_plan_refs/ {exit}
+    /^def annotate_update_plan_refs\(/ {flag=1}
+    flag && /^def / && !/annotate_update_plan_refs/ {exit}
     flag {print}
-' src/apm_cli/install/phases/resolve.py)
+' src/apm_cli/install/helpers/ref_reuse.py)
 if ! echo "$update_plan_ref_body" | grep -q 'downloader\.resolve_git_reference(dep_ref)' \
     || ! echo "$update_plan_ref_body" | grep -q 'dep_ref\.resolved_reference = resolved'; then
     echo "[x] Cached update planning must resolve refs through the downloader owner"
