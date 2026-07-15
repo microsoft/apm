@@ -2019,7 +2019,8 @@ class DependencyReference:
             return self.to_canonical()
         if self.is_insecure:
             host = self.host or default_host()
-            entry = {"git": f"http://{host}/{self.repo_url}"}
+            netloc = f"{host}:{self.port}" if self.port else host
+            entry = {"git": f"http://{netloc}/{self.repo_url}"}
             if self.reference:
                 entry["ref"] = self.reference
             if self.alias:

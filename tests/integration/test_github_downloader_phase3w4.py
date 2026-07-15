@@ -347,12 +347,14 @@ class TestDownloadSubdirectoryPersistentCache:
         dep_ref.host = "github.com"
         dep_ref.virtual_path = "packages/my-pkg"
         dep_ref.reference = "main"
+        dep_ref.is_insecure = False
         dep_ref.get_unique_key.return_value = "owner/repo@main"
+        dep_ref.to_github_url.return_value = f"https://gitlab.com/{repo_url}"
         return dep_ref
 
     def test_persistent_cache_hit_used(self, tmp_path):
         """Lines 1082-1090: persistent cache hit -> uses cached checkout."""
-        dep_ref = self._make_dep_ref()
+        dep_ref = self._make_dep_ref("spiritt/tenants/spiritt/agent-cfg")
 
         cached_checkout = tmp_path / "cached"
         cached_checkout.mkdir()
@@ -400,14 +402,16 @@ class TestDownloadSubdirectoryPersistentCache:
                 target_path=target_path,
             )
 
-        # persistent_cache.get_checkout was called
-        persistent_cache.get_checkout.assert_called()
+        assert persistent_cache.get_checkout.call_args.args[0] == (
+            "https://gitlab.com/spiritt/tenants/spiritt/agent-cfg"
+        )
 
         # Regression: the subdir-aware sparse_paths and locked_sha (when
         # available) MUST propagate to the persistent cache so the
         # variant-keyed shard ((sha, sparse_paths)) is actually hit and
         # the cold-path bloat fix from #1433 is not silently bypassed.
         call_kwargs = persistent_cache.get_checkout.call_args.kwargs
+        assert call_kwargs["env"] == dl._git_env_dict()
         assert "sparse_paths" in call_kwargs
         assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
         # locked_sha is plumbed via the kwarg; presence (not value) is the

@@ -15,9 +15,22 @@ so that silent deletion / rewording trips the suite.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
+from apm_cli.cache.url_normalize import normalize_repo_url
+from apm_cli.deps.shared_clone_cache import SharedCloneCache
+from apm_cli.deps.tiered_ref_resolver import (
+    L0PerRunCache,
+    PerRunRefCache,
+    TieredRefResolver,
+    _repository_cache_identity,
+)
+from apm_cli.models.dependency.reference import DependencyReference
+from tests.integration.test_install_subdir_dedup_e2e import (
+    test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
+)
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     load_json_fixture,
@@ -169,6 +182,164 @@ def test_resolver_replays_locked_commit_without_network():
         "WITHOUT issuing a network ref-resolution",
         "network-free at the resolution step",
     )
+
+
+@pytest.mark.req("req-rs-016")
+def test_resolver_cache_preserves_complete_repository_identity(tmp_path: Path):
+    """Distinct nested repositories stay separate; identical identities reuse."""
+    cache = SharedCloneCache(base_dir=tmp_path)
+    clone_count = 0
+
+    def clone_fn(target: Path) -> None:
+        nonlocal clone_count
+        clone_count += 1
+        target.mkdir(parents=True)
+        (target / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+
+    repo_a = "https://gitlab.com/acme/platform/team/repo-a"
+    repo_b = "https://gitlab.com/acme/platform/team/repo-b"
+    path_a = cache.get_or_clone(repo_a, "main", clone_fn)
+    path_b = cache.get_or_clone(repo_b, "main", clone_fn)
+    path_a_reused = cache.get_or_clone(repo_a, "main", clone_fn)
+
+    assert path_a != path_b
+    assert path_a_reused == path_a
+    assert clone_count == 2
+    cache.cleanup()
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_normalizes_safe_syntax_dimensions(tmp_path: Path):
+    """Default ports, credentials, suffixes, query, and fragments normalize safely."""
+    cache = SharedCloneCache(base_dir=tmp_path)
+    clone_count = 0
+
+    def clone_fn(target: Path) -> None:
+        nonlocal clone_count
+        clone_count += 1
+        target.mkdir(parents=True)
+        (target / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+
+    equivalent_urls = [
+        "https://oauth2:first@gitlab.com/acme/platform/team/repo-a",
+        "https://oauth2:second@GITLAB.COM:443/acme/platform/team/repo-a.git/?q=1#frag",
+        "https://oauth2:third@gitlab.com/acme/platform/team/repo-a.git///",
+    ]
+    paths = [cache.get_or_clone(url, "main", clone_fn) for url in equivalent_urls]
+
+    assert len(set(paths)) == 1
+    assert clone_count == 1
+    assert len({normalize_repo_url(url) for url in equivalent_urls}) == 1
+    cache.cleanup()
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_preserves_nondefault_port_and_path_case(tmp_path: Path):
+    """A non-default port or case-sensitive path difference remains distinct."""
+    cache = SharedCloneCache(base_dir=tmp_path)
+    clone_count = 0
+
+    def clone_fn(target: Path) -> None:
+        nonlocal clone_count
+        clone_count += 1
+        target.mkdir(parents=True)
+        (target / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+
+    urls = [
+        "https://git.corp:8443/Group/Repo",
+        "https://git.corp/Group/Repo",
+        "https://git.corp/group/repo",
+    ]
+    paths = [cache.get_or_clone(url, "main", clone_fn) for url in urls]
+
+    assert len(set(paths)) == 3
+    assert clone_count == 3
+    cache.cleanup()
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_preserves_literal_path_distinctions():
+    """Percent encoding, dot segments, and repeated slashes do not alias."""
+    canonical = "https://git.corp/acme/platform/team/repo-a"
+    variants = [
+        "https://git.corp/acme/platform/team/repo%2Da",
+        "https://git.corp/acme/platform/team/./repo-a",
+        "https://git.corp/acme/platform//team/repo-a",
+    ]
+
+    assert all(normalize_repo_url(variant) != normalize_repo_url(canonical) for variant in variants)
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_survives_full_install_and_persistent_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Bind the real install/cache/lock/deployment contract to req-rs-016."""
+    _run_nested_install_contract(tmp_path, monkeypatch)
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_isolates_l0_cache_across_hosts():
+    """The in-memory ref cache includes authority hostname in identity."""
+    cache = PerRunRefCache()
+    github_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="github.com",
+        reference="main",
+    )
+    gitlab_dep = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="gitlab.com",
+        reference="main",
+    )
+    cache.put(_repository_cache_identity(github_dep), "main", "a" * 40)
+
+    assert L0PerRunCache(cache=cache).try_resolve(gitlab_dep, "main") is None
+
+
+@pytest.mark.req("req-rs-016")
+def test_repository_identity_isolates_same_host_nested_repositories_through_resolver():
+    """Real resolver dispatch stores distinct SHAs for sibling nested repositories."""
+    cache = PerRunRefCache()
+
+    class SourceTier:
+        name = "source"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def try_resolve(self, dep_ref: DependencyReference, _ref: str) -> str:
+            self.calls.append(dep_ref.repo_url)
+            return "a" * 40 if dep_ref.repo_url.endswith("repo-a") else "b" * 40
+
+    source = SourceTier()
+    legacy = type("UnusedLegacy", (), {"resolve_full": lambda *_args: None})()
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), source],
+        cache=cache,
+        legacy=legacy,
+    )
+    dep_a = DependencyReference(
+        repo_url="acme/platform/team/repo-a",
+        host="gitlab.com",
+        reference="main",
+    )
+    dep_b = DependencyReference(
+        repo_url="acme/platform/team/repo-b",
+        host="gitlab.com",
+        reference="main",
+    )
+
+    first_a = resolver.resolve(dep_a)
+    first_b = resolver.resolve(dep_b)
+    warm_a = resolver.resolve(dep_a)
+
+    assert first_a.resolved_commit == "a" * 40
+    assert first_b.resolved_commit == "b" * 40
+    assert warm_a.resolved_commit == "a" * 40
+    assert source.calls == [dep_a.repo_url, dep_b.repo_url]
+    assert cache.size() == 2
 
 
 # --- req-pr-001..005: primitives ---------------------------------------

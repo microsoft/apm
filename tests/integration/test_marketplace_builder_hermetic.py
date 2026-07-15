@@ -1030,6 +1030,50 @@ class TestBuildPipeline:
         assert source["source"] == "url"
         assert source["url"] == "https://gitlab.example.com/platform/marketplaces/team/tool"
 
+    def test_build_writes_category_to_claude_output_on_disk(self, tmp_path):
+        """On-disk regression trap for issue #2188: a real ``builder.build()``
+        run (no mocked resolve/write_output) must write ``category`` into the
+        WRITTEN Claude ``marketplace.json`` for a package that sets it, and
+        omit the key entirely for a sibling package that doesn't -- the exact
+        promise ``ClaudeMarketplaceMapper.compose()`` now keeps."""
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "category-marketplace",
+                    "description": "Category on-disk marketplace",
+                    "version": "1.0.0",
+                    "marketplace": {
+                        "owner": {"name": "ACME"},
+                        "claude": {"output": "marketplace.json"},
+                        "packages": [
+                            {
+                                "name": "with-category",
+                                "source": "./packages/with-category",
+                                "version": "1.0.0",
+                                "category": "retrieval",
+                            },
+                            {
+                                "name": "without-category",
+                                "source": "./packages/without-category",
+                                "version": "1.0.0",
+                            },
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        builder = MarketplaceBuilder(apm_yml, options=BuildOptions(offline=True))
+
+        report = builder.build()
+
+        assert report.primary_output.errors == ()
+        output = json.loads((tmp_path / "marketplace.json").read_text(encoding="utf-8"))
+        plugins = {p["name"]: p for p in output["plugins"]}
+        assert plugins["with-category"]["category"] == "retrieval"
+        assert "category" not in plugins["without-category"]
+
     def test_build_calls_resolve_and_write_output(self, tmp_path):
         yml = _make_marketplace_yml_file(tmp_path)
         builder = MarketplaceBuilder(yml)
