@@ -276,7 +276,8 @@ def _run_matrix(root: Path, binary: Path) -> _MatrixReceipt:
     )
     source_after = ArtifactSnapshot.capture(source_root)
     producer_snapshot = ArtifactSnapshot.capture(producer.root)
-    bundle_root = producer.root / "build" / f"{producer.name}-0.1.0"
+    producer_manifest = load_yaml(producer.manifest_path)
+    bundle_root = producer.root / "build" / f"{producer.name}-{producer_manifest['version']}"
     bundle_before = ArtifactSnapshot.capture(bundle_root)
 
     consumer = project_factory.create(
