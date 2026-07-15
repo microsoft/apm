@@ -159,15 +159,15 @@ for...
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
-verbatim. Codex currently translates only `name`, `description`, and
-the Markdown body; it does not map agent-level `model` or `tools` into
-the generated TOML. When `tools` is present, `apm install` emits a
-lossy-compilation warning because the generated agent may inherit
-broader project or session tool access. APM cannot currently persist
-that restriction for Codex, so do not treat the generated agent as
-tool-isolated until this mapping is supported. Windsurf, Kiro, and
-Gemini do not receive `.agent.md` files at all -- use skills for
-Windsurf or Kiro personas; Gemini CLI has no agents primitive.
+verbatim. Codex translates only `name`, `description`, and the Markdown
+body; APM does not yet generate the complete per-agent MCP transport
+definitions needed to preserve `model` or `tools`. When `tools` is
+present, `apm install` warns that the generated agent may inherit every
+project or session MCP server. Remove `tools` if unrestricted access is
+intentional; otherwise, do not use the generated agent with Codex.
+Windsurf, Kiro, and Gemini do not receive `.agent.md` files at all --
+use skills for Windsurf or Kiro personas; Gemini CLI has no agents
+primitive.
 
 OpenCode is the strictest of the verbatim targets: it requires
 `tools` as a `tool-name: boolean` **mapping** (not a list, not a

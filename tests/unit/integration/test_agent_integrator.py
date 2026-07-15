@@ -7,7 +7,11 @@ from unittest.mock import Mock
 
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
-from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+from apm_cli.utils.diagnostics import (
+    CATEGORY_LOSSY_COMPILATION,
+    CATEGORY_WARNING,
+    DiagnosticCollector,
+)
 
 
 class TestAgentIntegrator:
@@ -1191,14 +1195,15 @@ class TestCodexAgentIntegration:
         assert result.files_integrated == 1
         warnings = [
             diagnostic
-            for diagnostic in diagnostics.by_category().get(CATEGORY_WARNING, [])
+            for diagnostic in diagnostics.by_category().get(CATEGORY_LOSSY_COMPILATION, [])
             if "scoped.agent.md" in diagnostic.message
         ]
         assert len(warnings) == 1
         assert warnings[0].package == "test-pkg"
         assert "tools" in warnings[0].message
         assert "Codex" in warnings[0].message
-        assert "tool access" in warnings[0].message
+        assert "project/session MCP servers" in warnings[0].message
+        assert warnings[0].detail.startswith("Fix:")
 
         diagnostics.render_summary()
         rendered = capsys.readouterr()
@@ -1209,8 +1214,35 @@ class TestCodexAgentIntegration:
 
         import toml
 
-        generated = toml.loads((self.root / ".codex" / "agents" / "scoped.toml").read_text())
+        generated = toml.loads(
+            (self.root / ".codex" / "agents" / "scoped.toml").read_text(encoding="utf-8")
+        )
         assert "tools" not in generated
+        assert "unrestricted access" in warnings[0].detail
+
+    def test_codex_agent_non_mapping_frontmatter_emits_warning(self):
+        """Valid YAML with the wrong shape must not bypass scope diagnostics."""
+        source = self.root / "list-frontmatter.agent.md"
+        source.write_text(
+            "---\n- name: list-frontmatter\n- tools: [read]\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "list-frontmatter.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert len(warnings) == 1
+        assert "must be a mapping and was ignored" in warnings[0].message
+        assert "may inherit broader tool access" in warnings[0].message
+        assert "rerun 'apm install'" in warnings[0].message
 
     def test_codex_agent_invalid_frontmatter_emits_warning(self):
         """Invalid YAML must not make Codex conversion fail open silently."""
@@ -1283,7 +1315,7 @@ class TestCodexAgentIntegration:
             package_name="test-pkg",
         )
 
-        assert diagnostics.by_category().get(CATEGORY_WARNING, []) == []
+        assert diagnostics.by_category().get(CATEGORY_LOSSY_COMPILATION, []) == []
 
 
 # ==================================================================

@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.integration.opencode_frontmatter import _ascii_safe_name, validate_opencode_frontmatter
+from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
 from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_yaml_str
@@ -298,6 +299,47 @@ class AgentIntegrator(BaseIntegrator):
     )
 
     @staticmethod
+    def _warn_codex_unverified_scope(
+        diagnostics: DiagnosticCollector | None,
+        source: Path,
+        package_name: str,
+        issue: str,
+        fix: str,
+    ) -> None:
+        """Warn that invalid Codex frontmatter prevents scope verification."""
+        if diagnostics is None:
+            return
+        diagnostics.warn(
+            message=(
+                f"Codex agent {printable_ascii_text(source.name)}: {issue}. "
+                "Tool restrictions could not be verified, so the agent may inherit broader "
+                f"tool access. Fix: {fix}."
+            ),
+            package=printable_ascii_text(package_name),
+        )
+
+    @staticmethod
+    def _warn_codex_tools_dropped(
+        diagnostics: DiagnosticCollector | None,
+        source: Path,
+        package_name: str,
+    ) -> None:
+        """Warn that APM cannot preserve Codex agent tool restrictions."""
+        if diagnostics is None:
+            return
+        diagnostics.lossy_compilation(
+            message=(
+                f"Codex agent {printable_ascii_text(source.name)}: frontmatter field 'tools' "
+                "was dropped; the agent may inherit all project/session MCP servers."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                "Fix: remove 'tools' if unrestricted access is intentional; "
+                "otherwise do not use the generated agent with Codex."
+            ),
+        )
+
+    @staticmethod
     def _write_codex_agent(
         source: Path,
         target: Path,
@@ -321,8 +363,6 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
-        safe_name = _ascii_safe_name(source.name)
-        safe_package = _ascii_safe_name(package_name)
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
@@ -332,38 +372,28 @@ class AgentIntegrator(BaseIntegrator):
                 if isinstance(fm, dict):
                     name = fm.get("name", name)
                     description = fm.get("description", description)
-                elif diagnostics is not None:
-                    diagnostics.warn(
-                        message=(
-                            f"Codex agent {safe_name}: YAML frontmatter must be a mapping and was ignored. "
-                            "Tool restrictions could not be verified, so the agent may inherit broader "
-                            "tool access. Fix the frontmatter, and do not rely on this generated agent "
-                            "for tool isolation until APM supports the mapping."
-                        ),
-                        package=safe_package,
+                else:
+                    AgentIntegrator._warn_codex_unverified_scope(
+                        diagnostics,
+                        source,
+                        package_name,
+                        "YAML frontmatter must be a mapping and was ignored",
+                        "use a YAML mapping, then rerun 'apm install'",
                     )
-                if diagnostics is not None and isinstance(fm, dict) and "tools" in fm:
-                    diagnostics.warn(
-                        message=(
-                            f"Codex agent {safe_name}: frontmatter field 'tools' was dropped "
-                            "because APM does not currently map agent tool restrictions into "
-                            "Codex agent TOML. The agent may inherit broader tool access. "
-                            "Do not rely on this generated agent for tool isolation until APM "
-                            "supports the mapping."
-                        ),
-                        package=safe_package,
+                if isinstance(fm, dict) and "tools" in fm:
+                    AgentIntegrator._warn_codex_tools_dropped(
+                        diagnostics,
+                        source,
+                        package_name,
                     )
             except yaml.YAMLError:
-                if diagnostics is not None:
-                    diagnostics.warn(
-                        message=(
-                            f"Codex agent {safe_name}: invalid YAML frontmatter was ignored. "
-                            "Tool restrictions could not be verified, so the agent may inherit "
-                            "broader tool access. Fix the frontmatter, and do not rely on this generated "
-                            "agent for tool isolation until APM supports the mapping."
-                        ),
-                        package=safe_package,
-                    )
+                AgentIntegrator._warn_codex_unverified_scope(
+                    diagnostics,
+                    source,
+                    package_name,
+                    "invalid YAML frontmatter was ignored",
+                    "repair the frontmatter, then rerun 'apm install'",
+                )
 
         doc = {
             "name": name,

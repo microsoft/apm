@@ -21,6 +21,7 @@ from apm_cli.utils.console import (
 CATEGORY_COLLISION = "collision"
 CATEGORY_OVERWRITE = "overwrite"
 CATEGORY_WARNING = "warning"
+CATEGORY_LOSSY_COMPILATION = "lossy_compilation"
 CATEGORY_ERROR = "error"
 CATEGORY_SECURITY = "security"
 CATEGORY_POLICY = "policy"
@@ -40,10 +41,17 @@ _CATEGORY_ORDER = [
     CATEGORY_DRIFT,
     CATEGORY_COLLISION,
     CATEGORY_OVERWRITE,
+    CATEGORY_LOSSY_COMPILATION,
     CATEGORY_WARNING,
     CATEGORY_ERROR,
     CATEGORY_INFO,
 ]
+
+
+def printable_ascii_text(value: str) -> str:
+    """Replace non-printable or non-ASCII characters for safe diagnostics."""
+    ascii_only = value.encode("ascii", "replace").decode("ascii")
+    return "".join("?" if ord(char) < 0x20 or ord(char) == 0x7F else char for char in ascii_only)
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,18 @@ class DiagnosticCollector:
                 Diagnostic(
                     message=message,
                     category=CATEGORY_WARNING,
+                    package=package,
+                    detail=detail,
+                )
+            )
+
+    def lossy_compilation(self, message: str, package: str = "", detail: str = "") -> None:
+        """Record a warning that target conversion discarded source semantics."""
+        with self._lock:
+            self._diagnostics.append(
+                Diagnostic(
+                    message=message,
+                    category=CATEGORY_LOSSY_COMPILATION,
                     package=package,
                     detail=detail,
                 )
@@ -307,6 +327,8 @@ class DiagnosticCollector:
                 self._render_collision_group(items)
             elif cat == CATEGORY_OVERWRITE:
                 self._render_overwrite_group(items)
+            elif cat == CATEGORY_LOSSY_COMPILATION:
+                self._render_lossy_compilation_group(items)
             elif cat == CATEGORY_WARNING:
                 self._render_warning_group(items)
             elif cat == CATEGORY_ERROR:
@@ -428,6 +450,17 @@ class DiagnosticCollector:
             _rich_warning(f"  [!] {pkg_prefix}{d.message}")
             if d.detail and self.verbose:
                 _rich_echo(f"    +- {d.detail}", color="dim")
+
+    def _render_lossy_compilation_group(self, items: list[Diagnostic]) -> None:
+        count = len(items)
+        noun = "warning" if count == 1 else "warnings"
+        _rich_warning(f"  [!] {count} lossy agent compilation {noun}")
+        for diagnostic in items:
+            package = f"[{diagnostic.package}] " if diagnostic.package else ""
+            _rich_echo(f"    +- {package}{diagnostic.message}", color="yellow")
+        fixes = tuple(dict.fromkeys(item.detail for item in items if item.detail))
+        for fix in fixes:
+            _rich_info(f"    {fix}")
 
     def _render_error_group(self, items: list[Diagnostic]) -> None:
         count = len(items)
