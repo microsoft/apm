@@ -1776,7 +1776,7 @@ def _detect_garbage(
 def _read_cache_entry(
     repo_ref: str,
     project_root: Path,
-    ttl: int = DEFAULT_CACHE_TTL,
+    ttl: int | None = None,
     *,
     expected_hash: str | None = None,
 ) -> _CacheEntry | None:
@@ -1792,6 +1792,9 @@ def _read_cache_entry(
     compared against it; a mismatch invalidates the cache entry so the
     caller falls through to a fresh fetch where the pin can be verified
     against authoritative bytes off the wire.
+
+    When *ttl* is omitted, staleness follows the cached effective policy's
+    ``cache.ttl``. Callers may pass an explicit TTL for diagnostics or tests.
     """
     cache_dir = _get_cache_dir(project_root)
     key = _cache_key(repo_ref)
@@ -1832,6 +1835,7 @@ def _read_cache_entry(
         # The sidecar preserves warnings from the authored cold input. Parser
         # warnings from canonical cache YAML are intentionally not user-facing.
         policy, _warnings = load_policy(policy_file)
+        effective_ttl = policy.cache.ttl if ttl is None else ttl
         cached_warnings = meta.get("warnings", [])
         if not isinstance(cached_warnings, list):
             cached_warnings = []
@@ -1848,7 +1852,7 @@ def _read_cache_entry(
             policy=policy,
             source=source,
             age_seconds=age,
-            stale=age > ttl,
+            stale=age > effective_ttl,
             chain_refs=meta.get("chain_refs", [repo_ref]),
             warnings=cached_warnings,
             fingerprint=meta.get("fingerprint", ""),
@@ -1861,11 +1865,12 @@ def _read_cache_entry(
 def _read_cache(
     repo_ref: str,
     project_root: Path,
-    ttl: int = DEFAULT_CACHE_TTL,
+    ttl: int | None = None,
 ) -> PolicyFetchResult | None:
     """Read policy from cache if still valid (within TTL).
 
     Legacy wrapper around ``_read_cache_entry`` for backward compatibility.
+    The cached effective policy's TTL applies unless *ttl* is explicit.
     Returns None if cache miss, expired, or past MAX_STALE_TTL.
     """
     entry = _read_cache_entry(repo_ref, project_root, ttl=ttl)

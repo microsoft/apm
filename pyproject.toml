@@ -52,6 +52,7 @@ dev = [
     "mypy>=1.0.0",
     "jsonschema>=4.0.0",
     "pylint>=3.0.0",
+    "hypothesis>=6.0.0",
 ]
 build = [
     "pyinstaller>=6.0.0",
