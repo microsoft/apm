@@ -1,0 +1,92 @@
+name: Windows SSH ConPTY Interactive Passphrase Evidence (issue #1976)
+
+# Evidence-only fixture for microsoft/apm issue #1976's remaining Windows
+# boundary: whether a real interactive SSH passphrase prompt, driven
+# through an actual Windows pseudo console (ConPTY) exactly as a human
+# PowerShell session would present one, still succeeds when packaged
+# apm.exe -> Git for Windows -> Windows OpenSSH -> loopback sshd is
+# exercised with an encrypted Ed25519 key and every askpass/agent
+# variable removed from the environment.
+#
+# This is deliberately NOT part of the normal CI/merge surface:
+#   - It is absent from ci.yml and merge-gate.yml's EXPECTED_CHECKS.
+#   - It only runs on workflow_dispatch, or on pull_request but scoped to
+#     the exact files that make up this fixture (so it never runs on
+#     unrelated PRs).
+#   - It makes no product code changes, calls no external git network, and
+#     stores no secrets -- every key/passphrase is generated fresh per run
+#     and is scanned out of the uploaded evidence before upload.
+#   - It never gates a merge; it exists purely to produce hosted evidence
+#     for a linked PR that is opened as a draft and is never intended to
+#     be merged.
+
+env:
+  PYTHON_VERSION: '3.12'
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '.github/workflows/windows-ssh-conpty-repro.yml'
+      - 'scripts/windows/conpty/**'
+      - 'scripts/windows/test-ssh-conpty-passphrase.ps1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ssh-conpty-repro-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conpty-evidence:
+    name: Interactive ConPTY passphrase evidence
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra build
+
+      - name: Build packaged apm.exe
+        shell: pwsh
+        run: uv run pwsh scripts/windows/build-binary.ps1
+
+      - name: Confirm sshd service is present (pre-installed, normally stopped)
+        shell: pwsh
+        run: |
+          $service = Get-Service -Name sshd -ErrorAction Stop
+          Write-Host "[i] sshd service found: Status=$($service.Status) StartType=$($service.StartType)"
+
+      # The actual evidence run. Never touches product code; only builds
+      # ephemeral fixture state under $env:TEMP and Windows' own
+      # $env:ProgramData\ssh loopback configuration (restored at the end).
+      - name: Run ConPTY interactive passphrase fixture
+        shell: pwsh
+        run: |
+          scripts/windows/test-ssh-conpty-passphrase.ps1 `
+            -ApmBinary "dist/apm-windows-x86_64/apm.exe" `
+            -EvidenceDirectory "conpty-evidence"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: conpty-passphrase-evidence-1976
+          path: conpty-evidence/**
+          retention-days: 14
+          if-no-files-found: warn
