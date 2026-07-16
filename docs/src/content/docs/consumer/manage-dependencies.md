@@ -307,11 +307,13 @@ apm prune             # delete orphaned packages from apm_modules/
 ```
 
 `apm prune` removes any directory in `apm_modules/` that no longer
-corresponds to a declared dependency. It does not touch your manifest.
+corresponds to a declared dependency or a still-required transitive
+lockfile entry. It does not touch your manifest.
 Lockfile entries, deployed harness files (`.github/`, `.claude/`, etc.),
 and merged hook configuration owned by the pruned package are all
-reconciled immediately by `apm prune` itself -- no follow-up
-`apm install` is required.
+reconciled immediately by `apm prune` itself -- remaining direct and
+transitive packages keep their hooks; no follow-up `apm install` is
+required.
 
 If you also want to refresh remaining deps to their latest versions or refs, see
 [Update and refresh](../update-and-refresh/).

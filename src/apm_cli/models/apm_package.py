@@ -54,7 +54,9 @@ __all__ = [  # noqa: RUF022
     # Defined in this module
     "APMPackage",
     "PackageInfo",
+    "build_installed_package_info",
     "clear_apm_yml_cache",
+    "surviving_dependency_refs_for_reintegration",
 ]
 
 # Module-level parse cache: (resolved apm.yml path, resolved source dir) ->
@@ -802,3 +804,33 @@ def build_installed_package_info(
         dependency_ref=dep_ref,
         package_type=result.package_type if result else None,
     )
+
+
+def surviving_dependency_refs_for_reintegration(
+    apm_package: "APMPackage",
+    project_root: Path,
+    *,
+    lockfile=None,
+) -> list[DependencyReference]:
+    """Return packages still present after removal, for clear+rebuild.
+
+    Prefer lockfile package dependencies (direct *and* transitive,
+    excluding the virtual ``"."`` self-entry). Callers that already hold
+    a post-removal in-memory lockfile (``apm uninstall``) must pass it
+    explicitly -- the on-disk lockfile is still stale until uninstall
+    writes it. When *lockfile* is omitted, the on-disk lockfile under
+    *project_root* is loaded (safe for ``apm prune``, which writes the
+    lockfile before hook reconciliation).
+
+    Falls back to ``apm_package.get_all_apm_dependencies()`` (manifest
+    directs only) when no lockfile is available.
+    """
+    # Deferred: LockFile imports DependencyReference from this module.
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    resolved = lockfile
+    if resolved is None:
+        resolved = LockFile.read(get_lockfile_path(project_root))
+    if resolved is not None:
+        return [dep.to_dependency_ref() for dep in resolved.get_package_dependencies()]
+    return list(apm_package.get_all_apm_dependencies())

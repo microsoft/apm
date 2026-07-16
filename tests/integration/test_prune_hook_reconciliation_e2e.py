@@ -68,7 +68,10 @@ def _clear_package_cache() -> None:
     clear_apm_yml_cache()
 
 
-def _stub_download_package(hook_commands: dict[str, str]):
+def _stub_download_package(
+    hook_commands: dict[str, str],
+    package_deps: dict[str, list[str]] | None = None,
+):
     """Build a ``download_package`` stub that materializes a hooked fixture package.
 
     *hook_commands* maps a dependency's ``repo_url`` (e.g. ``"acme/pkg-a"``)
@@ -76,7 +79,12 @@ def _stub_download_package(hook_commands: dict[str, str]):
     with no entry in the map are still materialized but ship no hooks --
     used to prove prune's *own* package/script removal still works
     unconditionally.
+
+    *package_deps* optionally maps a package's ``repo_url`` to nested
+    ``dependencies.apm`` entries so install can resolve a transitive
+    chain (see ``test_prune_preserves_transitive_dependency_hooks``).
     """
+    nested_deps = package_deps or {}
 
     def _download(
         _self: GitHubPackageDownloader,
@@ -93,15 +101,16 @@ def _stub_download_package(hook_commands: dict[str, str]):
         install_path = Path(install_path)
         install_path.mkdir(parents=True, exist_ok=True)
         pkg_name = dep_ref.repo_url.rsplit("/", maxsplit=1)[-1]
+        manifest: dict = {
+            "name": pkg_name,
+            "version": "1.0.0",
+            "description": f"Hermetic prune-reconciliation fixture: {pkg_name}",
+        }
+        nested = nested_deps.get(dep_ref.repo_url)
+        if nested:
+            manifest["dependencies"] = {"apm": list(nested)}
         (install_path / "apm.yml").write_text(
-            yaml.safe_dump(
-                {
-                    "name": pkg_name,
-                    "version": "1.0.0",
-                    "description": f"Hermetic prune-reconciliation fixture: {pkg_name}",
-                },
-                sort_keys=False,
-            ),
+            yaml.safe_dump(manifest, sort_keys=False),
             encoding="utf-8",
         )
         command = hook_commands.get(dep_ref.repo_url)
@@ -173,13 +182,17 @@ def _run_cli(project: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]) ->
 
 
 def _run_install(
-    project: Path, monkeypatch: pytest.MonkeyPatch, hook_commands: dict[str, str]
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hook_commands: dict[str, str],
+    *,
+    package_deps: dict[str, list[str]] | None = None,
 ) -> object:
     with patch.object(
         GitHubPackageDownloader,
         "download_package",
         autospec=True,
-        side_effect=_stub_download_package(hook_commands),
+        side_effect=_stub_download_package(hook_commands, package_deps=package_deps),
     ):
         return _run_cli(project, monkeypatch, ["install", "--no-policy"])
 
@@ -316,6 +329,57 @@ def test_prune_preserves_sibling_hooks_and_manual_entries(
     assert "./scripts/pkg-b-hook.sh" in commands, "sibling's hook command must remain"
     assert "echo manual-user-hook" in commands, "manual user-owned hook must remain untouched"
     assert "./scripts/pkg-a-hook.sh" not in commands, "pruned package's hook command must be gone"
+
+
+def test_prune_preserves_transitive_dependency_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2254: wipe+rebuild must restore hooks owned by a surviving transitive dep.
+
+    Graph: ``keeper`` (direct, no hooks) depends on ``transitive-hooks``
+    (transitive, has hooks); ``to-prune`` is a sibling direct orphan.
+    Pruning ``to-prune`` triggers ``reconcile_after_removal``. A
+    direct-only rebuild would wipe ``transitive-hooks`` entries and never
+    put them back even though the package remains installed via ``keeper``.
+    """
+    project = tmp_path / "proj-transitive-hooks"
+    _write_project(project, ["acme/keeper", "acme/to-prune"], ["claude"])
+
+    install_result = _run_install(
+        project,
+        monkeypatch,
+        {
+            "acme/transitive-hooks": "./scripts/transitive-hook.sh",
+            "acme/to-prune": "./scripts/to-prune-hook.sh",
+        },
+        package_deps={"acme/keeper": ["acme/transitive-hooks"]},
+    )
+    assert install_result.exit_code == 0, install_result.output
+
+    transitive_dir = project / "apm_modules" / "acme" / "transitive-hooks"
+    assert transitive_dir.is_dir(), "precondition: transitive package installed"
+    settings_path = project / ".claude" / "settings.json"
+    sidecar_path = project / ".claude" / "apm-hooks.json"
+    assert "transitive-hooks" in _sidecar_sources(sidecar_path), (
+        "precondition: transitive package's hooks merged"
+    )
+    assert "./scripts/transitive-hook.sh" in _pre_tool_use_commands(settings_path)
+
+    _remove_dependency(project, "acme/to-prune")
+    prune_result = _run_prune(project, monkeypatch)
+    assert prune_result.exit_code == 0, prune_result.output
+
+    assert not (project / "apm_modules" / "acme" / "to-prune").exists()
+    assert transitive_dir.is_dir(), "transitive package must survive via keeper"
+    assert "to-prune" not in _sidecar_sources(sidecar_path)
+    assert "transitive-hooks" in _sidecar_sources(sidecar_path), (
+        "transitive dependency's hook ownership must be rebuilt after prune wipe"
+    )
+    commands = _pre_tool_use_commands(settings_path)
+    assert "./scripts/transitive-hook.sh" in commands, (
+        "transitive dependency's hook command must survive reconcile_after_removal"
+    )
+    assert "./scripts/to-prune-hook.sh" not in commands
 
 
 def test_prune_hook_reconciliation_is_idempotent(

@@ -1974,10 +1974,13 @@ class HookIntegrator(BaseIntegrator):
         callers such as ``apm prune`` orchestrate the existing
         ownership-aware cleanup instead of reimplementing hook filtering.
 
-        Uses ``get_all_apm_dependencies()`` (prod + dev) rather than
-        uninstall's prod-only dependency set, matching ``apm prune``'s
-        own orphan-detection scope (prune already treats dev deps as
-        first-class for removal purposes).
+        Rebuilds from every package still recorded in the post-removal
+        lockfile (direct *and* transitive), via
+        ``surviving_dependency_refs_for_reintegration`` -- the same
+        survivor set uninstall Phase 2 uses (#2254). Falls back to
+        ``get_all_apm_dependencies()`` (prod + dev directs) only when no
+        lockfile is available, matching ``apm prune``'s orphan-detection
+        scope that already treats dev deps as first-class.
 
         Best-effort by design: a re-integration failure for one
         dependency is logged and skipped rather than aborting the
@@ -1985,18 +1988,15 @@ class HookIntegrator(BaseIntegrator):
         error-tolerant semantics.
 
         Target scope (#2250): the merged-hook JSON wipe below is scoped to
-        the SAME resolved ``targets`` the rebuild loop uses, so a harness
-        dropped from ``targets:`` (but still holding stale merged-hook
-        entries) is never wiped for still-declared, still-installed
-        packages while the rebuild silently skips repopulating it.
-
-        Known boundary (shared with uninstall, #2250): rebuilds only
-        direct dependencies from ``get_all_apm_dependencies()`` -- a
-        transitive dependency's merged hooks are wiped above but never
-        re-integrated here.
+        the same resolved ``targets`` the rebuild loop uses, so dropped
+        harnesses are not wiped for still-declared packages that the
+        rebuild will not repopulate.
         """
         from apm_cli.constants import APM_MODULES_DIR
-        from apm_cli.models.apm_package import build_installed_package_info
+        from apm_cli.models.apm_package import (
+            build_installed_package_info,
+            surviving_dependency_refs_for_reintegration,
+        )
 
         from .targets import resolve_targets
 
@@ -2010,7 +2010,7 @@ class HookIntegrator(BaseIntegrator):
         targets = resolve_targets(
             project_root, user_scope=user_scope, explicit_target=config_target or None
         )
-        surviving_deps = list(apm_package.get_all_apm_dependencies())
+        surviving_deps = surviving_dependency_refs_for_reintegration(apm_package, project_root)
 
         # Empty managed_files (not None) skips file-level deletion while
         # still triggering the merged-hook JSON wipe, scoped to the same
