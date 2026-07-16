@@ -115,7 +115,8 @@ fold-vs-defer, push, CI watch, with its own caps -- and
 returns a `completion_return` matching
 `../shepherd-driver/assets/completion-schema.json`
 (`ready-to-merge` | `advisory-with-deferred` | `superseded` |
-`blocked`).
+`blocked`). Terminal returns also pass the deterministic semantic gate
+in `../shepherd-driver/scripts/owner_touch_gate.py`.
 
 The cross-PR conflict-resolution / mergeability phase is ALSO
 shepherd-driver's: Phase 5 delegates to
@@ -131,6 +132,7 @@ EXECUTION):
 ```
 test -f ../shepherd-driver/assets/shepherd-driver-prompt.md \
   && test -f ../shepherd-driver/assets/completion-schema.json \
+  && test -f ../shepherd-driver/scripts/owner_touch_gate.py \
   && echo "shepherd-driver present" \
   || echo "MISSING shepherd-driver - stop and ask the operator"
 ```
@@ -139,8 +141,9 @@ On a probe MISS, STOP and ask the operator to restore the sibling; do
 NOT re-implement the loop inline (avoids HAND-ROLLED HALLUCINATION and
 PHANTOM DEPENDENCY). The driver transitively composes
 `apm-review-panel` and probes for it at its own preflight, returning
-`status: blocked` on a miss. The orchestrator NEVER reaches into
-shepherd-driver or apm-review-panel internals.
+`status: blocked` on a miss. The orchestrator uses only
+shepherd-driver's declared prompt, schema, and owner-gate interfaces;
+it NEVER re-implements shepherd-driver or apm-review-panel internals.
 
 ## Phases
 
@@ -309,12 +312,31 @@ Each driver owns the full convergence loop end-to-end and returns a
 `completion_return` matching
 `../shepherd-driver/assets/completion-schema.json` (status enum per
 the Composition section). Schema-validate every return (retry-once; on
-second malformed, mark the row `blocked` and continue). Write
-`head_sha`, `mergeable`, `merge_state_status`, and `ci_status` from
-the return into the table, and remove the `status/shepherding` label
-from the driven issue (assignment stays). The orchestrator owns only
-schema-validation, table update, and label cleanup -- it does NOT post
-to any PR.
+second malformed, mark the row `blocked` and continue).
+
+For a terminal `ready-to-merge` or `advisory-with-deferred` return,
+persist the returned JSON in the session state, derive `BASE_SHA` with
+`git -C <row-worktree> merge-base <returned-head-sha> origin/main`,
+then independently run:
+
+```
+uv run python <row-worktree>/.agents/skills/shepherd-driver/scripts/owner_touch_gate.py verify \
+  --repo-root <row-worktree> --base $BASE_SHA \
+  --head <returned-head-sha> --completion <session-return-json>
+```
+
+Do not update the table or labels until schema AND semantic
+verification pass. A non-zero verifier result gets the same retry-once
+treatment as malformed schema; on a second failure mark the row
+`blocked` with the diagnostic. This parent re-probe prevents a child
+from bypassing deterministic owner detection or presenting stale
+functional evidence.
+
+After both gates pass, write `head_sha`, `mergeable`,
+`merge_state_status`, and `ci_status` from the return into the table,
+and remove the `status/shepherding` label from the driven issue
+(assignment stays). The orchestrator owns only validation, table
+update, and label cleanup -- it does NOT post to any PR.
 
 ### Phase 5 - mergeability gate (WAVE 4)
 
@@ -395,6 +417,7 @@ Composed from shepherd-driver (loaded by relative path, NOT bundled):
 `shepherd-driver-prompt.md` (Phase 4 drive),
 `conflict-resolution-prompt.md` (Phase 5b),
 `completion-schema.json` (driver + resolution returns),
+`scripts/owner_touch_gate.py` (terminal functional-evidence gate),
 `references/mergeability-gate.md` (Phase 5 gate) -- all under
 `../shepherd-driver/`.
 
