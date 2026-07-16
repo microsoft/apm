@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from pathlib import PurePosixPath
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_git_repository import GitCommit, LocalGitRepository, LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
@@ -51,6 +57,218 @@ def _dependency_rows(project_root: Path) -> dict[str, dict[str, object]]:
         rows[key] = dependency
     return rows
 
+
+@dataclass(frozen=True)
+class _GitLifecycleProject:
+    """One isolated project consuming a local Git package through a Git URL."""
+
+    isolated: IsolatedApmEnvironment
+    project_root: Path
+    repository: LocalGitRepository
+    commit: GitCommit
+    source: str
+
+
+def _configure_local_source_rewrite(
+    source: str,
+    repository: LocalGitRepository,
+    *,
+    environment: dict[str, str],
+) -> None:
+    """Map a production-shaped Git URL to the local bare fixture origin."""
+    subprocess.run(
+        (
+            "git",
+            "config",
+            "--global",
+            f"url.{repository.file_url}.insteadOf",
+            source,
+        ),
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+
+
+def _create_git_lifecycle_project(
+    root: Path,
+    *,
+    source_name: str,
+    mcp_dependencies: tuple[dict[str, object], ...] = (),
+    lsp_dependencies: tuple[dict[str, object], ...] = (),
+) -> _GitLifecycleProject:
+    """Create an isolated consumer and real local-Git configuration package."""
+    isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    package_factory = LocalPackageFactory(isolated.package_root)
+    source_package = package_factory.create(
+        source_name,
+        mcp_dependencies=mcp_dependencies,
+        lsp_dependencies=lsp_dependencies,
+    )
+    package_factory.add_instruction(
+        source_package,
+        f"{source_name}-instruction",
+        _instruction(f"{source_name}-instruction"),
+    )
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root,
+        env=environment,
+    )
+    repository = repositories.create(source_name, source_tree=source_package.root)
+    commit = repositories.commit(repository, message=f"seed {source_name} fixture")
+    source = f"git@gitlab.example.invalid:contracts/{source_name}.git"
+    _configure_local_source_rewrite(
+        source,
+        repository,
+        environment=environment,
+    )
+    project = LocalPackageFactory(isolated.work_root).create(
+        "consumer",
+        dependencies=(
+            {
+                "git": source,
+                "type": "gitlab",
+                "ref": "main",
+                "alias": source_name,
+            },
+        ),
+        targets=("copilot",),
+    )
+    return _GitLifecycleProject(
+        isolated=isolated,
+        project_root=project.root,
+        repository=repository,
+        commit=commit,
+        source=source,
+    )
+
+
+def _audit_payload(
+    runner: ApmLifecycleRunner,
+    *,
+    scenario_id: str,
+    cwd: Path,
+    environment: dict[str, str],
+    expected_returncode: int = 0,
+) -> dict[str, object]:
+    """Run the real JSON CI audit and return its complete persisted-state report."""
+    (result,) = runner.run_sequence(
+        (("audit", "--ci", "--no-policy", "--format", "json"),),
+        expected_returncodes=(expected_returncode,),
+        scenario_id=scenario_id,
+        cwd=cwd,
+        env=environment,
+    )
+    payload = json.loads(result.stdout)
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _check(payload: dict[str, object], name: str) -> dict[str, object]:
+    """Return one named audit check, failing when audit shape changes."""
+    checks = payload["checks"]
+    assert isinstance(checks, list)
+    for check in checks:
+        assert isinstance(check, dict)
+        if check["name"] == name:
+            return check
+    raise AssertionError(f"Audit did not report {name!r}: {checks!r}")
+
+
+def test_project_mcp_reinstall_repairs_canonical_ownership(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """MCP reinstall must restore lock provenance, deployment ownership, and audit closure."""
+    server = {
+        "name": "project-contract-server",
+        "registry": False,
+        "transport": "stdio",
+        "command": "echo",
+        "args": ["project-contract"],
+    }
+    fixture = _create_git_lifecycle_project(
+        tmp_path / "project-mcp",
+        source_name="mcp-source",
+        mcp_dependencies=(server,),
+    )
+    runner = _runner(apm_binary_path)
+    environment = fixture.isolated.subprocess_env()
+    manifest_bytes = (fixture.project_root / "apm.yml").read_bytes()
+    install_args = (
+        "install",
+        "--runtime",
+        "vscode",
+        "--target",
+        "copilot",
+        "--trust-transitive-mcp",
+        "--no-policy",
+    )
+
+    runner.run_sequence(
+        (install_args,),
+        expected_returncodes=(0,),
+        scenario_id="project-mcp-initial-install",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    first = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".vscode/mcp.json"),),
+    )
+    assert first.manifest_bytes == manifest_bytes
+    assert first.deployment_records
+    assert b"project-contract-server" in first.mcp_state_bytes
+    assert first.file(".vscode/mcp.json").kind == "file"
+    assert _audit_payload(
+        runner,
+        scenario_id="project-mcp-initial-audit",
+        cwd=fixture.project_root,
+        environment=environment,
+    )["passed"] is True
+
+    lock_data = load_yaml(fixture.project_root / "apm.lock.yaml")
+    assert isinstance(lock_data, dict)
+    deployments = lock_data["deployments"]
+    assert isinstance(deployments, list)
+    assert deployments
+    deployments.clear()
+    dump_yaml(lock_data, fixture.project_root / "apm.lock.yaml")
+
+    broken = _audit_payload(
+        runner,
+        scenario_id="project-mcp-mutated-audit",
+        cwd=fixture.project_root,
+        environment=environment,
+        expected_returncode=1,
+    )
+    assert broken["passed"] is False
+    assert _check(broken, "content-integrity")["passed"] is False
+
+    runner.run_sequence(
+        (install_args,),
+        expected_returncodes=(0,),
+        scenario_id="project-mcp-repair-install",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    repaired = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".vscode/mcp.json"),),
+    )
+    assert repaired.manifest_bytes == manifest_bytes
+    assert repaired.mcp_state_bytes == first.mcp_state_bytes
+    assert repaired.semantic_bytes == first.semantic_bytes
+    closure = _audit_payload(
+        runner,
+        scenario_id="project-mcp-repaired-audit",
+        cwd=fixture.project_root,
+        environment=environment,
+    )
+    assert closure["passed"] is True
 
 def test_uninstalling_one_shared_root_retains_shared_dependency_ownership(
     tmp_path: Path,
