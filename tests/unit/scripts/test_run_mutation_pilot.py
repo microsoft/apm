@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -258,3 +259,157 @@ def test_report_only_skips_mutmut_execution(
     assert result == 0
     assert report_path.is_file()
     assert "metadata only" in capsys.readouterr().out
+
+
+def _meta_path(pilot: ModuleType, repo_root: Path, owner: object) -> Path:
+    path = repo_root / "mutants" / f"{owner.source}.meta"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _write_meta(pilot: ModuleType, repo_root: Path, owner: object, payload: dict) -> Path:
+    path = _meta_path(pilot, repo_root, owner)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_load_exit_codes_raises_on_corrupt_json(pilot: ModuleType, tmp_path: Path) -> None:
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+    meta_path = _meta_path(pilot, tmp_path, owner)
+    meta_path.write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(pilot.PilotError, match="invalid mutmut metadata"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_raises_on_missing_exit_code_map(pilot: ModuleType, tmp_path: Path) -> None:
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+    _write_meta(pilot, tmp_path, owner, {"not_exit_code_by_key": {}})
+
+    with pytest.raises(pilot.PilotError, match="exit_code_by_key missing"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_raises_on_wrong_type_exit_code_value(
+    pilot: ModuleType, tmp_path: Path
+) -> None:
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+    raw_name = f"{owner.module}.x_build_update_plan__mutmut_2"
+    _write_meta(pilot, tmp_path, owner, {"exit_code_by_key": {raw_name: "0"}})
+
+    with pytest.raises(pilot.PilotError, match="invalid exit code"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_raises_when_no_mutants_match_owner(
+    pilot: ModuleType, tmp_path: Path
+) -> None:
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+    _write_meta(
+        pilot,
+        tmp_path,
+        owner,
+        {"exit_code_by_key": {"apm_cli.other.module.x_unrelated__mutmut_1": 0}},
+    )
+
+    with pytest.raises(pilot.PilotError, match="no mutants matched owner allowlist: update-plan"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_raises_on_malformed_canonical_name(
+    pilot: ModuleType, tmp_path: Path
+) -> None:
+    """A raw mutmut name that matches the owner's glob (thanks to the trailing
+    wildcard) but whose final dotted segment lacks the expected 'x_' or
+    class-separator prefix is a data-integrity violation in the mutmut
+    metadata, not a value the pilot should silently skip or misclassify.
+    """
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+    raw_name = f"{owner.module}.x_build_update_plan__mutmut_2.stray"
+    _write_meta(pilot, tmp_path, owner, {"exit_code_by_key": {raw_name: 0}})
+
+    with pytest.raises(pilot.PilotError, match="invalid mutmut name"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_raises_on_duplicate_canonical_name(
+    pilot: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two distinct mutmut-reported names must never collapse to the same
+    canonical identifier; if they did, one mutant outcome would silently
+    shadow the other. This pins that data-integrity guard directly, since the
+    real mutmut mangling scheme cannot otherwise produce a collision for a
+    single owner pattern.
+    """
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+    raw_a = f"{owner.module}.x_build_update_plan__mutmut_2"
+    raw_b = f"{owner.module}.x_build_update_plan__mutmut_3"
+    _write_meta(pilot, tmp_path, owner, {"exit_code_by_key": {raw_a: 0, raw_b: 1}})
+    monkeypatch.setattr(pilot, "_canonical_mutant_name", lambda raw_name: "collided")
+
+    with pytest.raises(pilot.PilotError, match="duplicate canonical mutant name"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_scopes_to_owner_patterns_and_decodes_exit_codes(
+    pilot: ModuleType, tmp_path: Path
+) -> None:
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+    matching = f"{owner.module}.x_build_update_plan__mutmut_2"
+    unrelated = "apm_cli.other.module.x_unrelated__mutmut_1"
+    _write_meta(
+        pilot,
+        tmp_path,
+        owner,
+        {"exit_code_by_key": {matching: 0, unrelated: 1}},
+    )
+
+    scoped = pilot._load_exit_codes(owner, tmp_path)
+
+    assert scoped == {"apm_cli.install.plan.build_update_plan__mutmut_2": 0}
+
+
+def test_write_report_writes_sorted_ascii_with_trailing_newline(
+    pilot: ModuleType, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "nested" / "report.json"
+    payload = {"b": 1, "a": {"nested_b": 2, "nested_a": 1}}
+
+    pilot._write_report(report_path, payload)
+
+    text = report_path.read_text(encoding="ascii")
+    assert text == json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+    assert text.endswith("\n")
+    assert list(json.loads(text).keys()) == ["a", "b"]
+    assert not (report_path.parent / f".{report_path.name}.tmp").exists()
+
+
+def test_write_report_is_deterministic_across_repeated_writes(
+    pilot: ModuleType, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.json"
+    payload = {"z": 1, "a": 2}
+
+    pilot._write_report(report_path, payload)
+    first = report_path.read_text(encoding="ascii")
+    pilot._write_report(report_path, payload)
+    second = report_path.read_text(encoding="ascii")
+
+    assert first == second
+
+
+def test_write_report_cleans_up_temp_file_on_write_failure(
+    pilot: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "report.json"
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pilot.Path, "write_text", _boom)
+
+    with pytest.raises(pilot.PilotError, match="failed to write mutation report"):
+        pilot._write_report(report_path, {"a": 1})
+
+    assert not (report_path.parent / f".{report_path.name}.tmp").exists()
+    assert not report_path.exists()

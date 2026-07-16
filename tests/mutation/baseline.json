@@ -26,8 +26,6 @@
     },
     "subset-selection": {
       "accepted_survivors": [
-        "apm_cli.models.dependency.subsets._closest_target__mutmut_12",
-        "apm_cli.models.dependency.subsets._closest_target__mutmut_13",
         "apm_cli.models.dependency.subsets._levenshtein_distance__mutmut_9",
         "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_10",
         "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_17",

@@ -114,6 +114,18 @@ def test_parse_targets_rejects_non_string_name() -> None:
         DependencyReference.parse_from_dict({"git": "owner/repo", "targets": [7]})
 
 
+def test_parse_targets_tie_break_prefers_lexicographically_first_match() -> None:
+    """'coade' ties at edit distance 2 with both 'claude' and 'codex' (no other
+    known target is closer). The suggestion must deterministically resolve to
+    the lexicographically-first candidate encountered during the scan, so it
+    always picks 'claude'. This pins the exact tie-break contract: a stray '<='
+    (picking the last tied candidate) or a swapped tuple index (comparing the
+    distance against the candidate name) must fail this assertion.
+    """
+    with pytest.raises(ValueError, match=r"Did you mean 'claude'"):
+        DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coade"]})
+
+
 @pytest.mark.parametrize(
     ("left", "right", "expected"),
     [
