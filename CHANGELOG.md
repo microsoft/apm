@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
+  merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
+  dropped from a project's `targets:` list -- the hook wipe is now scoped to
+  the same resolved target set the rebuild step repopulates, so a narrowed
+  `targets:` no longer silently deletes a sibling package's hooks (and its
+  `apm-hooks.json` sidecar) in the now-undeclared harness. (closes #2250)
 - `apm prune` no longer leaves stale, executable hook entries behind for a
   removed package: it now reconciles merged hook ownership when it removes
   an orphaned package, clearing entries it contributed to

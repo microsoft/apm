@@ -635,11 +635,18 @@ def _sync_integrations_after_uninstall(
                 )
                 counts["prompts"] += result.get("files_removed", 0)
 
-    # Hooks (multi-target sync_integration handles all targets)
+    # Hooks: managed-file removal always scans every KNOWN_TARGETS prefix
+    # (safe -- it only ever deletes files already tracked as this
+    # package's own deployed_files). The merged-hook JSON wipe, in
+    # contrast, is scoped to `_resolved_targets` -- the SAME set the
+    # Phase 2 rebuild loop below iterates -- so a harness dropped from
+    # this project's `targets:` list is never wiped for packages that
+    # remain declared and installed (#2250).
     result = _integrators["hooks"].sync_integration(
         apm_package,
         project_root,
         managed_files=_buckets["hooks"] if _buckets else None,
+        targets=_resolved_targets,
     )
     counts["hooks"] = result.get("files_removed", 0)
 

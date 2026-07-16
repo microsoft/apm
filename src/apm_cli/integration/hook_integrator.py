@@ -1877,27 +1877,32 @@ class HookIntegrator(BaseIntegrator):
         """Remove APM-managed hook files.
 
         Uses *managed_files* (relative paths) to surgically remove only
-        APM-tracked files.  Falls back to legacy ``*-apm.json`` glob when
-        *managed_files* is ``None``.
-
-        **Never** calls ``shutil.rmtree``.
-
+        APM-tracked files; falls back to legacy ``*-apm.json`` glob when
+        *managed_files* is ``None``. **Never** calls ``shutil.rmtree``.
         Also cleans APM entries from merged-hook JSON files via the
         ``_apm_source`` marker.
+
+        ``targets`` (#2250) scopes ONLY the merged-hook JSON cleanup below,
+        NOT the ``managed_files`` prefix guard (union of ``KNOWN_TARGETS``
+        + ``targets``): that guard defends against deleting outside a
+        recognized ``hooks/`` dir, and narrowing it would strand real
+        files deployed under a since-dropped target.
         """
         from .targets import KNOWN_TARGETS
 
         stats: dict[str, int] = {"files_removed": 0, "errors": 0}
 
-        # Derive hook prefixes dynamically from targets
-        source = targets if targets is not None else list(KNOWN_TARGETS.values())
-        hook_prefixes = []
-        for t in source:
-            if t.supports("hooks"):
-                sm = t.primitives["hooks"]
-                effective_root = sm.deploy_root or t.root_dir
-                hook_prefixes.append(f"{effective_root}/hooks/")
-        hook_prefix_tuple = tuple(hook_prefixes)
+        # Prefix guard: union of KNOWN_TARGETS + caller `targets`, never
+        # narrower than the unscoped default -- see docstring above.
+        guard_targets = list(KNOWN_TARGETS.values())
+        if targets is not None:
+            guard_targets = guard_targets + list(targets)
+        hook_prefixes = [
+            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/"
+            for t in guard_targets
+            if t.supports("hooks")
+        ]
+        hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
 
         if managed_files is not None:
             # Manifest-based removal -- only remove tracked files
@@ -1929,8 +1934,10 @@ class HookIntegrator(BaseIntegrator):
                     except Exception:
                         stats["errors"] += 1
 
-        # Clean APM entries from merged-hook JSON configs using external ownership.
-        for t in source:
+        # Clean APM entries from merged-hook JSON configs, scoped to
+        # `targets` when supplied -- matches the rebuild phase (#2250).
+        merge_source = targets if targets is not None else list(KNOWN_TARGETS.values())
+        for t in merge_source:
             config = _MERGE_HOOK_TARGETS.get(t.name)
             if config is not None:
                 json_path = project_root / t.root_dir / config.config_filename
@@ -1977,10 +1984,16 @@ class HookIntegrator(BaseIntegrator):
         reconcile, consistent with prune's existing per-package
         error-tolerant semantics.
 
-        Known boundary (shared with uninstall, tracked in #2250):
-        rebuilds only direct dependencies from ``get_all_apm_dependencies()``
-        -- a transitive dependency's merged hooks are wiped by the clear
-        phase above but never re-integrated here.
+        Target scope (#2250): the merged-hook JSON wipe below is scoped to
+        the SAME resolved ``targets`` the rebuild loop uses, so a harness
+        dropped from ``targets:`` (but still holding stale merged-hook
+        entries) is never wiped for still-declared, still-installed
+        packages while the rebuild silently skips repopulating it.
+
+        Known boundary (shared with uninstall, #2250): rebuilds only
+        direct dependencies from ``get_all_apm_dependencies()`` -- a
+        transitive dependency's merged hooks are wiped above but never
+        re-integrated here.
         """
         from apm_cli.constants import APM_MODULES_DIR
         from apm_cli.models.apm_package import build_installed_package_info
@@ -2000,15 +2013,11 @@ class HookIntegrator(BaseIntegrator):
         surviving_deps = list(apm_package.get_all_apm_dependencies())
 
         # Empty managed_files (not None) skips file-level deletion while
-        # still triggering the unconditional wipe of every _apm_source
-        # entry (and its ownership sidecar) across all KNOWN_TARGETS --
-        # see _clean_apm_entries_from_json. The narrower `targets` list
-        # resolved above is deliberately NOT passed here: doing so would
-        # make prune's wipe scope diverge from uninstall's identical
-        # call (both currently wipe all KNOWN_TARGETS by omitting
-        # targets=); that divergence is tracked as a shared-primitive
-        # fix in #2250, evaluated against all three callers together.
-        stats = self.sync_integration(apm_package, project_root, managed_files=set())
+        # still triggering the merged-hook JSON wipe, scoped to the same
+        # resolved `targets` the rebuild loop below uses (#2250).
+        stats = self.sync_integration(
+            apm_package, project_root, managed_files=set(), targets=targets
+        )
 
         for dep_ref in surviving_deps:
             pkg_info = build_installed_package_info(dep_ref, project_root / APM_MODULES_DIR)
