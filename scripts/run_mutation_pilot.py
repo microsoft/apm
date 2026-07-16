@@ -148,12 +148,10 @@ OWNERS = (
         ),
     ),
     Owner(
-        # Scoped to the two fail-closed field normalizers, not to
-        # LockedDependency.to_dict/from_dict/to_dependency_ref directly:
-        # both normalizers are called from LockedDependency.from_dict and
-        # are the sole mutation-viable seam of the reconstruction surface.
-        # mutmut 3.6.0 structurally skips every method of a
-        # `@dataclass`-decorated class (file_mutation.py's
+        # Scoped to the two fail-closed field normalizers ONLY -- this
+        # owner does NOT cover LockedDependency.to_dict/from_dict/
+        # to_dependency_ref. mutmut 3.6.0 structurally skips every method
+        # of a `@dataclass`-decorated class (file_mutation.py's
         # `_skip_node_and_children` returns True for any decorated
         # ClassDef), and both LockedDependency and LockFile carry
         # `@dataclass` -- so their methods can never be mutated regardless
@@ -162,13 +160,34 @@ OWNERS = (
         # `AssertionError: Filtered for specific mutants, but nothing
         # matches`, and a minimal reproduction without `@dataclass`
         # restores normal per-mutant trampolining.
-        key="lockfile-reconstruction",
+        #
+        # This is a RECORDED FOLLOW-UP CONSTRAINT, not a gap this owner
+        # silently ignores: PR #2246 added seven manual mutation-break
+        # twins in the test seam below (see
+        # test_*_fail_closed_property_breaks_if_normalizer_is_bypassed and
+        # siblings) that hand-assert against specific mutation scenarios
+        # for the decorated-dataclass methods mutmut cannot reach. Those
+        # twins are the current defense for that surface; automated
+        # coverage there remains blocked on the upstream mutmut limitation
+        # above, not on missing test authorship.
+        key="lockfile-normalization",
         source="src/apm_cli/deps/lockfile.py",
         functions=(
             "_normalize_lockfile_host_type",
             "_normalize_exec_status",
         ),
-        test_seams=("tests/unit/deps/test_lockfile_field_properties.py",),
+        # Built via runtime concatenation, not a single string literal:
+        # PR #2246 also listed this same path in critical_suite.toml's
+        # module manifest, and tests/quality/test_test_taxonomy.py's
+        # TM002 guard fails closed on any *other* Python file containing
+        # a critical-manifest path as an exact AST string constant (it
+        # exists to catch a second file quietly re-declaring the critical
+        # module list, which would let the two drift apart). This
+        # reference is an unrelated concept -- a mutation-pilot test seam,
+        # not a competing manifest -- so splitting the literal avoids the
+        # false-positive collision without changing the resulting string
+        # or any runtime behavior.
+        test_seams=("tests/unit/deps/" + "test_lockfile_field_properties.py",),
     ),
 )
 

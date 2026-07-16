@@ -104,8 +104,11 @@ pytest -q
 
 The advisory mutation pilot covers five stable owners: dependency subset
 selection, update-plan construction, cached-policy serialization, canonical
-in-package link projection, and lockfile field reconstruction (the fail-closed
-`host_type`/`exec_status` normalizers). It runs nightly or by manual workflow
+in-package link projection, and lockfile field normalization (the fail-closed
+`host_type`/`exec_status` normalizers, not the `@dataclass` reconstruction
+methods `to_dict`/`from_dict`/`to_dependency_ref` -- mutmut cannot mutate
+`@dataclass` methods; those are defended by PR #2246's manual mutation-break
+twins instead). It runs nightly or by manual workflow
 dispatch, not as required PR CI, and has a 20-minute hosted job budget.
 
 Run the exact-function allowlist locally:

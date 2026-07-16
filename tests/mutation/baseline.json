@@ -12,7 +12,7 @@
         "tests/unit/compilation/test_link_resolver_resolution.py"
       ]
     },
-    "lockfile-reconstruction": {
+    "lockfile-normalization": {
       "accepted_survivors": [
         "apm_cli.deps.lockfile._normalize_exec_status__mutmut_12",
         "apm_cli.deps.lockfile._normalize_lockfile_host_type__mutmut_13"
