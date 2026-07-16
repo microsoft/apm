@@ -22,6 +22,8 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands.update import _module_cache_needs_rehydration
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.plan import PlanEntry, UpdatePlan
 
 
@@ -388,6 +390,50 @@ class TestUpdateNonTty:
 
 
 class TestUpdateNoChanges:
+    def test_locked_empty_module_cache_rehydrates_without_prompt(
+        self,
+        runner,
+        tmp_path,
+    ) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            project = Path.cwd()
+            _make_apm_yml(project)
+            modules_dir = project / "apm_modules"
+            modules_dir.mkdir()
+            lockfile = LockFile(
+                dependencies={
+                    "microsoft/apm": LockedDependency(
+                        repo_url="microsoft/apm",
+                        host="github.com",
+                        resolved_ref="main",
+                        resolved_commit="a" * 40,
+                    )
+                }
+            )
+            lockfile.write(project / "apm.lock.yaml")
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["proceeded"] = kwargs["plan_callback"](UpdatePlan(entries=()))
+                (modules_dir / "microsoft" / "apm").mkdir(parents=True)
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult(installed_count=1)
+
+            with (
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.install.manifest_reconcile.reconcile_project_deployed_state"),
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["proceeded"] is True
+            assert "Restored dependency cache without changing refs." in result.output
+            assert "Apply these changes?" not in result.output
+
     def test_unchanged_plan_short_circuits(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
             _make_apm_yml(Path.cwd())
@@ -407,6 +453,28 @@ class TestUpdateNoChanges:
 
             assert result.exit_code == 0, result.output
             assert "already at their latest" in result.output
+
+
+def test_module_cache_rehydration_requires_locked_dependencies(tmp_path: Path) -> None:
+    """An empty cache is actionable only when the lock expects packages."""
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+
+    assert _module_cache_needs_rehydration(None, modules_dir) is False
+    assert _module_cache_needs_rehydration(LockFile(), modules_dir) is False
+
+
+def test_module_cache_rehydration_ignores_empty_resolution_staging(
+    tmp_path: Path,
+) -> None:
+    """A transaction staging directory is not a materialized package cache."""
+    modules_dir = tmp_path / "apm_modules"
+    (modules_dir / ".apm-resolution-staging").mkdir(parents=True)
+    lockfile = LockFile(dependencies={"org/pkg": LockedDependency(repo_url="org/pkg")})
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+    (modules_dir / "org" / "pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
 
 
 # -----------------------------------------------------------------------------

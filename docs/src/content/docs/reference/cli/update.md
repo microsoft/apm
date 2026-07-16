@@ -15,14 +15,16 @@ apm update [OPTIONS] [PACKAGES...]
 
 ## Description
 
-`apm update` re-resolves every dependency in your project's `apm.yml` against the newest version or Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
+`apm update` re-resolves every dependency in your project's `apm.yml` against the newest version or Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before changing refs. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
+
+When every ref is already current but the locked `apm_modules/` cache is empty, `apm update` restores the cache from the same resolved refs without prompting. It uses the normal dependency materialization path without changing `apm.yml` or `apm.lock.yaml`. `--dry-run` reports the no-change plan without restoring files.
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
 This is the dependency-refresh command. To upgrade the APM CLI binary itself, see [`apm self-update`](../self-update/).
 
 :::note[Consent gate]
-The interactive prompt defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to proceed; otherwise `apm update` aborts without modifying the manifest, lockfile, or workspace.
+The interactive prompt for ref changes defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to apply ref changes. Rehydrating an empty cache from unchanged locked refs does not require consent.
 :::
 
 For a read-only install that pins to whatever is already in `apm.lock.yaml` -- the right command for CI -- use [`apm install --frozen`](../install/).
@@ -99,6 +101,7 @@ apm update
 - **No partial consent.** A single prompt covers both revision-pin manifest rewrites and the normal update plan; declining leaves everything unchanged.
 - **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
 - **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files and lockfile ownership for targets no longer declared in `apm.yml`, even when no dependency ref changes.
+- **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update rehydrates the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
 
 ## Back-compat: `apm update` used to be the self-updater
 

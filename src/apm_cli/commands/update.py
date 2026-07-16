@@ -94,6 +94,7 @@ class _UpdateRunState:
     plan: UpdatePlan | None = None
     proceeded: bool = False
     revision_pins_applied: bool = False
+    cache_rehydration_requested: bool = False
 
 
 def _stdin_is_tty() -> bool:
@@ -107,6 +108,21 @@ def _stdin_is_tty() -> bool:
         return sys.stdin is not None and sys.stdin.isatty()
     except (AttributeError, ValueError):
         return False
+
+
+def _module_cache_needs_rehydration(
+    lockfile: LockFile | None,
+    modules_dir: Path,
+) -> bool:
+    """Return whether a locked dependency tree has no materialized cache."""
+    if lockfile is None:
+        return False
+    dependency_paths = tuple(
+        dependency.to_dependency_ref().get_install_path(modules_dir)
+        for key, dependency in lockfile.dependencies.items()
+        if key != "."
+    )
+    return bool(dependency_paths) and not any(path.exists() for path in dependency_paths)
 
 
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
@@ -588,11 +604,13 @@ def _run_dep_update(
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            _rich_success(
-                "All dependencies already at their latest matching refs.",
-                symbol="check",
-            )
-            return False
+            if not _cache_rehydration_required:
+                _rich_success(
+                    "All dependencies already at their latest matching refs.",
+                    symbol="check",
+                )
+                return False
+            plan_state.cache_rehydration_requested = True
 
         if revision_pin_updates and plan.has_changes:
             pin_count = len(revision_pin_updates)
@@ -609,6 +627,10 @@ def _run_dep_update(
             )
             return False
 
+        if plan_state.cache_rehydration_requested:
+            plan_state.proceeded = True
+            return True
+
         return _confirm_plan_application()
 
     # Snapshot the pre-update lockfile's MCP/LSP state before
@@ -617,13 +639,18 @@ def _run_dep_update(
     # ``install/phases/lockfile.py::_preserve_existing_mcp_state``), so this
     # is the correct "old" baseline for stale-server detection below. LSP
     # fields have no such carry-forward, so they must be captured here too.
-    from apm_cli.core.scope import get_apm_dir, get_deploy_root
+    from apm_cli.core.scope import get_apm_dir, get_deploy_root, get_modules_dir
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
     _apm_dir = get_apm_dir(scope)
+    _modules_dir = get_modules_dir(scope)
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
     _existing_lock = LockFile.read(_lock_path)
+    _cache_rehydration_required = _module_cache_needs_rehydration(
+        _existing_lock,
+        _modules_dir,
+    )
 
     try:
         # Fire pre-update lifecycle scripts
@@ -734,6 +761,8 @@ def _run_dep_update(
             )
         elif applied:
             _rich_success(f"Updated {changed} APM {dep_noun}.")
+        elif plan_state.cache_rehydration_requested and installed:
+            logger.success("Restored dependency cache without changing refs.")
         elif revision_pin_updates:
             count = len(revision_pin_updates)
             noun = "pin" if count == 1 else "pins"
