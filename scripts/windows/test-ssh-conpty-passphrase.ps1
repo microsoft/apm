@@ -535,6 +535,47 @@ dependencies:
 }
 
 # ---------------------------------------------------------------------------
+# Self-test: prove the ConPTY capture pipeline itself actually relays a known
+# string before trusting an empty transcript from a real scenario as meaning
+# "the process printed nothing." Runs a trivial cmd.exe echo through the
+# exact same New-ConPtySession/Read-ConPtyAvailable path the real scenarios
+# use. If this fails, any RED/GREEN verdict from the real scenarios would be
+# untrustworthy -- an evidence-collection defect, not a research finding.
+# ---------------------------------------------------------------------------
+
+function Test-ConPtyCapture {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Environment,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory
+    )
+    $marker = "CONPTY_SELFTEST_" + [guid]::NewGuid().ToString("N").Substring(0, 12)
+    $comspec = Join-Path $env:WINDIR "System32\cmd.exe"
+    $commandLine = '"' + $comspec + '" /c "echo ' + $marker + ' & exit /b 7"'
+    $session = $null
+    $transcript = ""
+    $exitCode = $null
+    try {
+        $session = New-ConPtySession `
+            -CommandLine $commandLine `
+            -WorkingDirectory $WorkingDirectory `
+            -Environment $Environment
+        $wait = Wait-ConPtyText -Session $session -Pattern ([regex]::Escape($marker)) -TimeoutMs 10000
+        $transcript = $wait.Transcript
+        $exitWait = Wait-ConPtyExit -Session $session -TimeoutMs 10000
+        $exitCode = $exitWait.ExitCode
+        $transcript += Read-ConPtyAvailable -Session $session -TimeoutMs 500
+        return [pscustomobject]@{
+            Marker     = $marker
+            Matched    = ($transcript -like "*$marker*")
+            ExitCode   = $exitCode
+            Transcript = $transcript
+        }
+    } finally {
+        if ($session) { Stop-ConPtySession -Session $session -Force }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # The core of the fixture: drive one `apm install` invocation through a real
 # ConPTY, exactly as a human's PowerShell session would present a console to
 # it, and observe (never fabricate) whatever ssh/apm actually do.
@@ -732,6 +773,12 @@ try {
         $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     ) "Runner account is a local Administrator (needed for sshd loopback config)"
 
+    Write-Step "Self-test: proving the ConPTY capture pipeline relays real child output before trusting it"
+    $selfTest = Test-ConPtyCapture -Environment (Get-HumanLikeBaseEnvironment) -WorkingDirectory $root
+    Write-Info "ConPTY self-test transcript: $($selfTest.Transcript.Trim())"
+    Assert-Condition $selfTest.Matched "ConPTY self-test: known marker string observed in captured transcript"
+    Assert-Condition ($selfTest.ExitCode -eq 7) "ConPTY self-test: child exit code (7) captured correctly"
+
     $binaryVersions = [ordered]@{
         ApmVersion    = (Invoke-Setup -FilePath $apmPath -ArgumentList @("--version")).Stdout.Trim()
         ApmSha256     = (Get-FileHash -Path $apmPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -868,6 +915,7 @@ try {
         BaselineCommit      = "796e229805"
         Verdict             = $verdict
         VerdictReason       = $verdictReason
+        ConPtySelfTest      = $selfTest
         BinaryVersions      = $binaryVersions
         Port                = $port
         OriginCommit        = $originCommit
