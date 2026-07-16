@@ -117,7 +117,11 @@ def _workflow_uv_sync_commands(root: Path) -> list[tuple[str, str, str, list[str
                 for line in logical.splitlines():
                     if "uv sync" not in line or line.lstrip().startswith("#"):
                         continue
-                    tokens = shlex.split(line, comments=True, posix=True)
+                    try:
+                        tokens = shlex.split(line, comments=True, posix=True)
+                    except ValueError as exc:
+                        location = f"{workflow_path.name}:{job_name}:{step_name}"
+                        raise AssertionError(f"{location}: invalid shell line {line!r}") from exc
                     for index in range(len(tokens) - 1):
                         if tokens[index : index + 2] != ["uv", "sync"]:
                             continue
@@ -289,6 +293,26 @@ def test_first_party_workflow_uv_syncs_are_frozen() -> None:
         if "--frozen" not in tokens
     ]
     assert unfrozen == [], "unfrozen first-party workflow syncs:\n" + "\n".join(unfrozen)
+
+
+def test_workflow_sync_guard_reports_invalid_shell_line(tmp_path: Path) -> None:
+    """Malformed candidate commands identify their workflow location."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "broken.yml").write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Broken sync\n"
+        "        run: 'uv sync \"unterminated'\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        AssertionError,
+        match=r"broken\.yml:test:Broken sync: invalid shell line",
+    ):
+        _workflow_uv_sync_commands(tmp_path)
 
 
 def test_relocated_repository_contract_fails_topology(tmp_path: Path) -> None:

@@ -164,11 +164,14 @@ jobs:
       with:
         enable-cache: true
 
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
     - name: Run ratchet contract tests
       env:
         APM_ALLOW_PROVISIONAL_BASELINES: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && '1' || '0' }}
       run: |
-        uv run --extra dev pytest -p no:cacheprovider -q \
+        uv run --frozen --extra dev pytest -p no:cacheprovider -q \
           tests/unit/scripts/test_check_test_assertions.py \
           tests/unit/scripts/test_check_exact_test_duplicates.py \
           tests/quality/test_test_taxonomy.py \
