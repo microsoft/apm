@@ -31,7 +31,7 @@ apm compile
 ```
 
 Concretely, that command rolls your `instructions/*.instructions.md`
-(see [Instructions](../../author-primitives/instructions-and-agents/#instructions))
+(see [Instructions](author-primitives/instructions-and-agents/#instructions))
 into the native rules surface each target expects:
 
 - `AGENTS.md` -- the cross-harness root context file. Copilot, Codex,
