@@ -87,7 +87,7 @@ The scope matrix below is the contract. Every row maps a security or operational
 | Manifest scripts policy | `manifest.scripts` | `scripts-policy` | `[i] audit-only` | Yes |
 | Explicit manifest includes | `manifest.require_explicit_includes` | `explicit-includes` | `[i] audit-only` | Yes |
 | Unmanaged files in governed dirs | `unmanaged_files.action`, `.directories` | `unmanaged-files` | `[i] audit-only` | Yes |
-| Cache TTL override | `policy.cache.ttl` | -- | `[!] parsed but not enforced` (cache reader uses hardcoded 1h) | -- |
+| Cache freshness | `cache.ttl` | -- | Honored -- the cache reader uses the cached effective policy's `cache.ttl` (default `3600` seconds); entries older than the 7-day `MAX_STALE_TTL` ceiling are never served | Same |
 | Transitive MCP trust (policy field) | `mcp.trust_transitive` | -- | `[!] parsed but not enforced` (gate is the `--trust-transitive-mcp` CLI flag) | -- |
 | Manifest content types | `manifest.content_types` | -- | `[!] parsed but not enforced` | -- |
 
@@ -311,6 +311,7 @@ When `apm install` returns exit code 0 and the effective org policy is in `enfor
 - Compilation targets that would be written match `compilation.target.allow` (when `enforce: true` on that field).
 - The fetched policy file matched any `policy.hash` pin in `apm.yml`. If the hash did not match, install failed closed regardless of `fetch_failure_default` -- hash-mismatch is unconditionally fail-closed in non-dry-run install paths. (`apm install --dry-run` logs the mismatch but does not exit non-zero -- see section 14 gap.)
 - The lockfile (`apm.lock.yaml`) was regenerated from the resolved, gated set.
+- Any cached policy used was current within the effective `cache.ttl` (default `3600` seconds), or -- if a refresh failed -- was within the 7-day stale ceiling (`MAX_STALE_TTL`) and a warning was logged naming the cache age.
 
 You are NOT guaranteed:
 
@@ -319,7 +320,6 @@ You are NOT guaranteed:
 - That the audit-only checks (`compilation-strategy`, `source-attribution`, `required-manifest-fields`, `scripts-policy`, `unmanaged-files`) passed. Run `apm audit --ci --policy <scope>` in CI for those.
 - That non-APM files in the repo conform to anything. APM only governs files it placed.
 - Anything about runtime behavior. APM is install-time only.
-- That a `policy.cache.ttl` shorter or longer than 1 hour took effect. The cache reader uses a hardcoded 1-hour TTL; the `policy.cache.ttl` field is parsed but not honored.
 
 ---
 
@@ -329,11 +329,13 @@ This section covers offline **policy** enforcement (the `apm-policy.yml` cache).
 
 **For air-gapped CI, run `apm audit --ci --policy ./vendored-policy.yml` as your gating check; do not rely on `apm install` enforcement.**
 
+Cache freshness follows the effective policy's `cache.ttl` (default `3600` seconds, i.e. 1 hour); the 7-day stale ceiling (`MAX_STALE_TTL`) is fixed and cannot be extended by policy. See [Cache and offline behaviour](../policy-reference/#9-cache-and-offline-behaviour) for the full mechanics.
+
 | Network state | Install gate | Install `--mcp` | `apm audit --ci --policy <file>` | `apm audit --ci` (auto-discovery) |
 |---|---|---|---|---|
 | Online | Discovers + enforces | Discovers + enforces | Loads from path, enforces | Discovers + enforces |
-| Cache fresh (< 1h) | Cache hit, enforces | Cache hit, enforces | n/a (file path skips cache) | Cache hit, enforces |
-| Cache stale (1h - 7d) | Refresh attempted; on fail, `cached_stale` outcome -- proceed with cached unless `policy.fetch_failure: block` | Same | n/a | Same |
+| Cache fresh (younger than effective `cache.ttl`, default 3600s) | Cache hit, enforces | Cache hit, enforces | n/a (file path skips cache) | Cache hit, enforces |
+| Cache stale (older than effective `cache.ttl`, within 7-day ceiling) | Refresh attempted; on fail, `cached_stale` outcome -- proceed with cached unless `policy.fetch_failure: block` | Same | n/a | Same |
 | Offline, cache > 7d | `cache_miss_fetch_fail` -- fail-OPEN by default; fail-closed only if `policy.fetch_failure_default: block` in `apm.yml` | Same | Loads from path, full enforce | Same as install -- also covers `no_git_remote` / `absent` / `empty` outcomes when `policy.fetch_failure_default: block` |
 
 Workarounds when the network is unreliable:
@@ -350,7 +352,7 @@ Workarounds when the network is unreliable:
 | Outcome | Default behavior | Override to fail-closed | Citation |
 |---|---|---|---|
 | Network failure (`cache_miss_fetch_fail`) | Fail-OPEN, log warning, install proceeds with no policy | `policy.fetch_failure_default: block` in `apm.yml` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
-| Cached stale (1h - 7d, refresh failed) | Warn and proceed with cached policy | `policy.fetch_failure: block` set in the cached policy itself | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
+| Cached stale (past effective `cache.ttl`, within the 7-day ceiling; refresh failed) | Warn and proceed with cached policy | `policy.fetch_failure: block` set in the cached policy itself | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed YAML (`malformed`) (org policy file) | Fail-OPEN by default | `policy.fetch_failure_default: block` | `policy/parser.py` |
 | **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN, log warning** | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](../policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
 | Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
@@ -496,7 +498,6 @@ We publish this list because silent gaps are worse than known ones. Every item b
 
 These are the sharp edges. Plan around them; do not assume they are solved.
 
-- **`policy.cache.ttl` field is parsed but not honored.** The cache reader uses a hardcoded 1-hour TTL. Setting `policy.cache.ttl: 86400` in your policy will be silently ignored. Operational mitigation: do not rely on this field; assume 1-hour cache TTL universally.
 - **`mcp.trust_transitive` policy field is parsed but not enforced.** The transitive-MCP gate is the `--trust-transitive-mcp` CLI flag, NOT the policy field. Operational mitigation: govern transitive MCP trust through CI command lines and code review of workflow files, not through policy YAML.
 - **`manifest.content_types` field is parsed but no check enforces it.** Operational mitigation: do not advertise this field as a control to stakeholders.
 - **Audit-only checks are not enforced at install.** `compilation-strategy`, `source-attribution`, `required-manifest-fields`, `scripts-policy`, `explicit-includes`, and `unmanaged-files` only run under `apm audit --ci --policy <scope>`. Operational mitigation: make `apm audit --ci` a required status check in branch protection. Without that, these rules are advisory only.

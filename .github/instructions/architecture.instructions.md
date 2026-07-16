@@ -28,20 +28,27 @@ instead of re-deriving the answer locally.
 
 ## Existing canonical owners -- route through these, do not re-derive
 
-| Decision / fact | Canonical owner |
-|---|---|
-| Accepted target vocabulary | core/target_catalog.py |
-| Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py |
-| Runtime descriptors | runtime/registry.py |
-| User-facing output / diagnostics | CommandLogger / console owner |
-| Compiled-output writes (atomic) | CompiledOutputWriter |
-| Deployment provenance / state | deployment_ledger.py |
-| Install success / failure outcome | the canonical install-outcome path |
-| Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators |
-| File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) |
-| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |
-| Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) |
-| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |
+The `Owner path selectors` column is executable contract data. The
+shepherd-driver owner-touch gate parses it directly; do not copy these
+selectors into another table or script. Keep selectors repository-relative,
+semicolon-delimited, and specific to the file(s) that own the fact.
+
+<!-- canonical-owner-table:v1 -->
+| Decision / fact | Canonical owner | Owner path selectors |
+|---|---|---|
+| Accepted target vocabulary | core/target_catalog.py | `src/apm_cli/core/target_catalog.py` |
+| Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
+| Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
+| User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
+| Compiled-output writes (atomic) | CompiledOutputWriter | `src/apm_cli/compilation/output_writer.py` |
+| Deployment provenance / state | deployment_ledger.py | `src/apm_cli/core/deployment_ledger.py` |
+| Install success / failure outcome | the canonical install-outcome path | `src/apm_cli/install/outcome.py` |
+| Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators | `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py` |
+| File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |
+| Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
+| Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
+| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) | `src/apm_cli/policy/discovery.py` |
+<!-- /canonical-owner-table -->
 
 If you are about to compute one of these locally, stop and call the
 owner. If the owner is missing a case you need, EXTEND the owner --

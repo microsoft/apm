@@ -76,6 +76,10 @@ fallback enabled with `--allow-protocol-fallback`).
 - Use the `ssh://` form to specify an SSH port
   (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand
   `git@host:path` **cannot** carry a port -- the `:` is the path separator.
+- For HTTPS, prefer a full URL or object form when entering a custom port.
+  APM may write the dependency to `apm.yml` as
+  `host:PORT/owner/repo[#ref]`; the parser accepts this shorthand and
+  normalizes `:443` to no port.
 - A non-`git` SSH user is honored when present in the dep URL
   (e.g. `myuser@host:owner/repo.git` or `ssh://myuser@host/owner/repo.git`),
   useful for EMU accounts or servers where the SSH login is not `git`.
@@ -83,8 +87,9 @@ fallback enabled with `--allow-protocol-fallback`).
   percent-encoded userinfo is rejected. The user is presentation-only and
   not part of dependency identity (does not perturb lockfile dedup).
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
-  is set. Port is a transport detail, not part of the package identity --
-  the same repo reachable on different ports dedupes to one entry.
+  is set. Manifest identity includes `host:port`, while the lockfile dedup
+  key uses `host/repo`; the same repository reached through different
+  ports maps to one lockfile key.
 
 ## Transport selection (SSH vs HTTPS)
 

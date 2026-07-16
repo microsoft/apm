@@ -41,7 +41,10 @@ are part of your contract:
 - `copilot-classification-prompt.md`  -- Phase X.0 template
 - `ci-recovery-checklist.md`          -- post-push watch contract
 - `.apm/instructions/linting.instructions.md` -- the push gate
-- `.github/instructions/architecture.instructions.md` -- the canonical-owner gate (Step X.2.5)
+- `.apm/instructions/architecture.instructions.md` -- the canonical owner
+  table parsed by the deterministic gate (Step X.2.5)
+- `owner_touch_gate.py` -- exact-revision owner detection and terminal
+  evidence verification (Step X.2.5)
 - `../apm-review-panel/SKILL.md`      -- panel composition contract
 - `../pr-description-skill/SKILL.md`   -- superseding-PR body author (Path B)
 
@@ -93,6 +96,13 @@ test -f $D/SKILL.md \
   && test -f $D/assets/pr-body-template.md \
   && echo "pr-description-skill present (inline-executable)" \
   || echo "MISSING pr-description-skill"
+
+S=$REPO_ROOT/.agents/skills/shepherd-driver
+test -f $S/scripts/owner_touch_gate.py \
+  && test -f $S/assets/completion-schema.json \
+  && test -f $REPO_ROOT/.apm/instructions/architecture.instructions.md \
+  && echo "shepherd owner-evidence gate present" \
+  || echo "MISSING shepherd owner-evidence gate"
 ```
 
 On an apm-review-panel MISS, return immediately with `status: blocked`
@@ -108,6 +118,11 @@ loop (Path A needs no new PR body). If you reach Path B with
 pr-description-skill missing, return `status: blocked` with
 `blocker: "pr-description-skill not reachable; cannot author
 superseding PR body."` rather than hand-rolling a body.
+
+An owner-evidence-gate MISS blocks every terminal path. Return
+`status: blocked` with `blocker: "shepherd owner-evidence gate not
+reachable; cannot verify terminal functional evidence."` rather than
+falling back to LLM self-classification.
 
 ### Step 0 -- check out the PR
 
@@ -227,41 +242,72 @@ and goes into the final return / advisory comment.
 NEVER a fold/defer axis (severity-blocking on an out-of-scope theme
 defers; severity-recommended on the in-scope surface folds).
 
-### Step X.2.5 -- canonical-owner gate (FAIL CLOSED)
+### Step X.2.5 -- canonical-owner + functional-evidence gate (FAIL CLOSED)
 
 This gate runs every iteration, after fold/defer classification and
-before the lint/push terminal path. It is mandatory and fails closed:
-missing or uncertain evidence keeps the PR in the convergence loop or
-returns `blocked`; it is NEVER deferred as out of scope when the PR
-itself changes an authority.
+before the lint/push terminal path. It is mandatory and fails closed.
+The deterministic script owns owner-touch detection; your prose
+classification may interpret its result but may not override it.
 
-1. Read `.github/instructions/architecture.instructions.md` and the
-   full PR diff (the author's fix plus any folds applied this run).
+1. Capture exact revisions after all folds for this iteration:
 
-2. Classify the PR as EXACTLY ONE of:
-   - `ordinary-fix` -- behavioral change that re-owns no durable
-     decision; existing owners and guards already cover it.
-   - `owner-extension` -- an existing canonical owner gains a case.
-   - `new-owner` -- a durable decision gets its first canonical owner.
-   - `split-authority-repair` -- a decision computed/enforced in more
-     than one place is collapsed back to one owner.
-   - `not-applicable` -- no `src/apm_cli/**` decision surface is
-     touched (e.g. docs-only, tooling-only). Record why in
-     `rationale`.
+   ```
+   BASE_SHA=$(git merge-base HEAD origin/main)
+   HEAD_SHA=$(git rev-parse HEAD)
+   OWNER_GATE=$REPO_ROOT/.agents/skills/shepherd-driver/scripts/owner_touch_gate.py
+   ```
 
-3. For EVERY durable decision the PR touches, record the decision, its
-   one canonical owner, and the evidence that each consumer routes
-   THROUGH that owner instead of re-deriving locally. These become the
-   `architecture_evidence.decisions[]` entries.
+2. Run detection and persist its JSON unchanged:
 
-4. Decide `dual_guardrail_required`:
+   ```
+   uv run python $OWNER_GATE detect \
+     --repo-root $REPO_ROOT --base $BASE_SHA --head $HEAD_SHA \
+     > owner-touch-report.json
+   ```
+
+   A non-zero exit (including malformed/duplicated owner-table rows or
+   empty selectors) is a blocker. Do not self-classify around it. The
+   report's `touched_owners[]` entries come directly from the canonical
+   table in `.apm/instructions/architecture.instructions.md`; never
+   recreate that table in the prompt or completion JSON by hand.
+
+3. Classify the PR as EXACTLY ONE of:
+   - `ordinary-fix` -- no detected canonical owner is touched and the
+     change re-owns no new durable decision;
+   - `owner-extension` -- a detected existing owner gains a case;
+   - `new-owner` -- a durable decision gets its first canonical owner;
+   - `split-authority-repair` -- duplicate enforcement collapses to one
+     owner;
+   - `not-applicable` -- no runtime decision surface is touched.
+
+   If `touched_owners` is non-empty, `ordinary-fix` and
+   `not-applicable` are invalid regardless of your initial judgement.
+   This is the false-self-classification guard.
+
+4. For EVERY entry in `touched_owners`, select and EXECUTE one or more
+   functional tests that exercise the durable fact through its consumer
+   path. Static grep, reading a test, schema validation, and the boundary
+   lint are NOT functional evidence. Record each execution as:
+   - `test_id` -- stable pytest node ID or equivalent test identifier;
+   - `command` -- exact non-interactive command run;
+   - `outcome` -- literal `passed`;
+   - `head_sha` -- exact `$HEAD_SHA`;
+   - `owner_decisions` -- canonical decision strings copied from the
+     detector report that this execution covers;
+   - `run_evidence` -- concise pass line/count/duration from the tool.
+
+   Every touched decision must appear in at least one passing
+   `owner_decisions` list. Missing evidence stays in the loop or returns
+   blocked. Never substitute "tests exist" or panel confidence.
+
+5. Decide `dual_guardrail_required`:
    - `new-owner` and `split-authority-repair` ALWAYS set it `true`.
    - `owner-extension` sets it `true` when the change centralizes
      routing or repairs a split; otherwise `false` with a `rationale`
      naming the existing guard that already covers the new case.
    - `ordinary-fix` and `not-applicable` set it `false`.
 
-5. Run the boundary lint on the exact head and record the result in
+6. Run the boundary lint on the exact head and record the result in
    `boundary_lint`:
 
    ```
@@ -272,7 +318,7 @@ itself changes an authority.
    explicit rationale (e.g. `not-applicable: docs-only, no src/ change`)
    in `boundary_lint` instead of a run result.
 
-6. When `dual_guardrail_required` is true, do NOT push and do NOT
+7. When `dual_guardrail_required` is true, do NOT push and do NOT
    return a terminal status until ALL FOUR exist -- and fold the
    missing halves as in-scope work in Step X.3 if they do not yet:
    - a behavioral **regression test** (hermetic, under `tests/`) that
@@ -287,12 +333,23 @@ itself changes an authority.
      (`mutation_break`). Append the removed-guard entry to
      `mutation_break_evidence` too.
 
-7. Record the whole result in the `architecture_evidence` object of the
-   completion return. `ready-to-merge` and `advisory-with-deferred`
-   returns are schema-INVALID without it. If the required dual-guardrail
-   halves cannot be produced this run, stay in the loop; on cap, return
-   `blocked` with a `blocker` naming the missing half -- never
-   `ready-to-merge`.
+8. Build `architecture_evidence.version: "2"` with the unchanged
+   `owner_touch_report` JSON plus `functional_tests`. Write the full
+   candidate completion return to `completion-return.json`, validate it
+   against `completion-schema.json`, then run the semantic verifier:
+
+   ```
+   uv run python $OWNER_GATE verify \
+     --repo-root $REPO_ROOT --base $BASE_SHA --head $HEAD_SHA \
+     --completion completion-return.json
+   ```
+
+   A terminal return is forbidden until BOTH validators pass. The
+   semantic verifier freshly re-derives the report, rejects stale hashes
+   or revisions, rejects self-exempting classifications, verifies exact-
+   head passing outcomes, and checks that every touched owner is covered.
+   If evidence cannot be produced within the loop cap, return `blocked`
+   with the missing owner/test named. Never defer the gate.
 
 ### Step X.3 -- edit code, fold foldable items
 
@@ -416,12 +473,12 @@ On cap hit: `status: blocked` with failing job + log excerpt in
   items this iteration, OR every FOLD item was applied).
 - Copilot is drained (round cap hit OR zero new comments this
   iteration).
-- The canonical-owner gate (Step X.2.5) passed: the PR carries exactly
-  one classification, every touched decision has a recorded owner and
-  consumer-routing evidence, `bash scripts/lint-architecture-boundaries.sh`
-  is clean on the head, and -- when `dual_guardrail_required` is true --
-  all four dual-guardrail halves exist. Missing evidence is NOT a
-  ready-to-merge state.
+- The canonical-owner gate (Step X.2.5) passed: the deterministic report
+  matches the exact base/head, every detected owner touch is covered by
+  executed exact-head functional test IDs/evidence,
+  `bash scripts/lint-architecture-boundaries.sh` is clean on the head,
+  and -- when `dual_guardrail_required` is true -- all four dual-
+  guardrail halves exist. Missing evidence is NOT a ready-to-merge state.
 - CEO stance is `ship_now`, OR `ship_with_followups` where all
   remaining followups are tagged DEFER with valid scope-boundary
   notes.
@@ -547,9 +604,33 @@ most one short clause (e.g. `pending required review`,
   "lint_evidence": "string (required when status=ready-to-merge)",
   "mutation_break_evidence": [...],
   "architecture_evidence": {
+    "version": "2",
     "classification": "ordinary-fix|owner-extension|new-owner|split-authority-repair|not-applicable",
-    "decisions": [
-      { "decision": "the durable decision", "owner": "canonical owner", "consumer_routing": "each consumer routes through the owner" }
+    "owner_touch_report": {
+      "version": "1",
+      "owner_table": ".apm/instructions/architecture.instructions.md",
+      "owner_table_sha256": "64-char sha256",
+      "base_sha": "40-char sha",
+      "head_sha": "40-char sha",
+      "changed_files": ["..."],
+      "touched_owners": [
+        {
+          "decision": "canonical table decision",
+          "owner": "canonical table owner",
+          "selectors": ["repository-relative selector"],
+          "matched_files": ["changed owner path"]
+        }
+      ]
+    },
+    "functional_tests": [
+      {
+        "test_id": "tests/path/test_file.py::test_case",
+        "command": "uv run pytest tests/path/test_file.py::test_case -q",
+        "outcome": "passed",
+        "head_sha": "40-char sha",
+        "owner_decisions": ["canonical table decision"],
+        "run_evidence": "1 passed in 0.42s"
+      }
     ],
     "dual_guardrail_required": false,
     "boundary_lint": "bash scripts/lint-architecture-boundaries.sh exit 0",
@@ -586,10 +667,11 @@ two observed drift aliases are wrong:
 Use `status` (NOT `terminal_state`) and `pr` (NOT `pr_number`).
 `panel_execution`, `panel_personas`, and `routing_receipt` are optional
 (parent-audit observability) but, when present, must match the schema.
-`architecture_evidence` is REQUIRED for `ready-to-merge` and
-`advisory-with-deferred`: a terminal return without schema-valid
-canonical-owner evidence (Step X.2.5) fails validation and forces a
-re-spawn, exactly like a missing `ci_evidence`.
+`architecture_evidence` version 2 is REQUIRED for `ready-to-merge` and
+`advisory-with-deferred`. This is an intentional terminal-contract
+migration: version 1 self-classified `decisions[]` returns now fail and
+force one re-spawn under v2. Blocked and superseded returns remain
+compatible because they do not require architecture evidence.
 
 ## Hard rules
 
@@ -603,8 +685,10 @@ re-spawn, exactly like a missing `ci_evidence`.
   latest push.
 - Never add a regression-trap test without the mutation-break gate.
 - Never return `ready-to-merge` or `advisory-with-deferred` without a
-  schema-valid `architecture_evidence` from the canonical-owner gate
-  (Step X.2.5). A `new-owner`, `split-authority-repair`, or
+  schema-valid AND semantically verified `architecture_evidence`
+  version 2 from the canonical-owner gate (Step X.2.5). Every
+  deterministic owner touch requires executed exact-head functional
+  test IDs/evidence. A `new-owner`, `split-authority-repair`, or
   centralizing `owner-extension` cannot be terminal without all four
   dual-guardrail halves; missing evidence stays in the loop or returns
   `blocked`, never deferred.

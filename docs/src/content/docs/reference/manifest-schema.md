@@ -355,18 +355,21 @@ Grammar (ABNF-style):
 ```
 dependency      = url_form / shorthand_form / local_path_form
 url_form        = ("https://" / "http://" / "ssh://git@" / "git@") clone-url
-shorthand_form  = [host "/"] owner "/" repo ["/" virtual_path] ["#" ref]
+shorthand_form  = [host [":" port] "/"] owner "/" repo ["/" virtual_path] ["#" ref]
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
+The `host:port` shorthand resolves as HTTPS. SSH custom ports require the
+`ssh://` URL form.
+
 When a default registry is configured - via `registries.default` in `apm.yml` or `registry.<name>.default true` in `~/.apm/config.json` - plain `shorthand_form` entries with a `#<selector>` route through that registry instead of Git.
 
-`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port - `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
+`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port - `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols). For HTTPS custom-port dependencies, APM writes the scheme-free shorthand `host:PORT/owner/repo[#ref]` to `apm.yml` and can parse that form on the next run. The shorthand port `:443` normalizes to no port.
 
 | Segment | Required | Pattern | Description |
 |---|---|---|---|
 | `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to `github.com`. |
-| `port` | OPTIONAL | `1`-`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Not expressible in SCP shorthand. |
+| `port` | OPTIONAL | `1`-`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Also accepted in HTTPS shorthand as `host:PORT/owner/repo`; `:443` normalizes to no port. Not expressible in SCP shorthand. |
 | `owner/repo` | REQUIRED | 2+ path segments of `[a-zA-Z0-9._~-]+` on non-Azure-DevOps hosts; `[a-zA-Z0-9._\- ]+` (allows spaces, not tilde) on Azure DevOps | Repository path. GitHub uses exactly 2 segments. Non-GitHub hosts MAY use nested groups (e.g. `gitlab.com/group/sub/repo`). Tilde supports Bitbucket Data Center personal-repo segments (`/scm/~user/repo.git`) and Sourcehut `~user` paths. |
 | `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory or file within the repo. See Section 4.1.3. |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA | Git reference. Commit SHAs matched by `^[a-f0-9]{7,40}$`. Semver tags matched by `^v?\d+\.\d+\.\d+`. |
@@ -394,6 +397,7 @@ dependencies:
     # Custom ports (e.g. Bitbucket Datacenter, self-hosted GitLab)
     - ssh://git@bitbucket.example.com:7999/project/repo.git
     - https://git.internal:8443/team/repo.git
+    - git.internal:8443/team/repo#main        # HTTPS shorthand: accepted and written by APM
 
     # Virtual packages
     - ComposioHQ/awesome-claude-skills/brand-guidelines   # subdirectory
