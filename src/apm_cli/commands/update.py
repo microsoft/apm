@@ -20,8 +20,10 @@ What it does
 3. Prompt ``Apply these changes? [y/N]`` -- default **No**, mirroring
    the security framing in the public response on issue #1203.
 4. On ``y``: continue the install pipeline (download + integrate +
-   lockfile rewrite).  On ``N`` / ``--dry-run`` / no-TTY: exit cleanly
-   with no on-disk mutations.
+   lockfile rewrite).  On ``N`` / ``--dry-run``: exit cleanly with no
+   on-disk mutations.  In no-TTY mode, ref changes fail closed; an
+   unchanged locked graph may still restore a wholly absent package cache
+   without prompting.
 
 Flags
 -----
