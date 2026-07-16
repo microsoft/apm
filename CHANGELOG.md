@@ -30,10 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- First-party CI and release environments now install dependencies exactly from
-  `uv.lock`, and release binaries bundle Rich's dynamically imported Unicode
-  cell-width tables, preventing `apm deps list` failures caused by missing Rich
-  Unicode modules in frozen binaries. (#2264)
+- Release binaries no longer crash with missing Rich Unicode modules when
+  `apm deps list` renders non-ASCII package names. First-party CI and release
+  environments also install dependencies exactly from `uv.lock`. (#2264)
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
   dropped from a project's `targets:` list -- the hook wipe is now scoped to

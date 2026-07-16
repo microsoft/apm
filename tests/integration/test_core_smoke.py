@@ -156,7 +156,7 @@ class TestBinaryStartup:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         assert f"test-org/{repo_name}" in result.stdout
-        # Rich table borders are plain Unicode and render on piped stdout.
+        # Rich borders are structural Unicode, not ANSI, so piped output keeps them.
         assert "\u2502" in result.stdout, "deps list did not render a Rich table"
 
 
