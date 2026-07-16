@@ -48,6 +48,12 @@ class TestSkillSubsetFilterTokens:
             "foo",
         }
 
+    def test_blank_name_does_not_hide_later_names(self) -> None:
+        assert skill_subset_filter_tokens([" ", "category/reviewer"]) == {
+            "category/reviewer",
+            "reviewer",
+        }
+
 
 # ============================================================================
 # DependencyReference — parse_from_dict with skills: field
@@ -80,6 +86,11 @@ class TestDependencyReferenceSkillSubset:
         entry = {"git": "owner/repo", "skills": []}
         with pytest.raises(ValueError, match="must contain at least one"):
             DependencyReference.parse_from_dict(entry)
+
+    @pytest.mark.parametrize("invalid_name", [None, 7, " "])
+    def test_parse_skills_rejects_non_string_or_blank_name(self, invalid_name: object) -> None:
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict({"git": "owner/repo", "skills": [invalid_name]})
 
     def test_parse_skills_path_traversal_rejects(self):
         """Skill name with path traversal is rejected."""

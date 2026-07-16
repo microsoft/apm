@@ -1,0 +1,85 @@
+name: Mutation Testing Pilot
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-testing-pilot
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  mutation-pilot:
+    name: Bounded Mutation Pilot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Restore exact-input mutation cache
+        id: mutation-cache
+        uses: actions/cache@v4
+        with:
+          path: mutants
+          key: >-
+            mutation-pilot-v1-${{ runner.os }}-${{
+            hashFiles(
+              'uv.lock',
+              'pyproject.toml',
+              'scripts/run_mutation_pilot.py',
+              'tests/mutation/baseline.json',
+              'src/apm_cli/models/dependency/subsets.py',
+              'src/apm_cli/install/plan.py',
+              'src/apm_cli/policy/discovery.py',
+              'src/apm_cli/compilation/link_resolver.py',
+              'tests/unit/test_skill_subset_persistence.py',
+              'tests/unit/test_dep_targets_persistence.py',
+              'tests/unit/install/test_plan.py',
+              'tests/unit/policy/test_cache_merged_effective.py',
+              'tests/unit/compilation/test_link_resolver.py',
+              'tests/unit/compilation/test_link_resolver_phase3.py',
+              'tests/unit/compilation/test_link_resolver_resolution.py'
+            ) }}
+
+      - name: Run bounded mutation pilot
+        shell: bash
+        run: |
+          args=()
+          if [[ "${{ steps.mutation-cache.outputs.cache-hit }}" == "true" ]]; then
+            args+=(--reuse-cache)
+          fi
+          uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+            --output mutation-pilot-report.json \
+            "${args[@]}"
+
+      - name: Upload deterministic mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-pilot-report
+          path: mutation-pilot-report.json
+          if-no-files-found: error
+          retention-days: 14

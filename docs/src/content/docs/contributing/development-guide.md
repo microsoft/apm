@@ -100,6 +100,30 @@ pip install -e .[dev]
 pytest -q
 ```
 
+### Bounded mutation pilot
+
+The advisory mutation pilot covers four stable owners: dependency subset
+selection, update-plan construction, cached-policy serialization, and canonical
+in-package link projection. It runs nightly or by manual workflow dispatch,
+not as required PR CI, and has a 20-minute hosted job budget.
+
+Run the exact-function allowlist locally:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --output mutation-pilot-report.json
+```
+
+The command fails on new survivors, timeouts, suspicious results, unchecked
+mutants, and incomplete outcomes. Its timestamp-free JSON report is suitable
+for comparing runs. Pass `--reuse-cache` only when the allowlisted source,
+tests, configuration, runner, and lockfile are unchanged.
+
+The reviewed survivor allowlist lives in
+`tests/mutation/baseline.json`. Inspect surviving diffs with `mutmut show` and
+add behavioral tests for real contract gaps. Use `--update-baseline` only when
+the baseline change itself has been reviewed.
+
 ## Coding Style
 
 This project follows:
