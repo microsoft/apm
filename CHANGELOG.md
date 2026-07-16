@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SSH clone failures from passphrase-protected keys now explain how to unblock
+  non-interactive clones with `ssh-add`, CI deploy keys, or token-backed HTTPS
+  instead of ending with an opaque git error. (#2244)
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
   canonical serialization, and last-good bytes after malformed refreshes. (#2235)
