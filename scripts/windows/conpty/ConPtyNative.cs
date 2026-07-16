@@ -266,14 +266,6 @@ namespace ApmConPty
                         "CreatePseudoConsole failed, hresult=0x" + hr.ToString("X8", CultureInfo.InvariantCulture));
                 }
 
-                // The pseudo console duplicated what it needs; our copies of the
-                // "server" ends are no longer needed and must be closed so EOF
-                // is detected correctly when the child exits.
-                CloseHandle(inputReadSide);
-                inputReadSide = IntPtr.Zero;
-                CloseHandle(outputWriteSide);
-                outputWriteSide = IntPtr.Zero;
-
                 IntPtr requiredSize = IntPtr.Zero;
                 InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref requiredSize);
                 attributeList = Marshal.AllocHGlobal(requiredSize);
@@ -326,6 +318,19 @@ namespace ApmConPty
                         "CreateProcessW failed: " + Marshal.GetLastWin32Error()
                         + " command=" + commandLine);
                 }
+
+                // Per Microsoft's documented pseudoconsole lifecycle ("Creating a
+                // Pseudoconsole session"): "Upon completion of the CreateProcess
+                // call ... the handles given during creation should be freed from
+                // this process. This will decrease the reference count on the
+                // underlying device object and allow I/O operations to properly
+                // detect a broken channel when the pseudoconsole session closes
+                // its copy of the handles." Close them here, not before
+                // CreateProcessW, matching that documented order exactly.
+                CloseHandle(inputReadSide);
+                inputReadSide = IntPtr.Zero;
+                CloseHandle(outputWriteSide);
+                outputWriteSide = IntPtr.Zero;
 
                 session._pseudoConsole = pseudoConsole;
                 session._attributeList = attributeList;
