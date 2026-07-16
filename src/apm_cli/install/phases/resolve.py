@@ -24,8 +24,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.helpers.ref_reuse import (
-    _maybe_resolve_git_semver,
     annotate_update_plan_refs,
+)
+from apm_cli.install.helpers.ref_reuse import (
+    maybe_resolve_git_semver as _maybe_resolve_git_semver,
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.transaction import resolution_for_context

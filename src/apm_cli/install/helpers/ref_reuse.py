@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.transport_selection import ProtocolPreference, TransportSelector
     from apm_cli.models.dependency.reference import DependencyReference
+
+RefResolverCacheKey = tuple[str | None, str | None, str, tuple[str, str | None, int | None]]
 
 
 def _token_fingerprint(token: str | None) -> str | None:
@@ -62,16 +65,16 @@ def _git_semver_package_name(dep_ref: DependencyReference) -> str:
     return dep_ref.repo_url.rsplit("/", 1)[-1]
 
 
-def _maybe_resolve_git_semver(
+def maybe_resolve_git_semver(
     *,
     dep_ref: DependencyReference,
     existing_lockfile: Any,
     update_refs: bool,
     auth_resolver: Any = None,
-    ref_resolver_cache: dict[Any, Any] | None = None,
+    ref_resolver_cache: dict[RefResolverCacheKey, Any] | None = None,
     ref_resolver_cache_lock: Any = None,
-    transport_selector: Any = None,
-    protocol_pref: Any = None,
+    transport_selector: TransportSelector | None = None,
+    protocol_pref: ProtocolPreference | None = None,
 ) -> Any:
     """Resolve a git-source semver range or replay its locked resolution."""
     if dep_ref.is_local:
@@ -156,7 +159,7 @@ def _maybe_resolve_git_semver(
 def get_shared_ref_resolver(
     host: str | None,
     token: str | None,
-    cache: dict[Any, Any] | None,
+    cache: dict[RefResolverCacheKey, Any] | None,
     lock: Any = None,
     *,
     auth_scheme: str = "basic",
