@@ -71,6 +71,20 @@ _UPDATE_ARGS = (
     "0",
 )
 _AUDIT_ARGS = ("audit", "--ci", "--no-policy", "--format", "json")
+# Frozen binaries do not import the isolated environment's sitecustomize guard.
+# Fence best-effort HTTP metadata probes through a closed loopback endpoint.
+_DENY_PROXY = "http://127.0.0.1:9"
+_HERMETIC_ENVIRONMENT = {
+    "APM_NO_CACHE": "1",
+    "HTTP_PROXY": _DENY_PROXY,
+    "HTTPS_PROXY": _DENY_PROXY,
+    "ALL_PROXY": _DENY_PROXY,
+    "NO_PROXY": "",
+    "http_proxy": _DENY_PROXY,
+    "https_proxy": _DENY_PROXY,
+    "all_proxy": _DENY_PROXY,
+    "no_proxy": "",
+}
 
 
 @dataclass(frozen=True)
@@ -235,6 +249,7 @@ def _create_scenario(root: Path, case: _TransportCase) -> _Scenario:
     )
     trace_path = isolated.temp_root / "git-trace.json"
     environment = isolated.subprocess_env()
+    environment.update(_HERMETIC_ENVIRONMENT)
     environment["GIT_TRACE2_EVENT"] = str(trace_path)
     return _Scenario(
         row=row,
@@ -382,6 +397,10 @@ def test_git_semver_resolution_honors_consume_transport_contract(
 ) -> None:
     scenario = _create_scenario(tmp_path / case.id, case)
     assert scenario.environment["GIT_ALLOW_PROTOCOL"] == "file"
+    deny_proxy = urlparse(scenario.environment["HTTPS_PROXY"])
+    assert (deny_proxy.hostname, deny_proxy.port) == ("127.0.0.1", 9)
+    assert scenario.environment["NO_PROXY"] == ""
+    assert scenario.environment["APM_NO_CACHE"] == "1"
     observation = _run_scenario(scenario, apm_binary_path=apm_binary_path)
 
     if case.expect_success:
