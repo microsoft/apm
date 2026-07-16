@@ -49,13 +49,6 @@
         "tests/integration/test_yml_schema_validation.py"
       ],
       "sha256": "dedfae8f8c7d10355d2042afe89a55190a3a0a22eafdb4d30d7d3e2d9a437e22"
-    },
-    {
-      "paths": [
-        "tests/integration/test_validation_phase3w5.py",
-        "tests/integration/test_validation_rules.py"
-      ],
-      "sha256": "f85beaf48104869412c0189e7f0eef9cf6c2eb368b9efb198e94bc05f75dda24"
     }
   ],
   "schema_version": 1,
