@@ -80,6 +80,12 @@ def test_canonical_mutant_name_removes_internal_mangling(pilot: ModuleType) -> N
     )
 
 
+def test_signal_outcomes_are_classified_accurately(pilot: ModuleType) -> None:
+    assert pilot.STATUS_BY_EXIT_CODE[-9] == "terminated"
+    assert pilot.STATUS_BY_EXIT_CODE[-11] == "segfault"
+    assert {"segfault", "terminated"} <= pilot.FATAL_STATUSES
+
+
 def test_mutmut_config_matches_canonical_owner_scope(pilot: ModuleType) -> None:
     config = tomllib.loads((pilot.REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     mutmut = config["tool"]["mutmut"]
