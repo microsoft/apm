@@ -53,7 +53,7 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
 
 
 def test_ado_lock_coordinates_have_single_owner() -> None:
-    """AC14 lock persistence must consume DependencyReference's ADO parser."""
+    """AC14 derives ADO coordinates without provider-specific lock fields."""
     import inspect
 
     from apm_cli.deps.lockfile import LockedDependency
@@ -66,12 +66,16 @@ def test_ado_lock_coordinates_have_single_owner() -> None:
     reconstruction = inspect.getsource(LockedDependency.to_dependency_ref)
 
     assert hasattr(DependencyReference, "canonical_ado_coordinates")
-    assert "DependencyReference.canonical_ado_coordinates" in lockfile_source
+    assert hasattr(DependencyReference, "with_derived_provider_coordinates")
+    assert "with_derived_provider_coordinates" in reconstruction
+    assert "ado_organization" not in lockfile_source
+    assert "ado_project" not in lockfile_source
+    assert "ado_repo" not in lockfile_source
     assert "DependencyReference.canonical_ado_coordinates" in ref_resolver_source
     assert "repo_url.split" not in reconstruction
     assert "owner_repo.split" not in ref_resolver_source
     assert "AC14: ADO lock-coordinate authority" in guard
-    assert "ADO lock coordinates must use DependencyReference" in guard
+    assert "ADO coordinates must be derived by DependencyReference, never persisted" in guard
 
 
 def test_packed_marketplace_source_parsing_has_single_owner() -> None:

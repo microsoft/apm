@@ -54,9 +54,6 @@ _LOCKED_DEPENDENCY_VALUES = {
     "declared_license": "MIT",
     "exec_status": "deployed",
     "name": "consume-contract",
-    "ado_organization": "apm-org",
-    "ado_project": "apm-project",
-    "ado_repo": "consume-contract",
     "_unknown_fields": {"future_consumer_field": {"enabled": True}},
 }
 
@@ -78,14 +75,16 @@ _RECONSTRUCTED_LOCK_FIELDS = {
     "allow_insecure",
     "skill_subset",
     "target_subset",
-    "ado_organization",
-    "ado_project",
-    "ado_repo",
 }
 
 _REFERENCE_TO_LOCK_FIELD = {
     "artifactory_prefix": "registry_prefix",
     "is_local": "source",
+}
+_DERIVED_PROVIDER_FIELDS = {
+    "ado_organization",
+    "ado_project",
+    "ado_repo",
 }
 
 
@@ -143,12 +142,15 @@ def test_every_locked_dependency_field_survives_yaml_round_trip() -> None:
 
 
 def test_reconstruction_declares_and_preserves_every_consumed_lock_field() -> None:
-    """The lock owner must reconstruct every field its consumer reads."""
+    """Persist generic lock fields while deriving provider-specific coordinates."""
     declared_fields = {field.name for field in fields(LockedDependency)}
     projected_fields = _url_consumer_lock_projection()
+    persisted_projection = projected_fields - _DERIVED_PROVIDER_FIELDS
 
-    assert projected_fields <= declared_fields
-    assert projected_fields <= _locked_fields_read_by_reconstruction()
+    assert projected_fields >= _DERIVED_PROVIDER_FIELDS
+    assert _DERIVED_PROVIDER_FIELDS.isdisjoint(declared_fields)
+    assert persisted_projection <= declared_fields
+    assert persisted_projection <= _locked_fields_read_by_reconstruction()
     assert _locked_fields_read_by_reconstruction() == _RECONSTRUCTED_LOCK_FIELDS
 
     dependency = LockedDependency(
@@ -192,8 +194,8 @@ def test_reconstruction_declares_and_preserves_every_consumed_lock_field() -> No
     assert reconstructed.target_subset == ["copilot"]
 
 
-def test_ado_coordinates_survive_lock_creation_yaml_and_reconstruction() -> None:
-    """ADO URL coordinates remain complete across the real lock lifecycle."""
+def test_ado_coordinates_are_derived_after_generic_lock_round_trip() -> None:
+    """ADO transport coordinates are reconstructed without provider lock fields."""
     parsed = DependencyReference.parse(
         "https://dev.azure.com/apm-org/apm-project/_git/consume-contract#v1.0.0"
     )
@@ -204,7 +206,10 @@ def test_ado_coordinates_survive_lock_creation_yaml_and_reconstruction() -> None
         resolved_by=None,
     )
 
-    restored = LockedDependency.from_dict(locked.to_dict())
+    persisted = locked.to_dict()
+    assert _DERIVED_PROVIDER_FIELDS.isdisjoint(persisted)
+
+    restored = LockedDependency.from_dict(persisted)
     reconstructed = restored.to_dependency_ref()
 
     assert reconstructed.host == "dev.azure.com"
@@ -217,42 +222,43 @@ def test_ado_coordinates_survive_lock_creation_yaml_and_reconstruction() -> None
     )
 
 
-def test_legacy_ado_lock_without_coordinates_reconstructs_canonically() -> None:
-    """Pre-fix ADO locks remain readable through the reference owner."""
-    legacy = LockedDependency(
+def test_generic_ado_lock_reconstructs_canonical_transport_coordinates() -> None:
+    """Generic host and repository identity is sufficient for ADO replay."""
+    locked = LockedDependency(
         repo_url="apm-org/apm-project/consume-contract",
         host="dev.azure.com",
         resolved_commit="a" * 40,
         resolved_ref="v1.0.0",
     )
 
-    reconstructed = legacy.to_dependency_ref()
+    reconstructed = locked.to_dependency_ref()
 
     assert reconstructed.ado_organization == "apm-org"
     assert reconstructed.ado_project == "apm-project"
     assert reconstructed.ado_repo == "consume-contract"
 
 
-@pytest.mark.parametrize(
-    "missing_field",
-    ("ado_organization", "ado_project", "ado_repo"),
-)
-def test_partial_ado_lock_coordinates_fail_closed(missing_field: str) -> None:
-    """Dropping any one persisted ADO field is a rejected partial state."""
-    values = {
+def test_retired_ado_lock_fields_are_dropped_without_losing_unknown_fields() -> None:
+    """Provider coordinates never survive as lock metadata."""
+    persisted = {
+        "repo_url": "apm-org/apm-project/consume-contract",
+        "host": "dev.azure.com",
+        "resolved_ref": "v1.0.0",
         "ado_organization": "apm-org",
         "ado_project": "apm-project",
         "ado_repo": "consume-contract",
+        "future_consumer_field": {"enabled": True},
     }
-    values[missing_field] = None
-    dependency = LockedDependency(
-        repo_url="apm-org/apm-project/consume-contract",
-        host="dev.azure.com",
-        **values,
-    )
 
-    with pytest.raises(ValueError, match="Partial Azure DevOps lock coordinates"):
-        dependency.to_dependency_ref()
+    locked = LockedDependency.from_dict(persisted)
+    reserialized = locked.to_dict()
+    reconstructed = locked.to_dependency_ref()
+
+    assert _DERIVED_PROVIDER_FIELDS.isdisjoint(reserialized)
+    assert reserialized["future_consumer_field"] == {"enabled": True}
+    assert reconstructed.to_github_url() == (
+        "https://dev.azure.com/apm-org/apm-project/_git/consume-contract"
+    )
 
 
 def test_non_ado_lock_reconstruction_has_no_ado_coordinates() -> None:

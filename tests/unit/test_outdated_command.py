@@ -1250,9 +1250,6 @@ class TestOutdatedCommand:
             ado_dep = LockedDependency(
                 repo_url="myorg/myproject/myrepo",
                 host="dev.azure.com",
-                ado_organization="myorg",
-                ado_project="myproject",
-                ado_repo="myrepo",
                 resolved_ref="v1.0.0",
                 resolved_commit="aaa",
             )

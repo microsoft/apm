@@ -27,6 +27,7 @@ _ADO_ORGANIZATION = "apm-org"
 _ADO_PROJECT = "apm-project"
 _ADO_REPOSITORY = "ado-consume-bundle"
 _ADO_SOURCE = f"https://{_ADO_HOST}/{_ADO_ORGANIZATION}/{_ADO_PROJECT}/_git/{_ADO_REPOSITORY}"
+_ADO_LOCK_FIELDS = {"ado_organization", "ado_project", "ado_repo"}
 _SKILL_PATH = Path(".agents/skills/ado-contract/SKILL.md")
 _AUDIT_ARGS = ("audit", "--ci", "--no-policy", "--format", "json")
 
@@ -95,7 +96,7 @@ def test_ado_lock_replay_drives_outdated_update_audit_and_convergence(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """Persisted ADO coordinates survive every real Consume state transition."""
+    """Generic lock identity reconstructs ADO state through every Consume transition."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "ado-lock", base_env=dict(os.environ))
     environment = isolated.subprocess_env()
     packages = LocalPackageFactory(isolated.package_root)
@@ -132,9 +133,7 @@ def test_ado_lock_replay_drives_outdated_update_audit_and_convergence(
     initial_lock = _locked_dependency(consumer.root)
     assert initial_lock["host"] == _ADO_HOST
     assert initial_lock["repo_url"] == (f"{_ADO_ORGANIZATION}/{_ADO_PROJECT}/{_ADO_REPOSITORY}")
-    assert initial_lock["ado_organization"] == _ADO_ORGANIZATION
-    assert initial_lock["ado_project"] == _ADO_PROJECT
-    assert initial_lock["ado_repo"] == _ADO_REPOSITORY
+    assert _ADO_LOCK_FIELDS.isdisjoint(initial_lock)
     assert initial_lock["resolved_commit"] == first_commit.sha
     assert initial_lock["resolved_ref"] == "v1.0.0"
     assert (consumer.root / _SKILL_PATH).read_bytes() == _skill_document("version one").encode()
@@ -191,9 +190,7 @@ def test_ado_lock_replay_drives_outdated_update_audit_and_convergence(
     assert "1 updated" in update_output
 
     updated_lock = _locked_dependency(consumer.root)
-    assert updated_lock["ado_organization"] == _ADO_ORGANIZATION
-    assert updated_lock["ado_project"] == _ADO_PROJECT
-    assert updated_lock["ado_repo"] == _ADO_REPOSITORY
+    assert _ADO_LOCK_FIELDS.isdisjoint(updated_lock)
     assert updated_lock["resolved_commit"] == second_commit.sha, update_output
     assert updated_lock["resolved_ref"] == "v1.1.0"
     assert updated_lock["constraint"] == "^1.0.0"

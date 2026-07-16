@@ -2,7 +2,7 @@
 
 import re
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ...cache.url_normalize import SCP_LIKE_RE
@@ -224,6 +224,34 @@ class DependencyReference:
             cls._validate_final_repo_fields(host, repo_url)
             if host and is_azure_devops_hostname(host)
             else (None, None, None)
+        )
+
+    def validate_provider_coordinates(self) -> None:
+        """Reject transient provider coordinates that disagree with canonical identity."""
+        supplied = (self.ado_organization, self.ado_project, self.ado_repo)
+        canonical = self.canonical_ado_coordinates(self.host, self.repo_url)
+        if supplied != canonical:
+            raise ValueError(
+                "Incomplete or mismatched Azure DevOps reference coordinates. Re-add the "
+                "dependency with the original Azure DevOps URL to regenerate its state."
+            )
+
+    @classmethod
+    def is_transient_provider_field(cls, field_name: str) -> bool:
+        """Return whether a model field must never be persisted in lock state."""
+        return field_name in {"ado_organization", "ado_project", "ado_repo"}
+
+    def with_derived_provider_coordinates(self) -> "DependencyReference":
+        """Return a copy with transient provider coordinates derived from identity."""
+        ado_organization, ado_project, ado_repo = self.canonical_ado_coordinates(
+            self.host,
+            self.repo_url,
+        )
+        return replace(
+            self,
+            ado_organization=ado_organization,
+            ado_project=ado_project,
+            ado_repo=ado_repo,
         )
 
     @property
@@ -2050,13 +2078,10 @@ class DependencyReference:
         netloc = f"{host}:{self.port}" if self.port else host
         scheme = "http" if self.is_insecure else "https"
         if self.is_azure_devops():
-            coordinates = (self.ado_organization, self.ado_project, self.ado_repo)
-            if coordinates != self.canonical_ado_coordinates(self.host, self.repo_url):
-                raise ValueError(
-                    "Incomplete or mismatched Azure DevOps reference coordinates. Re-add the "
-                    "dependency with the original Azure DevOps URL to regenerate the lock entry."
-                )
-            organization, ado_project, ado_repo = coordinates
+            self.validate_provider_coordinates()
+            organization = self.ado_organization
+            ado_project = self.ado_project
+            ado_repo = self.ado_repo
             project = urllib.parse.quote(ado_project, safe="")
             repo = urllib.parse.quote(ado_repo, safe="")
             return f"https://{netloc}/{organization}/{project}/_git/{repo}"

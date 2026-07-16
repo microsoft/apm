@@ -20,10 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Azure DevOps lock entries now preserve complete organization, project, and
-  repository coordinates, so `apm outdated` reports real tag status and bounded
-  `apm update` runs resolve and materialize the matching tag. (closes #2197;
-  #2226)
+- Azure DevOps lock replay now derives transport coordinates from generic
+  `host` and `repo_url` identity, so `apm outdated` reports real tag status and
+  bounded `apm update` runs resolve and materialize the matching tag without
+  provider-specific lock fields. (closes #2197; #2226)
 - Fix #2184 so Git-source semver ranges honor explicit SSH and `prefer-ssh`
   during tag enumeration instead of invoking HTTPS. (#2229)
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
