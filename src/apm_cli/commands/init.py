@@ -86,12 +86,37 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     default=None,
     help="Comma-separated target list (skip prompt, write directly)",
 )
+@click.option(
+    "--name",
+    default=None,
+    help="Project name written to apm.yml. Ignored when a positional project name is given.",
+)
+@click.option("--description", default=None, help="Project description (default: auto-detected)")
+@click.option("--version", default=None, help="Project version (default: 1.0.0)")
+@click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+def init(
+    ctx,
+    project_name,
+    yes,
+    plugin,
+    marketplace_flag,
+    target_flag,
+    name,
+    description,
+    version,
+    author,
+    verbose,
+):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
+
+    Metadata flags (--name, --description, --version, --author) set the
+    corresponding apm.yml field without a prompt, so scripted and CI init
+    can produce a finished manifest. Outside --yes they seed the prompt
+    defaults rather than being discarded.
 
     Producers: prefer 'apm plugin init' (plugin scaffold) or
     'apm marketplace init' (marketplace block). The --plugin and
@@ -118,6 +143,10 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
         plugin=plugin,
         marketplace_flag=marketplace_flag,
         target_flag=target_flag,
+        name=name,
+        description=description,
+        version=version,
+        author=author,
         verbose=verbose,
         source="init",
     )
@@ -131,6 +160,10 @@ def _perform_init(
     marketplace_flag,
     target_flag,
     verbose,
+    name=None,
+    description=None,
+    version=None,
+    author=None,
     source="init",
 ):
     """Shared init body. Called by `apm init` and `apm plugin init`.
@@ -138,6 +171,10 @@ def _perform_init(
     ``source`` controls the "Next steps" hint shape:
       - "init"   -> consumer-focused, teaches the noun-verb namespace
       - "plugin" -> plugin-author next steps (same as legacy --plugin)
+
+    ``name``/``description``/``version``/``author`` are the optional
+    metadata overrides (#2146). They default to ``None`` so callers that
+    predate them -- ``apm plugin init`` -- keep their existing behavior.
     """
     logger = CommandLogger(source, verbose=verbose)
     try:
@@ -153,6 +190,23 @@ def _perform_init(
             )
             sys.exit(1)
 
+        # The positional argument also creates and enters a directory, so it
+        # keeps precedence over --name, which only labels the manifest. Report
+        # the ignored flag rather than dropping it silently.
+        if project_name and name:
+            logger.warning(
+                f"--name '{name}' ignored: positional project name "
+                f"'{project_name}' takes precedence."
+            )
+            name = None
+
+        if name and not _validate_project_name(name):
+            logger.error(
+                f"Invalid project name '{name}': "
+                "project names must not contain path separators ('/' or '\\\\') or be '..'."
+            )
+            sys.exit(1)
+
         # Determine project directory and name
         if project_name:
             project_dir = Path(project_name)
@@ -162,7 +216,7 @@ def _perform_init(
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
-            final_project_name = project_dir.name
+            final_project_name = name or project_dir.name
         project_root = Path.cwd()
 
         # Validate plugin name early
@@ -192,10 +246,23 @@ def _perform_init(
 
         # Get project configuration (interactive mode or defaults)
         if not yes:
-            config = _interactive_project_setup(final_project_name, logger)
+            config = _interactive_project_setup(
+                final_project_name,
+                logger,
+                description=description,
+                version=version,
+                author=author,
+            )
         else:
-            # Use auto-detected defaults
+            # Use auto-detected defaults, then let explicit flags win.
             config = _get_default_config(final_project_name)
+            for field, override in (
+                ("description", description),
+                ("version", version),
+                ("author", author),
+            ):
+                if override is not None:
+                    config[field] = override
 
         # --- Target selection (must run before the confirmation panel so
         #     the chosen targets render in the "About to create" summary). ---
@@ -213,8 +280,8 @@ def _perform_init(
         if not yes:
             _confirm_setup_summary(config, logger)
 
-        # Plugin mode uses 0.1.0 as default version
-        if plugin and yes:
+        # Plugin mode uses 0.1.0 as default version, unless --version set one.
+        if plugin and yes and version is None:
             config["version"] = "0.1.0"
 
         logger.start(f"Initializing APM project: {config['name']}", symbol="running")
@@ -369,17 +436,23 @@ def _perform_init(
         sys.exit(1)
 
 
-def _interactive_project_setup(default_name, logger):
+def _interactive_project_setup(
+    default_name, logger, *, description=None, version=None, author=None
+):
     """Interactive setup for new APM projects with auto-detection.
 
     Collects only the metadata fields here; target selection and final
     confirmation are run by the caller via ``_confirm_setup_summary`` so
     targets can be shown in the same "About to create" panel.
+
+    Any metadata passed via flags seeds the matching prompt default, so a
+    flag given without ``--yes`` is still honored on an empty answer (#2146).
     """
     from ._helpers import _auto_detect_author, _auto_detect_description, _validate_project_name
 
-    auto_author = _auto_detect_author()
-    auto_description = _auto_detect_description(default_name)
+    auto_author = author or _auto_detect_author()
+    auto_description = description or _auto_detect_description(default_name)
+    auto_version = version or "1.0.0"
 
     try:
         from rich.console import Console  # type: ignore
@@ -398,7 +471,7 @@ def _interactive_project_setup(default_name, logger):
                 "project names must not contain path separators ('/' or '\\\\') or be '..'.[/error]"
             )
 
-        version = Prompt.ask("Version", default="1.0.0").strip()
+        version = Prompt.ask("Version", default=auto_version).strip()
         description = Prompt.ask("Description", default=auto_description).strip()
         author = Prompt.ask("Author", default=auto_author).strip()
 
@@ -415,7 +488,7 @@ def _interactive_project_setup(default_name, logger):
                 f"project names must not contain path separators ('/' or '\\\\') or be '..'.{RESET}"
             )
 
-        version = click.prompt("Version", default="1.0.0").strip()
+        version = click.prompt("Version", default=auto_version).strip()
         description = click.prompt("Description", default=auto_description).strip()
         author = click.prompt("Author", default=auto_author).strip()
 
