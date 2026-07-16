@@ -45,6 +45,13 @@ authorized for that org.
 
 For the org-private case, see [Private and org packages](../private-and-org-packages/).
 
+## SSH clone prerequisites
+
+APM runs git clones non-interactively. Before using an SSH dependency, make
+sure its key is already available to SSH. Unlock a passphrase-protected key
+first (for example, with `ssh-add <key-file>`). In CI, load a dedicated deploy
+key non-interactively or use token-backed HTTPS.
+
 ## GitLab (SaaS or self-managed)
 
 **If `git clone` works, `apm install` works** -- no token is needed for GitLab `path:` files.

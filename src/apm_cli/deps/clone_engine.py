@@ -336,6 +336,7 @@ class CloneEngine:
             configured_github_host=os.environ.get("GITHUB_HOST", ""),
             default_host_fn=default_host,
             last_error=last_error,
+            last_attempt_scheme=prev_scheme,
             sanitize_git_error=host._sanitize_git_error,
         )
 

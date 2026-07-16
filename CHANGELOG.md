@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requirements in `openapm-v0.1.md` now cite both behaviors. Parser and audit
   diagnostics name `ref` and `apm install --update` when those are the required
   repair actions. (#2209)
+- SSH clone errors that report a passphrase prompt or public-key denial now add
+  remediation guidance for key availability, CI deploy keys, and token-backed
+  HTTPS without echoing captured SSH output. Diagnostic-only; #1976 remains
+  unresolved. (#2244; refs #1976)
 
 ### Fixed
 

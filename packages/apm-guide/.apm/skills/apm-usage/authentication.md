@@ -21,6 +21,13 @@ inherited token and authorization-header settings removed.
 
 For multi-account Git Credential Manager setups, see the [Multi-account Git Credential Manager](https://microsoft.github.io/apm/getting-started/authentication/#multi-account-git-credential-manager) section in the main authentication guide.
 
+## SSH clone prerequisites
+
+APM runs git clones non-interactively. Before using an SSH dependency, make
+sure its key is already available to SSH. Unlock a passphrase-protected key
+first (for example, with `ssh-add <key-file>`). In CI, load a dedicated deploy
+key non-interactively or use token-backed HTTPS.
+
 ## Marketplace transport
 
 For in-repository plugins from GitLab and generic git marketplaces, an SSH

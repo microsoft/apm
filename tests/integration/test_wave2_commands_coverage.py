@@ -1542,6 +1542,7 @@ class TestBareCacheHelpers:
             configured_github_host="github.com",
             default_host_fn=lambda: "github.com",
             last_error=None,
+            last_attempt_scheme=None,
             sanitize_git_error=lambda s: s,
         )
         assert isinstance(msg, str)

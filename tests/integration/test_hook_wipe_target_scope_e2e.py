@@ -251,7 +251,13 @@ def _install_two_packages_two_targets(project: Path, monkeypatch: pytest.MonkeyP
     assert result.exit_code == 0, result.output
 
 
-@pytest.mark.parametrize("caller", _CALLERS)
+@pytest.mark.parametrize(
+    "caller",
+    [
+        pytest.param("uninstall", marks=pytest.mark.lifecycle_smoke),
+        "prune",
+    ],
+)
 def test_narrowing_targets_preserves_sibling_hooks_in_dropped_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caller: str
 ) -> None:
