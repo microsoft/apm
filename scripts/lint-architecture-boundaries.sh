@@ -565,7 +565,10 @@ fi
 echo "[*] AC14: ADO lock-coordinate authority"
 if ! grep -q 'DependencyReference.canonical_ado_coordinates' \
     src/apm_cli/deps/lockfile.py \
-    || grep -Eq '(self\.)?repo_url\.split\(' src/apm_cli/deps/lockfile.py; then
+    || ! grep -q 'DependencyReference.canonical_ado_coordinates' \
+        src/apm_cli/marketplace/ref_resolver.py \
+    || grep -Eq '(self\.)?repo_url\.split\(' src/apm_cli/deps/lockfile.py \
+    || grep -Eq 'owner_repo\.split\(' src/apm_cli/marketplace/ref_resolver.py; then
     echo "[x] ADO lock coordinates must use DependencyReference"
     violations=$((violations + 1))
 fi

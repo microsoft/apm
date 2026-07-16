@@ -225,6 +225,7 @@ class TestRefResolver:
             "https://user:secret@dev.azure.com/apm-org/apm-project/_git/repo",
             "https://dev.azure.com/apm-org/apm-project/_git/repo?ref=v1",
             "https://dev.azure.com/apm-org/apm-project/_git/repo#fragment",
+            "https://dev.azure.com/apm-org/other-project/_git/consume-contract",
         ),
     )
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
@@ -236,7 +237,7 @@ class TestRefResolver:
         """Credentials never flow to an unsafe caller-supplied URL."""
         resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
 
-        with pytest.raises(GitLsRemoteError, match="configured host"):
+        with pytest.raises(GitLsRemoteError, match="dependency coordinates"):
             resolver.list_remote_refs(
                 "apm-org/apm-project/consume-contract",
                 remote_url=remote_url,
@@ -263,7 +264,7 @@ class TestRefResolver:
             remote_url="https://dev.azure.com/apm-org/apm-project/_git/consume-contract",
         )
         second = resolver.list_remote_refs(
-            owner_repo,
+            "apm-org/other-project/consume-contract",
             remote_url="https://dev.azure.com/apm-org/other-project/_git/consume-contract",
         )
 
@@ -457,6 +458,25 @@ class TestRefResolver:
         )
 
         resolver.list_remote_refs("contoso/platform/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_ssh_transport_accepts_git_path_from_canonical_owner(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """ADO SSH URL construction routes through the canonical coordinate owner."""
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("contoso/platform/_git/tools")
 
         args, kwargs = mock_run.call_args  # noqa: RUF059
         assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"

@@ -627,11 +627,17 @@ class LockedDependency:
         supplied_ado = (self.ado_organization, self.ado_project, self.ado_repo)
         supplied_count = sum(value is not None for value in supplied_ado)
         if supplied_count not in (0, 3):
-            raise ValueError("Partial Azure DevOps lock coordinates are not allowed")
+            raise ValueError(
+                "Partial Azure DevOps lock coordinates are not allowed. "
+                "Re-add the dependency with the original Azure DevOps URL "
+                "to regenerate the lock entry."
+            )
         canonical_ado = DependencyReference.canonical_ado_coordinates(self.host, self.repo_url)
         if supplied_count == 3 and supplied_ado != canonical_ado:
             raise ValueError(
-                "Azure DevOps lock coordinates do not match the canonical repository path"
+                "Azure DevOps lock coordinates do not match the canonical repository path. "
+                "Re-add the dependency with the original Azure DevOps URL "
+                "to regenerate the lock entry."
             )
         ado_organization, ado_project, ado_repo = (
             supplied_ado if supplied_count == 3 else canonical_ado

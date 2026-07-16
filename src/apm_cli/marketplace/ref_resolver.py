@@ -51,6 +51,48 @@ __all__ = [
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
+def _ado_coordinates_from_owner_repo(
+    *,
+    host: str,
+    owner_repo: str,
+) -> tuple[str, str, str]:
+    """Return validated ADO coordinates from the canonical dependency owner."""
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    try:
+        return DependencyReference.canonical_ado_coordinates(host, owner_repo)
+    except ValueError as exc:
+        if "/_git/" in owner_repo:
+            try:
+                dep_ref = DependencyReference.parse(f"https://{host}/{owner_repo}")
+                return DependencyReference.canonical_ado_coordinates(
+                    dep_ref.host,
+                    dep_ref.repo_url,
+                )
+            except ValueError:
+                pass
+        raise GitLsRemoteError(
+            package="",
+            summary="Azure DevOps resolution requires org/project/repo coordinates.",
+            hint=(
+                "Re-add the dependency with the original Azure DevOps URL "
+                "to regenerate the lock entry."
+            ),
+        ) from exc
+
+
+def _ado_remote_path_for_coordinates(
+    organization: str,
+    project: str,
+    repo: str,
+) -> str:
+    """Return the canonical HTTPS path for ADO coordinates."""
+    quoted_org = urllib.parse.quote(organization, safe="")
+    quoted_project = urllib.parse.quote(project, safe="")
+    quoted_repo = urllib.parse.quote(repo, safe="")
+    return f"/{quoted_org}/{quoted_project}/_git/{quoted_repo}"
+
+
 @dataclass(frozen=True)
 class RemoteRef:
     """A single ref returned by ``git ls-remote``."""
@@ -221,21 +263,10 @@ class RefResolver:
         bearer = requested_bearer and ado_host and not use_ssh
         url_token = None if requested_bearer or use_ssh else self._token
         if use_ssh and ado_host:
-            parts = owner_repo.split("/")
-            if len(parts) == 4 and parts[2] == "_git":
-                org, project, repo = parts[0], parts[1], parts[3]
-            elif len(parts) == 3:
-                org, project, repo = parts
-            else:
-                raise GitLsRemoteError(
-                    package="",
-                    summary="Azure DevOps SSH resolution requires org/project/repo coordinates.",
-                    hint=(
-                        "Expected org/project/repo or org/project/_git/repo. "
-                        "Re-add the dependency with 'apm install <source>' "
-                        "to regenerate the lock entry."
-                    ),
-                )
+            org, project, repo = _ado_coordinates_from_owner_repo(
+                host=self._host,
+                owner_repo=owner_repo,
+            )
             ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
             url = build_ado_ssh_url(org, project, repo, host=ssh_host)
         elif use_ssh:
@@ -247,11 +278,19 @@ class RefResolver:
             )
         elif remote_url is not None:
             parsed_remote = urllib.parse.urlparse(remote_url)
+            expected_ado_path = (
+                _ado_remote_path_for_coordinates(
+                    *_ado_coordinates_from_owner_repo(host=self._host, owner_repo=owner_repo)
+                )
+                if ado_host
+                else None
+            )
             # urlparse lowercases hostname per RFC 3986 3.2.2; normalize both sides.
             if (
                 not ado_host
                 or parsed_remote.scheme != "https"
                 or parsed_remote.hostname != self._host.lower()
+                or parsed_remote.path != expected_ado_path
                 or parsed_remote.username is not None
                 or parsed_remote.password is not None
                 or parsed_remote.query
@@ -261,14 +300,15 @@ class RefResolver:
                     package="",
                     summary=(
                         "The canonical remote URL does not match the configured host "
-                        f"(expected '{self._host.lower()}', "
-                        f"got '{parsed_remote.hostname}')."
+                        "or Azure DevOps dependency coordinates."
                     ),
                     hint=(
-                        "Re-add the dependency with 'apm install <source>' "
+                        "Re-add the dependency with the original Azure DevOps URL "
                         "to regenerate the lock entry."
                     ),
                 )
+            # ADO HTTPS intentionally keeps credentials out of the URL; auth
+            # is injected below through git http.extraheader.
             url = remote_url
         elif ado_host:
             url = f"https://{self._host}/{owner_repo}"

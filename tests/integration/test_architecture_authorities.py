@@ -61,12 +61,15 @@ def test_ado_lock_coordinates_have_single_owner() -> None:
 
     root = Path(__file__).parents[2]
     lockfile_source = (root / "src/apm_cli/deps/lockfile.py").read_text()
+    ref_resolver_source = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
     reconstruction = inspect.getsource(LockedDependency.to_dependency_ref)
 
     assert hasattr(DependencyReference, "canonical_ado_coordinates")
     assert "DependencyReference.canonical_ado_coordinates" in lockfile_source
+    assert "DependencyReference.canonical_ado_coordinates" in ref_resolver_source
     assert "repo_url.split" not in reconstruction
+    assert "owner_repo.split" not in ref_resolver_source
     assert "AC14: ADO lock-coordinate authority" in guard
     assert "ADO lock coordinates must use DependencyReference" in guard
 
