@@ -182,6 +182,11 @@ Each item in `dependencies` describes one resolved package.
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
 
+Azure DevOps uses the same generic `host` and `repo_url` fields as every other
+Git provider. APM derives its transient organization, project, and repository
+coordinates when reconstructing the dependency reference; no ADO-specific
+fields are persisted.
+
 ## Lockfile identity keys
 
 Lockfile dependency keys keep `github.com` implicit for migration stability:

@@ -148,6 +148,11 @@ def maybe_resolve_git_semver(
         owner_repo=owner_repo,
         package_name=package_name,
         constraint=constraint,
+        remote_url=(
+            dep_ref.to_github_url()
+            if transport_scheme == "https" and dep_ref.is_azure_devops()
+            else None
+        ),
     )
 
 
