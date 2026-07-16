@@ -300,6 +300,79 @@ def test_divergent_hook_files_route_single_target_under_single_dep_target(
     assert _deployed_commands(project, excluded) == []
 
 
+def _write_divergent_files(package_path: Path, own: str, foreign: str) -> None:
+    """Ship one hook file for *own* and one for *foreign* by filename suffix."""
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    for target_name in (own, foreign):
+        (hooks_dir / f"pkg-{target_name}-hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "*",
+                                "hooks": [{"type": "command", "command": f"echo {target_name}"}],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+
+def test_copilot_per_file_routing_under_dep_targets(tmp_path: Path) -> None:
+    """Copilot writes per-file JSON; a dep `targets:` list must not make it
+    absorb another target's per-file hook manifest."""
+    project = tmp_path / "project"
+    package_path = tmp_path / "pkg"
+    _write_divergent_files(package_path, own="copilot", foreign="claude")
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target("copilot")],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=["copilot"],
+    )
+
+    assert result["hooks"] == 1
+    deployed = sorted(p.name for p in (project / ".github" / "hooks").glob("*.json"))
+    assert deployed and all("copilot" in name for name in deployed), deployed
+    assert not any("claude" in name for name in deployed), "Claude file leaked into Copilot"
+
+
+def test_kiro_per_file_routing_under_dep_targets(tmp_path: Path) -> None:
+    """Kiro writes one JSON per hook action; a dep `targets:` list must not make
+    it integrate another target's per-file hook manifest."""
+    project = tmp_path / "project"
+    (project / ".kiro").mkdir(parents=True)
+    package_path = tmp_path / "pkg"
+    _write_divergent_files(package_path, own="kiro", foreign="claude")
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target("kiro")],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=["kiro"],
+    )
+
+    assert result["hooks"] == 1
+    deployed = sorted(p.name for p in (project / ".kiro" / "hooks").rglob("*.json"))
+    assert deployed and all("kiro" in name for name in deployed), deployed
+    assert not any("claude" in name for name in deployed), "Claude file leaked into Kiro"
+
+
 def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> None:
     skill_integrator = _NoopSkillIntegrator()
     bundle = IntegratorBundle(
