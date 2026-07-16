@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Virtual Claude Skill subpath dependencies now keep `SKILL.md`-derived names
   and unversioned metadata stable across install, frozen cache replay, and
   update, avoiding spurious lockfile rewrites. (#2217)
+- `apm update` now restores a wholly missing `apm_modules/` cache from
+  unchanged locked dependencies without a ref-change consent prompt, including
+  local-path packages under `_local`. (#2240)
 - Changing a literal Git ref in `apm.yml` no longer silently keeps old bytes;
   `apm install` re-resolves the new ref and preserves the last good deployment
   when the new ref is invalid. (#2219)

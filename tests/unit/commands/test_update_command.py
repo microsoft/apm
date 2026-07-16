@@ -390,6 +390,69 @@ class TestUpdateNonTty:
 
 
 class TestUpdateNoChanges:
+    def test_locked_local_dependency_rehydrates_canonical_cache_once(
+        self,
+        runner,
+        tmp_path,
+    ) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            project = Path.cwd()
+            local_source = project / "packages" / "local-pkg"
+            local_source.mkdir(parents=True)
+            (local_source / "apm.yml").write_text(
+                "name: local-pkg\nversion: 1.0.0\n",
+                encoding="utf-8",
+            )
+            (project / "apm.yml").write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - path: ./packages/local-pkg\n",
+                encoding="utf-8",
+            )
+            locked = LockedDependency(
+                repo_url="_local/local-pkg",
+                source="local",
+                local_path="./packages/local-pkg",
+            )
+            lockfile = LockFile()
+            lockfile.add_dependency(locked)
+            lockfile.write(project / "apm.lock.yaml")
+            modules_dir = project / "apm_modules"
+            install_path = locked.to_dependency_ref().get_install_path(modules_dir)
+            install_calls = 0
+
+            def fake_install(_apm, **kwargs):
+                nonlocal install_calls
+                install_calls += 1
+                assert kwargs["plan_callback"](UpdatePlan(entries=())) is True
+                install_path.mkdir(parents=True)
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult(installed_count=1)
+
+            with (
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.install.manifest_reconcile.reconcile_project_deployed_state"),
+                patch(
+                    "apm_cli.commands.update.click.confirm",
+                    side_effect=AssertionError("unchanged local refs must not prompt"),
+                ),
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert install_calls == 1
+            assert install_path == modules_dir / "_local" / "local-pkg"
+            assert install_path.is_dir()
+            assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+            assert "Restored dependency cache without changing refs." in result.output
+            assert "Apply these changes?" not in result.output
+
     def test_locked_empty_module_cache_rehydrates_without_prompt(
         self,
         runner,
