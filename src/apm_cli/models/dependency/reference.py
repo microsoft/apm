@@ -2,7 +2,7 @@
 
 import re
 import urllib.parse
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from ...cache.url_normalize import SCP_LIKE_RE
@@ -44,13 +44,14 @@ from .object_fields import (
     reject_unknown_fields,
     reject_unknown_git_fields,
 )
+from .provider_coordinates import ProviderCoordinateMixin
 from .types import VirtualPackageType
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
 @dataclass
-class DependencyReference:
+class DependencyReference(ProviderCoordinateMixin):
     """Represents a reference to an APM dependency."""
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
@@ -224,34 +225,6 @@ class DependencyReference:
             cls._validate_final_repo_fields(host, repo_url)
             if host and is_azure_devops_hostname(host)
             else (None, None, None)
-        )
-
-    def validate_provider_coordinates(self) -> None:
-        """Reject transient provider coordinates that disagree with canonical identity."""
-        supplied = (self.ado_organization, self.ado_project, self.ado_repo)
-        canonical = self.canonical_ado_coordinates(self.host, self.repo_url)
-        if supplied != canonical:
-            raise ValueError(
-                "Incomplete or mismatched Azure DevOps reference coordinates. Re-add the "
-                "dependency with the original Azure DevOps URL to regenerate its state."
-            )
-
-    @classmethod
-    def is_transient_provider_field(cls, field_name: str) -> bool:
-        """Return whether a model field must never be persisted in lock state."""
-        return field_name in {"ado_organization", "ado_project", "ado_repo"}
-
-    def with_derived_provider_coordinates(self) -> "DependencyReference":
-        """Return a copy with transient provider coordinates derived from identity."""
-        ado_organization, ado_project, ado_repo = self.canonical_ado_coordinates(
-            self.host,
-            self.repo_url,
-        )
-        return replace(
-            self,
-            ado_organization=ado_organization,
-            ado_project=ado_project,
-            ado_repo=ado_repo,
         )
 
     @property
