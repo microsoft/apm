@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm prune` now reconciles merged hook ownership when it removes an
+  orphaned package: entries it contributed to `.claude/settings.json`,
+  `.cursor/hooks.json`, and similar merge targets, plus their
+  `apm-hooks.json` ownership sidecars, are cleared while sibling packages'
+  and manually authored entries are preserved. (closes #2245)
 - `apm update` now automatically repairs a locked dependency whose
   materialized `apm_modules` cache is wholly absent -- including local
   filesystem dependencies -- without prompting for ref-change consent or
