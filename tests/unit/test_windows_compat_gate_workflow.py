@@ -21,6 +21,7 @@ need to change every time a test gains or loses the marker.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -118,6 +119,21 @@ def _positional_test_paths(args: list[str]) -> list[str]:
     return positional
 
 
+def _collect_gate_family(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Collect the declared gate family without loading unrelated plugins."""
+    collection_env = os.environ.copy()
+    collection_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q", *args],
+        cwd=ROOT,
+        env=collection_env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
 def test_windows_compat_gate_runs_on_windows_with_bounded_timeout() -> None:
     job = workflow_job(_ci_workflow(), GATE_JOB)
     assert job["name"] == GATE_CHECK_NAME
@@ -200,15 +216,7 @@ def test_windows_compat_gate_marker_selects_nonempty_bounded_family() -> None:
     job = workflow_job(_ci_workflow(), GATE_JOB)
     step = workflow_step(job, GATE_STEP)
     args = _gate_pytest_args(step)
-
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q", *args],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
+    result = _collect_gate_family(args)
     assert result.returncode == 0, (
         f"collection failed for the gate's own declared invocation "
         f"(args={args!r}):\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -220,6 +228,35 @@ def test_windows_compat_gate_marker_selects_nonempty_bounded_family() -> None:
         f"expected a non-empty, bounded {GATE_MARKER!r} contract family "
         f"(1..{MAX_BOUNDED_FAMILY_SIZE}), got {collected}"
     )
+
+
+def test_nested_collection_disables_plugin_autoload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nested collection must not import unrelated third-party plugins."""
+    captured_env: dict[str, str] | None = None
+
+    def fake_run(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal captured_env
+        env = kwargs.get("env")
+        captured_env = env if isinstance(env, dict) else None
+        return subprocess.CompletedProcess(
+            command,
+            returncode=0,
+            stdout="1 test collected\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _collect_gate_family(["-m", GATE_MARKER, "tests/unit"])
+
+    assert captured_env is not None
+    assert captured_env.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") == "1"
+    assert captured_env.get("PATH") == os.environ.get("PATH")
 
 
 @pytest.mark.parametrize(
