@@ -51,6 +51,7 @@ __all__ = [
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
+# Local import below avoids a dependency-model import cycle at module load time.
 def _ado_coordinates_from_owner_repo(
     *,
     host: str,
@@ -363,6 +364,8 @@ class RefResolver:
             ``"owner/repo"`` string (no host, no ``.git`` suffix).
         remote_url:
             Canonical ADO URL from ``DependencyReference.to_github_url``.
+            Pass consistently for the same logical remote within one
+            ``RefResolver`` lifetime so cache identity stays aligned.
 
         Returns
         -------

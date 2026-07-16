@@ -238,6 +238,23 @@ def test_generic_ado_lock_reconstructs_canonical_transport_coordinates() -> None
     assert reconstructed.ado_repo == "consume-contract"
 
 
+def test_validate_provider_coordinates_rejects_mismatched_ado_fields() -> None:
+    """Transient ADO fields must match the generic repository identity."""
+    reference = DependencyReference(
+        repo_url="apm-org/apm-project/consume-contract",
+        host="dev.azure.com",
+        ado_organization="apm-org",
+        ado_project="wrong-project",
+        ado_repo="consume-contract",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Run `apm install <original-ado-url>`",
+    ):
+        reference.validate_provider_coordinates()
+
+
 def test_retired_ado_lock_fields_are_dropped_without_losing_unknown_fields() -> None:
     """Provider coordinates never survive as lock metadata."""
     persisted = {

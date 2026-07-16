@@ -1,10 +1,11 @@
 """Transient provider-coordinate behavior for dependency references."""
 
+from abc import ABC, abstractmethod
 from dataclasses import replace
 from typing import Self
 
 
-class ProviderCoordinateMixin:
+class ProviderCoordinateMixin(ABC):
     """Derive and validate provider details without persisting them."""
 
     host: str | None
@@ -14,6 +15,7 @@ class ProviderCoordinateMixin:
     ado_repo: str | None
 
     @classmethod
+    @abstractmethod
     def canonical_ado_coordinates(
         cls,
         host: str | None,
@@ -29,8 +31,8 @@ class ProviderCoordinateMixin:
         if supplied != canonical:
             raise ValueError(
                 f"Incomplete or mismatched Azure DevOps reference coordinates for "
-                f"{self.repo_url}. Re-add the dependency with the original Azure DevOps URL "
-                "to regenerate its state."
+                f"{self.repo_url}. Run `apm install <original-ado-url>` with "
+                "the original Azure DevOps URL to regenerate its state."
             )
 
     @staticmethod

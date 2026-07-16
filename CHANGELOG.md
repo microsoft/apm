@@ -20,9 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Azure DevOps lock replay now derives transport coordinates from generic
-  `host` and `repo_url` identity, so `apm outdated` reports real tag status and
-  bounded `apm update` runs resolve and materialize the matching tag without
+- Azure DevOps dependencies now report real latest versions in `apm outdated`
+  and resolve correctly during bounded `apm update`, deriving transport
+  coordinates from generic `host` and `repo_url` identity without
   provider-specific lock fields. (closes #2197; #2226)
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
