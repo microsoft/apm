@@ -120,6 +120,9 @@ def _loopback_http_stub(
     responses: list[tuple[int, dict[str, str], bytes]],
 ) -> Iterator[tuple[types.SimpleNamespace, str]]:
     """Serve deterministic HTTP responses from loopback."""
+    if not responses:
+        raise ValueError("responses must not be empty")
+
     state = types.SimpleNamespace(hits=0)
 
     class Handler(BaseHTTPRequestHandler):
