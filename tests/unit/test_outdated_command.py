@@ -5,6 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 from click.testing import CliRunner
@@ -1241,18 +1242,18 @@ class TestOutdatedCommand:
         mock_dl_cls,
         mock_auth,
     ):
-        """ADO deps (host=dev.azure.com) should pass full URL to DependencyReference.parse()."""
+        """ADO lock coordinates should reach the real remote-ref consumer."""
         with self._chdir_tmp() as tmp:
             mock_get_apm_dir.return_value = tmp
             mock_get_path.return_value = tmp / "apm.lock.yaml"
 
             ado_dep = LockedDependency(
-                repo_url="myorg/myproject/_git/myrepo",
+                repo_url="myorg/myproject/myrepo",
                 host="dev.azure.com",
                 resolved_ref="v1.0.0",
                 resolved_commit="aaa",
             )
-            deps = {"myorg/myproject/_git/myrepo": ado_dep}
+            deps = {ado_dep.get_unique_key(): ado_dep}
             mock_lf_cls.read.return_value = _make_lockfile(deps)
 
             mock_downloader = MagicMock()
@@ -1266,6 +1267,11 @@ class TestOutdatedCommand:
             assert result.exit_code == 0
             # Verify list_remote_refs was called (dep was not silently skipped)
             mock_downloader.list_remote_refs.assert_called_once()
+            reconstructed = mock_downloader.list_remote_refs.call_args.args[0]
+            remote = urlparse(reconstructed.to_github_url())
+            assert remote.scheme == "https"
+            assert remote.hostname == "dev.azure.com"
+            assert remote.path == "/myorg/myproject/_git/myrepo"
 
 
 class TestPackageBasename:

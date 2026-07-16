@@ -562,6 +562,18 @@ if ! grep -q 'transport_plan = transport_selector.select(' "$semver_transport_ro
     violations=$((violations + 1))
 fi
 
+echo "[*] AC14: ADO lock-coordinate authority"
+if ! grep -q 'with_derived_provider_coordinates' \
+    src/apm_cli/deps/lockfile.py \
+    || grep -Eq 'ado_(organization|project|repo)' src/apm_cli/deps/lockfile.py \
+    || ! grep -q 'DependencyReference.canonical_ado_coordinates' \
+        src/apm_cli/marketplace/ref_resolver.py \
+    || grep -Eq '(self\.)?repo_url\.split\(' src/apm_cli/deps/lockfile.py \
+    || grep -Eq 'owner_repo\.split\(' src/apm_cli/marketplace/ref_resolver.py; then
+    echo "[x] ADO coordinates must be derived by DependencyReference, never persisted"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1
