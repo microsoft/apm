@@ -1174,6 +1174,11 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         deploy_root_for_rewrite = project_root if user_scope else None
+        if deploy_root_for_rewrite is not None:
+            _log.debug(
+                "Copilot hook rewrite using deploy root: %s",
+                deploy_root_for_rewrite,
+            )
 
         hooks_integrated = 0
         scripts_copied = 0
@@ -1187,7 +1192,7 @@ class HookIntegrator(BaseIntegrator):
             if data is None:
                 continue
 
-            # Rewrite script paths for VSCode target
+            # Rewrite script paths for Copilot target
             rewritten, scripts = self._rewrite_hooks_data(
                 data,
                 package_info.install_path,
