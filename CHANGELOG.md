@@ -20,8 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fix #2184 so Git-source semver ranges honor explicit SSH and `prefer-ssh`
-  during tag enumeration instead of invoking HTTPS. (#2229)
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
   canonical serialization, and last-good bytes after malformed refreshes. (#2235)
