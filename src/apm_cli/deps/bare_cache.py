@@ -719,6 +719,57 @@ def clone_with_fallback(
     return repo_holder[0]
 
 
+def _git_failure_text(error: Exception) -> str:
+    """Return command error text including captured stderr/stdout when present."""
+    parts = [str(error)]
+    for attr in ("stderr", "stdout"):
+        stream = getattr(error, attr, None)
+        if not stream:
+            continue
+        if isinstance(stream, bytes):
+            parts.append(stream.decode("utf-8", errors="replace"))
+        else:
+            parts.append(str(stream))
+    return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _is_ssh_passphrase_or_auth_failure(
+    error_text: str,
+    dep_ref: DependencyReference | None,
+) -> bool:
+    """Return True when git/ssh failed in the passphrase-protected key path."""
+    text = error_text.lower()
+    passphrase_markers = (
+        "enter passphrase for key",
+        "incorrect passphrase supplied",
+        "bad passphrase",
+        "read_passphrase",
+    )
+    if any(marker in text for marker in passphrase_markers):
+        return True
+
+    is_explicit_ssh = (getattr(dep_ref, "explicit_scheme", None) or "").lower() == "ssh"
+    return is_explicit_ssh and "permission denied (publickey)" in text
+
+
+def _ssh_passphrase_diagnostic(
+    last_error: Exception | None,
+    dep_ref: DependencyReference | None,
+) -> str:
+    """Build the SSH passphrase diagnostic, or an empty string when unrelated."""
+    if last_error is None:
+        return ""
+    if not _is_ssh_passphrase_or_auth_failure(_git_failure_text(last_error), dep_ref):
+        return ""
+    return (
+        " SSH authentication failed while APM ran git without interactive prompts. "
+        "If your SSH key has a passphrase, run 'ssh-add <key-file>' first so "
+        "ssh-agent can unlock it. In CI, use a deploy key loaded into ssh-agent "
+        "or switch this dependency to token-backed HTTPS. APM will not open a raw "
+        "passphrase prompt during clone."
+    )
+
+
 def build_clone_failure_message(
     *,
     repo_url_base: str,
@@ -798,8 +849,10 @@ def build_clone_failure_message(
     else:
         error_msg += "Please check repository access permissions and authentication setup."
 
+    error_msg += _ssh_passphrase_diagnostic(last_error, dep_ref)
+
     if last_error:
-        sanitized_error = sanitize_git_error(str(last_error))
+        sanitized_error = sanitize_git_error(_git_failure_text(last_error))
         error_msg += f" Last error: {sanitized_error}"
 
     return error_msg
