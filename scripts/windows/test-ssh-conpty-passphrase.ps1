@@ -306,7 +306,10 @@ function New-EphemeralSshKeypair {
     param(
         [Parameter(Mandatory = $true)][string]$SshKeygenPath,
         [Parameter(Mandatory = $true)][string]$KeyPath,
-        [Parameter(Mandatory = $true)][string]$Passphrase
+        # Empty string is a legitimate value here (the unencrypted-control
+        # key), so AllowEmptyString is required alongside Mandatory --
+        # PowerShell otherwise rejects "" bound to a mandatory string param.
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Passphrase
     )
     Invoke-Setup -FilePath $SshKeygenPath -ArgumentList @(
         "-q", "-t", "ed25519", "-N", $Passphrase, "-f", $KeyPath, "-C", "conpty-fixture"
