@@ -40,6 +40,7 @@ from tests.workflow_contracts import (
 ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 MERGE_GATE_WORKFLOW = ROOT / ".github" / "workflows" / "merge-gate.yml"
+_COLLECTION_ENV_BASELINE = os.environ.copy()
 
 GATE_JOB = "windows-compat-gate"
 GATE_CHECK_NAME = "Windows Compatibility Gate"
@@ -121,7 +122,7 @@ def _positional_test_paths(args: list[str]) -> list[str]:
 
 def _collect_gate_family(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Collect the declared gate family without loading unrelated plugins."""
-    collection_env = os.environ.copy()
+    collection_env = _COLLECTION_ENV_BASELINE.copy()
     collection_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q", *args],
@@ -234,6 +235,7 @@ def test_nested_collection_disables_plugin_autoload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Nested collection must not import unrelated third-party plugins."""
+    expected_path = os.environ.get("PATH")
     captured_env: dict[str, str] | None = None
 
     def fake_run(
@@ -251,12 +253,13 @@ def test_nested_collection_disables_plugin_autoload(
         )
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.delenv("PATH", raising=False)
 
     _collect_gate_family(["-m", GATE_MARKER, "tests/unit"])
 
     assert captured_env is not None
     assert captured_env.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") == "1"
-    assert captured_env.get("PATH") == os.environ.get("PATH")
+    assert captured_env.get("PATH") == expected_path
 
 
 @pytest.mark.parametrize(
