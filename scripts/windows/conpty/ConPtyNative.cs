@@ -171,8 +171,29 @@ namespace ApmConPty
         private readonly ManualResetEventSlim _chunkSignal = new ManualResetEventSlim(false);
         private volatile bool _outputClosed;
         private bool _disposed;
+        private readonly ConcurrentQueue<string> _diagnostics = new ConcurrentQueue<string>();
 
         public int ProcessId { get; private set; }
+
+        /// <summary>
+        /// Hex value of the HPCON returned by CreatePseudoConsole, recorded
+        /// purely for evidence/diagnostics (proves a pseudo console handle
+        /// was actually obtained and which one was wired into this child).
+        /// </summary>
+        public string PseudoConsoleHandleHex { get; private set; }
+
+        /// <summary>
+        /// Chronological, timestamped trace of every reader-thread Read()
+        /// call outcome (byte count, exception, or stream-closed), so a
+        /// blank transcript can be told apart from "the pipe never produced
+        /// any bytes" versus "bytes arrived but were mis-decoded/dropped".
+        /// Not evidence of secrets: only byte counts and control-flow
+        /// markers are recorded, never captured text.
+        /// </summary>
+        public string[] GetDiagnostics()
+        {
+            return _diagnostics.ToArray();
+        }
 
         /// <summary>
         /// Starts <paramref name="commandLine"/> attached to a brand-new pseudo
@@ -286,6 +307,12 @@ namespace ApmConPty
                 session._processHandle = processInfo.hProcess;
                 session._threadHandle = processInfo.hThread;
                 session.ProcessId = processInfo.dwProcessId;
+                session.PseudoConsoleHandleHex = "0x" + pseudoConsole.ToString("X", CultureInfo.InvariantCulture);
+                session._diagnostics.Enqueue(
+                    "CreatePseudoConsole ok, handle=" + session.PseudoConsoleHandleHex
+                    + "; CreateProcessW ok, pid=" + session.ProcessId
+                    + "; creationFlags=0x" + creationFlags.ToString("X8", CultureInfo.InvariantCulture)
+                    + "; bInheritHandles=false");
                 session._inputWriter = new FileStream(
                     new Microsoft.Win32.SafeHandles.SafeFileHandle(inputWriteSide, true),
                     FileAccess.Write,
@@ -359,6 +386,7 @@ namespace ApmConPty
         private void ReadLoop()
         {
             var buffer = new byte[4096];
+            _diagnostics.Enqueue("ReadLoop: thread started");
             try
             {
                 while (true)
@@ -366,26 +394,31 @@ namespace ApmConPty
                     int read = _outputReader.Read(buffer, 0, buffer.Length);
                     if (read <= 0)
                     {
+                        _diagnostics.Enqueue("ReadLoop: Read() returned " + read + " (EOF), exiting loop");
                         break;
                     }
+                    _diagnostics.Enqueue("ReadLoop: Read() returned " + read + " bytes");
                     var text = Encoding.UTF8.GetString(buffer, 0, read);
                     _chunks.Enqueue(new ConPtyOutputChunk { TimestampUtc = DateTime.UtcNow, Text = text });
                     _chunkSignal.Set();
                 }
             }
-            catch (IOException)
+            catch (IOException ex)
             {
                 // Expected once the pseudo console tears down the pipe after
                 // the hosted process exits.
+                _diagnostics.Enqueue("ReadLoop: IOException (expected on teardown): " + ex.Message);
             }
             catch (ObjectDisposedException)
             {
                 // Stream was disposed from Dispose(); nothing left to read.
+                _diagnostics.Enqueue("ReadLoop: ObjectDisposedException (expected on Dispose)");
             }
             finally
             {
                 _outputClosed = true;
                 _chunkSignal.Set();
+                _diagnostics.Enqueue("ReadLoop: thread exiting, _outputClosed=true");
             }
         }
 

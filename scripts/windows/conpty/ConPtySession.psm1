@@ -130,6 +130,23 @@ function Wait-ConPtyExit {
     }
 }
 
+function Get-ConPtyDiagnostics {
+    <#
+        .SYNOPSIS
+        Returns the reader thread's chronological trace (byte counts and
+        control-flow markers only -- never captured text) plus the native
+        pseudo-console handle, for evidence/self-diagnosis purposes.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][ApmConPty.ConPtyProcess]$Session
+    )
+    return [pscustomobject]@{
+        PseudoConsoleHandle = $Session.PseudoConsoleHandleHex
+        ProcessId           = $Session.ProcessId
+        ReaderTrace         = @($Session.GetDiagnostics())
+    }
+}
+
 function Stop-ConPtySession {
     param(
         [Parameter(Mandatory = $true)][ApmConPty.ConPtyProcess]$Session,
@@ -149,5 +166,6 @@ Export-ModuleMember -Function @(
     "Send-ConPtyText",
     "Send-ConPtyControlC",
     "Wait-ConPtyExit",
+    "Get-ConPtyDiagnostics",
     "Stop-ConPtySession"
 )

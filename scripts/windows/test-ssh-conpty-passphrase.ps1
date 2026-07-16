@@ -554,6 +554,7 @@ function Test-ConPtyCapture {
     $session = $null
     $transcript = ""
     $exitCode = $null
+    $diagnostics = $null
     try {
         $session = New-ConPtySession `
             -CommandLine $commandLine `
@@ -564,11 +565,13 @@ function Test-ConPtyCapture {
         $exitWait = Wait-ConPtyExit -Session $session -TimeoutMs 10000
         $exitCode = $exitWait.ExitCode
         $transcript += Read-ConPtyAvailable -Session $session -TimeoutMs 500
+        $diagnostics = Get-ConPtyDiagnostics -Session $session
         return [pscustomobject]@{
-            Marker     = $marker
-            Matched    = ($transcript -like "*$marker*")
-            ExitCode   = $exitCode
-            Transcript = $transcript
+            Marker      = $marker
+            Matched     = ($transcript -like "*$marker*")
+            ExitCode    = $exitCode
+            Transcript  = $transcript
+            Diagnostics = $diagnostics
         }
     } finally {
         if ($session) { Stop-ConPtySession -Session $session -Force }
@@ -605,6 +608,7 @@ function Invoke-Scenario {
     $forcedKill = $false
     $exited = $false
     $exitCode = $null
+    $conPtyDiagnostics = $null
     $startedUtc = [DateTime]::UtcNow
 
     try {
@@ -658,6 +662,7 @@ function Invoke-Scenario {
             $forcedKill = $true
         }
         $transcript += Read-ConPtyAvailable -Session $session -TimeoutMs 500
+        $conPtyDiagnostics = Get-ConPtyDiagnostics -Session $session
     } finally {
         if ($session) {
             Stop-ConPtySession -Session $session -Force:$forcedKill
@@ -692,6 +697,7 @@ function Invoke-Scenario {
         Trace2EventCount  = $traceLines.Count
         TranscriptSanitized = ($transcript -replace [regex]::Escape($CorrectPassphrase), "***REDACTED-CORRECT***" `
                                           -replace [regex]::Escape($WrongPassphrase), "***REDACTED-WRONG***")
+        ConPtyDiagnostics = $conPtyDiagnostics
     }
 }
 
@@ -820,8 +826,14 @@ try {
         " -o IdentitiesOnly=yes -o UserKnownHostsFile=" + (ConvertTo-ForwardSlashPath $knownHosts) +
         " -o StrictHostKeyChecking=yes -p " + $port
     )
+    # The forced command in serve-git.cmd always serves the same fixed bare
+    # repo regardless of what path the client requests (see
+    # Initialize-LoopbackSshd), so this path segment is cosmetic to sshd --
+    # but apm's own dependency-reference parser rejects single-segment SSH
+    # repo paths ("Expected 'user/repo'"), so it must still look like a real
+    # two-segment owner/repo path.
     $preflight = Invoke-Setup -FilePath $gitPath -ArgumentList @(
-        "ls-remote", "ssh://$runnerUser@127.0.0.1:$port/conpty-fixture.git"
+        "ls-remote", "ssh://$runnerUser@127.0.0.1:$port/conpty-owner/conpty-fixture.git"
     ) -Environment $preflightEnv -TimeoutSeconds 20
     if ($preflight.ExitCode -ne 0) {
         Write-Info "Preflight exit code: $($preflight.ExitCode)"
@@ -830,7 +842,7 @@ try {
     }
     Assert-Condition ($preflight.ExitCode -eq 0) "Preflight git ls-remote over loopback sshd (plain key) succeeds non-interactively"
 
-    $originUrl = "ssh://$runnerUser@127.0.0.1:$port/conpty-fixture.git"
+    $originUrl = "ssh://$runnerUser@127.0.0.1:$port/conpty-owner/conpty-fixture.git"
     $baseEnvironment = Get-HumanLikeBaseEnvironment
     foreach ($strippedVar in (@() + $script:AskpassAndAgentVars + $script:CiMarkerVars)) {
         Assert-Condition (-not $baseEnvironment.Contains($strippedVar)) "Human-like base environment excludes $strippedVar"
