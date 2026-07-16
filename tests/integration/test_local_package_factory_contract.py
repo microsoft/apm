@@ -3,6 +3,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from apm_cli.core.errors import UnknownTargetError
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
@@ -680,3 +681,182 @@ def test_product_output_paths_are_rejected(tmp_path: Path) -> None:
         ".claude",
     ):
         assert not (package.root / forbidden).exists()
+
+
+def test_lifecycle_sources_cover_all_deploy_categories_and_config_dependencies(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "lifecycle-source",
+        targets=("copilot", "claude"),
+        mcp_dependencies=(
+            {
+                "name": "fixture-mcp",
+                "registry": False,
+                "transport": "stdio",
+                "command": "fixture-mcp",
+                "args": ["--stdio"],
+            },
+        ),
+        lsp_dependencies=(
+            {
+                "name": "fixture-lsp",
+                "command": "fixture-lsp",
+                "extensionToLanguage": {".py": "python"},
+            },
+        ),
+    )
+
+    skill = factory.add_skill(package, "review", "# Review\n")
+    agent = factory.add_agent(package, "helper", "---\ndescription: Helper\n---\n# Helper\n")
+    prompt = factory.add_prompt(
+        package,
+        "summarize",
+        "---\ndescription: Summarize\n---\nSummarize this repository.\n",
+    )
+    command = factory.add_command(
+        package,
+        "check",
+        "---\ndescription: Check\n---\nCheck this repository.\n",
+    )
+    instruction = factory.add_instruction(
+        package,
+        "rules",
+        "---\ndescription: Rules\n---\n# Rules\n",
+    )
+    hook = factory.add_hook(
+        package,
+        "lifecycle",
+        {"hooks": {"PreToolUse": [{"command": "python scripts/check.py"}]}},
+    )
+    canvas = factory.add_canvas(
+        package,
+        "inspector",
+        "export default { activate() {} };\n",
+        assets={
+            PurePosixPath("ui/config.json"): b'{"label":"\\u03bb"}\n',
+            PurePosixPath("ui/icon.bin"): b"\x00\xff",
+        },
+    )
+
+    assert skill == package.root / "skills/review/SKILL.md"
+    assert agent == package.root / ".apm/agents/helper.agent.md"
+    assert prompt == package.root / ".apm/prompts/summarize.prompt.md"
+    assert command == package.root / ".apm/prompts/check.prompt.md"
+    assert instruction == package.root / ".apm/instructions/rules.instructions.md"
+    assert hook == package.root / ".apm/hooks/lifecycle.json"
+    assert canvas == package.root / ".apm/extensions/inspector"
+    assert hook.read_bytes() == (
+        b'{\n  "hooks": {\n    "PreToolUse": [\n'
+        b'      {\n        "command": "python scripts/check.py"\n'
+        b"      }\n    ]\n  }\n}\n"
+    )
+    assert (canvas / "extension.mjs").read_bytes() == (b"export default { activate() {} };\n")
+    assert (canvas / "ui/config.json").read_bytes() == b'{"label":"\\u03bb"}\n'
+    assert (canvas / "ui/icon.bin").read_bytes() == b"\x00\xff"
+
+    parsed = APMPackage.from_apm_yml(package.manifest_path)
+    assert parsed.dependencies is not None
+    assert [dependency.to_dict() for dependency in parsed.dependencies["mcp"]] == [
+        {
+            "name": "fixture-mcp",
+            "transport": "stdio",
+            "args": ["--stdio"],
+            "registry": False,
+            "command": "fixture-mcp",
+        }
+    ]
+    assert [dependency.to_dict() for dependency in parsed.dependencies["lsp"]] == [
+        {
+            "name": "fixture-lsp",
+            "command": "fixture-lsp",
+            "extensionToLanguage": {".py": "python"},
+        }
+    ]
+
+
+def test_lifecycle_source_authors_reject_traversal_and_symlink_escape(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create("lifecycle-source")
+
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_prompt(package, "../outside", "prompt")
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_command(package, "../outside", "command")
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_hook(package, "../outside", {"hooks": {}})
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_canvas(package, "../outside", "export default {};\n")
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_canvas(
+            package,
+            "safe",
+            "export default {};\n",
+            assets={PurePosixPath("../outside.bin"): b"outside"},
+        )
+    with pytest.raises(TypeError, match="contents must be bytes"):
+        factory.add_canvas(
+            package,
+            "invalid-content",
+            "export default {};\n",
+            assets={PurePosixPath("asset.txt"): "not-bytes"},
+        )
+    assert not (tmp_path / "outside").exists()
+    assert not (tmp_path / "outside.bin").exists()
+    assert not (package.root / ".apm/extensions/invalid-content").exists()
+
+    outside = tmp_path / "outside-extensions"
+    outside.mkdir()
+    extensions = package.root / ".apm/extensions"
+    extensions.parent.mkdir(parents=True)
+    extensions.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match=r"outside|symlink"):
+        factory.add_canvas(package, "escaped", "export default {};\n")
+    assert not (outside / "escaped").exists()
+
+
+def test_config_dependency_validation_is_transactional(tmp_path: Path) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+
+    with pytest.raises(ValueError, match="requires 'command'"):
+        factory.create(
+            "invalid-mcp",
+            mcp_dependencies=(
+                {
+                    "name": "invalid",
+                    "registry": False,
+                    "transport": "stdio",
+                },
+            ),
+        )
+    with pytest.raises(ValueError, match="requires 'extensionToLanguage'"):
+        factory.create(
+            "invalid-lsp",
+            lsp_dependencies=({"name": "invalid", "command": "fixture-lsp"},),
+        )
+    assert not (tmp_path / "packages/invalid-mcp").exists()
+    assert not (tmp_path / "packages/invalid-lsp").exists()
+
+
+def test_lifecycle_sources_accept_mcp_and_lsp_string_references(tmp_path: Path) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "registry-config-source",
+        mcp_dependencies=("io.github.acme/fixture-mcp",),
+        lsp_dependencies=("fixture-lsp",),
+    )
+
+    parsed = APMPackage.from_apm_yml(package.manifest_path)
+
+    assert parsed.dependencies is not None
+    assert [dependency.name for dependency in parsed.dependencies["mcp"]] == [
+        "io.github.acme/fixture-mcp"
+    ]
+    assert [dependency.name for dependency in parsed.dependencies["lsp"]] == ["fixture-lsp"]
+    assert load_yaml(package.manifest_path)["dependencies"] == {
+        "mcp": ["io.github.acme/fixture-mcp"],
+        "lsp": ["fixture-lsp"],
+    }

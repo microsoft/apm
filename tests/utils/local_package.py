@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -11,16 +12,21 @@ from typing import TypeAlias
 import yaml
 
 from apm_cli.core.apm_yml import parse_targets_field
-from apm_cli.models.dependency import DependencyReference
+from apm_cli.integration.canvas_integrator import CanvasIntegrator
+from apm_cli.models.dependency import DependencyReference, LSPDependency, MCPDependency
 from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml, load_yaml_str, yaml_to_str
 
 DependencyInput: TypeAlias = str | Mapping[str, object]
+ConfigDependencyInput: TypeAlias = str | Mapping[str, object]
 _MANIFEST_LAYOUT = "manifest"
 _POLICY_LAYOUT = "policy"
 _SKILL_LAYOUT = "skill"
 _AGENT_LAYOUT = "agent"
 _INSTRUCTION_LAYOUT = "instruction"
+_PROMPT_LAYOUT = "prompt"
+_HOOK_LAYOUT = "hook"
+_CANVAS_LAYOUT = "canvas"
 _PRIMITIVE_LAYOUTS = frozenset({_SKILL_LAYOUT, _AGENT_LAYOUT, _INSTRUCTION_LAYOUT})
 
 
@@ -48,6 +54,8 @@ class LocalPackageFactory:
         *,
         version: str = "0.1.0",
         dependencies: Sequence[DependencyInput] = (),
+        mcp_dependencies: Sequence[ConfigDependencyInput] = (),
+        lsp_dependencies: Sequence[ConfigDependencyInput] = (),
         targets: Sequence[str] = (),
     ) -> LocalPackage:
         """Create a package source directory and its manifest."""
@@ -56,6 +64,14 @@ class LocalPackageFactory:
         package_root = self._root / name
         ensure_path_within(package_root, self._root)
         validated_dependencies = self._validate_dependencies(dependencies)
+        validated_mcp = self._validate_config_dependencies(
+            mcp_dependencies,
+            kind="MCP",
+        )
+        validated_lsp = self._validate_config_dependencies(
+            lsp_dependencies,
+            kind="LSP",
+        )
         validated_targets = parse_targets_field({"targets": list(targets)}) if targets else []
         package_root.mkdir(parents=True, exist_ok=False)
         manifest_path = self._validated_source_path(
@@ -69,8 +85,15 @@ class LocalPackageFactory:
             "description": f"Hermetic test package {name}",
             "author": "APM Test",
         }
+        dependency_block: dict[str, object] = {}
         if validated_dependencies:
-            manifest["dependencies"] = {"apm": validated_dependencies}
+            dependency_block["apm"] = validated_dependencies
+        if validated_mcp:
+            dependency_block["mcp"] = validated_mcp
+        if validated_lsp:
+            dependency_block["lsp"] = validated_lsp
+        if dependency_block:
+            manifest["dependencies"] = dependency_block
         if validated_targets:
             manifest["targets"] = validated_targets
         dump_yaml(manifest, manifest_path)
@@ -112,6 +135,73 @@ class LocalPackageFactory:
             frozenset({_INSTRUCTION_LAYOUT}),
         )
         return self._write_text(path, content)
+
+    def add_prompt(self, package: LocalPackage, name: str, content: str) -> Path:
+        """Author a prompt source consumed by prompt-capable targets."""
+        return self._add_prompt_source(package, name, content, kind="prompt")
+
+    def add_command(self, package: LocalPackage, name: str, content: str) -> Path:
+        """Author a prompt source transformed by command-capable targets."""
+        return self._add_prompt_source(package, name, content, kind="command")
+
+    def add_hook(
+        self,
+        package: LocalPackage,
+        name: str,
+        document: Mapping[str, object],
+    ) -> Path:
+        """Author one declarative hook document using canonical JSON text."""
+        self._validate_segment(name, "hook")
+        path = self._source_path(
+            package,
+            PurePosixPath(".apm") / "hooks" / f"{name}.json",
+            frozenset({_HOOK_LAYOUT}),
+        )
+        content = json.dumps(
+            dict(document),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=True,
+        )
+        return self._write_text(path, f"{content}\n")
+
+    def add_canvas(
+        self,
+        package: LocalPackage,
+        name: str,
+        extension: str,
+        *,
+        assets: Mapping[PurePosixPath, bytes] | None = None,
+    ) -> Path:
+        """Author an executable canvas bundle and optional exact-byte assets."""
+        self._validate_segment(name, "canvas")
+        CanvasIntegrator._validate_canvas_name(name)
+        bundle_path = PurePosixPath(".apm") / "extensions" / name
+        marker_path = self._source_path(
+            package,
+            bundle_path / "extension.mjs",
+            frozenset({_CANVAS_LAYOUT}),
+        )
+        validated_assets: list[tuple[Path, bytes]] = []
+        for relative_path, content in (assets or {}).items():
+            if not isinstance(relative_path, PurePosixPath):
+                raise TypeError("Canvas asset paths must be PurePosixPath instances")
+            if not isinstance(content, bytes):
+                raise TypeError("Canvas asset contents must be bytes")
+            if relative_path == PurePosixPath("extension.mjs"):
+                raise ValueError("Canvas assets must not replace extension.mjs")
+            asset_path = self._source_path(
+                package,
+                bundle_path / relative_path,
+                frozenset({_CANVAS_LAYOUT}),
+            )
+            validated_assets.append((asset_path, content))
+
+        self._write_text(marker_path, extension)
+        for asset_path, content in validated_assets:
+            asset_path.parent.mkdir(parents=True, exist_ok=True)
+            asset_path.write_bytes(content)
+        return marker_path.parent
 
     def add_relative_dependency(
         self,
@@ -206,6 +296,22 @@ class LocalPackageFactory:
             frozenset({_MANIFEST_LAYOUT}),
         )
 
+    def _add_prompt_source(
+        self,
+        package: LocalPackage,
+        name: str,
+        content: str,
+        *,
+        kind: str,
+    ) -> Path:
+        self._validate_segment(name, kind)
+        path = self._source_path(
+            package,
+            PurePosixPath(".apm") / "prompts" / f"{name}.prompt.md",
+            frozenset({_PROMPT_LAYOUT}),
+        )
+        return self._write_text(path, content)
+
     def _owned_package(self, package: LocalPackage) -> LocalPackage:
         if self._packages.get(id(package)) is not package:
             raise ValueError("Local package is not owned by this factory")
@@ -247,6 +353,8 @@ class LocalPackageFactory:
             return _POLICY_LAYOUT
         if len(parts) >= 3 and parts[0] == "skills":
             return _SKILL_LAYOUT
+        if len(parts) >= 4 and parts[:2] == (".apm", "extensions"):
+            return _CANVAS_LAYOUT
         if len(parts) != 3:
             return None
         if (
@@ -261,6 +369,14 @@ class LocalPackageFactory:
             and parts[2] != ".instructions.md"
         ):
             return _INSTRUCTION_LAYOUT
+        if (
+            parts[:2] == (".apm", "prompts")
+            and parts[2].endswith(".prompt.md")
+            and parts[2] != ".prompt.md"
+        ):
+            return _PROMPT_LAYOUT
+        if parts[:2] == (".apm", "hooks") and parts[2].endswith(".json") and parts[2] != ".json":
+            return _HOOK_LAYOUT
         return None
 
     @staticmethod
@@ -303,6 +419,47 @@ class LocalPackageFactory:
                 reparsed = DependencyReference.parse_from_dict(roundtrip_entry)
             if reparsed != dependency:
                 raise ValueError("Dependency source form failed semantic round-trip validation")
+            validated.append(source_entry)
+        return validated
+
+    @staticmethod
+    def _validate_config_dependencies(
+        dependencies: Sequence[ConfigDependencyInput],
+        *,
+        kind: str,
+    ) -> list[str | dict[str, object]]:
+        model = MCPDependency if kind == "MCP" else LSPDependency
+        validated: list[str | dict[str, object]] = []
+        for entry in dependencies:
+            if isinstance(entry, str):
+                source_entry: str | dict[str, object] = entry
+                dependency = model.from_string(entry)
+            elif isinstance(entry, Mapping):
+                source_entry = dict(entry)
+                dependency = model.from_dict(source_entry)
+            else:
+                raise TypeError(f"{kind} dependency entries must be strings or mappings")
+
+            roundtrip_document = load_yaml_str(yaml_to_str({"dependency": source_entry}))
+            if not isinstance(roundtrip_document, dict):
+                raise ValueError(
+                    f"{kind} dependency source form did not survive YAML serialization"
+                )
+            roundtrip_entry = roundtrip_document.get("dependency")
+            if isinstance(source_entry, str):
+                if not isinstance(roundtrip_entry, str):
+                    raise ValueError(f"{kind} dependency string did not survive YAML serialization")
+                reparsed = model.from_string(roundtrip_entry)
+            else:
+                if not isinstance(roundtrip_entry, dict):
+                    raise ValueError(
+                        f"{kind} dependency mapping did not survive YAML serialization"
+                    )
+                reparsed = model.from_dict(roundtrip_entry)
+            if reparsed.to_dict() != dependency.to_dict():
+                raise ValueError(
+                    f"{kind} dependency source form failed semantic round-trip validation"
+                )
             validated.append(source_entry)
         return validated
 
