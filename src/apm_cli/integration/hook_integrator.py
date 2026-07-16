@@ -1151,14 +1151,19 @@ class HookIntegrator(BaseIntegrator):
         """
         hook_files = self.find_hook_files(package_info.install_path)
         package_name = self._get_package_name(package_info, project_root)
-        if not dep_targets_active:
-            hook_files = _filter_hook_files_for_target(
-                hook_files,
-                "copilot",
-                package_name=package_name,
-                warned_packages=self._deprecated_hook_routing_warnings,
-                package_identity=package_info.get_canonical_dependency_string(),
-            )
+        # Per-file target routing always runs.  A dep-level ``targets:`` list
+        # restricts WHICH targets are active (upstream in services.py); it must
+        # not disable per-file routing here, or divergent per-target files
+        # (e.g. ``pkg-claude-hooks.json`` vs ``pkg-codex-hooks.json``) would all
+        # merge into every active target -- cross-contaminating configs and
+        # duplicating shared entries (microsoft/apm#2020 regression class).
+        hook_files = _filter_hook_files_for_target(
+            hook_files,
+            "copilot",
+            package_name=package_name,
+            warned_packages=self._deprecated_hook_routing_warnings,
+            package_identity=package_info.get_canonical_dependency_string(),
+        )
 
         if not hook_files:
             return HookIntegrationResult(
@@ -1367,14 +1372,16 @@ class HookIntegrator(BaseIntegrator):
 
         hook_files = self.find_hook_files(package_info.install_path)
         package_name = self._get_package_name(package_info, project_root)
-        if not dep_targets_active:
-            hook_files = _filter_hook_files_for_target(
-                hook_files,
-                config.target_key,
-                package_name=package_name,
-                warned_packages=self._deprecated_hook_routing_warnings,
-                package_identity=package_info.get_canonical_dependency_string(),
-            )
+        # Per-file target routing always runs; a dep-level ``targets:`` list
+        # narrows the active target set upstream but must not disable per-file
+        # routing (see integrate_package_hooks for the full rationale).
+        hook_files = _filter_hook_files_for_target(
+            hook_files,
+            config.target_key,
+            package_name=package_name,
+            warned_packages=self._deprecated_hook_routing_warnings,
+            package_identity=package_info.get_canonical_dependency_string(),
+        )
         if not hook_files:
             return _empty
 

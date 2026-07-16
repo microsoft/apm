@@ -236,14 +236,16 @@ def integrate_kiro_hooks(
 
     hook_files = integrator.find_hook_files(package_info.install_path)
     package_name = integrator._get_package_name(package_info, project_root)
-    if not dep_targets_active:
-        hook_files = _filter_hook_files_for_target(
-            hook_files,
-            "kiro",
-            package_name=package_name,
-            warned_packages=integrator._deprecated_hook_routing_warnings,
-            package_identity=package_info.get_canonical_dependency_string(),
-        )
+    # Per-file target routing always runs; a dep-level ``targets:`` list narrows
+    # the active target set upstream but must not disable per-file routing (see
+    # HookIntegrator.integrate_package_hooks for the full rationale).
+    hook_files = _filter_hook_files_for_target(
+        hook_files,
+        "kiro",
+        package_name=package_name,
+        warned_packages=integrator._deprecated_hook_routing_warnings,
+        package_identity=package_info.get_canonical_dependency_string(),
+    )
     if not hook_files:
         return HookIntegrationResult(0, 0, 0, [])
 

@@ -11,7 +11,7 @@ import pytest
 
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.base_integrator import IntegrationResult
-from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS, HookIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -167,6 +167,137 @@ def test_hooks_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> N
     assert result["hooks"] == 2
     assert (project / ".claude" / "settings.json").exists()
     assert (project / ".codex" / "hooks.json").exists()
+
+
+# Every merge-based harness APM ships, so the routing regression below is
+# proven across the whole registry rather than a claude/codex special case.
+_MERGE_HARNESSES = sorted(_MERGE_HOOK_TARGETS)
+
+
+def _target_command_hook(command: str) -> dict:
+    """A minimal, schema-neutral hook whose command uniquely tags its file.
+
+    ``SessionStart`` and a trivial command survive event normalization across
+    every merge harness, so the command string is a reliable per-file marker
+    regardless of a target's casing/matcher conventions.
+    """
+    return {
+        "hooks": {
+            "SessionStart": [
+                {"matcher": "startup", "hooks": [{"type": "command", "command": command}]}
+            ],
+        }
+    }
+
+
+def _deployed_commands(project: Path, target_name: str) -> list[str]:
+    """Return every hook command written to *target_name*'s merged config."""
+    target = KNOWN_TARGETS[target_name]
+    config = _MERGE_HOOK_TARGETS[target_name]
+    config_path = project / target.root_dir / config.config_filename
+    if not config_path.exists():
+        return []
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    commands: list[str] = []
+    for entries in data.get(config.event_container_key, {}).values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            # Most targets nest hooks under a matcher entry ({matcher, hooks});
+            # antigravity flattens to bare {type, command} entries. Handle both.
+            if "command" in entry:
+                commands.append(entry["command"])
+            for hook in entry.get("hooks", []):
+                if "command" in hook:
+                    commands.append(hook["command"])
+    return commands
+
+
+def _write_divergent_pair(package_path: Path, first: str, second: str) -> dict[str, str]:
+    """Ship one hook file per target with a unique command tag; return the map."""
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    tags = {first: f"echo {first}-only", second: f"echo {second}-only"}
+    for target_name, command in tags.items():
+        (hooks_dir / f"pkg-{target_name}-hooks.json").write_text(
+            json.dumps(_target_command_hook(command)), encoding="utf-8"
+        )
+    return tags
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [(a, b) for i, a in enumerate(_MERGE_HARNESSES) for b in _MERGE_HARNESSES[i + 1 :]],
+)
+def test_divergent_hook_files_route_per_target_under_multi_dep_targets(
+    tmp_path: Path, first: str, second: str
+) -> None:
+    """`targets: [A, B]` must refine routing, not disable it -- for any A, B.
+
+    Regression for the dep-target gate that merged every per-target file into
+    every active target. Each divergent file must land only in its own harness;
+    the other harness's uniquely-tagged command must not leak in. Proven across
+    every pair of merge-based harnesses APM ships, not just claude/codex.
+    """
+    project = tmp_path / "project"
+    for name in (first, second):
+        (project / KNOWN_TARGETS[name].root_dir).mkdir(parents=True)
+    package_path = tmp_path / "pkg"
+    tags = _write_divergent_pair(package_path, first, second)
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target(first), _hook_only_target(second)],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=[first, second],
+    )
+
+    assert result["hooks"] == 2
+    first_cmds = _deployed_commands(project, first)
+    second_cmds = _deployed_commands(project, second)
+
+    # Each harness gets exactly its own file's command -- no leak, no dupes.
+    assert first_cmds == [tags[first]], f"{first} config: {first_cmds}"
+    assert second_cmds == [tags[second]], f"{second} config: {second_cmds}"
+    assert tags[second] not in first_cmds, f"{second} hook leaked into {first}"
+    assert tags[first] not in second_cmds, f"{first} hook leaked into {second}"
+
+
+@pytest.mark.parametrize(
+    ("active", "excluded"),
+    [(a, b) for i, a in enumerate(_MERGE_HARNESSES) for b in _MERGE_HARNESSES[i + 1 :]],
+)
+def test_divergent_hook_files_route_single_target_under_single_dep_target(
+    tmp_path: Path, active: str, excluded: str
+) -> None:
+    """`targets: [A]` installs only A's file even when B's file also ships."""
+    project = tmp_path / "project"
+    for name in (active, excluded):
+        (project / KNOWN_TARGETS[name].root_dir).mkdir(parents=True)
+    package_path = tmp_path / "pkg"
+    tags = _write_divergent_pair(package_path, active, excluded)
+
+    result = integrate_package_primitives(
+        _package_info(package_path),
+        project,
+        targets=[_hook_only_target(active), _hook_only_target(excluded)],
+        integrators=_bundle(HookIntegrator()),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+        dep_target_subset=[active],
+    )
+
+    # Only the active harness is installed, and it receives only its own file.
+    assert result["hooks"] == 1
+    assert _deployed_commands(project, active) == [tags[active]]
+    assert _deployed_commands(project, excluded) == []
 
 
 def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> None:
