@@ -93,11 +93,20 @@ class TestFromInstalledPackagesIsDev:
         ref = Mock()
         ref.repo_url = repo_url
         ref.host = None
+        ref.host_type = None
+        ref.port = None
         ref.reference = "main"
         ref.virtual_path = None
         ref.is_virtual = False
         ref.is_local = False
         ref.local_path = None
+        ref.declaring_parent = None
+        ref.anchored_local_path = None
+        ref.is_insecure = False
+        # ADO coordinate fields must be None for non-ADO hosts.
+        ref.ado_organization = None
+        ref.ado_project = None
+        ref.ado_repo = None
         return ref
 
     def test_5_element_tuple_with_is_dev_true(self):

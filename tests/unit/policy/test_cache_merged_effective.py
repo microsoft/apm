@@ -805,6 +805,19 @@ def test_policy_serializer_covers_every_dataclass_leaf() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("bin_deploy", "expected"),
+    [
+        (BinDeployPolicy(deny_all=True), {"deny_all": True, "deny": []}),
+        (BinDeployPolicy(deny=("legacy/tool",)), {"deny_all": False, "deny": ["legacy/tool"]}),
+    ],
+)
+def test_policy_serializer_preserves_sparse_bin_deploy_shapes(
+    bin_deploy: BinDeployPolicy, expected: dict[str, object]
+) -> None:
+    assert _policy_to_dict(ApmPolicy(bin_deploy=bin_deploy))["bin_deploy"] == expected
+
+
 class TestPolicyRoundTrip(unittest.TestCase):
     """_policy_to_dict -> YAML -> load_policy preserves semantics."""
 

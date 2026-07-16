@@ -268,6 +268,54 @@ class TestResolveInPackageAssetLink:
         ctx = self._make_ctx(base_dir, source_file, package_root=pkg_root)
         assert resolver._resolve_in_package_asset_link("nonexistent.png", ctx) is None
 
+    def test_directory_candidate_returns_none(
+        self, resolver: UnifiedLinkResolver, base_dir: Path
+    ) -> None:
+        pkg_root = base_dir / "pkg"
+        linked_dir = pkg_root / "images"
+        linked_dir.mkdir(parents=True)
+        source_file = pkg_root / "file.md"
+        source_file.write_text("content")
+        ctx = self._make_ctx(base_dir, source_file, package_root=pkg_root)
+
+        assert resolver._resolve_in_package_asset_link("images", ctx) is None
+
+    def test_link_inside_preserved_source_root_stays_bundle_relative(
+        self, resolver: UnifiedLinkResolver, base_dir: Path
+    ) -> None:
+        pkg_root = base_dir / "pkg"
+        preserved_root = pkg_root / "skills" / "reviewer"
+        preserved_root.mkdir(parents=True)
+        source_file = preserved_root / "SKILL.md"
+        source_file.write_text("[guide](guide.md)")
+        (preserved_root / "guide.md").write_text("# Guide")
+        ctx = self._make_ctx(base_dir, source_file, package_root=pkg_root)
+        ctx.preserved_source_root = preserved_root
+
+        assert resolver._resolve_in_package_asset_link("guide.md", ctx) is None
+
+    def test_external_source_package_projects_into_base_dir(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "project"
+        base_dir.mkdir()
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = tmp_path / "source-package"
+        source_file = pkg_root / "skills" / "reviewer" / "SKILL.md"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text("[guide](guide.md)")
+        (source_file.parent / "guide.md").write_text("# Guide")
+        target_dir = base_dir / ".github" / "skills" / "reviewer"
+        target_dir.mkdir(parents=True)
+        ctx = self._make_ctx(
+            base_dir,
+            source_file,
+            package_root=pkg_root,
+            target_location=target_dir,
+        )
+
+        result = resolver._resolve_in_package_asset_link("guide.md", ctx)
+
+        assert result == "../../../skills/reviewer/guide.md"
+
     def test_successful_rewrite_returns_relative_path(
         self, resolver: UnifiedLinkResolver, base_dir: Path
     ) -> None:

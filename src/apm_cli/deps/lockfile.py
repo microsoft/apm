@@ -403,7 +403,11 @@ class LockedDependency:
             # legacy migration key handled above
             "deployed_skills",
         }
-        unknown_fields = {k: v for k, v in data.items() if k not in _known_keys}
+        unknown_fields = {
+            k: v
+            for k, v in data.items()
+            if k not in _known_keys and not DependencyReference.is_transient_provider_field(k)
+        }
 
         return cls(
             repo_url=data["repo_url"],
@@ -532,6 +536,7 @@ class LockedDependency:
         else:
             resolved_ref_val = dep_ref.reference
 
+        dep_ref.validate_provider_coordinates()
         if registry_resolution is not None:
             version_value = registry_resolution.version
         elif git_semver_resolution is not None:
@@ -617,7 +622,7 @@ class LockedDependency:
             source=self.source,
             skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
-        )
+        ).with_derived_provider_coordinates()
 
 
 @dataclass

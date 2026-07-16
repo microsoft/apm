@@ -119,6 +119,8 @@ export APM_GIT_PROTOCOL=ssh            # session default
 
 `--ssh` and `--https` are mutually exclusive and apply only to shorthand.
 URLs with an explicit scheme ignore them.
+The selected protocol also governs remote tag enumeration when APM resolves a
+Git-source semver range.
 
 Match local `git clone` behavior by configuring `insteadOf` once:
 

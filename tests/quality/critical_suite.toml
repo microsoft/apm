@@ -55,3 +55,10 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_virtual_claude_skill_lock_convergence.py"
 marker = "component"
+
+[[modules]]
+path = "tests/integration/test_ssh_semver_transport_contract.py"
+marker = "e2e"
+[[modules]]
+path = "tests/integration/test_ado_lock_consumer_contract.py"
+marker = "e2e"

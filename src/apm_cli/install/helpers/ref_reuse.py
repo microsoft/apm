@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.transport_selection import ProtocolPreference, TransportSelector
     from apm_cli.models.dependency.reference import DependencyReference
+
+RefResolverCacheKey = tuple[str | None, str | None, str, tuple[str, str | None, int | None]]
 
 
 def _token_fingerprint(token: str | None) -> str | None:
@@ -55,34 +58,133 @@ def resolve_dep_auth(
         return None, "basic", None
 
 
+def _git_semver_package_name(dep_ref: DependencyReference) -> str:
+    """Return the package name used for git tag ``{name}`` matching."""
+    if dep_ref.is_virtual_subdirectory() and dep_ref.virtual_path:
+        return dep_ref.virtual_path.rstrip("/").rsplit("/", 1)[-1]
+    return dep_ref.repo_url.rsplit("/", 1)[-1]
+
+
+def maybe_resolve_git_semver(
+    *,
+    dep_ref: DependencyReference,
+    existing_lockfile: Any,
+    update_refs: bool,
+    auth_resolver: Any = None,
+    ref_resolver_cache: dict[RefResolverCacheKey, Any] | None = None,
+    ref_resolver_cache_lock: Any = None,
+    transport_selector: TransportSelector | None = None,
+    protocol_pref: ProtocolPreference | None = None,
+) -> Any:
+    """Resolve a git-source semver range or replay its locked resolution."""
+    if dep_ref.is_local:
+        return None
+    if getattr(dep_ref, "source", None) == "registry":
+        return None
+    if getattr(dep_ref, "artifactory_prefix", None):
+        return None
+    if dep_ref.ref_kind != "semver":
+        return None
+
+    constraint = dep_ref.reference
+    owner_repo = dep_ref.repo_url
+    package_name = _git_semver_package_name(dep_ref)
+    if not update_refs and existing_lockfile is not None:
+        locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+        if (
+            locked is not None
+            and locked.constraint == constraint
+            and locked.resolved_tag
+            and locked.resolved_commit
+            and locked.version
+        ):
+            from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+            return GitSemverResolution(
+                constraint=locked.constraint,
+                resolved_version=locked.version,
+                resolved_tag=locked.resolved_tag,
+                resolved_sha=locked.resolved_commit,
+                matched_pattern="",
+                resolved_at=locked.resolved_at or "",
+            )
+
+    from apm_cli.deps.git_semver_resolver import GitSemverResolver
+
+    token, auth_scheme, git_env = resolve_dep_auth(dep_ref, auth_resolver)
+    if transport_selector is None:
+        from apm_cli.deps.transport_selection import (
+            NoOpInsteadOfResolver,
+            TransportSelector,
+        )
+
+        transport_selector = TransportSelector(NoOpInsteadOfResolver())
+    if protocol_pref is None:
+        from apm_cli.deps.transport_selection import ProtocolPreference
+
+        protocol_pref = ProtocolPreference.NONE
+    transport_plan = transport_selector.select(
+        dep_ref=dep_ref,
+        cli_pref=protocol_pref,
+        allow_fallback=False,
+        has_token=bool(token),
+    )
+    selected_scheme = transport_plan.attempts[0].scheme
+    transport_scheme = "ssh" if selected_scheme == "ssh" else "https"
+    ref_resolver = get_shared_ref_resolver(
+        dep_ref.host,
+        token,
+        ref_resolver_cache,
+        ref_resolver_cache_lock,
+        auth_scheme=auth_scheme,
+        git_env=git_env,
+        auth_resolver=auth_resolver,
+        auth_target=dep_ref.host,
+        transport_scheme=transport_scheme,
+        ssh_user=dep_ref.ssh_user or "git",
+        port=dep_ref.port,
+    )
+    return GitSemverResolver(ref_resolver).resolve(
+        owner_repo=owner_repo,
+        package_name=package_name,
+        constraint=constraint,
+        remote_url=(
+            dep_ref.to_github_url()
+            if transport_scheme == "https" and dep_ref.is_azure_devops()
+            else None
+        ),
+    )
+
+
 def get_shared_ref_resolver(
     host: str | None,
     token: str | None,
-    cache: dict[Any, Any] | None,
+    cache: dict[RefResolverCacheKey, Any] | None,
     lock: Any = None,
     *,
     auth_scheme: str = "basic",
     git_env: dict[str, str] | None = None,
     auth_resolver: Any = None,
     auth_target: Any = None,
+    transport_scheme: str = "https",
+    ssh_user: str = "git",
+    port: int | None = None,
 ) -> Any:
-    """Return a ``RefResolver`` for ``(host, token, auth_scheme)``, reused across a run.
+    """Return a transport-specific shared ``RefResolver`` for one auth context.
 
     When ``cache`` is provided, resolvers are memoized so the second and
     later deps from a repo reuse the instance (and its ref cache). The cache
-    key includes ``(normalized_host, fingerprint(token), auth_scheme)``. The
-    fingerprint is non-reversible and never stores the raw credential in the
-    context object this cache lives on. ``host`` is normalized to ``None``
-    meaning "use RefResolver default (github.com)", so a dep written with an
-    explicit ``host='github.com'`` and one with no host collapse to the same
-    cache bucket. When ``lock`` is also provided, the get-or-create runs under
-    it -- required because the BFS download callback runs on a worker pool,
-    where unguarded concurrent first-touches would each build a resolver and
-    defeat the dedup. ``cache=None`` (the default caller behavior) builds a
-    fresh resolver per call, preserving the legacy one-per-dep path. Token
-    rotation mid-run is intentionally unsupported: once a resolver is cached,
-    its embedded token is fixed for the lifetime of the run (APM installs are
-    short-lived; tokens do not rotate mid-process).
+    key includes normalized host, credential fingerprint, auth scheme, and the
+    selected transport identity. The fingerprint is non-reversible and never
+    stores the raw credential in the context object this cache lives on.
+    ``host`` is normalized to ``None`` meaning "use RefResolver default
+    (github.com)", so a dep written with an explicit ``host='github.com'`` and
+    one with no host collapse to the same cache bucket when transport also
+    matches. When ``lock`` is also provided, the get-or-create runs under it --
+    required because the BFS download callback runs on a worker pool, where
+    unguarded concurrent first-touches would each build a resolver and defeat
+    the dedup. ``cache=None`` builds a fresh resolver per call. Token rotation
+    mid-run is intentionally unsupported.
     """
     from apm_cli.marketplace.ref_resolver import RefResolver
 
@@ -103,11 +205,28 @@ def get_shared_ref_resolver(
             auth_resolver=auth_resolver,
             auth_target=auth_target,
         )
+    if transport_scheme == "ssh":
+        resolver_kwargs.update(
+            transport_scheme=transport_scheme,
+            ssh_user=ssh_user,
+        )
+    if port is not None:
+        resolver_kwargs["port"] = port
 
     if cache is None:
         return RefResolver(**resolver_kwargs)
 
-    key = (canonical_host, _token_fingerprint(token), auth_scheme)
+    transport_identity = (
+        transport_scheme,
+        ssh_user if transport_scheme == "ssh" else None,
+        port,
+    )
+    key = (
+        canonical_host,
+        _token_fingerprint(token),
+        auth_scheme,
+        transport_identity,
+    )
     if lock is not None:
         with lock:
             resolver = cache.get(key)

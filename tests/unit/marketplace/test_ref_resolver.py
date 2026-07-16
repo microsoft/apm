@@ -195,6 +195,86 @@ class TestRefResolver:
     """Tests for RefResolver with mocked subprocess."""
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_remote_url_uses_canonical_dependency_url(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """ADO callers can supply the URL built by DependencyReference."""
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
+        remote_url = "https://dev.azure.com/apm-org/apm-project/_git/consume-contract"
+
+        resolver.list_remote_refs(
+            "apm-org/apm-project/consume-contract",
+            remote_url=remote_url,
+        )
+
+        command = mock_run.call_args.args[0]
+        parsed = urllib.parse.urlparse(command[-1])
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "dev.azure.com"
+        assert parsed.path == "/apm-org/apm-project/_git/consume-contract"
+        resolver.close()
+
+    @pytest.mark.parametrize(
+        "remote_url",
+        (
+            "http://dev.azure.com/apm-org/apm-project/_git/repo",
+            "https://attacker.example.invalid/apm-org/apm-project/_git/repo",
+            "https://user@dev.azure.com/apm-org/apm-project/_git/repo",
+            "https://user:secret@dev.azure.com/apm-org/apm-project/_git/repo",
+            "https://dev.azure.com/apm-org/apm-project/_git/repo?ref=v1",
+            "https://dev.azure.com/apm-org/apm-project/_git/repo#fragment",
+            "https://dev.azure.com/apm-org/other-project/_git/consume-contract",
+        ),
+    )
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_remote_url_rejects_unsafe_variants(
+        self,
+        mock_run: MagicMock,
+        remote_url: str,
+    ) -> None:
+        """Credentials never flow to an unsafe caller-supplied URL."""
+        resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
+
+        with pytest.raises(GitLsRemoteError, match="dependency coordinates") as exc_info:
+            resolver.list_remote_refs(
+                "apm-org/apm-project/consume-contract",
+                remote_url=remote_url,
+            )
+
+        assert exc_info.value.package == "apm-org/apm-project/consume-contract"
+        mock_run.assert_not_called()
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_remote_url_is_part_of_cache_identity(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """Distinct canonical URLs cannot share one owner/repo cache slot."""
+        mock_run.side_effect = (
+            _make_completed(stdout=f"{_SHA_A}\trefs/tags/v1.0.0\n"),
+            _make_completed(stdout=f"{_SHA_B}\trefs/tags/v2.0.0\n"),
+        )
+        resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
+        owner_repo = "apm-org/apm-project/consume-contract"
+
+        first = resolver.list_remote_refs(
+            owner_repo,
+            remote_url="https://dev.azure.com/apm-org/apm-project/_git/consume-contract",
+        )
+        second = resolver.list_remote_refs(
+            "apm-org/other-project/consume-contract",
+            remote_url="https://dev.azure.com/apm-org/other-project/_git/consume-contract",
+        )
+
+        assert first[0].sha == _SHA_A
+        assert second[0].sha == _SHA_B
+        assert mock_run.call_count == 2
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_list_remote_refs_success(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -317,6 +397,90 @@ class TestRefResolver:
         assert kwargs["timeout"] == 7.5
         assert kwargs["capture_output"] is True
         assert kwargs["text"] is True
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_uses_ssh_url_without_http_auth(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            token="secret-token",
+            git_env={
+                "GIT_TOKEN": "secret-token",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraheader",
+                "GIT_CONFIG_VALUE_0": "Authorization: Bearer secret-token",
+            },
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("acme/tools")
+
+        args, kwargs = mock_run.call_args
+        assert args[0][4] == "git@github.com:acme/tools.git"
+        assert "GIT_TOKEN" not in kwargs["env"]
+        assert "GIT_CONFIG_COUNT" not in kwargs["env"]
+        assert "GIT_CONFIG_VALUE_0" not in kwargs["env"]
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ssh_transport_with_custom_port_uses_explicit_url(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="github.com",
+            transport_scheme="ssh",
+            port=2222,
+        )
+
+        resolver.list_remote_refs("acme/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "ssh://git@github.com:2222/acme/tools.git"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_ssh_transport_uses_azure_devops_remote_shape(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("contoso/platform/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_ssh_transport_accepts_git_path_from_canonical_owner(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        """ADO SSH URL construction routes through the canonical coordinate owner."""
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        resolver.list_remote_refs("contoso/platform/_git/tools")
+
+        args, kwargs = mock_run.call_args  # noqa: RUF059
+        assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
         resolver.close()
 
     def test_close_clears_cache(self) -> None:
@@ -631,3 +795,26 @@ class TestRefResolverTokenInjection:
         assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
         expected = base64.b64encode(b":ado_pat").decode()
         assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Basic {expected}"
+
+    def test_ado_ssh_transport_skips_bearer_retry(self) -> None:
+        """SSH transport never retries an ADO PAT as an HTTP bearer flow."""
+        auth_resolver = MagicMock()
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="ado_pat",
+            auth_scheme="basic",
+            auth_resolver=auth_resolver,
+            auth_target="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed(
+                stderr="TF401019: The Git repository does not exist or you do not have permissions.",
+                returncode=128,
+            )
+
+            with pytest.raises(GitLsRemoteError):
+                resolver.list_remote_refs("contoso/platform/repo")
+
+        auth_resolver.execute_with_bearer_fallback.assert_not_called()

@@ -100,6 +100,47 @@ pip install -e .[dev]
 pytest -q
 ```
 
+### Running the bounded mutation pilot
+
+The advisory mutation pilot covers four stable owners: dependency subset
+selection, update-plan construction, cached-policy serialization, and canonical
+in-package link projection. It runs nightly or by manual workflow dispatch,
+not as required PR CI, and has a 20-minute hosted job budget.
+
+Run the exact-function allowlist locally:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --output mutation-pilot-report.json
+```
+
+The command fails on new survivors, timeouts, suspicious results, unchecked
+mutants, and incomplete outcomes. Its timestamp-free JSON report is suitable
+for comparing runs. Pass `--reuse-cache` only when the allowlisted source,
+tests, configuration, runner, and lockfile are unchanged.
+
+To inspect existing mutmut metadata without executing mutants:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --report-only --output mutation-pilot-report.json
+```
+
+The reviewed survivor allowlist lives in
+[`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json).
+Do not update it to make a run green. Inspect surviving diffs with `mutmut show`
+and add behavioral tests for real contract gaps. Use `--update-baseline` only
+when the baseline change itself has been reviewed:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --update-baseline --output mutation-pilot-report.json
+```
+
+The repository
+[`CONTRIBUTING.md`](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#running-the-bounded-mutation-pilot)
+owns the review policy for baseline changes.
+
 ## Coding Style
 
 This project follows:

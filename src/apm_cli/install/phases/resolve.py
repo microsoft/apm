@@ -23,7 +23,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.install.helpers.ref_reuse import annotate_update_plan_refs
+from apm_cli.install.helpers.ref_reuse import (
+    annotate_update_plan_refs,
+)
+from apm_cli.install.helpers.ref_reuse import (
+    maybe_resolve_git_semver as _maybe_resolve_git_semver,
+)
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
@@ -32,7 +37,6 @@ from apm_cli.utils.short_sha import format_short_sha
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.install.resolution_staging import ResolutionStagingSession
-    from apm_cli.models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
 
@@ -68,115 +72,6 @@ def _require_package_registry_feature_if_needed(registries_map, existing_lockfil
 
         require_package_registry_enabled("Registry-sourced installs")
     return needs_registry
-
-
-def _git_semver_package_name(dep_ref: DependencyReference) -> str:
-    """Return the package name used for git tag ``{name}`` matching."""
-    if dep_ref.is_virtual_subdirectory() and dep_ref.virtual_path:
-        return dep_ref.virtual_path.rstrip("/").rsplit("/", 1)[-1]
-    return dep_ref.repo_url.rsplit("/", 1)[-1]
-
-
-def _maybe_resolve_git_semver(
-    *,
-    dep_ref,
-    existing_lockfile,
-    update_refs: bool,
-    auth_resolver=None,
-    ref_resolver_cache=None,
-    ref_resolver_cache_lock=None,
-):
-    """Resolve a git-source semver-range ``ref:`` to a concrete tag.
-
-    Returns the :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolution`
-    when resolution ran (and the caller should rewrite ``dep_ref.reference``);
-    returns ``None`` for any dep that should NOT route through the
-    git-semver resolver (local, registry-sourced, proxy-sourced, literal
-    ref, or a lockfile-pinned reinstall without ``--update``).
-
-    Lockfile replay
-    ---------------
-    When a lockfile entry already records ``constraint == dep_ref.reference``
-    and the locked tag still satisfies it, this function rebuilds the
-    :class:`GitSemverResolution` from the lockfile WITHOUT touching the
-    network. This is the npm-style "honour the lock" path -- the locked
-    tag is canonical until the manifest range changes or the user passes
-    ``--update`` / ``--refresh``.
-
-    Auth
-    ----
-    When ``auth_resolver`` is supplied, the per-dep ``AuthContext`` is
-    resolved before constructing :class:`RefResolver`; its token and
-    authentication scheme are forwarded to ``git ls-remote``, mirroring
-    the clone step downstream. A private-repo semver dep that clones
-    successfully then also enumerates its tags in CI environments where
-    ``GITHUB_APM_PAT`` / ``ADO_APM_PAT`` are the only credential source.
-    ``auth_resolver=None`` preserves unauthenticated public-repo behavior.
-    """
-    # Only git-source deps with a semver-range reference are eligible.
-    if dep_ref.is_local:
-        return None
-    if getattr(dep_ref, "source", None) == "registry":
-        return None
-    if getattr(dep_ref, "artifactory_prefix", None):
-        return None
-    if dep_ref.ref_kind != "semver":
-        return None
-
-    constraint = dep_ref.reference
-    owner_repo = dep_ref.repo_url
-    package_name = _git_semver_package_name(dep_ref)
-
-    # Lockfile replay (npm semantics): if the lockfile already records a
-    # resolution for this constraint, return it directly. Saves a
-    # ls-remote call and keeps installs deterministic across machines.
-    if not update_refs and existing_lockfile is not None:
-        locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-        if (
-            locked is not None
-            and locked.constraint == constraint
-            and locked.resolved_tag
-            and locked.resolved_commit
-            and locked.version
-        ):
-            from apm_cli.deps.git_semver_resolver import GitSemverResolution
-
-            return GitSemverResolution(
-                constraint=locked.constraint,
-                resolved_version=locked.version,
-                resolved_tag=locked.resolved_tag,
-                resolved_sha=locked.resolved_commit,
-                # The pattern that produced the locked tag is not
-                # persisted (it would just be informational); the empty
-                # string here means "unknown / from lockfile".
-                matched_pattern="",
-                resolved_at=locked.resolved_at or "",
-            )
-
-    from apm_cli.deps.git_semver_resolver import GitSemverResolver
-    from apm_cli.install.helpers.ref_reuse import (
-        get_shared_ref_resolver,
-        resolve_dep_auth,
-    )
-
-    # Reuse one resolver per auth context so same-repo deps share tag listing.
-    token, auth_scheme, git_env = resolve_dep_auth(dep_ref, auth_resolver)
-    ref_resolver = get_shared_ref_resolver(
-        dep_ref.host,
-        token,
-        ref_resolver_cache,
-        ref_resolver_cache_lock,
-        auth_scheme=auth_scheme,
-        git_env=git_env,
-        auth_resolver=auth_resolver,
-        auth_target=dep_ref.host,
-    )
-    resolver = GitSemverResolver(ref_resolver)
-    return resolver.resolve(
-        owner_repo=owner_repo,
-        package_name=package_name,
-        constraint=constraint,
-    )
 
 
 def _purge_cached_semver_paths_for_update(
@@ -634,6 +529,8 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
                 auth_resolver=ctx.auth_resolver,
                 ref_resolver_cache=ctx.ref_resolver_cache,
                 ref_resolver_cache_lock=callback_lock,
+                transport_selector=ctx.downloader._transport_selector,
+                protocol_pref=ctx.downloader._protocol_pref,
             )
             if _semver_resolution is not None:
                 with callback_lock:
