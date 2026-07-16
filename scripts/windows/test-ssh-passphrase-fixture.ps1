@@ -498,7 +498,7 @@ targets:
     $actualSuccess = -not $process.timed_out -and $process.exit_code -eq 0
     $skillInstalled = Test-Path $skillPath
     $lockWritten = Test-Path $lockPath
-    $askpassReceipt = Get-AskpassReceipt -AskpassLog $askpassLogPath
+    $askpassReceipt = @(Get-AskpassReceipt -AskpassLog $askpassLogPath)
     $traceReceipt = Get-TraceReceipt -TracePath $tracePath
     $skillMatches = $false
     if ($skillInstalled) {
@@ -749,11 +749,10 @@ echo %SSH_ORIGINAL_COMMAND%>>"$serverLogForward"
         'command="' + $serveCommandForward +
         '",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding '
     )
-    $authorizedContent = @(
-        $keyOptions + (Get-Content -Path "$encryptedKey.pub" -Raw).Trim(),
-        $keyOptions + (Get-Content -Path "$plainKey.pub" -Raw).Trim()
-    ) -join "`n"
-    Write-Utf8Text -Path $authorizedKeys -Content ($authorizedContent + "`n")
+    $encryptedAuthorizedKey = $keyOptions + (Get-Content -Path "$encryptedKey.pub" -Raw).Trim()
+    $plainAuthorizedKey = $keyOptions + (Get-Content -Path "$plainKey.pub" -Raw).Trim()
+    $authorizedContent = $encryptedAuthorizedKey + "`n" + $plainAuthorizedKey + "`n"
+    Write-Utf8Text -Path $authorizedKeys -Content $authorizedContent
     & icacls.exe $authorizedKeys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F" | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to secure administrators_authorized_keys"
@@ -787,6 +786,33 @@ Match Group administrators
     Assert-Condition (-not [string]::IsNullOrWhiteSpace($keyscan.stdout)) "Loopback SSH host key was captured"
 
     $remoteUrl = "ssh://${runnerUser}@127.0.0.1:${port}/fixture/ssh-passphrase-fixture.git"
+    $preflightRoot = Join-Path $root "git-preflight"
+    $preflightEvidence = Join-Path $EvidenceDirectory "git-preflight"
+    New-Item -ItemType Directory -Path $preflightEvidence -Force | Out-Null
+    $preflightEnvironment = New-ScenarioEnvironment `
+        -BaseEnvironment $baseEnvironment `
+        -ScenarioRoot $preflightRoot `
+        -IdentityPath $plainKey `
+        -KnownHostsPath $knownHosts `
+        -SshPath $sshPath `
+        -SshLogPath (Join-Path $preflightEvidence "ssh-client.log") `
+        -TracePath (Join-Path $preflightEvidence "git-trace.json") `
+        -AskpassPath "" `
+        -AskpassLogPath "" `
+        -AskpassResponse ""
+    $preflightEnvironment["GIT_TERMINAL_PROMPT"] = "0"
+    $gitPreflight = Invoke-CheckedProcess `
+        -FilePath $gitPath `
+        -ArgumentList @("ls-remote", $remoteUrl, "refs/heads/main") `
+        -WorkingDirectory $preflightRoot `
+        -Environment $preflightEnvironment
+    Write-Utf8Text `
+        -Path (Join-Path $preflightEvidence "receipt.json") `
+        -Content ($gitPreflight | ConvertTo-Json -Depth 10)
+    Assert-Condition (
+        $gitPreflight.stdout.Contains($fixtureCommit)
+    ) "Direct unencrypted Git/OpenSSH preflight reached the fixture commit"
+
     $scenarioDefinitions = @(
         [pscustomobject]@{
             id = "unencrypted-positive"
