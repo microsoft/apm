@@ -43,7 +43,8 @@ class _Row:
     targets: tuple[str, ...]
     user_scope: bool
     dynamic_refusal: bool = False
-    transition: str | None = None
+    widen_targets: tuple[str, ...] = ()
+    narrow_targets: tuple[str, ...] = ()
 
 
 _ROWS = (
@@ -54,7 +55,8 @@ _ROWS = (
         ("prompts",),
         ("copilot",),
         False,
-        transition="copilot,cursor",
+        widen_targets=("copilot", "cursor"),
+        narrow_targets=("copilot",),
     ),
     _Row("gemini-command-user", ("commands",), ("gemini",), True),
     _Row("cursor-instruction-project", ("instructions",), ("cursor",), False),
@@ -63,7 +65,7 @@ _ROWS = (
         ("hooks",),
         ("claude", "codex"),
         False,
-        transition="claude",
+        narrow_targets=("claude",),
     ),
     _Row("kiro-hook-user", ("hooks",), ("kiro",), True),
     _Row("opencode-skill-user", ("skills",), ("opencode",), True),
@@ -112,7 +114,7 @@ def _assert_sparse_covering_array() -> None:
         "copilot-app",
         "copilot-cowork",
     }
-    assert sum(row.transition is not None for row in _ROWS) == 2
+    assert sum(bool(row.widen_targets or row.narrow_targets) for row in _ROWS) == 2
 
 
 def _row_profiles(row: _Row) -> tuple[TargetProfile, ...]:
@@ -143,13 +145,15 @@ def _feature_flags(row: _Row) -> tuple[str, ...]:
     return tuple(sorted(set(flags)))
 
 
-def _expected_ledger_targets(row: _Row) -> set[str]:
+def _expected_ledger_targets(row: _Row, targets: tuple[str, ...] | None = None) -> set[str]:
     """Resolve ledger target ownership through each canonical primitive mapping."""
     owners = set()
-    for target_name in row.targets:
+    for target_name in targets or row.targets:
         profile = KNOWN_TARGETS[target_name].for_scope(user_scope=row.user_scope)
         assert profile is not None
         for primitive in row.primitives:
+            if primitive not in profile.primitives:
+                continue
             mapping = profile.primitives[primitive]
             owners.add("agents" if mapping.deploy_root == ".agents" else target_name)
     return owners
@@ -471,14 +475,18 @@ def test_primitive_target_covering_array(
     project = project_factory.create(
         f"consumer-{row.id}",
         dependencies=(
-            {
-                "git": remote,
-                "type": "gitlab",
-                "ref": revision.sha,
-                "alias": package_name,
-            },
+            ()
+            if row.user_scope
+            else (
+                {
+                    "git": remote,
+                    "type": "gitlab",
+                    "ref": revision.sha,
+                    "alias": package_name,
+                },
+            )
         ),
-        targets=manifest_targets,
+        targets=() if row.user_scope else manifest_targets,
     )
     if row.user_scope:
         _write_user_manifest(
@@ -490,6 +498,7 @@ def test_primitive_target_covering_array(
         )
 
     cwd = project.root
+    project_before = ArtifactSnapshot.capture(project.root)
     if row.dynamic_refusal:
         _run_dynamic_refusal(
             row,
@@ -498,6 +507,7 @@ def test_primitive_target_covering_array(
             environment=environment,
             isolated=isolated,
         )
+        assert_unchanged(project_before, ArtifactSnapshot.capture(project.root))
         return
 
     _enable_required_features(runner, row, cwd=cwd, environment=environment)
@@ -529,6 +539,8 @@ def test_primitive_target_covering_array(
         )
     )
     _run(runner, install_args, scenario_id=f"{row.id}-install", cwd=cwd, environment=environment)
+    if row.user_scope:
+        assert_unchanged(project_before, ArtifactSnapshot.capture(project.root))
     after_install = _capture_state(
         row,
         isolated=isolated,
@@ -546,6 +558,8 @@ def test_primitive_target_covering_array(
     deployed_records = _deployment_records(after_install, state_root)
 
     _run(runner, install_args, scenario_id=f"{row.id}-reinstall", cwd=cwd, environment=environment)
+    if row.user_scope:
+        assert_unchanged(project_before, ArtifactSnapshot.capture(project.root))
     after_reinstall = _capture_state(
         row,
         isolated=isolated,
@@ -554,9 +568,46 @@ def test_primitive_target_covering_array(
     )
     assert after_reinstall.semantic_bytes == after_install.semantic_bytes
 
-    if row.transition is not None:
-        narrowed_targets = tuple(row.transition.split(","))
-        _set_project_targets(project, narrowed_targets)
+    if row.widen_targets:
+        _set_project_targets(project, row.widen_targets)
+        _run(
+            runner,
+            ("install", "--no-policy", "--parallel-downloads", "0"),
+            scenario_id=f"{row.id}-widen",
+            cwd=cwd,
+            environment=environment,
+        )
+        after_widen = _capture_state(
+            row,
+            isolated=isolated,
+            project_root=state_root,
+            profiles=tuple(KNOWN_TARGETS[target] for target in row.widen_targets),
+        )
+        widen_records = _deployment_records(after_widen, state_root)
+        assert {record.locator.target for record in widen_records} >= set(row.widen_targets)
+        cursor_paths = [
+            deployment_root / record.locator.value
+            for record in widen_records
+            if record.locator.target == "cursor"
+        ]
+        assert cursor_paths and all(path.is_file() and path.read_bytes() for path in cursor_paths)
+        _run(
+            runner,
+            ("install", "--no-policy", "--parallel-downloads", "0"),
+            scenario_id=f"{row.id}-reinstall-widened",
+            cwd=cwd,
+            environment=environment,
+        )
+        after_widen_reinstall = _capture_state(
+            row,
+            isolated=isolated,
+            project_root=state_root,
+            profiles=tuple(KNOWN_TARGETS[target] for target in row.widen_targets),
+        )
+        assert after_widen_reinstall.semantic_bytes == after_widen.semantic_bytes
+
+    if row.narrow_targets:
+        _set_project_targets(project, row.narrow_targets)
         _run(
             runner,
             ("install", "--no-policy", "--parallel-downloads", "0"),
@@ -575,17 +626,19 @@ def test_primitive_target_covering_array(
             row,
             isolated=isolated,
             project_root=state_root,
-            profiles=tuple(KNOWN_TARGETS[target] for target in narrowed_targets),
+            profiles=tuple(KNOWN_TARGETS[target] for target in row.narrow_targets),
         )
         transition_records = _deployment_records(after_transition, state_root)
         if transition_records:
-            assert {record.locator.target for record in transition_records} == set(narrowed_targets)
+            assert {
+                record.locator.target for record in transition_records
+            } == _expected_ledger_targets(row, row.narrow_targets)
         else:
             assert row.primitives == ("hooks",)
             marker = f"fixture-{row.id}"
             assert marker in (project.root / ".claude/apm-hooks.json").read_text(encoding="utf-8")
 
-    if row.primitives == ("hooks",) and row.transition is not None:
+    if row.primitives == ("hooks",) and row.narrow_targets:
         _set_project_targets(project, row.targets)
 
     uninstall_args = (
@@ -603,6 +656,8 @@ def test_primitive_target_covering_array(
         cwd=cwd,
         environment=environment,
     )
+    if row.user_scope:
+        assert_unchanged(project_before, ArtifactSnapshot.capture(project.root))
     after_uninstall = _capture_state(
         row,
         isolated=isolated,
