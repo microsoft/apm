@@ -696,3 +696,26 @@ class TestRefResolverTokenInjection:
         assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
         expected = base64.b64encode(b":ado_pat").decode()
         assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Basic {expected}"
+
+    def test_ado_ssh_transport_skips_bearer_retry(self) -> None:
+        """SSH transport never retries an ADO PAT as an HTTP bearer flow."""
+        auth_resolver = MagicMock()
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="ado_pat",
+            auth_scheme="basic",
+            auth_resolver=auth_resolver,
+            auth_target="dev.azure.com",
+            transport_scheme="ssh",
+        )
+
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed(
+                stderr="TF401019: The Git repository does not exist or you do not have permissions.",
+                returncode=128,
+            )
+
+            with pytest.raises(GitLsRemoteError):
+                resolver.list_remote_refs("contoso/platform/repo")
+
+        auth_resolver.execute_with_bearer_fallback.assert_not_called()

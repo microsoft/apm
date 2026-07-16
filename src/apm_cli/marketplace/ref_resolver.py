@@ -222,8 +222,11 @@ class RefResolver:
                 org, project, repo = parts
             else:
                 raise GitLsRemoteError(
-                    package="",
-                    summary="Azure DevOps SSH resolution requires org/project/repo coordinates.",
+                    package=owner_repo,
+                    summary=(
+                        "Azure DevOps SSH resolution requires org/project/repo "
+                        f"coordinates; got '{owner_repo}'."
+                    ),
                     hint="Use a standard Azure DevOps dependency URL.",
                 )
             ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host

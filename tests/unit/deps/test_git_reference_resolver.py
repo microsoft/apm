@@ -258,6 +258,7 @@ class TestListRemoteRefs:
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "http.extraheader",
             "GIT_CONFIG_VALUE_0": "Authorization: ******",
+            "GIT_ASKPASS": "echo",
         }
         dep = _dep(host="github.com")
         with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
@@ -269,7 +270,7 @@ class TestListRemoteRefs:
             "owner/repo",
             use_ssh=True,
             dep_ref=dep,
-            token="",
+            token=None,
             auth_scheme="basic",
         )
         host._build_noninteractive_git_env.assert_called_once()
@@ -278,6 +279,7 @@ class TestListRemoteRefs:
         assert "GIT_TOKEN" not in git_env
         assert "GIT_HTTP_EXTRAHEADER" not in git_env
         assert "GIT_CONFIG_COUNT" not in git_env
+        assert "GIT_ASKPASS" not in git_env
 
     def test_error_message_sanitized(self):
         host = _ctx(token="ghp_xxx")
