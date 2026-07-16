@@ -29,7 +29,6 @@ on:
     paths:
       - '.github/workflows/windows-ssh-conpty-repro.yml'
       - 'scripts/windows/conpty/**'
-      - 'scripts/windows/conpty-differential/**'
       - 'scripts/windows/test-ssh-conpty-passphrase.ps1'
 
 permissions:
@@ -73,6 +72,17 @@ jobs:
           $service = Get-Service -Name sshd -ErrorAction Stop
           Write-Host "[i] sshd service found: Status=$($service.Status) StartType=$($service.StartType)"
 
+      - name: Run standalone ConPTY host probe
+        shell: pwsh
+        run: |
+          dotnet build scripts/windows/conpty/ConPtyStandaloneProbe.csproj `
+            --configuration Release `
+            --nologo `
+            --verbosity quiet
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "scripts/windows/conpty/bin/Release/net8.0/ConPtyStandaloneProbe.exe"
+          exit $LASTEXITCODE
+
       # The actual evidence run. Never touches product code; only builds
       # ephemeral fixture state under $env:TEMP and Windows' own
       # $env:ProgramData\ssh loopback configuration (restored at the end).
@@ -82,28 +92,6 @@ jobs:
           scripts/windows/test-ssh-conpty-passphrase.ps1 `
             -ApmBinary "dist/apm-windows-x86_64/apm.exe" `
             -EvidenceDirectory "conpty-evidence"
-
-      # Differential harness (issue #1976 investigation): a minimal
-      # standalone ConPTY console app, compiled to a real .exe and run
-      # directly -- NOT PowerShell Add-Type in-process. Excludes every
-      # DSR/resize/diagnostic workaround added to conpty/ConPtyNative.cs
-      # this session, isolating whether the empty-transcript symptom is
-      # specific to this fixture's PowerShell-hosted approach or a
-      # runner-wide ConPTY limitation. Runs regardless of the main
-      # fixture's outcome (always() below) and after it, since the main
-      # fixture wipes/recreates conpty-evidence/ on every run.
-      - name: Build and run minimal standalone ConPTY differential (MiniTerm)
-        if: always()
-        shell: pwsh
-        run: |
-          dotnet build scripts/windows/conpty-differential/MiniTerm.csproj -c Release -o miniterm-build
-          $marker = "MINITERM_DIFF_" + (Get-Random -Maximum 99999999)
-          Write-Host "[*] Differential: running standalone MiniTerm.exe (outside PowerShell Add-Type) with marker $marker"
-          & "miniterm-build/MiniTerm.exe" $marker
-          $exitCode = $LASTEXITCODE
-          Write-Host "[i] MiniTerm.exe exit code: $exitCode (0=marker observed, 1=marker NOT observed, 2=setup failure)"
-          New-Item -ItemType Directory -Force -Path conpty-evidence | Out-Null
-          "MiniTerm differential exit code: $exitCode" | Out-File -FilePath conpty-evidence/miniterm-differential-result.txt -Encoding ascii
 
       - name: Upload sanitized evidence
         if: always()
