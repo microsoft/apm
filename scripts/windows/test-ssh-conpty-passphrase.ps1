@@ -782,6 +782,11 @@ try {
     Write-Step "Self-test: proving the ConPTY capture pipeline relays real child output before trusting it"
     $selfTest = Test-ConPtyCapture -Environment (Get-HumanLikeBaseEnvironment) -WorkingDirectory $root
     Write-Info "ConPTY self-test transcript: $($selfTest.Transcript.Trim())"
+    Write-Info "ConPTY self-test pseudo-console handle: $($selfTest.Diagnostics.PseudoConsoleHandle), child pid: $($selfTest.Diagnostics.ProcessId)"
+    Write-Info "ConPTY self-test reader trace:"
+    foreach ($line in $selfTest.Diagnostics.ReaderTrace) {
+        Write-Info "  $line"
+    }
     Assert-Condition $selfTest.Matched "ConPTY self-test: known marker string observed in captured transcript"
     Assert-Condition ($selfTest.ExitCode -eq 7) "ConPTY self-test: child exit code (7) captured correctly"
 
