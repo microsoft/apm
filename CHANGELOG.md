@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix #2184: Git-source semver ranges now honor explicit SSH and `prefer-ssh`
   during tag enumeration instead of invoking HTTPS -- by @danielmeppiel
   (#2229).
+- SSH-selected Git-source semver ranges no longer invoke HTTPS during tag
+  enumeration -- by @danielmeppiel
+  (#2229; fixes #2184).
 - Codex agent generation now warns when `.agent.md` `tools` restrictions cannot
   be preserved, instead of silently widening effective MCP access;
   `openapm-v0.1.md` now requires semantic preservation or a default-visible

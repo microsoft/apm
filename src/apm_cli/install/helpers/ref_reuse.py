@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.transport_selection import ProtocolPreference, TransportSelector
     from apm_cli.models.dependency.reference import DependencyReference
 
 RefResolverCacheKey = tuple[str | None, str | None, str, tuple[str, str | None, int | None]]
@@ -72,8 +73,8 @@ def maybe_resolve_git_semver(
     auth_resolver: Any = None,
     ref_resolver_cache: dict[RefResolverCacheKey, Any] | None = None,
     ref_resolver_cache_lock: Any = None,
-    transport_selector: Any = None,
-    protocol_pref: Any = None,
+    transport_selector: TransportSelector | None = None,
+    protocol_pref: ProtocolPreference | None = None,
 ) -> Any:
     """Resolve a git-source semver range or replay its locked resolution."""
     if dep_ref.is_local:
