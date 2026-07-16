@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 # Check if UPX is available
 def is_upx_available():
     try:
@@ -228,6 +230,7 @@ hiddenimports = [
     'importlib.metadata',
     'importlib_metadata',
 ]
+hiddenimports.extend(collect_submodules('rich._unicode_data'))
 
 # Modules to exclude to reduce binary size
 excludes = [
