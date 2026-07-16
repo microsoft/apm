@@ -229,3 +229,91 @@ and review.
   reads `APM_RUN_INTEGRATION_TESTS` to branch behaviour, the marker
   is wrong (or missing). The marker is the gate; the test body
   should assume the gate already passed.
+
+## The `windows_compat` marker (cross-platform regression contract)
+
+`windows_compat` is a **scheduling marker**, not a prerequisite
+marker. Do not confuse it with `requires_windows` -- there is no
+`requires_windows` marker in this repo, and there must never be one
+used for this purpose. `windows_compat` tests run on **every OS**
+(Linux, macOS, Windows) as part of the normal unit suite; the marker
+additionally selects them for a dedicated, focused PR-time job
+(`windows-compat-gate` in `.github/workflows/ci.yml`, `runs-on:
+windows-latest`) that runs `pytest -m windows_compat tests/unit`.
+That job exists because the full Windows matrix in
+`build-release.yml` only runs post-merge -- without this gate, a
+Windows-only regression (CRLF line endings, backslash path
+separators, bare `git` argv resolution, socket/thread shutdown races,
+etc.) is structurally invisible until after the PR has already
+merged. See microsoft/apm#2233 for the incident that motivated it.
+
+### When to add the marker
+
+Add `pytest.mark.windows_compat` to a test when it is a **load-bearing
+regression proof for a cross-platform defect class** -- i.e. it would
+have caught a bug that only manifests on Windows (or that a
+non-portable implementation could silently reintroduce), such as:
+
+- Text/JSON writers that must produce LF-only, atomic, ASCII-safe
+  output regardless of platform line-ending or encoding defaults.
+- Path formatting that must stay POSIX-style in diagnostics/output
+  even when the underlying OS uses backslash separators.
+- Subprocess invocation that must resolve an executable name (e.g.
+  `git`) portably instead of assuming a POSIX `$PATH` lookup.
+- Socket/thread lifecycle code whose shutdown path differs by OS
+  (e.g. Windows-specific WinError codes needing a narrow, proven
+  catch -- never a broad exception swallow).
+
+Do **not** add the marker to a whole file just because it happens to
+live near Windows-relevant code -- mark only the specific tests that
+assert the cross-platform contract, unless (per module) virtually
+every test in the file already exercises that same code path (in
+which case a module-level `pytestmark = pytest.mark.windows_compat`
+is the right level of granularity -- see
+`tests/unit/test_shepherd_owner_touch_gate.py` for an example where
+nearly every test goes through the same git-executable-resolution
+helper).
+
+### Procedure
+
+1. Register the marker once in `pyproject.toml` under
+   `[tool.pytest.ini_options].markers` (already done -- do not
+   re-register). `--strict-markers` is set, so an unregistered marker
+   name fails collection immediately; this is deliberate and must not
+   be worked around with a bare string literal.
+2. Apply the marker at the narrowest level that is true:
+   ```python
+   @pytest.mark.windows_compat
+   def test_write_report_is_deterministic_atomic_and_printable_ascii():
+       ...
+   ```
+   or, for a module dedicated to the contract family:
+   ```python
+   pytestmark = pytest.mark.windows_compat
+   ```
+3. Do **not** edit `.github/workflows/ci.yml` to add your test file --
+   the gate selects by marker, not by file enumeration. If your test
+   is properly marked, it is picked up automatically the next PR run.
+4. Confirm collection locally:
+   ```bash
+   uv run --extra dev pytest -m windows_compat tests/unit --collect-only -q
+   ```
+5. `tests/unit/test_windows_compat_gate_workflow.py` asserts the
+   *shape* of the gate (marker-scoped, bounded, non-empty, required,
+   non-duplicative of the Linux full suite) -- it does not enumerate
+   file names, so it does not need editing when you add or remove a
+   marked test.
+
+### Anti-patterns
+
+- **Enumerating test files in the workflow instead of using the
+  marker.** This is the exact drift the marker-based gate replaces;
+  a file list silently goes stale as tests move or get renamed.
+- **Using `requires_windows` (or inventing it) for this purpose.**
+  That name implies "only runs on Windows" -- the opposite of what
+  this marker means. These tests are cross-platform regression
+  proofs that run everywhere.
+- **Marking a whole large, multi-purpose test file** when only a
+  handful of its tests actually assert the Windows-regression
+  contract -- this bloats the PR-time gate with unrelated coverage
+  that belongs to the ordinary Linux unit run instead.

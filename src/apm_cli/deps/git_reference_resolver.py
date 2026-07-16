@@ -44,7 +44,10 @@ from ..utils.github_host import (
 )
 
 if TYPE_CHECKING:
+    import requests
+
     from ..core.auth import AuthResolver
+    from .transport_selection import ProtocolPreference, TransportSelector
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +65,8 @@ class _DownloaderContext(Protocol):
     auth_resolver: AuthResolver
     git_env: dict
     shared_clone_cache: object | None
+    _protocol_pref: ProtocolPreference
+    _transport_selector: TransportSelector
 
     def _resolve_dep_token(self, dep_ref: DependencyReference | None = ...) -> str | None: ...
     def _resolve_dep_auth_ctx(self, dep_ref: DependencyReference | None = ...): ...
@@ -82,7 +87,13 @@ class _DownloaderContext(Protocol):
     ) -> str: ...
     def _clone_with_fallback(self, *args, **kwargs): ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
-    def _resilient_get(self, url: str, headers: dict, timeout: int = ...): ...
+    def _resilient_get(
+        self,
+        url: str,
+        headers: dict[str, str],
+        timeout: int = ...,
+        max_retries: int = ...,
+    ) -> requests.Response: ...
     def _parse_ls_remote_output(self, output: str) -> list[RemoteRef]: ...
     def _sort_remote_refs(self, refs: list[RemoteRef]) -> list[RemoteRef]: ...
     def _parse_artifactory_base_url(self) -> tuple | None: ...
@@ -133,8 +144,22 @@ class GitReferenceResolver:
         dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
         repo_url_base = dep_ref.repo_url
+        transport_plan = host._transport_selector.select(
+            dep_ref=dep_ref,
+            cli_pref=host._protocol_pref,
+            allow_fallback=False,
+            has_token=bool(dep_token),
+        )
+        transport_attempt = transport_plan.attempts[0]
+        use_ssh = transport_attempt.scheme == "ssh"
 
-        if dep_token:
+        if use_ssh:
+            ls_env = host._build_noninteractive_git_env()
+            from ..core.auth import AuthResolver
+
+            AuthResolver._clear_git_auth_env(ls_env)
+            ls_env.pop("GIT_ASKPASS", None)
+        elif dep_token and transport_attempt.use_token:
             if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
                 ls_env = dep_auth_ctx.git_env
             else:
@@ -147,10 +172,10 @@ class GitReferenceResolver:
 
         remote_url = host._build_repo_url(
             repo_url_base,
-            use_ssh=False,
+            use_ssh=use_ssh,
             dep_ref=dep_ref,
-            token=dep_token,
-            auth_scheme=dep_auth_scheme,
+            token=None if use_ssh else (dep_token if transport_attempt.use_token else None),
+            auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
         )
 
         # Route through the github_downloader module so that test patches
@@ -189,7 +214,13 @@ class GitReferenceResolver:
                 return False
             return is_ado_auth_failure_signal(str(outcome[1]))
 
-        ado_eligible = is_ado and dep_auth_scheme == "basic" and dep_token is not None
+        ado_eligible = (
+            is_ado
+            and not use_ssh
+            and transport_attempt.use_token
+            and dep_auth_scheme == "basic"
+            and dep_token is not None
+        )
 
         if ado_eligible:
             fb = host.auth_resolver.execute_with_bearer_fallback(
@@ -288,7 +319,8 @@ class GitReferenceResolver:
             headers["Authorization"] = f"token {token}"
 
         try:
-            response = host._resilient_get(api_url, headers=headers, timeout=10)
+            # L2/L3 own fallback, so this optional metadata tier gets one total attempt.
+            response = host._resilient_get(api_url, headers=headers, timeout=10, max_retries=1)
             if response.status_code != 200:
                 return None
             body = (response.text or "").strip()

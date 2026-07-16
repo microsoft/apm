@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
+from apm_cli.deps.transport_selection import ProtocolPreference
 from apm_cli.install.helpers.ref_reuse import resolve_dep_auth
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
@@ -30,13 +31,20 @@ def _semver_dep(repo_url: str, virtual_path: str) -> DependencyReference:
     )
 
 
+def _ado_semver_dep() -> DependencyReference:
+    """Return a production-shaped ADO semver reference."""
+    dep = DependencyReference.parse("https://dev.azure.com/example/project/_git/package#^1.0.0")
+    dep.source = "git"
+    return dep
+
+
 def _patched_resolver_env():
     """Patch RefResolver (counting ctor) + GitSemverResolver (no-op resolve)."""
     made = []
 
     class _FakeRefResolver:
-        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
-            made.append((host, token, auth_scheme))
+        def __init__(self, *, host=None, token=None, auth_scheme="basic", **kwargs):
+            made.append((host, token, auth_scheme, kwargs))
 
     fake_semver = MagicMock()
     fake_semver.return_value.resolve.return_value = "RESOLUTION"
@@ -105,12 +113,12 @@ def test_concurrent_same_repo_deps_share_one_resolver_under_lock():
     errors_lock = threading.Lock()
 
     class _SlowFakeRefResolver:
-        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
+        def __init__(self, *, host=None, token=None, auth_scheme="basic", **kwargs):
             # Small delay to widen the construction window. With a working
             # lock only one thread ever reaches here; without it, several
             # would slip in during this sleep and append multiple entries.
             time.sleep(0.02)
-            made.append((host, token, auth_scheme))
+            made.append((host, token, auth_scheme, kwargs))
 
     fake_semver = MagicMock()
     fake_semver.return_value.resolve.return_value = "R"
@@ -182,6 +190,87 @@ def test_distinct_hosts_get_distinct_resolvers():
     assert len(cache) == 2
 
 
+def test_semver_resolution_propagates_prefer_ssh_to_ref_resolver():
+    """The canonical transport selector must drive semver tag enumeration."""
+    made, fake_ref, fake_semver = _patched_resolver_env()
+    dep = _semver_dep("owner/repo", "packages/a")
+
+    with (
+        patch("apm_cli.marketplace.ref_resolver.RefResolver", fake_ref),
+        patch("apm_cli.deps.git_semver_resolver.GitSemverResolver", fake_semver),
+    ):
+        _maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=None,
+            update_refs=False,
+            protocol_pref=ProtocolPreference.SSH,
+        )
+
+    assert len(made) == 1
+    assert made[0][3]["transport_scheme"] == "ssh"
+
+
+def test_https_semver_resolution_preserves_custom_port():
+    """Custom HTTPS ports must survive the shared RefResolver boundary."""
+    made, fake_ref, fake_semver = _patched_resolver_env()
+    dep = DependencyReference(
+        repo_url="owner/repo",
+        host="git.example.com",
+        port=8443,
+        explicit_scheme="https",
+        reference="^1.0.0",
+    )
+
+    with (
+        patch("apm_cli.marketplace.ref_resolver.RefResolver", fake_ref),
+        patch("apm_cli.deps.git_semver_resolver.GitSemverResolver", fake_semver),
+    ):
+        _maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=None,
+            update_refs=False,
+        )
+
+    assert len(made) == 1
+    assert made[0][3]["port"] == 8443
+
+
+def test_cache_separates_transport_identity_for_same_host_and_token():
+    """Scheme, SSH user, and port must each select a distinct resolver."""
+    from apm_cli.install.helpers.ref_reuse import get_shared_ref_resolver
+
+    class _FakeRefResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    cache: dict = {}
+    with patch("apm_cli.marketplace.ref_resolver.RefResolver", _FakeRefResolver):
+        https = get_shared_ref_resolver("github.com", "token", cache)
+        ssh = get_shared_ref_resolver(
+            "github.com",
+            "token",
+            cache,
+            transport_scheme="ssh",
+        )
+        ssh_port = get_shared_ref_resolver(
+            "github.com",
+            "token",
+            cache,
+            transport_scheme="ssh",
+            port=2222,
+        )
+        ssh_user = get_shared_ref_resolver(
+            "github.com",
+            "token",
+            cache,
+            transport_scheme="ssh",
+            ssh_user="deploy",
+        )
+
+    assert len({id(https), id(ssh), id(ssh_port), id(ssh_user)}) == 4
+    assert len(cache) == 4
+
+
 def test_cache_key_does_not_contain_raw_token():
     """The raw PAT must never appear in a cache key (leak prevention)."""
     from apm_cli.install.helpers.ref_reuse import get_shared_ref_resolver
@@ -247,13 +336,7 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
         )
 
     deps = [
-        DependencyReference(
-            host="dev.azure.com",
-            repo_url="example/project/_git/package",
-            reference="^1.0.0",
-            source="git",
-            explicit_scheme="https",
-        ),
+        _ado_semver_dep(),
         DependencyReference(
             host="github.com",
             repo_url="example/package",
@@ -307,13 +390,7 @@ def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
         def resolve_for_dep(self, dep_ref):
             return SimpleNamespace(token="", auth_scheme="bearer")
 
-    dep = DependencyReference(
-        host="dev.azure.com",
-        repo_url="example/project/_git/package",
-        reference="^1.0.0",
-        source="git",
-        explicit_scheme="https",
-    )
+    dep = _ado_semver_dep()
 
     assert resolve_dep_auth(dep, _NoTokenBearerResolver()) == (None, "basic", None)
     assert resolve_dep_auth(dep, _EmptyTokenBearerResolver()) == (None, "basic", None)
@@ -331,13 +408,7 @@ def test_resolve_dep_auth_preserves_sanitized_git_environment():
                 git_env=sanitized,
             )
 
-    dep = DependencyReference(
-        host="dev.azure.com",
-        repo_url="example/project/_git/package",
-        reference="^1.0.0",
-        source="git",
-        explicit_scheme="https",
-    )
+    dep = _ado_semver_dep()
 
     assert resolve_dep_auth(dep, _Resolver()) == ("pat", "basic", sanitized)
 
@@ -381,13 +452,7 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
             stderr="fatal: The requested URL returned error: 401",
         )
 
-    dep = DependencyReference(
-        host="dev.azure.com",
-        repo_url="example/project/_git/package",
-        reference="^1.0.0",
-        source="git",
-        explicit_scheme="https",
-    )
+    dep = _ado_semver_dep()
 
     with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
         resolution = _maybe_resolve_git_semver(

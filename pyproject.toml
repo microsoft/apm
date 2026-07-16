@@ -53,6 +53,7 @@ dev = [
     "jsonschema>=4.0.0",
     "pylint>=3.0.0",
     "hypothesis>=6.0.0",
+    "mutmut==3.6.0",
 ]
 build = [
     "pyinstaller>=6.0.0",
@@ -160,8 +161,41 @@ exclude_lines = [
     "@overload",
 ]
 
+[tool.mutmut]
+source_paths = ["src/"]
+only_mutate = [
+    "src/apm_cli/models/dependency/subsets.py",
+    "src/apm_cli/install/plan.py",
+    "src/apm_cli/policy/discovery.py",
+    "src/apm_cli/compilation/link_resolver.py",
+    "src/apm_cli/deps/lockfile.py",
+]
+pytest_add_cli_args = [
+    "-n0",
+    "-p",
+    "no:cacheprovider",
+    "-o",
+    "addopts=",
+]
+pytest_add_cli_args_test_selection = [
+    "tests/unit/test_skill_subset_persistence.py",
+    "tests/unit/test_dep_targets_persistence.py",
+    "tests/unit/install/test_plan.py",
+    "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_covers_every_dataclass_leaf",
+    "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
+    "tests/unit/policy/test_cache_merged_effective.py::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip",
+    "tests/unit/compilation/test_link_resolver.py",
+    "tests/unit/compilation/test_link_resolver_phase3.py",
+    "tests/unit/compilation/test_link_resolver_resolution.py",
+    "tests/unit/deps/test_lockfile_field_properties.py",
+]
+timeout_constant = 1.0
+timeout_multiplier = 5.0
+use_setproctitle = false
+
 [tool.pytest.ini_options]
-addopts = "-m 'not benchmark and not live'"
+addopts = "-m 'not benchmark and not live' --strict-markers"
+testpaths = ["tests"]
 markers = [
     "unit: pure logic with no filesystem and no CLI",
     "component: in-process behavior that touches a filesystem or one command boundary",
@@ -170,6 +204,7 @@ markers = [
     "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
+    "windows_compat: load-bearing cross-platform regression contract family (CRLF-safe atomic writes, portable path formatting, git-executable resolution, socket/thread shutdown); runs on every OS and is additionally selected by the PR-time Windows Compatibility Gate -- NOT a requires_windows skip-gate, do not use requires_windows for this",
     "requires_e2e_mode: requires APM_E2E_TESTS=1",
     "requires_github_token: requires GITHUB_APM_PAT or GITHUB_TOKEN",
     "requires_ado_pat: requires ADO_APM_PAT",
@@ -182,4 +217,5 @@ markers = [
     "requires_runtime_llm: requires llm runtime installed",
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
+    "lifecycle_smoke: promoted to the required PR-time Lifecycle Smoke (Linux) job -- see ci.yml's lifecycle-smoke job and docs/src/content/docs/contributing/integration-testing.md",
 ]

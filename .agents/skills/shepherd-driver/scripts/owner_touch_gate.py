@@ -8,6 +8,7 @@ import fnmatch
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -25,6 +26,27 @@ OWNER_CLASSIFICATIONS = {
     "new-owner",
     "split-authority-repair",
 }
+
+# Cached, PATH-resolved git executable. This script ships as a
+# standalone, portable APM skill artifact (see packages/shepherd-driver)
+# and must not depend on the main repo's apm_cli package being
+# importable, so it resolves git itself rather than reusing
+# apm_cli.utils.git_env.get_git_executable(). A bare "git" argv does
+# not reliably resolve on Windows (CreateProcess with shell=False does
+# not perform a PATH search for extension-less names), which raised
+# FileNotFoundError: [WinError 2] (see microsoft/apm#2233).
+_GIT_EXECUTABLE: str | None = None
+
+
+def _git_executable() -> str:
+    """Return the cached, fully-resolved path to the git executable."""
+    global _GIT_EXECUTABLE
+    if _GIT_EXECUTABLE is None:
+        resolved = shutil.which("git")
+        if resolved is None:
+            raise GateError("git executable not found on PATH")
+        _GIT_EXECUTABLE = resolved
+    return _GIT_EXECUTABLE
 
 
 class GateError(RuntimeError):
@@ -50,8 +72,8 @@ def _git(repo_root: Path, *args: str, text: Literal[False]) -> bytes: ...
 
 def _git(repo_root: Path, *args: str, text: bool = True) -> str | bytes:
     """Run git in repo_root and return stdout, raising GateError on failure."""
-    command = ["git", "-C", str(repo_root), *args]
-    completed = subprocess.run(  # noqa: S603 - fixed git executable, no shell
+    command = [_git_executable(), "-C", str(repo_root), *args]
+    completed = subprocess.run(  # noqa: S603 - fixed, PATH-resolved git executable, no shell
         command,
         check=False,
         capture_output=True,

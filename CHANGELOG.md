@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Pull requests now run a ~65-70s hermetic `Lifecycle Smoke (Linux)` check,
+  selected declaratively via a registered `lifecycle_smoke` pytest marker,
+  that validates core install, lock-convergence, policy-enforcement, and
+  prune-time hook-reconciliation contracts at PR time instead of only in
+  the merge queue -- no network, credentials, or built binary required
+  (#2247).
 - Object-form Git dependencies now reject unsupported keys instead of silently
   ignoring them; use `ref` rather than `version`, and omit inert `name` fields
   from `git: parent`. CI audit also rejects full-SHA pins whose
@@ -24,9 +30,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands so user-scope hook JSON resolves from any working directory, while
   project-scope Copilot hooks remain repo-relative for portability -- by
   @danielmeppiel (closes #2232; #2236).
+- `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
+  merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
+  dropped from a project's `targets:` list -- the hook wipe is now scoped to
+  the same resolved target set the rebuild step repopulates, so a narrowed
+  `targets:` no longer silently deletes a sibling package's hooks (and its
+  `apm-hooks.json` sidecar) in the now-undeclared harness. (closes #2250)
+- `apm prune` no longer leaves stale, executable hook entries behind for a
+  removed package: it now reconciles merged hook ownership when it removes
+  an orphaned package, clearing entries it contributed to
+  `.claude/settings.json`, `.cursor/hooks.json`, and similar merge targets
+  (plus their `apm-hooks.json` ownership sidecars), while sibling packages'
+  and manually authored entries are preserved. (closes #2245)
+- Four classes of Windows-only CI failures (CRLF baseline drift in JSON
+  reports, backslash-path authority-check diagnostics, bare-`git`-argv
+  subprocess resolution, and a WebSocket shutdown race) no longer slip
+  through Linux-only PR CI; each is now fixed under its canonical owner
+  (`atomic_write_text`, `.as_posix()`, `get_git_executable()`, a narrow
+  platform-scoped shutdown guard). (closes #2233; #2237)
+- `apm update` now automatically repairs a locked dependency whose
+  materialized `apm_modules` cache is wholly absent -- including local
+  filesystem dependencies -- without prompting for ref-change consent or
+  changing any resolved refs. (#2240)
+- Best-effort commits API lookups now fall through promptly to Git when
+  rate-limited, avoiding multi-minute dependency resolution stalls -- by
+  @danielmeppiel (#2238).
+- Azure DevOps dependencies now report real latest versions in `apm outdated`
+  and resolve correctly during bounded `apm update`, deriving transport
+  coordinates from generic `host` and `repo_url` identity without
+  provider-specific lock fields. (closes #2197; #2226)
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
   canonical serialization, and last-good bytes after malformed refreshes. (#2235)
+- Fix #2184: Git-source semver ranges now honor explicit SSH and `prefer-ssh`
+  during tag enumeration instead of invoking HTTPS -- by @danielmeppiel
+  (#2229).
 - Codex agent generation now warns when `.agent.md` `tools` restrictions cannot
   be preserved, instead of silently widening effective MCP access;
   `openapm-v0.1.md` now requires semantic preservation or a default-visible
@@ -77,6 +115,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   
 ### Added
 
+- A focused Windows Compatibility Gate now runs at PR time on the
+  cross-platform contract test family, so Windows-only regressions are
+  caught before merge instead of surfacing only in the post-merge
+  `main` build. (#2233, #2237)
 - Corporate proxy and internal-CA users can now use Python-based APM HTTPS paths
   without per-shell TLS setup. APM verifies against the OS trust store through
   `truststore` for `apm install`, the Python `llm` child runtime, and the frozen

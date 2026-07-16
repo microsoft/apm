@@ -150,6 +150,11 @@ What this means for contributors:
 
 - You don't need to keep your branch up to date with `main` manually.
 - The fast unit + build checks (Tier 1) run on every push to your PR.
+- A hermetic ~65-70s Lifecycle Smoke check also runs on every push, validating
+  core install/lock-convergence/policy-enforcement contracts via a declarative
+  `lifecycle_smoke` pytest marker -- no network, credentials, or built binary
+  required, so you get real regression feedback before the queue instead of
+  only after.
 - The full integration suite (Tier 2) only runs once your PR is in the queue,
   not on every WIP push.
 
@@ -198,6 +203,54 @@ uv run pytest tests/unit -x -v
 ```
 
 Tests run in parallel automatically (`-n auto` is configured in `pyproject.toml`). To force serial execution, add `-n0`.
+
+### Running the bounded mutation pilot
+
+The advisory mutation pilot checks five stable owners: dependency subset
+selection, update-plan construction, cached-policy serialization, canonical
+in-package link projection, and lockfile field normalization (the fail-closed
+`host_type`/`exec_status` normalizers, not the `@dataclass` reconstruction
+methods `to_dict`/`from_dict`/`to_dependency_ref` -- mutmut cannot mutate
+`@dataclass` methods; those are defended by PR #2246's manual mutation-break
+twins instead). It is intentionally separate from
+required PR CI and runs nightly or by manual workflow dispatch with a
+20-minute job budget.
+
+Run the same exact-function allowlist locally:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --output mutation-pilot-report.json
+```
+
+The command exits nonzero for a new survivor, timeout, suspicious result,
+unchecked mutant, or any other incomplete outcome. It writes a sorted,
+timestamp-free JSON report even when the survivor comparison fails. Reuse the
+`mutants/` cache only when the source, test seams, configuration, runner, and
+lockfile are unchanged:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --reuse-cache --output mutation-pilot-report.json
+```
+
+To inspect existing mutmut metadata without executing mutants:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --report-only --output mutation-pilot-report.json
+```
+
+The accepted survivor allowlist is
+[`tests/mutation/baseline.json`](tests/mutation/baseline.json). Do not update it
+to make a run green. Review every surviving diff with `mutmut show`, add a
+behavioral test for real contract gaps, and use `--update-baseline` only for a
+reviewed baseline change.
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --update-baseline --output mutation-pilot-report.json
+```
 
 If you don't have `uv` available, you can use a standard Python venv and pip:
 

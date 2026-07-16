@@ -1,0 +1,106 @@
+{
+  "owners": {
+    "link-projection": {
+      "accepted_survivors": [],
+      "functions": [
+        "UnifiedLinkResolver._resolve_in_package_asset_link"
+      ],
+      "source": "src/apm_cli/compilation/link_resolver.py",
+      "test_seams": [
+        "tests/unit/compilation/test_link_resolver.py",
+        "tests/unit/compilation/test_link_resolver_phase3.py",
+        "tests/unit/compilation/test_link_resolver_resolution.py"
+      ]
+    },
+    "lockfile-normalization": {
+      "accepted_survivors": [
+        "apm_cli.deps.lockfile._normalize_exec_status__mutmut_12",
+        "apm_cli.deps.lockfile._normalize_lockfile_host_type__mutmut_13"
+      ],
+      "functions": [
+        "_normalize_lockfile_host_type",
+        "_normalize_exec_status"
+      ],
+      "source": "src/apm_cli/deps/lockfile.py",
+      "test_seams": [
+        "tests/unit/deps/test_lockfile_field_properties.py"
+      ]
+    },
+    "policy-serialization": {
+      "accepted_survivors": [],
+      "functions": [
+        "_policy_to_dict"
+      ],
+      "source": "src/apm_cli/policy/discovery.py",
+      "test_seams": [
+        "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_covers_every_dataclass_leaf",
+        "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
+        "tests/unit/policy/test_cache_merged_effective.py::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip"
+      ]
+    },
+    "subset-selection": {
+      "accepted_survivors": [
+        "apm_cli.models.dependency.subsets._levenshtein_distance__mutmut_9",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_10",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_17",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_18",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_2",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_22",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_24",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_25",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_26",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_3",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_4",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_7",
+        "apm_cli.models.dependency.subsets.parse_skill_subset__mutmut_9",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_10",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_2",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_21",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_22",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_3",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_33",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_36",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_4",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_7",
+        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_9"
+      ],
+      "functions": [
+        "skill_subset_filter_tokens",
+        "parse_skill_subset",
+        "parse_target_subset",
+        "_closest_target",
+        "_levenshtein_distance"
+      ],
+      "source": "src/apm_cli/models/dependency/subsets.py",
+      "test_seams": [
+        "tests/unit/test_skill_subset_persistence.py",
+        "tests/unit/test_dep_targets_persistence.py"
+      ]
+    },
+    "update-plan": {
+      "accepted_survivors": [
+        "apm_cli.install.plan.build_update_plan__mutmut_118",
+        "apm_cli.install.plan.build_update_plan__mutmut_139",
+        "apm_cli.install.plan.build_update_plan__mutmut_147",
+        "apm_cli.install.plan.build_update_plan__mutmut_149",
+        "apm_cli.install.plan.build_update_plan__mutmut_150",
+        "apm_cli.install.plan.build_update_plan__mutmut_151",
+        "apm_cli.install.plan.build_update_plan__mutmut_23",
+        "apm_cli.install.plan.build_update_plan__mutmut_42",
+        "apm_cli.install.plan.build_update_plan__mutmut_94"
+      ],
+      "functions": [
+        "build_update_plan"
+      ],
+      "source": "src/apm_cli/install/plan.py",
+      "test_seams": [
+        "tests/unit/install/test_plan.py"
+      ]
+    }
+  },
+  "schema_version": 1,
+  "tool": {
+    "name": "mutmut",
+    "version": "3.6.0"
+  }
+}

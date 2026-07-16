@@ -53,6 +53,7 @@ ENV/
 .coverage_*.json
 coverage*.json
 htmlcov/
+mutants/
 .tox/
 .pytest_cache/
 .mypy_cache/

@@ -33,6 +33,20 @@ APM uses a tiered approach to integration testing:
 - **Duration**: ~10-15 minutes per platform (with 20-minute timeout)  
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
+### 3. **Lifecycle Smoke** (PR-time required check)
+- **Location**: selected declaratively via the registered `lifecycle_smoke` pytest marker, applied to all of `tests/integration/test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py` (module-level), to only `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner` (function-level -- the file's other tests are not part of this family), and to only the `[claude]` parametrization of `test_prune_hook_reconciliation_e2e.py::test_prune_removes_merged_hook_entries_and_sidecar` (the sibling `[cursor]` parametrization is deliberately excluded)
+- **Purpose**: Promote the smallest stable, hermetic slice of the real Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so a regression in install/lock/audit convergence, ADO lock-coordinate handling, or prune-time hook reconciliation fails the PR instead of only surfacing once a change reaches the merge queue
+- **Scope**: install content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill lock convergence, the virtual/manifestless lifecycle matrix, the ADO lock-coordinate ownership guard, and prune's merged-hook/sidecar reconciliation -- no built binary, no network, no credentials
+- **Duration**: ~65-70s job wall time (hard 3-minute timeout)
+- **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
+- **Selection mechanism**: `pytest --strict-markers -m lifecycle_smoke tests/integration` -- declarative, not an explicit file/node-id list. If every `@pytest.mark.lifecycle_smoke` mark were ever removed, the marker family collects zero tests and pytest exits code 5 ("no tests collected"), failing the job loudly rather than silently shrinking. The marker is registered in `pyproject.toml`'s `[tool.pytest.ini_options]` markers list; `--strict-markers` rejects any typo'd or unregistered mark used as a decorator.
+- **Drift guard**: `tests/quality/test_ci_topology.py` pins the marker's registration, the command's use of `--strict-markers`/`-m lifecycle_smoke`/the bounded `tests/integration` root, hermeticity (no credentials at job- or step-level `env`, no credential expressions in `run:`/`with:`), required-check membership, and that the marker family collects a non-empty set of tests right now -- editing the job without updating that guard fails CI
+- **Run it locally** (the exact command CI runs):
+  ```bash
+  uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+    -m lifecycle_smoke tests/integration
+  ```
+
 ## Running Tests Locally
 
 Integration tests live under `tests/integration/` and run via `pytest`
@@ -73,9 +87,14 @@ Pytest markers compose across independent axes:
 | Behavioral | What boundary does the test cross? | `unit`, `component`, `e2e` |
 | Scheduling | When is the test selected? | `integration`, `slow`, `benchmark`, `live` |
 | Prerequisite | What environment must exist? | `requires_*` |
+| CI-selection | Is this test part of a named required CI gate? | `lifecycle_smoke` |
 
 `live` is both an opt-in scheduling marker and an external-service
 prerequisite. Behavioral markers do not replace prerequisite markers.
+`lifecycle_smoke` is orthogonal to all three: it does not describe a
+test's boundary, scheduling, or precondition, only that
+`ci.yml`'s required `lifecycle-smoke` job selects it via
+`-m lifecycle_smoke` (see Tier 3 above for the full rationale).
 
 The behavioral definitions are:
 
@@ -248,7 +267,7 @@ environment end-to-end; for local iteration prefer the direct
 ### GitHub Actions Workflow
 
 **On PR and merge queue:**
-1. PR-time unit checks run first; merge queue adds Linux smoke, integration, and release-validation gates.
+1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
 **On version tag releases:**
 1. Unit tests + Smoke tests
@@ -325,6 +344,15 @@ Promotion integration tests run on:
 - ✅ Binary artifacts work across platforms
 - ✅ Release pipeline integrity (GitHub Release → PyPI)
 
+### Lifecycle Smoke Verifies:
+- Install content-hash roundtrip (Consume contract)
+- Virtual-skill lock convergence (Produce contract, adjacent to the #2226 ADO lock-coordinate fix)
+- Policy pinned-constraint enforcement (Govern contract)
+- The virtual/manifestless lifecycle matrix: install, lock, frozen-install, update, and audit stay consistent (the direct #2240 regression)
+- The ADO lock-coordinate single-owner guard (the direct #2226 regression)
+- Prune's merged-hook and ownership-sidecar reconciliation for the `claude` target (the direct #2249 regression -- an orphaned package's merged hook entries and sidecar markers must be cleaned up, not left pointing at deleted scripts)
+- No network, no credentials, no built binary required for any of the above
+
 ## Benefits
 
 ### **Speed vs Confidence Balance**
@@ -361,6 +389,11 @@ Promotion integration tests run on:
 - Check GitHub Models API availability
 - Review actual vs expected output
 - Test locally with same environment
+
+### Lifecycle Smoke Failures
+- These tests are hermetic -- no credentials, no built binary, no network (a real socket attempt raises `OSError`, it does not hang or retry). A failure is a genuine regression, not an environment issue.
+- Run the exact CI command from the "Run it locally" block under Tier 3 above to reproduce.
+- If the failure is about the CI job's shape (marker not registered, wrong `-m`/`--strict-markers` invocation, unbounded root, timeout, empty marker family, or required-check wiring) rather than test logic, check `tests/quality/test_ci_topology.py` -- that guard pins the job's contract and its own failure message will point at what drifted.
 - For hanging issues: Check command transformation in script runner (codex expects prompt content, not file paths)
 
 ## Adding New Tests

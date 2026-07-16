@@ -13,6 +13,10 @@ path = "tests/unit/deps/test_lockfile_consumer_contract.py"
 marker = "unit"
 
 [[modules]]
+path = "tests/unit/deps/test_lockfile_field_properties.py"
+marker = "unit"
+
+[[modules]]
 path = "tests/integration/test_install_content_hash_roundtrip.py"
 marker = "component"
 
@@ -55,3 +59,10 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_virtual_claude_skill_lock_convergence.py"
 marker = "component"
+
+[[modules]]
+path = "tests/integration/test_ssh_semver_transport_contract.py"
+marker = "e2e"
+[[modules]]
+path = "tests/integration/test_ado_lock_consumer_contract.py"
+marker = "e2e"
