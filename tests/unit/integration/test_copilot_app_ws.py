@@ -84,6 +84,8 @@ class _Server:
 
         with contextlib.suppress(Exception):
             self._server.shutdown()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
 
 
 @pytest.fixture
@@ -103,6 +105,17 @@ def _write_creds(run_dir: Path, port: int, token: str) -> None:
     # token file -- the production module refuses to read a token
     # that is group/other-readable (see _token_file_mode_ok).
     os.chmod(token_path, 0o600)
+
+
+def test_server_context_joins_serve_forever_thread() -> None:
+    def handler(websocket):
+        websocket.recv()
+
+    with _Server(handler) as srv:
+        thread = srv._thread
+        assert thread is not None
+
+    assert not thread.is_alive()
 
 
 # ---------------------------------------------------------------------------

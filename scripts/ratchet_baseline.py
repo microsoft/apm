@@ -62,10 +62,8 @@ def write_baseline(
     """Atomically write canonical sorted JSON."""
     temporary = path.with_name(f".{path.name}.tmp")
     try:
-        temporary.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        temporary.write_bytes(content.encode("utf-8"))
         temporary.replace(path)
     except OSError as error:
         temporary.unlink(missing_ok=True)
