@@ -28,8 +28,9 @@ class ProviderCoordinateMixin:
         canonical = self.canonical_ado_coordinates(self.host, self.repo_url)
         if supplied != canonical:
             raise ValueError(
-                "Incomplete or mismatched Azure DevOps reference coordinates. Re-add the "
-                "dependency with the original Azure DevOps URL to regenerate its state."
+                f"Incomplete or mismatched Azure DevOps reference coordinates for "
+                f"{self.repo_url}. Re-add the dependency with the original Azure DevOps URL "
+                "to regenerate its state."
             )
 
     @staticmethod

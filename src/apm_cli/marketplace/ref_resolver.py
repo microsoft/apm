@@ -72,7 +72,7 @@ def _ado_coordinates_from_owner_repo(
             except ValueError:
                 pass
         raise GitLsRemoteError(
-            package="",
+            package=owner_repo,
             summary="Azure DevOps resolution requires org/project/repo coordinates.",
             hint=(
                 "Re-add the dependency with the original Azure DevOps URL "
@@ -297,7 +297,7 @@ class RefResolver:
                 or parsed_remote.fragment
             ):
                 raise GitLsRemoteError(
-                    package="",
+                    package=owner_repo,
                     summary=(
                         "The canonical remote URL does not match the configured host "
                         "or Azure DevOps dependency coordinates."

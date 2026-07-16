@@ -237,12 +237,13 @@ class TestRefResolver:
         """Credentials never flow to an unsafe caller-supplied URL."""
         resolver = RefResolver(timeout_seconds=5.0, host="dev.azure.com")
 
-        with pytest.raises(GitLsRemoteError, match="dependency coordinates"):
+        with pytest.raises(GitLsRemoteError, match="dependency coordinates") as exc_info:
             resolver.list_remote_refs(
                 "apm-org/apm-project/consume-contract",
                 remote_url=remote_url,
             )
 
+        assert exc_info.value.package == "apm-org/apm-project/consume-contract"
         mock_run.assert_not_called()
         resolver.close()
 
