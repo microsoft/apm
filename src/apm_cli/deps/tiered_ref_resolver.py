@@ -154,9 +154,10 @@ class L1CommitsAPI:
     Delegates to :meth:`GitReferenceResolver.resolve_commit_sha_for_ref` --
     the cheap-path helper that already dispatches through
     ``host_backends.build_commits_api_url`` and ``host._resilient_get``,
-    inheriting that helper's auth + retry behavior. Returns ``None`` for
-    hosts whose backend has no cheap commits endpoint (e.g. ADO today);
-    the caller then falls through to L2/L3.
+    inheriting that helper's auth behavior. The optional metadata lookup
+    makes one HTTP attempt so rate limiting cannot delay L2/L3 fallback.
+    Returns ``None`` for hosts whose backend has no cheap commits endpoint
+    (e.g. ADO today); the caller then falls through to L2/L3.
 
     Future: an explicit :class:`HttpCache` ETag pass could be added here
     for unauthenticated requests (the underlying helper does not yet

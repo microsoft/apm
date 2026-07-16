@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Best-effort commits API lookups now fall through promptly to Git when
+  rate-limited, avoiding multi-minute dependency resolution stalls -- by
+  @danielmeppiel (#2238).
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
   canonical serialization, and last-good bytes after malformed refreshes. (#2235)

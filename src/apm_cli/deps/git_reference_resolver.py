@@ -319,6 +319,7 @@ class GitReferenceResolver:
             headers["Authorization"] = f"token {token}"
 
         try:
+            # L2/L3 own fallback, so this optional metadata tier gets one total attempt.
             response = host._resilient_get(api_url, headers=headers, timeout=10, max_retries=1)
             if response.status_code != 200:
                 return None

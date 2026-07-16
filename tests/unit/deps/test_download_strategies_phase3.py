@@ -227,15 +227,22 @@ class TestResilientGet:
         assert result is forbidden_resp
         assert mock_get.call_count == 1
 
-    def test_rate_limit_exhausts_retries_returns_last_response(self) -> None:
+    def test_rate_limit_exhausts_retries_returns_last_response(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """If every attempt is rate-limited, the last rate-limit response is returned."""
         rate_resp = _fake_response(429, b"rate", headers={"Retry-After": "0.001"})
         with (
             patch("requests.get", return_value=rate_resp),
-            patch("time.sleep"),
+            patch("time.sleep") as mock_sleep,
+            patch.dict("os.environ", {"APM_DEBUG": "1"}),
         ):
             result = self.delegate.resilient_get("https://example.com", {}, max_retries=2)
         assert result is rate_resp
+        assert mock_sleep.call_count == 1
+        captured = capsys.readouterr()
+        assert captured.err.count("retry in") == 1
+        assert "no retries left (attempt 2/2)" in captured.err
 
     def test_retry_after_invalid_falls_back_to_backoff(self) -> None:
         """Non-numeric Retry-After header falls back to exponential back-off."""

@@ -134,7 +134,7 @@ class DownloadDelegate:
             url: Request URL
             headers: HTTP headers
             timeout: Request timeout in seconds
-            max_retries: Maximum retry attempts for transient failures
+            max_retries: Maximum total attempts, including the initial request
             stream: Whether to stream the response body instead of buffering it
 
         Returns:
@@ -177,13 +177,18 @@ class DownloadDelegate:
                             wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
                     else:
                         wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
-                    _debug(
-                        f"Rate limited ({response.status_code}), retry in "
-                        f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
-                    )
                     if attempt < max_retries - 1:
+                        _debug(
+                            f"Rate limited ({response.status_code}), retry in "
+                            f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
+                        )
                         _close_response(response, "rate-limit retry")
                         time.sleep(wait)
+                    else:
+                        _debug(
+                            f"Rate limited ({response.status_code}), no retries left "
+                            f"(attempt {attempt + 1}/{max_retries})"
+                        )
                     continue
 
                 # Log rate limit proximity
