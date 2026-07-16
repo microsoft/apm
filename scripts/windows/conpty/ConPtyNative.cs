@@ -172,6 +172,28 @@ namespace ApmConPty
         private volatile bool _outputClosed;
         private bool _disposed;
         private readonly ConcurrentQueue<string> _diagnostics = new ConcurrentQueue<string>();
+        private readonly object _inputWriteLock = new object();
+
+        // ConPTY, acting as the "far end" terminal for the attached child,
+        // issues a Device Status Report / cursor-position request (CSI 6n,
+        // i.e. ESC [ 6 n) as part of its own internal cursor bookkeeping.
+        // A *real* terminal emulator (Windows Terminal, conhost itself when
+        // run interactively, etc.) answers this transparently with
+        // ESC [ row ; col R. Nothing in the documented CreatePseudoConsole
+        // sample mentions this because samples that pipe output straight to
+        // another real console get the answer for free. A minimal reader
+        // like this one is *itself* the terminal emulator from ConPTY's
+        // point of view, so it must answer -- otherwise ConPTY's internal
+        // handshake stays parked and the child's own output/keystrokes never
+        // flow any further. (Confirmed independently by an unrelated ConPTY
+        // consumer hitting the identical symptom -- child output never
+        // arriving past the initial VT100 mode-set bytes on a GitHub
+        // Actions windows-latest runner -- root-caused to this exact
+        // missing handshake.) The reply content (row/col) is not
+        // load-bearing; ConPTY only needs proof of life from its peer.
+        private static readonly byte[] DsrCursorPositionRequest = Encoding.ASCII.GetBytes("\u001b[6n");
+        private static readonly byte[] DsrCursorPositionReply = Encoding.ASCII.GetBytes("\u001b[1;1R");
+        private readonly StringBuilder _dsrScanBuffer = new StringBuilder();
 
         public int ProcessId { get; private set; }
 
@@ -401,6 +423,7 @@ namespace ApmConPty
                     var text = Encoding.UTF8.GetString(buffer, 0, read);
                     _chunks.Enqueue(new ConPtyOutputChunk { TimestampUtc = DateTime.UtcNow, Text = text });
                     _chunkSignal.Set();
+                    RespondToDeviceStatusReportRequests(text);
                 }
             }
             catch (IOException ex)
@@ -419,6 +442,63 @@ namespace ApmConPty
                 _outputClosed = true;
                 _chunkSignal.Set();
                 _diagnostics.Enqueue("ReadLoop: thread exiting, _outputClosed=true");
+            }
+        }
+
+        /// <summary>
+        /// Scans newly-decoded output for a ConPTY Device Status Report /
+        /// cursor-position request (CSI 6n) and answers it on the input
+        /// side, exactly as a real terminal emulator would. Without this,
+        /// ConPTY's internal handshake with its "terminal" peer stays
+        /// unanswered and the attached child's output never progresses past
+        /// the initial mode-set bytes -- this was independently confirmed as
+        /// the root cause of an identical symptom in another minimal ConPTY
+        /// consumer. Kept append-only and bounded so a request split across
+        /// two Read() calls is still caught (the scan re-checks the last
+        /// few carried-over characters), while already-scanned text is not
+        /// rescanned or re-answered.
+        /// </summary>
+        private void RespondToDeviceStatusReportRequests(string newText)
+        {
+            string requestMarker = "\u001b[6n";
+            lock (_dsrScanBuffer)
+            {
+                _dsrScanBuffer.Append(newText);
+                // Only keep a small tail: enough to catch a request that
+                // straddles this chunk and the next one, no more (this
+                // buffer must never grow unbounded across a long session).
+                string combined = _dsrScanBuffer.ToString();
+                int fromIndex = 0;
+                int foundAt;
+                int responsesSent = 0;
+                while ((foundAt = combined.IndexOf(requestMarker, fromIndex, StringComparison.Ordinal)) >= 0)
+                {
+                    responsesSent++;
+                    fromIndex = foundAt + requestMarker.Length;
+                }
+                if (responsesSent > 0)
+                {
+                    lock (_inputWriteLock)
+                    {
+                        for (int i = 0; i < responsesSent; i++)
+                        {
+                            _inputWriter.Write(DsrCursorPositionReply, 0, DsrCursorPositionReply.Length);
+                        }
+                        _inputWriter.Flush();
+                    }
+                    _diagnostics.Enqueue(
+                        "ReadLoop: answered " + responsesSent
+                        + " ConPTY DSR(6) cursor-position request(s) with a synthetic reply");
+                }
+                // Trim the scan buffer down to at most (marker length - 1)
+                // trailing characters so a request split across reads is
+                // still detected, without retaining unbounded output text.
+                int keep = requestMarker.Length - 1;
+                if (combined.Length > keep)
+                {
+                    _dsrScanBuffer.Clear();
+                    _dsrScanBuffer.Append(combined.Substring(combined.Length - keep));
+                }
             }
         }
 
@@ -475,15 +555,21 @@ namespace ApmConPty
         public void WriteInput(string text)
         {
             var bytes = Encoding.UTF8.GetBytes(text);
-            _inputWriter.Write(bytes, 0, bytes.Length);
-            _inputWriter.Flush();
+            lock (_inputWriteLock)
+            {
+                _inputWriter.Write(bytes, 0, bytes.Length);
+                _inputWriter.Flush();
+            }
         }
 
         /// <summary>Writes a single raw byte (e.g. 0x03 for Ctrl+C) into input.</summary>
         public void WriteRawByte(byte value)
         {
-            _inputWriter.Write(new[] { value }, 0, 1);
-            _inputWriter.Flush();
+            lock (_inputWriteLock)
+            {
+                _inputWriter.Write(new[] { value }, 0, 1);
+                _inputWriter.Flush();
+            }
         }
 
         public bool WaitForExit(int timeoutMs, out int exitCode)
