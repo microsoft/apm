@@ -84,6 +84,10 @@ entries owned by a pruned package are removed, while entries owned by
 packages that remain declared -- and any manually authored entries -- are
 preserved and rewritten back. This orchestrates the same ownership-aware
 cleanup `apm uninstall` uses; it does not duplicate the filtering logic.
+Hook reconciliation is best-effort: a failure is logged as a warning but
+does not abort the run, since package and lockfile cleanup has already
+completed by that point. If reconciliation logs a warning, run `apm
+install` to rebuild hook configuration from the current dependency set.
 
 Notes:
 
@@ -105,6 +109,7 @@ Per-package removal failures are logged but do not abort the run; remaining orph
 ## Related
 
 - [`apm install`](../install/) -- install declared dependencies
+- [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
 - [`apm list`](../list/) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
 - [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where

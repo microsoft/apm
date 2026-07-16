@@ -1976,20 +1976,41 @@ class HookIntegrator(BaseIntegrator):
         dependency is logged and skipped rather than aborting the
         reconcile, consistent with prune's existing per-package
         error-tolerant semantics.
+
+        Known boundary (shared with uninstall, tracked in #2250):
+        rebuilds only direct dependencies from ``get_all_apm_dependencies()``
+        -- a transitive dependency's merged hooks are wiped by the clear
+        phase above but never re-integrated here.
         """
         from apm_cli.constants import APM_MODULES_DIR
         from apm_cli.models.apm_package import build_installed_package_info
 
         from .targets import resolve_targets
 
-        stats = self.sync_integration(apm_package, project_root, managed_files=set())
-
+        # Resolve targets and materialize the dependency list BEFORE the
+        # destructive wipe below. If either raises (malformed target
+        # config, bad dependency data), we abort with nothing written
+        # instead of committing a wipe we can never rebuild from -- a
+        # zero-hook window for every still-declared package would
+        # otherwise persist until the next `apm install`.
         config_target = list(apm_package.canonical_targets)
         targets = resolve_targets(
             project_root, user_scope=user_scope, explicit_target=config_target or None
         )
+        surviving_deps = list(apm_package.get_all_apm_dependencies())
 
-        for dep_ref in apm_package.get_all_apm_dependencies():
+        # Empty managed_files (not None) skips file-level deletion while
+        # still triggering the unconditional wipe of every _apm_source
+        # entry (and its ownership sidecar) across all KNOWN_TARGETS --
+        # see _clean_apm_entries_from_json. The narrower `targets` list
+        # resolved above is deliberately NOT passed here: doing so would
+        # make prune's wipe scope diverge from uninstall's identical
+        # call (both currently wipe all KNOWN_TARGETS by omitting
+        # targets=); that divergence is tracked as a shared-primitive
+        # fix in #2250, evaluated against all three callers together.
+        stats = self.sync_integration(apm_package, project_root, managed_files=set())
+
+        for dep_ref in surviving_deps:
             pkg_info = build_installed_package_info(dep_ref, project_root / APM_MODULES_DIR)
             if pkg_info is None:
                 continue

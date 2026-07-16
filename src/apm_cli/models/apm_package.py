@@ -776,7 +776,7 @@ class PackageInfo:
 
 def build_installed_package_info(
     dep_ref: DependencyReference, apm_modules_dir: Path
-) -> "PackageInfo | None":
+) -> PackageInfo | None:
     """Build a ``PackageInfo`` for a dependency that is still installed on disk.
 
     Shared by callers that re-integrate primitives from remaining

@@ -394,6 +394,10 @@ def test_prune_hook_reconciliation_failure_does_not_abort_package_removal(
     assert not (project / "apm_modules" / "acme" / "pkg-a").exists(), (
         "package removal must not be rolled back by a reconciliation failure"
     )
+    assert "Hook reconciliation failed" in prune_result.output, (
+        "a failed reconciliation must surface a user-visible diagnostic, not "
+        "fail silently -- users need to know hook entries may be stale"
+    )
 
 
 def test_prune_orchestration_call_is_load_bearing(
