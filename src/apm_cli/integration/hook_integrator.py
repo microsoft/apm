@@ -1132,6 +1132,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
+        user_scope: bool = False,
         dep_targets_active: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks from a package into hooks dir (Copilot target).
@@ -1145,6 +1146,7 @@ class HookIntegrator(BaseIntegrator):
             force: If True, overwrite user-authored files on collision
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
+            user_scope: If True, rewrite hook script commands to absolute paths
 
         Returns:
             HookIntegrationResult: Results of the integration operation
@@ -1171,6 +1173,7 @@ class HookIntegrator(BaseIntegrator):
         root_dir = target.root_dir if target else ".github"
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
+        deploy_root_for_rewrite = project_root if user_scope else None
 
         hooks_integrated = 0
         scripts_copied = 0
@@ -1192,6 +1195,7 @@ class HookIntegrator(BaseIntegrator):
                 "vscode",
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
+                deploy_root=deploy_root_for_rewrite,
             )
 
             # Generate target filename (clean, no -apm suffix)
@@ -1828,6 +1832,7 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+                user_scope=user_scope,
                 dep_targets_active=dep_targets_active,
             )
 

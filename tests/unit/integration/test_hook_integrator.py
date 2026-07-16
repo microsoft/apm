@@ -3017,7 +3017,7 @@ class TestScopeResolvedHookDeployment:
         script = hooks_dir / "run.sh"
         script.write_text("#!/bin/bash\necho test", encoding="utf-8")
         hooks_dir.joinpath("hooks.json").write_text(
-            json.dumps({"hooks": {"SessionStart": [{"type": "command", "command": "./run.sh"}]}}),
+            json.dumps({"hooks": {"sessionStart": [{"bash": "./run.sh"}]}}),
             encoding="utf-8",
         )
 
@@ -3035,6 +3035,46 @@ class TestScopeResolvedHookDeployment:
         scripts_dir = self.root / ".copilot" / "hooks" / "scripts" / "scope-pkg"
         assert scripts_dir.exists()
         assert (scripts_dir / "run.sh").exists()
+        hooks_config = json.loads(
+            (self.root / ".copilot" / "hooks" / "scope-pkg-hooks.json").read_text(encoding="utf-8")
+        )
+        cmd = hooks_config["hooks"]["sessionStart"][0]["bash"]
+        assert cmd == ".copilot/hooks/scripts/scope-pkg/run.sh", (
+            f"Project-scope Copilot command must be repo-relative; got {cmd!r}"
+        )
+        assert not Path(cmd).is_absolute(), (
+            f"Project-scope Copilot command must not be absolute; got {cmd!r}"
+        )
+
+    def test_copilot_user_scope_writes_absolute_hook_paths(self):
+        """Copilot user-scope hook commands must resolve from any cwd."""
+        hooks_dir = self.pkg_dir / ".apm" / "hooks"
+        script = hooks_dir / "run.sh"
+        script.write_text("#!/bin/bash\necho test", encoding="utf-8")
+        hooks_dir.joinpath("hooks.json").write_text(
+            json.dumps({"hooks": {"sessionStart": [{"bash": "./run.sh"}]}}),
+            encoding="utf-8",
+        )
+
+        copilot_target = self._make_target("copilot", ".copilot")
+        pi = _make_package_info(self.pkg_dir, "scope-pkg")
+        integrator = HookIntegrator()
+
+        integrator.integrate_hooks_for_target(
+            copilot_target,
+            pi,
+            self.root,
+            user_scope=True,
+        )
+
+        hooks_config = json.loads(
+            (self.root / ".copilot" / "hooks" / "scope-pkg-hooks.json").read_text(encoding="utf-8")
+        )
+        cmd = hooks_config["hooks"]["sessionStart"][0]["bash"]
+        assert Path(cmd).is_absolute(), f"User-scope Copilot command must be absolute; got {cmd!r}"
+        assert cmd == str(
+            (self.root / ".copilot" / "hooks" / "scripts" / "scope-pkg" / "run.sh").resolve()
+        )
 
     def test_sync_with_copilot_scope_prefix(self):
         """sync_integration removes .copilot/hooks/ files when target is present."""
