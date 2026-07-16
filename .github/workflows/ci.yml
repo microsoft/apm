@@ -85,6 +85,65 @@ jobs:
     - name: Lint - architecture authority boundaries
       run: bash scripts/lint-architecture-boundaries.sh
 
+  # Focused Windows compatibility gate -- runs at PR time (not just
+  # post-merge in build-release.yml) so the class of Windows-only
+  # regressions fixed here (CRLF text-mode writes, Windows path
+  # separators leaking into diagnostics, bare "git" argv resolution,
+  # and the websockets.sync shutdown race) is caught before merge
+  # instead of surfacing only in the post-merge full-matrix build (see
+  # microsoft/apm#2233). Deliberately narrow: selects the load-bearing
+  # cross-platform contract family declaratively via the `windows_compat`
+  # pytest marker (see pyproject.toml) rather than enumerating test
+  # files here -- adding a new Windows-relevant regression test only
+  # requires marking it, not editing this workflow. Not a full-suite
+  # duplicate: keeps PR-time cost bounded while still gating the exact
+  # defect class that slipped through Linux-only CI.
+  windows-compat-gate:
+    name: Windows Compatibility Gate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      run: uv sync --extra dev
+
+    - name: Diagnostics (platform, git, python)
+      run: |
+        python --version
+        python -c "import sys; print('platform:', sys.platform)"
+        git --version
+        where git
+
+    - name: Run cross-platform contract family
+      run: >-
+        uv run --extra dev pytest -p no:cacheprovider -v
+        -m windows_compat
+        tests/unit
+
+    - name: Diagnostics on failure
+      if: failure()
+      run: |
+        echo "::group::Environment"
+        Get-ChildItem Env: | Sort-Object Name
+        echo "::endgroup::"
+        echo "::group::git config"
+        git config --list --show-origin
+        echo "::endgroup::"
+
   test-architecture:
     name: Test Architecture Ratchets
     runs-on: ubuntu-24.04

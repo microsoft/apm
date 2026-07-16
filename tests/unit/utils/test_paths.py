@@ -14,7 +14,15 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.utils.paths import portable_relpath
+
+# Entire module: this is the canonical owner of platform-independent
+# relative-path formatting (microsoft/apm#2233's backslash-on-Windows
+# diagnostic class). Selected by the PR-time Windows Compatibility
+# Gate via `pytest -m windows_compat`; also runs on every other OS.
+pytestmark = pytest.mark.windows_compat
 
 
 class TestPortableRelpath:

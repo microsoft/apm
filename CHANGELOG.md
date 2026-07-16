@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.claude/settings.json`, `.cursor/hooks.json`, and similar merge targets
   (plus their `apm-hooks.json` ownership sidecars), while sibling packages'
   and manually authored entries are preserved. (closes #2245)
+- Four classes of Windows-only CI failures (CRLF baseline drift in JSON
+  reports, backslash-path authority-check diagnostics, bare-`git`-argv
+  subprocess resolution, and a WebSocket shutdown race) no longer slip
+  through Linux-only PR CI; each is now fixed under its canonical owner
+  (`atomic_write_text`, `.as_posix()`, `get_git_executable()`, a narrow
+  platform-scoped shutdown guard). (closes #2233; #2237)
 - `apm update` now automatically repairs a locked dependency whose
   materialized `apm_modules` cache is wholly absent -- including local
   filesystem dependencies -- without prompting for ref-change consent or
@@ -93,6 +99,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   
 ### Added
 
+- A focused Windows Compatibility Gate now runs at PR time on the
+  cross-platform contract test family, so Windows-only regressions are
+  caught before merge instead of surfacing only in the post-merge
+  `main` build. (#2233, #2237)
 - Corporate proxy and internal-CA users can now use Python-based APM HTTPS paths
   without per-shell TLS setup. APM verifies against the OS trust store through
   `truststore` for `apm install`, the Python `llm` child runtime, and the frozen

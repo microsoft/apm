@@ -126,7 +126,13 @@ jobs:
           # allocation latency on the critical path.
           # merge_group context: Coverage Combine IS required, so the
           # global 80% floor blocks the actual merge.
-          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),APM Self-Check,NOTICE Drift Check,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),APM Self-Check,NOTICE Drift Check' }}
+          # "Windows Compatibility Gate" is required at BOTH PR-time and
+          # merge-queue-time: it is the only Windows signal that runs
+          # before merge (build-release.yml's full Windows matrix only
+          # runs post-merge on push to main), so it must gate the class
+          # of Windows-only regressions fixed in microsoft/apm#2233
+          # rather than surfacing only after landing on main.
+          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check' }}
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
           # Integration (timeout 20m) -> Release Validation (timeout 20m).
           # Theoretical worst case ~50m; observed today ~5m end-to-end.

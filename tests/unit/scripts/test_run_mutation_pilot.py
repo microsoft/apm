@@ -389,6 +389,7 @@ def test_load_exit_codes_scopes_to_owner_patterns_and_decodes_exit_codes(
     assert scoped == {"apm_cli.install.plan.build_update_plan__mutmut_2": 0}
 
 
+@pytest.mark.windows_compat
 def test_write_report_is_deterministic_atomic_and_printable_ascii(
     pilot: ModuleType, tmp_path: Path
 ) -> None:
@@ -410,16 +411,20 @@ def test_write_report_is_deterministic_atomic_and_printable_ascii(
     assert not (report_path.parent / f".{report_path.name}.tmp").exists()
 
 
+@pytest.mark.windows_compat
 def test_write_report_preserves_existing_file_when_atomic_replace_fails(
     pilot: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     report_path = tmp_path / "report.json"
     report_path.write_text("previous\n", encoding="ascii")
 
-    def fail_replace(source: Path, target: Path) -> None:
+    def fail_replace(source: str, target: str) -> None:
         raise OSError("replace failed")
 
-    monkeypatch.setattr(pilot.Path, "replace", fail_replace)
+    # _write_report routes through the canonical apm_cli.utils.atomic_io
+    # atomic-write primitive, which performs its rename via os.replace
+    # (not Path.replace) -- patch the real call site.
+    monkeypatch.setattr("apm_cli.utils.atomic_io.os.replace", fail_replace)
 
     with pytest.raises(pilot.PilotError, match="failed to write mutation report"):
         pilot._write_report(report_path, {"status": "accepted"})

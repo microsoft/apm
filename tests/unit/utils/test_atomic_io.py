@@ -22,6 +22,12 @@ import pytest
 
 from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 
+# Entire module: this is the canonical owner of platform-independent
+# atomic/LF-safe text writes (microsoft/apm#2233 CRLF-drift class).
+# Selected by the PR-time Windows Compatibility Gate via
+# `pytest -m windows_compat`; also runs on every other OS.
+pytestmark = pytest.mark.windows_compat
+
 
 class TestAtomicWriteText:
     """Tests for atomic_write_text()."""
