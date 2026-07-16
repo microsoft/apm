@@ -334,6 +334,13 @@ function Initialize-LoopbackSshd {
         even if this function throws partway through (e.g. ACL lockdown
         failure after the service was already stopped) -- restorative
         cleanup must not depend on this function running to completion.
+
+        .PARAMETER RunnerUser
+        The real local Windows account name the SSH client will connect
+        as. Windows OpenSSH authenticates the SSH username against an
+        actual local account (there is no synthetic "git" system account
+        as on Linux git hosts), so AllowUsers and the client's connection
+        URL must both use this value, not a literal "git".
     #>
     param(
         [Parameter(Mandatory = $true)][string]$GitPath,
@@ -341,6 +348,7 @@ function Initialize-LoopbackSshd {
         [Parameter(Mandatory = $true)][string]$Root,
         [Parameter(Mandatory = $true)][int]$Port,
         [Parameter(Mandatory = $true)][string[]]$PublicKeyPaths,
+        [Parameter(Mandatory = $true)][string]$RunnerUser,
         [Parameter(Mandatory = $true)][ref]$StateOut
     )
     $sshdService = Get-Service -Name sshd -ErrorAction Stop
@@ -397,7 +405,7 @@ function Initialize-LoopbackSshd {
         throw "Failed to lock down administrators_authorized_keys ACL"
     }
 
-    $runnerUser = $env:USERNAME.ToLowerInvariant()
+    $runnerUser = $RunnerUser
     $sshdConfiguration = @"
 Port $Port
 ListenAddress 127.0.0.1
@@ -746,9 +754,11 @@ try {
     Write-Info "Plain key fingerprint:     $plainFingerprint"
 
     Write-Step "Configuring Windows OpenSSH server on loopback only (port $port)"
+    $runnerUser = $env:USERNAME.ToLowerInvariant()
     Initialize-LoopbackSshd `
         -GitPath $gitPath -BareRoot $bareRoot -Root $root -Port $port `
         -PublicKeyPaths @("$encryptedKey.pub", "$plainKey.pub") `
+        -RunnerUser $runnerUser `
         -StateOut ([ref]$sshdState) | Out-Null
 
     $keyscan = Invoke-Setup -FilePath $sshKeyscanPath -ArgumentList @("-p", [string]$port, "127.0.0.1")
@@ -764,11 +774,16 @@ try {
         " -o StrictHostKeyChecking=yes -p " + $port
     )
     $preflight = Invoke-Setup -FilePath $gitPath -ArgumentList @(
-        "ls-remote", "ssh://git@127.0.0.1:$port/conpty-fixture.git"
+        "ls-remote", "ssh://$runnerUser@127.0.0.1:$port/conpty-fixture.git"
     ) -Environment $preflightEnv -TimeoutSeconds 20
+    if ($preflight.ExitCode -ne 0) {
+        Write-Info "Preflight exit code: $($preflight.ExitCode)"
+        Write-Info "Preflight stdout: $($preflight.Stdout)"
+        Write-Info "Preflight stderr: $($preflight.Stderr)"
+    }
     Assert-Condition ($preflight.ExitCode -eq 0) "Preflight git ls-remote over loopback sshd (plain key) succeeds non-interactively"
 
-    $originUrl = "ssh://git@127.0.0.1:$port/conpty-fixture.git"
+    $originUrl = "ssh://$runnerUser@127.0.0.1:$port/conpty-fixture.git"
     $baseEnvironment = Get-HumanLikeBaseEnvironment
     foreach ($strippedVar in (@() + $script:AskpassAndAgentVars + $script:CiMarkerVars)) {
         Assert-Condition (-not $baseEnvironment.Contains($strippedVar)) "Human-like base environment excludes $strippedVar"
