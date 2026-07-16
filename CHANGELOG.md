@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm update` now automatically repairs a locked dependency whose
+  materialized `apm_modules` cache is wholly absent -- including local
+  filesystem dependencies -- without prompting for ref-change consent or
+  changing any resolved refs. (#2240)
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
   canonical serialization, and last-good bytes after malformed refreshes. (#2235)

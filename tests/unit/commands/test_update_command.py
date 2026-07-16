@@ -434,6 +434,60 @@ class TestUpdateNoChanges:
             assert "Restored dependency cache without changing refs." in result.output
             assert "Apply these changes?" not in result.output
 
+    def test_local_dependency_empty_module_cache_rehydrates_without_prompt(
+        self,
+        runner,
+        tmp_path,
+    ) -> None:
+        """A local-only locked dep with a wholly-absent cache rehydrates.
+
+        Local (filesystem) dependencies have no ref to change -- they are
+        identity-stable across runs -- so the only actionable signal is
+        whether their canonical ``apm_modules/_local/<name>`` cache exists.
+        This must behave exactly like the remote-dep case above: no
+        ref-change consent prompt, one install pass, no loop.
+        """
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            project = Path.cwd()
+            _make_apm_yml(project)
+            modules_dir = project / "apm_modules"
+            modules_dir.mkdir()
+            lockfile = LockFile(
+                dependencies={
+                    "_local/my-pkg": LockedDependency(
+                        repo_url="_local/my-pkg",
+                        source="local",
+                        local_path="./my-pkg",
+                    )
+                }
+            )
+            lockfile.write(project / "apm.lock.yaml")
+            captured = {}
+            call_count = {"n": 0}
+
+            def fake_install(_apm, **kwargs):
+                call_count["n"] += 1
+                captured["proceeded"] = kwargs["plan_callback"](UpdatePlan(entries=()))
+                (modules_dir / "_local" / "my-pkg").mkdir(parents=True)
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult(installed_count=1)
+
+            with (
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.install.manifest_reconcile.reconcile_project_deployed_state"),
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["proceeded"] is True
+            assert call_count["n"] == 1
+            assert "Restored dependency cache without changing refs." in result.output
+            assert "Apply these changes?" not in result.output
+
     def test_unchanged_plan_short_circuits(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
             _make_apm_yml(Path.cwd())
@@ -474,6 +528,82 @@ def test_module_cache_rehydration_ignores_empty_resolution_staging(
 
     assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
     (modules_dir / "org" / "pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+
+
+def test_module_cache_rehydration_local_dependency_uses_canonical_local_path(
+    tmp_path: Path,
+) -> None:
+    """A local-only locked dep's absent cache lives under ``_local/<name>``.
+
+    Local (filesystem) dependencies have no host/repo segments, so their
+    canonical install path is ``apm_modules/_local/<pkg_name>``
+    (``DependencyReference.get_install_path``), not a naive
+    ``apm_modules/<repo_url>`` split. This guards against a regression
+    that would check the wrong path and either loop (never see the cache
+    as present) or misfire (treat an absent cache as present).
+    """
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+    lockfile = LockFile(
+        dependencies={
+            "_local/my-pkg": LockedDependency(
+                repo_url="_local/my-pkg",
+                source="local",
+                local_path="./my-pkg",
+            )
+        }
+    )
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # A misclassified path (e.g. splitting repo_url naively) must not
+    # satisfy the check.
+    (modules_dir / "_local" / "wrong-name").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # Only the canonical path resolves the absent cache.
+    (modules_dir / "_local" / "my-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+
+
+def test_module_cache_rehydration_transitive_local_dependency_uses_hashed_parent_slot(
+    tmp_path: Path,
+) -> None:
+    """A transitive local dep's cache lives under a hashed parent slot.
+
+    When a local dependency is declared by another package rather than
+    the root project (``declaring_parent`` set), its canonical path is
+    ``apm_modules/_local/<sha256(identity)[:12]>/<pkg_name>`` -- distinct
+    from the top-level ``_local/<pkg_name>`` shape. The rehydration check
+    must follow this exact same canonical path, not a flattened one.
+    """
+    import hashlib
+
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+    parent_identity = "../sibling-parent"
+    parent_slot = hashlib.sha256(parent_identity.encode("utf-8")).hexdigest()[:12]
+    lockfile = LockFile(
+        dependencies={
+            "_local/nested-pkg": LockedDependency(
+                repo_url="_local/nested-pkg",
+                source="local",
+                local_path="../nested-pkg",
+                declaring_parent=parent_identity,
+                anchored_local_path=parent_identity,
+            )
+        }
+    )
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # The flattened (non-hashed) path must not be mistaken for the cache.
+    (modules_dir / "_local" / "nested-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # Only the hashed parent-slot path is canonical.
+    (modules_dir / "_local" / parent_slot / "nested-pkg").mkdir(parents=True)
     assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
 
 
