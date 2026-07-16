@@ -95,9 +95,11 @@ def _run_steps(job: WorkflowNode) -> list[WorkflowNode]:
     return [step for step in steps if isinstance(step, dict)]
 
 
-def _workflow_uv_sync_commands(root: Path) -> list[tuple[str, str, str, list[str]]]:
-    """Collect every first-party workflow command that invokes ``uv sync``."""
-    commands: list[tuple[str, str, str, list[str]]] = []
+def _workflow_uv_environment_commands(
+    root: Path,
+) -> list[tuple[str, str, str, list[str], bool]]:
+    """Collect project-environment commands and prior frozen-sync state."""
+    commands: list[tuple[str, str, str, list[str], bool]] = []
     workflows_dir = root / ".github" / "workflows"
     workflow_paths = sorted([*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")])
     for workflow_path in workflow_paths:
@@ -108,6 +110,7 @@ def _workflow_uv_sync_commands(root: Path) -> list[tuple[str, str, str, list[str
         for job_name, job in jobs.items():
             if not isinstance(job, dict):
                 continue
+            frozen_sync_seen = False
             for step in _run_steps(job):
                 step_name = str(step.get("name", "<unnamed>"))
                 run = step.get("run")
@@ -115,7 +118,9 @@ def _workflow_uv_sync_commands(root: Path) -> list[tuple[str, str, str, list[str
                     continue
                 logical = run.replace("\\\n", " ")
                 for line in logical.splitlines():
-                    if "uv sync" not in line or line.lstrip().startswith("#"):
+                    if not any(
+                        command in line for command in ("uv sync", "uv run")
+                    ) or line.lstrip().startswith("#"):
                         continue
                     try:
                         tokens = shlex.split(line, comments=True, posix=True)
@@ -123,7 +128,8 @@ def _workflow_uv_sync_commands(root: Path) -> list[tuple[str, str, str, list[str
                         location = f"{workflow_path.name}:{job_name}:{step_name}"
                         raise AssertionError(f"{location}: invalid shell line {line!r}") from exc
                     for index in range(len(tokens) - 1):
-                        if tokens[index : index + 2] != ["uv", "sync"]:
+                        command = tokens[index : index + 2]
+                        if command not in (["uv", "sync"], ["uv", "run"]):
                             continue
                         commands.append(
                             (
@@ -131,8 +137,11 @@ def _workflow_uv_sync_commands(root: Path) -> list[tuple[str, str, str, list[str
                                 str(job_name),
                                 step_name,
                                 tokens[index:],
+                                frozen_sync_seen,
                             )
                         )
+                        if command == ["uv", "sync"] and "--frozen" in tokens[index:]:
+                            frozen_sync_seen = True
     return commands
 
 
@@ -283,16 +292,24 @@ def test_provisional_ci_opt_in_is_draft_guarded() -> None:
     _assert_ci_provisional_guard(ci)
 
 
-def test_first_party_workflow_uv_syncs_are_frozen() -> None:
+def test_first_party_workflow_uv_environments_are_frozen() -> None:
     """The committed lockfile governs every GitHub Actions environment."""
-    sync_commands = _workflow_uv_sync_commands(REPO_ROOT)
-    assert sync_commands
-    unfrozen = [
+    commands = _workflow_uv_environment_commands(REPO_ROOT)
+    assert commands
+    unfrozen_syncs = [
         f"{workflow}:{job}:{step}: {' '.join(tokens)}"
-        for workflow, job, step, tokens in sync_commands
-        if "--frozen" not in tokens
+        for workflow, job, step, tokens, _frozen_sync_seen in commands
+        if tokens[:2] == ["uv", "sync"] and "--frozen" not in tokens
     ]
-    assert unfrozen == [], "unfrozen first-party workflow syncs:\n" + "\n".join(unfrozen)
+    implicit_unfrozen_runs = [
+        f"{workflow}:{job}:{step}: {' '.join(tokens)}"
+        for workflow, job, step, tokens, frozen_sync_seen in commands
+        if tokens[:2] == ["uv", "run"] and "--frozen" not in tokens and not frozen_sync_seen
+    ]
+    violations = unfrozen_syncs + implicit_unfrozen_runs
+    assert violations == [], "unfrozen first-party workflow environments:\n" + (
+        "\n".join(violations)
+    )
 
 
 def test_workflow_sync_guard_reports_invalid_shell_line(tmp_path: Path) -> None:
@@ -312,7 +329,7 @@ def test_workflow_sync_guard_reports_invalid_shell_line(tmp_path: Path) -> None:
         AssertionError,
         match=r"broken\.yml:test:Broken sync: invalid shell line",
     ):
-        _workflow_uv_sync_commands(tmp_path)
+        _workflow_uv_environment_commands(tmp_path)
 
 
 def test_relocated_repository_contract_fails_topology(tmp_path: Path) -> None:
