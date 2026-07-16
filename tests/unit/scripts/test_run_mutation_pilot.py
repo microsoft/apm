@@ -389,6 +389,7 @@ def test_load_exit_codes_scopes_to_owner_patterns_and_decodes_exit_codes(
     assert scoped == {"apm_cli.install.plan.build_update_plan__mutmut_2": 0}
 
 
+@pytest.mark.windows_compat
 def test_write_report_is_deterministic_atomic_and_printable_ascii(
     pilot: ModuleType, tmp_path: Path
 ) -> None:
@@ -410,6 +411,7 @@ def test_write_report_is_deterministic_atomic_and_printable_ascii(
     assert not (report_path.parent / f".{report_path.name}.tmp").exists()
 
 
+@pytest.mark.windows_compat
 def test_write_report_preserves_existing_file_when_atomic_replace_fails(
     pilot: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -132,6 +132,7 @@ def _write_creds(run_dir: Path, port: int, token: str) -> None:
     os.chmod(token_path, 0o600)
 
 
+@pytest.mark.windows_compat
 def test_server_context_joins_serve_forever_thread() -> None:
     def handler(websocket):
         websocket.recv()
@@ -163,6 +164,7 @@ def _bare_server() -> _Server:
     return _Server.__new__(_Server)
 
 
+@pytest.mark.windows_compat
 def test_run_serve_forever_absorbs_windows_shutdown_race(monkeypatch) -> None:
     """The Windows-only shutdown race (WinError 10038) must be
     swallowed -- reproduced here by manually tagging a plain ``OSError``
@@ -177,6 +179,7 @@ def test_run_serve_forever_absorbs_windows_shutdown_race(monkeypatch) -> None:
     srv._run_serve_forever()  # must not raise
 
 
+@pytest.mark.windows_compat
 def test_run_serve_forever_reraises_other_winerrors(monkeypatch) -> None:
     """Only WinError 10038 is a proven, expected shutdown race; any
     other Windows OSError must propagate rather than being silently
@@ -191,6 +194,7 @@ def test_run_serve_forever_reraises_other_winerrors(monkeypatch) -> None:
         srv._run_serve_forever()
 
 
+@pytest.mark.windows_compat
 def test_run_serve_forever_reraises_on_non_windows(monkeypatch) -> None:
     """The narrow catch is Windows-only: on POSIX platforms even a
     winerror-tagged OSError must not be swallowed, since the real
@@ -205,6 +209,7 @@ def test_run_serve_forever_reraises_on_non_windows(monkeypatch) -> None:
         srv._run_serve_forever()
 
 
+@pytest.mark.windows_compat
 def test_run_serve_forever_propagates_normal_completion(monkeypatch) -> None:
     """A clean ``serve_forever`` return (the POSIX-shutdown happy path)
     must not be affected by the wrapper."""

@@ -919,6 +919,7 @@ def _checker_source() -> str:
     return (root / "scripts" / "check_test_contract_authorities.py").read_text(encoding="utf-8")
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize(
     "owner_constant",
     (
@@ -941,6 +942,7 @@ def test_owner_path_constants_are_never_raw_formatted(owner_constant: str) -> No
     )
 
 
+@pytest.mark.windows_compat
 def test_relative_to_root_is_never_raw_formatted() -> None:
     """``path.relative_to(root)`` must always be posix-formatted before
     reaching a diagnostic string."""

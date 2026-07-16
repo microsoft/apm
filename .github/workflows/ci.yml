@@ -91,10 +91,13 @@ jobs:
   # separators leaking into diagnostics, bare "git" argv resolution,
   # and the websockets.sync shutdown race) is caught before merge
   # instead of surfacing only in the post-merge full-matrix build (see
-  # microsoft/apm#2233). Deliberately narrow: only the load-bearing
-  # cross-platform contract family plus their canonical owners, not a
-  # full-suite duplicate -- keeps PR-time cost bounded while still
-  # gating the exact defect class that slipped through Linux-only CI.
+  # microsoft/apm#2233). Deliberately narrow: selects the load-bearing
+  # cross-platform contract family declaratively via the `windows_compat`
+  # pytest marker (see pyproject.toml) rather than enumerating test
+  # files here -- adding a new Windows-relevant regression test only
+  # requires marking it, not editing this workflow. Not a full-suite
+  # duplicate: keeps PR-time cost bounded while still gating the exact
+  # defect class that slipped through Linux-only CI.
   windows-compat-gate:
     name: Windows Compatibility Gate
     runs-on: windows-latest
@@ -128,16 +131,8 @@ jobs:
     - name: Run cross-platform contract family
       run: >-
         uv run --extra dev pytest -p no:cacheprovider -v
-        tests/unit/scripts/test_ratchet_baseline.py
-        tests/unit/scripts/test_run_mutation_pilot.py
-        tests/unit/scripts/test_check_test_contract_authorities.py
-        tests/unit/scripts/test_check_test_assertions.py
-        tests/unit/scripts/test_check_exact_test_duplicates.py
-        tests/unit/test_shepherd_owner_touch_gate.py
-        tests/unit/integration/test_copilot_app_ws.py
-        tests/unit/utils/test_atomic_io.py
-        tests/unit/cache/test_git_env.py
-        tests/unit/utils/test_paths.py
+        -m windows_compat
+        tests/unit
 
     - name: Diagnostics on failure
       if: failure()

@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-07-16T10:31:37.811906+00:00'
+generated_at: '2026-07-16T10:55:54.310339+00:00'
 apm_version: 0.25.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
@@ -2864,7 +2864,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:ba0d1f1003960beb7a469d35ef724641f902841b4cb07049600c691b8c66afe4
+  content_hash: sha256:377c5f6f332cdce8c7aa2aa6096fc2cdef8596e0033a6b55d6f4d0b94a1740ac
 local_deployed_files:
 - .agents/skills/apm-spec-guardian
 - .agents/skills/apm-spec-guardian/SKILL.md
@@ -3299,4 +3299,4 @@ local_deployed_file_hashes:
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:8d31137f18842570bef6c93f8396587ac691e5fc973988bd865b008b0983f90d
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:ba0d1f1003960beb7a469d35ef724641f902841b4cb07049600c691b8c66afe4
+  .github/instructions/tests.instructions.md: sha256:377c5f6f332cdce8c7aa2aa6096fc2cdef8596e0033a6b55d6f4d0b94a1740ac

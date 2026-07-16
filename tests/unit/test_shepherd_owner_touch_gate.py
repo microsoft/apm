@@ -13,6 +13,14 @@ import pytest
 
 from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
 
+# Entire module: every scenario here drives the gate through the fixed
+# _run_git()/_git_executable() path (microsoft/apm#2233's WinError 2
+# FileNotFoundError), since the fixture helper below and the gate
+# script itself both resolve git via the canonical apm_cli.utils.git_env
+# owner. Selected by the PR-time Windows Compatibility Gate via
+# `pytest -m windows_compat`; also runs on every other OS.
+pytestmark = pytest.mark.windows_compat
+
 ROOT = Path(__file__).parents[2]
 GATE = ROOT / "packages/shepherd-driver/scripts/owner_touch_gate.py"
 OWNER_TABLE = ".apm/instructions/architecture.instructions.md"
