@@ -201,10 +201,12 @@ Tests run in parallel automatically (`-n auto` is configured in `pyproject.toml`
 
 ### Running the bounded mutation pilot
 
-The advisory mutation pilot checks four stable owners: dependency subset
-selection, update-plan construction, cached-policy serialization, and canonical
-in-package link projection. It is intentionally separate from required PR CI
-and runs nightly or by manual workflow dispatch with a 20-minute job budget.
+The advisory mutation pilot checks five stable owners: dependency subset
+selection, update-plan construction, cached-policy serialization, canonical
+in-package link projection, and lockfile field reconstruction (the fail-closed
+`host_type`/`exec_status` normalizers). It is intentionally separate from
+required PR CI and runs nightly or by manual workflow dispatch with a
+20-minute job budget.
 
 Run the same exact-function allowlist locally:
 

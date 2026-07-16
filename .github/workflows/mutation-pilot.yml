@@ -57,6 +57,7 @@ jobs:
               'src/apm_cli/install/plan.py',
               'src/apm_cli/policy/discovery.py',
               'src/apm_cli/compilation/link_resolver.py',
+              'src/apm_cli/deps/lockfile.py',
               'tests/unit/test_skill_subset_persistence.py',
               'tests/unit/test_dep_targets_persistence.py',
               'tests/unit/install/conftest.py',
@@ -64,7 +65,8 @@ jobs:
               'tests/unit/policy/test_cache_merged_effective.py',
               'tests/unit/compilation/test_link_resolver.py',
               'tests/unit/compilation/test_link_resolver_phase3.py',
-              'tests/unit/compilation/test_link_resolver_resolution.py'
+              'tests/unit/compilation/test_link_resolver_resolution.py',
+              'tests/unit/deps/test_lockfile_field_properties.py'
             ) }}
 
       - name: Run bounded mutation pilot

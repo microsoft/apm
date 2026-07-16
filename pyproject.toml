@@ -168,6 +168,7 @@ only_mutate = [
     "src/apm_cli/install/plan.py",
     "src/apm_cli/policy/discovery.py",
     "src/apm_cli/compilation/link_resolver.py",
+    "src/apm_cli/deps/lockfile.py",
 ]
 pytest_add_cli_args = [
     "-n0",
@@ -186,6 +187,7 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/compilation/test_link_resolver.py",
     "tests/unit/compilation/test_link_resolver_phase3.py",
     "tests/unit/compilation/test_link_resolver_resolution.py",
+    "tests/unit/deps/test_lockfile_field_properties.py",
 ]
 timeout_constant = 1.0
 timeout_multiplier = 5.0

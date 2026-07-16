@@ -363,6 +363,34 @@ def test_host_type_fail_closed_property_breaks_if_normalizer_is_bypassed(bad_val
         lockfile_module._normalize_lockfile_host_type = original
 
 
+def test_empty_string_exec_status_fails_closed_with_its_own_message() -> None:
+    """An empty ``exec_status`` is a distinct fail-closed branch from ``_BAD_EXEC_STATUS``.
+
+    ``_BAD_EXEC_STATUS`` above only generates non-empty ASCII text, so it never
+    exercises the ``not raw.strip()`` half of the guard. Mutating that guard's
+    ``or`` to ``and`` still raises for an empty string (it falls through to the
+    "unsupported value" branch instead) -- only the exact message distinguishes
+    the two branches, so this asserts on it exactly.
+    """
+    with pytest.raises(ValueError) as exc_info:
+        LockedDependency.from_dict({"repo_url": "acme/example", "exec_status": ""})
+
+    assert str(exc_info.value) == "lockfile exec_status must be a non-empty string"
+
+
+def test_empty_string_host_type_fails_closed_with_its_own_message() -> None:
+    """An empty ``host_type`` is a distinct fail-closed branch from ``_BAD_HOST_TYPE``.
+
+    Mirrors ``test_empty_string_exec_status_fails_closed_with_its_own_message``
+    for the sibling normalizer -- see that test for why the empty-string case
+    needs its own exact assertion.
+    """
+    with pytest.raises(ValueError) as exc_info:
+        LockedDependency.from_dict({"repo_url": "acme/example", "host_type": ""})
+
+    assert str(exc_info.value) == "lockfile host_type must be a non-empty string"
+
+
 # --------------------------------------------------------------------------
 # 5 & 6. ADO transient coordinate derivation: round trip, never persisted,
 #         idempotent, and host-gated (not repo_url-shape-gated).

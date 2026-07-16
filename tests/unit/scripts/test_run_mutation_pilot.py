@@ -65,6 +65,31 @@ def test_method_pattern_is_exact_and_internal_separator_stays_runtime_only(
     )
 
 
+def test_lockfile_owner_covers_field_normalizer_patterns(
+    pilot: ModuleType,
+) -> None:
+    """The lockfile-reconstruction owner targets the two fail-closed
+    normalizers, not LockedDependency's dataclass methods directly.
+
+    mutmut 3.6.0 never mutates methods of a `@dataclass`-decorated class
+    (it skips the whole ClassDef when it carries any decorator), and both
+    LockedDependency and LockFile are `@dataclass`. The normalizers below
+    are bare module-level functions invoked from
+    `LockedDependency.from_dict` -- they are the sole mutation-viable seam
+    that actually defends the reconstruction surface.
+    """
+    owner = next(owner for owner in pilot.OWNERS if owner.key == "lockfile-reconstruction")
+
+    assert owner.functions == (
+        "_normalize_lockfile_host_type",
+        "_normalize_exec_status",
+    )
+    assert owner.patterns == (
+        "apm_cli.deps.lockfile.x__normalize_lockfile_host_type*",
+        "apm_cli.deps.lockfile.x__normalize_exec_status*",
+    )
+
+
 def test_canonical_mutant_name_removes_internal_mangling(pilot: ModuleType) -> None:
     separator = chr(0x01C1)
 

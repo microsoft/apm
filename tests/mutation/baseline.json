@@ -12,6 +12,20 @@
         "tests/unit/compilation/test_link_resolver_resolution.py"
       ]
     },
+    "lockfile-reconstruction": {
+      "accepted_survivors": [
+        "apm_cli.deps.lockfile._normalize_exec_status__mutmut_12",
+        "apm_cli.deps.lockfile._normalize_lockfile_host_type__mutmut_13"
+      ],
+      "functions": [
+        "_normalize_lockfile_host_type",
+        "_normalize_exec_status"
+      ],
+      "source": "src/apm_cli/deps/lockfile.py",
+      "test_seams": [
+        "tests/unit/deps/test_lockfile_field_properties.py"
+      ]
+    },
     "policy-serialization": {
       "accepted_survivors": [],
       "functions": [

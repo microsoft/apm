@@ -147,6 +147,29 @@ OWNERS = (
             "tests/unit/compilation/test_link_resolver_resolution.py",
         ),
     ),
+    Owner(
+        # Scoped to the two fail-closed field normalizers, not to
+        # LockedDependency.to_dict/from_dict/to_dependency_ref directly:
+        # both normalizers are called from LockedDependency.from_dict and
+        # are the sole mutation-viable seam of the reconstruction surface.
+        # mutmut 3.6.0 structurally skips every method of a
+        # `@dataclass`-decorated class (file_mutation.py's
+        # `_skip_node_and_children` returns True for any decorated
+        # ClassDef), and both LockedDependency and LockFile carry
+        # `@dataclass` -- so their methods can never be mutated regardless
+        # of `only_mutate`/pattern configuration. Confirmed empirically:
+        # `mutmut run` filtered to those method patterns raises
+        # `AssertionError: Filtered for specific mutants, but nothing
+        # matches`, and a minimal reproduction without `@dataclass`
+        # restores normal per-mutant trampolining.
+        key="lockfile-reconstruction",
+        source="src/apm_cli/deps/lockfile.py",
+        functions=(
+            "_normalize_lockfile_host_type",
+            "_normalize_exec_status",
+        ),
+        test_seams=("tests/unit/deps/test_lockfile_field_properties.py",),
+    ),
 )
 
 
