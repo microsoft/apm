@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm uninstall` no longer deletes a shared transitive dependency that a
+  surviving direct dependency still declares (a diamond-shaped install where
+  two packages both depend on the same local or remote transitive package).
+  A new canonical reachability owner (`deps/reachability.py`) recomputes
+  forward reachability from the real manifest/lock graph instead of trusting
+  the single-valued, first-wins `resolved_by` field, and repairs a rescued
+  dependency's `resolved_by`/`local_path` so it remains correctly
+  garbage-collectable on a later uninstall of its true last parent. (#2269)
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
   dropped from a project's `targets:` list -- the hook wipe is now scoped to
