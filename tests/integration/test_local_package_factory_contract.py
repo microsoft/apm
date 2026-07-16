@@ -1,3 +1,5 @@
+import json
+import os
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -865,3 +867,200 @@ def test_lifecycle_sources_accept_mcp_and_lsp_string_references(tmp_path: Path) 
         "mcp": ["io.github.acme/fixture-mcp"],
         "lsp": ["fixture-lsp"],
     }
+
+
+def test_hook_assets_are_bounded_source_files_with_executable_intent(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create("hook-source")
+    hook_document = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "command": "python ./lifecycle/scripts/check.py",
+                }
+            ]
+        }
+    }
+    hook = factory.add_hook(package, "lifecycle", hook_document)
+
+    script = factory.add_hook_asset(
+        package,
+        "lifecycle",
+        PurePosixPath("scripts/check.py"),
+        "print('hook')\n",
+        executable=True,
+    )
+    binary = factory.add_hook_asset(
+        package,
+        "lifecycle",
+        PurePosixPath("assets/payload.bin"),
+        b"\x00\xffhook\n",
+    )
+
+    assert hook == package.root / ".apm/hooks/lifecycle.json"
+    assert script == package.root / ".apm/hooks/lifecycle/scripts/check.py"
+    assert binary == package.root / ".apm/hooks/lifecycle/assets/payload.bin"
+    assert script.read_bytes() == b"print('hook')\n"
+    assert binary.read_bytes() == b"\x00\xffhook\n"
+    if os.name != "nt":
+        assert script.stat().st_mode & 0o111 == 0o111
+        assert binary.stat().st_mode & 0o111 == 0
+    assert json.loads(hook.read_text(encoding="utf-8")) == hook_document
+
+
+def test_hook_assets_reject_escape_replacement_and_foreign_packages(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create("hook-source")
+    hook = factory.add_hook(package, "lifecycle", {"hooks": {}})
+    hook_bytes = hook.read_bytes()
+
+    for relative_path in (
+        PurePosixPath("."),
+        PurePosixPath("../lifecycle.json"),
+        PurePosixPath("/outside.py"),
+        PurePosixPath(r"..\outside.py"),
+        PurePosixPath("%252e%252e/outside.py"),
+    ):
+        with pytest.raises(ValueError):
+            factory.add_hook_asset(
+                package,
+                "lifecycle",
+                relative_path,
+                b"outside",
+            )
+    with pytest.raises(TypeError, match="text or bytes"):
+        factory.add_hook_asset(
+            package,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            object(),
+        )
+    assert hook.read_bytes() == hook_bytes
+    assert not (tmp_path / "outside.py").exists()
+
+    without_descriptor = factory.create("missing-hook")
+    with pytest.raises(ValueError, match="descriptor"):
+        factory.add_hook_asset(
+            without_descriptor,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            b"missing",
+        )
+
+    foreign_factory = LocalPackageFactory(tmp_path / "foreign")
+    foreign = foreign_factory.create("foreign")
+    foreign_factory.add_hook(foreign, "lifecycle", {"hooks": {}})
+    with pytest.raises(ValueError, match="not owned"):
+        factory.add_hook_asset(
+            foreign,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            b"foreign",
+        )
+
+    outside = tmp_path / "outside-assets"
+    outside.mkdir()
+    asset_root = package.root / ".apm/hooks/lifecycle"
+    asset_root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match=r"outside|symlink"):
+        factory.add_hook_asset(
+            package,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            b"escaped",
+        )
+    assert not (outside / "scripts/check.py").exists()
+
+
+def test_manifest_transitions_preserve_unrelated_sections_and_are_idempotent(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "consumer",
+        mcp_dependencies=("io.github.acme/server",),
+    )
+    manifest = load_yaml(package.manifest_path)
+    manifest["compilation"] = {"output": "AGENTS.md"}
+    manifest["allowExecutables"] = {"acme/hooks#v1": {"hooks": True}}
+    dump_yaml(manifest, package.manifest_path)
+    dependencies = (
+        "acme/first#v1.0.0",
+        {
+            "git": "https://gitlab.example.invalid/acme/second.git",
+            "type": "gitlab",
+            "ref": "main",
+            "alias": "second",
+        },
+    )
+
+    factory.set_targets(package, ("copilot", "claude"))
+    factory.replace_apm_dependencies(package, dependencies)
+    first_bytes = package.manifest_path.read_bytes()
+    factory.set_targets(package, ("copilot", "claude"))
+    factory.replace_apm_dependencies(package, dependencies)
+
+    transitioned = load_yaml(package.manifest_path)
+    assert package.manifest_path.read_bytes() == first_bytes
+    assert transitioned["targets"] == ["copilot", "claude"]
+    assert transitioned["dependencies"] == {
+        "apm": list(dependencies),
+        "mcp": ["io.github.acme/server"],
+    }
+    assert transitioned["compilation"] == {"output": "AGENTS.md"}
+    assert transitioned["allowExecutables"] == {"acme/hooks#v1": {"hooks": True}}
+
+    identity_equivalent = "https://github.com/acme/first.git#v9.9.9"
+    assert factory.remove_apm_dependency(package, identity_equivalent) is True
+    removed_bytes = package.manifest_path.read_bytes()
+    assert factory.remove_apm_dependency(package, identity_equivalent) is False
+    assert package.manifest_path.read_bytes() == removed_bytes
+    assert load_yaml(package.manifest_path)["dependencies"]["apm"] == [dependencies[1]]
+
+    factory.replace_apm_dependencies(package, ())
+    factory.set_targets(package, ())
+    contracted = load_yaml(package.manifest_path)
+    assert contracted["dependencies"] == {"mcp": ["io.github.acme/server"]}
+    assert "targets" not in contracted
+    assert contracted["compilation"] == {"output": "AGENTS.md"}
+
+
+def test_manifest_transitions_reject_invalid_inputs_without_partial_write(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "consumer",
+        dependencies=("acme/original#v1.0.0",),
+        targets=("copilot",),
+    )
+    original = package.manifest_path.read_bytes()
+
+    with pytest.raises(UnknownTargetError, match="Unknown target"):
+        factory.set_targets(package, ("not-a-target",))
+    with pytest.raises(ValueError, match="Unsupported field"):
+        factory.replace_apm_dependencies(
+            package,
+            (
+                {
+                    "git": "acme/repository",
+                    "resolved_commit": "a" * 40,
+                },
+            ),
+        )
+    with pytest.raises(TypeError, match="strings or mappings"):
+        factory.remove_apm_dependency(package, 42)
+    assert package.manifest_path.read_bytes() == original
+
+    foreign_factory = LocalPackageFactory(tmp_path / "foreign")
+    foreign = foreign_factory.create("foreign")
+    with pytest.raises(ValueError, match="not owned"):
+        factory.set_targets(foreign, ("copilot",))
+    with pytest.raises(ValueError, match="not owned"):
+        factory.replace_apm_dependencies(foreign, ())
+    with pytest.raises(ValueError, match="not owned"):
+        factory.remove_apm_dependency(foreign, "acme/original#v1.0.0")

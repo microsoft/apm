@@ -16,6 +16,7 @@ from typing import Literal, TypeAlias
 
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import DeploymentRecord, LocatorKind
+from apm_cli.core.scope import InstallScope
 from apm_cli.core.target_catalog import get_target_capability
 from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
 from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
@@ -37,12 +38,26 @@ LifecycleFileRole: TypeAlias = Literal[
     "compiled",
 ]
 _COMPILED_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
+_WORKSPACE_ROOT_ID = "workspace"
+
+
+@dataclass(frozen=True)
+class LifecycleStateRoot:
+    """One caller-bounded external target root and selected native configs."""
+
+    root_id: str
+    target: str
+    scope: str
+    path: Path
+    config_paths: tuple[PurePosixPath, ...] = ()
 
 
 @dataclass(frozen=True)
 class LifecycleFileState:
-    """Exact bytes and classification for one workspace-contained path."""
+    """Exact bytes and classification for one explicitly bounded root path."""
 
+    root_id: str
+    root_path: Path
     relative_path: str
     kind: LifecycleFileKind
     roles: frozenset[LifecycleFileRole]
@@ -61,6 +76,7 @@ class LifecycleStateSnapshot:
     """
 
     workspace_root: Path
+    external_roots: tuple[LifecycleStateRoot, ...]
     manifest_bytes: bytes | None
     lockfile_bytes: bytes | None
     deployment_records: tuple[DeploymentRecord, ...]
@@ -76,8 +92,9 @@ class LifecycleStateSnapshot:
         *,
         targets: Sequence[str] = (),
         config_paths: Sequence[PurePosixPath] = (),
+        external_roots: Sequence[LifecycleStateRoot] = (),
     ) -> LifecycleStateSnapshot:
-        """Capture deterministic durable state without reading outside the workspace."""
+        """Capture deterministic durable state from explicit non-overlapping roots."""
         root = workspace_root.absolute()
         if root.is_symlink():
             raise ValueError(f"Lifecycle workspace root must not be a symlink: {root}")
@@ -89,9 +106,20 @@ class LifecycleStateSnapshot:
             if profile is not None:
                 profiles.append(profile)
 
+        normalized_roots = _validate_external_roots(root, external_roots)
+        root_paths = {
+            _WORKSPACE_ROOT_ID: root,
+            **{external.root_id: external.path for external in normalized_roots},
+        }
+        roots_by_owner = {
+            (external.target, external.scope): external for external in normalized_roots
+        }
         if not root.exists():
+            if normalized_roots:
+                raise ValueError("Lifecycle workspace root must exist when external roots are used")
             return cls(
                 workspace_root=root,
+                external_roots=(),
                 manifest_bytes=None,
                 lockfile_bytes=None,
                 deployment_records=(),
@@ -127,48 +155,100 @@ class LifecycleStateSnapshot:
             if lock is not None
             else ()
         )
-        target_relative = tuple(
-            record.locator.key
-            for record in records
-            if record.locator.kind is LocatorKind.TARGET_RELATIVE
-        )
-        if target_relative:
-            raise ValueError(
-                "Lifecycle snapshots require explicit bounded roots for "
-                f"target-relative deployments: {sorted(target_relative)}"
-            )
         mcp_state = _mcp_state(lock)
         lsp_state = _lsp_state(lock)
 
-        roles_by_path: dict[str, set[LifecycleFileRole]] = {}
+        roles_by_path: dict[tuple[str, str], set[LifecycleFileRole]] = {}
         for record in records:
             if record.locator.kind is LocatorKind.PROJECT_RELATIVE:
                 _add_role(
                     roles_by_path,
+                    _WORKSPACE_ROOT_ID,
+                    record.locator.value,
+                    "deployment",
+                )
+            elif record.locator.kind is LocatorKind.TARGET_RELATIVE:
+                external = roots_by_owner.get((record.locator.target, record.locator.scope))
+                if external is None:
+                    raise ValueError(
+                        "Lifecycle snapshot has no bounded root for target-relative "
+                        f"deployment {record.locator.key!r}"
+                    )
+                _add_role(
+                    roles_by_path,
+                    external.root_id,
                     record.locator.value,
                     "deployment",
                 )
         for relative_path in config_paths:
-            _add_role(roles_by_path, relative_path.as_posix(), "config")
+            _add_role(
+                roles_by_path,
+                _WORKSPACE_ROOT_ID,
+                relative_path.as_posix(),
+                "config",
+            )
+        for external in normalized_roots:
+            for relative_path in external.config_paths:
+                _add_role(
+                    roles_by_path,
+                    external.root_id,
+                    relative_path.as_posix(),
+                    "config",
+                )
         for profile in profiles:
             if profile.hooks_config_display:
                 hook_path = PurePosixPath(profile.hooks_config_display)
-                _add_role(roles_by_path, hook_path.as_posix(), "config")
-                _add_role(roles_by_path, hook_path.as_posix(), "hook-config")
+                _add_role(
+                    roles_by_path,
+                    _WORKSPACE_ROOT_ID,
+                    hook_path.as_posix(),
+                    "config",
+                )
+                _add_role(
+                    roles_by_path,
+                    _WORKSPACE_ROOT_ID,
+                    hook_path.as_posix(),
+                    "hook-config",
+                )
                 sidecar = hook_path.parent / _APM_HOOKS_SIDECAR
-                _add_role(roles_by_path, sidecar.as_posix(), "config")
-                _add_role(roles_by_path, sidecar.as_posix(), "hook-sidecar")
+                _add_role(
+                    roles_by_path,
+                    _WORKSPACE_ROOT_ID,
+                    sidecar.as_posix(),
+                    "config",
+                )
+                _add_role(
+                    roles_by_path,
+                    _WORKSPACE_ROOT_ID,
+                    sidecar.as_posix(),
+                    "hook-sidecar",
+                )
             for generated in profile.generated_files:
                 relative = PurePosixPath(profile.root_dir) / generated
-                _add_role(roles_by_path, relative.as_posix(), "compiled")
+                _add_role(
+                    roles_by_path,
+                    _WORKSPACE_ROOT_ID,
+                    relative.as_posix(),
+                    "compiled",
+                )
 
         if profiles:
             for relative_path in _compiled_paths(root):
-                _add_role(roles_by_path, relative_path, "compiled")
+                _add_role(
+                    roles_by_path,
+                    _WORKSPACE_ROOT_ID,
+                    relative_path,
+                    "compiled",
+                )
 
         files = tuple(
-            _capture_file(root, relative_path, frozenset(roles_by_path[relative_path]))
-            for relative_path in sorted(roles_by_path)
+            _capture_file(
+                root_paths[root_id],
+                root_id,
+                relative_path,
+                frozenset(roles_by_path[(root_id, relative_path)]),
+            )
+            for root_id, relative_path in sorted(roles_by_path)
         )
         manifest_semantic = (
             load_yaml_str(manifest_bytes.decode("utf-8")) if manifest_bytes is not None else None
@@ -180,6 +260,7 @@ class LifecycleStateSnapshot:
                 "lock": lock_semantic,
                 "files": [
                     {
+                        "root_id": file.root_id,
                         "path": file.relative_path,
                         "kind": file.kind,
                         "roles": sorted(file.roles),
@@ -192,6 +273,7 @@ class LifecycleStateSnapshot:
         )
         return cls(
             workspace_root=root,
+            external_roots=normalized_roots,
             manifest_bytes=manifest_bytes,
             lockfile_bytes=lockfile_bytes,
             deployment_records=records,
@@ -201,35 +283,42 @@ class LifecycleStateSnapshot:
             semantic_bytes=semantic_bytes,
         )
 
-    def file(self, relative_path: str) -> LifecycleFileState:
+    def file(
+        self,
+        relative_path: str,
+        *,
+        root_id: str = _WORKSPACE_ROOT_ID,
+    ) -> LifecycleFileState:
         """Return a tracked file state, failing clearly for untracked paths."""
+        known_roots = {_WORKSPACE_ROOT_ID, *(root.root_id for root in self.external_roots)}
+        if root_id not in known_roots:
+            raise KeyError(f"Unknown lifecycle snapshot root_id {root_id!r}")
         for file in self.files:
-            if file.relative_path == relative_path:
+            if file.root_id == root_id and file.relative_path == relative_path:
                 return file
-        tracked = ", ".join(file.relative_path for file in self.files) or "<none>"
+        tracked = (
+            ", ".join(file.relative_path for file in self.files if file.root_id == root_id)
+            or "<none>"
+        )
         raise KeyError(
-            f"Lifecycle snapshot path {relative_path!r} is not tracked; tracked paths: {tracked}"
+            f"Lifecycle snapshot path {relative_path!r} is not tracked in "
+            f"root {root_id!r}; tracked paths: {tracked}"
         )
 
 
 def _add_role(
-    roles_by_path: dict[str, set[LifecycleFileRole]],
+    roles_by_path: dict[tuple[str, str], set[LifecycleFileRole]],
+    root_id: str,
     relative_path: str,
     role: LifecycleFileRole,
 ) -> None:
-    validate_path_segments(
-        relative_path,
-        context="lifecycle snapshot path",
-        reject_empty=True,
-    )
-    path = PurePosixPath(relative_path)
-    if path.is_absolute() or "\\" in relative_path or PureWindowsPath(relative_path).drive:
-        raise ValueError(f"Lifecycle snapshot path must be relative POSIX: {relative_path}")
-    roles_by_path.setdefault(path.as_posix(), set()).add(role)
+    path = _validate_relative_state_path(relative_path)
+    roles_by_path.setdefault((root_id, path.as_posix()), set()).add(role)
 
 
 def _capture_file(
     root: Path,
+    root_id: str,
     relative_path: str,
     roles: frozenset[LifecycleFileRole],
 ) -> LifecycleFileState:
@@ -237,11 +326,15 @@ def _capture_file(
     try:
         ensure_path_within(path.parent, root)
     except PathTraversalError as exc:
-        raise ValueError(f"Refusing lifecycle snapshot path outside workspace: {path}") from exc
+        raise ValueError(
+            f"Refusing lifecycle snapshot path outside bounded root {root_id!r}: {path}"
+        ) from exc
     try:
         metadata = path.lstat()
     except FileNotFoundError:
         return LifecycleFileState(
+            root_id=root_id,
+            root_path=root,
             relative_path=relative_path,
             kind="missing",
             roles=roles,
@@ -252,6 +345,8 @@ def _capture_file(
         raise ValueError(f"Lifecycle snapshot path ancestor is not a directory: {path}") from exc
     if stat.S_ISLNK(metadata.st_mode):
         return LifecycleFileState(
+            root_id=root_id,
+            root_path=root,
             relative_path=relative_path,
             kind="symlink",
             roles=roles,
@@ -261,6 +356,8 @@ def _capture_file(
         )
     if stat.S_ISDIR(metadata.st_mode):
         return LifecycleFileState(
+            root_id=root_id,
+            root_path=root,
             relative_path=relative_path,
             kind="directory",
             roles=roles,
@@ -271,12 +368,83 @@ def _capture_file(
         raise ValueError(f"Unsupported lifecycle snapshot file type: {path}")
     content = path.read_bytes()
     return LifecycleFileState(
+        root_id=root_id,
+        root_path=root,
         relative_path=relative_path,
         kind="file",
         roles=roles,
         content=content,
         sha256=hashlib.sha256(content).hexdigest(),
     )
+
+
+def _validate_external_roots(
+    workspace_root: Path,
+    external_roots: Sequence[LifecycleStateRoot],
+) -> tuple[LifecycleStateRoot, ...]:
+    normalized: list[LifecycleStateRoot] = []
+    root_ids: set[str] = set()
+    owners: set[tuple[str, str]] = set()
+    bounded_paths = [workspace_root.resolve()]
+    for external in external_roots:
+        validate_path_segments(
+            external.root_id,
+            context="lifecycle root_id",
+            reject_empty=True,
+        )
+        if external.root_id == _WORKSPACE_ROOT_ID:
+            raise ValueError(f"Lifecycle root_id {_WORKSPACE_ROOT_ID!r} is reserved")
+        if external.root_id in root_ids:
+            raise ValueError(f"Duplicate lifecycle root_id: {external.root_id!r}")
+        capability = get_target_capability(external.target)
+        if capability.name != external.target:
+            raise ValueError(f"Lifecycle state root target must be canonical: {external.target!r}")
+        scope = InstallScope(external.scope).value
+        owner = (external.target, scope)
+        if owner in owners:
+            raise ValueError(
+                f"Duplicate lifecycle target/scope root: {external.target!r}/{scope!r}"
+            )
+        path = external.path.absolute()
+        if path.is_symlink():
+            raise ValueError(f"Lifecycle external root must not be a symlink: {path}")
+        if not path.is_dir():
+            raise ValueError(f"Lifecycle external root must be a directory: {path}")
+        resolved = path.resolve()
+        for bounded in bounded_paths:
+            if (
+                resolved == bounded
+                or resolved.is_relative_to(bounded)
+                or bounded.is_relative_to(resolved)
+            ):
+                raise ValueError(f"Lifecycle state roots overlap: {resolved} and {bounded}")
+        for config_path in external.config_paths:
+            _validate_relative_state_path(config_path.as_posix())
+        normalized.append(
+            LifecycleStateRoot(
+                root_id=external.root_id,
+                target=external.target,
+                scope=scope,
+                path=resolved,
+                config_paths=tuple(external.config_paths),
+            )
+        )
+        root_ids.add(external.root_id)
+        owners.add(owner)
+        bounded_paths.append(resolved)
+    return tuple(sorted(normalized, key=lambda root: root.root_id))
+
+
+def _validate_relative_state_path(relative_path: str) -> PurePosixPath:
+    validate_path_segments(
+        relative_path,
+        context="lifecycle snapshot path",
+        reject_empty=True,
+    )
+    path = PurePosixPath(relative_path)
+    if path.is_absolute() or "\\" in relative_path or PureWindowsPath(relative_path).drive:
+        raise ValueError(f"Lifecycle snapshot path must be relative POSIX: {relative_path}")
+    return path
 
 
 def _read_optional_file(path: Path) -> bytes | None:

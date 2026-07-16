@@ -169,6 +169,39 @@ class LocalPackageFactory:
         )
         return self._write_text(path, f"{content}\n")
 
+    def add_hook_asset(
+        self,
+        package: LocalPackage,
+        hook_name: str,
+        relative_path: PurePosixPath,
+        content: str | bytes,
+        *,
+        executable: bool = False,
+    ) -> Path:
+        """Author a file below one hook descriptor's relative source subtree."""
+        self._validate_segment(hook_name, "hook")
+        if not isinstance(relative_path, PurePosixPath):
+            raise TypeError("Hook asset paths must be PurePosixPath instances")
+        if not isinstance(content, (str, bytes)):
+            raise TypeError("Hook asset contents must be text or bytes")
+        descriptor = self._source_path(
+            package,
+            PurePosixPath(".apm") / "hooks" / f"{hook_name}.json",
+            frozenset({_HOOK_LAYOUT}),
+        )
+        if descriptor.is_symlink() or not descriptor.is_file():
+            raise ValueError(f"Hook descriptor must exist before its assets: {descriptor}")
+        path = self._source_path(
+            package,
+            PurePosixPath(".apm") / "hooks" / hook_name / relative_path,
+            frozenset({_HOOK_LAYOUT}),
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
+        if executable:
+            path.chmod(path.stat().st_mode | 0o111)
+        return path
+
     def add_canvas(
         self,
         package: LocalPackage,
@@ -287,6 +320,89 @@ class LocalPackageFactory:
         dump_yaml(dict(policy), path)
         return path
 
+    def set_targets(
+        self,
+        package: LocalPackage,
+        targets: Sequence[str],
+    ) -> None:
+        """Replace canonical manifest targets while preserving other sections."""
+        manifest_path, manifest = self._load_manifest(package)
+        validated = parse_targets_field({"targets": list(targets)}) if targets else []
+        if validated:
+            if manifest.get("targets") == validated:
+                return
+            manifest["targets"] = validated
+        elif "targets" in manifest:
+            manifest.pop("targets")
+        else:
+            return
+        dump_yaml(manifest, manifest_path)
+
+    def replace_apm_dependencies(
+        self,
+        package: LocalPackage,
+        dependencies: Sequence[DependencyInput],
+    ) -> None:
+        """Replace only ``dependencies.apm`` using canonical source validation."""
+        manifest_path, manifest = self._load_manifest(package)
+        validated = self._validate_dependencies(dependencies)
+        dependency_block = manifest.get("dependencies")
+        if dependency_block is None:
+            dependency_block = {}
+        if not isinstance(dependency_block, dict):
+            raise ValueError(f"Invalid dependencies mapping: {manifest_path}")
+        current = dependency_block.get("apm")
+        if current is not None and not isinstance(current, list):
+            raise ValueError(f"Invalid APM dependencies list: {manifest_path}")
+        if validated:
+            if current == validated:
+                return
+            dependency_block["apm"] = validated
+            manifest["dependencies"] = dependency_block
+        elif "apm" in dependency_block:
+            dependency_block.pop("apm")
+            if dependency_block:
+                manifest["dependencies"] = dependency_block
+            else:
+                manifest.pop("dependencies", None)
+        else:
+            return
+        dump_yaml(manifest, manifest_path)
+
+    def remove_apm_dependency(
+        self,
+        package: LocalPackage,
+        dependency: DependencyInput,
+    ) -> bool:
+        """Remove the first semantically matching APM dependency."""
+        manifest_path, manifest = self._load_manifest(package)
+        validated = self._validate_dependencies((dependency,))
+        expected = self._parse_dependency(validated[0])
+        expected_identity = expected.get_identity()
+        dependency_block = manifest.get("dependencies")
+        if dependency_block is None:
+            return False
+        if not isinstance(dependency_block, dict):
+            raise ValueError(f"Invalid dependencies mapping: {manifest_path}")
+        current = dependency_block.get("apm")
+        if current is None:
+            return False
+        if not isinstance(current, list):
+            raise ValueError(f"Invalid APM dependencies list: {manifest_path}")
+        for index, entry in enumerate(current):
+            if self._parse_dependency(entry).get_identity() != expected_identity:
+                continue
+            updated = [*current[:index], *current[index + 1 :]]
+            if updated:
+                dependency_block["apm"] = updated
+            else:
+                dependency_block.pop("apm")
+                if not dependency_block:
+                    manifest.pop("dependencies", None)
+            dump_yaml(manifest, manifest_path)
+            return True
+        return False
+
     def _source_path(
         self,
         package: LocalPackage,
@@ -303,6 +419,16 @@ class LocalPackageFactory:
             PurePosixPath("apm.yml"),
             frozenset({_MANIFEST_LAYOUT}),
         )
+
+    def _load_manifest(self, package: LocalPackage) -> tuple[Path, dict[str, object]]:
+        manifest_path = self._manifest_path(package)
+        try:
+            manifest = load_yaml(manifest_path)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Invalid manifest YAML: {manifest_path}") from exc
+        if not isinstance(manifest, dict):
+            raise ValueError(f"Invalid manifest mapping: {manifest_path}")
+        return manifest_path, manifest
 
     def _add_prompt_source(
         self,
@@ -363,6 +489,8 @@ class LocalPackageFactory:
             return _SKILL_LAYOUT
         if len(parts) >= 4 and parts[:2] == (".apm", "extensions"):
             return _CANVAS_LAYOUT
+        if len(parts) >= 4 and parts[:2] == (".apm", "hooks") and not parts[2].endswith(".json"):
+            return _HOOK_LAYOUT
         if len(parts) != 3:
             return None
         if (
@@ -429,6 +557,14 @@ class LocalPackageFactory:
                 raise ValueError("Dependency source form failed semantic round-trip validation")
             validated.append(source_entry)
         return validated
+
+    @staticmethod
+    def _parse_dependency(entry: object) -> DependencyReference:
+        if isinstance(entry, str):
+            return DependencyReference.parse(entry)
+        if isinstance(entry, Mapping):
+            return DependencyReference.parse_from_dict(dict(entry))
+        raise TypeError("APM dependency entries must be strings or mappings")
 
     @staticmethod
     def _validate_config_dependencies(
