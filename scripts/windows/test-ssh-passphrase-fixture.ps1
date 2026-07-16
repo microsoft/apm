@@ -1094,7 +1094,7 @@ Match Group administrators
 
     foreach ($sensitiveValue in @($passphrase, $wrongPassphrase)) {
         foreach ($file in Get-ChildItem -Path $EvidenceDirectory -File -Recurse) {
-            $evidenceContent = [string](Get-Content -Path $file.FullName -Raw)
+            $evidenceContent = [System.IO.File]::ReadAllText($file.FullName)
             if ($evidenceContent.Contains($sensitiveValue)) {
                 throw "Ephemeral passphrase leaked into evidence file: $($file.FullName)"
             }
