@@ -969,9 +969,6 @@ class APMDependencyResolver:
             if self._existing_lockfile is not None
             else None
         )
-        # `locked_dep is None` means "new dependency" only when a lockfile exists.
-        if self._existing_lockfile is None and not self._update_refs:
-            return False
         return should_force_ref_recheck(
             dep_ref,
             locked_dep,

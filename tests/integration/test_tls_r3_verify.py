@@ -339,8 +339,17 @@ def test_v4_setup_llm_truststore_is_best_effort_and_pinned():
     assert "Write-WarningText" in tail
 
 
+@pytest.mark.parametrize(
+    ("argv", "original_args"),
+    (
+        (["/managed/llm-venv/bin/pip"], ["python", "/managed/llm-venv/bin/pip"]),
+        (["pip/__main__.py"], ["python", "-m", "pip", "install", "llm"]),
+    ),
+)
 def test_child_bootstrap_leaves_pip_vendored_truststore_in_control(
     monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    original_args: list[str],
 ) -> None:
     """Repeated runtime setup must not inject twice into pip's SSL module."""
     bootstrap = _repo_root() / "src" / "apm_cli" / "core" / "_child_tls" / "_apm_tls_bootstrap.py"
@@ -349,7 +358,8 @@ def test_child_bootstrap_leaves_pip_vendored_truststore_in_control(
         inject_into_ssl=lambda: injections.append(True),
     )
     monkeypatch.setitem(sys.modules, "truststore", fake_truststore)
-    monkeypatch.setattr(sys, "argv", ["/managed/llm-venv/bin/pip"])
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(sys, "orig_argv", original_args)
 
     spec = importlib.util.spec_from_file_location("_test_apm_tls_bootstrap", bootstrap)
     assert spec is not None

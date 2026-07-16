@@ -1660,6 +1660,7 @@ class TestDepsUpdateTokenResolution:
         (tmp_path / "apm.yml").write_text(_APM_YML_WITH_DEPS)
         # 'test-dep' is parts[-1] of 'test-org/test-dep' — adds to token_to_canonical
         result = CliRunner().invoke(cli, ["deps", "update", "test-dep"])
+        # The resolving heartbeat proves token mapping passed before the fake clone fails.
         assert "resolving test-org/test-dep" in result.output.lower()
 
     def test_update_by_full_canonical_key(
@@ -1669,6 +1670,7 @@ class TestDepsUpdateTokenResolution:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "apm.yml").write_text(_APM_YML_WITH_DEPS)
         result = CliRunner().invoke(cli, ["deps", "update", "test-org/test-dep"])
+        # The resolving heartbeat proves token mapping passed before the fake clone fails.
         assert "resolving test-org/test-dep" in result.output.lower()
 
 

@@ -23,7 +23,12 @@ def _truthy(val):
 
 def _is_pip_process():
     """Let pip use its vendored truststore without a second SSL injection."""
-    return _os.path.basename(_sys.argv[0]).lower().startswith("pip")
+    if _os.path.basename(_sys.argv[0]).lower().startswith("pip"):
+        return True
+    original_args = getattr(_sys, "orig_argv", ())
+    return any(
+        original_args[index : index + 2] == ["-m", "pip"] for index in range(len(original_args) - 1)
+    )
 
 
 def _bootstrap():
