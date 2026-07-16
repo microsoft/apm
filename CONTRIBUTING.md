@@ -224,11 +224,23 @@ uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
   --reuse-cache --output mutation-pilot-report.json
 ```
 
+To inspect existing mutmut metadata without executing mutants:
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --report-only --output mutation-pilot-report.json
+```
+
 The accepted survivor allowlist is
 [`tests/mutation/baseline.json`](tests/mutation/baseline.json). Do not update it
 to make a run green. Review every surviving diff with `mutmut show`, add a
 behavioral test for real contract gaps, and use `--update-baseline` only for a
 reviewed baseline change.
+
+```bash
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+  --update-baseline --output mutation-pilot-report.json
+```
 
 If you don't have `uv` available, you can use a standard Python venv and pip:
 

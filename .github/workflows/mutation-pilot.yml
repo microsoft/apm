@@ -49,14 +49,17 @@ jobs:
             hashFiles(
               'uv.lock',
               'pyproject.toml',
+              'scripts/ratchet_baseline.py',
               'scripts/run_mutation_pilot.py',
               'tests/mutation/baseline.json',
+              'tests/conftest.py',
               'src/apm_cli/models/dependency/subsets.py',
               'src/apm_cli/install/plan.py',
               'src/apm_cli/policy/discovery.py',
               'src/apm_cli/compilation/link_resolver.py',
               'tests/unit/test_skill_subset_persistence.py',
               'tests/unit/test_dep_targets_persistence.py',
+              'tests/unit/install/conftest.py',
               'tests/unit/install/test_plan.py',
               'tests/unit/policy/test_cache_merged_effective.py',
               'tests/unit/compilation/test_link_resolver.py',
@@ -72,6 +75,7 @@ jobs:
             args+=(--reuse-cache)
           fi
           uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+            --max-children 2 \
             --output mutation-pilot-report.json \
             "${args[@]}"
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import tomllib
@@ -97,6 +98,14 @@ def test_validate_baseline_rejects_schema_version_mismatch(pilot: ModuleType) ->
         pilot._validate_baseline(payload)
 
 
+def test_validate_baseline_rejects_tool_version_mismatch(pilot: ModuleType) -> None:
+    payload = pilot._baseline_payload(_reports(pilot))
+    payload["tool"] = {"name": "mutmut", "version": "9.9.9"}
+
+    with pytest.raises(pilot.BaselineError, match="tool version mismatch"):
+        pilot._validate_baseline(payload)
+
+
 def test_new_survivor_fails_baseline_comparison(pilot: ModuleType) -> None:
     reports = _reports(
         pilot,
@@ -124,13 +133,122 @@ def test_killed_accepted_survivor_is_reported_without_failing(pilot: ModuleType)
     assert comparisons["update-plan"]["resolved_survivors"] == [survivor]
 
 
-def test_timeout_cannot_be_written_into_baseline(pilot: ModuleType) -> None:
+@pytest.mark.parametrize("status", ["skipped", "timeout", "type_checked"])
+def test_incomplete_outcome_fails_baseline_comparison(
+    pilot: ModuleType,
+    status: str,
+) -> None:
     reports = _reports(pilot)
-    reports["update-plan"]["outcomes"]["timeout"] = [
-        "apm_cli.install.plan.build_update_plan__mutmut_9"
+    mutant = f"apm_cli.install.plan.build_update_plan__mutmut_{status}"
+    reports["update-plan"]["outcomes"][status] = [mutant]
+    reports["update-plan"]["counts"][status] = 1
+    reports["update-plan"]["counts"]["total"] += 1
+    baseline = pilot._validate_baseline(pilot._baseline_payload(_reports(pilot)))
+
+    comparisons, failed = pilot._compare_with_baseline(reports, baseline)
+
+    assert failed is True
+    assert comparisons["update-plan"]["fatal_outcomes"] == {status: [mutant]}
+
+
+@pytest.mark.parametrize("status", ["skipped", "timeout", "type_checked"])
+def test_incomplete_outcome_cannot_be_written_into_baseline(
+    pilot: ModuleType,
+    status: str,
+) -> None:
+    reports = _reports(pilot)
+    reports["update-plan"]["outcomes"][status] = [
+        f"apm_cli.install.plan.build_update_plan__mutmut_{status}"
     ]
-    reports["update-plan"]["counts"]["timeout"] = 1
+    reports["update-plan"]["counts"][status] = 1
     reports["update-plan"]["counts"]["total"] += 1
 
     with pytest.raises(pilot.PilotError, match="non-survivor failures present"):
         pilot._baseline_payload(reports)
+
+
+def test_sanitized_environment_removes_credentials_and_preserves_safe_values(
+    pilot: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = {name: "secret" for name in pilot.SENSITIVE_ENVIRONMENT_NAMES}
+    environment["HOME"] = "/safe/home"
+    monkeypatch.setattr(pilot.os, "environ", environment)
+
+    sanitized = pilot._sanitized_environment()
+
+    assert set(sanitized) == {"HOME"}
+    assert sanitized["HOME"] == "/safe/home"
+
+
+@pytest.mark.parametrize(
+    ("reuse_cache", "expected_removals"),
+    [(False, 1), (True, 0)],
+)
+def test_run_mutmut_respects_cache_mode(
+    pilot: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    reuse_cache: bool,
+    expected_removals: int,
+) -> None:
+    removals = []
+    monkeypatch.setattr(
+        pilot.shutil,
+        "rmtree",
+        lambda path, ignore_errors: removals.append((path, ignore_errors)),
+    )
+    monkeypatch.setattr(pilot.shutil, "which", lambda name: f"/venv/bin/{name}")
+    run = Mock(
+        return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(pilot.subprocess, "run", run)
+
+    pilot._run_mutmut(max_children=2, reuse_cache=reuse_cache, repo_root=tmp_path)
+
+    assert len(removals) == expected_removals
+    run.assert_called_once()
+
+
+def test_report_only_skips_mutmut_execution(
+    pilot: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reports = _reports(pilot)
+    baseline_path = tmp_path / "baseline.json"
+    report_path = tmp_path / "report.json"
+    pilot.write_baseline(
+        baseline_path,
+        pilot._baseline_payload(reports),
+        label="mutation",
+    )
+    monkeypatch.setattr(
+        pilot,
+        "_parse_args",
+        lambda: SimpleNamespace(
+            baseline=baseline_path,
+            max_children=2,
+            output=report_path,
+            report_only=True,
+            reuse_cache=False,
+            update_baseline=False,
+        ),
+    )
+    monkeypatch.setattr(
+        pilot,
+        "_run_mutmut",
+        lambda **kwargs: pytest.fail("report-only mode executed mutmut"),
+    )
+    monkeypatch.setattr(
+        pilot,
+        "_owner_report",
+        lambda owner, repo_root: reports[owner.key],
+    )
+
+    result = pilot.main()
+
+    assert result == 0
+    assert report_path.is_file()
+    assert "metadata only" in capsys.readouterr().out

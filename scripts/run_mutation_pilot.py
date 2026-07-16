@@ -44,7 +44,30 @@ STATUS_BY_EXIT_CODE = {
     255: "timeout",
 }
 FATAL_STATUSES = frozenset(
-    {"interrupted", "no_tests", "not_checked", "segfault", "suspicious", "timeout", "unknown"}
+    {
+        "interrupted",
+        "no_tests",
+        "not_checked",
+        "segfault",
+        "skipped",
+        "suspicious",
+        "timeout",
+        "type_checked",
+        "unknown",
+    }
+)
+SENSITIVE_ENVIRONMENT_NAMES = frozenset(
+    {
+        "ADO_APM_PAT",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "AZURE_DEVOPS_EXT_PAT",
+        "GH_TOKEN",
+        "GITHUB_APM_PAT",
+        "GITHUB_TOKEN",
+        "SSH_AUTH_SOCK",
+        "SYSTEM_ACCESSTOKEN",
+    }
 )
 
 
@@ -301,18 +324,7 @@ def _compare_with_baseline(
 def _sanitized_environment() -> dict[str, str]:
     """Remove credential-bearing environment variables before executing mutants."""
     environment = os.environ.copy()
-    sensitive_names = {
-        "ADO_APM_PAT",
-        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-        "ACTIONS_RUNTIME_TOKEN",
-        "AZURE_DEVOPS_EXT_PAT",
-        "GH_TOKEN",
-        "GITHUB_APM_PAT",
-        "GITHUB_TOKEN",
-        "SSH_AUTH_SOCK",
-        "SYSTEM_ACCESSTOKEN",
-    }
-    for name in sensitive_names:
+    for name in SENSITIVE_ENVIRONMENT_NAMES:
         environment.pop(name, None)
     return environment
 
@@ -396,6 +408,8 @@ def main() -> int:
         if args.report_only:
             print("[!] Report-only mode reuses existing mutmut metadata without executing tests.")
         else:
+            mode = "cached" if args.reuse_cache else "fresh"
+            print(f"[i] Starting {mode} mutation execution.")
             elapsed = _run_mutmut(
                 max_children=args.max_children,
                 reuse_cache=args.reuse_cache,
@@ -427,6 +441,7 @@ def main() -> int:
     survivors = sum(report["counts"].get("survived", 0) for report in owner_reports.values())
     runtime = "metadata only" if args.report_only else f"{elapsed:.1f}s runtime"
     print(f"[+] Mutation pilot report: {total} mutants, {survivors} survivors, {runtime}")
+    print(f"[i] Report written to {_ascii(str(args.output))}")
     for owner in OWNERS:
         counts = owner_reports[owner.key]["counts"]
         print(
@@ -437,13 +452,14 @@ def main() -> int:
         resolved_count = len(comparisons[owner.key]["resolved_survivors"])
         if resolved_count:
             print(
-                f"[!] {owner.key}: {resolved_count} accepted survivor(s) are now killed; "
+                f"[i] {owner.key}: {resolved_count} accepted survivor(s) are now killed; "
                 "review and rerun with --update-baseline."
             )
     if failed:
         print(
             "[x] Unexpected mutation outcomes are not allowlisted. "
-            "Inspect the JSON report and run 'mutmut show <id>'; "
+            "Inspect the JSON report, use 'mutmut results' to find each survivor, "
+            "then run 'mutmut show <name>'; "
             "add a behavioral test before updating the baseline.",
             file=sys.stderr,
         )
