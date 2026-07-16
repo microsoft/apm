@@ -896,3 +896,57 @@ def test_direct_parity_module_import_is_rejected(
 
     assert len(violations) == 1
     assert "rendered parity module imported directly" in violations[0]
+
+
+# ---------------------------------------------------------------------------
+# Windows path-separator regression (microsoft/apm#2233)
+#
+# str(Path(...)) uses OS-native separators: forward slashes on POSIX,
+# backslashes on Windows. Formatting a Path constant or a Path dict key
+# directly into an f-string diagnostic therefore emits a backslash on
+# Windows, which cannot match a forward-slash test literal (e.g. a
+# parametrized "scripts/check_test_assertions.py" substring). Because
+# str(Path(...)) already yields forward slashes on the POSIX hosts that
+# run this suite, a behavioral test cannot reproduce the Windows
+# failure here -- only a static-source guard can, so it fails closed
+# for any future edit that reintroduces raw Path formatting instead of
+# ``.as_posix()``.
+# ---------------------------------------------------------------------------
+
+
+def _checker_source() -> str:
+    root = Path(__file__).resolve().parents[3]
+    return (root / "scripts" / "check_test_contract_authorities.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "owner_constant",
+    (
+        "BINARY_OWNER",
+        "PARITY_OWNER",
+        "TEST_FILE_INVENTORY_OWNER",
+        "RATCHET_BASELINE_OWNER",
+    ),
+)
+def test_owner_path_constants_are_never_raw_formatted(owner_constant: str) -> None:
+    """Every Path-typed owner constant must reach diagnostics via ``.as_posix()``.
+
+    A bare ``{OWNER}`` f-string interpolation would silently regress to
+    OS-native (backslash-on-Windows) formatting.
+    """
+    source = _checker_source()
+    assert f"{{{owner_constant}}}" not in source, (
+        f"{owner_constant} must not be interpolated raw into an f-string; "
+        f"use {owner_constant}.as_posix() instead (see microsoft/apm#2233)"
+    )
+
+
+def test_relative_to_root_is_never_raw_formatted() -> None:
+    """``path.relative_to(root)`` must always be posix-formatted before
+    reaching a diagnostic string."""
+    source = _checker_source()
+    assert "relative_to(root)}" not in source, (
+        "path.relative_to(root) must not be interpolated raw into an f-string; "
+        "chain .as_posix() (see microsoft/apm#2233)"
+    )
+    assert "relative_to(root):" not in source

@@ -85,6 +85,70 @@ jobs:
     - name: Lint - architecture authority boundaries
       run: bash scripts/lint-architecture-boundaries.sh
 
+  # Focused Windows compatibility gate -- runs at PR time (not just
+  # post-merge in build-release.yml) so the class of Windows-only
+  # regressions fixed here (CRLF text-mode writes, Windows path
+  # separators leaking into diagnostics, bare "git" argv resolution,
+  # and the websockets.sync shutdown race) is caught before merge
+  # instead of surfacing only in the post-merge full-matrix build (see
+  # microsoft/apm#2233). Deliberately narrow: only the load-bearing
+  # cross-platform contract family plus their canonical owners, not a
+  # full-suite duplicate -- keeps PR-time cost bounded while still
+  # gating the exact defect class that slipped through Linux-only CI.
+  windows-compat-gate:
+    name: Windows Compatibility Gate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      run: uv sync --extra dev
+
+    - name: Diagnostics (platform, git, python)
+      run: |
+        python --version
+        python -c "import sys; print('platform:', sys.platform)"
+        git --version
+        where git
+
+    - name: Run cross-platform contract family
+      run: >-
+        uv run --extra dev pytest -p no:cacheprovider -v
+        tests/unit/scripts/test_ratchet_baseline.py
+        tests/unit/scripts/test_run_mutation_pilot.py
+        tests/unit/scripts/test_check_test_contract_authorities.py
+        tests/unit/scripts/test_check_test_assertions.py
+        tests/unit/scripts/test_check_exact_test_duplicates.py
+        tests/unit/test_shepherd_owner_touch_gate.py
+        tests/unit/integration/test_copilot_app_ws.py
+        tests/unit/utils/test_atomic_io.py
+        tests/unit/cache/test_git_env.py
+        tests/unit/utils/test_paths.py
+
+    - name: Diagnostics on failure
+      if: failure()
+      run: |
+        echo "::group::Environment"
+        Get-ChildItem Env: | Sort-Object Name
+        echo "::endgroup::"
+        echo "::group::git config"
+        git config --list --show-origin
+        echo "::endgroup::"
+
   test-architecture:
     name: Test Architecture Ratchets
     runs-on: ubuntu-24.04

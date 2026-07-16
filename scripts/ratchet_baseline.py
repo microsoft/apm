@@ -6,6 +6,8 @@ import json
 from json import JSONDecodeError
 from pathlib import Path
 
+from apm_cli.utils.atomic_io import atomic_write_text
+
 PROVISIONAL_KEYS = {"basis_commit", "required_follow_up"}
 
 
@@ -59,12 +61,15 @@ def write_baseline(
     *,
     label: str,
 ) -> None:
-    """Atomically write canonical sorted JSON."""
-    temporary = path.with_name(f".{path.name}.tmp")
+    """Atomically write canonical sorted JSON.
+
+    Routes through :func:`apm_cli.utils.atomic_io.atomic_write_text`, the
+    single canonical atomic-write primitive, so the on-disk bytes use LF
+    line endings on every platform (Windows text-mode writes would
+    otherwise translate ``\\n`` to ``\\r\\n``, see microsoft/apm#2233).
+    """
+    content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     try:
-        content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-        temporary.write_bytes(content.encode("utf-8"))
-        temporary.replace(path)
+        atomic_write_text(path, content)
     except OSError as error:
-        temporary.unlink(missing_ok=True)
         raise BaselineError(f"failed to update {label} baseline: {error}") from error

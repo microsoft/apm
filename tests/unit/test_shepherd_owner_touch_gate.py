@@ -6,9 +6,12 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
+
+from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
 
 ROOT = Path(__file__).parents[2]
 GATE = ROOT / "packages/shepherd-driver/scripts/owner_touch_gate.py"
@@ -29,8 +32,23 @@ def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _git(repo: Path, *args: str) -> str:
-    """Run git in a fixture repository and return stdout."""
-    result = _run(["git", *args], cwd=repo)
+    """Run git in a fixture repository and return stdout.
+
+    Resolves git's full executable path and uses a sanitized subprocess
+    environment via the canonical ``apm_cli.utils.git_env`` owner --
+    a bare ``["git", ...]`` argv does not reliably resolve on Windows
+    (``CreateProcess`` requires an extension-qualified executable or a
+    PATH lookup that ``shell=False`` does not perform), which previously
+    raised ``FileNotFoundError: [WinError 2]`` (see microsoft/apm#2233).
+    """
+    result = subprocess.run(
+        [get_git_executable(), *args],
+        cwd=repo,
+        env=git_subprocess_env(),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
@@ -409,3 +427,73 @@ def test_unknown_completion_status_fails_closed(
 
     assert result.returncode == 1
     assert "unsupported completion status" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Windows bare-argv git resolution regression (microsoft/apm#2233)
+#
+# subprocess.run(["git", ...]) does not reliably resolve on Windows with
+# shell=False (CreateProcess needs an extension-qualified path or a PATH
+# search this test's environment previously did not perform), raising
+# FileNotFoundError: [WinError 2]. The fix resolves git's full path once
+# via shutil.which and reuses it for every invocation. These regression
+# tests cover the gate script itself (packages/shepherd-driver/scripts/
+# owner_touch_gate.py::_git), not just this test file's own fixture
+# helper, since both had the identical bug.
+# ---------------------------------------------------------------------------
+
+
+def _load_gate_module() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("owner_touch_gate", GATE)
+    assert spec is not None and spec.loader is not None
+    module = ModuleType("owner_touch_gate")
+    import sys as _sys
+
+    _sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_gate_git_helper_never_uses_bare_argv() -> None:
+    """The production gate script must not pass a bare "git" argv to
+    subprocess -- it must resolve git's full path first (see
+    microsoft/apm#2233)."""
+    source = GATE.read_text(encoding="utf-8")
+    assert '["git"' not in source
+    assert "['git'" not in source
+
+
+def test_gate_git_executable_is_cached_and_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The resolved git path is looked up via shutil.which and cached."""
+    module = _load_gate_module()
+    calls = {"count": 0}
+
+    def fake_which(name: str) -> str:
+        assert name == "git"
+        calls["count"] += 1
+        return "/usr/bin/git"
+
+    monkeypatch.setattr(module.shutil, "which", fake_which)
+    module._GIT_EXECUTABLE = None
+
+    first = module._git_executable()
+    second = module._git_executable()
+
+    assert first == "/usr/bin/git"
+    assert second == "/usr/bin/git"
+    assert calls["count"] == 1, "git executable lookup must be cached, not repeated"
+
+
+def test_gate_git_executable_fails_closed_when_git_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing git binary must raise a clear GateError, not an opaque
+    platform-specific FileNotFoundError."""
+    module = _load_gate_module()
+    monkeypatch.setattr(module.shutil, "which", lambda name: None)
+    module._GIT_EXECUTABLE = None
+
+    with pytest.raises(module.GateError, match="git executable not found"):
+        module._git_executable()

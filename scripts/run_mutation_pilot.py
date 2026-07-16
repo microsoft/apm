@@ -17,6 +17,8 @@ from typing import Any
 
 from ratchet_baseline import BaselineError, load_baseline, write_baseline
 
+from apm_cli.utils.atomic_io import atomic_write_text
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = REPO_ROOT / "tests" / "mutation" / "baseline.json"
 DEFAULT_OUTPUT = REPO_ROOT / "build" / "mutation-pilot" / "report.json"
@@ -370,17 +372,21 @@ def _run_mutmut(*, max_children: int, reuse_cache: bool, repo_root: Path) -> flo
 
 
 def _write_report(path: Path, payload: dict[str, Any]) -> None:
-    """Atomically write canonical mutation evidence."""
+    """Atomically write canonical mutation evidence.
+
+    Routes through :func:`apm_cli.utils.atomic_io.atomic_write_text`, the
+    single canonical atomic-write primitive, so the on-disk bytes use LF
+    line endings on every platform (Windows text-mode writes would
+    otherwise translate ``\\n`` to ``\\r\\n``, see microsoft/apm#2233).
+    The payload is serialized with ``ensure_ascii=True`` so the resulting
+    text -- and therefore its UTF-8 encoding -- contains only printable
+    ASCII bytes.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
+    content = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
     try:
-        temporary.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
-            encoding="ascii",
-        )
-        temporary.replace(path)
+        atomic_write_text(path, content)
     except OSError as error:
-        temporary.unlink(missing_ok=True)
         raise PilotError(f"failed to write mutation report {path}: {error}") from error
 
 
