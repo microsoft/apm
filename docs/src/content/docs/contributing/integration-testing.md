@@ -34,9 +34,9 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ### 3. **Lifecycle Smoke** (PR-time required check)
-- **Location**: selected declaratively via the registered `lifecycle_smoke` pytest marker, applied to all of `tests/integration/test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py` (module-level), and to only `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner` (function-level -- the file's other tests are not part of this family)
-- **Purpose**: Promote the smallest stable, hermetic slice of the real Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so a regression in install/lock/audit convergence or ADO lock-coordinate handling fails the PR instead of only surfacing once a change reaches the merge queue
-- **Scope**: install content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill lock convergence, the virtual/manifestless lifecycle matrix, and the ADO lock-coordinate ownership guard -- no built binary, no network, no credentials
+- **Location**: selected declaratively via the registered `lifecycle_smoke` pytest marker, applied to all of `tests/integration/test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py` (module-level), to only `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner` (function-level -- the file's other tests are not part of this family), and to only the `[claude]` parametrization of `test_prune_hook_reconciliation_e2e.py::test_prune_removes_merged_hook_entries_and_sidecar` (the sibling `[cursor]` parametrization is deliberately excluded)
+- **Purpose**: Promote the smallest stable, hermetic slice of the real Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so a regression in install/lock/audit convergence, ADO lock-coordinate handling, or prune-time hook reconciliation fails the PR instead of only surfacing once a change reaches the merge queue
+- **Scope**: install content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill lock convergence, the virtual/manifestless lifecycle matrix, the ADO lock-coordinate ownership guard, and prune's merged-hook/sidecar reconciliation -- no built binary, no network, no credentials
 - **Duration**: ~65-70s job wall time (hard 3-minute timeout)
 - **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
 - **Selection mechanism**: `pytest --strict-markers -m lifecycle_smoke tests/integration` -- declarative, not an explicit file/node-id list. If every `@pytest.mark.lifecycle_smoke` mark were ever removed, the marker family collects zero tests and pytest exits code 5 ("no tests collected"), failing the job loudly rather than silently shrinking. The marker is registered in `pyproject.toml`'s `[tool.pytest.ini_options]` markers list; `--strict-markers` rejects any typo'd or unregistered mark used as a decorator.
@@ -350,6 +350,7 @@ Promotion integration tests run on:
 - Policy pinned-constraint enforcement (Govern contract)
 - The virtual/manifestless lifecycle matrix: install, lock, frozen-install, update, and audit stay consistent (the direct #2240 regression)
 - The ADO lock-coordinate single-owner guard (the direct #2226 regression)
+- Prune's merged-hook and ownership-sidecar reconciliation for the `claude` target (the direct #2249 regression -- an orphaned package's merged hook entries and sidecar markers must be cleaned up, not left pointing at deleted scripts)
 - No network, no credentials, no built binary required for any of the above
 
 ## Benefits

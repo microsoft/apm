@@ -220,7 +220,11 @@ def _pre_tool_use_commands(settings_path: Path) -> list[str]:
     return commands
 
 
-@pytest.mark.parametrize("target", ["claude", "cursor"], ids=["claude", "cursor"])
+@pytest.mark.parametrize(
+    "target",
+    [pytest.param("claude", marks=pytest.mark.lifecycle_smoke), "cursor"],
+    ids=["claude", "cursor"],
+)
 def test_prune_removes_merged_hook_entries_and_sidecar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
 ) -> None:
