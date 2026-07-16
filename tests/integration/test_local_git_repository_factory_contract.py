@@ -496,6 +496,62 @@ def test_url_rewrite_subprocess_env_rejects_preexisting_process_git_config(
         factory_with_slot.url_rewrite_subprocess_env(repository_with_slot, remote_base)
 
 
+def test_url_rewrite_subprocess_env_rejects_preexisting_process_git_config_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    # Windows environment variable names are case-insensitive: a fixture
+    # carrying "git_config_count" or "Git_Config_Key_0" occupies the exact
+    # same slot there as the canonical uppercase name, so the fail-closed
+    # guard must normalize case before comparing -- otherwise a
+    # differently-cased pre-existing entry would slip past detection and
+    # end up silently clobbered (or duplicated with undefined precedence)
+    # alongside the ones this method writes.
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    remote_base = "https://github.example.invalid/acme/package"
+
+    polluted_by_lower_count = dict(environment)
+    polluted_by_lower_count["git_config_count"] = "1"
+    polluted_by_lower_count["Git_Config_Key_0"] = "credential.helper"
+    polluted_by_lower_count["Git_Config_Value_0"] = ""
+    factory_with_lower_count = LocalGitRepositoryFactory(
+        tmp_path / "repositories-lower-count",
+        env=polluted_by_lower_count,
+    )
+    repository_with_lower_count = factory_with_lower_count.create("package")
+    (repository_with_lower_count.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory_with_lower_count.commit(repository_with_lower_count, message="seed")
+    snapshot_before = dict(factory_with_lower_count._env)
+    with pytest.raises(ValueError, match="git_config_count"):
+        factory_with_lower_count.url_rewrite_subprocess_env(
+            repository_with_lower_count, remote_base
+        )
+    assert factory_with_lower_count._env == snapshot_before
+
+    mixed_case_slot = dict(environment)
+    mixed_case_slot["gIt_ConFiG_key_0"] = "credential.helper"
+    factory_with_mixed_slot = LocalGitRepositoryFactory(
+        tmp_path / "repositories-mixed-slot",
+        env=mixed_case_slot,
+    )
+    repository_with_mixed_slot = factory_with_mixed_slot.create("package")
+    (repository_with_mixed_slot.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory_with_mixed_slot.commit(repository_with_mixed_slot, message="seed")
+    snapshot_before_slot = dict(factory_with_mixed_slot._env)
+    with pytest.raises(ValueError, match="gIt_ConFiG_key_0"):
+        factory_with_mixed_slot.url_rewrite_subprocess_env(repository_with_mixed_slot, remote_base)
+    assert factory_with_mixed_slot._env == snapshot_before_slot
+
+
 def test_install_url_rewrite_rejects_unsafe_inputs_before_config_mutation(
     tmp_path: Path,
 ) -> None:

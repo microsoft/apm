@@ -241,16 +241,28 @@ class LocalGitRepositoryFactory:
 
     @staticmethod
     def _reject_preexisting_process_git_config(env: Mapping[str, str]) -> None:
-        """Fail closed rather than silently clobber inherited process config."""
-        if "GIT_CONFIG_COUNT" in env:
+        """Fail closed rather than silently clobber inherited process config.
+
+        Windows environment variable names are case-insensitive, so
+        ``git_config_count`` or ``Git_Config_Key_0`` are the *same* slot as
+        their uppercase forms there -- comparisons must normalize case
+        before matching, or a differently-cased pre-existing entry would
+        silently coexist with (and be clobbered by) the ones this method
+        writes. Names are upper-cased only for the equality/prefix check;
+        the original (as-provided) names are reported in errors.
+        """
+        count_names = sorted(name for name in env if name.upper() == "GIT_CONFIG_COUNT")
+        if count_names:
             raise ValueError(
-                "Fixture env already declares GIT_CONFIG_COUNT; "
-                "url_rewrite_subprocess_env requires a clean process-config slate"
+                "Fixture env already declares a process-scoped Git config count "
+                f"under {', '.join(count_names)!r}; url_rewrite_subprocess_env "
+                "requires a clean process-config slate"
             )
         stray = sorted(
             name
             for name in env
-            if name.startswith("GIT_CONFIG_KEY_") or name.startswith("GIT_CONFIG_VALUE_")
+            if name.upper().startswith("GIT_CONFIG_KEY_")
+            or name.upper().startswith("GIT_CONFIG_VALUE_")
         )
         if stray:
             raise ValueError(
