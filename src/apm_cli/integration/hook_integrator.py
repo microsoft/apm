@@ -1124,6 +1124,13 @@ class HookIntegrator(BaseIntegrator):
             return False
         return HookIntegrator._hook_entry_content_key(entry) in fresh_content_keys
 
+    @staticmethod
+    def _deploy_root_for_hook_rewrite(project_root: Path, user_scope: bool) -> Path | None:
+        # User-scope hook configs are read outside a fixed repository cwd, so
+        # script commands must be absolutized; project-scope configs stay
+        # repo-relative for portability across clones and CI.
+        return project_root if user_scope else None
+
     def integrate_package_hooks(
         self,
         package_info,
@@ -1173,7 +1180,7 @@ class HookIntegrator(BaseIntegrator):
         root_dir = target.root_dir if target else ".github"
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        deploy_root_for_rewrite = project_root if user_scope else None
+        deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
         if deploy_root_for_rewrite is not None:
             _log.debug(
                 "Copilot hook rewrite using deploy root: %s",
@@ -1361,18 +1368,7 @@ class HookIntegrator(BaseIntegrator):
         if config.require_dir and not target_dir.exists():
             return _empty
 
-        # Absolutize hook commands only for user-scope deploys.  Claude
-        # Code (and the Codex/Cursor/Gemini equivalents) reads
-        # ``~/.claude/settings.json`` without a fixed cwd and does not
-        # expand ``${CLAUDE_PLUGIN_ROOT}`` in that file (see #1310 / #1354),
-        # so user-scope deploys must write absolute paths.  Project-scope
-        # ``<repo>/.claude/settings.json`` is typically checked in and runs
-        # with cwd at the repo root, where repo-relative paths resolve
-        # correctly -- baking absolute machine paths into checked-in config
-        # breaks portability across clones, contributors, and CI (#1394).
-        # ``user_scope`` is threaded from the caller's ``InstallScope`` so
-        # the gate is explicit rather than inferred from deploy-root shape.
-        _deploy_root_for_rewrite = project_root if user_scope else None
+        _deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
 
         hook_files = self.find_hook_files(package_info.install_path)
         package_name = self._get_package_name(package_info, project_root)

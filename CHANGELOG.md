@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Copilot hooks installed with `apm install -g` now write absolute script
+  commands so user-scope hook JSON resolves from any working directory, while
+  project-scope Copilot hooks remain repo-relative for portability -- by
+  @danielmeppiel (closes #2232; #2236).
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
   canonical serialization, and last-good bytes after malformed refreshes. (#2235)
