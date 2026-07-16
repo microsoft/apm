@@ -33,11 +33,14 @@ MACOS_STARTUP_CONTRACTS = (
         "build-and-validate-macos-intel",
         "macos-15-intel",
         "${{ github.workspace }}/dist/apm-darwin-x86_64/apm",
+        None,
     ),
     (
         "build-and-validate-macos-arm",
         "macos-latest",
         "${{ github.workspace }}/dist/apm-darwin-arm64/apm",
+        "github.ref_type == 'tag' || github.event_name == 'schedule' || "
+        "github.event_name == 'workflow_dispatch'",
     ),
 )
 RELEASE_SYNC_CONTRACTS = (
@@ -69,9 +72,13 @@ def _workflow() -> dict:
 
 
 def _assert_macos_startup_steps(workflow: dict) -> None:
-    for job_id, runner, binary_path in MACOS_STARTUP_CONTRACTS:
+    for job_id, runner, binary_path, job_condition in MACOS_STARTUP_CONTRACTS:
         job = workflow_job(workflow, job_id)
         step = workflow_step(job, "Test macOS non-shell binary startup")
+        if job_condition is None:
+            assert_unconditional(job, label=f"{job_id} job")
+        else:
+            assert job.get("if") == job_condition
         assert_unconditional(step, label=f"{job_id} startup step")
         assert job["runs-on"] == runner
         assert effective_env(workflow, job, step).get("GITHUB_TOKEN") is None
@@ -208,12 +215,13 @@ def test_windows_linux_gate_mutation_is_rejected() -> None:
 
 
 @pytest.mark.parametrize("job_id", [contract[0] for contract in MACOS_STARTUP_CONTRACTS])
-def test_macos_disabled_mutations_are_rejected(job_id: str) -> None:
-    """The macOS startup evidence cannot be disabled at step scope."""
+@pytest.mark.parametrize("scope", ("job", "step"))
+def test_macos_disabled_mutations_are_rejected(job_id: str, scope: str) -> None:
+    """The macOS startup evidence cannot be disabled at job or step scope."""
     workflow = deepcopy(_workflow())
     job = workflow_job(workflow, job_id)
     step = workflow_step(job, "Test macOS non-shell binary startup")
-    step["if"] = False
+    {"job": job, "step": step}[scope]["if"] = False
 
     with pytest.raises(AssertionError):
         _assert_macos_startup_steps(workflow)
