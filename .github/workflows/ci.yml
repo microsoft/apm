@@ -119,7 +119,7 @@ jobs:
         enable-cache: true
 
     - name: Install dependencies
-      run: uv sync --extra dev
+      run: uv sync --frozen --extra dev
 
     - name: Diagnostics (platform, git, python)
       run: |
@@ -223,7 +223,7 @@ jobs:
     # binary build still runs in ci-integration.yml on merge_group and
     # in build-release.yml on release.
     - name: Install dependencies
-      run: uv sync --extra dev
+      run: uv sync --frozen --extra dev
 
     # --splits 2 --group N matches the layout used by ci-integration.yml.
     # -n 2 --dist worksteal parallelises within the shard.
@@ -345,7 +345,7 @@ jobs:
         enable-cache: true
 
     - name: Install dependencies
-      run: uv sync --extra dev --extra build
+      run: uv sync --frozen --extra dev --extra build
 
     - name: Install UPX
       run: |
@@ -521,7 +521,7 @@ jobs:
         enable-cache: true
 
     - name: Install dependencies
-      run: uv sync --extra dev
+      run: uv sync --frozen --extra dev
 
     - name: Run required lifecycle smoke subset
       run: |

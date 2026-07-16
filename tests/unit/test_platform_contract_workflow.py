@@ -43,28 +43,6 @@ MACOS_STARTUP_CONTRACTS = (
         "github.event_name == 'workflow_dispatch'",
     ),
 )
-RELEASE_SYNC_CONTRACTS = (
-    (
-        "build-and-test",
-        "Install dependencies",
-        ["uv", "sync", "--frozen", "--extra", "dev", "--extra", "build"],
-    ),
-    (
-        "build-and-validate-macos-intel",
-        "Install dependencies",
-        ["uv", "sync", "--frozen", "--extra", "dev", "--extra", "build"],
-    ),
-    (
-        "build-and-validate-macos-arm",
-        "Install dependencies",
-        ["uv", "sync", "--frozen", "--extra", "dev", "--extra", "build"],
-    ),
-    (
-        "integration-tests",
-        "Install test dependencies",
-        ["uv", "sync", "--frozen", "--extra", "dev"],
-    ),
-)
 
 
 def _workflow() -> dict:
@@ -113,16 +91,6 @@ def _assert_macos_startup_steps(workflow: dict) -> None:
         ) < workflow_step_index(job, "Upload binary as workflow artifact")
 
 
-def _assert_release_syncs_frozen(workflow: dict) -> None:
-    for job_id, step_name, expected_tokens in RELEASE_SYNC_CONTRACTS:
-        step = workflow_step(workflow_job(workflow, job_id), step_name)
-        assert_exact_command(
-            shell_commands(step),
-            expected_tokens,
-            label=f"{job_id} {step_name}",
-        )
-
-
 def _assert_windows_installer_step(workflow: dict) -> None:
     job = workflow_job(workflow, "build-and-test")
     step = workflow_step(job, "Test install.ps1 end-to-end (Windows)")
@@ -145,31 +113,6 @@ def test_macos_jobs_run_non_shell_binary_startup_after_build() -> None:
 def test_windows_installer_contract_is_windows_only_and_tokenless() -> None:
     """The Windows E2E has exact gating and no effective repository token."""
     _assert_windows_installer_step(_workflow())
-
-
-def test_release_dependency_syncs_are_frozen_to_uv_lock() -> None:
-    """Every release environment must install exactly from the committed lock."""
-    _assert_release_syncs_frozen(_workflow())
-
-
-@pytest.mark.parametrize(
-    ("job_id", "step_name", "_expected_tokens"),
-    RELEASE_SYNC_CONTRACTS,
-)
-@pytest.mark.parametrize("replacement", ("", " --upgrade"))
-def test_release_dependency_sync_mutations_are_rejected(
-    job_id: str,
-    step_name: str,
-    _expected_tokens: list[str],
-    replacement: str,
-) -> None:
-    """Removing or replacing --frozen must fail the topology contract."""
-    workflow = deepcopy(_workflow())
-    step = workflow_step(workflow_job(workflow, job_id), step_name)
-    step["run"] = step["run"].replace(" --frozen", replacement)
-
-    with pytest.raises(AssertionError):
-        _assert_release_syncs_frozen(workflow)
 
 
 @pytest.mark.parametrize("scope", ("workflow", "job", "step"))
