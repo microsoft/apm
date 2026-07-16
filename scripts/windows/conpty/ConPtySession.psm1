@@ -105,6 +105,21 @@ function Send-ConPtyText {
     $Session.WriteInput($Text + "`r")
 }
 
+function Resize-ConPtySession {
+    <#
+        .SYNOPSIS
+        Explicitly resizes the pseudo console. Diagnostic/kick tool used to
+        force a full repaint when investigating whether ConPTY is withholding
+        already-buffered screen content.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][ApmConPty.ConPtyProcess]$Session,
+        [Parameter(Mandatory = $true)][int]$Columns,
+        [Parameter(Mandatory = $true)][int]$Rows
+    )
+    $Session.Resize($Columns, $Rows)
+}
+
 function Send-ConPtyControlC {
     <#
         .SYNOPSIS
@@ -164,6 +179,7 @@ Export-ModuleMember -Function @(
     "Read-ConPtyAvailable",
     "Wait-ConPtyText",
     "Send-ConPtyText",
+    "Resize-ConPtySession",
     "Send-ConPtyControlC",
     "Wait-ConPtyExit",
     "Get-ConPtyDiagnostics",

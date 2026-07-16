@@ -583,6 +583,23 @@ namespace ApmConPty
             }
         }
 
+        /// <summary>
+        /// Explicitly resizes the pseudo console. Diagnostic/kick tool: a resize to
+        /// a size that genuinely differs from the console's current size forces a
+        /// full repaint, which some ConPTY host builds appear to require before
+        /// they will flush already-buffered screen content (as opposed to a resize
+        /// to the same size, which only appears to flush host-synthesized
+        /// bookkeeping such as title-set sequences).
+        /// </summary>
+        public void Resize(int columns, int rows)
+        {
+            var size = new COORD { X = (short)columns, Y = (short)rows };
+            int hr = ResizePseudoConsole(_pseudoConsole, size);
+            _diagnostics.Enqueue(
+                "Resize(" + columns + "x" + rows + ") kick: hresult=0x"
+                + hr.ToString("X8", CultureInfo.InvariantCulture));
+        }
+
         public bool WaitForExit(int timeoutMs, out int exitCode)
         {
             uint waited = WaitForSingleObject(_processHandle, (uint)timeoutMs);

@@ -571,6 +571,14 @@ function Test-ConPtyCapture {
         $processTree = @(Get-CimInstance -ClassName Win32_Process |
             Where-Object { $_.Name -in @('cmd.exe', 'conhost.exe', 'OpenConsole.exe') } |
             Select-Object ProcessId, ParentProcessId, Name, CommandLine)
+        # A resize to the *same* size only flushed host-synthesized bookkeeping
+        # (title-set, mode-set) in an earlier probe of this fixture, not the
+        # child's own already-written buffer content. Force a resize to a
+        # genuinely *different* size (then settle back) to test whether that
+        # triggers a full repaint that includes real buffer content.
+        Resize-ConPtySession -Session $session -Columns 100 -Rows 24
+        Start-Sleep -Milliseconds 200
+        Resize-ConPtySession -Session $session -Columns 120 -Rows 32
         $wait = Wait-ConPtyText -Session $session -Pattern ([regex]::Escape($marker)) -TimeoutMs 10000
         $transcript = $wait.Transcript
         $exitWait = Wait-ConPtyExit -Session $session -TimeoutMs 10000
