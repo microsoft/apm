@@ -83,6 +83,9 @@ def _manifest_component_targets() -> tuple[str, ...]:
 
 LIFECYCLE_SMOKE_TARGETS = _manifest_component_targets() + LIFECYCLE_SMOKE_DIRECT_TARGETS
 FORBIDDEN_CREDENTIAL_ENV = ("GITHUB_APM_PAT", "ADO_APM_PAT", "GITHUB_TOKEN")
+# Covers the `${{ github.token }}` context alias, which does not contain any
+# FORBIDDEN_CREDENTIAL_ENV substring but resolves to the same automatic token.
+FORBIDDEN_CREDENTIAL_EXPRESSIONS = (*FORBIDDEN_CREDENTIAL_ENV, "github.token")
 
 
 def _run_steps(job: WorkflowNode) -> list[WorkflowNode]:
@@ -363,6 +366,16 @@ def _assert_lifecycle_smoke_targets(job: WorkflowNode) -> None:
 
 def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
     assert "secrets" not in job
+
+    # Job-level `env:` is inherited by every step in GitHub Actions, so a
+    # credential bound there would bypass a step-only check (panel review
+    # of #2247: python-architect, supply-chain-security-expert, and
+    # test-coverage-expert independently found and proved this gap).
+    job_env = job.get("env")
+    if isinstance(job_env, dict):
+        for key in FORBIDDEN_CREDENTIAL_ENV:
+            assert key not in job_env, f"lifecycle-smoke job-level env must not bind {key}"
+
     for step in _run_steps(job):
         env = step.get("env")
         if isinstance(env, dict):
@@ -372,6 +385,17 @@ def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
         if isinstance(run, str):
             for key in FORBIDDEN_CREDENTIAL_ENV:
                 assert key not in run, f"lifecycle-smoke step must not reference {key}"
+        # `with:` values can smuggle a credential expression (e.g. a
+        # checkout `token:` input) past the env/run-only checks above.
+        with_block = step.get("with")
+        if isinstance(with_block, dict):
+            for value in with_block.values():
+                if not isinstance(value, str):
+                    continue
+                for key in FORBIDDEN_CREDENTIAL_EXPRESSIONS:
+                    assert key not in value, (
+                        f"lifecycle-smoke step `with:` must not reference {key}"
+                    )
 
 
 def _assert_lifecycle_smoke_required(merge_gate: WorkflowNode) -> None:
@@ -452,6 +476,50 @@ def test_lifecycle_smoke_credential_env_fails(
     critical path depends on."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
     step["env"] = {"GITHUB_APM_PAT": "${{ secrets.GITHUB_APM_PAT }}"}
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_hermetic(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_job_level_credential_env_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard fails if a credential is bound at job-level `env:`
+    rather than step-level -- job-level env is inherited by every step in
+    GitHub Actions, so this is a distinct injection vector from the
+    step-level case above, not a duplicate of it. Panel review of #2247
+    found this gap independently in three lenses (architecture, supply
+    chain security, test coverage) and it was empirically confirmed:
+    without this fix, the same mutation on `job["env"]` passed silently."""
+    provisional_lifecycle_job["env"] = {"GITHUB_APM_PAT": "${{ secrets.GITHUB_APM_PAT }}"}
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_hermetic(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_with_block_credential_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard fails if a credential expression is smuggled
+    through a step's `with:` block (e.g. an actions/checkout `token:`
+    input) instead of `env:`/`run:` -- a third distinct injection vector
+    flagged by the supply-chain-security-expert panelist."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["with"] = {"token": "${{ secrets.GITHUB_APM_PAT }}"}
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_hermetic(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_github_token_expression_alias_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard catches the `${{ github.token }}` context alias,
+    which resolves to the same automatic GITHUB_TOKEN but does not
+    contain the `GITHUB_TOKEN` substring FORBIDDEN_CREDENTIAL_ENV alone
+    would catch."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["with"] = {"token": "${{ github.token }}"}
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_hermetic(provisional_lifecycle_job)

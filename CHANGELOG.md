@@ -9,15 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- A hermetic ~60s `Lifecycle Smoke (Linux)` check is now required at PR time
-  (`ci.yml`, gated via `merge-gate.yml`), covering the smallest stable subset
-  of the real Consume/Produce/Govern lifecycle contracts: install
-  content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill
-  lock convergence, the virtual/manifestless lifecycle matrix (#2240), and
-  the ADO lock-coordinate ownership guard (#2226). No built binary, network,
-  or credentials required; `tests/quality/test_ci_topology.py` guards the
-  job's targets, timeout, and required-check membership against drift.
-  (#2247)
+- Pull requests now run a ~60s hermetic `Lifecycle Smoke (Linux)` check that
+  validates core install, lock-convergence, and policy-enforcement contracts
+  at PR time instead of only in the merge queue -- no network, credentials, or
+  built binary required (#2247).
 - Object-form Git dependencies now reject unsupported keys instead of silently
   ignoring them; use `ref` rather than `version`, and omit inert `name` fields
   from `git: parent`. CI audit also rejects full-SHA pins whose

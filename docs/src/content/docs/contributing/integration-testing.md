@@ -34,11 +34,21 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ### 3. **Lifecycle Smoke** (PR-time required check)
-- **Location**: `tests/integration/test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py`, and `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner`
+- **Location**: all under `tests/integration/` -- `test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py`, and `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner`
 - **Purpose**: Promote the smallest stable, hermetic slice of the real Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so a regression in install/lock/audit convergence or ADO lock-coordinate handling fails the PR instead of only surfacing once a change reaches the merge queue
 - **Scope**: install content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill lock convergence, the virtual/manifestless lifecycle matrix, and the ADO lock-coordinate ownership guard -- no built binary, no network, no credentials
 - **Duration**: ~60s job wall time (hard 3-minute timeout)
 - **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
+- **Drift guard**: `tests/quality/test_ci_topology.py` pins this job's exact targets, timeout, hermeticity (no credentials at job- or step-level `env`, no credential expressions in `run:`/`with:`), and required-check membership -- editing the job's targets without updating that guard fails CI
+- **Run it locally** (the exact command CI runs):
+  ```bash
+  uv run --extra dev pytest -p no:cacheprovider -q \
+    tests/integration/test_install_content_hash_roundtrip.py \
+    tests/integration/test_policy_pinned_constraint_e2e.py \
+    tests/integration/test_virtual_claude_skill_lock_convergence.py \
+    tests/integration/test_virtual_package_lifecycle_matrix.py \
+    "tests/integration/test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner"
+  ```
 
 ## Running Tests Locally
 
@@ -332,6 +342,14 @@ Promotion integration tests run on:
 - ✅ Binary artifacts work across platforms
 - ✅ Release pipeline integrity (GitHub Release → PyPI)
 
+### Lifecycle Smoke Verifies:
+- Install content-hash roundtrip (Consume contract)
+- Virtual-skill lock convergence (Produce contract, adjacent to the #2226 ADO lock-coordinate fix)
+- Policy pinned-constraint enforcement (Govern contract)
+- The virtual/manifestless lifecycle matrix: install, lock, frozen-install, update, and audit stay consistent (the direct #2240 regression)
+- The ADO lock-coordinate single-owner guard (the direct #2226 regression)
+- No network, no credentials, no built binary required for any of the above
+
 ## Benefits
 
 ### **Speed vs Confidence Balance**
@@ -368,6 +386,11 @@ Promotion integration tests run on:
 - Check GitHub Models API availability
 - Review actual vs expected output
 - Test locally with same environment
+
+### Lifecycle Smoke Failures
+- These tests are hermetic -- no credentials, no built binary, no network (a real socket attempt raises `OSError`, it does not hang or retry). A failure is a genuine regression, not an environment issue.
+- Run the exact CI command from the "Run it locally" block under Tier 3 above to reproduce.
+- If the failure is about the CI job's shape (wrong target list, timeout, or required-check wiring) rather than test logic, check `tests/quality/test_ci_topology.py` -- that guard pins the job's contract and its own failure message will point at what drifted.
 - For hanging issues: Check command transformation in script runner (codex expects prompt content, not file paths)
 
 ## Adding New Tests
