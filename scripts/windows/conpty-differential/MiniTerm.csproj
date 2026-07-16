@@ -1,0 +1,28 @@
+<!--
+  Minimal standalone ConPTY differential harness for microsoft/apm issue
+  #1976. This is a deliberately separate, deliberately dumber sibling of
+  ../conpty/ConPtyNative.cs: it is compiled into a real, standalone .exe
+  via `dotnet build` and invoked directly by the workflow (not loaded via
+  PowerShell Add-Type and run in-process inside powershell.exe). It
+  excludes every workaround added to ConPtyNative.cs this session (DSR
+  auto-responder, resize kicks, live process-tree diagnostics) so it
+  isolates exactly one variable: does a fresh, minimal, non-PowerShell-
+  hosted ConPTY consumer on this same runner see the same symptom
+  (creation succeeds, child runs, but its console output never lands in
+  the pseudo console buffer)?
+
+  Not part of the normal CI/merge surface. No product code. No external
+  network access. No secrets.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>MiniTerm</AssemblyName>
+    <RootNamespace>ApmConPtyDifferential</RootNamespace>
+  </PropertyGroup>
+
+</Project>
