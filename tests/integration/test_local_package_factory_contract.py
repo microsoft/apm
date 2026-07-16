@@ -1,8 +1,11 @@
+import json
+import os
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 from apm_cli.core.errors import UnknownTargetError
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
@@ -680,3 +683,406 @@ def test_product_output_paths_are_rejected(tmp_path: Path) -> None:
         ".claude",
     ):
         assert not (package.root / forbidden).exists()
+
+
+def test_lifecycle_sources_cover_all_deploy_categories_and_config_dependencies(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "lifecycle-source",
+        targets=("copilot", "claude"),
+        mcp_dependencies=(
+            {
+                "name": "fixture-mcp",
+                "registry": False,
+                "transport": "stdio",
+                "command": "fixture-mcp",
+                "args": ["--stdio"],
+            },
+        ),
+        lsp_dependencies=(
+            {
+                "name": "fixture-lsp",
+                "command": "fixture-lsp",
+                "extensionToLanguage": {".py": "python"},
+            },
+        ),
+    )
+
+    skill = factory.add_skill(package, "review", "# Review\n")
+    agent = factory.add_agent(package, "helper", "---\ndescription: Helper\n---\n# Helper\n")
+    prompt = factory.add_prompt(
+        package,
+        "summarize",
+        "---\ndescription: Summarize\n---\nSummarize this repository.\n",
+    )
+    command = factory.add_command(
+        package,
+        "check",
+        "---\ndescription: Check\n---\nCheck this repository.\n",
+    )
+    instruction = factory.add_instruction(
+        package,
+        "rules",
+        "---\ndescription: Rules\n---\n# Rules\n",
+    )
+    hook = factory.add_hook(
+        package,
+        "lifecycle",
+        {"hooks": {"PreToolUse": [{"command": "python scripts/check.py"}]}},
+    )
+    canvas = factory.add_canvas(
+        package,
+        "inspector",
+        "export default { activate() {} };\n",
+        assets={
+            PurePosixPath("ui/config.json"): b'{"label":"\\u03bb"}\n',
+            PurePosixPath("ui/icon.bin"): b"\x00\xff",
+        },
+    )
+
+    assert skill == package.root / "skills/review/SKILL.md"
+    assert agent == package.root / ".apm/agents/helper.agent.md"
+    assert prompt == package.root / ".apm/prompts/summarize.prompt.md"
+    assert command == package.root / ".apm/prompts/check.prompt.md"
+    assert instruction == package.root / ".apm/instructions/rules.instructions.md"
+    assert hook == package.root / ".apm/hooks/lifecycle.json"
+    assert canvas == package.root / ".apm/extensions/inspector"
+    assert hook.read_bytes() == (
+        b'{\n  "hooks": {\n    "PreToolUse": [\n'
+        b'      {\n        "command": "python scripts/check.py"\n'
+        b"      }\n    ]\n  }\n}\n"
+    )
+    assert (canvas / "extension.mjs").read_bytes() == (b"export default { activate() {} };\n")
+    assert (canvas / "ui/config.json").read_bytes() == b'{"label":"\\u03bb"}\n'
+    assert (canvas / "ui/icon.bin").read_bytes() == b"\x00\xff"
+
+    parsed = APMPackage.from_apm_yml(package.manifest_path)
+    assert parsed.dependencies is not None
+    assert [dependency.to_dict() for dependency in parsed.dependencies["mcp"]] == [
+        {
+            "name": "fixture-mcp",
+            "transport": "stdio",
+            "args": ["--stdio"],
+            "registry": False,
+            "command": "fixture-mcp",
+        }
+    ]
+    assert [dependency.to_dict() for dependency in parsed.dependencies["lsp"]] == [
+        {
+            "name": "fixture-lsp",
+            "command": "fixture-lsp",
+            "extensionToLanguage": {".py": "python"},
+        }
+    ]
+
+
+def test_lifecycle_source_authors_reject_traversal_and_symlink_escape(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create("lifecycle-source")
+
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_prompt(package, "../outside", "prompt")
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_command(package, "../outside", "command")
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_hook(package, "../outside", {"hooks": {}})
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_canvas(package, "../outside", "export default {};\n")
+    with pytest.raises(ValueError, match="traversal sequence"):
+        factory.add_canvas(
+            package,
+            "safe",
+            "export default {};\n",
+            assets={PurePosixPath("../outside.bin"): b"outside"},
+        )
+    with pytest.raises(TypeError, match="contents must be bytes"):
+        factory.add_canvas(
+            package,
+            "invalid-content",
+            "export default {};\n",
+            assets={PurePosixPath("asset.txt"): "not-bytes"},
+        )
+    assert not (tmp_path / "outside").exists()
+    assert not (tmp_path / "outside.bin").exists()
+    assert not (package.root / ".apm/extensions/invalid-content").exists()
+
+    outside = tmp_path / "outside-extensions"
+    outside.mkdir()
+    extensions = package.root / ".apm/extensions"
+    extensions.parent.mkdir(parents=True)
+    extensions.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match=r"outside|symlink"):
+        factory.add_canvas(package, "escaped", "export default {};\n")
+    assert not (outside / "escaped").exists()
+
+
+def test_config_dependency_validation_is_transactional(tmp_path: Path) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+
+    with pytest.raises(ValueError, match="Unsupported config dependency kind"):
+        factory._validate_config_dependencies((), kind="mcp")
+    with pytest.raises(ValueError, match="requires 'command'"):
+        factory.create(
+            "invalid-mcp",
+            mcp_dependencies=(
+                {
+                    "name": "invalid",
+                    "registry": False,
+                    "transport": "stdio",
+                },
+            ),
+        )
+    with pytest.raises(ValueError, match="requires 'extensionToLanguage'"):
+        factory.create(
+            "invalid-lsp",
+            lsp_dependencies=({"name": "invalid", "command": "fixture-lsp"},),
+        )
+    with pytest.raises(TypeError, match="strings or mappings"):
+        factory.create("invalid-mcp-type", mcp_dependencies=(42,))
+    assert not (tmp_path / "packages/invalid-mcp").exists()
+    assert not (tmp_path / "packages/invalid-lsp").exists()
+    assert not (tmp_path / "packages/invalid-mcp-type").exists()
+
+
+def test_config_dependency_round_trip_guards_reject_loss_and_semantic_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = {
+        "name": "fixture-mcp",
+        "registry": False,
+        "transport": "stdio",
+        "command": "fixture-mcp",
+    }
+
+    monkeypatch.setattr("tests.utils.local_package.load_yaml_str", lambda _text: None)
+    with pytest.raises(ValueError, match="did not survive YAML serialization"):
+        LocalPackageFactory._validate_config_dependencies((entry,), kind="MCP")
+
+    monkeypatch.setattr(
+        "tests.utils.local_package.load_yaml_str",
+        lambda _text: {"dependency": {"name": "different-server"}},
+    )
+    with pytest.raises(ValueError, match="failed semantic round-trip validation"):
+        LocalPackageFactory._validate_config_dependencies((entry,), kind="MCP")
+
+
+def test_lifecycle_sources_accept_mcp_and_lsp_string_references(tmp_path: Path) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "registry-config-source",
+        mcp_dependencies=("io.github.acme/fixture-mcp",),
+        lsp_dependencies=("fixture-lsp",),
+    )
+
+    parsed = APMPackage.from_apm_yml(package.manifest_path)
+
+    assert parsed.dependencies is not None
+    assert [dependency.name for dependency in parsed.dependencies["mcp"]] == [
+        "io.github.acme/fixture-mcp"
+    ]
+    assert [dependency.name for dependency in parsed.dependencies["lsp"]] == ["fixture-lsp"]
+    assert load_yaml(package.manifest_path)["dependencies"] == {
+        "mcp": ["io.github.acme/fixture-mcp"],
+        "lsp": ["fixture-lsp"],
+    }
+
+
+def test_hook_assets_are_bounded_source_files_with_executable_intent(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create("hook-source")
+    hook_document = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "command": "python ./lifecycle/scripts/check.py",
+                }
+            ]
+        }
+    }
+    hook = factory.add_hook(package, "lifecycle", hook_document)
+
+    script = factory.add_hook_asset(
+        package,
+        "lifecycle",
+        PurePosixPath("scripts/check.py"),
+        "print('hook')\n",
+        executable=True,
+    )
+    binary = factory.add_hook_asset(
+        package,
+        "lifecycle",
+        PurePosixPath("assets/payload.bin"),
+        b"\x00\xffhook\n",
+    )
+
+    assert hook == package.root / ".apm/hooks/lifecycle.json"
+    assert script == package.root / ".apm/hooks/lifecycle/scripts/check.py"
+    assert binary == package.root / ".apm/hooks/lifecycle/assets/payload.bin"
+    assert script.read_bytes() == b"print('hook')\n"
+    assert binary.read_bytes() == b"\x00\xffhook\n"
+    if os.name != "nt":
+        assert script.stat().st_mode & 0o111 == 0o111
+        assert binary.stat().st_mode & 0o111 == 0
+    assert json.loads(hook.read_text(encoding="utf-8")) == hook_document
+
+
+def test_hook_assets_reject_escape_replacement_and_foreign_packages(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create("hook-source")
+    hook = factory.add_hook(package, "lifecycle", {"hooks": {}})
+    hook_bytes = hook.read_bytes()
+
+    for relative_path in (
+        PurePosixPath("."),
+        PurePosixPath("../lifecycle.json"),
+        PurePosixPath("/outside.py"),
+        PurePosixPath(r"..\outside.py"),
+        PurePosixPath("%252e%252e/outside.py"),
+    ):
+        with pytest.raises(ValueError):
+            factory.add_hook_asset(
+                package,
+                "lifecycle",
+                relative_path,
+                b"outside",
+            )
+    with pytest.raises(TypeError, match="text or bytes"):
+        factory.add_hook_asset(
+            package,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            object(),
+        )
+    assert hook.read_bytes() == hook_bytes
+    assert not (tmp_path / "outside.py").exists()
+
+    without_descriptor = factory.create("missing-hook")
+    with pytest.raises(ValueError, match="descriptor"):
+        factory.add_hook_asset(
+            without_descriptor,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            b"missing",
+        )
+
+    foreign_factory = LocalPackageFactory(tmp_path / "foreign")
+    foreign = foreign_factory.create("foreign")
+    foreign_factory.add_hook(foreign, "lifecycle", {"hooks": {}})
+    with pytest.raises(ValueError, match="not owned"):
+        factory.add_hook_asset(
+            foreign,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            b"foreign",
+        )
+
+    outside = tmp_path / "outside-assets"
+    outside.mkdir()
+    asset_root = package.root / ".apm/hooks/lifecycle"
+    asset_root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match=r"outside|symlink"):
+        factory.add_hook_asset(
+            package,
+            "lifecycle",
+            PurePosixPath("scripts/check.py"),
+            b"escaped",
+        )
+    assert not (outside / "scripts/check.py").exists()
+
+
+def test_manifest_transitions_preserve_unrelated_sections_and_are_idempotent(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "consumer",
+        mcp_dependencies=("io.github.acme/server",),
+    )
+    manifest = load_yaml(package.manifest_path)
+    manifest["compilation"] = {"output": "AGENTS.md"}
+    manifest["allowExecutables"] = {"acme/hooks#v1": {"hooks": True}}
+    dump_yaml(manifest, package.manifest_path)
+    dependencies = (
+        "acme/first#v1.0.0",
+        {
+            "git": "https://gitlab.example.invalid/acme/second.git",
+            "type": "gitlab",
+            "ref": "main",
+            "alias": "second",
+        },
+    )
+
+    factory.set_targets(package, ("copilot", "claude"))
+    factory.replace_apm_dependencies(package, dependencies)
+    first_bytes = package.manifest_path.read_bytes()
+    factory.set_targets(package, ("copilot", "claude"))
+    factory.replace_apm_dependencies(package, dependencies)
+
+    transitioned = load_yaml(package.manifest_path)
+    assert package.manifest_path.read_bytes() == first_bytes
+    assert transitioned["targets"] == ["copilot", "claude"]
+    assert transitioned["dependencies"] == {
+        "apm": list(dependencies),
+        "mcp": ["io.github.acme/server"],
+    }
+    assert transitioned["compilation"] == {"output": "AGENTS.md"}
+    assert transitioned["allowExecutables"] == {"acme/hooks#v1": {"hooks": True}}
+
+    identity_equivalent = "https://github.com/acme/first.git#v9.9.9"
+    assert factory.remove_apm_dependency(package, identity_equivalent) is True
+    removed_bytes = package.manifest_path.read_bytes()
+    assert factory.remove_apm_dependency(package, identity_equivalent) is False
+    assert package.manifest_path.read_bytes() == removed_bytes
+    assert load_yaml(package.manifest_path)["dependencies"]["apm"] == [dependencies[1]]
+
+    factory.replace_apm_dependencies(package, ())
+    factory.set_targets(package, ())
+    contracted = load_yaml(package.manifest_path)
+    assert contracted["dependencies"] == {"mcp": ["io.github.acme/server"]}
+    assert "targets" not in contracted
+    assert contracted["compilation"] == {"output": "AGENTS.md"}
+
+
+def test_manifest_transitions_reject_invalid_inputs_without_partial_write(
+    tmp_path: Path,
+) -> None:
+    factory = LocalPackageFactory(tmp_path / "packages")
+    package = factory.create(
+        "consumer",
+        dependencies=("acme/original#v1.0.0",),
+        targets=("copilot",),
+    )
+    original = package.manifest_path.read_bytes()
+
+    with pytest.raises(UnknownTargetError, match="Unknown target"):
+        factory.set_targets(package, ("not-a-target",))
+    with pytest.raises(ValueError, match="Unsupported field"):
+        factory.replace_apm_dependencies(
+            package,
+            (
+                {
+                    "git": "acme/repository",
+                    "resolved_commit": "a" * 40,
+                },
+            ),
+        )
+    with pytest.raises(TypeError, match="strings or mappings"):
+        factory.remove_apm_dependency(package, 42)
+    assert package.manifest_path.read_bytes() == original
+
+    foreign_factory = LocalPackageFactory(tmp_path / "foreign")
+    foreign = foreign_factory.create("foreign")
+    with pytest.raises(ValueError, match="not owned"):
+        factory.set_targets(foreign, ("copilot",))
+    with pytest.raises(ValueError, match="not owned"):
+        factory.replace_apm_dependencies(foreign, ())
+    with pytest.raises(ValueError, match="not owned"):
+        factory.remove_apm_dependency(foreign, "acme/original#v1.0.0")
