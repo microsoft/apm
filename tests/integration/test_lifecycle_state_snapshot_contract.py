@@ -112,12 +112,12 @@ def test_capture_preserves_raw_bytes_and_canonical_semantics(tmp_path: Path) -> 
     assert tuple(record.locator.key for record in snapshot.deployment_records) == tuple(
         sorted((file_record.locator.key, uri_record.locator.key))
     )
-    assert snapshot.mcp_state_json == (
+    assert snapshot.mcp_state_bytes == (
         b'{"configs":{"fixture-mcp":{"command":"fixture-mcp","label":"'
         b'\\u03bb","name":"fixture-mcp","transport":"stdio"}},'
         b'"provenance":{},"servers":["fixture-mcp"],"target_servers":{}}'
     )
-    assert snapshot.lsp_state_json == (
+    assert snapshot.lsp_state_bytes == (
         b'{"configs":{"fixture-lsp":{"command":"fixture-lsp",'
         b'"extensionToLanguage":{".py":"python"},"name":"fixture-lsp"}},'
         b'"servers":["fixture-lsp"]}'
@@ -130,7 +130,8 @@ def test_capture_preserves_raw_bytes_and_canonical_semantics(tmp_path: Path) -> 
         b'{"servers":{"fixture-mcp":{"label":"\xcf\x80"}}}\n'
     )
     assert snapshot.file("AGENTS.md").roles == frozenset({"compiled"})
-    assert snapshot.file("copilot-app-db://workflows/dynamic-row") is None
+    with pytest.raises(KeyError, match="not tracked"):
+        snapshot.file("copilot-app-db://workflows/dynamic-row")
     assert tuple(file.relative_path for file in snapshot.files) == tuple(
         sorted(file.relative_path for file in snapshot.files)
     )
@@ -169,7 +170,7 @@ def test_semantic_state_reflects_deployment_and_config_changes(tmp_path: Path) -
 
     assert before.deployment_records == ()
     assert after.deployment_records == (record,)
-    assert before.mcp_state_json != after.mcp_state_json
+    assert before.mcp_state_bytes != after.mcp_state_bytes
     assert before.semantic_bytes != after.semantic_bytes
 
 
@@ -245,7 +246,7 @@ def test_capture_rejects_symlinked_ancestor_and_workspace_root(tmp_path: Path) -
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / ".claude").symlink_to(outside, target_is_directory=True)
-    with pytest.raises(ValueError, match="symlinked lifecycle snapshot path"):
+    with pytest.raises(ValueError, match="outside workspace"):
         LifecycleStateSnapshot.capture(workspace, targets=("claude",))
 
     linked_workspace = tmp_path / "linked-workspace"
@@ -260,6 +261,22 @@ def test_capture_rejects_unknown_targets(tmp_path: Path) -> None:
 
     with pytest.raises(KeyError, match="not-a-target"):
         LifecycleStateSnapshot.capture(workspace, targets=("not-a-target",))
+
+
+def test_capture_rejects_target_relative_deployment_without_bounded_root(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    record = _record(
+        kind=LocatorKind.TARGET_RELATIVE,
+        target="claude",
+        value="rules/external.md",
+    )
+    _write_lock(workspace, (record,))
+
+    with pytest.raises(ValueError, match="target-relative"):
+        LifecycleStateSnapshot.capture(workspace, targets=("claude",))
 
 
 def test_capture_accepts_catalog_target_without_file_profile(tmp_path: Path) -> None:
@@ -289,6 +306,19 @@ def test_capture_marks_target_generated_file_as_compiled(tmp_path: Path) -> None
     assert snapshot.file(".github/copilot-instructions.md").roles == frozenset({"compiled"})
 
 
+def test_compiled_discovery_requires_a_file_target(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "AGENTS.md").write_bytes(b"# Compiled\n")
+
+    semantic_only = LifecycleStateSnapshot.capture(workspace)
+    with pytest.raises(KeyError, match="not tracked"):
+        semantic_only.file("AGENTS.md")
+
+    with_compiled = LifecycleStateSnapshot.capture(workspace, targets=("claude",))
+    assert with_compiled.file("AGENTS.md").roles == frozenset({"compiled"})
+
+
 def test_capture_reports_directory_kind_for_role_path(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     config_directory = workspace / ".custom/config.json"
@@ -303,3 +333,35 @@ def test_capture_reports_directory_kind_for_role_path(tmp_path: Path) -> None:
     assert state.kind == "directory"
     assert state.content is None
     assert state.sha256 is None
+
+
+def test_capture_reads_legacy_lock_when_canonical_lockfile_is_absent(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    lock = LockFile(generated_at="2026-01-01T00:00:00+00:00")
+    lock.write(workspace / "apm.lock")
+
+    snapshot = LifecycleStateSnapshot.capture(workspace)
+
+    assert not (workspace / "apm.lock.yaml").exists()
+    assert snapshot.lockfile_bytes == (workspace / "apm.lock").read_bytes()
+
+
+def test_capture_rejects_windows_drive_and_file_ancestor_paths(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    with pytest.raises(ValueError, match="relative POSIX"):
+        LifecycleStateSnapshot.capture(
+            workspace,
+            config_paths=(PurePosixPath("C:/outside/config.json"),),
+        )
+
+    (workspace / ".custom").write_bytes(b"not-a-directory")
+    with pytest.raises(ValueError, match="not a directory"):
+        LifecycleStateSnapshot.capture(
+            workspace,
+            config_paths=(PurePosixPath(".custom/config.json"),),
+        )

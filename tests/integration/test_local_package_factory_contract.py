@@ -837,8 +837,11 @@ def test_config_dependency_validation_is_transactional(tmp_path: Path) -> None:
             "invalid-lsp",
             lsp_dependencies=({"name": "invalid", "command": "fixture-lsp"},),
         )
+    with pytest.raises(TypeError, match="strings or mappings"):
+        factory.create("invalid-mcp-type", mcp_dependencies=(42,))
     assert not (tmp_path / "packages/invalid-mcp").exists()
     assert not (tmp_path / "packages/invalid-lsp").exists()
+    assert not (tmp_path / "packages/invalid-mcp-type").exists()
 
 
 def test_lifecycle_sources_accept_mcp_and_lsp_string_references(tmp_path: Path) -> None:

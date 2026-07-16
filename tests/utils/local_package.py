@@ -18,7 +18,6 @@ from apm_cli.utils.path_security import ensure_path_within, validate_path_segmen
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml, load_yaml_str, yaml_to_str
 
 DependencyInput: TypeAlias = str | Mapping[str, object]
-ConfigDependencyInput: TypeAlias = str | Mapping[str, object]
 _MANIFEST_LAYOUT = "manifest"
 _POLICY_LAYOUT = "policy"
 _SKILL_LAYOUT = "skill"
@@ -40,7 +39,12 @@ class LocalPackage:
 
 
 class LocalPackageFactory:
-    """Author realistic package source inputs without product-generated output."""
+    """Author realistic package source inputs without product-generated output.
+
+    Create a package, then add source primitives through the category-specific
+    ``add_*`` methods. Lifecycle scenarios can commit ``package.root`` with
+    ``LocalGitRepositoryFactory`` and run commands through ``ApmLifecycleRunner``.
+    """
 
     def __init__(self, root: Path) -> None:
         """Create a factory rooted at the package source directory."""
@@ -54,8 +58,8 @@ class LocalPackageFactory:
         *,
         version: str = "0.1.0",
         dependencies: Sequence[DependencyInput] = (),
-        mcp_dependencies: Sequence[ConfigDependencyInput] = (),
-        lsp_dependencies: Sequence[ConfigDependencyInput] = (),
+        mcp_dependencies: Sequence[DependencyInput] = (),
+        lsp_dependencies: Sequence[DependencyInput] = (),
         targets: Sequence[str] = (),
     ) -> LocalPackage:
         """Create a package source directory and its manifest."""
@@ -141,7 +145,7 @@ class LocalPackageFactory:
         return self._add_prompt_source(package, name, content, kind="prompt")
 
     def add_command(self, package: LocalPackage, name: str, content: str) -> Path:
-        """Author a prompt source transformed by command-capable targets."""
+        """Author a ``.apm/prompts/*.prompt.md`` source for command targets."""
         return self._add_prompt_source(package, name, content, kind="command")
 
     def add_hook(
@@ -173,7 +177,11 @@ class LocalPackageFactory:
         *,
         assets: Mapping[PurePosixPath, bytes] | None = None,
     ) -> Path:
-        """Author an executable canvas bundle and optional exact-byte assets."""
+        """Author a canvas bundle and return its directory, not its entry file.
+
+        Canvas names deliberately delegate to the production integrator's
+        validator so tests cannot drift from the executable deployment surface.
+        """
         self._validate_segment(name, "canvas")
         CanvasIntegrator._validate_canvas_name(name)
         bundle_path = PurePosixPath(".apm") / "extensions" / name
@@ -424,7 +432,7 @@ class LocalPackageFactory:
 
     @staticmethod
     def _validate_config_dependencies(
-        dependencies: Sequence[ConfigDependencyInput],
+        dependencies: Sequence[DependencyInput],
         *,
         kind: str,
     ) -> list[str | dict[str, object]]:

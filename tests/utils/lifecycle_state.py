@@ -1,4 +1,7 @@
-"""Exact and semantic snapshots of one evolving lifecycle workspace."""
+"""Exact and semantic snapshots of one evolving lifecycle workspace.
+
+For generic whole-tree hashing and diffs, use ``ArtifactSnapshot`` instead.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +11,7 @@ import os
 import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal, TypeAlias
 
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -17,7 +20,11 @@ from apm_cli.core.target_catalog import get_target_capability
 from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
 from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.utils.path_security import validate_path_segments
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_yaml_str
 
@@ -57,8 +64,8 @@ class LifecycleStateSnapshot:
     manifest_bytes: bytes | None
     lockfile_bytes: bytes | None
     deployment_records: tuple[DeploymentRecord, ...]
-    mcp_state_json: bytes
-    lsp_state_json: bytes
+    mcp_state_bytes: bytes
+    lsp_state_bytes: bytes
     files: tuple[LifecycleFileState, ...]
     semantic_bytes: bytes
 
@@ -88,8 +95,8 @@ class LifecycleStateSnapshot:
                 manifest_bytes=None,
                 lockfile_bytes=None,
                 deployment_records=(),
-                mcp_state_json=_canonical_json_bytes(_empty_mcp_state()),
-                lsp_state_json=_canonical_json_bytes(_empty_lsp_state()),
+                mcp_state_bytes=_canonical_json_bytes(_empty_mcp_state()),
+                lsp_state_bytes=_canonical_json_bytes(_empty_lsp_state()),
                 files=(),
                 semantic_bytes=_canonical_json_bytes(
                     {
@@ -120,6 +127,16 @@ class LifecycleStateSnapshot:
             if lock is not None
             else ()
         )
+        target_relative = tuple(
+            record.locator.key
+            for record in records
+            if record.locator.kind is LocatorKind.TARGET_RELATIVE
+        )
+        if target_relative:
+            raise ValueError(
+                "Lifecycle snapshots require explicit bounded roots for "
+                f"target-relative deployments: {sorted(target_relative)}"
+            )
         mcp_state = _mcp_state(lock)
         lsp_state = _lsp_state(lock)
 
@@ -145,8 +162,9 @@ class LifecycleStateSnapshot:
                 relative = PurePosixPath(profile.root_dir) / generated
                 _add_role(roles_by_path, relative.as_posix(), "compiled")
 
-        for relative_path in _compiled_paths(root):
-            _add_role(roles_by_path, relative_path, "compiled")
+        if profiles:
+            for relative_path in _compiled_paths(root):
+                _add_role(roles_by_path, relative_path, "compiled")
 
         files = tuple(
             _capture_file(root, relative_path, frozenset(roles_by_path[relative_path]))
@@ -177,17 +195,20 @@ class LifecycleStateSnapshot:
             manifest_bytes=manifest_bytes,
             lockfile_bytes=lockfile_bytes,
             deployment_records=records,
-            mcp_state_json=_canonical_json_bytes(mcp_state),
-            lsp_state_json=_canonical_json_bytes(lsp_state),
+            mcp_state_bytes=_canonical_json_bytes(mcp_state),
+            lsp_state_bytes=_canonical_json_bytes(lsp_state),
             files=files,
             semantic_bytes=semantic_bytes,
         )
 
-    def file(self, relative_path: str) -> LifecycleFileState | None:
-        """Return one captured file state by portable workspace-relative path."""
-        return next(
-            (file for file in self.files if file.relative_path == relative_path),
-            None,
+    def file(self, relative_path: str) -> LifecycleFileState:
+        """Return a tracked file state, failing clearly for untracked paths."""
+        for file in self.files:
+            if file.relative_path == relative_path:
+                return file
+        tracked = ", ".join(file.relative_path for file in self.files) or "<none>"
+        raise KeyError(
+            f"Lifecycle snapshot path {relative_path!r} is not tracked; tracked paths: {tracked}"
         )
 
 
@@ -202,7 +223,7 @@ def _add_role(
         reject_empty=True,
     )
     path = PurePosixPath(relative_path)
-    if path.is_absolute() or "\\" in relative_path:
+    if path.is_absolute() or "\\" in relative_path or PureWindowsPath(relative_path).drive:
         raise ValueError(f"Lifecycle snapshot path must be relative POSIX: {relative_path}")
     roles_by_path.setdefault(path.as_posix(), set()).add(role)
 
@@ -213,7 +234,10 @@ def _capture_file(
     roles: frozenset[LifecycleFileRole],
 ) -> LifecycleFileState:
     path = root.joinpath(*PurePosixPath(relative_path).parts)
-    _reject_symlink_ancestors(path, root)
+    try:
+        ensure_path_within(path.parent, root)
+    except PathTraversalError as exc:
+        raise ValueError(f"Refusing lifecycle snapshot path outside workspace: {path}") from exc
     try:
         metadata = path.lstat()
     except FileNotFoundError:
@@ -224,6 +248,8 @@ def _capture_file(
             content=None,
             sha256=None,
         )
+    except NotADirectoryError as exc:
+        raise ValueError(f"Lifecycle snapshot path ancestor is not a directory: {path}") from exc
     if stat.S_ISLNK(metadata.st_mode):
         return LifecycleFileState(
             relative_path=relative_path,
@@ -251,15 +277,6 @@ def _capture_file(
         content=content,
         sha256=hashlib.sha256(content).hexdigest(),
     )
-
-
-def _reject_symlink_ancestors(path: Path, root: Path) -> None:
-    current = root
-    relative = path.relative_to(root)
-    for part in relative.parts[:-1]:
-        current /= part
-        if current.is_symlink():
-            raise ValueError(f"Refusing symlinked lifecycle snapshot path: {current}")
 
 
 def _read_optional_file(path: Path) -> bytes | None:
