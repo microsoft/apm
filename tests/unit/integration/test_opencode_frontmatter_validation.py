@@ -18,8 +18,8 @@ from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
-def _make_package_info(pkg_dir: Path) -> PackageInfo:
-    package = APMPackage(name="test-pkg", version="1.0.0", package_path=pkg_dir)
+def _make_package_info(pkg_dir: Path, *, name: str = "test-pkg") -> PackageInfo:
+    package = APMPackage(name=name, version="1.0.0", package_path=pkg_dir)
     resolved_ref = ResolvedReference(
         original_ref="main",
         ref_type=GitReferenceType.BRANCH,
@@ -313,6 +313,27 @@ class TestOpencodeInstallEmitsWarnings:
         assert result.files_integrated == 1
         deployed = self.project_root / ".opencode" / "agents" / "demo.md"
         assert deployed.exists()
+
+    def test_rendered_package_name_is_sanitized(self, capsys):
+        """OpenCode wrapper attribution must not reintroduce terminal controls."""
+        pkg = self._write_agent("tools:\n  - Read\n")
+        pkg_info = _make_package_info(pkg, name="evil\x1b[31mpkg\nnext")
+        diagnostics = DiagnosticCollector()
+
+        self.integrator.integrate_agents_for_target(
+            KNOWN_TARGETS["opencode"],
+            pkg_info,
+            self.project_root,
+            diagnostics=diagnostics,
+        )
+
+        warnings = [item for item in diagnostics._diagnostics if item.category == "warning"]
+        assert len(warnings) == 1
+        assert warnings[0].package == "evil?[31mpkg?next"
+        diagnostics.render_summary()
+        output = capsys.readouterr().out
+        assert "\x1b" not in output
+        assert "pkg\nnext" not in output
 
     def test_malformed_yaml_does_not_crash(self):
         pkg = self._write_agent("tools: [unclosed\n")

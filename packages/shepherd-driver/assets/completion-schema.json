@@ -8,6 +8,178 @@
     { "$ref": "#/definitions/conflict_resolution_return" }
   ],
   "definitions": {
+    "owner_touch_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Byte-for-byte output of scripts/owner_touch_gate.py detect for the exact base/head pair. The semantic verifier re-derives this report before accepting a terminal return.",
+      "required": [
+        "version",
+        "owner_table",
+        "owner_table_sha256",
+        "base_sha",
+        "head_sha",
+        "changed_files",
+        "touched_owners"
+      ],
+      "properties": {
+        "version": { "const": "1" },
+        "owner_table": { "const": ".apm/instructions/architecture.instructions.md" },
+        "owner_table_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "changed_files": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "touched_owners": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["decision", "owner", "selectors", "matched_files"],
+            "properties": {
+              "decision": { "type": "string", "minLength": 1 },
+              "owner": { "type": "string", "minLength": 1 },
+              "selectors": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "matched_files": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "functional_test_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One executed functional test at the exact head. owner_decisions links the test to canonical owner rows from owner_touch_report.",
+      "required": [
+        "test_id",
+        "command",
+        "outcome",
+        "head_sha",
+        "owner_decisions",
+        "run_evidence"
+      ],
+      "properties": {
+        "test_id": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "outcome": { "const": "passed" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "owner_decisions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "run_evidence": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "architecture_evidence_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Version 2 canonical-owner gate result. Terminal v1 evidence is intentionally rejected: v2 replaces LLM self-classification with a deterministic owner-touch report and executed functional evidence for every touched owner.",
+      "required": [
+        "version",
+        "classification",
+        "owner_touch_report",
+        "functional_tests",
+        "dual_guardrail_required",
+        "boundary_lint"
+      ],
+      "properties": {
+        "version": { "const": "2" },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "ordinary-fix",
+            "owner-extension",
+            "new-owner",
+            "split-authority-repair",
+            "not-applicable"
+          ],
+          "description": "Interpretive classification after deterministic owner-touch detection. A non-empty touched_owners report forbids ordinary-fix and not-applicable."
+        },
+        "owner_touch_report": { "$ref": "#/definitions/owner_touch_report" },
+        "functional_tests": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/functional_test_evidence" }
+        },
+        "dual_guardrail_required": {
+          "type": "boolean",
+          "description": "True for new-owner and split-authority-repair always, and for owner-extension when the change centralizes or repairs routing."
+        },
+        "behavioral_test": { "type": "string", "minLength": 1, "description": "Behavioral regression test that encodes the symptom (fails before / passes after). Required when dual_guardrail_required=true." },
+        "static_guard": { "type": "string", "minLength": 1, "description": "The scripts/lint-architecture-boundaries.sh check that forbids a second owner. Required when dual_guardrail_required=true." },
+        "architecture_test": { "type": "string", "minLength": 1, "description": "Matching tests/integration/test_architecture_*.py assertion. Required when dual_guardrail_required=true." },
+        "mutation_break": { "type": "string", "minLength": 1, "description": "Evidence that removing the guard makes the behavioral and architecture tests fail. Required when dual_guardrail_required=true." },
+        "boundary_lint": { "type": "string", "minLength": 1, "description": "Result of running bash scripts/lint-architecture-boundaries.sh on the exact head, OR an explicit rationale when the boundary script does not apply." },
+        "rationale": { "type": "string", "minLength": 1, "description": "Why the classification and dual-guardrail disposition are correct after deterministic owner detection." }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "enum": ["new-owner", "split-authority-repair"]
+              }
+            },
+            "required": ["classification"]
+          },
+          "then": {
+            "properties": {
+              "dual_guardrail_required": { "const": true }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "dual_guardrail_required": { "const": true } },
+            "required": ["dual_guardrail_required"]
+          },
+          "then": {
+            "required": [
+              "behavioral_test",
+              "static_guard",
+              "architecture_test",
+              "mutation_break"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "owner_touch_report": {
+                "properties": {
+                  "touched_owners": { "minItems": 1 }
+                },
+                "required": ["touched_owners"]
+              }
+            },
+            "required": ["owner_touch_report"]
+          },
+          "then": {
+            "properties": {
+              "classification": {
+                "enum": ["owner-extension", "new-owner", "split-authority-repair"]
+              },
+              "functional_tests": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
     "completion_return": {
       "type": "object",
       "required": ["kind", "pr", "status"],
@@ -162,83 +334,7 @@
           }
         },
         "architecture_evidence": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Canonical-owner gate result (shepherd-driver-prompt.md Step X.2.5). Required when status in {ready-to-merge, advisory-with-deferred}. Every PR carries exactly one classification. When dual_guardrail_required=true, the behavioral test, static guard, matching architecture test, and mutation-break evidence are ALL required and the change cannot become terminal without them.",
-          "required": [
-            "classification",
-            "decisions",
-            "dual_guardrail_required",
-            "boundary_lint"
-          ],
-          "properties": {
-            "classification": {
-              "type": "string",
-              "enum": [
-                "ordinary-fix",
-                "owner-extension",
-                "new-owner",
-                "split-authority-repair",
-                "not-applicable"
-              ],
-              "description": "The single architecture classification for this PR per .github/instructions/architecture.instructions.md."
-            },
-            "decisions": {
-              "type": "array",
-              "description": "Every durable decision the PR touches, with its canonical owner and the evidence that each consumer routes through that owner. Empty array is legal for ordinary-fix / not-applicable.",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["decision", "owner", "consumer_routing"],
-                "properties": {
-                  "decision": { "type": "string", "minLength": 1, "description": "The durable decision / vocabulary / outcome / contract." },
-                  "owner": { "type": "string", "minLength": 1, "description": "The one canonical owner (file or symbol) for that decision." },
-                  "consumer_routing": { "type": "string", "minLength": 1, "description": "Evidence that every consumer routes THROUGH the owner rather than re-deriving locally." }
-                }
-              }
-            },
-            "dual_guardrail_required": {
-              "type": "boolean",
-              "description": "True for new-owner and split-authority-repair always, and for owner-extension when the change centralizes or repairs routing."
-            },
-            "behavioral_test": { "type": "string", "minLength": 1, "description": "Behavioral regression test that encodes the symptom (fails before / passes after). Required when dual_guardrail_required=true." },
-            "static_guard": { "type": "string", "minLength": 1, "description": "The scripts/lint-architecture-boundaries.sh check that forbids a second owner. Required when dual_guardrail_required=true." },
-            "architecture_test": { "type": "string", "minLength": 1, "description": "Matching tests/integration/test_architecture_*.py assertion. Required when dual_guardrail_required=true." },
-            "mutation_break": { "type": "string", "minLength": 1, "description": "Evidence that removing the guard makes the behavioral and architecture tests fail. Required when dual_guardrail_required=true." },
-            "boundary_lint": { "type": "string", "minLength": 1, "description": "Result of running bash scripts/lint-architecture-boundaries.sh on the exact head, OR an explicit rationale (e.g. no src/ change) when the boundary script does not apply." },
-            "rationale": { "type": "string", "minLength": 1, "description": "Why the classification is correct and, for non-dual-guardrail cases, why existing guards already cover the change." }
-          },
-          "allOf": [
-            {
-              "if": {
-                "properties": {
-                  "classification": {
-                    "enum": ["new-owner", "split-authority-repair"]
-                  }
-                },
-                "required": ["classification"]
-              },
-              "then": {
-                "properties": {
-                  "dual_guardrail_required": { "const": true }
-                }
-              }
-            },
-            {
-              "if": {
-                "properties": { "dual_guardrail_required": { "const": true } },
-                "required": ["dual_guardrail_required"]
-              },
-              "then": {
-                "required": [
-                  "behavioral_test",
-                  "static_guard",
-                  "architecture_test",
-                  "mutation_break"
-                ]
-              }
-            }
-          ]
+          "$ref": "#/definitions/architecture_evidence_v2"
         }
       },
       "allOf": [

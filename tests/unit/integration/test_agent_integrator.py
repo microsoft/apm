@@ -7,6 +7,11 @@ from unittest.mock import Mock
 
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.utils.diagnostics import (
+    CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_WARNING,
+    DiagnosticCollector,
+)
 
 
 class TestAgentIntegrator:
@@ -1101,6 +1106,21 @@ class TestCodexAgentIntegration:
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def _create_package_info(self, package_dir: Path, *, name: str = "test-pkg") -> PackageInfo:
+        package = APMPackage(name=name, version="1.0.0", package_path=package_dir)
+        resolved_ref = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        return PackageInfo(
+            package=package,
+            install_path=package_dir,
+            resolved_reference=resolved_ref,
+            installed_at=datetime.now().isoformat(),
+        )
+
     def test_agent_md_to_toml_with_frontmatter(self):
         """Agent .md with YAML frontmatter is converted to .toml."""
         import toml
@@ -1146,6 +1166,156 @@ class TestCodexAgentIntegration:
         source = Path("/fake/test.agent.md")
         filename = integrator.get_target_filename_for_target(source, "pkg", codex)
         assert filename == "test.toml"
+
+    def test_codex_agent_tools_scope_emits_lossy_compilation_warning(self, capsys):
+        """Codex installs must not silently discard agent tool restrictions."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "scoped.agent.md").write_text(
+            "---\n"
+            "name: scoped\n"
+            "description: Scoped agent\n"
+            "tools: [read, search, 'allowed-demo/*']\n"
+            "---\n"
+            "Review changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "scoped.agent.md" in diagnostic.message
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].package == "test-pkg"
+        assert "tools" in warnings[0].message
+        assert "Codex" in warnings[0].message
+        assert "project/session MCP servers" in warnings[0].message
+        assert warnings[0].detail.startswith("Fix:")
+
+        diagnostics.render_summary()
+        rendered = capsys.readouterr()
+        output = rendered.out + rendered.err
+        assert "[!]" in output
+        assert "test-pkg" in output
+        assert "scoped.agent.md" in output
+
+        import toml
+
+        generated = toml.loads(
+            (self.root / ".codex" / "agents" / "scoped.toml").read_text(encoding="utf-8")
+        )
+        assert "tools" not in generated
+        assert "unrestricted access" in warnings[0].detail
+
+    def test_codex_agent_non_mapping_frontmatter_emits_warning(self):
+        """Valid YAML with the wrong shape must not bypass scope diagnostics."""
+        source = self.root / "list-frontmatter.agent.md"
+        source.write_text(
+            "---\n- name: list-frontmatter\n- tools: [read]\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "list-frontmatter.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert len(warnings) == 1
+        assert "must be a mapping and was ignored" in warnings[0].message
+        assert "may inherit broader tool access" in warnings[0].message
+        assert "rerun 'apm install'" in warnings[0].message
+
+    def test_codex_agent_invalid_frontmatter_emits_warning(self):
+        """Invalid YAML must not make Codex conversion fail open silently."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "broken.agent.md").write_text(
+            "---\nname: broken\ntools: [read, 'allowed-demo/*'\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert len(warnings) == 1
+        assert "broken.agent.md" in warnings[0].message
+        assert "invalid YAML frontmatter" in warnings[0].message
+        assert "tool access" in warnings[0].message
+
+    def test_codex_agent_warning_sanitizes_package_name(self, capsys):
+        """Package attribution must not inject terminal control sequences."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "scoped.agent.md").write_text(
+            "---\nname: scoped\ntools: [read]\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir, name="evil\x1b[31mpkg\nnext"),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        diagnostics.render_summary()
+        rendered = capsys.readouterr()
+        output = rendered.out + rendered.err
+        assert "\x1b" not in output
+        assert "pkg\nnext" not in output
+
+    def test_codex_agent_without_tools_does_not_warn(self):
+        """Supported Codex fields should not produce a lossy warning."""
+        source = self.root / "plain.agent.md"
+        source.write_text(
+            "---\nname: plain\ndescription: Plain agent\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "plain.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
 
 
 # ==================================================================

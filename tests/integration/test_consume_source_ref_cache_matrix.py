@@ -26,10 +26,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.core.host_providers import classify_host_provider
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
@@ -89,6 +91,7 @@ class _MatrixRow:
     mode: str = "standard"
     transition_source: str | None = None
     transition_rewrite_urls: tuple[str, ...] = ()
+    expected_port: int | None = None
 
 
 _ROWS = (
@@ -173,6 +176,35 @@ _ROWS = (
         transition_source="git@gitlab.example.invalid:group/consume-matrix.git",
         transition_rewrite_urls=("git@gitlab.example.invalid:group/consume-matrix.git",),
     ),
+    _MatrixRow(
+        id="generic-https-default-port-persistence",
+        source="https://git.example.invalid:443/acme/consume-matrix.git",
+        rewrite_urls=(
+            "https://git.example.invalid:443/acme/consume-matrix.git",
+            "https://git.example.invalid/acme/consume-matrix.git",
+            "https://git.example.invalid/acme/consume-matrix",
+            "git@git.example.invalid:acme/consume-matrix.git",
+        ),
+        expected_host="git.example.invalid",
+        expected_kind="generic",
+        expected_repo="acme/consume-matrix",
+        ref_selector="first-sha",
+        mode="port-persistence",
+    ),
+    _MatrixRow(
+        id="generic-https-custom-port-persistence",
+        source="https://git.example.invalid:8443/acme/consume-matrix.git",
+        rewrite_urls=(
+            "https://git.example.invalid:8443/acme/consume-matrix.git",
+            "https://git.example.invalid:8443/acme/consume-matrix",
+        ),
+        expected_host="git.example.invalid",
+        expected_kind="generic",
+        expected_repo="acme/consume-matrix",
+        ref_selector="second-sha",
+        mode="port-persistence",
+        expected_port=8443,
+    ),
 )
 
 
@@ -205,23 +237,31 @@ def _configure_rewrites(
     urls: tuple[str, ...],
     *,
     environment: dict[str, str],
+    include_home_config: bool = False,
 ) -> None:
+    # Generic-host preflight drops GIT_CONFIG_GLOBAL, while clone keeps it.
+    # Port rows therefore need rewrites in both isolated global locations.
+    home_gitconfig = Path(environment["HOME"]) / ".gitconfig"
     for url in urls:
-        subprocess.run(
-            (
-                "git",
-                "config",
-                "--global",
-                "--add",
-                f"url.{repository.file_url}.insteadOf",
-                url,
-            ),
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
-        )
+        config_locations = [("--global",)]
+        if include_home_config:
+            config_locations.append(("--file", str(home_gitconfig)))
+        for config_args in config_locations:
+            subprocess.run(
+                (
+                    "git",
+                    "config",
+                    *config_args,
+                    "--add",
+                    f"url.{repository.file_url}.insteadOf",
+                    url,
+                ),
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
 
 
 def _reference_for(
@@ -275,15 +315,19 @@ def _create_scenario(root: Path, row: _MatrixRow) -> _Scenario:
         repository,
         (*row.rewrite_urls, *row.transition_rewrite_urls),
         environment=environment,
+        include_home_config=row.mode == "port-persistence",
     )
     reference, expected_commit, expected_skill_bytes = _reference_for(
         row,
         first_commit,
         second_commit,
     )
+    dependencies = (
+        () if row.mode == "port-persistence" else (_manifest_entry(row, row.source, reference),)
+    )
     consumer = LocalPackageFactory(isolated.work_root).create(
         f"consumer-{row.id}",
-        dependencies=(_manifest_entry(row, row.source, reference),),
+        dependencies=dependencies,
         targets=("copilot",),
     )
     return _Scenario(
@@ -594,3 +638,107 @@ def test_source_ref_transition_applies_once_and_invalid_twin_preserves_state(
     assert (scenario.project_root / "apm.lock.yaml").read_bytes() == lock_bytes
     assert (scenario.project_root / _SKILL_PATH).read_bytes() == deployed_bytes
     record_property("scenario_seconds", round(time.monotonic() - started, 3))
+
+
+@pytest.mark.parametrize(
+    "row",
+    tuple(row for row in _ROWS if row.mode == "port-persistence"),
+    ids=lambda row: row.id,
+)
+def test_cli_manifest_port_rows_reparse_to_backend_url(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    record_property: Callable[[str, object], None],
+    row: _MatrixRow,
+) -> None:
+    """Public install writes a shorthand that re-parses to the same backend."""
+    started = time.monotonic()
+    scenario = _create_scenario(tmp_path / row.id, row)
+    source_with_ref = f"{row.source}#{scenario.initial_ref}"
+    first_install = _runner(apm_binary_path).run(
+        (*_INSTALL_ARGS, source_with_ref),
+        scenario_id=f"{row.id}-public-install",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(first_install)
+    _assert_deployment(
+        scenario,
+        expected_skill_bytes=scenario.expected_skill_bytes,
+    )
+
+    persisted = load_yaml(scenario.project_root / "apm.yml")["dependencies"]["apm"]
+    assert len(persisted) == 1
+    assert isinstance(persisted[0], str)
+    reparsed = DependencyReference.parse(persisted[0])
+    backend_url = urlparse(reparsed.to_clone_url())
+    assert (
+        backend_url.scheme,
+        backend_url.hostname,
+        backend_url.port,
+        backend_url.path,
+    ) == ("https", row.expected_host, row.expected_port, f"/{row.expected_repo}")
+    assert reparsed.reference == scenario.initial_ref
+
+    manifest_reparse = _runner(apm_binary_path).run(
+        _INSTALL_ARGS,
+        scenario_id=f"{row.id}-manifest-reparse",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(manifest_reparse)
+    locked = _locked_dependency(scenario.project_root)
+    assert locked["host"] == row.expected_host
+    assert locked["repo_url"] == row.expected_repo
+    assert locked.get("port") == row.expected_port
+    assert locked["resolved_ref"] == scenario.initial_ref
+    assert locked["resolved_commit"] == scenario.expected_commit.sha
+    assert _manifest_dependency(scenario.project_root) == persisted[0]
+    record_property("scenario_seconds", round(time.monotonic() - started, 3))
+
+
+def test_cli_custom_port_negative_twins_preserve_last_good_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Malformed and insecure twins fail without changing installed state."""
+    row = next(row for row in _ROWS if row.id == "generic-https-custom-port-persistence")
+    scenario = _create_scenario(tmp_path / row.id, row)
+    source_with_ref = f"{row.source}#{scenario.initial_ref}"
+    installed = _runner(apm_binary_path).run(
+        (*_INSTALL_ARGS, source_with_ref),
+        scenario_id=f"{row.id}-seed-last-good",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(installed)
+
+    invalid_sources = (
+        (
+            "malformed-port",
+            f"https://git.example.invalid:70000/acme/consume-matrix.git#{scenario.initial_ref}",
+            "Port out of range",
+        ),
+        (
+            "malformed-shorthand-port",
+            f"git.example.invalid:70000/acme/consume-matrix#{scenario.initial_ref}",
+            "Invalid shorthand port",
+        ),
+        (
+            "insecure-transport",
+            f"http://git.example.invalid:8080/acme/consume-matrix.git#{scenario.initial_ref}",
+            "--allow-insecure",
+        ),
+    )
+    for scenario_suffix, invalid_source, expected_message in invalid_sources:
+        last_good = ArtifactSnapshot.capture(scenario.project_root)
+        invalid = _runner(apm_binary_path).run(
+            (*_INSTALL_ARGS, invalid_source),
+            scenario_id=f"{row.id}-{scenario_suffix}",
+            cwd=scenario.project_root,
+            env=scenario.environment,
+        )
+        assert invalid.returncode == 1
+        output = " ".join((invalid.stdout + invalid.stderr).split())
+        assert expected_message in output
+        assert_unchanged(last_good, ArtifactSnapshot.capture(scenario.project_root))

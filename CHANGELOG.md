@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Govern policy cache freshness now honors the effective policy's `cache.ttl`;
   bounded property coverage protects all 39 enforceable fields, cold/warm parity,
   canonical serialization, and last-good bytes after malformed refreshes. (#2235)
+- Codex agent generation now warns when `.agent.md` `tools` restrictions cannot
+  be preserved, instead of silently widening effective MCP access;
+  `openapm-v0.1.md` now requires semantic preservation or a default-visible
+  diagnostic for lossy agent target conversion -- by @jstar0 (#2186).
 - Marketplace packages emitted as remote URL or subdirectory sources now
   preserve the package host, path, and ref through `apm install`, fixing
   cross-host enterprise validation and self-hosted GitLab monorepo installs.
