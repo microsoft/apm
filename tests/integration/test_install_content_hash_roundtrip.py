@@ -29,7 +29,7 @@ from apm_cli.models.apm_package import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.content_hash import compute_package_hash
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.lifecycle_smoke]
 
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 _VIRTUAL_COMMIT = "a" * 40

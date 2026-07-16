@@ -150,10 +150,11 @@ What this means for contributors:
 
 - You don't need to keep your branch up to date with `main` manually.
 - The fast unit + build checks (Tier 1) run on every push to your PR.
-- A hermetic ~60s Lifecycle Smoke check also runs on every push, validating
-  core install/lock-convergence/policy-enforcement contracts -- no network,
-  credentials, or built binary required, so you get real regression
-  feedback before the queue instead of only after.
+- A hermetic ~65-70s Lifecycle Smoke check also runs on every push, validating
+  core install/lock-convergence/policy-enforcement contracts via a declarative
+  `lifecycle_smoke` pytest marker -- no network, credentials, or built binary
+  required, so you get real regression feedback before the queue instead of
+  only after.
 - The full integration suite (Tier 2) only runs once your PR is in the queue,
   not on every WIP push.
 

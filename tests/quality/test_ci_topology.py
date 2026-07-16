@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -48,44 +49,42 @@ REQUIRED_SHARD_ROOTS = (
 
 # Lifecycle Smoke (Linux): the smallest stable hermetic subset of the real
 # Consume/Produce/Govern lifecycle contracts, promoted to a PR-time required
-# check. See ci.yml's lifecycle-smoke job comment for full rationale;
-# targets directly pin the #2226 (ADO lock coordinates) and #2240 (virtual
-# lifecycle convergence) regressions plus the `component`-marked (hermetic,
-# no built binary) contracts already curated in critical_suite.toml.
+# check. See ci.yml's lifecycle-smoke job comment for full rationale.
+#
+# Selection is declarative via the `lifecycle_smoke` pytest marker (see
+# pyproject.toml's [tool.pytest.ini_options].markers), not an explicit
+# file/node-id list. The marker is applied at the source: module-level
+# `pytestmark` on the four lifecycle-contract modules, and a single
+# function-level `@pytest.mark.lifecycle_smoke` on the one #2226 AC14
+# static guard inside test_architecture_authorities.py (that module's
+# other 32 tests are deliberately NOT marked). This intentionally means
+# no target list lives here or in any other test constant/manifest --
+# the marker registration + a live collection count are the only source
+# of truth, so a maintainer adding/removing a lifecycle_smoke-marked test
+# anywhere under tests/integration changes the required job's scope
+# without ever touching this file or ci.yml.
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
 LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 5
-MANIFEST = REPO_ROOT / "tests" / "quality" / "critical_suite.toml"
-# The two direct regression targets are NOT in critical_suite.toml (only
-# `pytest.mark.integration`, not a taxonomy behavioral marker), so no
-# manifest change is needed and no literal-duplication conflict exists.
-LIFECYCLE_SMOKE_DIRECT_TARGETS = (
-    "tests/integration/test_virtual_package_lifecycle_matrix.py",
-    "tests/integration/test_architecture_authorities.py::"
-    "test_ado_lock_coordinates_have_single_owner",
-)
-
-
-def _manifest_component_targets() -> tuple[str, ...]:
-    """The `component`-marked hermetic modules curated in
-    critical_suite.toml, in manifest declaration order.
-
-    Read dynamically rather than hardcoded as literals: TM002 in
-    tests/quality/test_test_taxonomy.py enforces that critical_suite.toml
-    is the sole place manifest module paths may be declared, so any
-    literal duplicate here would fail that guard.
-    """
-    with MANIFEST.open("rb") as handle:
-        data = tomllib.load(handle)
-    return tuple(entry["path"] for entry in data["modules"] if entry["marker"] == "component")
-
-
-LIFECYCLE_SMOKE_TARGETS = _manifest_component_targets() + LIFECYCLE_SMOKE_DIRECT_TARGETS
+LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
+LIFECYCLE_SMOKE_ROOT = "tests/integration"
+PYPROJECT = REPO_ROOT / "pyproject.toml"
 FORBIDDEN_CREDENTIAL_ENV = ("GITHUB_APM_PAT", "ADO_APM_PAT", "GITHUB_TOKEN")
 # Covers the `${{ github.token }}` context alias, which does not contain any
 # FORBIDDEN_CREDENTIAL_ENV substring but resolves to the same automatic token.
 FORBIDDEN_CREDENTIAL_EXPRESSIONS = (*FORBIDDEN_CREDENTIAL_ENV, "github.token")
+
+
+def _pytest_ini_markers() -> list[str]:
+    """The registered marker declarations from
+    [tool.pytest.ini_options].markers in pyproject.toml -- the single
+    canonical place pytest markers are declared in this repo."""
+    with PYPROJECT.open("rb") as handle:
+        data = tomllib.load(handle)
+    markers = data["tool"]["pytest"]["ini_options"]["markers"]
+    assert isinstance(markers, list)
+    return markers
 
 
 def _run_steps(job: WorkflowNode) -> list[WorkflowNode]:
@@ -360,8 +359,53 @@ def test_duplicate_ratchet_target_fails(
         )
 
 
-def _assert_lifecycle_smoke_targets(job: WorkflowNode) -> None:
-    assert _pytest_targets(job) == LIFECYCLE_SMOKE_TARGETS
+def _assert_lifecycle_smoke_marker_registered(markers: list[str]) -> None:
+    """The `lifecycle_smoke` marker must be registered in pyproject.toml's
+    canonical markers list. The CI invocation's `--strict-markers` flag
+    turns an unregistered marker into a hard collection error, so this is
+    a load-bearing prerequisite for the job to run at all -- not cosmetic
+    documentation."""
+    assert any(marker.startswith(f"{LIFECYCLE_SMOKE_MARKER}:") for marker in markers), (
+        f"{LIFECYCLE_SMOKE_MARKER} marker must be registered in "
+        "pyproject.toml's [tool.pytest.ini_options].markers so "
+        "--strict-markers does not reject it"
+    )
+
+
+def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
+    """The run step must select declaratively via the `lifecycle_smoke`
+    marker expression, pass `--strict-markers`, and bound collection to
+    `tests/integration` -- never the bare `tests` root or full repo.
+    Dropping the marker expression (or widening the root) would silently
+    make this job re-run the entire integration suite inside the PR-time
+    critical path, duplicating ci-integration.yml's merge_group-only job
+    rather than staying the smallest stable hermetic subset."""
+    step = workflow_step(job, LIFECYCLE_SMOKE_RUN_STEP)
+    for tokens in shell_commands(step):
+        if "pytest" not in tokens:
+            continue
+        assert "--strict-markers" in tokens, (
+            "lifecycle-smoke must pass --strict-markers so an unregistered "
+            "or typo'd marker name fails loudly instead of silently "
+            "selecting zero tests"
+        )
+        assert "-m" in tokens, (
+            "lifecycle-smoke must select tests declaratively via a marker "
+            "expression (-m), not explicit file/node-id targets"
+        )
+        marker_index = tokens.index("-m")
+        assert marker_index + 1 < len(tokens), "lifecycle-smoke's -m flag is missing its value"
+        assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_MARKER, (
+            f"lifecycle-smoke's -m expression must be exactly {LIFECYCLE_SMOKE_MARKER!r}, "
+            f"got {tokens[marker_index + 1]!r}"
+        )
+        targets = [token for token in tokens if token.startswith("tests/")]
+        assert targets == [LIFECYCLE_SMOKE_ROOT], (
+            f"lifecycle-smoke must bound collection to exactly {LIFECYCLE_SMOKE_ROOT!r} "
+            f"(never the full repo or bare tests/) -- got {targets!r}"
+        )
+        return
+    raise AssertionError("lifecycle-smoke run step contains no pytest invocation")
 
 
 def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
@@ -406,11 +450,57 @@ def _assert_lifecycle_smoke_required(merge_gate: WorkflowNode) -> None:
     assert LIFECYCLE_SMOKE_CHECK in expected_checks
 
 
+def _assert_marker_collection_non_empty(marker: str) -> None:
+    """Runs a real `--collect-only` subprocess for the given marker
+    expression and asserts pytest's exit code is 0, not 5 ("no tests
+    collected"). Parameterized so the mutation test below can prove a
+    marker guaranteed to match zero tests is caught by the exact same
+    code path the real check exercises."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "--collect-only",
+            "--strict-markers",
+            "-m",
+            marker,
+            LIFECYCLE_SMOKE_ROOT,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"marker {marker!r} family must not be empty -- pytest exit "
+        f"code {result.returncode} (5 == no tests collected):\n{result.stdout}\n{result.stderr}"
+    )
+    assert "collected" in result.stdout, f"expected a collection summary, got: {result.stdout}"
+
+
+def _assert_lifecycle_smoke_collection_non_empty() -> None:
+    """Proves the marker-based family is non-empty right now: a real
+    `--collect-only` subprocess run against the exact CI invocation. If
+    every `@pytest.mark.lifecycle_smoke` were stripped from the four
+    modules and the AC14 function, pytest would exit 5 ("no tests
+    collected") -- exactly what the CI job itself would do, per
+    test_lifecycle_smoke_marker_family_empty_fails below."""
+    _assert_marker_collection_non_empty(LIFECYCLE_SMOKE_MARKER)
+
+
 def test_lifecycle_smoke_is_required_and_hermetic() -> None:
-    """Pins the new PR-time gate: exact targets, bounded timeout, no
-    credentials, and required-check membership. This is the positive half
-    of the guard -- the mutation tests below prove it actually catches
-    drift rather than trivially passing."""
+    """Pins the new PR-time gate as a semantic contract, not an exact
+    target list: the marker is registered, the command selects
+    declaratively via that marker within a bounded root, the job stays
+    hermetic and required, and the marker family actually collects tests
+    right now. This is the positive half of the guard -- the mutation
+    tests below prove it actually catches drift rather than trivially
+    passing."""
     ci = load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml")
     job = workflow_job(ci, LIFECYCLE_SMOKE_JOB)
     assert job["name"] == LIFECYCLE_SMOKE_CHECK
@@ -424,8 +514,10 @@ def test_lifecycle_smoke_is_required_and_hermetic() -> None:
         "fast and loud rather than silently eating the PR-time budget"
     )
 
-    _assert_lifecycle_smoke_targets(job)
+    _assert_lifecycle_smoke_marker_registered(_pytest_ini_markers())
+    _assert_lifecycle_smoke_command(job)
     _assert_lifecycle_smoke_hermetic(job)
+    _assert_lifecycle_smoke_collection_non_empty()
 
     merge_gate = load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml")
     _assert_lifecycle_smoke_required(merge_gate)
@@ -436,36 +528,84 @@ def provisional_lifecycle_job(provisional_ci: WorkflowNode) -> WorkflowNode:
     return workflow_job(provisional_ci, LIFECYCLE_SMOKE_JOB)
 
 
-def test_lifecycle_smoke_dropped_target_fails(
+def test_lifecycle_smoke_marker_expression_dropped_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    """Proves the guard fails if a load-bearing regression target (here,
-    the direct #2240 lifecycle-matrix regression test) is silently
-    removed from the required job."""
+    """Proves the guard fails if the `-m lifecycle_smoke` marker
+    expression is silently dropped -- without it, this job would
+    silently re-run the ENTIRE tests/integration suite inside the
+    PR-time critical path, duplicating ci-integration.yml's
+    merge_group-only job and blowing the 60-90s time budget."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    target = LIFECYCLE_SMOKE_DIRECT_TARGETS[0]
-    assert target in step["run"]
-    step["run"] = step["run"].replace(target, "")
+    step["run"] = step["run"].replace("-m lifecycle_smoke ", "")
 
     with pytest.raises(AssertionError):
-        _assert_lifecycle_smoke_targets(provisional_lifecycle_job)
+        _assert_lifecycle_smoke_command(provisional_lifecycle_job)
 
 
-def test_lifecycle_smoke_inverted_ac14_target_fails(
+def test_lifecycle_smoke_wrong_marker_expression_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    """Proves the guard fails if the direct #2226 AC14 static guard
-    node-id is swapped for a different (non-equivalent) node-id -- i.e.
-    the check would still run *a* test, but not the one that actually
-    pins the regression."""
+    """Proves the guard fails if the marker expression is swapped for a
+    different, broader, pre-existing marker (e.g. `integration`) --
+    which would still select *some* tests but silently change this job's
+    curated scope away from the lifecycle_smoke family."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace(
-        "test_ado_lock_coordinates_have_single_owner",
-        "test_something_unrelated",
-    )
+    step["run"] = step["run"].replace("lifecycle_smoke", "integration")
 
     with pytest.raises(AssertionError):
-        _assert_lifecycle_smoke_targets(provisional_lifecycle_job)
+        _assert_lifecycle_smoke_command(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_unbounded_root_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard fails if the collection root is silently widened
+    from tests/integration to the full tests/ tree -- even with the
+    marker expression intact, collecting over the entire suite adds
+    unbounded, unbudgeted collection overhead to every PR."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["run"] = step["run"].replace("tests/integration", "tests")
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_command(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_strict_markers_flag_dropped_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard fails if --strict-markers is silently dropped
+    from the invocation -- without it, a future typo in the marker name
+    would silently collect zero tests (or the wrong tests) instead of
+    erroring loudly at collection time."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["run"] = step["run"].replace("--strict-markers ", "")
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_command(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_marker_not_registered_fails() -> None:
+    """Proves the guard fails if the lifecycle_smoke marker is silently
+    dropped from pyproject.toml's registered markers list -- the state
+    that would make --strict-markers reject every
+    @pytest.mark.lifecycle_smoke decorator at collection time."""
+    markers = [m for m in _pytest_ini_markers() if not m.startswith(f"{LIFECYCLE_SMOKE_MARKER}:")]
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_marker_registered(markers)
+
+
+def test_lifecycle_smoke_marker_family_empty_fails() -> None:
+    """Proves the collection-non-empty check would fail loudly (pytest
+    exit code 5, "no tests collected") if the lifecycle_smoke family ever
+    became empty -- e.g. if every @pytest.mark.lifecycle_smoke were
+    stripped from the four modules and the AC14 function. Exercises the
+    exact same subprocess code path as
+    _assert_lifecycle_smoke_collection_non_empty, with a marker name
+    guaranteed to match zero tests today."""
+    with pytest.raises(AssertionError):
+        _assert_marker_collection_non_empty("lifecycle_smoke_nonexistent_probe_marker")
 
 
 def test_lifecycle_smoke_credential_env_fails(

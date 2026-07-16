@@ -357,8 +357,31 @@ jobs:
   # merge queue. This job closes that gap for the subset that is both
   # hermetic and fast enough for the PR-time critical path.
   #
-  # Why these five targets specifically
-  # ------------------------------------
+  # Declarative selection via a registered pytest marker
+  # -----------------------------------------------------
+  # The family is selected by `-m lifecycle_smoke`, not by an explicit
+  # file/node-id list. `@pytest.mark.lifecycle_smoke` (registered in
+  # pyproject.toml's [tool.pytest.ini_options] markers, enforced by
+  # --strict-markers) is applied at the module level to
+  # test_install_content_hash_roundtrip.py, test_policy_pinned_constraint_e2e.py,
+  # test_virtual_claude_skill_lock_convergence.py, and
+  # test_virtual_package_lifecycle_matrix.py, and at the function level to
+  # ONLY test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner
+  # (the exact #2226 AC14 static guard pinning that ADO coordinates are
+  # derived by DependencyReference and never persisted in the lockfile --
+  # the file's other 32 tests are deliberately unmarked; four of them shell
+  # out to a subprocess pytest run (~30s each) and would blow the time
+  # budget without adding coverage for this PR's regressions).
+  #
+  # This is the load-bearing reason for marker-based selection over an
+  # explicit-path list: if every `lifecycle_smoke` mark were ever stripped
+  # (accidentally or via a bad merge), `-m lifecycle_smoke` collects zero
+  # tests and pytest exits 5 ("no tests collected") -- a hard, structural
+  # CI failure, not a silent no-op. An explicit path list degrades instead:
+  # a dropped/renamed target just quietly shrinks what runs.
+  #
+  # Why these four modules + one function, Consume/Produce/Govern coverage
+  # ------------------------------------------------------------------------
   #   - test_install_content_hash_roundtrip.py, test_policy_pinned_constraint_e2e.py:
   #     already-curated `component`-tier Consume/Govern contracts from
   #     critical_suite.toml; no built binary, no network.
@@ -369,13 +392,9 @@ jobs:
   #     regression test (install/lock/frozen-install/update/audit matrix for
   #     virtual + manifestless packages). Not in critical_suite.toml (it
   #     carries only `pytest.mark.integration`, not a taxonomy behavioral
-  #     marker), so no manifest change is needed to target it.
+  #     marker), so no manifest change is needed to mark it.
   #   - test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner:
-  #     the exact #2226 AC14 static guard pinning that ADO coordinates are
-  #     derived by DependencyReference and never persisted in the lockfile.
-  #     The other 32 tests in that file are excluded here: four of them
-  #     shell out to a subprocess pytest run (~30s each) and would blow the
-  #     time budget without adding coverage for this PR's regressions.
+  #     see above.
   #
   # #2238 (bounded best-effort ref-lookup retries) is intentionally NOT
   # duplicated here: its regression coverage
@@ -385,8 +404,9 @@ jobs:
   #
   # Why this stays hermetic, network-free, and credential-free
   # ------------------------------------------------------------
-  # None of the five targets carry requires_apm_binary, requires_github_token,
-  # requires_ado_pat, or any other network/credential precondition marker.
+  # None of the twelve tests this marker currently collects carry
+  # requires_apm_binary, requires_github_token, requires_ado_pat, or any
+  # other network/credential precondition marker.
   # tests/utils/isolated_apm_environment.py's socket guard denies ALL
   # AF_INET/AF_INET6 use (including loopback) inside the subprocess these
   # tests drive; git remotes are rewritten to local bare repos via
@@ -394,18 +414,33 @@ jobs:
   # GITHUB_APM_PAT/ADO_APM_PAT env, so it is structurally unable to depend on
   # credentials.
   #
+  # Why `tests/integration` as the collection root, not `tests/`
+  # ----------------------------------------------------------------
+  # Bounding collection to tests/integration keeps `-m lifecycle_smoke` from
+  # ever silently picking up a same-named marker use added under
+  # tests/unit or tests/quality in the future; it also keeps collection
+  # cost proportional to the directory that actually owns this family.
+  #
   # Why timeout-minutes: 3
   # ------------------------
-  # Measured cold wall time for this exact target list is ~13s bare pytest
-  # (stable across repeated runs); with checkout + setup-python + setup-uv +
-  # `uv sync --extra dev` overhead (~45-50s, per the comparable
-  # Test Architecture Ratchets job), total job wall time is projected at
-  # ~60s. 3 minutes gives ample runner-variance headroom while still failing
-  # fast and loud if this suite ever regresses toward materially slower
-  # (e.g. an accidental real network call retrying under the hood).
+  # Before this refactor (explicit 5-target list), measured cold wall time
+  # was ~16-19s bare pytest. After moving to marker-based selection over
+  # the full tests/integration/ directory (299 files), measured cold wall
+  # time is ~18-27s bare pytest -- the marker scan adds a real but bounded
+  # +2 to +8s of collection overhead versus enumerating five paths
+  # directly. With checkout + setup-python + setup-uv + `uv sync --extra
+  # dev` overhead (~45-50s, per the comparable Test Architecture Ratchets
+  # job), total job wall time is projected at ~63-70s -- still within the
+  # 60-90s target with adequate headroom. 3 minutes gives ample
+  # runner-variance headroom while still failing fast and loud if this
+  # suite ever regresses toward materially slower (e.g. an accidental real
+  # network call retrying under the hood, or the marker family silently
+  # growing unbounded).
   #
-  # tests/quality/test_ci_topology.py guards this job's name, target list,
-  # timeout, and required-check membership against silent drift.
+  # tests/quality/test_ci_topology.py guards this job's name, the marker's
+  # registration, the command's use of --strict-markers/-m/bounded root,
+  # required-check membership, and that the marker family is non-empty
+  # right now -- against silent drift.
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
     runs-on: ubuntu-24.04
@@ -431,9 +466,5 @@ jobs:
 
     - name: Run required lifecycle smoke subset
       run: |
-        uv run --extra dev pytest -p no:cacheprovider -q \
-          tests/integration/test_install_content_hash_roundtrip.py \
-          tests/integration/test_policy_pinned_constraint_e2e.py \
-          tests/integration/test_virtual_claude_skill_lock_convergence.py \
-          tests/integration/test_virtual_package_lifecycle_matrix.py \
-          tests/integration/test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner
+        uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+          -m lifecycle_smoke tests/integration

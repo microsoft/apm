@@ -34,20 +34,17 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ### 3. **Lifecycle Smoke** (PR-time required check)
-- **Location**: all under `tests/integration/` -- `test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py`, and `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner`
+- **Location**: selected declaratively via the registered `lifecycle_smoke` pytest marker, applied to all of `tests/integration/test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py` (module-level), and to only `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner` (function-level -- the file's other tests are not part of this family)
 - **Purpose**: Promote the smallest stable, hermetic slice of the real Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so a regression in install/lock/audit convergence or ADO lock-coordinate handling fails the PR instead of only surfacing once a change reaches the merge queue
 - **Scope**: install content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill lock convergence, the virtual/manifestless lifecycle matrix, and the ADO lock-coordinate ownership guard -- no built binary, no network, no credentials
-- **Duration**: ~60s job wall time (hard 3-minute timeout)
+- **Duration**: ~65-70s job wall time (hard 3-minute timeout)
 - **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
-- **Drift guard**: `tests/quality/test_ci_topology.py` pins this job's exact targets, timeout, hermeticity (no credentials at job- or step-level `env`, no credential expressions in `run:`/`with:`), and required-check membership -- editing the job's targets without updating that guard fails CI
+- **Selection mechanism**: `pytest --strict-markers -m lifecycle_smoke tests/integration` -- declarative, not an explicit file/node-id list. If every `@pytest.mark.lifecycle_smoke` mark were ever removed, the marker family collects zero tests and pytest exits code 5 ("no tests collected"), failing the job loudly rather than silently shrinking. The marker is registered in `pyproject.toml`'s `[tool.pytest.ini_options]` markers list; `--strict-markers` rejects any typo'd or unregistered mark used as a decorator.
+- **Drift guard**: `tests/quality/test_ci_topology.py` pins the marker's registration, the command's use of `--strict-markers`/`-m lifecycle_smoke`/the bounded `tests/integration` root, hermeticity (no credentials at job- or step-level `env`, no credential expressions in `run:`/`with:`), required-check membership, and that the marker family collects a non-empty set of tests right now -- editing the job without updating that guard fails CI
 - **Run it locally** (the exact command CI runs):
   ```bash
-  uv run --extra dev pytest -p no:cacheprovider -q \
-    tests/integration/test_install_content_hash_roundtrip.py \
-    tests/integration/test_policy_pinned_constraint_e2e.py \
-    tests/integration/test_virtual_claude_skill_lock_convergence.py \
-    tests/integration/test_virtual_package_lifecycle_matrix.py \
-    "tests/integration/test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner"
+  uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+    -m lifecycle_smoke tests/integration
   ```
 
 ## Running Tests Locally
@@ -90,9 +87,14 @@ Pytest markers compose across independent axes:
 | Behavioral | What boundary does the test cross? | `unit`, `component`, `e2e` |
 | Scheduling | When is the test selected? | `integration`, `slow`, `benchmark`, `live` |
 | Prerequisite | What environment must exist? | `requires_*` |
+| CI-selection | Is this test part of a named required CI gate? | `lifecycle_smoke` |
 
 `live` is both an opt-in scheduling marker and an external-service
 prerequisite. Behavioral markers do not replace prerequisite markers.
+`lifecycle_smoke` is orthogonal to all three: it does not describe a
+test's boundary, scheduling, or precondition, only that
+`ci.yml`'s required `lifecycle-smoke` job selects it via
+`-m lifecycle_smoke` (see Tier 3 above for the full rationale).
 
 The behavioral definitions are:
 
@@ -390,7 +392,7 @@ Promotion integration tests run on:
 ### Lifecycle Smoke Failures
 - These tests are hermetic -- no credentials, no built binary, no network (a real socket attempt raises `OSError`, it does not hang or retry). A failure is a genuine regression, not an environment issue.
 - Run the exact CI command from the "Run it locally" block under Tier 3 above to reproduce.
-- If the failure is about the CI job's shape (wrong target list, timeout, or required-check wiring) rather than test logic, check `tests/quality/test_ci_topology.py` -- that guard pins the job's contract and its own failure message will point at what drifted.
+- If the failure is about the CI job's shape (marker not registered, wrong `-m`/`--strict-markers` invocation, unbounded root, timeout, empty marker family, or required-check wiring) rather than test logic, check `tests/quality/test_ci_topology.py` -- that guard pins the job's contract and its own failure message will point at what drifted.
 - For hanging issues: Check command transformation in script runner (codex expects prompt content, not file paths)
 
 ## Adding New Tests

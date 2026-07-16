@@ -52,6 +52,7 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
+@pytest.mark.lifecycle_smoke
 def test_ado_lock_coordinates_have_single_owner() -> None:
     """AC14 derives ADO coordinates without provider-specific lock fields."""
     import inspect

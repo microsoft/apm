@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Pull requests now run a ~60s hermetic `Lifecycle Smoke (Linux)` check that
-  validates core install, lock-convergence, and policy-enforcement contracts
-  at PR time instead of only in the merge queue -- no network, credentials, or
-  built binary required (#2247).
+- Pull requests now run a ~65-70s hermetic `Lifecycle Smoke (Linux)` check,
+  selected declaratively via a registered `lifecycle_smoke` pytest marker,
+  that validates core install, lock-convergence, and policy-enforcement
+  contracts at PR time instead of only in the merge queue -- no network,
+  credentials, or built binary required (#2247).
 - Object-form Git dependencies now reject unsupported keys instead of silently
   ignoring them; use `ref` rather than `version`, and omit inert `name` fields
   from `git: parent`. CI audit also rejects full-SHA pins whose
