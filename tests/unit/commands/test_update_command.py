@@ -540,6 +540,82 @@ def test_module_cache_rehydration_ignores_empty_resolution_staging(
     assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
 
 
+def test_module_cache_rehydration_local_dependency_uses_canonical_local_path(
+    tmp_path: Path,
+) -> None:
+    """A local-only locked dep's absent cache lives under ``_local/<name>``.
+
+    Local (filesystem) dependencies have no host/repo segments, so their
+    canonical install path is ``apm_modules/_local/<pkg_name>``
+    (``DependencyReference.get_install_path``), not a naive
+    ``apm_modules/<repo_url>`` split. This guards against a regression
+    that would check the wrong path and either loop (never see the cache
+    as present) or misfire (treat an absent cache as present).
+    """
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+    lockfile = LockFile(
+        dependencies={
+            "_local/my-pkg": LockedDependency(
+                repo_url="_local/my-pkg",
+                source="local",
+                local_path="./my-pkg",
+            )
+        }
+    )
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # A misclassified path (e.g. splitting repo_url naively) must not
+    # satisfy the check.
+    (modules_dir / "_local" / "wrong-name").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # Only the canonical path resolves the absent cache.
+    (modules_dir / "_local" / "my-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+
+
+def test_module_cache_rehydration_transitive_local_dependency_uses_hashed_parent_slot(
+    tmp_path: Path,
+) -> None:
+    """A transitive local dep's cache lives under a hashed parent slot.
+
+    When a local dependency is declared by another package rather than
+    the root project (``declaring_parent`` set), its canonical path is
+    ``apm_modules/_local/<sha256(identity)[:12]>/<pkg_name>`` -- distinct
+    from the top-level ``_local/<pkg_name>`` shape. The rehydration check
+    must follow this exact same canonical path, not a flattened one.
+    """
+    import hashlib
+
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+    parent_identity = "../sibling-parent"
+    parent_slot = hashlib.sha256(parent_identity.encode("utf-8")).hexdigest()[:12]
+    lockfile = LockFile(
+        dependencies={
+            "_local/nested-pkg": LockedDependency(
+                repo_url="_local/nested-pkg",
+                source="local",
+                local_path="../nested-pkg",
+                declaring_parent=parent_identity,
+                anchored_local_path=parent_identity,
+            )
+        }
+    )
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # The flattened (non-hashed) path must not be mistaken for the cache.
+    (modules_dir / "_local" / "nested-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # Only the hashed parent-slot path is canonical.
+    (modules_dir / "_local" / parent_slot / "nested-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+
+
 # -----------------------------------------------------------------------------
 # apm update outside an apm.yml project -> back-compat shim
 # -----------------------------------------------------------------------------
