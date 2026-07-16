@@ -255,7 +255,12 @@ def _create_scenario(root: Path, case: _TransportCase) -> _Scenario:
         lifecycle_actions=tuple(actions),
     )
     trace_path = isolated.temp_root / "git-trace.json"
-    environment = isolated.subprocess_env()
+    # Frozen binaries can bypass both PYTHONPATH sitecustomize and proxy
+    # isolation. Disable the unrelated HTTP metadata tier so this transport
+    # contract has a deterministic Git-only network boundary.
+    environment = isolated.subprocess_env(
+        overrides={"APM_TIERED_RESOLVER": "0"},
+    )
     environment.update(_HERMETIC_ENVIRONMENT)
     environment["GIT_TRACE2_EVENT"] = str(trace_path)
     return _Scenario(
@@ -351,6 +356,7 @@ def _assert_hermetic_preflight(scenario: _Scenario, apm_binary_path: Path) -> No
     assert environment["GIT_ALLOW_PROTOCOL"] == "file"
     assert environment["GIT_CONFIG_NOSYSTEM"] == "1"
     assert environment["APM_NO_CACHE"] == "1"
+    assert environment["APM_TIERED_RESOLVER"] == "0"
     for name in (
         "HTTP_PROXY",
         "HTTPS_PROXY",
