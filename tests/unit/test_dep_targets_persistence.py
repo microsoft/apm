@@ -104,12 +104,6 @@ def test_parse_targets_suggests_name_at_edit_distance_boundary() -> None:
         DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coexx"]})
 
 
-def test_parse_targets_tie_suggests_lexicographically_first_name() -> None:
-    # "coade" is distance 2 from both "claude" and "codex"; "claude" sorts first.
-    with pytest.raises(ValueError, match=r"Did you mean 'claude'"):
-        DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coade"]})
-
-
 def test_parse_targets_omits_suggestion_beyond_edit_distance_boundary() -> None:
     with pytest.raises(ValueError, match=r"^((?!Did you mean).)*$"):
         DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coexxx"]})
@@ -121,13 +115,7 @@ def test_parse_targets_rejects_non_string_name() -> None:
 
 
 def test_parse_targets_tie_break_prefers_lexicographically_first_match() -> None:
-    """'coade' ties at edit distance 2 with both 'claude' and 'codex' (no other
-    known target is closer). The suggestion must deterministically resolve to
-    the lexicographically-first candidate encountered during the scan, so it
-    always picks 'claude'. This pins the exact tie-break contract: a stray '<='
-    (picking the last tied candidate) or a swapped tuple index (comparing the
-    distance against the candidate name) must fail this assertion.
-    """
+    # "coade" is distance 2 from both "claude" and "codex"; "claude" sorts first.
     with pytest.raises(ValueError, match=r"Did you mean 'claude'"):
         DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coade"]})
 
