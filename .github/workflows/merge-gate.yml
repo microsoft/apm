@@ -126,7 +126,13 @@ jobs:
           # allocation latency on the critical path.
           # merge_group context: Coverage Combine IS required, so the
           # global 80% floor blocks the actual merge.
-          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),APM Self-Check,NOTICE Drift Check,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),APM Self-Check,NOTICE Drift Check' }}
+          # Lifecycle Smoke (Linux) is required in BOTH contexts: it's a
+          # hermetic, ~60s ci.yml job (runs on pull_request AND merge_group,
+          # same as APM Self-Check / NOTICE Drift Check), promoting the
+          # smallest stable subset of the real Consume/Produce/Govern
+          # lifecycle contracts -- including the direct #2226/#2240
+          # regression tests -- onto the PR-time critical path.
+          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux)' }}
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
           # Integration (timeout 20m) -> Release Validation (timeout 20m).
           # Theoretical worst case ~50m; observed today ~5m end-to-end.

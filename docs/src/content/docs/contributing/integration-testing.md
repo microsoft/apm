@@ -33,6 +33,13 @@ APM uses a tiered approach to integration testing:
 - **Duration**: ~10-15 minutes per platform (with 20-minute timeout)  
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
+### 3. **Lifecycle Smoke** (PR-time required check)
+- **Location**: `tests/integration/test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py`, and `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner`
+- **Purpose**: Promote the smallest stable, hermetic slice of the real Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so a regression in install/lock/audit convergence or ADO lock-coordinate handling fails the PR instead of only surfacing once a change reaches the merge queue
+- **Scope**: install content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill lock convergence, the virtual/manifestless lifecycle matrix, and the ADO lock-coordinate ownership guard -- no built binary, no network, no credentials
+- **Duration**: ~60s job wall time (hard 3-minute timeout)
+- **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
+
 ## Running Tests Locally
 
 Integration tests live under `tests/integration/` and run via `pytest`
@@ -248,7 +255,7 @@ environment end-to-end; for local iteration prefer the direct
 ### GitHub Actions Workflow
 
 **On PR and merge queue:**
-1. PR-time unit checks run first; merge queue adds Linux smoke, integration, and release-validation gates.
+1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
 **On version tag releases:**
 1. Unit tests + Smoke tests

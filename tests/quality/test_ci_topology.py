@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import tomllib
 
 from scripts.test_file_inventory import is_test_module_path
 from tests.quality.repository_python_inventory import (
@@ -44,6 +45,44 @@ REQUIRED_SHARD_ROOTS = (
     "tests/test_console.py",
     "tests/red_team",
 )
+
+# Lifecycle Smoke (Linux): the smallest stable hermetic subset of the real
+# Consume/Produce/Govern lifecycle contracts, promoted to a PR-time required
+# check. See ci.yml's lifecycle-smoke job comment for full rationale;
+# targets directly pin the #2226 (ADO lock coordinates) and #2240 (virtual
+# lifecycle convergence) regressions plus the `component`-marked (hermetic,
+# no built binary) contracts already curated in critical_suite.toml.
+LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
+LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
+LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
+LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 5
+MANIFEST = REPO_ROOT / "tests" / "quality" / "critical_suite.toml"
+# The two direct regression targets are NOT in critical_suite.toml (only
+# `pytest.mark.integration`, not a taxonomy behavioral marker), so no
+# manifest change is needed and no literal-duplication conflict exists.
+LIFECYCLE_SMOKE_DIRECT_TARGETS = (
+    "tests/integration/test_virtual_package_lifecycle_matrix.py",
+    "tests/integration/test_architecture_authorities.py::"
+    "test_ado_lock_coordinates_have_single_owner",
+)
+
+
+def _manifest_component_targets() -> tuple[str, ...]:
+    """The `component`-marked hermetic modules curated in
+    critical_suite.toml, in manifest declaration order.
+
+    Read dynamically rather than hardcoded as literals: TM002 in
+    tests/quality/test_test_taxonomy.py enforces that critical_suite.toml
+    is the sole place manifest module paths may be declared, so any
+    literal duplicate here would fail that guard.
+    """
+    with MANIFEST.open("rb") as handle:
+        data = tomllib.load(handle)
+    return tuple(entry["path"] for entry in data["modules"] if entry["marker"] == "component")
+
+
+LIFECYCLE_SMOKE_TARGETS = _manifest_component_targets() + LIFECYCLE_SMOKE_DIRECT_TARGETS
+FORBIDDEN_CREDENTIAL_ENV = ("GITHUB_APM_PAT", "ADO_APM_PAT", "GITHUB_TOKEN")
 
 
 def _run_steps(job: WorkflowNode) -> list[WorkflowNode]:
@@ -316,3 +355,118 @@ def test_duplicate_ratchet_target_fails(
             provisional_ci,
             repository_inventory,
         )
+
+
+def _assert_lifecycle_smoke_targets(job: WorkflowNode) -> None:
+    assert _pytest_targets(job) == LIFECYCLE_SMOKE_TARGETS
+
+
+def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
+    assert "secrets" not in job
+    for step in _run_steps(job):
+        env = step.get("env")
+        if isinstance(env, dict):
+            for key in FORBIDDEN_CREDENTIAL_ENV:
+                assert key not in env, f"lifecycle-smoke step must not bind {key}"
+        run = step.get("run")
+        if isinstance(run, str):
+            for key in FORBIDDEN_CREDENTIAL_ENV:
+                assert key not in run, f"lifecycle-smoke step must not reference {key}"
+
+
+def _assert_lifecycle_smoke_required(merge_gate: WorkflowNode) -> None:
+    gate = workflow_job(merge_gate, "gate")
+    wait_step = workflow_step(gate, "Wait for all required checks")
+    expected_checks = wait_step["env"]["EXPECTED_CHECKS"]
+    assert isinstance(expected_checks, str)
+    assert LIFECYCLE_SMOKE_CHECK in expected_checks
+
+
+def test_lifecycle_smoke_is_required_and_hermetic() -> None:
+    """Pins the new PR-time gate: exact targets, bounded timeout, no
+    credentials, and required-check membership. This is the positive half
+    of the guard -- the mutation tests below prove it actually catches
+    drift rather than trivially passing."""
+    ci = load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml")
+    job = workflow_job(ci, LIFECYCLE_SMOKE_JOB)
+    assert job["name"] == LIFECYCLE_SMOKE_CHECK
+    assert job["runs-on"] == "ubuntu-24.04"
+
+    timeout = job.get("timeout-minutes")
+    assert isinstance(timeout, int)
+    assert 0 < timeout <= LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES, (
+        "lifecycle-smoke must keep a hard, tight timeout so a regression "
+        "toward slowness (e.g. an accidental network retry loop) fails "
+        "fast and loud rather than silently eating the PR-time budget"
+    )
+
+    _assert_lifecycle_smoke_targets(job)
+    _assert_lifecycle_smoke_hermetic(job)
+
+    merge_gate = load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml")
+    _assert_lifecycle_smoke_required(merge_gate)
+
+
+@pytest.fixture
+def provisional_lifecycle_job(provisional_ci: WorkflowNode) -> WorkflowNode:
+    return workflow_job(provisional_ci, LIFECYCLE_SMOKE_JOB)
+
+
+def test_lifecycle_smoke_dropped_target_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard fails if a load-bearing regression target (here,
+    the direct #2240 lifecycle-matrix regression test) is silently
+    removed from the required job."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    target = LIFECYCLE_SMOKE_DIRECT_TARGETS[0]
+    assert target in step["run"]
+    step["run"] = step["run"].replace(target, "")
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_targets(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_inverted_ac14_target_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard fails if the direct #2226 AC14 static guard
+    node-id is swapped for a different (non-equivalent) node-id -- i.e.
+    the check would still run *a* test, but not the one that actually
+    pins the regression."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["run"] = step["run"].replace(
+        "test_ado_lock_coordinates_have_single_owner",
+        "test_something_unrelated",
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_targets(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_credential_env_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    """Proves the guard fails if this job is ever wired to a credential,
+    which would break the hermetic/no-credentials contract the PR-time
+    critical path depends on."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["env"] = {"GITHUB_APM_PAT": "${{ secrets.GITHUB_APM_PAT }}"}
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_hermetic(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_removed_from_expected_checks_fails() -> None:
+    """Proves the guard fails if Lifecycle Smoke is dropped from
+    merge-gate's EXPECTED_CHECKS -- i.e. the job could exist and pass
+    while silently no longer blocking merges."""
+    merge_gate = deepcopy(load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"))
+    gate = workflow_job(merge_gate, "gate")
+    wait_step = workflow_step(gate, "Wait for all required checks")
+    wait_step["env"]["EXPECTED_CHECKS"] = wait_step["env"]["EXPECTED_CHECKS"].replace(
+        LIFECYCLE_SMOKE_CHECK, "REMOVED"
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_required(merge_gate)

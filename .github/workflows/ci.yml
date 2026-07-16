@@ -342,3 +342,98 @@ jobs:
       # .agents/skills/ content could silently diverge from source (#1716).
       - name: apm audit --ci
         run: uv run apm audit --ci
+
+  # Promotes the smallest stable hermetic slice of the real Consume/Produce/
+  # Govern lifecycle contracts to a PR-time required check. Tier 1.
+  #
+  # Why this job exists
+  # --------------------
+  # Every module under tests/integration/ -- including the curated
+  # producer/consumer/govern contracts in tests/quality/critical_suite.toml
+  # and the regression coverage added by #2226 (ADO lock coordinate
+  # preservation) and #2240 (virtual/manifestless lifecycle convergence) --
+  # only ran on merge_group (ci-integration.yml), never as a required PR
+  # check. A revert of either fix could sit un-caught until a PR reached the
+  # merge queue. This job closes that gap for the subset that is both
+  # hermetic and fast enough for the PR-time critical path.
+  #
+  # Why these five targets specifically
+  # ------------------------------------
+  #   - test_install_content_hash_roundtrip.py, test_policy_pinned_constraint_e2e.py:
+  #     already-curated `component`-tier Consume/Govern contracts from
+  #     critical_suite.toml; no built binary, no network.
+  #   - test_virtual_claude_skill_lock_convergence.py: `component`-tier
+  #     Produce/Consume lock-convergence contract from critical_suite.toml,
+  #     directly adjacent to the #2226 ADO lock-coordinate fix.
+  #   - test_virtual_package_lifecycle_matrix.py: the direct #2240
+  #     regression test (install/lock/frozen-install/update/audit matrix for
+  #     virtual + manifestless packages). Not in critical_suite.toml (it
+  #     carries only `pytest.mark.integration`, not a taxonomy behavioral
+  #     marker), so no manifest change is needed to target it.
+  #   - test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner:
+  #     the exact #2226 AC14 static guard pinning that ADO coordinates are
+  #     derived by DependencyReference and never persisted in the lockfile.
+  #     The other 32 tests in that file are excluded here: four of them
+  #     shell out to a subprocess pytest run (~30s each) and would blow the
+  #     time budget without adding coverage for this PR's regressions.
+  #
+  # #2238 (bounded best-effort ref-lookup retries) is intentionally NOT
+  # duplicated here: its regression coverage
+  # (tests/unit/deps/test_download_strategies_phase3.py,
+  # tests/unit/deps/test_git_reference_resolver.py) is unit-level and
+  # already required today via build-and-test-shard.
+  #
+  # Why this stays hermetic, network-free, and credential-free
+  # ------------------------------------------------------------
+  # None of the five targets carry requires_apm_binary, requires_github_token,
+  # requires_ado_pat, or any other network/credential precondition marker.
+  # tests/utils/isolated_apm_environment.py's socket guard denies ALL
+  # AF_INET/AF_INET6 use (including loopback) inside the subprocess these
+  # tests drive; git remotes are rewritten to local bare repos via
+  # `git config url.<path>.insteadOf`. This job declares no `secrets:` and no
+  # GITHUB_APM_PAT/ADO_APM_PAT env, so it is structurally unable to depend on
+  # credentials.
+  #
+  # Why timeout-minutes: 3
+  # ------------------------
+  # Measured cold wall time for this exact target list is ~13s bare pytest
+  # (stable across repeated runs); with checkout + setup-python + setup-uv +
+  # `uv sync --extra dev` overhead (~45-50s, per the comparable
+  # Test Architecture Ratchets job), total job wall time is projected at
+  # ~60s. 3 minutes gives ample runner-variance headroom while still failing
+  # fast and loud if this suite ever regresses toward materially slower
+  # (e.g. an accidental real network call retrying under the hood).
+  #
+  # tests/quality/test_ci_topology.py guards this job's name, target list,
+  # timeout, and required-check membership against silent drift.
+  lifecycle-smoke:
+    name: Lifecycle Smoke (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      run: uv sync --extra dev
+
+    - name: Run required lifecycle smoke subset
+      run: |
+        uv run --extra dev pytest -p no:cacheprovider -q \
+          tests/integration/test_install_content_hash_roundtrip.py \
+          tests/integration/test_policy_pinned_constraint_e2e.py \
+          tests/integration/test_virtual_claude_skill_lock_convergence.py \
+          tests/integration/test_virtual_package_lifecycle_matrix.py \
+          tests/integration/test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner
