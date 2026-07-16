@@ -550,16 +550,27 @@ function Test-ConPtyCapture {
     )
     $marker = "CONPTY_SELFTEST_" + [guid]::NewGuid().ToString("N").Substring(0, 12)
     $comspec = Join-Path $env:WINDIR "System32\cmd.exe"
-    $commandLine = '"' + $comspec + '" /c "echo ' + $marker + ' & exit /b 7"'
+    # A short loopback-only delay (no external network -- 127.0.0.1 never
+    # leaves the machine) after the echo keeps the child alive long enough
+    # to capture a live process-tree snapshot before it exits, which is
+    # itself one of the evidence artifacts this fixture must produce and is
+    # also the most direct way to see whether the child actually attached
+    # to this pseudo console or to something else.
+    $commandLine = '"' + $comspec + '" /c "echo ' + $marker + ' & ping -n 3 127.0.0.1 >nul & exit /b 7"'
     $session = $null
     $transcript = ""
     $exitCode = $null
     $diagnostics = $null
+    $processTree = @()
     try {
         $session = New-ConPtySession `
             -CommandLine $commandLine `
             -WorkingDirectory $WorkingDirectory `
             -Environment $Environment
+        Start-Sleep -Milliseconds 700
+        $processTree = @(Get-CimInstance -ClassName Win32_Process |
+            Where-Object { $_.Name -in @('cmd.exe', 'conhost.exe', 'OpenConsole.exe') } |
+            Select-Object ProcessId, ParentProcessId, Name, CommandLine)
         $wait = Wait-ConPtyText -Session $session -Pattern ([regex]::Escape($marker)) -TimeoutMs 10000
         $transcript = $wait.Transcript
         $exitWait = Wait-ConPtyExit -Session $session -TimeoutMs 10000
@@ -572,6 +583,7 @@ function Test-ConPtyCapture {
             ExitCode    = $exitCode
             Transcript  = $transcript
             Diagnostics = $diagnostics
+            ProcessTree = $processTree
         }
     } finally {
         if ($session) { Stop-ConPtySession -Session $session -Force }
@@ -787,6 +799,14 @@ try {
     foreach ($line in $selfTest.Diagnostics.ReaderTrace) {
         Write-Info "  $line"
     }
+    Write-Info "ConPTY self-test live process tree (cmd.exe/conhost.exe/OpenConsole.exe, captured ~700ms after launch):"
+    if ($selfTest.ProcessTree.Count -eq 0) {
+        Write-Info "  (none found -- child may have already exited before the snapshot was taken)"
+    }
+    foreach ($proc in $selfTest.ProcessTree) {
+        Write-Info "  pid=$($proc.ProcessId) parentPid=$($proc.ParentProcessId) name=$($proc.Name) commandLine=$($proc.CommandLine)"
+    }
+    Write-Info "  (this script's own pid for reference: $PID)"
     Assert-Condition $selfTest.Matched "ConPTY self-test: known marker string observed in captured transcript"
     Assert-Condition ($selfTest.ExitCode -eq 7) "ConPTY self-test: child exit code (7) captured correctly"
 
