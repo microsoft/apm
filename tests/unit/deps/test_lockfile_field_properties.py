@@ -27,6 +27,7 @@ import pytest
 from hypothesis import given, seed, settings
 from hypothesis import strategies as st
 
+from apm_cli.core.host_providers import accepted_host_types
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.provider_coordinates import ProviderCoordinateMixin
 from apm_cli.models.dependency.reference import DependencyReference
@@ -41,6 +42,9 @@ _TOKEN = st.text(alphabet=string.ascii_lowercase + string.digits, min_size=2, ma
 _SHA = st.text(alphabet="0123456789abcdef", min_size=40, max_size=40)
 
 _ALLOWED_EXEC_STATUS = ("deployed", "gated_pending_approval", "denied", "absent")
+# Sourced from the real provider registry (not a hand-maintained literal) so this
+# strategy can never drift from what ``_normalize_lockfile_host_type`` accepts.
+_ALLOWED_HOST_TYPES = tuple(accepted_host_types())
 _DERIVED_PROVIDER_FIELDS = ("ado_organization", "ado_project", "ado_repo")
 
 # Optional string-or-None fields whose to_dict() contract is "omitted when
@@ -318,6 +322,45 @@ def test_exec_status_fail_closed_property_breaks_if_normalizer_is_bypassed(bad_v
             _assert_exec_status_fails_closed(bad_value)
     finally:
         lockfile_module._normalize_exec_status = original
+
+
+_BAD_HOST_TYPE = st.text(
+    alphabet=string.ascii_letters + string.digits, min_size=1, max_size=12
+).filter(lambda s: s.lower() not in _ALLOWED_HOST_TYPES)
+
+
+def _assert_host_type_fails_closed(bad_value: str) -> None:
+    """Assert an invalid ``host_type`` raises the fail-closed ValueError."""
+    try:
+        LockedDependency.from_dict({"repo_url": "acme/example", "host_type": bad_value})
+    except ValueError as exc:
+        assert "Unsupported lockfile host_type" in str(exc)
+        return
+    raise AssertionError("invalid host_type did not raise")
+
+
+@seed(PROPERTY_SEED)
+@PROPERTY_PROFILE
+@given(bad_value=_BAD_HOST_TYPE)
+def test_unsupported_host_type_raises_instead_of_silently_coercing(bad_value: str) -> None:
+    """Unlike ``port``, an invalid ``host_type`` must fail loudly (not silently coerce)."""
+    _assert_host_type_fails_closed(bad_value)
+
+
+@seed(PROPERTY_SEED)
+@SINGLE_EXAMPLE_PROFILE
+@given(bad_value=_BAD_HOST_TYPE)
+def test_host_type_fail_closed_property_breaks_if_normalizer_is_bypassed(bad_value: str) -> None:
+    """Negative twin: skipping ``_normalize_lockfile_host_type`` un-does the fail-closed guarantee."""
+    import apm_cli.deps.lockfile as lockfile_module
+
+    original = lockfile_module._normalize_lockfile_host_type
+    try:
+        lockfile_module._normalize_lockfile_host_type = lambda raw: raw
+        with pytest.raises(AssertionError):
+            _assert_host_type_fails_closed(bad_value)
+    finally:
+        lockfile_module._normalize_lockfile_host_type = original
 
 
 # --------------------------------------------------------------------------
