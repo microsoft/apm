@@ -136,6 +136,24 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
 
 
+def test_ac13_git_ref_transport_selection_has_single_owner() -> None:
+    """AC13 makes Git ref enumeration consume canonical transport selection."""
+    root = Path(__file__).parents[2]
+    ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
+    ref_resolver = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
+    git_ref_resolver = (root / "src/apm_cli/deps/git_reference_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "transport_plan = transport_selector.select(" in ref_reuse
+    assert "transport_scheme=transport_scheme" in ref_reuse
+    assert "transport_plan = host._transport_selector.select(" in git_ref_resolver
+    assert "build_ssh_url(" in ref_resolver
+    assert "from apm_cli.deps.transport_selection import" not in ref_resolver
+    assert "TransportSelector(" not in ref_resolver
+    assert "AC13: Git ref transport selection authority" in guard
+    assert "Git ref transport must route through TransportSelector into RefResolver" in guard
+
+
 def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
     """Imperative bundle deploys must not bypass policy outcome routing."""
     root = Path(__file__).parents[2]
