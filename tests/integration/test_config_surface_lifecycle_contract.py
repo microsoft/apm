@@ -6,16 +6,19 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-from tests.utils.lifecycle_state import LifecycleStateSnapshot
-from tests.utils.local_git_repository import GitCommit, LocalGitRepository, LocalGitRepositoryFactory
+from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
+from tests.utils.local_git_repository import (
+    GitCommit,
+    LocalGitRepository,
+    LocalGitRepositoryFactory,
+)
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
@@ -35,13 +38,7 @@ def _runner(apm_binary_path: Path) -> ApmLifecycleRunner:
 
 def _instruction(name: str) -> str:
     """Return a valid observable instruction source document."""
-    return (
-        "---\n"
-        "applyTo: '**'\n"
-        f"description: Lifecycle contract fixture {name}\n"
-        "---\n"
-        f"# {name}\n"
-    )
+    return f"---\napplyTo: '**'\ndescription: Lifecycle contract fixture {name}\n---\n# {name}\n"
 
 
 def _dependency_rows(project_root: Path) -> dict[str, dict[str, object]]:
@@ -98,6 +95,7 @@ def _create_git_lifecycle_project(
     source_name: str,
     mcp_dependencies: tuple[dict[str, object], ...] = (),
     lsp_dependencies: tuple[dict[str, object], ...] = (),
+    targets: tuple[str, ...] = ("copilot",),
 ) -> _GitLifecycleProject:
     """Create an isolated consumer and real local-Git configuration package."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
@@ -135,7 +133,7 @@ def _create_git_lifecycle_project(
                 "alias": source_name,
             },
         ),
-        targets=("copilot",),
+        targets=targets,
     )
     return _GitLifecycleProject(
         isolated=isolated,
@@ -223,12 +221,31 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     assert first.deployment_records
     assert b"project-contract-server" in first.mcp_state_bytes
     assert first.file(".vscode/mcp.json").kind == "file"
-    assert _audit_payload(
-        runner,
-        scenario_id="project-mcp-initial-audit",
+    assert (
+        _audit_payload(
+            runner,
+            scenario_id="project-mcp-initial-audit",
+            cwd=fixture.project_root,
+            environment=environment,
+        )["passed"]
+        is True
+    )
+
+    runner.run_sequence(
+        (install_args,),
+        expected_returncodes=(0,),
+        scenario_id="project-mcp-reinstall",
         cwd=fixture.project_root,
-        environment=environment,
-    )["passed"] is True
+        env=environment,
+    )
+    reinstalled = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".vscode/mcp.json"),),
+    )
+    assert reinstalled.manifest_bytes == first.manifest_bytes
+    assert reinstalled.file(".vscode/mcp.json").content == first.file(".vscode/mcp.json").content
+    assert reinstalled.mcp_state_bytes == first.mcp_state_bytes
+    assert reinstalled.semantic_bytes == first.semantic_bytes
 
     lock_data = load_yaml(fixture.project_root / "apm.lock.yaml")
     assert isinstance(lock_data, dict)
@@ -260,8 +277,8 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
         config_paths=(PurePosixPath(".vscode/mcp.json"),),
     )
     assert repaired.manifest_bytes == manifest_bytes
-    assert repaired.mcp_state_bytes == first.mcp_state_bytes
-    assert repaired.semantic_bytes == first.semantic_bytes
+    assert repaired.mcp_state_bytes == reinstalled.mcp_state_bytes
+    assert repaired.semantic_bytes == reinstalled.semantic_bytes
     closure = _audit_payload(
         runner,
         scenario_id="project-mcp-repaired-audit",
@@ -269,6 +286,300 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
         environment=environment,
     )
     assert closure["passed"] is True
+
+
+def test_user_scope_mcp_reinstall_keeps_global_copilot_state_isolated(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Global MCP installs converge under isolated APM and Copilot user roots."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "user-mcp",
+        base_env=dict(os.environ),
+    )
+    package_factory = LocalPackageFactory(isolated.package_root)
+    package = package_factory.create(
+        "user-mcp-source",
+        mcp_dependencies=(
+            {
+                "name": "user-contract-server",
+                "registry": False,
+                "transport": "stdio",
+                "command": "echo",
+                "args": ["user-contract"],
+            },
+        ),
+    )
+    unrelated_project = isolated.work_root / "unrelated-project"
+    unrelated_project.mkdir()
+    unrelated_manifest = unrelated_project / "apm.yml"
+    unrelated_bytes = b"name: unrelated\nversion: 0.1.0\n"
+    unrelated_manifest.write_bytes(unrelated_bytes)
+    copilot_root = isolated.home / ".copilot"
+    copilot_root.mkdir()
+    runner = _runner(apm_binary_path)
+    environment = isolated.subprocess_env()
+    initial_install = (
+        "install",
+        "--global",
+        str(package.root),
+        "--target",
+        "copilot",
+        "--trust-transitive-mcp",
+        "--no-policy",
+    )
+    reinstall = (
+        "install",
+        "--global",
+        "--target",
+        "copilot",
+        "--trust-transitive-mcp",
+        "--no-policy",
+    )
+
+    runner.run_sequence(
+        (initial_install,),
+        expected_returncodes=(0,),
+        scenario_id="user-mcp-initial-install",
+        cwd=unrelated_project,
+        env=environment,
+    )
+    user_root = isolated.home / ".apm"
+    first = LifecycleStateSnapshot.capture(
+        user_root,
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="user",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
+        ),
+    )
+    assert unrelated_manifest.read_bytes() == unrelated_bytes
+    assert first.manifest_bytes is not None
+    assert first.lockfile_bytes is not None
+    assert b"user-contract-server" in first.mcp_state_bytes
+    assert first.file("mcp-config.json", root_id="copilot-user").kind == "file"
+
+    runner.run_sequence(
+        (reinstall,),
+        expected_returncodes=(0,),
+        scenario_id="user-mcp-reinstall",
+        cwd=unrelated_project,
+        env=environment,
+    )
+    second = LifecycleStateSnapshot.capture(
+        user_root,
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="user",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
+        ),
+    )
+    assert unrelated_manifest.read_bytes() == unrelated_bytes
+    assert second.manifest_bytes == first.manifest_bytes
+    assert (
+        second.file("mcp-config.json", root_id="copilot-user").content
+        == first.file("mcp-config.json", root_id="copilot-user").content
+    )
+    assert second.semantic_bytes == first.semantic_bytes
+    closure = _audit_payload(
+        runner,
+        scenario_id="user-mcp-audit",
+        cwd=user_root,
+        environment=environment,
+    )
+    assert closure["passed"] is True
+
+
+def test_mcp_target_contraction_removes_only_apm_owned_native_config(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Target narrowing removes managed MCP config while preserving user-owned entries."""
+    fixture = _create_git_lifecycle_project(
+        tmp_path / "mcp-target-contraction",
+        source_name="contraction-source",
+        mcp_dependencies=(
+            {
+                "name": "managed-contract-server",
+                "registry": False,
+                "transport": "stdio",
+                "command": "echo",
+                "args": ["managed-contract"],
+            },
+        ),
+        targets=("copilot", "codex"),
+    )
+    codex_config = fixture.project_root / ".codex" / "config.toml"
+    codex_config.parent.mkdir()
+    codex_config.write_text(
+        "[projects.'c:\\\\contracts\\\\consumer']\n"
+        'trust_level = "trusted"\n'
+        "\n"
+        "[mcp_servers.user-authored]\n"
+        'command = "user-command"\n',
+        encoding="utf-8",
+    )
+    runner = _runner(apm_binary_path)
+    environment = fixture.isolated.subprocess_env()
+    broad_install = (
+        "install",
+        "--target",
+        "copilot,codex",
+        "--trust-transitive-mcp",
+        "--no-policy",
+    )
+    narrow_install = (
+        "install",
+        "--target",
+        "copilot",
+        "--trust-transitive-mcp",
+        "--no-policy",
+    )
+
+    runner.run_sequence(
+        (broad_install,),
+        expected_returncodes=(0,),
+        scenario_id="mcp-target-contraction-broad-install",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    broad = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(
+            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".codex/config.toml"),
+        ),
+    )
+    assert broad.file(".vscode/mcp.json").kind == "file"
+    assert b"managed-contract-server" in broad.file(".codex/config.toml").content
+    assert b"user-authored" in broad.file(".codex/config.toml").content
+    assert b"trust_level" in broad.file(".codex/config.toml").content
+    assert (
+        b'"target_servers":{"codex":["managed-contract-server"],"vscode":["managed-contract-server"]}'
+        in (broad.mcp_state_bytes)
+    )
+
+    manifest = load_yaml(fixture.project_root / "apm.yml")
+    assert isinstance(manifest, dict)
+    manifest["targets"] = ["copilot"]
+    dump_yaml(manifest, fixture.project_root / "apm.yml")
+    runner.run_sequence(
+        (narrow_install,),
+        expected_returncodes=(0,),
+        scenario_id="mcp-target-contraction-narrow-install",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    narrow = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(
+            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".codex/config.toml"),
+        ),
+    )
+    codex_bytes = narrow.file(".codex/config.toml").content
+    assert codex_bytes is not None
+    assert b"managed-contract-server" not in codex_bytes
+    assert b"user-authored" in codex_bytes
+    assert b"trust_level" in codex_bytes
+    assert b'"target_servers":{"copilot":["managed-contract-server"]}' in narrow.mcp_state_bytes
+    assert (
+        _audit_payload(
+            runner,
+            scenario_id="mcp-target-contraction-audit",
+            cwd=fixture.project_root,
+            environment=environment,
+        )["passed"]
+        is True
+    )
+
+
+def test_lsp_reinstall_and_update_keep_copilot_state_deterministic(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """LSP install, reinstall, and update converge on one native Copilot state."""
+    fixture = _create_git_lifecycle_project(
+        tmp_path / "lsp-reinstall-update",
+        source_name="lsp-source",
+        lsp_dependencies=(
+            {
+                "name": "contract-lsp",
+                "command": "contract-lsp-command",
+                "extensionToLanguage": {".contract": "contract"},
+            },
+        ),
+    )
+    runner = _runner(apm_binary_path)
+    environment = fixture.isolated.subprocess_env()
+    manifest_bytes = (fixture.project_root / "apm.yml").read_bytes()
+    install = ("install", "--target", "copilot", "--no-policy")
+    update = ("update", "--yes", "--target", "copilot")
+
+    runner.run_sequence(
+        (install,),
+        expected_returncodes=(0,),
+        scenario_id="lsp-initial-install",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    first = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".github/lsp.json"),),
+    )
+    assert first.manifest_bytes == manifest_bytes
+    assert b"contract-lsp" in first.lsp_state_bytes
+    assert first.file(".github/lsp.json").kind == "file"
+
+    runner.run_sequence(
+        (install,),
+        expected_returncodes=(0,),
+        scenario_id="lsp-reinstall",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    second = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".github/lsp.json"),),
+    )
+    assert second.manifest_bytes == manifest_bytes
+    assert second.file(".github/lsp.json").content == first.file(".github/lsp.json").content
+    assert second.lsp_state_bytes == first.lsp_state_bytes
+    assert second.semantic_bytes == first.semantic_bytes
+
+    runner.run_sequence(
+        (update,),
+        expected_returncodes=(0,),
+        scenario_id="lsp-update",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    updated = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".github/lsp.json"),),
+    )
+    assert updated.manifest_bytes == manifest_bytes
+    assert updated.file(".github/lsp.json").content == first.file(".github/lsp.json").content
+    assert updated.lsp_state_bytes == first.lsp_state_bytes
+    assert updated.semantic_bytes == first.semantic_bytes
+    assert (
+        _audit_payload(
+            runner,
+            scenario_id="lsp-update-audit",
+            cwd=fixture.project_root,
+            environment=environment,
+        )["passed"]
+        is True
+    )
+
 
 def test_uninstalling_one_shared_root_retains_shared_dependency_ownership(
     tmp_path: Path,

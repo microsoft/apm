@@ -66,3 +66,7 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_ado_lock_consumer_contract.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_config_surface_lifecycle_contract.py"
+marker = "e2e"
