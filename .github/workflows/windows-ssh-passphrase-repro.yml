@@ -1,0 +1,85 @@
+name: Windows SSH Passphrase Reproduction
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-ssh-passphrase-repro.yml'
+      - 'scripts/windows/test-ssh-passphrase-fixture.ps1'
+      - 'src/apm_cli/deps/**'
+      - 'src/apm_cli/install/**'
+      - 'src/apm_cli/core/auth.py'
+      - 'src/apm_cli/core/token_manager.py'
+      - 'build/apm.spec'
+      - 'scripts/windows/build-binary.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ssh-passphrase-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-ssh-passphrase:
+    name: Windows SSH passphrase contract
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify fixture-only baseline
+        shell: pwsh
+        run: |
+          $baseline = "796e229805ade19244683f0a1e70ec534ce4fb85"
+          git merge-base --is-ancestor $baseline HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Required baseline $baseline is not an ancestor of HEAD"
+          }
+          $allowed = @(
+            ".github/workflows/windows-ssh-passphrase-repro.yml",
+            "scripts/windows/test-ssh-passphrase-fixture.ps1"
+          )
+          $changed = @(git diff --name-only "$baseline..HEAD")
+          $unexpected = @($changed | Where-Object { $allowed -notcontains $_ })
+          if ($unexpected.Count -gt 0) {
+            throw "Evidence lane contains non-fixture changes: $($unexpected -join ', ')"
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install build dependencies
+        run: uv sync --extra dev --extra build
+
+      - name: Build packaged Windows CLI
+        shell: pwsh
+        run: uv run pwsh scripts/windows/build-binary.ps1
+
+      - name: Exercise encrypted SSH key boundary
+        shell: pwsh
+        run: >-
+          ./scripts/windows/test-ssh-passphrase-fixture.ps1
+          -ApmBinary ./dist/apm-windows-x86_64/apm.exe
+          -EvidenceDirectory ./ssh-passphrase-evidence
+
+      - name: Upload process evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ssh-passphrase-evidence
+          path: ./ssh-passphrase-evidence
+          if-no-files-found: error
+          retention-days: 14
