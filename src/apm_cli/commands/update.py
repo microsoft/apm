@@ -117,12 +117,15 @@ def _module_cache_needs_rehydration(
     """Return whether a locked dependency tree has no materialized cache."""
     if lockfile is None:
         return False
-    dependency_paths = tuple(
-        dependency.to_dependency_ref().get_install_path(modules_dir)
-        for key, dependency in lockfile.dependencies.items()
-        if key != "."
-    )
-    return bool(dependency_paths) and not any(path.exists() for path in dependency_paths)
+    has_locked_dependency = False
+    for key, dependency in lockfile.dependencies.items():
+        if key == ".":
+            continue
+        has_locked_dependency = True
+        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
+        if install_path.exists():
+            return False
+    return has_locked_dependency
 
 
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
@@ -762,7 +765,10 @@ def _run_dep_update(
         elif applied:
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif plan_state.cache_rehydration_requested and installed:
-            logger.success("Restored dependency cache without changing refs.")
+            logger.success(
+                "Restored dependency cache without changing refs.",
+                symbol="check",
+            )
         elif revision_pin_updates:
             count = len(revision_pin_updates)
             noun = "pin" if count == 1 else "pins"

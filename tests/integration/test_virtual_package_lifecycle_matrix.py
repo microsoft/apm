@@ -590,6 +590,8 @@ def test_virtual_package_lifecycle_matrix(
         assert changed_commit != scenario.initial_commit
         _assert_last_good_preserved(scenario.project, install_state)
     else:
+        if case.mutation == "pinned-content":
+            assert "Restored dependency cache without changing refs." in updated.stdout
         _assert_lock_and_materialization(
             scenario,
             expected_commit=scenario.initial_commit,
