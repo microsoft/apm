@@ -214,6 +214,165 @@ def test_relative_root_resolves_once_at_the_intended_location(
     assert remote_main.stdout.split()[0] == commit.sha
 
 
+@pytest.mark.parametrize("remote_suffix", ("", ".git"))
+def test_install_url_rewrite_is_isolated_and_resolves_bare_and_git_forms(
+    tmp_path: Path,
+    remote_suffix: str,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    (repository.worktree / "apm.yml").write_text(
+        "name: package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    commit = factory.commit(repository, message="seed")
+    remote_base = "https://github.example.invalid/acme/package"
+
+    remote_forms = factory.install_url_rewrite(
+        repository,
+        f"{remote_base}{remote_suffix}",
+    )
+    assert factory.install_url_rewrite(repository, remote_base) == remote_forms
+
+    assert remote_forms == (remote_base, f"{remote_base}.git")
+    key = f"url.{repository.file_url}/.insteadOf"
+    configured = _run_git(
+        "config",
+        "--file",
+        environment["GIT_CONFIG_GLOBAL"],
+        "--get-all",
+        key,
+        environment=environment,
+    )
+    assert configured.stdout.splitlines() == list(remote_forms)
+    assert not (home / ".gitconfig").exists()
+
+    for remote_form in remote_forms:
+        resolved = _run_git(
+            "ls-remote",
+            remote_form,
+            "refs/heads/main",
+            environment=environment,
+        )
+        assert resolved.stdout.split()[0] == commit.sha
+
+    adjacent = factory.create("package.git-fork")
+    (adjacent.worktree / "apm.yml").write_text(
+        "name: adjacent\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    factory.commit(adjacent, message="seed adjacent")
+    adjacent_remote = _run_git(
+        "ls-remote",
+        f"{remote_base}.git-fork.git",
+        "refs/heads/main",
+        environment=environment,
+        check=False,
+    )
+    assert adjacent_remote.returncode != 0
+
+
+def test_install_url_rewrite_rejects_unsafe_inputs_before_config_mutation(
+    tmp_path: Path,
+) -> None:
+    environment = _git_environment(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    factory = LocalGitRepositoryFactory(
+        tmp_path / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+    global_config = Path(environment["GIT_CONFIG_GLOBAL"])
+    original_global = global_config.read_bytes()
+
+    for remote_url in (
+        "",
+        " https://github.example.invalid/acme/package",
+        "file:///tmp/package.git",
+        "https://token@github.example.invalid/acme/package.git",
+        "https://github.example.invalid/acme/package?ref=main",
+        "https://github.example.invalid/acme/package#main",
+        "https://github.example.invalid/acme/../package",
+        "https://github.example.invalid/acme/package/",
+    ):
+        with pytest.raises(ValueError):
+            factory.install_url_rewrite(repository, remote_url)
+    assert global_config.read_bytes() == original_global
+    assert not (home / ".gitconfig").exists()
+
+    forged = LocalGitRepository(
+        origin=repository.origin,
+        worktree=repository.worktree,
+    )
+    with pytest.raises(ValueError, match="not owned"):
+        factory.install_url_rewrite(
+            forged,
+            "https://github.example.invalid/acme/package",
+        )
+    assert global_config.read_bytes() == original_global
+    assert not (home / ".gitconfig").exists()
+
+    outside_config = tmp_path / "outside.gitconfig"
+    outside_config.write_bytes(b"[safe]\n\tvalue = unchanged\n")
+    global_config.unlink()
+    global_config.symlink_to(outside_config)
+    with pytest.raises(ValueError, match="symlinked fixture Git config"):
+        factory.install_url_rewrite(
+            repository,
+            "https://github.example.invalid/acme/package",
+        )
+    assert outside_config.read_bytes() == b"[safe]\n\tvalue = unchanged\n"
+    assert not (home / ".gitconfig").exists()
+
+
+def test_install_url_rewrite_requires_bounded_fixture_git_config(tmp_path: Path) -> None:
+    scenario = tmp_path / "scenario"
+    scenario.mkdir()
+    home = scenario / "home"
+    home.mkdir()
+    environment = _git_environment(tmp_path)
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    outside_config = Path(environment["GIT_CONFIG_GLOBAL"])
+    original_config = outside_config.read_bytes()
+    factory = LocalGitRepositoryFactory(
+        scenario / "repositories",
+        env=environment,
+    )
+    repository = factory.create("package")
+
+    with pytest.raises(ValueError, match="outside the allowed base"):
+        factory.install_url_rewrite(
+            repository,
+            "https://github.example.invalid/acme/package",
+        )
+    assert outside_config.read_bytes() == original_config
+
+    isolated_environment = _git_environment(scenario)
+    isolated_environment.pop("GIT_CONFIG_NOSYSTEM")
+    unguarded_factory = LocalGitRepositoryFactory(
+        scenario / "unguarded-repositories",
+        env=isolated_environment,
+    )
+    unguarded_repository = unguarded_factory.create("package")
+    with pytest.raises(ValueError, match="GIT_CONFIG_NOSYSTEM=1"):
+        unguarded_factory.install_url_rewrite(
+            unguarded_repository,
+            "https://github.example.invalid/acme/package",
+        )
+
+
 def test_same_source_sequence_produces_deterministic_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
