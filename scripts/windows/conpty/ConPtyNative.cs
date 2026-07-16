@@ -112,6 +112,9 @@ namespace ApmConPty
         [DllImport("kernel32.dll")]
         private static extern void ClosePseudoConsole(IntPtr hPC);
 
+        [DllImport("kernel32.dll")]
+        private static extern int ResizePseudoConsole(IntPtr hPC, COORD size);
+
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool InitializeProcThreadAttributeList(
             IntPtr lpAttributeList,
@@ -335,6 +338,14 @@ namespace ApmConPty
                     + "; CreateProcessW ok, pid=" + session.ProcessId
                     + "; creationFlags=0x" + creationFlags.ToString("X8", CultureInfo.InvariantCulture)
                     + "; bInheritHandles=false");
+
+                // Some ConPTY host builds buffer/withhold child output until the
+                // console is explicitly resized at least once after creation,
+                // even to its own initial size. Kick it here.
+                int resizeHr = ResizePseudoConsole(pseudoConsole, size);
+                session._diagnostics.Enqueue(
+                    "ResizePseudoConsole(same size) kick: hresult=0x"
+                    + resizeHr.ToString("X8", CultureInfo.InvariantCulture));
                 session._inputWriter = new FileStream(
                     new Microsoft.Win32.SafeHandles.SafeFileHandle(inputWriteSide, true),
                     FileAccess.Write,
