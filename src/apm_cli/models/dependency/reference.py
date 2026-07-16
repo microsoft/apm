@@ -2053,9 +2053,8 @@ class DependencyReference:
             coordinates = (self.ado_organization, self.ado_project, self.ado_repo)
             if coordinates != self.canonical_ado_coordinates(self.host, self.repo_url):
                 raise ValueError(
-                    "Incomplete or mismatched Azure DevOps reference coordinates. "
-                    "Re-add the dependency with the original Azure DevOps URL "
-                    "to regenerate the lock entry."
+                    "Incomplete or mismatched Azure DevOps reference coordinates. Re-add the "
+                    "dependency with the original Azure DevOps URL to regenerate the lock entry."
                 )
             organization, ado_project, ado_repo = coordinates
             project = urllib.parse.quote(ado_project, safe="")
