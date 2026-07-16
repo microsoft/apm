@@ -484,7 +484,7 @@ def _sync_integrations_after_uninstall(
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
-    from ...models.apm_package import PackageInfo, validate_apm_package
+    from ...models.apm_package import build_installed_package_info
     from ...primitives.discovery import clear_discovery_cache
 
     # Phase 2 re-integration walks the on-disk primitive set after Phase 1
@@ -654,20 +654,9 @@ def _sync_integrations_after_uninstall(
         dep_ref = dep if hasattr(dep, "repo_url") else None
         if not dep_ref:
             continue
-        install_path = dep_ref.get_install_path(Path(APM_MODULES_DIR))
-        if not install_path.exists():
+        pkg_info = build_installed_package_info(dep_ref, Path(APM_MODULES_DIR))
+        if pkg_info is None:
             continue
-
-        result = validate_apm_package(install_path)
-        pkg = result.package if result and result.package else None
-        if not pkg:
-            continue
-        pkg_info = PackageInfo(
-            package=pkg,
-            install_path=install_path,
-            dependency_ref=dep_ref,
-            package_type=result.package_type if result else None,
-        )
         dep_key = dep_ref.get_unique_key()
         deployed_files = package_deployed_files.setdefault(dep_key, [])
 

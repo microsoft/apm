@@ -13,6 +13,13 @@ from apm_cli.utils.git_env import (
     reset_git_cache,
 )
 
+# Entire module: this is the canonical owner of resolved,
+# PATH-independent git executable lookup (microsoft/apm#2233's bare
+# ["git", ...] argv WinError 2 class). Selected by the PR-time Windows
+# Compatibility Gate via `pytest -m windows_compat`; also runs on
+# every other OS.
+pytestmark = pytest.mark.windows_compat
+
 
 class TestGetGitExecutable:
     """Test cached git binary lookup."""

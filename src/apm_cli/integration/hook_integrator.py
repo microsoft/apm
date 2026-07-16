@@ -1943,6 +1943,92 @@ class HookIntegrator(BaseIntegrator):
 
         return stats
 
+    def reconcile_after_removal(
+        self,
+        apm_package,
+        project_root: Path,
+        *,
+        user_scope: bool = False,
+    ) -> dict:
+        """Reconcile merged-hook ownership after packages leave apm.yml.
+
+        ``_clean_apm_entries_from_json`` (invoked by ``sync_integration``)
+        strips *every* ``_apm_source``-tagged entry from a merge target's
+        JSON file and deletes its ownership sidecar unconditionally -- it
+        has no notion of "this package only". A caller that wants to drop
+        one package's hooks therefore cannot call ``sync_integration``
+        alone without also erasing entries owned by packages that remain
+        declared: it must wipe, then rebuild from what is still installed.
+
+        This mirrors the "clear + rebuild" pattern
+        ``apm uninstall`` already uses (see
+        ``_sync_integrations_after_uninstall`` in
+        ``commands/uninstall/engine.py``), scoped to hooks only, so
+        callers such as ``apm prune`` orchestrate the existing
+        ownership-aware cleanup instead of reimplementing hook filtering.
+
+        Uses ``get_all_apm_dependencies()`` (prod + dev) rather than
+        uninstall's prod-only dependency set, matching ``apm prune``'s
+        own orphan-detection scope (prune already treats dev deps as
+        first-class for removal purposes).
+
+        Best-effort by design: a re-integration failure for one
+        dependency is logged and skipped rather than aborting the
+        reconcile, consistent with prune's existing per-package
+        error-tolerant semantics.
+
+        Known boundary (shared with uninstall, tracked in #2250):
+        rebuilds only direct dependencies from ``get_all_apm_dependencies()``
+        -- a transitive dependency's merged hooks are wiped by the clear
+        phase above but never re-integrated here.
+        """
+        from apm_cli.constants import APM_MODULES_DIR
+        from apm_cli.models.apm_package import build_installed_package_info
+
+        from .targets import resolve_targets
+
+        # Resolve targets and materialize the dependency list BEFORE the
+        # destructive wipe below. If either raises (malformed target
+        # config, bad dependency data), we abort with nothing written
+        # instead of committing a wipe we can never rebuild from -- a
+        # zero-hook window for every still-declared package would
+        # otherwise persist until the next `apm install`.
+        config_target = list(apm_package.canonical_targets)
+        targets = resolve_targets(
+            project_root, user_scope=user_scope, explicit_target=config_target or None
+        )
+        surviving_deps = list(apm_package.get_all_apm_dependencies())
+
+        # Empty managed_files (not None) skips file-level deletion while
+        # still triggering the unconditional wipe of every _apm_source
+        # entry (and its ownership sidecar) across all KNOWN_TARGETS --
+        # see _clean_apm_entries_from_json. The narrower `targets` list
+        # resolved above is deliberately NOT passed here: doing so would
+        # make prune's wipe scope diverge from uninstall's identical
+        # call (both currently wipe all KNOWN_TARGETS by omitting
+        # targets=); that divergence is tracked as a shared-primitive
+        # fix in #2250, evaluated against all three callers together.
+        stats = self.sync_integration(apm_package, project_root, managed_files=set())
+
+        for dep_ref in surviving_deps:
+            pkg_info = build_installed_package_info(dep_ref, project_root / APM_MODULES_DIR)
+            if pkg_info is None:
+                continue
+
+            try:
+                for target in targets:
+                    self.integrate_hooks_for_target(
+                        target, pkg_info, project_root, user_scope=user_scope
+                    )
+            except Exception as e:
+                stats["errors"] = stats.get("errors", 0) + 1
+                pkg_id = (
+                    dep_ref.get_identity() if hasattr(dep_ref, "get_identity") else str(dep_ref)
+                )
+                _log.warning("Best-effort hook re-integration skipped for %s: %s", pkg_id, e)
+
+        return stats
+
     @staticmethod
     def _clean_apm_entries_from_json(
         json_path: Path,

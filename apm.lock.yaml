@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-07-15T22:23:33.393882+00:00'
+generated_at: '2026-07-16T10:55:54.310339+00:00'
 apm_version: 0.25.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
@@ -228,7 +228,7 @@ dependencies:
     .agents/skills/shepherd-driver/assets/pr-comment-templates.md: sha256:24fe0ec64286c7b39037a5e93acfa607a43dbb4763d653f3955a1c4d65d68882
     .agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md: sha256:48f5f9276f92984480dba4f0d54ecc5b612b6c72f313fd5222962dffd75ed0ed
     .agents/skills/shepherd-driver/references/mergeability-gate.md: sha256:90bf5cd838d1025dd0fa223a0843be926cd509c85c91ef683cc9bfc98b5e8785
-    .agents/skills/shepherd-driver/scripts/owner_touch_gate.py: sha256:103535226722d4ae673657ab4123bffc23c821ea319e6b5d8eda7f96e729f8b6
+    .agents/skills/shepherd-driver/scripts/owner_touch_gate.py: sha256:f78a10e6a972046d212720372a1bf6971fd8cbadd0eb78c06c1a48f333fcd5b5
   source: local
   local_path: ../shepherd-driver
   declaring_parent: ./packages/apm-issue-autopilot
@@ -2549,7 +2549,7 @@ deployments:
   owners:
   - local:packages/shepherd-driver
   active_owner: local:packages/shepherd-driver
-  content_hash: sha256:103535226722d4ae673657ab4123bffc23c821ea319e6b5d8eda7f96e729f8b6
+  content_hash: sha256:f78a10e6a972046d212720372a1bf6971fd8cbadd0eb78c06c1a48f333fcd5b5
 - kind: project-relative
   target: agents
   value: .agents/skills/supply-chain-security
@@ -2864,7 +2864,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:ba0d1f1003960beb7a469d35ef724641f902841b4cb07049600c691b8c66afe4
+  content_hash: sha256:377c5f6f332cdce8c7aa2aa6096fc2cdef8596e0033a6b55d6f4d0b94a1740ac
 local_deployed_files:
 - .agents/skills/apm-spec-guardian
 - .agents/skills/apm-spec-guardian/SKILL.md
@@ -3299,4 +3299,4 @@ local_deployed_file_hashes:
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:8d31137f18842570bef6c93f8396587ac691e5fc973988bd865b008b0983f90d
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:ba0d1f1003960beb7a469d35ef724641f902841b4cb07049600c691b8c66afe4
+  .github/instructions/tests.instructions.md: sha256:377c5f6f332cdce8c7aa2aa6096fc2cdef8596e0033a6b55d6f4d0b94a1740ac

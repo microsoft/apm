@@ -688,7 +688,7 @@ def _parse(path: Path, root: Path) -> tuple[ast.Module | None, str | None]:
     try:
         return ast.parse(path.read_text(encoding="utf-8")), None
     except (OSError, SyntaxError) as error:
-        return None, f"[x] cannot inspect {path.relative_to(root)}: {error}"
+        return None, f"[x] cannot inspect {path.relative_to(root).as_posix()}: {error}"
 
 
 def find_binary_selection_violations(root: Path) -> list[str]:
@@ -699,7 +699,7 @@ def find_binary_selection_violations(root: Path) -> list[str]:
     if owner_error is not None:
         diagnostics.append(owner_error)
     elif owner_tree is None or "_resolve_apm_binary" not in _defined_functions(owner_tree):
-        diagnostics.append(f"[x] {BINARY_OWNER} must define _resolve_apm_binary")
+        diagnostics.append(f"[x] {BINARY_OWNER.as_posix()} must define _resolve_apm_binary")
 
     integration_root = root / "tests" / "integration"
     for path in _python_files(root, ("tests/integration",)):
@@ -715,42 +715,42 @@ def find_binary_selection_violations(root: Path) -> list[str]:
         env_read_lines = _direct_binary_env_read_lines(tree)
         for line in env_read_lines:
             diagnostics.append(
-                f"[x] direct APM_BINARY_PATH read outside {BINARY_OWNER}: "
+                f"[x] direct APM_BINARY_PATH read outside {BINARY_OWNER.as_posix()}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
         for line in _direct_binary_path_lookup_lines(tree):
             diagnostics.append(
-                f"[x] direct PATH lookup for apm outside {BINARY_OWNER}: "
+                f"[x] direct PATH lookup for apm outside {BINARY_OWNER.as_posix()}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
         for line in _venv_binary_fallback_lines(tree):
             diagnostics.append(
-                f"[x] direct .venv apm fallback outside {BINARY_OWNER}: "
+                f"[x] direct .venv apm fallback outside {BINARY_OWNER.as_posix()}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
         for line in _python_sibling_binary_lines(tree):
             diagnostics.append(
-                f"[x] interpreter-relative apm selection outside {BINARY_OWNER}: "
+                f"[x] interpreter-relative apm selection outside {BINARY_OWNER.as_posix()}: "
                 f"{relative}:{line}; consume the apm_binary_path fixture"
             )
         for line in _local_binary_facade_lines(tree):
             diagnostics.append(
-                f"[x] local apm binary fixture or facade outside {BINARY_OWNER}: "
+                f"[x] local apm binary fixture or facade outside {BINARY_OWNER.as_posix()}: "
                 f"{relative}:{line}; inject apm_binary_path directly"
             )
         for line in _direct_apm_subprocess_lines(tree):
             diagnostics.append(
-                f"[x] direct apm subprocess selection outside {BINARY_OWNER}: "
+                f"[x] direct apm subprocess selection outside {BINARY_OWNER.as_posix()}: "
                 f"{relative}:{line}; inject apm_binary_path directly"
             )
         for line in _implicit_lifecycle_runner_lines(tree):
             diagnostics.append(
-                f"[x] implicit lifecycle runner APM selection outside {BINARY_OWNER}: "
+                f"[x] implicit lifecycle runner APM selection outside {BINARY_OWNER.as_posix()}: "
                 f"{relative}:{line}; pass apm_binary_path as the runner command"
             )
         if path.parent == integration_root and "_resolve_apm_binary" in _defined_functions(tree):
             diagnostics.append(
-                f"[x] duplicate _resolve_apm_binary definition: {relative}; owner is {BINARY_OWNER}"
+                f"[x] duplicate _resolve_apm_binary definition: {relative}; owner is {BINARY_OWNER.as_posix()}"
             )
     return sorted(diagnostics)
 
@@ -900,10 +900,11 @@ def _owner_definition_violations(root: Path) -> list[str]:
     if error is not None:
         return [error]
     if tree is None:
-        return [f"[x] cannot inspect {PARITY_OWNER}"]
+        return [f"[x] cannot inspect {PARITY_OWNER.as_posix()}"]
     missing = sorted(PARITY_OWNER_FUNCTIONS - _defined_functions(tree))
     return [
-        f"[x] {PARITY_OWNER} must define rendered parity owner function: {name}" for name in missing
+        f"[x] {PARITY_OWNER.as_posix()} must define rendered parity owner function: {name}"
+        for name in missing
     ]
 
 
@@ -940,18 +941,19 @@ def find_ratchet_authority_violations(root: Path) -> list[str]:
     diagnostics: list[str] = []
     for owner in (TEST_FILE_INVENTORY_OWNER, RATCHET_BASELINE_OWNER):
         if not (root / owner).is_file():
-            diagnostics.append(f"[x] missing ratchet authority owner: {owner}")
+            diagnostics.append(f"[x] missing ratchet authority owner: {owner.as_posix()}")
 
     for relative, required_imports in RATCHET_AUTHORITY_CONSUMERS.items():
         path = root / relative
+        relative_posix = relative.as_posix()
         if not path.is_file():
-            diagnostics.append(f"[x] missing ratchet authority consumer: {relative}")
+            diagnostics.append(f"[x] missing ratchet authority consumer: {relative_posix}")
             continue
         text = path.read_text(encoding="utf-8")
         for required_import in required_imports:
             if required_import not in text:
                 diagnostics.append(
-                    f"[x] {relative} must consume ratchet authority: {required_import}"
+                    f"[x] {relative_posix} must consume ratchet authority: {required_import}"
                 )
 
     local_inventory_shapes = {
@@ -970,8 +972,8 @@ def find_ratchet_authority_violations(root: Path) -> list[str]:
         for forbidden in forbidden_shapes:
             if forbidden in text:
                 diagnostics.append(
-                    f"[x] duplicate tracked Python inventory in {relative}: "
-                    f"{forbidden}; owner is {TEST_FILE_INVENTORY_OWNER}"
+                    f"[x] duplicate tracked Python inventory in {relative.as_posix()}: "
+                    f"{forbidden}; owner is {TEST_FILE_INVENTORY_OWNER.as_posix()}"
                 )
     return sorted(diagnostics)
 
