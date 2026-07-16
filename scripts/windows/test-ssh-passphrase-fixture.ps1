@@ -338,14 +338,14 @@ function New-ScenarioEnvironment {
         $environment[[string]$entry.Key] = [string]$entry.Value
     }
 
-    $home = Join-Path $ScenarioRoot "home"
+    $homeRoot = Join-Path $ScenarioRoot "home"
     $config = Join-Path $ScenarioRoot "config"
     $cache = Join-Path $ScenarioRoot "cache"
     $temp = Join-Path $ScenarioRoot "temp"
-    foreach ($path in @($home, $config, $cache, $temp)) {
+    foreach ($path in @($homeRoot, $config, $cache, $temp)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
-    $updateCache = Join-Path $home "AppData\Local\apm\cache"
+    $updateCache = Join-Path $homeRoot "AppData\Local\apm\cache"
     New-Item -ItemType Directory -Path $updateCache -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $updateCache "last_version_check") -Force | Out-Null
 
@@ -374,9 +374,9 @@ function New-ScenarioEnvironment {
         "NumberOfPasswordPrompts=1"
     ) -join " "
 
-    $environment["HOME"] = $home
-    $environment["USERPROFILE"] = $home
-    $environment["LOCALAPPDATA"] = Join-Path $home "AppData\Local"
+    $environment["HOME"] = $homeRoot
+    $environment["USERPROFILE"] = $homeRoot
+    $environment["LOCALAPPDATA"] = Join-Path $homeRoot "AppData\Local"
     $environment["XDG_CONFIG_HOME"] = $config
     $environment["XDG_CACHE_HOME"] = $cache
     $environment["APM_HOME"] = $config
