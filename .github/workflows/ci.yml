@@ -173,7 +173,8 @@ jobs:
           tests/unit/scripts/test_check_exact_test_duplicates.py \
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
-          tests/quality/test_ci_topology.py
+          tests/quality/test_ci_topology.py \
+          tests/quality/test_build_release_topology.py
 
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #

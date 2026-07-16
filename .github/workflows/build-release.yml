@@ -179,7 +179,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra build
 
+      # Unit tests run unconditionally on push: fast macOS regression signal.
+      # Skipped on tag/schedule/dispatch where integration tests already run and
+      # provide stronger macOS-specific signal via the real binary. Linux x86
+      # covers the same platform-agnostic suite in build-and-test (root node,
+      # running in parallel). Measured savings: ~7 min off the dispatch/release
+      # critical path (418 s observed vs 115 s on Linux for the same suite).
       - name: Run unit tests
+        if: github.ref_type != 'tag' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 
       # ── PHASE 1: BUILD BINARY ──
