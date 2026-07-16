@@ -104,6 +104,12 @@ def test_parse_targets_suggests_name_at_edit_distance_boundary() -> None:
         DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coexx"]})
 
 
+def test_parse_targets_tie_suggests_lexicographically_first_name() -> None:
+    # "coade" is distance 2 from both "claude" and "codex"; "claude" sorts first.
+    with pytest.raises(ValueError, match=r"Did you mean 'claude'"):
+        DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coade"]})
+
+
 def test_parse_targets_omits_suggestion_beyond_edit_distance_boundary() -> None:
     with pytest.raises(ValueError, match=r"^((?!Did you mean).)*$"):
         DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coexxx"]})

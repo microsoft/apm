@@ -181,9 +181,17 @@ def _load_exit_codes(owner: Owner, repo_root: Path) -> dict[str, int | None]:
     meta_path = repo_root / "mutants" / f"{owner.source}.meta"
     try:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, IsADirectoryError, PermissionError, json.JSONDecodeError) as error:
+    except (
+        FileNotFoundError,
+        IsADirectoryError,
+        PermissionError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as error:
         raise PilotError(f"invalid mutmut metadata {meta_path}: {error}") from error
 
+    if not isinstance(payload, dict):
+        raise PilotError(f"invalid mutmut metadata {meta_path}: root must be an object")
     exit_codes = payload.get("exit_code_by_key")
     if not isinstance(exit_codes, dict):
         raise PilotError(f"invalid mutmut metadata {meta_path}: exit_code_by_key missing")
@@ -194,7 +202,9 @@ def _load_exit_codes(owner: Owner, repo_root: Path) -> dict[str, int | None]:
             raise PilotError(f"invalid mutmut metadata {meta_path}: non-string mutant name")
         if not any(fnmatch.fnmatchcase(raw_name, pattern) for pattern in owner.patterns):
             continue
-        if exit_code is not None and not isinstance(exit_code, int):
+        if exit_code is not None and (
+            not isinstance(exit_code, int) or isinstance(exit_code, bool)
+        ):
             raise PilotError(f"invalid mutmut metadata {meta_path}: invalid exit code")
         canonical_name = _canonical_mutant_name(raw_name)
         if canonical_name in scoped:

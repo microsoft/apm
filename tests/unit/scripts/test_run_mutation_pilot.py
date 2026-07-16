@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -54,6 +55,22 @@ def _reports(pilot: ModuleType, *, update_survivors: list[str] | None = None) ->
     return reports
 
 
+def _update_plan_owner(pilot: ModuleType) -> Any:
+    return next(owner for owner in pilot.OWNERS if owner.key == "update-plan")
+
+
+def _metadata_path(repo_root: Path, owner: Any) -> Path:
+    path = repo_root / "mutants" / f"{owner.source}.meta"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _write_metadata(repo_root: Path, owner: Any, payload: object) -> Path:
+    path = _metadata_path(repo_root, owner)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_method_pattern_is_exact_and_internal_separator_stays_runtime_only(
     pilot: ModuleType,
 ) -> None:
@@ -79,6 +96,119 @@ def test_canonical_mutant_name_removes_internal_mangling(pilot: ModuleType) -> N
         pilot._canonical_mutant_name("apm_cli.install.plan.x_build_update_plan__mutmut_2")
         == "apm_cli.install.plan.build_update_plan__mutmut_2"
     )
+
+
+@pytest.mark.parametrize("raw_name", ["missing-module", "module.not_mangled"])
+def test_canonical_mutant_name_rejects_invalid_mangling(
+    pilot: ModuleType,
+    raw_name: str,
+) -> None:
+    with pytest.raises(pilot.PilotError, match="invalid mutmut name"):
+        pilot._canonical_mutant_name(raw_name)
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("{", "invalid mutmut metadata"),
+        ("[]", "root must be an object"),
+        ("{}", "exit_code_by_key missing"),
+    ],
+)
+def test_load_exit_codes_rejects_corrupt_or_partial_metadata(
+    pilot: ModuleType,
+    tmp_path: Path,
+    content: str,
+    message: str,
+) -> None:
+    owner = _update_plan_owner(pilot)
+    _metadata_path(tmp_path, owner).write_text(content, encoding="utf-8")
+
+    with pytest.raises(pilot.PilotError, match=message):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_rejects_invalid_utf8_metadata(
+    pilot: ModuleType,
+    tmp_path: Path,
+) -> None:
+    owner = _update_plan_owner(pilot)
+    _metadata_path(tmp_path, owner).write_bytes(b"\xff")
+
+    with pytest.raises(pilot.PilotError, match="invalid mutmut metadata"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+@pytest.mark.parametrize("exit_code", ["1", True, 1.5, []])
+def test_load_exit_codes_rejects_wrong_exit_code_type(
+    pilot: ModuleType,
+    tmp_path: Path,
+    exit_code: object,
+) -> None:
+    owner = _update_plan_owner(pilot)
+    raw_name = f"{owner.module}.x_build_update_plan__mutmut_1"
+    _write_metadata(tmp_path, owner, {"exit_code_by_key": {raw_name: exit_code}})
+
+    with pytest.raises(pilot.PilotError, match="invalid exit code"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_load_exit_codes_rejects_canonical_name_collision(
+    pilot: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _update_plan_owner(pilot)
+    prefix = f"{owner.module}.x_build_update_plan__mutmut_"
+    _write_metadata(
+        tmp_path,
+        owner,
+        {"exit_code_by_key": {f"{prefix}1": 1, f"{prefix}2": 1}},
+    )
+    monkeypatch.setattr(pilot, "_canonical_mutant_name", lambda raw_name: "same.name")
+
+    with pytest.raises(pilot.PilotError, match="duplicate canonical mutant name"):
+        pilot._load_exit_codes(owner, tmp_path)
+
+
+def test_write_report_is_deterministic_atomic_and_printable_ascii(
+    pilot: ModuleType,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "report.json"
+    payload = {"z": "snowman \u2603", "a": {"z": 2, "a": 1}}
+
+    pilot._write_report(report_path, payload)
+    first = report_path.read_bytes()
+    pilot._write_report(
+        report_path,
+        {"a": {"a": 1, "z": 2}, "z": "snowman \u2603"},
+    )
+
+    assert report_path.read_bytes() == first
+    assert all(byte < 128 for byte in first)
+    assert first == (b'{\n  "a": {\n    "a": 1,\n    "z": 2\n  },\n  "z": "snowman \\u2603"\n}\n')
+    assert not (tmp_path / ".report.json.tmp").exists()
+
+
+def test_write_report_preserves_existing_file_when_atomic_replace_fails(
+    pilot: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text("previous\n", encoding="ascii")
+
+    def fail_replace(source: Path, target: Path) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(pilot.PilotError, match="failed to write mutation report"):
+        pilot._write_report(report_path, {"status": "accepted"})
+
+    assert report_path.read_text(encoding="ascii") == "previous\n"
+    assert not (tmp_path / ".report.json.tmp").exists()
 
 
 def test_signal_outcomes_are_classified_accurately(pilot: ModuleType) -> None:
