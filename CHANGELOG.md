@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the ADO lock-coordinate ownership guard (#2226). No built binary, network,
   or credentials required; `tests/quality/test_ci_topology.py` guards the
   job's targets, timeout, and required-check membership against drift.
+  (#2247)
 - Object-form Git dependencies now reject unsupported keys instead of silently
   ignoring them; use `ref` rather than `version`, and omit inert `name` fields
   from `git: parent`. CI audit also rejects full-SHA pins whose
