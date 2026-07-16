@@ -253,6 +253,16 @@ function Get-TraceReceipt {
             }
         }
     )
+    $processExits = @(
+        $events | Where-Object {
+            $_.event -eq "exit"
+        } | ForEach-Object {
+            [pscustomobject]@{
+                sid = [string]$_.sid
+                exit_code = [int]$_.code
+            }
+        }
+    )
     $safeEnvironmentNames = @(
         "GIT_TERMINAL_PROMPT",
         "GIT_ASKPASS",
@@ -300,6 +310,7 @@ function Get-TraceReceipt {
             }
         )
         child_exits = $transportExits
+        process_exits = $processExits
         environment = $environmentEvents
     }
 }
@@ -493,13 +504,14 @@ targets:
     Write-Utf8Text -Path $stdoutPath -Content $process.stdout
     Write-Utf8Text -Path $stderrPath -Content $process.stderr
 
-    $skillPath = Join-Path $projectRoot ".github\skills\ssh-passphrase-fixture\SKILL.md"
+    $skillPath = Join-Path $projectRoot ".agents\skills\ssh-passphrase-fixture\SKILL.md"
     $lockPath = Join-Path $projectRoot "apm.lock.yaml"
     $actualSuccess = -not $process.timed_out -and $process.exit_code -eq 0
     $skillInstalled = Test-Path $skillPath
     $lockWritten = Test-Path $lockPath
     $askpassReceipt = @(Get-AskpassReceipt -AskpassLog $askpassLogPath)
     $traceReceipt = Get-TraceReceipt -TracePath $tracePath
+    $sshLogContent = [string](Get-Content -Path $sshLogPath -Raw)
     $skillMatches = $false
     if ($skillInstalled) {
         $skillMatches = (Get-Content -Path $skillPath -Raw).Contains($ExpectedSkillMarker)
@@ -524,6 +536,7 @@ targets:
         }
         askpass_invocation_count = $askpassReceipt.Count
         askpass_invocations = $askpassReceipt
+        ssh_agent_socket_unavailable = $sshLogContent.Contains("unable to connect to pipe")
         git_trace = $traceReceipt
         skill_installed = $skillInstalled
         skill_marker_matches = $skillMatches
@@ -672,7 +685,7 @@ type invocation struct {
     SshAskpass         string   `json:"ssh_askpass"`
     SshAskpassRequire  string   `json:"ssh_askpass_require"`
     Display            string   `json:"display"`
-    SshAuthSockPresent bool     `json:"ssh_auth_sock_present"`
+    SshAuthSock         string   `json:"ssh_auth_sock"`
     ResponsePresent    bool     `json:"response_present"`
 }
 
@@ -685,7 +698,7 @@ func main() {
         SshAskpass:         os.Getenv("SSH_ASKPASS"),
         SshAskpassRequire:  os.Getenv("SSH_ASKPASS_REQUIRE"),
         Display:            os.Getenv("DISPLAY"),
-        SshAuthSockPresent: os.Getenv("SSH_AUTH_SOCK") != "",
+        SshAuthSock:        os.Getenv("SSH_AUTH_SOCK"),
         ResponsePresent:    responsePresent,
     }
     logPath := os.Getenv("APM_SSH_FIXTURE_ASKPASS_LOG")
@@ -893,30 +906,30 @@ Match Group administrators
                     "Scenario $($receipt.id): Git did not record the configured Windows OpenSSH child"
                 )
             } else {
-                $missingChildExits = @(
-                    $openSshChildren | Where-Object { $null -eq $_.exit_code }
-                )
-                if ($missingChildExits.Count -gt 0) {
-                    $assertionFailures.Add(
-                        "Scenario $($receipt.id): one or more OpenSSH children have no Trace2 exit"
-                    )
-                }
                 $sshExitCodes = @(
                     $openSshChildren | Where-Object { $null -ne $_.exit_code } |
                         ForEach-Object { [int]$_.exit_code }
                 )
-                if ($receipt.expected_success -and @($sshExitCodes | Where-Object { $_ -ne 0 }).Count -gt 0) {
-                    $assertionFailures.Add(
-                        "Scenario $($receipt.id): a successful case recorded a failed OpenSSH child"
+                if ($receipt.expected_success) {
+                    if ($sshExitCodes.Count -ne $openSshChildren.Count) {
+                        $assertionFailures.Add(
+                            "Scenario $($receipt.id): successful OpenSSH child has no Trace2 exit"
+                        )
+                    }
+                    if (@($sshExitCodes | Where-Object { $_ -ne 0 }).Count -gt 0) {
+                        $assertionFailures.Add(
+                            "Scenario $($receipt.id): a successful case recorded a failed OpenSSH child"
+                        )
+                    }
+                } else {
+                    $failedGitExits = @(
+                        $receipt.git_trace.process_exits | Where-Object { $_.exit_code -ne 0 }
                     )
-                }
-                if (
-                    -not $receipt.expected_success -and
-                    @($sshExitCodes | Where-Object { $_ -ne 0 }).Count -eq 0
-                ) {
-                    $assertionFailures.Add(
-                        "Scenario $($receipt.id): negative case recorded no failed OpenSSH child"
-                    )
+                    if ($failedGitExits.Count -eq 0) {
+                        $assertionFailures.Add(
+                            "Scenario $($receipt.id): negative case recorded no failed Git exit"
+                        )
+                    }
                 }
             }
         }
@@ -949,6 +962,11 @@ Match Group administrators
         if ($traceEnvironment.ContainsKey("SSH_AUTH_SOCK")) {
             $assertionFailures.Add(
                 "Scenario $($receipt.id): SSH agent state leaked into the Git child"
+            )
+        }
+        if (-not $receipt.ssh_agent_socket_unavailable) {
+            $assertionFailures.Add(
+                "Scenario $($receipt.id): OpenSSH did not prove its default agent pipe unavailable"
             )
         }
         $expectsAskpassEnvironment = $receipt.id -ne "unencrypted-positive"
@@ -1015,9 +1033,12 @@ Match Group administrators
                     "Scenario $($receipt.id): askpass child did not inherit the fixture DISPLAY"
                 )
             }
-            if ($invocation.ssh_auth_sock_present) {
+            if (
+                -not [string]::IsNullOrEmpty($invocation.ssh_auth_sock) -and
+                $invocation.ssh_auth_sock -ne '\\.\pipe\openssh-ssh-agent'
+            ) {
                 $assertionFailures.Add(
-                    "Scenario $($receipt.id): askpass child inherited SSH agent state"
+                    "Scenario $($receipt.id): askpass child inherited unexpected SSH agent state"
                 )
             }
             if (-not $invocation.response_present) {
@@ -1073,7 +1094,8 @@ Match Group administrators
 
     foreach ($sensitiveValue in @($passphrase, $wrongPassphrase)) {
         foreach ($file in Get-ChildItem -Path $EvidenceDirectory -File -Recurse) {
-            if ((Get-Content -Path $file.FullName -Raw).Contains($sensitiveValue)) {
+            $evidenceContent = [string](Get-Content -Path $file.FullName -Raw)
+            if ($evidenceContent.Contains($sensitiveValue)) {
                 throw "Ephemeral passphrase leaked into evidence file: $($file.FullName)"
             }
         }
