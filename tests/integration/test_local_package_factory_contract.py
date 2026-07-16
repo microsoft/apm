@@ -821,6 +821,8 @@ def test_lifecycle_source_authors_reject_traversal_and_symlink_escape(
 def test_config_dependency_validation_is_transactional(tmp_path: Path) -> None:
     factory = LocalPackageFactory(tmp_path / "packages")
 
+    with pytest.raises(ValueError, match="Unsupported config dependency kind"):
+        factory._validate_config_dependencies((), kind="mcp")
     with pytest.raises(ValueError, match="requires 'command'"):
         factory.create(
             "invalid-mcp",

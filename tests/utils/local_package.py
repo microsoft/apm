@@ -436,7 +436,12 @@ class LocalPackageFactory:
         *,
         kind: str,
     ) -> list[str | dict[str, object]]:
-        model = MCPDependency if kind == "MCP" else LSPDependency
+        if kind == "MCP":
+            model = MCPDependency
+        elif kind == "LSP":
+            model = LSPDependency
+        else:
+            raise ValueError(f"Unsupported config dependency kind: {kind}")
         validated: list[str | dict[str, object]] = []
         for entry in dependencies:
             if isinstance(entry, str):
