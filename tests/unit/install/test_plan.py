@@ -59,6 +59,111 @@ def _resolved_dep(repo_url: str, ref: str, commit: str | None) -> DependencyRefe
 
 
 class TestBuildUpdatePlan:
+    def test_entries_preserve_full_state_and_canonical_action_order(self):
+        lock = _new_lockfile()
+        update = _locked("https://github.com/u/r", "main", "a" * 40, ["update.md"])
+        update.content_hash = "sha256:update"
+        remove = _locked("https://github.com/r/r", "main", "b" * 40, ["remove.md"])
+        remove.content_hash = "sha256:remove"
+        unchanged = _locked("https://github.com/z/r", "main", "c" * 40, ["unchanged.md"])
+        unchanged.content_hash = "sha256:unchanged"
+        for locked in (update, remove, unchanged):
+            lock.add_dependency(locked)
+
+        plan = build_update_plan(
+            lock,
+            [
+                _resolved_dep("https://github.com/n/r", "main", "n" * 40),
+                _resolved_dep("https://github.com/z/r", "main", "c" * 40),
+                _resolved_dep("https://github.com/u/r", "main", "x" * 40),
+            ],
+        )
+
+        assert plan.entries == (
+            PlanEntry(
+                dep_key="https://github.com/u/r",
+                action="update",
+                display_name="https://github.com/u/r",
+                old_resolved_ref="main",
+                old_resolved_commit="a" * 40,
+                old_content_hash="sha256:update",
+                new_resolved_ref="main",
+                new_resolved_commit="x" * 40,
+                deployed_files=("update.md",),
+            ),
+            PlanEntry(
+                dep_key="https://github.com/n/r",
+                action="add",
+                display_name="https://github.com/n/r",
+                new_resolved_ref="main",
+                new_resolved_commit="n" * 40,
+            ),
+            PlanEntry(
+                dep_key="https://github.com/r/r",
+                action="remove",
+                display_name="https://github.com/r/r",
+                old_resolved_ref="main",
+                old_resolved_commit="b" * 40,
+                old_content_hash="sha256:remove",
+                deployed_files=("remove.md",),
+            ),
+            PlanEntry(
+                dep_key="https://github.com/z/r",
+                action="unchanged",
+                display_name="https://github.com/z/r",
+                old_resolved_ref="main",
+                old_resolved_commit="c" * 40,
+                old_content_hash="sha256:unchanged",
+                new_resolved_ref="main",
+                new_resolved_commit="c" * 40,
+                deployed_files=("unchanged.md",),
+            ),
+        )
+
+    def test_non_default_host_display_names_preserve_action_context(self):
+        host = "ghe.example.com"
+        lock = _new_lockfile()
+        for repo_url, commit in (
+            ("owner/update", "a" * 40),
+            ("owner/remove", "b" * 40),
+            ("owner/unchanged", "c" * 40),
+        ):
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url=repo_url,
+                    host=host,
+                    resolved_ref="main",
+                    resolved_commit=commit,
+                    depth=1,
+                )
+            )
+
+        def resolved(repo_url: str, commit: str) -> DependencyReference:
+            dep = DependencyReference(repo_url=repo_url, host=host, reference="main")
+            dep.resolved_reference = ResolvedReference(
+                original_ref="main",
+                ref_type=GitReferenceType.BRANCH,
+                ref_name="main",
+                resolved_commit=commit,
+            )
+            return dep
+
+        plan = build_update_plan(
+            lock,
+            [
+                resolved("owner/add", "n" * 40),
+                resolved("owner/unchanged", "c" * 40),
+                resolved("owner/update", "x" * 40),
+            ],
+        )
+
+        assert [(entry.action, entry.display_name) for entry in plan.entries] == [
+            ("update", "owner/update"),
+            ("add", "ghe.example.com/owner/add"),
+            ("remove", "owner/remove"),
+            ("unchanged", "owner/unchanged"),
+        ]
+
     def test_unchanged_dep_when_ref_and_commit_match(self):
         lock = _new_lockfile()
         lock.add_dependency(_locked("https://github.com/o/r", "main", "a" * 40))
@@ -308,6 +413,24 @@ class TestBuildUpdatePlan:
         assert plan.has_changes is True
         assert plan.entries[0].action == "update"
         assert plan.entries[0].new_resolved_commit == "b" * 40
+
+    def test_unannotated_branch_without_sha_is_not_masked_as_unchanged(self):
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/o/r",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+                depth=1,
+            )
+        )
+        dep = DependencyReference(repo_url="https://github.com/o/r", reference="main")
+
+        plan = build_update_plan(lock, [dep])
+
+        assert plan.has_changes is True
+        assert plan.entries[0].action == "update"
+        assert plan.entries[0].new_resolved_commit is None
 
 
 # -----------------------------------------------------------------------------

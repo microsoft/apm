@@ -21,6 +21,7 @@ import re
 import subprocess
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass
 
 from ..utils.github_host import (
@@ -50,6 +51,49 @@ __all__ = [
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
+# Local import below avoids a dependency-model import cycle at module load time.
+def _ado_coordinates_from_owner_repo(
+    *,
+    host: str,
+    owner_repo: str,
+) -> tuple[str, str, str]:
+    """Return validated ADO coordinates from the canonical dependency owner."""
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    try:
+        return DependencyReference.canonical_ado_coordinates(host, owner_repo)
+    except ValueError as exc:
+        if "/_git/" in owner_repo:
+            try:
+                dep_ref = DependencyReference.parse(f"https://{host}/{owner_repo}")
+                return DependencyReference.canonical_ado_coordinates(
+                    dep_ref.host,
+                    dep_ref.repo_url,
+                )
+            except ValueError:
+                pass
+        raise GitLsRemoteError(
+            package=owner_repo,
+            summary="Azure DevOps resolution requires org/project/repo coordinates.",
+            hint=(
+                "Re-add the dependency with the original Azure DevOps URL "
+                "to regenerate the lock entry."
+            ),
+        ) from exc
+
+
+def _ado_remote_path_for_coordinates(
+    organization: str,
+    project: str,
+    repo: str,
+) -> str:
+    """Return the canonical HTTPS path for ADO coordinates."""
+    quoted_org = urllib.parse.quote(organization, safe="")
+    quoted_project = urllib.parse.quote(project, safe="")
+    quoted_repo = urllib.parse.quote(repo, safe="")
+    return f"/{quoted_org}/{quoted_project}/_git/{quoted_repo}"
+
+
 @dataclass(frozen=True)
 class RemoteRef:
     """A single ref returned by ``git ls-remote``."""
@@ -72,7 +116,7 @@ class _CacheEntry:
 
 
 class RefCache:
-    """In-memory cache keyed on ``owner/repo``.
+    """In-memory cache keyed on the effective remote identity.
 
     TTL defaults to 5 minutes.  Not thread-safe on its own; callers
     should use external synchronisation (``RefResolver`` does this via
@@ -201,7 +245,12 @@ class RefResolver:
                 self._remote_locks[owner_repo] = threading.Lock()
             return self._remote_locks[owner_repo]
 
-    def _git_url_and_env(self, owner_repo: str) -> tuple[str, dict[str, str]]:
+    def _git_url_and_env(
+        self,
+        owner_repo: str,
+        *,
+        remote_url: str | None = None,
+    ) -> tuple[str, dict[str, str]]:
         """Build the remote URL and auth environment for one git operation."""
         use_ssh = self._transport_scheme == "ssh"
         requested_bearer = self._auth_scheme == "bearer"
@@ -215,20 +264,10 @@ class RefResolver:
         bearer = requested_bearer and ado_host and not use_ssh
         url_token = None if requested_bearer or use_ssh else self._token
         if use_ssh and ado_host:
-            parts = owner_repo.split("/")
-            if len(parts) == 4 and parts[2] == "_git":
-                org, project, repo = parts[0], parts[1], parts[3]
-            elif len(parts) == 3:
-                org, project, repo = parts
-            else:
-                raise GitLsRemoteError(
-                    package=owner_repo,
-                    summary=(
-                        "Azure DevOps SSH resolution requires org/project/repo "
-                        f"coordinates; got '{owner_repo}'."
-                    ),
-                    hint="Use a standard Azure DevOps dependency URL.",
-                )
+            org, project, repo = _ado_coordinates_from_owner_repo(
+                host=self._host,
+                owner_repo=owner_repo,
+            )
             ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
             url = build_ado_ssh_url(org, project, repo, host=ssh_host)
         elif use_ssh:
@@ -238,6 +277,40 @@ class RefResolver:
                 port=self._port,
                 user=self._ssh_user,
             )
+        elif remote_url is not None:
+            parsed_remote = urllib.parse.urlparse(remote_url)
+            expected_ado_path = (
+                _ado_remote_path_for_coordinates(
+                    *_ado_coordinates_from_owner_repo(host=self._host, owner_repo=owner_repo)
+                )
+                if ado_host
+                else None
+            )
+            # urlparse lowercases hostname per RFC 3986 3.2.2; normalize both sides.
+            if (
+                not ado_host
+                or parsed_remote.scheme != "https"
+                or parsed_remote.hostname != self._host.lower()
+                or parsed_remote.path != expected_ado_path
+                or parsed_remote.username is not None
+                or parsed_remote.password is not None
+                or parsed_remote.query
+                or parsed_remote.fragment
+            ):
+                raise GitLsRemoteError(
+                    package=owner_repo,
+                    summary=(
+                        "The canonical remote URL does not match the configured host "
+                        "or Azure DevOps dependency coordinates."
+                    ),
+                    hint=(
+                        "Re-add the dependency with the original Azure DevOps URL "
+                        "to regenerate the lock entry."
+                    ),
+                )
+            # ADO HTTPS intentionally keeps credentials out of the URL; auth
+            # is injected below through git http.extraheader.
+            url = remote_url
         elif ado_host:
             url = f"https://{self._host}/{owner_repo}"
         else:
@@ -274,7 +347,12 @@ class RefResolver:
             env.update(build_authorization_header_git_env("Basic", credential))
         return url, env
 
-    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
+    def list_remote_refs(
+        self,
+        owner_repo: str,
+        *,
+        remote_url: str | None = None,
+    ) -> list[RemoteRef]:
         """Fetch all tags and heads from the configured Git host.
 
         Results are cached; subsequent calls for the same remote return
@@ -284,6 +362,10 @@ class RefResolver:
         ----------
         owner_repo:
             ``"owner/repo"`` string (no host, no ``.git`` suffix).
+        remote_url:
+            Canonical ADO URL from ``DependencyReference.to_github_url``.
+            Pass consistently for the same logical remote within one
+            ``RefResolver`` lifetime so cache identity stays aligned.
 
         Returns
         -------
@@ -297,17 +379,18 @@ class RefResolver:
         GitLsRemoteError
             When the ``git ls-remote`` subprocess fails.
         """
-        lock = self._remote_lock(owner_repo)
+        cache_key = remote_url or owner_repo
+        lock = self._remote_lock(cache_key)
         with lock:
             # Check cache first
-            cached = self._cache.get(owner_repo)
+            cached = self._cache.get(cache_key)
             if cached is not None:
                 return cached
 
             if self._offline:
-                raise OfflineMissError(package="", remote=owner_repo)
+                raise OfflineMissError(package="", remote=cache_key)
 
-            url, env = self._git_url_and_env(owner_repo)
+            url, env = self._git_url_and_env(owner_repo, remote_url=remote_url)
             try:
                 result = subprocess.run(
                     ["git", "ls-remote", "--tags", "--heads", url],
@@ -329,9 +412,13 @@ class RefResolver:
                     hint=f"Ensure git is installed and on PATH. Error: {exc}",
                 )
 
-            fallback_refs = self._retry_rejected_ado_pat(result, owner_repo)
+            fallback_refs = self._retry_rejected_ado_pat(
+                result,
+                owner_repo,
+                remote_url=remote_url,
+            )
             if fallback_refs is not None:
-                self._cache.put(owner_repo, fallback_refs)
+                self._cache.put(cache_key, fallback_refs)
                 return fallback_refs
 
             if result.returncode != 0:
@@ -355,13 +442,15 @@ class RefResolver:
                 )
 
             refs = _parse_ls_remote_output(result.stdout)
-            self._cache.put(owner_repo, refs)
+            self._cache.put(cache_key, refs)
             return refs
 
     def _retry_rejected_ado_pat(
         self,
         result: subprocess.CompletedProcess,
         owner_repo: str,
+        *,
+        remote_url: str | None = None,
     ) -> list[RemoteRef] | None:
         """Retry one rejected ADO basic credential with an Azure CLI bearer."""
         eligible = (
@@ -396,7 +485,7 @@ class RefResolver:
                 git_env=bearer_env,
             )
             try:
-                return resolver.list_remote_refs(owner_repo)
+                return resolver.list_remote_refs(owner_repo, remote_url=remote_url)
             finally:
                 resolver.close()
 

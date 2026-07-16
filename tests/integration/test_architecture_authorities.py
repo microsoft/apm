@@ -52,6 +52,33 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
+@pytest.mark.lifecycle_smoke
+def test_ado_lock_coordinates_have_single_owner() -> None:
+    """AC14 derives ADO coordinates without provider-specific lock fields."""
+    import inspect
+
+    from apm_cli.deps.lockfile import LockedDependency
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    root = Path(__file__).parents[2]
+    lockfile_source = (root / "src/apm_cli/deps/lockfile.py").read_text()
+    ref_resolver_source = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    reconstruction = inspect.getsource(LockedDependency.to_dependency_ref)
+
+    assert hasattr(DependencyReference, "canonical_ado_coordinates")
+    assert hasattr(DependencyReference, "with_derived_provider_coordinates")
+    assert "with_derived_provider_coordinates" in reconstruction
+    assert "ado_organization" not in lockfile_source
+    assert "ado_project" not in lockfile_source
+    assert "ado_repo" not in lockfile_source
+    assert "DependencyReference.canonical_ado_coordinates" in ref_resolver_source
+    assert "repo_url.split" not in reconstruction
+    assert "owner_repo.split" not in ref_resolver_source
+    assert "AC14: ADO lock-coordinate authority" in guard
+    assert "ADO coordinates must be derived by DependencyReference, never persisted" in guard
+
+
 def test_packed_marketplace_source_parsing_has_single_owner() -> None:
     """Packed marketplace URL/ref/path parsing must use DependencyReference."""
     root = Path(__file__).parents[2]

@@ -77,6 +77,18 @@ For each orphaned package, `apm prune`:
 4. Cleans up empty parent directories under both `apm_modules/` and the harness deploy roots.
 5. Deletes `apm.lock.yaml` if pruning leaves it with zero dependencies.
 
+After processing all orphaned packages, `apm prune` also reconciles merged
+hook configuration (`.claude/settings.json`, `.cursor/hooks.json`, and
+similar merge targets, plus their `apm-hooks.json` ownership sidecars):
+entries owned by a pruned package are removed, while entries owned by
+packages that remain declared -- and any manually authored entries -- are
+preserved and rewritten back. This orchestrates the same ownership-aware
+cleanup `apm uninstall` uses; it does not duplicate the filtering logic.
+Hook reconciliation is best-effort: a failure is logged as a warning but
+does not abort the run, since package and lockfile cleanup has already
+completed by that point. If reconciliation logs a warning, run `apm
+install` to rebuild hook configuration from the current dependency set.
+
 Notes:
 
 - Packages that share an install root with a still-declared sibling subdirectory dependency are not falsely protected by ancestor expansion. The check uses lockfile membership (with `apm.yml` fallback) to identify genuine standalone packages.
@@ -97,6 +109,7 @@ Per-package removal failures are logged but do not abort the run; remaining orph
 ## Related
 
 - [`apm install`](../install/) -- install declared dependencies
+- [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
 - [`apm list`](../list/) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
 - [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where
