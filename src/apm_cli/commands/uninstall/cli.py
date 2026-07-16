@@ -145,7 +145,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 2: Dry run
         modules_dir = get_modules_dir(scope)
         if dry_run:
-            _dry_run_uninstall(packages_to_remove, modules_dir, logger)
+            _dry_run_uninstall(packages_to_remove, modules_dir, logger, apm_yml_path)
             return
 
         # Step 3: Remove from apm.yml
