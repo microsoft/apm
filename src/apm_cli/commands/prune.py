@@ -157,6 +157,21 @@ def prune(ctx, dry_run):
                 except Exception:
                     pass
 
+            # Reconcile merged-hook ownership (settings.json / hooks.json
+            # entries and their apm-hooks.json sidecars) for the packages
+            # just pruned. This delegates to the same canonical
+            # clear-then-rebuild owner `apm uninstall` already uses --
+            # prune must not reimplement hook-entry filtering itself.
+            # apm.yml is not mutated by prune (orphaned packages are, by
+            # definition, already absent from it), so the manifest parsed
+            # at the top of this command still reflects the desired state.
+            try:
+                from ..integration.hook_integrator import HookIntegrator
+
+                HookIntegrator().reconcile_after_removal(apm_package, project_root)
+            except Exception as e:
+                logger.error(f"Failed to reconcile hook integrations: {e}")
+
         # Final summary
         if removed_count > 0:
             logger.success(f"Pruned {removed_count} orphaned package(s)")

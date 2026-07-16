@@ -772,3 +772,33 @@ class PackageInfo:
             return True
 
         return False
+
+
+def build_installed_package_info(
+    dep_ref: DependencyReference, apm_modules_dir: Path
+) -> "PackageInfo | None":
+    """Build a ``PackageInfo`` for a dependency that is still installed on disk.
+
+    Shared by callers that re-integrate primitives from remaining
+    dependencies after some other package is removed -- e.g. ``apm
+    uninstall``'s post-removal re-sync and ``apm prune``'s hook
+    reconciliation (see ``HookIntegrator.reconcile_after_removal``).
+    Returns ``None`` when the dependency's install directory is missing
+    or fails manifest validation, so callers can skip it rather than
+    fail the broader re-integration pass.
+    """
+    install_path = dep_ref.get_install_path(apm_modules_dir)
+    if not install_path.exists():
+        return None
+
+    result = validate_apm_package(install_path)
+    package = result.package if result and result.package else None
+    if not package:
+        return None
+
+    return PackageInfo(
+        package=package,
+        install_path=install_path,
+        dependency_ref=dep_ref,
+        package_type=result.package_type if result else None,
+    )

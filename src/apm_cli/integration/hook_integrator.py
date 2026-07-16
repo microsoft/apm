@@ -1943,6 +1943,71 @@ class HookIntegrator(BaseIntegrator):
 
         return stats
 
+    def reconcile_after_removal(
+        self,
+        apm_package,
+        project_root: Path,
+        *,
+        user_scope: bool = False,
+    ) -> dict:
+        """Reconcile merged-hook ownership after packages leave apm.yml.
+
+        ``_clean_apm_entries_from_json`` (invoked by ``sync_integration``)
+        strips *every* ``_apm_source``-tagged entry from a merge target's
+        JSON file and deletes its ownership sidecar unconditionally -- it
+        has no notion of "this package only". A caller that wants to drop
+        one package's hooks therefore cannot call ``sync_integration``
+        alone without also erasing entries owned by packages that remain
+        declared: it must wipe, then rebuild from what is still installed.
+
+        This mirrors the "clear + rebuild" pattern
+        ``apm uninstall`` already uses (see
+        ``_sync_integrations_after_uninstall`` in
+        ``commands/uninstall/engine.py``), scoped to hooks only, so
+        callers such as ``apm prune`` orchestrate the existing
+        ownership-aware cleanup instead of reimplementing hook filtering.
+
+        Uses ``get_all_apm_dependencies()`` (prod + dev) rather than
+        uninstall's prod-only dependency set, matching ``apm prune``'s
+        own orphan-detection scope (prune already treats dev deps as
+        first-class for removal purposes).
+
+        Best-effort by design: a re-integration failure for one
+        dependency is logged and skipped rather than aborting the
+        reconcile, consistent with prune's existing per-package
+        error-tolerant semantics.
+        """
+        from apm_cli.constants import APM_MODULES_DIR
+        from apm_cli.models.apm_package import build_installed_package_info
+
+        from .targets import resolve_targets
+
+        stats = self.sync_integration(apm_package, project_root, managed_files=set())
+
+        config_target = list(apm_package.canonical_targets)
+        targets = resolve_targets(
+            project_root, user_scope=user_scope, explicit_target=config_target or None
+        )
+
+        for dep_ref in apm_package.get_all_apm_dependencies():
+            pkg_info = build_installed_package_info(dep_ref, project_root / APM_MODULES_DIR)
+            if pkg_info is None:
+                continue
+
+            try:
+                for target in targets:
+                    self.integrate_hooks_for_target(
+                        target, pkg_info, project_root, user_scope=user_scope
+                    )
+            except Exception as e:
+                stats["errors"] = stats.get("errors", 0) + 1
+                pkg_id = (
+                    dep_ref.get_identity() if hasattr(dep_ref, "get_identity") else str(dep_ref)
+                )
+                _log.warning("Best-effort hook re-integration skipped for %s: %s", pkg_id, e)
+
+        return stats
+
     @staticmethod
     def _clean_apm_entries_from_json(
         json_path: Path,

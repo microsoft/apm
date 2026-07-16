@@ -77,6 +77,14 @@ For each orphaned package, `apm prune`:
 4. Cleans up empty parent directories under both `apm_modules/` and the harness deploy roots.
 5. Deletes `apm.lock.yaml` if pruning leaves it with zero dependencies.
 
+After processing all orphaned packages, `apm prune` also reconciles merged
+hook configuration (`.claude/settings.json`, `.cursor/hooks.json`, and
+similar merge targets, plus their `apm-hooks.json` ownership sidecars):
+entries owned by a pruned package are removed, while entries owned by
+packages that remain declared -- and any manually authored entries -- are
+preserved and rewritten back. This orchestrates the same ownership-aware
+cleanup `apm uninstall` uses; it does not duplicate the filtering logic.
+
 Notes:
 
 - Packages that share an install root with a still-declared sibling subdirectory dependency are not falsely protected by ancestor expansion. The check uses lockfile membership (with `apm.yml` fallback) to identify genuine standalone packages.
