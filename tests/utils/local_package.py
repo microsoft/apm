@@ -141,7 +141,7 @@ class LocalPackageFactory:
         return self._write_text(path, content)
 
     def add_prompt(self, package: LocalPackage, name: str, content: str) -> Path:
-        """Author a prompt source consumed by prompt-capable targets."""
+        """Author a ``.apm/prompts/*.prompt.md`` source with prompt intent."""
         return self._add_prompt_source(package, name, content, kind="prompt")
 
     def add_command(self, package: LocalPackage, name: str, content: str) -> Path:
@@ -214,6 +214,8 @@ class LocalPackageFactory:
 
         Canvas names deliberately delegate to the production integrator's
         validator so tests cannot drift from the executable deployment surface.
+        Canvas assets are intentionally supplied in one validated mapping;
+        unlike hook scripts, they do not need incremental authoring.
         """
         self._validate_segment(name, "canvas")
         CanvasIntegrator._validate_canvas_name(name)
@@ -374,7 +376,7 @@ class LocalPackageFactory:
         package: LocalPackage,
         dependency: DependencyInput,
     ) -> bool:
-        """Remove the first semantically matching APM dependency."""
+        """Remove one canonical identity match, or return False without writing."""
         manifest_path, manifest = self._load_manifest(package)
         validated = self._validate_dependencies((dependency,))
         expected = self._parse_dependency(validated[0])

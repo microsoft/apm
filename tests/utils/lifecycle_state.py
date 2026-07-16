@@ -466,6 +466,7 @@ def _lockfile_path(root: Path) -> Path | None:
 
 
 def _compiled_paths(root: Path) -> tuple[str, ...]:
+    """Find distributed context outputs across the full selected workspace."""
     paths: list[str] = []
     for directory, dirnames, filenames in os.walk(root, followlinks=False):
         directory_path = Path(directory)

@@ -848,6 +848,28 @@ def test_config_dependency_validation_is_transactional(tmp_path: Path) -> None:
     assert not (tmp_path / "packages/invalid-mcp-type").exists()
 
 
+def test_config_dependency_round_trip_guards_reject_loss_and_semantic_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = {
+        "name": "fixture-mcp",
+        "registry": False,
+        "transport": "stdio",
+        "command": "fixture-mcp",
+    }
+
+    monkeypatch.setattr("tests.utils.local_package.load_yaml_str", lambda _text: None)
+    with pytest.raises(ValueError, match="did not survive YAML serialization"):
+        LocalPackageFactory._validate_config_dependencies((entry,), kind="MCP")
+
+    monkeypatch.setattr(
+        "tests.utils.local_package.load_yaml_str",
+        lambda _text: {"dependency": {"name": "different-server"}},
+    )
+    with pytest.raises(ValueError, match="failed semantic round-trip validation"):
+        LocalPackageFactory._validate_config_dependencies((entry,), kind="MCP")
+
+
 def test_lifecycle_sources_accept_mcp_and_lsp_string_references(tmp_path: Path) -> None:
     factory = LocalPackageFactory(tmp_path / "packages")
     package = factory.create(
