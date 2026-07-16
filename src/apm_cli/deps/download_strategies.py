@@ -183,7 +183,7 @@ class DownloadDelegate:
                     )
                     if attempt < max_retries - 1:
                         _close_response(response, "rate-limit retry")
-                    time.sleep(wait)
+                        time.sleep(wait)
                     continue
 
                 # Log rate limit proximity

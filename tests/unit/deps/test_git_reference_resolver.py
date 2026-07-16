@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import types
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,6 +27,7 @@ from git.exc import GitCommandError
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
 from apm_cli.deps.git_reference_resolver import GitReferenceResolver
+from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.transport_selection import (
     NoOpInsteadOfResolver,
     ProtocolPreference,
@@ -110,6 +115,38 @@ def _ctx(
     return host
 
 
+@contextmanager
+def _loopback_http_stub(
+    responses: list[tuple[int, dict[str, str], bytes]],
+) -> Iterator[tuple[types.SimpleNamespace, str]]:
+    """Serve deterministic HTTP responses from loopback."""
+    state = types.SimpleNamespace(hits=0)
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            index = min(state.hits, len(responses) - 1)
+            status, headers, body = responses[index]
+            state.hits += 1
+            self.send_response(status)
+            for name, value in headers.items():
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield state, f"http://127.0.0.1:{server.server_port}/commit/main"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 # ---------------------------------------------------------------------------
 # resolve_commit_sha_for_ref
 # ---------------------------------------------------------------------------
@@ -176,6 +213,59 @@ class TestResolveCommitShaForRef:
         resolver = GitReferenceResolver(host)
         # Use a generic-host dep -- generic backend returns None for commits API
         assert resolver.resolve_commit_sha_for_ref(_dep(host="git.example.com"), "main") is None
+
+    def test_best_effort_rate_limit_falls_through_without_retry_wait(self):
+        """The optional commits-API tier must not stall the git fallback."""
+        downloader = GitHubPackageDownloader()
+        dep = _dep(host="github.com", reference="main")
+        responses = [
+            (
+                403,
+                {"X-RateLimit-Remaining": "0", "Retry-After": "60"},
+                b"rate limited",
+            )
+        ]
+
+        with (
+            _loopback_http_stub(responses) as (server, api_url),
+            patch(
+                "apm_cli.deps.host_backends.backend_for",
+                return_value=types.SimpleNamespace(
+                    build_commits_api_url=lambda dep_ref, ref: api_url
+                ),
+            ),
+            patch.object(
+                downloader.auth_resolver,
+                "resolve",
+                return_value=types.SimpleNamespace(token=None),
+            ),
+            patch("apm_cli.deps.download_strategies.time.sleep") as sleep,
+        ):
+            result = downloader._refs.resolve_commit_sha_for_ref(dep, "main")
+
+        assert result is None
+        assert server.hits == 1
+        sleep.assert_not_called()
+
+    def test_primary_http_transient_rate_limit_still_retries(self):
+        """Primary HTTP work keeps the shared transient retry policy."""
+        downloader = GitHubPackageDownloader()
+        sha = b"deadbeef" + (b"0" * 32)
+        responses = [
+            (429, {"Retry-After": "0.01"}, b"rate limited"),
+            (200, {}, sha),
+        ]
+
+        with (
+            _loopback_http_stub(responses) as (server, api_url),
+            patch("apm_cli.deps.download_strategies.time.sleep") as sleep,
+        ):
+            response = downloader._resilient_get(api_url, {}, timeout=1)
+
+        assert response.status_code == 200
+        assert response.content == sha
+        assert server.hits == 2
+        sleep.assert_called_once_with(0.01)
 
 
 # ---------------------------------------------------------------------------

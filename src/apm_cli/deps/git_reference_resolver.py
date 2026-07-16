@@ -44,6 +44,8 @@ from ..utils.github_host import (
 )
 
 if TYPE_CHECKING:
+    import requests
+
     from ..core.auth import AuthResolver
     from .transport_selection import ProtocolPreference, TransportSelector
 
@@ -85,7 +87,13 @@ class _DownloaderContext(Protocol):
     ) -> str: ...
     def _clone_with_fallback(self, *args, **kwargs): ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
-    def _resilient_get(self, url: str, headers: dict, timeout: int = ...): ...
+    def _resilient_get(
+        self,
+        url: str,
+        headers: dict[str, str],
+        timeout: int = ...,
+        max_retries: int = ...,
+    ) -> requests.Response: ...
     def _parse_ls_remote_output(self, output: str) -> list[RemoteRef]: ...
     def _sort_remote_refs(self, refs: list[RemoteRef]) -> list[RemoteRef]: ...
     def _parse_artifactory_base_url(self) -> tuple | None: ...
@@ -311,7 +319,7 @@ class GitReferenceResolver:
             headers["Authorization"] = f"token {token}"
 
         try:
-            response = host._resilient_get(api_url, headers=headers, timeout=10)
+            response = host._resilient_get(api_url, headers=headers, timeout=10, max_retries=1)
             if response.status_code != 200:
                 return None
             body = (response.text or "").strip()
