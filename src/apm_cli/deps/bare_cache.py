@@ -720,7 +720,11 @@ def clone_with_fallback(
 
 
 def _git_failure_text(error: Exception) -> str:
-    """Return command error text including captured stderr/stdout when present."""
+    """Return captured command text for internal marker classification only.
+
+    The result may contain credentials, key paths, or remote-controlled text.
+    Never surface it to users, logs, or exception messages.
+    """
     parts = [str(error)]
     for attr in ("stderr", "stdout"):
         stream = getattr(error, attr, None)
@@ -733,39 +737,37 @@ def _git_failure_text(error: Exception) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
 
 
-def _is_ssh_passphrase_or_auth_failure(
-    error_text: str,
-    dep_ref: DependencyReference | None,
-) -> bool:
-    """Return True when git/ssh failed in the passphrase-protected key path."""
+def _is_ssh_key_auth_failure(error_text: str, last_attempt_scheme: str | None) -> bool:
+    """Return True for passphrase or public-key errors from an SSH attempt."""
+    if (last_attempt_scheme or "").lower() != "ssh":
+        return False
+
     text = error_text.lower()
-    passphrase_markers = (
+    markers = (
         "enter passphrase for key",
         "incorrect passphrase supplied",
         "bad passphrase",
         "read_passphrase",
+        "permission denied (publickey)",
     )
-    if any(marker in text for marker in passphrase_markers):
-        return True
-
-    is_explicit_ssh = (getattr(dep_ref, "explicit_scheme", None) or "").lower() == "ssh"
-    return is_explicit_ssh and "permission denied (publickey)" in text
+    return any(marker in text for marker in markers)
 
 
-def _ssh_passphrase_diagnostic(
+def _ssh_key_auth_diagnostic(
     last_error: Exception | None,
-    dep_ref: DependencyReference | None,
+    last_attempt_scheme: str | None,
 ) -> str:
-    """Build the SSH passphrase diagnostic, or an empty string when unrelated."""
+    """Build an SSH key diagnostic, or an empty string when unrelated."""
     if last_error is None:
         return ""
-    if not _is_ssh_passphrase_or_auth_failure(_git_failure_text(last_error), dep_ref):
+    if not _is_ssh_key_auth_failure(_git_failure_text(last_error), last_attempt_scheme):
         return ""
     return (
-        " SSH authentication failed while APM ran git without interactive prompts. "
-        "If your SSH key has a passphrase, run 'ssh-add <key-file>' first so "
-        "ssh-agent can unlock it. In CI, use a deploy key loaded into ssh-agent "
-        "or switch this dependency to token-backed HTTPS. APM will not open a raw "
+        " SSH key authentication failed while APM ran git non-interactively. "
+        "Verify that the key is available to SSH. For a passphrase-protected key, "
+        "unlock it before running APM (for example, with 'ssh-add <key-file>'). "
+        "In CI, load a dedicated deploy key non-interactively, or switch the "
+        "dependency to token-backed HTTPS. APM does not open an interactive "
         "passphrase prompt during clone."
     )
 
@@ -784,6 +786,7 @@ def build_clone_failure_message(
     configured_github_host: str,
     default_host_fn: Callable[[], str],
     last_error: Exception | None,
+    last_attempt_scheme: str | None,
     sanitize_git_error: Callable[[str], str],
 ) -> str:
     """Build the aggregate ``RuntimeError`` message for a failed transport plan.
@@ -849,10 +852,10 @@ def build_clone_failure_message(
     else:
         error_msg += "Please check repository access permissions and authentication setup."
 
-    error_msg += _ssh_passphrase_diagnostic(last_error, dep_ref)
+    error_msg += _ssh_key_auth_diagnostic(last_error, last_attempt_scheme)
 
     if last_error:
-        sanitized_error = sanitize_git_error(_git_failure_text(last_error))
+        sanitized_error = sanitize_git_error(str(last_error))
         error_msg += f" Last error: {sanitized_error}"
 
     return error_msg

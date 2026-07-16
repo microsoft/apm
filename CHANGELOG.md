@@ -23,12 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requirements in `openapm-v0.1.md` now cite both behaviors. Parser and audit
   diagnostics name `ref` and `apm install --update` when those are the required
   repair actions. (#2209)
+- SSH clone errors that report a passphrase prompt or public-key denial now add
+  remediation guidance for key availability, CI deploy keys, and token-backed
+  HTTPS without echoing captured SSH output. Diagnostic-only; #1976 remains
+  unresolved. (#2244; refs #1976)
 
 ### Fixed
 
-- SSH clone failures from passphrase-protected keys now explain how to unblock
-  non-interactive clones with `ssh-add`, CI deploy keys, or token-backed HTTPS
-  instead of ending with an opaque git error. (#2244)
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
   dropped from a project's `targets:` list -- the hook wipe is now scoped to
