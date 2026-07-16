@@ -1126,9 +1126,7 @@ class HookIntegrator(BaseIntegrator):
 
     @staticmethod
     def _deploy_root_for_hook_rewrite(project_root: Path, user_scope: bool) -> Path | None:
-        # User-scope hook configs are read outside a fixed repository cwd, so
-        # script commands must be absolutized; project-scope configs stay
-        # repo-relative for portability across clones and CI.
+        # User scope needs cwd-independent paths; project scope stays portable.
         return project_root if user_scope else None
 
     def integrate_package_hooks(
@@ -1154,6 +1152,7 @@ class HookIntegrator(BaseIntegrator):
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
             user_scope: If True, rewrite hook script commands to absolute paths
+            dep_targets_active: If True, hook files were already target-filtered
 
         Returns:
             HookIntegrationResult: Results of the integration operation
@@ -1182,10 +1181,7 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir.mkdir(parents=True, exist_ok=True)
         deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
         if deploy_root_for_rewrite is not None:
-            _log.debug(
-                "Copilot hook rewrite using deploy root: %s",
-                deploy_root_for_rewrite,
-            )
+            _log.debug("Copilot user-scope hook rewrite root: %s", deploy_root_for_rewrite)
 
         hooks_integrated = 0
         scripts_copied = 0

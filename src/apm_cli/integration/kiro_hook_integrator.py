@@ -249,7 +249,7 @@ def integrate_kiro_hooks(
 
     hooks_dir = target_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    deploy_root_for_rewrite = project_root if user_scope else None
+    deploy_root_for_rewrite = integrator._deploy_root_for_hook_rewrite(project_root, user_scope)
 
     files_integrated = 0
     files_skipped = 0

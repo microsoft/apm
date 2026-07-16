@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from apm_cli.core.scope import InstallScope
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -55,12 +56,14 @@ def _integrate_package_hooks(
     project_root: Path,
     *,
     target_name: str,
+    user_scope: bool = False,
 ) -> dict[str, Any]:
     """Run the install service dispatch that invokes HookIntegrator for a target."""
+    target = KNOWN_TARGETS[target_name].for_scope(user_scope=user_scope)
     return integrate_package_primitives(
         package_info,
         project_root,
-        targets=[KNOWN_TARGETS[target_name]],
+        targets=[target],
         integrators=IntegratorBundle(
             prompt=None,
             agent=None,
@@ -73,6 +76,7 @@ def _integrate_package_hooks(
         managed_files=set(),
         diagnostics=DiagnosticCollector(),
         package_name=package_info.package.name,
+        scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
     )
 
 
@@ -136,6 +140,51 @@ def test_copilot_install_merges_duplicate_event_aliases(tmp_path: Path) -> None:
     assert set(hooks) == {"preToolUse"}
     commands = [entry["hooks"][0]["command"] for entry in hooks["preToolUse"]]
     assert commands == ["echo pascal", "echo camel"]
+
+
+@pytest.mark.parametrize("user_scope", [False, True])
+def test_copilot_install_scope_controls_script_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    user_scope: bool,
+) -> None:
+    """Install dispatch keeps project paths relative and user paths absolute."""
+    project_root = tmp_path / ("home" if user_scope else "project")
+    project_root.mkdir(exist_ok=True)
+    package_info = _make_hook_package(
+        tmp_path,
+        {"sessionStart": [_hook_entry("./run.sh")]},
+        name=f"scope-{'user' if user_scope else 'project'}",
+    )
+    script = package_info.install_path / ".apm" / "hooks" / "run.sh"
+    script.write_text("#!/bin/sh\necho scope\n", encoding="utf-8")
+    target = KNOWN_TARGETS["copilot"].for_scope(user_scope=user_scope)
+
+    result = _integrate_package_hooks(
+        package_info,
+        project_root,
+        target_name="copilot",
+        user_scope=user_scope,
+    )
+
+    assert result["hooks"] == 1
+    config_path = (
+        project_root / target.root_dir / "hooks" / f"{package_info.package.name}-hooks.json"
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    command = config["hooks"]["sessionStart"][0]["hooks"][0]["command"]
+    installed_script = (
+        project_root / target.root_dir / "hooks" / "scripts" / package_info.package.name / "run.sh"
+    ).resolve()
+    monkeypatch.chdir(package_info.install_path)
+    if user_scope:
+        assert Path(command).is_absolute()
+        assert Path(command).resolve() == installed_script
+    else:
+        assert not Path(command).is_absolute()
+        assert command == f"{target.root_dir}/hooks/scripts/{package_info.package.name}/run.sh"
+        monkeypatch.chdir(project_root)
+        assert Path(command).resolve() == installed_script
 
 
 def test_claude_install_preserves_pascal_case_hook_events(tmp_path: Path) -> None:

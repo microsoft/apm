@@ -3010,7 +3010,7 @@ class TestScopeResolvedHookDeployment:
         assert result.files_integrated > 0
         assert (self.root / ".codex" / "hooks.json").exists()
 
-    def test_script_paths_rewritten_with_scope_root(self):
+    def test_script_paths_rewritten_with_scope_root(self, monkeypatch):
         """Script paths in hook commands use the scope-resolved root_dir."""
         # Create a hook with a script reference
         hooks_dir = self.pkg_dir / ".apm" / "hooks"
@@ -3045,8 +3045,10 @@ class TestScopeResolvedHookDeployment:
         assert not Path(cmd).is_absolute(), (
             f"Project-scope Copilot command must not be absolute; got {cmd!r}"
         )
+        monkeypatch.chdir(self.root)
+        assert Path(cmd).resolve() == (scripts_dir / "run.sh").resolve()
 
-    def test_copilot_user_scope_writes_absolute_hook_paths(self):
+    def test_copilot_user_scope_writes_absolute_hook_paths(self, monkeypatch):
         """Copilot user-scope hook commands must resolve from any cwd."""
         hooks_dir = self.pkg_dir / ".apm" / "hooks"
         script = hooks_dir / "run.sh"
@@ -3072,9 +3074,10 @@ class TestScopeResolvedHookDeployment:
         )
         cmd = hooks_config["hooks"]["sessionStart"][0]["bash"]
         assert Path(cmd).is_absolute(), f"User-scope Copilot command must be absolute; got {cmd!r}"
-        assert cmd == str(
-            (self.root / ".copilot" / "hooks" / "scripts" / "scope-pkg" / "run.sh").resolve()
-        )
+        expected = (self.root / ".copilot" / "hooks" / "scripts" / "scope-pkg" / "run.sh").resolve()
+        assert cmd == str(expected)
+        monkeypatch.chdir(self.pkg_dir)
+        assert Path(cmd).resolve() == expected
 
     def test_sync_with_copilot_scope_prefix(self):
         """sync_integration removes .copilot/hooks/ files when target is present."""

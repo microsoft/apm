@@ -26,9 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Copilot hooks installed with `apm install -g` now write absolute script
-  commands so user-scope hook JSON resolves from any working directory, while
-  project-scope Copilot hooks remain repo-relative for portability -- by
+- Copilot hooks installed with `apm install -g` now resolve from any working
+  directory by writing absolute user-scope script commands, while project-scope
+  hooks remain repo-relative for portability -- reported by @sproott, fixed by
   @danielmeppiel (closes #2232; #2236).
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
