@@ -74,3 +74,11 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_package_shape_lifecycle_contract.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_guardrailing_hero_e2e.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_packaged_virtual_file_lifecycle_e2e.py"
+marker = "e2e"
