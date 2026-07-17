@@ -67,27 +67,18 @@ def run_command(
             result = subprocess.run(
                 cmd,
                 shell=True,
-                check=check,
-                capture_output=False,  # Don't capture, let it stream to terminal
-                text=True,
-                timeout=timeout,
-                cwd=cwd,
-                env=env,
-            )
-            # For show_output commands, we need to capture in a different way to return something
-            # Run again with capture to get return data
-            result_capture = subprocess.run(
-                cmd,
-                shell=True,
-                check=False,  # Don't fail here, we already ran it above
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 cwd=cwd,
                 env=env,
             )
-            result.stdout = result_capture.stdout
-            result.stderr = result_capture.stderr
+            print(result.stdout, end="")
+            if result.stderr:
+                print(result.stderr, end="")
+            if check:
+                result.check_returncode()
         else:
             result = subprocess.run(
                 cmd,

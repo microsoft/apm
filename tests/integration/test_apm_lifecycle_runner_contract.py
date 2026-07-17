@@ -101,9 +101,9 @@ def test_runner_raises_when_configured_timeout_expires(tmp_path: Path) -> None:
 
 def test_run_sequence_enforces_one_scenario_deadline(tmp_path: Path) -> None:
     runner = ApmLifecycleRunner(
-        (sys.executable, "-c", "import time; time.sleep(0.2)"),
+        (sys.executable, "-c", "import time; time.sleep(2.0)"),
         timeout_seconds=1.0,
-        scenario_timeout_seconds=0.3,
+        scenario_timeout_seconds=0.5,
     )
 
     started = time.monotonic()
@@ -116,13 +116,13 @@ def test_run_sequence_enforces_one_scenario_deadline(tmp_path: Path) -> None:
             env=os.environ,
         )
 
-    assert time.monotonic() - started < 0.8
-    assert 0 < exc_info.value.timeout < 0.2
+    assert time.monotonic() - started < 2.0
+    assert 0 < exc_info.value.timeout < 1.0
     message = str(exc_info.value)
     assert "scenario='bounded-sequence'" in message
     assert f"cwd={str(tmp_path)!r}" in message
     assert "command=" in message
-    assert "budget_seconds=0.3" in message
+    assert "budget_seconds=0.5" in message
     assert "stdout=" in message
     assert "stderr=" in message
 

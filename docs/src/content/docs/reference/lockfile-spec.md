@@ -155,7 +155,7 @@ Each item in `dependencies` describes one resolved package.
 | `virtual_path` | string | no | Subpath inside the repo for virtual packages (monorepo subpaths). |
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
-| `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. |
+| `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. Rewritten by `apm uninstall` when a rescued transitive dependency's original parent is removed, so the entry stays keyed on a genuine surviving parent -- this never changes the entry's identity or lock key, only which parent it points to. |
 | `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
