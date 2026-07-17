@@ -39,10 +39,13 @@ def test_ado_semver_ref_resolution_retries_stale_pat_with_cli_bearer(
 
     dep = DependencyReference(
         host="dev.azure.com",
-        repo_url="example/project/_git/package",
+        repo_url="example/project/package",
         reference="^2.0.0",
         source="git",
         explicit_scheme="https",
+        ado_organization="example",
+        ado_project="project",
+        ado_repo="package",
     )
     with (
         patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
@@ -101,10 +104,13 @@ def test_bearer_fallback_scrubs_inherited_authorization_header(
 
     dep = DependencyReference(
         host="dev.azure.com",
-        repo_url="example/project/_git/package",
+        repo_url="example/project/package",
         reference="^3.0.0",
         source="git",
         explicit_scheme="https",
+        ado_organization="example",
+        ado_project="project",
+        ado_repo="package",
     )
     with (
         patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),

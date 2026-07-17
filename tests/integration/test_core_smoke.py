@@ -112,7 +112,7 @@ def smoke_project(tmp_path: Path, apm_binary_path: Path) -> Path:
 
 
 class TestBinaryStartup:
-    """Sanity: the built binary starts and reports its version."""
+    """Sanity: the built binary starts and renders Rich output."""
 
     def test_apm_version_runs(self, apm_binary_path: Path, tmp_path: Path) -> None:
         """``apm --version`` must exit 0 and print non-empty output.
@@ -128,6 +128,36 @@ class TestBinaryStartup:
             f"apm --version failed (rc={result.returncode})\nstderr:\n{result.stderr}"
         )
         assert result.stdout.strip(), "apm --version produced empty stdout"
+
+    def test_apm_rich_table_runs(self, apm_binary_path: Path, tmp_path: Path) -> None:
+        """``deps list`` must render non-ASCII cell widths from the frozen binary."""
+        repo_name = "wide-\u4e2d"
+        package_dir = tmp_path / "apm_modules" / "test-org" / repo_name
+        package_dir.mkdir(parents=True)
+        (tmp_path / "apm.yml").write_text(
+            "name: test-project\n"
+            "version: 0.1.0\n"
+            "owner:\n"
+            "  name: test-org\n"
+            "dependencies:\n"
+            "  apm:\n"
+            f"    - test-org/{repo_name}\n",
+            encoding="utf-8",
+        )
+        (package_dir / "apm.yml").write_text(
+            f"name: {repo_name}\nversion: 1.0.0\ndescription: Rich cell-width fixture\n",
+            encoding="utf-8",
+        )
+
+        result = _run_apm(apm_binary_path, ["deps", "list"], cwd=tmp_path)
+
+        assert result.returncode == 0, (
+            f"apm deps list failed (rc={result.returncode})\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert f"test-org/{repo_name}" in result.stdout
+        # Rich borders are structural Unicode, not ANSI, so piped output keeps them.
+        assert "\u2502" in result.stdout, "deps list did not render a Rich table"
 
 
 class TestPortableByManifest:

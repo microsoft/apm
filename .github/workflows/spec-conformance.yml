@@ -40,7 +40,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Orphan check (anchors == manifest == Appendix C == markers)
-        run: uv run --extra dev python -m tests.spec_conformance.orphan_check
+        run: uv run --frozen --extra dev python -m tests.spec_conformance.orphan_check
 
       - name: Mode B detector (silent-extension gate on critical paths)
         env:
@@ -50,17 +50,17 @@ jobs:
 
       - name: Conformance test suite
         run: |
-          uv run --extra dev pytest tests/spec_conformance \
+          uv run --frozen --extra dev pytest tests/spec_conformance \
             -p no:randomly \
             --no-header \
             -q
 
       - name: Regenerate CONFORMANCE.{json,md}
-        run: uv run --extra dev python -m tests.spec_conformance.gen_statement
+        run: uv run --frozen --extra dev python -m tests.spec_conformance.gen_statement
 
       - name: Gate on clean diff (regenerated artifacts MUST be committed)
         run: |
           git diff --exit-code CONFORMANCE.json CONFORMANCE.md \
             || (echo "::error::CONFORMANCE.{json,md} are stale. Run \
-            'uv run --extra dev python -m tests.spec_conformance.gen_statement' \
+            'uv run --frozen --extra dev python -m tests.spec_conformance.gen_statement' \
             and commit the result." && exit 1)

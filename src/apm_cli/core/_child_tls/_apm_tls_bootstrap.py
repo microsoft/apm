@@ -12,6 +12,7 @@ bootstrap must not disturb the child runtime's own output or startup.
 
 import logging as _logging
 import os as _os
+import sys as _sys
 
 _logger = _logging.getLogger("apm.tls")
 
@@ -20,8 +21,18 @@ def _truthy(val):
     return (val or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _is_pip_process():
+    """Let pip use its vendored truststore without a second SSL injection."""
+    if _os.path.basename(_sys.argv[0]).lower().startswith("pip"):
+        return True
+    original_args = getattr(_sys, "orig_argv", ())
+    return any(
+        original_args[index : index + 2] == ["-m", "pip"] for index in range(len(original_args) - 1)
+    )
+
+
 def _bootstrap():
-    if _truthy(_os.environ.get("APM_DISABLE_TRUSTSTORE")):
+    if _is_pip_process() or _truthy(_os.environ.get("APM_DISABLE_TRUSTSTORE")):
         return
     for var in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
         if (_os.environ.get(var) or "").strip():
