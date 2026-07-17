@@ -765,6 +765,47 @@ dependencies:
             assert beta_key not in repaired.dependencies
             assert DeploymentLedgerCodec.owner_reference_violations(repaired) == ()
 
+    def test_prune_removes_stale_host_collision_without_deleting_shared_module(self):
+        """Exact lock identity wins when two hosts share one installed path."""
+        alpha_key = "declared-org/declared-repo"
+        stale_key = "ghe.example.com/declared-org/declared-repo"
+        shared_path = ".github/prompts/shared.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_WITH_DEP)
+            alpha_module = _make_package_dir(tmp, "declared-org", "declared-repo")
+            shared = tmp / shared_path
+            shared.parent.mkdir(parents=True)
+            shared.write_text("# Shared\n")
+            lockfile_path = _write_canonical_lockfile(
+                tmp,
+                dependencies={
+                    alpha_key: LockedDependency(repo_url=alpha_key),
+                    stale_key: LockedDependency(
+                        repo_url=alpha_key,
+                        host="ghe.example.com",
+                    ),
+                },
+                records=(
+                    _deployment_record(
+                        shared_path,
+                        owners=(alpha_key, stale_key),
+                        active_owner=stale_key,
+                    ),
+                ),
+            )
+
+            result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert alpha_module.exists()
+            assert shared.read_text() == "# Shared\n"
+            repaired = LockFile.read(lockfile_path)
+            assert repaired is not None
+            assert set(repaired.dependencies) == {alpha_key}
+            record = next(iter(repaired.deployment_ledger.records.values()))
+            assert record.owners == (alpha_key,)
+            assert record.active_owner == alpha_key
+
     def test_prune_preserves_user_edited_file_but_removes_departed_owner(self):
         """An orphan's edited file becomes unmanaged instead of being deleted."""
         beta_key = "orphan-org/orphan-repo"

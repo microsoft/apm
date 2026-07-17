@@ -100,6 +100,13 @@ def prune(ctx, dry_run):
             expected_installed,
             standalone_installed,
         )
+        expected_lock_keys = {dependency.get_unique_key() for dependency in declared_deps}
+        if lockfile is not None:
+            expected_lock_keys.update(
+                dep_key
+                for dep_key, dependency in lockfile.dependencies.items()
+                if dependency.depth is not None and dependency.depth > 1
+            )
         lock_keys_by_path = (
             _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
         )
@@ -109,9 +116,10 @@ def prune(ctx, dry_run):
         missing_orphaned_keys = sorted(
             dep_key
             for relative_path, dep_keys in lock_keys_by_path.items()
-            if relative_path not in expected_with_ancestors
-            and not (apm_modules_dir / relative_path).exists()
+            if relative_path in expected_with_ancestors
+            or not (apm_modules_dir / relative_path).exists()
             for dep_key in dep_keys
+            if dep_key not in expected_lock_keys
         )
         owner_violations = (
             DeploymentLedgerCodec.owner_reference_violations(lockfile)
@@ -168,7 +176,11 @@ def prune(ctx, dry_run):
                 safe_rmtree(pkg_path, apm_modules_dir)
                 logger.progress(f"Removed {org_repo_name}")
                 removed_count += 1
-                for dep_key in lock_keys_by_path.get(org_repo_name, ()):
+                for dep_key in (
+                    key
+                    for key in lock_keys_by_path.get(org_repo_name, ())
+                    if key not in expected_lock_keys
+                ):
                     if dep_key not in pruned_key_set:
                         pruned_keys.append(dep_key)
                         pruned_key_set.add(dep_key)
