@@ -226,7 +226,6 @@ def integrate_kiro_hooks(
     diagnostics=None,
     target=None,
     user_scope: bool = False,
-    dep_targets_active: bool = False,
 ) -> HookIntegrationResult:
     """Integrate hooks as one Kiro JSON file per hook action."""
     root_dir = target.root_dir if target else ".kiro"

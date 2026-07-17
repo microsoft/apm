@@ -46,11 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same resolved target set the rebuild step repopulates, so a narrowed
   `targets:` no longer silently deletes a sibling package's hooks (and its
   `apm-hooks.json` sidecar) in the now-undeclared harness. (closes #2250)
-- A per-dependency `targets:` list no longer disables per-file hook target
-  routing. Packages that ship target-suffixed hook files now install each file
-  only into its intended active harness, so divergent Claude, Codex, Cursor, and
-  similar hook manifests no longer cross-contaminate sibling tool configs or
-  duplicate shared entries -- by @srobroek. (closes #2258)
+- Packages with per-target hook files (for example separate Claude and Codex
+  hooks) no longer cross-contaminate sibling tool configs when a dependency
+  `targets:` list is set. APM now intersects dependency targets with filename
+  routing, preserves the deprecation warning for target-suffixed hook filenames,
+  and avoids duplicate shared entries -- by @srobroek. (closes #2258; #2259)
 - `apm prune` no longer leaves stale, executable hook entries behind for a
   removed package: it now reconciles merged hook ownership when it removes
   an orphaned package, clearing entries it contributed to

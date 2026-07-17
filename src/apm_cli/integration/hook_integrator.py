@@ -1132,7 +1132,6 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
-        dep_targets_active: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks from a package into hooks dir (Copilot target).
 
@@ -1334,7 +1333,6 @@ class HookIntegrator(BaseIntegrator):
         diagnostics=None,
         target=None,
         user_scope: bool = False,
-        dep_targets_active: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks by merging into a target-specific JSON config.
 
@@ -1835,7 +1833,6 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
-                dep_targets_active=dep_targets_active,
             )
 
         if target.name == "kiro":
@@ -1850,7 +1847,6 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target=target,
                 user_scope=user_scope,
-                dep_targets_active=dep_targets_active,
             )
 
         config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -1864,7 +1860,6 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target=target,
                 user_scope=user_scope,
-                dep_targets_active=dep_targets_active,
             )
 
         return HookIntegrationResult(

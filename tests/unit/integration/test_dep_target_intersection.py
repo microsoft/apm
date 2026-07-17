@@ -322,12 +322,13 @@ def _write_divergent_files(package_path: Path, own: str, foreign: str) -> None:
         )
 
 
-def test_copilot_per_file_routing_under_dep_targets(tmp_path: Path) -> None:
+@pytest.mark.parametrize("foreign", [name for name in KNOWN_TARGETS if name != "copilot"])
+def test_copilot_per_file_routing_under_dep_targets(tmp_path: Path, foreign: str) -> None:
     """Copilot writes per-file JSON; a dep `targets:` list must not make it
     absorb another target's per-file hook manifest."""
     project = tmp_path / "project"
     package_path = tmp_path / "pkg"
-    _write_divergent_files(package_path, own="copilot", foreign="claude")
+    _write_divergent_files(package_path, own="copilot", foreign=foreign)
 
     result = integrate_package_primitives(
         _package_info(package_path),
@@ -344,7 +345,7 @@ def test_copilot_per_file_routing_under_dep_targets(tmp_path: Path) -> None:
     assert result["hooks"] == 1
     deployed = sorted(p.name for p in (project / ".github" / "hooks").glob("*.json"))
     assert deployed and all("copilot" in name for name in deployed), deployed
-    assert not any("claude" in name for name in deployed), "Claude file leaked into Copilot"
+    assert not any(foreign in name for name in deployed), f"{foreign} file leaked into Copilot"
 
 
 def test_kiro_per_file_routing_under_dep_targets(tmp_path: Path) -> None:

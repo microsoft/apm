@@ -114,7 +114,8 @@ the target vocabulary in
 Hook filename routing (`*-<harness>-hooks.json`) is deprecated. Ship one
 hook manifest; consumers scope harness reach with the per-dependency
 `targets:` field. The filename router still works during the deprecation
-window and warns at install time.
+window and warns at install time. If both are present, `targets:` narrows the
+active harness set and filename routing still applies within that set.
 
 Before: name the manifest `my-pkg-codex-hooks.json`. After: keep
 `hooks.json` generic and let the consumer set `targets: [codex]`.
