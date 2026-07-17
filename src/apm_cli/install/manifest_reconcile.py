@@ -425,6 +425,20 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         include_ledger=True,
     )
     dropped = set(prior_files) - set(files)
+    # Ledger-authoritative orphan detection. A prior value that HELD a ledger
+    # row, LOST it during reconciliation (its owning target went stale), yet
+    # still lingers in `files` -- a stale-cleanup retention re-inserts shared
+    # roots the active target cannot validate -- is a physical orphan. It never
+    # entered `dropped` (still present in `files`) so it would otherwise survive
+    # on disk with no manifest row. Route it through the SAME cleanup chokepoint
+    # so the validate / provenance / unlink gates decide its fate. This acts
+    # only on values that had a prior row (never on a ghost/no-row path), and
+    # excludes any value re-owned this run (`surviving`), so a shared root a
+    # concrete active target still claims is preserved.
+    if prior_ledger is not None:
+        prior_owned = {record.locator.value for record in prior_ledger.records.values()}
+        surviving = {record.locator.value for record in ledger.records.values()}
+        dropped |= (set(prior_files) & prior_owned) - surviving
     if not dropped:
         if include_ledger:
             return files, hashes, ledger
@@ -443,6 +457,14 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
+    # Orphan candidates (unlike the classic dropped set) can still be present in
+    # `files`; a proven deletion must therefore also retract the value from the
+    # returned manifest and hashes so the lockfile row and disk state agree.
+    if cleanup.deleted:
+        deleted = set(cleanup.deleted)
+        files = [path for path in files if path not in deleted]
+        for path in deleted:
+            hashes.pop(path, None)
     for path in cleanup.retained:
         if path not in files:
             files.append(path)
