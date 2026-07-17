@@ -26,6 +26,11 @@ from pathlib import Path
 import pytest
 import rich
 
+from tests.utils.hermetic_packaged_sample import (
+    HermeticPackagedSample,
+    create_hermetic_packaged_sample,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -303,3 +308,28 @@ def apm_binary_path() -> Path:
 
     pytest.skip("No apm binary found (set APM_BINARY_PATH or build via scripts/build-binary.sh)")
     raise RuntimeError("unreachable")  # for type-checker
+
+
+@pytest.fixture
+def hermetic_packaged_sample(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> HermeticPackagedSample:
+    """Create the owned GitHub-shaped package fixture for packaged E2E tests."""
+    return create_hermetic_packaged_sample(
+        tmp_path,
+        apm_binary_path=apm_binary_path,
+        project_name="hermetic-packaged-consumer",
+    )
+
+
+@pytest.fixture
+def packaged_sample(
+    hermetic_packaged_sample: HermeticPackagedSample,
+) -> HermeticPackagedSample:
+    """Back-compat alias for established lifecycle suites.
+
+    Prefer ``hermetic_packaged_sample`` in new tests; this alias only preserves the
+    shorter name used by the pre-hermetic deployed-files and silent-adopt suites.
+    """
+    return hermetic_packaged_sample

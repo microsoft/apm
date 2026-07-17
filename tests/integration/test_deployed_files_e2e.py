@@ -1,476 +1,369 @@
 """End-to-end integration tests for the deployed_files manifest system.
 
-Tests the complete lifecycle of deployed_files tracking with real packages:
-- Clean filenames (no -apm suffix) after install
-- deployed_files recorded in apm.lock after install
-- Collision detection (skip when user-authored file exists)
-- --force flag overrides collision detection
-- Prune removes deployed files for pruned packages
-- Uninstall cleans deployed files
-- Re-install preserves existing deployed files context
-
-Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
+The suite uses an owned local Git origin exposed as
+``microsoft/apm-sample-package`` so its package lifecycle assertions remain
+hermetic while preserving GitHub-shaped lockfile provenance.
 """
 
-import json  # noqa: F401
-import subprocess
+from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 import yaml
 
-# Skip all tests if no GitHub token is available
-pytestmark = pytest.mark.requires_github_token
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from tests.utils.hermetic_packaged_sample import (
+    DEPENDENCY,
+    HermeticPackagedSample,
+)
+
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+]
 
 
-@pytest.fixture
-def temp_project(tmp_path):
-    """Create a temporary APM project with .github/ for VSCode target detection."""
-    project_dir = tmp_path / "deployed-files-test"
-    project_dir.mkdir()
-
-    apm_yml = project_dir / "apm.yml"
-    apm_yml.write_text(
-        "name: deployed-files-test\n"
-        "version: 1.0.0\n"
-        "description: Test project for deployed_files manifest\n"
-        "dependencies:\n"
-        "  apm: []\n"
-        "  mcp: []\n"
-    )
-
-    # Create .github/copilot-instructions.md so the copilot target is
-    # detected (post-#1154 the bare directory is no longer a signal).
-    (project_dir / ".github").mkdir()
-    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
-
-    return project_dir
-
-
-def _run_apm(apm_binary_path, args, cwd, timeout=120):
-    """Run an apm CLI command and return the result."""
-    return subprocess.run(
-        [apm_binary_path] + args,  # noqa: RUF005
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-
-
-def _read_lockfile(project_dir):
+def _read_lockfile(project_dir: Path) -> dict[str, object] | None:
     """Read and parse apm.lock from the project directory."""
     lock_path = project_dir / "apm.lock.yaml"
     if not lock_path.exists():
         return None
-    with open(lock_path) as f:
-        return yaml.safe_load(f)
+    with lock_path.open(encoding="utf-8") as handle:
+        lockfile = yaml.safe_load(handle)
+    assert lockfile is None or isinstance(lockfile, dict)
+    return lockfile
 
 
-def _get_locked_dep(lockfile, key):
-    """Get a dependency entry from lockfile by key (repo_url match)."""
+def _get_locked_dep(
+    lockfile: dict[str, object] | None,
+    key: str,
+) -> dict[str, object] | None:
+    """Get a dependency entry from lockfile by its repository URL."""
     if not lockfile or "dependencies" not in lockfile:
         return None
-    deps = lockfile["dependencies"]
-    if isinstance(deps, list):
-        for entry in deps:
+    dependencies = lockfile["dependencies"]
+    if isinstance(dependencies, list):
+        for entry in dependencies:
+            assert isinstance(entry, dict)
             repo_url = entry.get("repo_url", "")
             virtual_path = entry.get("virtual_path")
             dep_key = f"{repo_url}/{virtual_path}" if virtual_path else repo_url
-            if dep_key == key or repo_url == key:  # noqa: PLR1714
+            if key in (dep_key, repo_url):
                 return entry
         return None
-    # dict format (shouldn't happen, but be safe)
-    return deps.get(key)
+    assert isinstance(dependencies, dict)
+    entry = dependencies.get(key)
+    assert entry is None or isinstance(entry, dict)
+    return entry
 
 
-# ---------------------------------------------------------------------------
-# Clean filename tests
-# ---------------------------------------------------------------------------
+def _install(
+    packaged_sample: HermeticPackagedSample,
+    *,
+    scenario_id: str,
+    args: tuple[str, ...] = (),
+) -> None:
+    """Install the fixture package and retain full command evidence on failure."""
+    result = packaged_sample.run(("install", *args), scenario_id=scenario_id)
+    assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+
+
+def _remove_dependency(project_dir: Path) -> None:
+    """Rewrite the consumer manifest without its package dependency."""
+    manifest_path = project_dir / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    assert isinstance(manifest, dict)
+    manifest.pop("dependencies", None)
+    dump_yaml(manifest, manifest_path)
 
 
 class TestCleanFilenames:
-    """Verify installed files use clean names (no -apm suffix)."""
+    """Verify installed files use clean names without an -apm suffix."""
 
-    def test_prompts_have_clean_names(self, temp_project, apm_binary_path):
+    def test_prompts_have_clean_names(self, packaged_sample: HermeticPackagedSample) -> None:
         """Prompts should be deployed without -apm suffix."""
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+        _install(packaged_sample, scenario_id="deployed-files-clean-prompts")
 
-        prompts_dir = temp_project / ".github" / "prompts"
-        if prompts_dir.exists():
-            prompt_files = list(prompts_dir.glob("*.prompt.md"))
-            for f in prompt_files:
-                assert "-apm.prompt.md" not in f.name, f"Prompt {f.name} still uses -apm suffix"
+        prompts_dir = packaged_sample.project.root / ".github" / "prompts"
+        prompt_files = list(prompts_dir.glob("*.prompt.md"))
+        assert prompt_files, "Fixture package must deploy a prompt"
+        for path in prompt_files:
+            assert "-apm.prompt.md" not in path.name, f"Prompt {path.name} still uses -apm suffix"
 
-    def test_agents_have_clean_names(self, temp_project, apm_binary_path):
+    def test_agents_have_clean_names(self, packaged_sample: HermeticPackagedSample) -> None:
         """Agents should be deployed without -apm suffix."""
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+        _install(packaged_sample, scenario_id="deployed-files-clean-agents")
 
-        agents_dir = temp_project / ".github" / "agents"
-        if agents_dir.exists():
-            agent_files = list(agents_dir.glob("*.agent.md"))
-            for f in agent_files:
-                assert "-apm.agent.md" not in f.name, f"Agent {f.name} still uses -apm suffix"
-
-
-# ---------------------------------------------------------------------------
-# deployed_files lockfile tracking
-# ---------------------------------------------------------------------------
+        agents_dir = packaged_sample.project.root / ".github" / "agents"
+        agent_files = list(agents_dir.glob("*.agent.md"))
+        assert agent_files, "Fixture package must deploy an agent"
+        for path in agent_files:
+            assert "-apm.agent.md" not in path.name, f"Agent {path.name} still uses -apm suffix"
 
 
 class TestDeployedFilesInLockfile:
     """Verify deployed_files are recorded in apm.lock after install."""
 
-    def test_lockfile_has_deployed_files_after_install(self, temp_project, apm_binary_path):
+    def test_lockfile_has_deployed_files_after_install(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
         """apm.lock should contain deployed_files for each installed package."""
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+        _install(packaged_sample, scenario_id="deployed-files-lock-recorded")
 
-        lockfile = _read_lockfile(temp_project)
+        lockfile = _read_lockfile(packaged_sample.project.root)
         assert lockfile is not None, "apm.lock not created"
+        dependency = _get_locked_dep(lockfile, DEPENDENCY)
+        assert dependency is not None, "Dependency not found in lockfile"
+        assert "deployed_files" in dependency, "deployed_files key missing from lockfile entry"
+        deployed_files = dependency["deployed_files"]
+        assert isinstance(deployed_files, list)
+        assert deployed_files, "deployed_files list is empty"
 
-        dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
-        assert dep is not None, "Dependency not found in lockfile"
-        assert "deployed_files" in dep, "deployed_files key missing from lockfile entry"
-        assert len(dep["deployed_files"]) > 0, "deployed_files list is empty"
-
-    def test_deployed_files_point_to_existing_files(self, temp_project, apm_binary_path):
+    def test_deployed_files_point_to_existing_files(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
         """Every path in deployed_files should exist on disk after install."""
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+        _install(packaged_sample, scenario_id="deployed-files-lock-paths")
 
-        lockfile = _read_lockfile(temp_project)
-        dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
-        assert dep is not None
+        project_dir = packaged_sample.project.root
+        dependency = _get_locked_dep(_read_lockfile(project_dir), DEPENDENCY)
+        assert dependency is not None
+        deployed_files = dependency["deployed_files"]
+        assert isinstance(deployed_files, list)
+        for rel_path in deployed_files:
+            assert isinstance(rel_path, str)
+            assert (project_dir / rel_path).exists(), (
+                f"Deployed file {rel_path} does not exist on disk"
+            )
 
-        for rel_path in dep["deployed_files"]:
-            full_path = temp_project / rel_path
-            assert full_path.exists(), f"Deployed file {rel_path} does not exist on disk"
+    def test_deployed_files_are_under_known_target_roots(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
+        """deployed_files must land under one of the known target roots."""
+        _install(packaged_sample, scenario_id="deployed-files-target-roots")
 
-    def test_deployed_files_are_under_known_target_roots(self, temp_project, apm_binary_path):
-        """deployed_files must land under one of the known target roots.
-
-        Plugin-style packages whose primitives include skills also deploy a
-        copy under the AGENTS family root (``.agents/``) -- AGENTS.md is
-        the cross-tool common skills format used by Codex / Cursor /
-        OpenCode. The post-#1257 lockfile correctly records those paths,
-        so the assertion must allow ``.agents/`` alongside ``.github/``
-        and ``.claude/``.
-        """
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
-
-        lockfile = _read_lockfile(temp_project)
-        dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
-        assert dep is not None
-
+        dependency = _get_locked_dep(_read_lockfile(packaged_sample.project.root), DEPENDENCY)
+        assert dependency is not None
+        deployed_files = dependency["deployed_files"]
+        assert isinstance(deployed_files, list)
         allowed_roots = (".github/", ".claude/", ".agents/")
-        for rel_path in dep["deployed_files"]:
+        for rel_path in deployed_files:
+            assert isinstance(rel_path, str)
             assert rel_path.startswith(allowed_roots), (
                 f"Deployed file {rel_path} is not under any of {allowed_roots}"
             )
 
-    def test_deployed_files_have_clean_names_in_lockfile(self, temp_project, apm_binary_path):
-        """deployed_files paths in lockfile should use clean names (no -apm suffix)."""
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+    def test_deployed_files_have_clean_names_in_lockfile(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
+        """deployed_files paths in lockfile should use clean names."""
+        _install(packaged_sample, scenario_id="deployed-files-clean-lock-paths")
 
-        lockfile = _read_lockfile(temp_project)
-        dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
-        assert dep is not None
-
-        for rel_path in dep["deployed_files"]:
+        dependency = _get_locked_dep(_read_lockfile(packaged_sample.project.root), DEPENDENCY)
+        assert dependency is not None
+        deployed_files = dependency["deployed_files"]
+        assert isinstance(deployed_files, list)
+        for rel_path in deployed_files:
+            assert isinstance(rel_path, str)
             assert "-apm." not in rel_path, f"Deployed file path {rel_path} still uses -apm suffix"
 
-    def test_skill_deployed_files_tracked(self, temp_project, apm_binary_path):
-        """Skill packages should have deployed_files entries for .agents/skills/."""
-        result = _run_apm(
-            apm_binary_path,
-            ["install", "anthropics/skills/skills/brand-guidelines"],
-            temp_project,
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+    def test_skill_deployed_files_tracked(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
+        """Skill packages should record deployed_files under .agents/skills/."""
+        _install(packaged_sample, scenario_id="deployed-files-skill-tracking")
 
-        lockfile = _read_lockfile(temp_project)
+        lockfile = _read_lockfile(packaged_sample.project.root)
         assert lockfile is not None
-
-        # Find the skill dependency in lockfile
-        dep = None
-        deps = lockfile.get("dependencies", [])
-        if isinstance(deps, list):
-            for entry in deps:
-                repo = entry.get("repo_url", "")
-                vpath = entry.get("virtual_path", "")
-                if "brand-guidelines" in repo or "brand-guidelines" in vpath:
-                    dep = entry
-                    break
-        else:
-            for key, entry in deps.items():
-                if "brand-guidelines" in key:
-                    dep = entry
-                    break
-
-        assert dep is not None, "Skill dependency not found in lockfile"
-        assert "deployed_files" in dep, "deployed_files missing for skill"
-        skill_paths = [p for p in dep["deployed_files"] if ".agents/skills/" in p]
-        assert len(skill_paths) > 0, "No skill paths in deployed_files"
-
-
-# ---------------------------------------------------------------------------
-# Collision detection
-# ---------------------------------------------------------------------------
+        dependency = _get_locked_dep(lockfile, DEPENDENCY)
+        assert dependency is not None, "Skill dependency not found in lockfile"
+        assert "deployed_files" in dependency, "deployed_files missing for skill"
+        deployed_files = dependency["deployed_files"]
+        assert isinstance(deployed_files, list)
+        skill_paths = [path for path in deployed_files if ".agents/skills/" in path]
+        assert skill_paths, "No skill paths in deployed_files"
 
 
 class TestCollisionDetection:
     """Test that user-authored files are not overwritten on re-install."""
 
-    def test_user_file_not_overwritten_on_reinstall(self, temp_project, apm_binary_path):
+    def test_user_file_not_overwritten_on_reinstall(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
         """Pre-existing user-authored file should be preserved on re-install."""
-        # First install to get the package
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"First install failed: {result.stderr}\n{result.stdout}"
+        _install(packaged_sample, scenario_id="deployed-files-collision-initial")
 
-        # Find a deployed prompt file
-        prompts_dir = temp_project / ".github" / "prompts"
-        if not prompts_dir.exists():
-            pytest.skip("No prompts deployed by sample-package")
-
-        prompt_files = list(prompts_dir.glob("*.prompt.md"))
-        if not prompt_files:
-            pytest.skip("No prompt files found")
-
+        project_dir = packaged_sample.project.root
+        prompt_files = list((project_dir / ".github" / "prompts").glob("*.prompt.md"))
+        assert prompt_files, "Fixture package must deploy a prompt"
         target_file = prompt_files[0]
-        target_name = target_file.name  # noqa: F841
 
-        # Delete the lockfile to clear deployed_files tracking, then create
-        # a user-authored file at the same path
-        lock_path = temp_project / "apm.lock.yaml"
-        lock_path.unlink(missing_ok=True)
-
+        (project_dir / "apm.lock.yaml").unlink()
         user_content = "# User-authored content - DO NOT OVERWRITE\n"
-        target_file.write_text(user_content)
+        target_file.write_text(user_content, encoding="utf-8")
 
-        # Re-install (should detect collision and skip)
-        result2 = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result2.returncode == 0, f"Re-install failed: {result2.stderr}\n{result2.stdout}"
-
-        # User content should be preserved
-        assert target_file.read_text() == user_content, (
+        _install(packaged_sample, scenario_id="deployed-files-collision-reinstall")
+        assert target_file.read_text(encoding="utf-8") == user_content, (
             "User-authored file was overwritten during re-install"
         )
 
-    def test_force_flag_overwrites_collision(self, temp_project, apm_binary_path):
+    def test_force_flag_overwrites_collision(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
         """--force should overwrite even user-authored files."""
-        # First install
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0
+        _install(packaged_sample, scenario_id="deployed-files-force-initial")
 
-        prompts_dir = temp_project / ".github" / "prompts"
-        if not prompts_dir.exists():
-            pytest.skip("No prompts deployed by sample-package")
-
-        prompt_files = list(prompts_dir.glob("*.prompt.md"))
-        if not prompt_files:
-            pytest.skip("No prompt files found")
-
+        project_dir = packaged_sample.project.root
+        prompt_files = list((project_dir / ".github" / "prompts").glob("*.prompt.md"))
+        assert prompt_files, "Fixture package must deploy a prompt"
         target_file = prompt_files[0]
 
-        # Delete lockfile to clear tracking, then create user file
-        lock_path = temp_project / "apm.lock.yaml"
-        lock_path.unlink(missing_ok=True)
-
+        (project_dir / "apm.lock.yaml").unlink()
         user_content = "# User-authored content\n"
-        target_file.write_text(user_content)
+        target_file.write_text(user_content, encoding="utf-8")
 
-        # Re-install with --force
-        result2 = _run_apm(
-            apm_binary_path,
-            ["install", "microsoft/apm-sample-package", "--force"],
-            temp_project,
+        _install(
+            packaged_sample,
+            scenario_id="deployed-files-force-reinstall",
+            args=("--force",),
         )
-        assert result2.returncode == 0
-
-        # User content should be overwritten
-        assert target_file.read_text() != user_content, (
+        assert target_file.read_text(encoding="utf-8") != user_content, (
             "--force did not overwrite the user-authored file"
         )
-
-
-# ---------------------------------------------------------------------------
-# Re-install preserves manifest
-# ---------------------------------------------------------------------------
 
 
 class TestReinstallPreservesManifest:
     """Verify that re-install updates deployed_files correctly."""
 
-    def test_reinstall_same_package_updates_lockfile(self, temp_project, apm_binary_path):
-        """Re-installing the same package should keep deployed_files in lockfile."""
-        # First install
-        result1 = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+    def test_reinstall_same_package_updates_lockfile(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
+        """Re-installing the same package should keep deployed_files in apm.lock."""
+        _install(packaged_sample, scenario_id="deployed-files-reinstall-initial")
+
+        project_dir = packaged_sample.project.root
+        first_dependency = _get_locked_dep(_read_lockfile(project_dir), DEPENDENCY)
+        assert first_dependency is not None
+        first_files = first_dependency.get("deployed_files", [])
+        assert isinstance(first_files, list)
+
+        result = packaged_sample.run(("install",), scenario_id="deployed-files-reinstall-replay")
+        assert result.returncode == 0, f"Re-install failed: {result.stderr}\n{result.stdout}"
+
+        second_dependency = _get_locked_dep(_read_lockfile(project_dir), DEPENDENCY)
+        assert second_dependency is not None
+        second_files = second_dependency.get("deployed_files", [])
+        assert isinstance(second_files, list)
+        assert sorted(first_files) == sorted(second_files), (
+            f"deployed_files changed after re-install:\n"
+            f"  Before: {first_files}\n"
+            f"  After: {second_files}"
         )
-        assert result1.returncode == 0
-
-        lockfile1 = _read_lockfile(temp_project)
-        dep1 = _get_locked_dep(lockfile1, "microsoft/apm-sample-package")
-        files1 = dep1.get("deployed_files", []) if dep1 else []
-
-        # Second install
-        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
-        assert result2.returncode == 0
-
-        lockfile2 = _read_lockfile(temp_project)
-        dep2 = _get_locked_dep(lockfile2, "microsoft/apm-sample-package")
-        files2 = dep2.get("deployed_files", []) if dep2 else []
-
-        # Should be the same set (possibly different order)
-        assert sorted(files1) == sorted(files2), (
-            f"deployed_files changed after re-install:\n  Before: {files1}\n  After: {files2}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Prune cleans deployed files
-# ---------------------------------------------------------------------------
 
 
 class TestPruneDeployedFiles:
     """Verify that prune removes deployed files for pruned packages."""
 
-    def test_prune_removes_deployed_files(self, temp_project, apm_binary_path):
-        """After removing a package from apm.yml and pruning, deployed files should be cleaned."""
-        # Install a package
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+    def test_prune_removes_deployed_files(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
+        """Pruning a removed package should clean its deployed files."""
+        _install(packaged_sample, scenario_id="deployed-files-prune-initial")
 
-        # Read deployed files before prune
-        lockfile = _read_lockfile(temp_project)
-        dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
-        if not dep or not dep.get("deployed_files"):
-            pytest.skip("No deployed_files tracked for this package")
+        project_dir = packaged_sample.project.root
+        dependency = _get_locked_dep(_read_lockfile(project_dir), DEPENDENCY)
+        assert dependency is not None
+        deployed_files = dependency.get("deployed_files", [])
+        assert isinstance(deployed_files, list)
+        existing_files = [
+            rel_path
+            for rel_path in deployed_files
+            if isinstance(rel_path, str) and (project_dir / rel_path).exists()
+        ]
+        assert existing_files, "No deployed files exist on disk"
 
-        deployed = dep["deployed_files"]
-        existing_files = [f for f in deployed if (temp_project / f).exists()]
-        assert len(existing_files) > 0, "No deployed files exist on disk"
+        _remove_dependency(project_dir)
 
-        # Remove the package from apm.yml
-        apm_yml = temp_project / "apm.yml"
-        apm_yml.write_text(
-            "name: deployed-files-test\n"
-            "version: 1.0.0\n"
-            "description: Test project\n"
-            "dependencies:\n"
-            "  apm: []\n"
-            "  mcp: []\n"
-        )
-
-        # Run prune
-        result2 = _run_apm(apm_binary_path, ["prune"], temp_project)
-        assert result2.returncode == 0, f"Prune failed: {result2.stderr}\n{result2.stdout}"
-
-        # Verify deployed files were cleaned up
+        result = packaged_sample.run(("prune",), scenario_id="deployed-files-prune")
+        assert result.returncode == 0, f"Prune failed: {result.stderr}\n{result.stdout}"
         for rel_path in existing_files:
-            full_path = temp_project / rel_path
-            assert not full_path.exists(), f"Deployed file {rel_path} was not cleaned up by prune"
+            assert not (project_dir / rel_path).exists(), (
+                f"Deployed file {rel_path} was not cleaned up by prune"
+            )
 
-    def test_prune_removes_package_from_lockfile(self, temp_project, apm_binary_path):
+    def test_prune_removes_package_from_lockfile(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
         """After prune, the pruned package should not be in apm.lock."""
-        # Install
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result.returncode == 0
+        _install(packaged_sample, scenario_id="deployed-files-prune-lock-initial")
 
-        # Remove from apm.yml
-        apm_yml = temp_project / "apm.yml"
-        apm_yml.write_text("name: deployed-files-test\nversion: 1.0.0\ndependencies:\n  apm: []\n")
+        project_dir = packaged_sample.project.root
+        _remove_dependency(project_dir)
 
-        # Prune
-        result2 = _run_apm(apm_binary_path, ["prune"], temp_project)
-        assert result2.returncode == 0
+        result = packaged_sample.run(("prune",), scenario_id="deployed-files-prune-lock")
+        assert result.returncode == 0, f"Prune failed: {result.stderr}\n{result.stdout}"
 
-        # Lockfile should not have the pruned package
-        lockfile = _read_lockfile(temp_project)
+        lockfile = _read_lockfile(project_dir)
         if lockfile and "dependencies" in lockfile:
-            dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
-            assert dep is None, "Pruned package still in apm.lock"
-
-
-# ---------------------------------------------------------------------------
-# Uninstall cleans deployed files
-# ---------------------------------------------------------------------------
+            assert _get_locked_dep(lockfile, DEPENDENCY) is None, "Pruned package still in apm.lock"
 
 
 class TestUninstallDeployedFiles:
     """Verify that uninstall removes deployed files for the package."""
 
-    def test_uninstall_removes_deployed_files(self, temp_project, apm_binary_path):
+    def test_uninstall_removes_deployed_files(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
         """Uninstalling a package should clean up its deployed files."""
-        # Install
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        _install(packaged_sample, scenario_id="deployed-files-uninstall-initial")
+
+        project_dir = packaged_sample.project.root
+        dependency = _get_locked_dep(_read_lockfile(project_dir), DEPENDENCY)
+        assert dependency is not None
+        deployed_files = dependency.get("deployed_files", [])
+        assert isinstance(deployed_files, list)
+        existing_before = [
+            rel_path
+            for rel_path in deployed_files
+            if isinstance(rel_path, str) and (project_dir / rel_path).exists()
+        ]
+
+        result = packaged_sample.run(
+            ("uninstall", DEPENDENCY),
+            scenario_id="deployed-files-uninstall",
         )
-        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
-
-        # Record deployed files
-        lockfile = _read_lockfile(temp_project)
-        dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
-        if not dep or not dep.get("deployed_files"):
-            pytest.skip("No deployed_files tracked")
-
-        deployed = dep["deployed_files"]
-        existing_before = [f for f in deployed if (temp_project / f).exists()]
-
-        # Uninstall
-        result2 = _run_apm(
-            apm_binary_path, ["uninstall", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result2.returncode == 0, f"Uninstall failed: {result2.stderr}\n{result2.stdout}"
-
-        # Deployed files should be cleaned
+        assert result.returncode == 0, f"Uninstall failed: {result.stderr}\n{result.stdout}"
         for rel_path in existing_before:
-            full_path = temp_project / rel_path
-            assert not full_path.exists(), (
+            assert not (project_dir / rel_path).exists(), (
                 f"Deployed file {rel_path} was not cleaned up by uninstall"
             )
 
-    def test_uninstall_removes_package_dir(self, temp_project, apm_binary_path):
+    def test_uninstall_removes_package_dir(
+        self,
+        packaged_sample: HermeticPackagedSample,
+    ) -> None:
         """Uninstalling should remove the package from apm_modules/."""
-        # Install
-        result = _run_apm(
-            apm_binary_path, ["install", "microsoft/apm-sample-package"], temp_project
+        _install(packaged_sample, scenario_id="deployed-files-uninstall-dir-initial")
+
+        project_dir = packaged_sample.project.root
+        package_dir = project_dir / "apm_modules" / "microsoft" / "apm-sample-package"
+        assert package_dir.exists(), "Package not installed"
+
+        result = packaged_sample.run(
+            ("uninstall", DEPENDENCY),
+            scenario_id="deployed-files-uninstall-dir",
         )
-        assert result.returncode == 0
-
-        pkg_dir = temp_project / "apm_modules" / "microsoft" / "apm-sample-package"
-        assert pkg_dir.exists(), "Package not installed"
-
-        # Uninstall
-        result2 = _run_apm(
-            apm_binary_path, ["uninstall", "microsoft/apm-sample-package"], temp_project
-        )
-        assert result2.returncode == 0
-
-        assert not pkg_dir.exists(), "Package dir not removed after uninstall"
+        assert result.returncode == 0, f"Uninstall failed: {result.stderr}\n{result.stdout}"
+        assert not package_dir.exists(), "Package dir not removed after uninstall"
