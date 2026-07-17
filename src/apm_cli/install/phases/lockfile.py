@@ -380,23 +380,21 @@ class LockfileBuilder:
                         # OR package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
                     elif retained := retained_orphans.get(dep_key):
-                        retained_dep = copy.deepcopy(dep)
-                        retained_dep.deployed_files = [
-                            path for path in dep.deployed_files if path in retained
-                        ]
-                        retained_dep.deployed_file_hashes = {
+                        retained_files = [path for path in dep.deployed_files if path in retained]
+                        retained_hashes = {
                             path: dep.deployed_file_hashes[path]
-                            for path in retained_dep.deployed_files
+                            for path in retained_files
                             if path in dep.deployed_file_hashes
                         }
+                        retained_dep = copy.deepcopy(dep)
                         lockfile.dependencies[dep_key] = retained_dep
                         from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
                         DeploymentLedgerCodec.replace_legacy_owner(
                             lockfile,
                             dep_key,
-                            retained_dep.deployed_files,
-                            retained_dep.deployed_file_hashes,
+                            retained_files,
+                            retained_hashes,
                         )
                     # else: orphan -- package was in lockfile but is no longer in
                     # the manifest (full install only). Don't preserve so the
