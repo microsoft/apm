@@ -109,6 +109,8 @@ def _run_lockfile_phase_and_mcp_persist(
     project_root: Path,
     package: APMPackage,
     instant: datetime,
+    *,
+    mcp_target_servers: dict[str, list[str]] | None = None,
 ) -> None:
     lock_path = get_lockfile_path(project_root)
     dep_ref = package.get_apm_dependencies()[0]
@@ -138,6 +140,7 @@ def _run_lockfile_phase_and_mcp_persist(
             MCPIntegrator.get_server_names(mcp_deps),
             lock_path,
             mcp_configs=MCPIntegrator.get_server_configs(mcp_deps),
+            mcp_target_servers=mcp_target_servers,
         )
 
 
@@ -262,6 +265,35 @@ def test_unchanged_mcp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
     assert second_lock is not None
 
     assert second_lock.generated_at == first_lock.generated_at
+    assert second_bytes == first_bytes
+
+
+def test_unchanged_mcp_target_servers_do_not_rewrite_lockfile(tmp_path: Path) -> None:
+    """Regression for #2297: a populated mcp_target_servers must not churn generated_at."""
+    package = _write_manifest_with_mcp(tmp_path)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    target_servers = {"claude": ["atlassian"]}
+
+    _run_lockfile_phase_and_mcp_persist(
+        tmp_path, package, first_instant, mcp_target_servers=target_servers
+    )
+    lock_path = get_lockfile_path(tmp_path)
+    first_bytes = lock_path.read_bytes()
+    first_lock = LockFile.read(lock_path)
+    assert first_lock is not None
+    assert first_lock.generated_at == first_instant.isoformat()
+    assert first_lock.mcp_target_servers == target_servers
+
+    _run_lockfile_phase_and_mcp_persist(
+        tmp_path, package, second_instant, mcp_target_servers=target_servers
+    )
+    second_bytes = lock_path.read_bytes()
+    second_lock = LockFile.read(lock_path)
+    assert second_lock is not None
+
+    assert second_lock.generated_at == first_lock.generated_at
+    assert second_lock.mcp_target_servers == target_servers
     assert second_bytes == first_bytes
 
 
