@@ -593,6 +593,21 @@ if ! grep -q 'with_derived_provider_coordinates' \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC15: post-uninstall reachability owner authority"
+if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
+    src/apm_cli/commands/uninstall/engine.py; then
+    echo "[x] Uninstall engine must call deps/reachability.py's compute_forward_reachable_keys"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "Only deps/reachability.py may walk an installed package's own manifest dependencies" \
+    'get_apm_dependencies' \
+    $(find src/apm_cli/commands/uninstall -name '*.py')
+check_pattern \
+    "Uninstall must not re-derive a parallel local-anchor reachability walk" \
+    'resolve_local_dep_dir' \
+    $(find src/apm_cli/commands/uninstall -name '*.py')
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1
