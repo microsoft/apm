@@ -85,12 +85,23 @@ def run(ctx: InstallContext) -> None:
                 diagnostics=diagnostics,
                 recorded_hashes=_prev_hashes,
             )
-            # Failed paths stay in lockfile so we retry next time.
+            # Every cleanup refusal stays in the lockfile so it can be retried
+            # or reviewed without losing the previous ownership claim.
             from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
             DeploymentLedgerCodec.replace_context_local_files(
                 ctx,
-                [*ctx.local_deployed_files, *_cleanup_result.failed],
+                [
+                    *ctx.local_deployed_files,
+                    *(
+                        path
+                        for path in _cleanup_result.retained
+                        if path not in ctx.local_deployed_files
+                    ),
+                ],
+            )
+            ctx.local_cleanup_retained.update(
+                {path: _prev_hashes.get(path) for path in _cleanup_result.retained}
             )
             if _cleanup_result.deleted_targets:
                 BaseIntegrator.cleanup_empty_parents(
@@ -112,6 +123,9 @@ def run(ctx: InstallContext) -> None:
 
     _lock_path = _get_lfp(ctx.apm_dir)
     _persist_lock = _LF.read(_lock_path) or _LF()
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    _prior_ledger = DeploymentLedgerCodec.from_lockfile(_persist_lock)
     # Target-scoped union: preserve project-root files deployed by OTHER
     # targets (a prior install) rather than clobbering them. Symmetric with
     # the per-dependency reconciliation in phases/lockfile.py and with
@@ -121,7 +135,10 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.install.phases.targets import declared_target_profiles
 
     _current_files = sorted(ctx.local_deployed_files)
-    _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
+    _current_hashes = _hash_deployed(
+        (path for path in ctx.local_deployed_files if path not in ctx.local_cleanup_retained),
+        ctx.project_root,
+    )
     _ghost_count = 0
 
     def _log_local_ghost_drop(path: str) -> None:
@@ -143,8 +160,10 @@ def run(ctx: InstallContext) -> None:
         declared_targets=declared_target_profiles(ctx),
         diagnostics=ctx.diagnostics,
         on_ghost_drop=_log_local_ghost_drop,
+        prior_ledger=_prior_ledger,
+        cleanup_retained_hashes=ctx.local_cleanup_retained,
+        current_run_trusted=not _local_had_errors,
     )
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     DeploymentLedgerCodec.replace_legacy_owner(_persist_lock, ".", sorted(_files), _hashes)
     if logger and _ghost_count:

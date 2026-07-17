@@ -14,9 +14,20 @@ gate (deployed-files-present, content-integrity, drift).
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import pytest
+
+from apm_cli.core.deployment_state import (
+    DeploymentLedger,
+    DeploymentLocator,
+    DeploymentRecord,
+    LocatorKind,
+)
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
+from apm_cli.integration.cleanup import CleanupResult
+from apm_cli.utils.content_hash import compute_file_hash
 
 
 def _target(name, root_dir=None, deploy_roots=None):
@@ -94,11 +105,40 @@ class TestAttachDeployedFilesUnion:
         LockfileBuilder(ctx)._attach_deployed_files(new)
 
         dep = new.get_dependency(key)
-        # current-target URI row replaced
+        # The native URI adapter did not delete the old URI, so its prior
+        # provenance remains until a later successful cleanup can prove removal.
         assert "copilot-app-db://workflows/new-id" in dep.deployed_files
-        assert "copilot-app-db://workflows/old-id" not in dep.deployed_files
+        assert "copilot-app-db://workflows/old-id" in dep.deployed_files
         # other-target file rows preserved
         assert ".agents/skills/demo/SKILL.md" in dep.deployed_files
+
+    def test_orphan_cleanup_refusal_retains_existing_owner(self):
+        """An orphan retained on disk must keep its prior lockfile owner."""
+        key = "owner/pkg"
+        path = ".agents/skills/alpha/SKILL.md"
+        prior = LockFile()
+        prior.add_dependency(
+            LockedDependency(
+                repo_url=key,
+                deployed_files=[path],
+                deployed_file_hashes={path: "sha256:original"},
+            )
+        )
+        lockfile = LockFile()
+        ctx = SimpleNamespace(
+            existing_lockfile=prior,
+            only_packages=None,
+            intended_dep_keys=set(),
+            update_refs=False,
+            orphan_cleanup_retained={key: {path: "sha256:original"}},
+        )
+
+        LockfileBuilder(ctx)._merge_existing(lockfile)
+
+        retained = lockfile.get_dependency(key)
+        assert retained is not None
+        assert retained.deployed_files == [path]
+        assert retained.deployed_file_hashes == {path: "sha256:original"}
 
     def test_file_target_reinstall_drops_stale_in_target_files(self, tmp_path):
         """A same-target reinstall must still drop files removed from the
@@ -168,6 +208,248 @@ class TestCurrentInstallGovernance:
 
         _file_roots, uri_schemes = install_governance([_target("copilot-app")])
         assert any(s.startswith("copilot-app-db://") for s in uri_schemes)
+
+    def test_generic_agents_rows_contract_from_current_skill_claims(self, tmp_path):
+        """Current claims supersede legacy generic rows and remove stale twins."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        shared = ".agents/skills/shared/SKILL.md"
+        beta_only = ".agents/skills/beta-only/SKILL.md"
+        alpha_only = ".agents/skills/alpha-only/SKILL.md"
+        for path, content in (
+            (shared, "shared"),
+            (beta_only, "beta"),
+            (alpha_only, "alpha"),
+        ):
+            target = tmp_path / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        prior_hashes = {
+            path: compute_file_hash(tmp_path / path) for path in (shared, beta_only, alpha_only)
+        }
+        generic_records = {}
+        for path, owner in ((shared, "beta"), (beta_only, "beta"), (alpha_only, "alpha")):
+            locator = DeploymentLocator(
+                kind=LocatorKind.PROJECT_RELATIVE,
+                target="agents",
+                value=path,
+                runtime=None,
+                scope="project",
+            )
+            generic_records[locator.key] = DeploymentRecord(
+                locator=locator,
+                owners=(owner,),
+                active_owner=owner,
+                content_hash=prior_hashes[path],
+            )
+
+        files, hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[shared, beta_only],
+            current_hashes={shared: "sha256:shared-current", beta_only: "sha256:beta-current"},
+            prior_files=[shared, beta_only, alpha_only],
+            prior_hashes=prior_hashes,
+            active_targets=[_known("cursor")],
+            declared_targets=[_known("cursor")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=DeploymentLedger(records=generic_records),
+        )
+
+        assert files == [shared, beta_only]
+        assert hashes == {shared: "sha256:shared-current", beta_only: "sha256:beta-current"}
+        assert not (tmp_path / alpha_only).exists()
+
+    def test_user_edited_generic_agents_row_remains_tracked(self, tmp_path):
+        """A generic row survives contraction when cleanup cannot prove ownership."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        alpha_only = ".agents/skills/alpha-only/SKILL.md"
+        alpha_path = tmp_path / alpha_only
+        alpha_path.parent.mkdir(parents=True)
+        alpha_path.write_text("user edit", encoding="utf-8")
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="agents",
+            value=alpha_only,
+            runtime=None,
+            scope="project",
+        )
+        prior_hash = "sha256:original"
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("alpha",),
+                    active_owner="alpha",
+                    content_hash=prior_hash,
+                )
+            }
+        )
+
+        files, hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[],
+            current_hashes={},
+            prior_files=[alpha_only],
+            prior_hashes={alpha_only: prior_hash},
+            active_targets=[_known("cursor")],
+            declared_targets=[_known("cursor")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+        )
+
+        assert files == [alpha_only]
+        assert hashes == {alpha_only: prior_hash}
+        assert alpha_path.read_text(encoding="utf-8") == "user edit"
+
+    def test_generic_agents_row_is_preserved_when_current_run_failed(self, tmp_path):
+        """An integration error is not permission to contract an existing row."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        alpha_only = ".agents/skills/alpha-only/SKILL.md"
+        alpha_path = tmp_path / alpha_only
+        alpha_path.parent.mkdir(parents=True)
+        alpha_path.write_text("original", encoding="utf-8")
+        original_hash = compute_file_hash(alpha_path)
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="agents",
+            value=alpha_only,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("alpha",),
+                    active_owner="alpha",
+                    content_hash=original_hash,
+                )
+            }
+        )
+
+        files, hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[],
+            current_hashes={},
+            prior_files=[alpha_only],
+            prior_hashes={alpha_only: original_hash},
+            active_targets=[_known("cursor")],
+            declared_targets=[_known("cursor")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+            current_run_trusted=False,
+        )
+
+        assert files == [alpha_only]
+        assert hashes == {alpha_only: original_hash}
+        assert alpha_path.read_text(encoding="utf-8") == "original"
+
+    def test_cleanup_retention_never_rehashes_a_user_edited_path(self, tmp_path):
+        """A cleanup refusal keeps its original provenance instead of adopting edits."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        alpha_only = ".agents/skills/alpha-only/SKILL.md"
+        alpha_path = tmp_path / alpha_only
+        alpha_path.parent.mkdir(parents=True)
+        alpha_path.write_text("user edit", encoding="utf-8")
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="agents",
+            value=alpha_only,
+            runtime=None,
+            scope="project",
+        )
+        original_hash = "sha256:original"
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("alpha",),
+                    active_owner="alpha",
+                    content_hash=original_hash,
+                )
+            }
+        )
+
+        files, hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[alpha_only],
+            current_hashes={alpha_only: "sha256:user-edit"},
+            prior_files=[alpha_only],
+            prior_hashes={alpha_only: original_hash},
+            active_targets=[_known("cursor")],
+            declared_targets=[_known("cursor")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+            cleanup_retained_hashes={alpha_only: original_hash},
+        )
+
+        assert files == [alpha_only]
+        assert hashes == {alpha_only: original_hash}
+        assert alpha_path.read_text(encoding="utf-8") == "user edit"
+
+    @pytest.mark.parametrize(
+        "cleanup_result",
+        (
+            CleanupResult(failed=["cowork://skills/alpha/SKILL.md"]),
+            CleanupResult(skipped_user_edit=["cowork://skills/alpha/SKILL.md"]),
+            CleanupResult(skipped_unmanaged=["cowork://skills/alpha/SKILL.md"]),
+        ),
+    )
+    def test_uri_cleanup_retains_its_existing_provenance(self, tmp_path, cleanup_result):
+        """Every URI cleanup refusal remains auditable for a later retry."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        uri = "cowork://skills/alpha/SKILL.md"
+        locator = DeploymentLocator(
+            kind=LocatorKind.URI,
+            target="copilot-cowork",
+            value=uri,
+            runtime=None,
+            scope="project",
+        )
+        original_hash = "sha256:original"
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("alpha",),
+                    active_owner="alpha",
+                    content_hash=original_hash,
+                )
+            }
+        )
+
+        with patch(
+            "apm_cli.integration.cleanup.remove_stale_deployed_files",
+            return_value=cleanup_result,
+        ):
+            files, hashes = reconcile_deployed_block(
+                project_root=tmp_path,
+                dep_key="owner/pkg",
+                current_files=[],
+                current_hashes={},
+                prior_files=[uri],
+                prior_hashes={uri: original_hash},
+                active_targets=[_known("cursor")],
+                declared_targets=[_known("cursor")],
+                diagnostics=DiagnosticCollector(),
+                prior_ledger=ledger,
+            )
+
+        assert files == [uri]
+        assert hashes == {uri: original_hash}
 
 
 class TestLocalDeployedFilesUnion:

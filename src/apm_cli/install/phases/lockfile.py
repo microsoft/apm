@@ -205,6 +205,11 @@ class LockfileBuilder:
         from apm_cli.install.phases.targets import declared_target_profiles
 
         existing = self.ctx.existing_lockfile
+        prior_ledger = None
+        if existing is not None:
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            prior_ledger = DeploymentLedgerCodec.from_lockfile(existing)
         prior_files_by_package: dict[str, list[str]] = {}
         prior_hashes_by_package: dict[str, dict[str, str]] = {}
         for dep_key in lockfile.dependencies:
@@ -229,11 +234,16 @@ class LockfileBuilder:
             from apm_cli.utils.diagnostics import DiagnosticCollector
 
             diagnostics = DiagnosticCollector()
+        cleanup_retained = getattr(self.ctx, "package_cleanup_retained", {})
         ghost_count = 0
         for dep_key in lockfile.dependencies:
             claim = package_claims[dep_key]
             current = list(claim.current_files)
-            current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
+            retained_hashes = cleanup_retained.get(dep_key, {})
+            current_hashes = compute_deployed_hashes(
+                (path for path in current if path not in retained_hashes),
+                self.ctx.project_root,
+            )
             prior_files = list(claim.prior_files)
             prior_hashes = claim.prior_hashes
 
@@ -258,6 +268,9 @@ class LockfileBuilder:
                 declared_targets=declared,
                 diagnostics=diagnostics,
                 on_ghost_drop=_log_ghost_drop,
+                prior_ledger=prior_ledger,
+                cleanup_retained_hashes=retained_hashes,
+                current_run_trusted=diagnostics.count_for_package(dep_key, "error") == 0,
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;
@@ -350,12 +363,32 @@ class LockfileBuilder:
 
     def _merge_existing(self, lockfile: LockFile) -> None:
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
+            retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
             for dep_key, dep in self.ctx.existing_lockfile.dependencies.items():
                 if dep_key not in lockfile.dependencies:
                     if self.ctx.only_packages or dep_key in self.ctx.intended_dep_keys:
                         # Preserve: partial install (sequential install support)
                         # OR package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
+                    elif retained := retained_orphans.get(dep_key):
+                        retained_dep = copy.deepcopy(dep)
+                        retained_dep.deployed_files = [
+                            path for path in dep.deployed_files if path in retained
+                        ]
+                        retained_dep.deployed_file_hashes = {
+                            path: dep.deployed_file_hashes[path]
+                            for path in retained_dep.deployed_files
+                            if path in dep.deployed_file_hashes
+                        }
+                        lockfile.dependencies[dep_key] = retained_dep
+                        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+                        DeploymentLedgerCodec.replace_legacy_owner(
+                            lockfile,
+                            dep_key,
+                            retained_dep.deployed_files,
+                            retained_dep.deployed_file_hashes,
+                        )
                     # else: orphan -- package was in lockfile but is no longer in
                     # the manifest (full install only). Don't preserve so the
                     # lockfile stays in sync with what apm.yml declares.

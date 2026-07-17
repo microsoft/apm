@@ -242,6 +242,15 @@ if [ "$cleanup_claim_status" -ne 0 ]; then
     echo "$cleanup_claim_output"
     violations=$((violations + 1))
 fi
+shared_target_contraction="src/apm_cli/install/manifest_reconcile.py"
+shared_target_output=$(python3 scripts/check_shared_target_contraction_owner.py \
+    "$shared_target_contraction" 2>&1)
+shared_target_status=$?
+if [ "$shared_target_status" -ne 0 ]; then
+    echo "[x] Shared target contraction must use DeploymentReconciler"
+    echo "$shared_target_output"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
