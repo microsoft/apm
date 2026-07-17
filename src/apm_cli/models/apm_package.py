@@ -6,10 +6,11 @@ Dependency and validation types have been extracted to sibling modules
 compatibility.
 """
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -34,6 +35,11 @@ from .validation import (
     validate_apm_package,
 )
 
+if TYPE_CHECKING:
+    from apm_cli.deps.lockfile import LockFile
+
+_log = logging.getLogger(__name__)
+
 # Re-export all moved symbols so `from apm_cli.models.apm_package import X` keeps working
 __all__ = [  # noqa: RUF022
     # Backward-compatible re-exports from .dependency
@@ -54,7 +60,9 @@ __all__ = [  # noqa: RUF022
     # Defined in this module
     "APMPackage",
     "PackageInfo",
+    "build_installed_package_info",
     "clear_apm_yml_cache",
+    "surviving_dependency_refs_for_reintegration",
 ]
 
 # Module-level parse cache: (resolved apm.yml path, resolved source dir) ->
@@ -803,3 +811,47 @@ def build_installed_package_info(
         dependency_ref=dep_ref,
         package_type=result.package_type if result else None,
     )
+
+
+def surviving_dependency_refs_for_reintegration(
+    apm_package: "APMPackage",
+    project_root: Path,
+    *,
+    lockfile: "LockFile | None" = None,
+) -> list[DependencyReference]:
+    """Return packages still present after removal, for clear+rebuild.
+
+    Prefer lockfile package dependencies (direct *and* transitive,
+    excluding the virtual ``"."`` self-entry). Callers that already hold
+    a post-removal in-memory lockfile (``apm uninstall``) must pass it
+    explicitly -- the on-disk lockfile is still stale until uninstall
+    writes it. When *lockfile* is omitted, the on-disk lockfile under
+    *project_root* is loaded (safe for ``apm prune``, which writes the
+    lockfile before hook reconciliation).
+
+    Falls back to ``apm_package.get_all_apm_dependencies()`` (manifest
+    directs only) when no lockfile is available.
+    """
+    # Deferred: LockFile imports DependencyReference from this module.
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    resolved = lockfile
+    lockfile_source = "caller-provided"
+    if resolved is None:
+        lockfile_source = "on-disk"
+        resolved = LockFile.read(get_lockfile_path(project_root))
+    if resolved is not None:
+        deps = [dep.to_dependency_ref() for dep in resolved.get_package_dependencies()]
+        _log.debug(
+            "Survivor set for re-integration: %d package(s) from %s lockfile",
+            len(deps),
+            lockfile_source,
+        )
+        return deps
+    deps = list(apm_package.get_all_apm_dependencies())
+    _log.debug(
+        "Survivor set for re-integration: %d package(s) from manifest fallback "
+        "(lockfile unavailable)",
+        len(deps),
+    )
+    return deps
