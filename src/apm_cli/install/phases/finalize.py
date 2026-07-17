@@ -32,15 +32,25 @@ def _has_dep_instruction_files(ctx: InstallContext) -> bool:
     """Return True if any installed dep directory contains ``.instructions.md`` files.
 
     Scans ``apm_modules/`` for ``*.instructions.md`` files under any
-    ``.apm/instructions/`` subdirectory.  Kept deliberately lightweight --
-    imports are lazy to avoid pulling the discovery package into the hot
-    install path.
+    ``.apm/instructions/`` subdirectory, including dependencies installed by
+    earlier runs.  The all-modules scan is intentionally conservative: after
+    any successful install, every dependency instruction must be represented
+    in the next compile.  Imports stay lazy to keep the common no-hint path
+    lightweight.
     """
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
     apm_modules = (ctx.apm_modules_dir or (ctx.project_root / "apm_modules")).resolve()
     if not apm_modules.is_dir():
         return False
 
     for candidate in apm_modules.rglob("*.instructions.md"):
+        try:
+            candidate = ensure_path_within(candidate, apm_modules)
+        except PathTraversalError:
+            continue
+        if not candidate.is_file():
+            continue
         # Only count files that live inside a ``.apm/instructions/`` subtree,
         # which is where ``_copy_local_package`` and the bundle staging logic
         # place compile-only instruction files.
@@ -99,7 +109,7 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
         targets = ", ".join(target_names)
         message = (
             f"Instructions installed for {targets}. "
-            "Run 'apm compile' to update root context files."
+            "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md."
         )
         ctx.logger.info(message, symbol="info")
 

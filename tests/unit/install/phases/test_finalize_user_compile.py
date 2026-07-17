@@ -17,6 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -403,8 +405,31 @@ class TestHintProjectCompileNeeded:
 
         ctx.logger.info.assert_called_once()
         message = ctx.logger.info.call_args.args[0]
-        assert "apm compile" in message
-        assert "Gemini CLI" in message
+        assert message == (
+            "Instructions installed for Gemini CLI. "
+            "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md."
+        )
+
+    def test_instruction_scan_ignores_symlink_outside_apm_modules(self, tmp_path):
+        """An escaping instruction symlink cannot trigger the compile hint."""
+        from apm_cli.install.phases.finalize import _has_dep_instruction_files
+
+        apm_modules = tmp_path / "apm_modules"
+        instructions = apm_modules / "pkg" / ".apm" / "instructions"
+        instructions.mkdir(parents=True)
+        outside = tmp_path / "outside.instructions.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        linked_instruction = instructions / "linked.instructions.md"
+        try:
+            linked_instruction.symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation not supported here: {exc}")
+
+        ctx = _make_install_context()
+        ctx.apm_modules_dir = apm_modules
+        ctx.project_root = tmp_path
+
+        assert _has_dep_instruction_files(ctx) is False
 
     def test_hint_not_fired_for_copilot_target(self, tmp_path):
         """Copilot target (native per-file rules) -> no hint."""
