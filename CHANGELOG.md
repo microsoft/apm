@@ -30,10 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Shared `.agents/skills` target contraction now supersedes generic deployment
-  rows by value while preserving entries whose cleanup fails, detects user
-  edits, or refuses unmanaged content, including their original provenance for
-  a later retry. (#2283)
+- Installing packages that share `.agents/skills` no longer leaves duplicate
+  lockfile state or drops prior integrity information when APM must keep a file
+  for a later retry. (#2283)
 - `apm uninstall` no longer deletes a shared transitive dependency that a
   surviving direct dependency still declares (e.g. two packages that both
   depend on the same local or remote package). When a dependency's
