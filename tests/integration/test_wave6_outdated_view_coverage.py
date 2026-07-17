@@ -18,7 +18,7 @@ Target modules
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Never
+from typing import NoReturn
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -660,7 +660,7 @@ class TestOutdatedParallel:
             f"    resolved_commit: {sha}\n",
         )
 
-        def _raise_check_error(*_args: object, **_kwargs: object) -> Never:
+        def _raise_check_error(*_args: object, **_kwargs: object) -> NoReturn:
             raise TypeError("'<' not supported between MagicMock and MagicMock")
 
         with patch(
