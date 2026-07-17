@@ -235,6 +235,9 @@ class LockfileBuilder:
 
             diagnostics = DiagnosticCollector()
         cleanup_retained = getattr(self.ctx, "package_cleanup_retained", {})
+        from apm_cli.core.deployment_state import DeploymentLedger
+
+        canonical_records = {}
         ghost_count = 0
         for dep_key in lockfile.dependencies:
             claim = package_claims[dep_key]
@@ -257,7 +260,7 @@ class LockfileBuilder:
                         f"(target not declared in apm.yml) for {package_key}"
                     )
 
-            files, hashes = reconcile_deployed_block(
+            files, _hashes, ledger = reconcile_deployed_block(
                 project_root=self.ctx.project_root,
                 dep_key=dep_key,
                 current_files=current,
@@ -271,15 +274,21 @@ class LockfileBuilder:
                 prior_ledger=prior_ledger,
                 cleanup_retained_hashes=retained_hashes,
                 current_run_trusted=diagnostics.count_for_package(dep_key, "error") == 0,
+                owner=dep_key,
+                include_ledger=True,
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;
                 # leave deployed_files untouched so the whole-dep
                 # _merge_existing path can preserve it intact.
                 continue
+            canonical_records.update(ledger.records)
             from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
-            DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
+            DeploymentLedgerCodec.apply_to_lockfile(
+                DeploymentLedger(records=canonical_records),
+                lockfile,
+            )
         logger = getattr(self.ctx, "logger", None)
         if logger and ghost_count:
             noun = "entry" if ghost_count == 1 else "entries"

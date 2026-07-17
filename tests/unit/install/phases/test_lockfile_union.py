@@ -140,6 +140,40 @@ class TestAttachDeployedFilesUnion:
         assert retained.deployed_files == [path]
         assert retained.deployed_file_hashes == {path: "sha256:original"}
 
+    def test_lockfile_builder_persists_concrete_row_after_generic_supersession(self, tmp_path):
+        """Lockfile projection must not reintroduce a generic row after reconciliation."""
+        key = "owner/pkg"
+        path = ".agents/skills/demo/SKILL.md"
+        deployed = tmp_path / path
+        deployed.parent.mkdir(parents=True)
+        deployed.write_text("skill", encoding="utf-8")
+        (tmp_path / "apm.yml").write_text("targets:\n  - cursor\n", encoding="utf-8")
+        prior = LockFile()
+        prior.add_dependency(
+            LockedDependency(
+                repo_url=key,
+                deployed_files=[path],
+                deployed_file_hashes={path: compute_file_hash(deployed)},
+            )
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url=key))
+        ctx = _ctx(
+            package_deployed_files={key: [path]},
+            existing_lockfile=prior,
+            targets=[_known("cursor")],
+            project_root=tmp_path,
+        )
+        ctx.apm_package = SimpleNamespace(package_path=tmp_path)
+        ctx.scope = None
+
+        LockfileBuilder(ctx)._attach_deployed_files(lockfile)
+
+        records = tuple(lockfile.deployment_ledger.records.values())
+        assert len(records) == 1
+        assert records[0].locator.target == "cursor"
+        assert records[0].owners == (key,)
+
     def test_file_target_reinstall_drops_stale_in_target_files(self, tmp_path):
         """A same-target reinstall must still drop files removed from the
         package (no false preservation within the governed roots)."""

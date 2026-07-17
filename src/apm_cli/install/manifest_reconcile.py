@@ -109,7 +109,9 @@ def union_preserving(
     prior_ledger: DeploymentLedger | None = None,
     cleanup_retained_hashes: dict[str, str | None] | None = None,
     current_run_trusted: bool = True,
-) -> tuple[list[str], dict[str, str]]:
+    owner: str = "legacy",
+    include_ledger: bool = False,
+) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Union the current install's manifest with preserved other-target entries.
 
     ``current_files`` / ``current_hashes`` describe what THIS install
@@ -188,20 +190,22 @@ def union_preserving(
         for key, record in (prior_ledger.records.items() if prior_ledger is not None else ())
         if record.locator.value in prior_values
     }
+    prior_record_values = {record.locator.value for record in prior_records.values()}
     for path in prior_files or ():
-        if any(record.locator.value == path for record in prior_records.values()):
+        if path in prior_record_values:
             continue
         locator = _locator(path)
         prior_records[locator.key] = DeploymentRecord(
             locator=locator,
-            owners=("legacy",),
-            active_owner="legacy",
+            owners=(owner,),
+            active_owner=owner,
             content_hash=prior_hashes.get(path),
         )
+        prior_record_values.add(path)
     current_results = [
         MaterializationResult(
             locator=_locator(path),
-            owners=frozenset({"legacy"}),
+            owners=frozenset({owner}),
             status=MaterializationStatus.UNCHANGED,
             content_hash=current_hashes.get(path),
             validation=NativePayloadValidation(valid=True, contract="legacy-file"),
@@ -212,7 +216,7 @@ def union_preserving(
     current_results.extend(
         MaterializationResult(
             locator=_locator(path),
-            owners=frozenset({"legacy"}),
+            owners=frozenset({owner}),
             status=MaterializationStatus.FAILED,
             content_hash=prior_hashes.get(path),
             validation=NativePayloadValidation(valid=True, contract="legacy-file"),
@@ -269,7 +273,10 @@ def union_preserving(
     for path in preserved:
         if path in prior_hashes:
             merged_hashes[path] = prior_hashes[path]
-    return list(current_files or ()) + preserved, merged_hashes
+    files = list(current_files or ()) + preserved
+    if include_ledger:
+        return files, merged_hashes, reconciled.ledger
+    return files, merged_hashes
 
 
 def declared_target_profiles(
@@ -377,9 +384,11 @@ def reconcile_deployed_block(
     prior_ledger: DeploymentLedger | None = None,
     cleanup_retained_hashes: dict[str, str | None] | None = None,
     current_run_trusted: bool = True,
-) -> tuple[list[str], dict[str, str]]:
+    owner: str = "legacy",
+    include_ledger: bool = False,
+) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths."""
-    files, hashes = union_preserving(
+    files, hashes, ledger = union_preserving(
         current_files,
         current_hashes,
         prior_files,
@@ -390,9 +399,13 @@ def reconcile_deployed_block(
         prior_ledger=prior_ledger,
         cleanup_retained_hashes=cleanup_retained_hashes,
         current_run_trusted=current_run_trusted,
+        owner=owner,
+        include_ledger=True,
     )
     dropped = set(prior_files) - set(files)
     if not dropped:
+        if include_ledger:
+            return files, hashes, ledger
         return files, hashes
 
     from apm_cli.integration.base_integrator import BaseIntegrator
@@ -411,8 +424,23 @@ def reconcile_deployed_block(
             files.append(path)
         if path in prior_hashes:
             hashes[path] = prior_hashes[path]
+    if cleanup.retained and prior_ledger is not None:
+        from apm_cli.core.deployment_state import DeploymentLedger
+
+        retained_values = set(cleanup.retained)
+        records = dict(ledger.records)
+        records.update(
+            {
+                key: record
+                for key, record in prior_ledger.records.items()
+                if record.locator.value in retained_values
+            }
+        )
+        ledger = DeploymentLedger(records=records)
     if cleanup.deleted_targets:
         BaseIntegrator.cleanup_empty_parents(cleanup.deleted_targets, project_root)
+    if include_ledger:
+        return files, hashes, ledger
     return files, hashes
 
 
