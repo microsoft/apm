@@ -57,6 +57,8 @@ Order of operations is deterministic and worth memorizing:
 
 `apm install` with no arguments installs from the existing manifest. `apm install <package>` adds a new dependency, re-runs the full pipeline, and updates both `apm.yml` and `apm.lock.yaml`. `--dry-run` runs steps 1 and 2 only and prints the plan. If that command bootstraps a new project, it keeps the generated `apm.yml` and explicit target selection while rolling back package and deployment writes.
 
+After narrowing `targets:`, run `apm install` to reconcile obsolete target output. APM removes only unchanged files it owns; edited files remain tracked so `apm audit --ci` can surface them for review.
+
 :::note[Coming from npm?]
 `apm install` mirrors `npm install` deliberately. The big difference: APM also runs a security scan and, if present, an org policy gate before writing deployed files.
 :::

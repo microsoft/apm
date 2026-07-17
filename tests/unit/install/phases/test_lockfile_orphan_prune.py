@@ -30,6 +30,8 @@ def _ctx(*, existing_lockfile, intended_dep_keys, only_packages=None):
         existing_lockfile=existing_lockfile,
         intended_dep_keys=set(intended_dep_keys),
         only_packages=only_packages,
+        lockfile_only=False,
+        installed_packages=[],
     )
 
 
@@ -95,3 +97,36 @@ class TestHasOrphanLockfileEntries:
         written = LockFile.read(lockfile_path)
         assert written is not None
         assert written.get_package_dependencies() == []
+
+    def test_empty_install_reconciles_target_files_before_early_return(self, monkeypatch) -> None:
+        """Target contraction must not depend on installing a package this run."""
+        existing = _existing_with("acme/pkg")
+        ctx = _ctx(
+            existing_lockfile=existing,
+            intended_dep_keys={"acme/pkg"},
+        )
+        observed: list[LockFile | None] = []
+        monkeypatch.setattr(
+            LockfileBuilder,
+            "_sync_cache_pin_markers_from_existing",
+            lambda self: None,
+        )
+        monkeypatch.setattr(
+            LockfileBuilder,
+            "_reconcile_dropped_merge_hook_targets",
+            lambda self: None,
+        )
+        monkeypatch.setattr(
+            LockfileBuilder,
+            "_sync_cache_pin_markers_from_disk",
+            lambda self: None,
+        )
+        monkeypatch.setattr(
+            LockfileBuilder,
+            "_reconcile_target_deployed_files",
+            lambda self, lockfile: observed.append(lockfile),
+        )
+
+        LockfileBuilder(ctx).build_and_save()
+
+        assert observed == [existing]

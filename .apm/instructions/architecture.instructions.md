@@ -42,6 +42,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
 | Compiled-output writes (atomic) | CompiledOutputWriter | `src/apm_cli/compilation/output_writer.py` |
 | Deployment provenance / state | deployment_ledger.py | `src/apm_cli/core/deployment_ledger.py` |
+| Target-scoped deployed-file contraction | install/manifest_reconcile.py (reconcile_target_deployed_files) | `src/apm_cli/install/manifest_reconcile.py` |
 | Install success / failure outcome | the canonical install-outcome path | `src/apm_cli/install/outcome.py` |
 | Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators | `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py` |
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |

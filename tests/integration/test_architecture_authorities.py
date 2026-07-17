@@ -417,6 +417,18 @@ def _load_shared_target_contraction_owner_checker(root: Path) -> ModuleType:
     return module
 
 
+def _load_target_instruction_contraction_owner_checker(root: Path) -> ModuleType:
+    """Import the target-specific instruction contraction owner checker."""
+    module_name = "check_target_instruction_contraction_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_skill_subset_owner_checker() -> ModuleType:
     """Import scripts/check_skill_subset_owner.py as a standalone module.
 
@@ -652,6 +664,23 @@ def test_lockfile_builder_delegates_package_claim_policy() -> None:
         "other_current",
     ):
         assert duplicate not in source
+
+
+def test_target_instruction_contraction_uses_manifest_reconciliation() -> None:
+    """Install lifecycle routing must not own target-file deletion itself."""
+    root = Path(__file__).parents[2]
+    checker = _load_target_instruction_contraction_owner_checker(root)
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert checker.analyze_paths(root) == []
+    assert "AC15a: target-specific instruction contraction authority" in guard
+    assert (
+        "Target-specific instruction contraction must route through manifest_reconcile.py" in guard
+    )
+    assert "Target-scoped deployed-file contraction" in architecture
 
 
 def test_dependency_winner_selection_has_one_algorithm() -> None:

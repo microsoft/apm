@@ -444,7 +444,7 @@ def reconcile_deployed_block(
     return files, hashes
 
 
-def reconcile_deployed_state(
+def reconcile_target_deployed_files(
     *,
     project_root: Path,
     lockfile: LockFile,
@@ -453,7 +453,13 @@ def reconcile_deployed_state(
     diagnostics: DiagnosticCollector,
     user_scope: bool = False,
 ) -> bool:
-    """Prune undeclared-target ownership from every lockfile deployment block."""
+    """Prune undeclared-target file ownership from every lockfile deployment block.
+
+    This is the canonical target-contraction owner for physical deployed
+    files. It calculates stale target-owned rows and delegates every deletion
+    to :func:`reconcile_deployed_block`, which routes through the cleanup
+    chokepoint and its path, directory, and provenance safety gates.
+    """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import _SELF_KEY
     from apm_cli.integration.targets import KNOWN_TARGETS
@@ -523,6 +529,27 @@ def reconcile_deployed_state(
         DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
         changed = True
 
+    return changed
+
+
+def reconcile_deployed_state(
+    *,
+    project_root: Path,
+    lockfile: LockFile,
+    active_targets: list[TargetProfile],
+    declared_targets: list[TargetProfile] | None,
+    diagnostics: DiagnosticCollector,
+    user_scope: bool = False,
+) -> bool:
+    """Reconcile target-scoped deployed files and merge-hook state."""
+    changed = reconcile_target_deployed_files(
+        project_root=project_root,
+        lockfile=lockfile,
+        active_targets=active_targets,
+        declared_targets=declared_targets,
+        diagnostics=diagnostics,
+        user_scope=user_scope,
+    )
     reconcile_dropped_merge_hook_targets(
         project_root,
         active_targets=active_targets,

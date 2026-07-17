@@ -114,6 +114,7 @@ class LockfileBuilder:
             # dependency leaves installed_packages empty, but the lockfile
             # must still be pruned to match apm.yml (see
             # ``_has_orphan_lockfile_entries``).
+            self._reconcile_target_deployed_files(self.ctx.existing_lockfile)
             self._sync_cache_pin_markers_from_disk()
             return
         try:
@@ -161,6 +162,7 @@ class LockfileBuilder:
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
             self._write_if_changed(lockfile, lockfile_path, _LF)
+            self._reconcile_target_deployed_files(lockfile)
             # Self-heal cache pin markers EVERY install, regardless of
             # whether the lockfile YAML changed. This unblocks users
             # whose caches pre-date the supply-chain hardening (PR
@@ -549,6 +551,28 @@ class LockfileBuilder:
         except Exception as exc:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(f"Dropped-target hook reconciliation skipped: {exc}")
+
+    def _reconcile_target_deployed_files(self, lockfile: LockFile | None) -> None:
+        """Apply the canonical file contraction owner to the final lockfile."""
+        if lockfile is None:
+            return
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.deps.lockfile import get_lockfile_path
+        from apm_cli.install.manifest_reconcile import reconcile_target_deployed_files
+        from apm_cli.install.phases.targets import declared_target_profiles
+
+        declared = declared_target_profiles(self.ctx)
+        is_user = getattr(self.ctx, "scope", None) is InstallScope.USER
+        changed = reconcile_target_deployed_files(
+            project_root=self.ctx.project_root,
+            lockfile=lockfile,
+            active_targets=self.ctx.targets,
+            declared_targets=declared,
+            diagnostics=self.ctx.diagnostics,
+            user_scope=is_user,
+        )
+        if changed:
+            lockfile.save(get_lockfile_path(self.ctx.apm_dir))
 
     def _sync_cache_pin_markers_from_existing(self) -> None:
         """Self-heal markers from the pre-existing in-memory lockfile.
