@@ -152,6 +152,22 @@ class TestSpecFileSyntax:
             "See test docstring for context."
         )
 
+    def test_collects_rich_unicode_data_submodules(self):
+        """Rich cell-width tables dynamically import versioned Unicode modules."""
+        source = _SPEC_FILE.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(_SPEC_FILE))
+        collected_packages = [
+            node.args[0].value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "collect_submodules"
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Constant)
+        ]
+
+        assert collected_packages.count("rich._unicode_data") == 1
+
 
 # ---------------------------------------------------------------------------
 # 2. should_use_upx()

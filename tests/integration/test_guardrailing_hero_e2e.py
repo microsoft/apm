@@ -4,7 +4,7 @@ End-to-end test for a typical 2-Minute Guardrailing flow.
 Exercises a guardrailing workflow with mixed package types:
 1. apm init my-project && cd my-project
 2. apm install microsoft/apm-sample-package
-3. apm install github/awesome-copilot/instructions/code-review-generic.instructions.md
+3. apm install microsoft/apm/.apm/instructions/encoding.instructions.md
 4. apm compile
 5. apm run design-review
 
@@ -43,18 +43,6 @@ def run_command(
             result = subprocess.run(
                 cmd,
                 shell=True,
-                check=check,
-                capture_output=False,
-                text=True,
-                timeout=timeout,
-                cwd=cwd,
-                env=env,
-                encoding="utf-8",
-                errors="replace",
-            )
-            result_capture = subprocess.run(
-                cmd,
-                shell=True,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -64,8 +52,11 @@ def run_command(
                 encoding="utf-8",
                 errors="replace",
             )
-            result.stdout = result_capture.stdout
-            result.stderr = result_capture.stderr
+            print(result.stdout, end="")
+            if result.stderr:
+                print(result.stderr, end="")
+            if check:
+                result.check_returncode()
         else:
             result = subprocess.run(
                 cmd,
@@ -96,7 +87,7 @@ class TestGuardrailingHeroScenario:
         Validates:
         1. apm init my-project creates minimal project
         2. apm install microsoft/apm-sample-package succeeds
-        3. apm install github/awesome-copilot/instructions/code-review-generic.instructions.md succeeds
+        3. apm install microsoft/apm/.apm/instructions/encoding.instructions.md succeeds
         4. apm compile produces combined instructions from both packages
         5. apm run design-review executes prompt from first installed package
         """
@@ -135,12 +126,12 @@ class TestGuardrailingHeroScenario:
 
             print("[OK] design-guidelines installed")
 
-            # Step 3: apm install github/awesome-copilot/instructions/code-review-generic.instructions.md
+            # Step 3: install a virtual instruction from this SSO-authorized repository
             print(
-                "\n=== Step 3: apm install github/awesome-copilot/instructions/code-review-generic.instructions.md ==="
+                "\n=== Step 3: apm install microsoft/apm/.apm/instructions/encoding.instructions.md ==="
             )
             result = run_command(
-                f"{apm_binary_path} install github/awesome-copilot/instructions/code-review-generic.instructions.md",
+                f"{apm_binary_path} install microsoft/apm/.apm/instructions/encoding.instructions.md",
                 cwd=project_dir,
                 show_output=True,
                 env=env,
@@ -148,9 +139,7 @@ class TestGuardrailingHeroScenario:
             assert result.returncode == 0, f"instruction package install failed: {result.stderr}"
 
             # Verify installation - virtual file packages use flattened name: owner/repo-name-file-stem
-            instruction_pkg = (
-                project_dir / "apm_modules" / "github" / "awesome-copilot-code-review-generic"
-            )
+            instruction_pkg = project_dir / "apm_modules" / "microsoft" / "apm-encoding"
             assert instruction_pkg.exists(), "instruction package not installed"
 
             # Verify the instruction file was actually downloaded
@@ -159,7 +148,7 @@ class TestGuardrailingHeroScenario:
                 "instruction file not downloaded into virtual package"
             )
 
-            print("[OK] code-review-generic instruction installed")
+            print("[OK] encoding instruction installed")
 
             # Step 4: apm compile
             print("\n=== Step 4: apm compile ===")
@@ -190,14 +179,14 @@ class TestGuardrailingHeroScenario:
             assert "design" in compiled_content, (
                 "Compiled instructions don't contain design-related content from apm-sample-package"
             )
-            assert "review" in compiled_content or "code" in compiled_content, (
-                "Compiled instructions don't contain code-review content from awesome-copilot"
+            assert "printable ascii" in compiled_content, (
+                "Compiled instructions don't contain content from the encoding instruction"
             )
 
             compiled_bytes = sum(p.stat().st_size for p in compiled_sources if p.exists())
             print(f"[OK] Copilot instructions generated ({compiled_bytes} bytes)")
             print("  Contains design instructions: [OK]")
-            print("  Contains code-review instructions: [OK]")
+            print("  Contains encoding instructions: [OK]")
 
             # Step 5: apm run design-review
             print("\n=== Step 5: apm run design-review ===")

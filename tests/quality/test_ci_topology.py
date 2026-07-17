@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 from collections import Counter
@@ -92,6 +93,56 @@ def _run_steps(job: WorkflowNode) -> list[WorkflowNode]:
     if not isinstance(steps, list):
         return []
     return [step for step in steps if isinstance(step, dict)]
+
+
+def _workflow_uv_environment_commands(
+    root: Path,
+) -> list[tuple[str, str, str, list[str], bool]]:
+    """Collect project-environment commands and prior frozen-sync state."""
+    commands: list[tuple[str, str, str, list[str], bool]] = []
+    workflows_dir = root / ".github" / "workflows"
+    workflow_paths = sorted([*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")])
+    for workflow_path in workflow_paths:
+        workflow = load_workflow(workflow_path)
+        jobs = workflow.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            frozen_sync_seen = False
+            for step in _run_steps(job):
+                step_name = str(step.get("name", "<unnamed>"))
+                run = step.get("run")
+                if not isinstance(run, str):
+                    continue
+                logical = run.replace("\\\n", " ")
+                for line in logical.splitlines():
+                    if not any(
+                        command in line for command in ("uv sync", "uv run")
+                    ) or line.lstrip().startswith("#"):
+                        continue
+                    try:
+                        tokens = shlex.split(line, comments=True, posix=True)
+                    except ValueError as exc:
+                        location = f"{workflow_path.name}:{job_name}:{step_name}"
+                        raise AssertionError(f"{location}: invalid shell line {line!r}") from exc
+                    for index in range(len(tokens) - 1):
+                        command = tokens[index : index + 2]
+                        if command not in (["uv", "sync"], ["uv", "run"]):
+                            continue
+                        commands.append(
+                            (
+                                workflow_path.name,
+                                str(job_name),
+                                step_name,
+                                tokens[index:],
+                                frozen_sync_seen,
+                            )
+                        )
+                        if command == ["uv", "sync"] and "--frozen" in tokens[index:]:
+                            frozen_sync_seen = True
+    return commands
 
 
 def _pytest_targets(job: WorkflowNode) -> tuple[str, ...]:
@@ -239,6 +290,46 @@ def test_repository_ratchet_inventory_is_collected_once(
 def test_provisional_ci_opt_in_is_draft_guarded() -> None:
     ci = load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml")
     _assert_ci_provisional_guard(ci)
+
+
+def test_first_party_workflow_uv_environments_are_frozen() -> None:
+    """The committed lockfile governs every GitHub Actions environment."""
+    commands = _workflow_uv_environment_commands(REPO_ROOT)
+    assert commands
+    unfrozen_syncs = [
+        f"{workflow}:{job}:{step}: {' '.join(tokens)}"
+        for workflow, job, step, tokens, _frozen_sync_seen in commands
+        if tokens[:2] == ["uv", "sync"] and "--frozen" not in tokens
+    ]
+    implicit_unfrozen_runs = [
+        f"{workflow}:{job}:{step}: {' '.join(tokens)}"
+        for workflow, job, step, tokens, frozen_sync_seen in commands
+        if tokens[:2] == ["uv", "run"] and "--frozen" not in tokens and not frozen_sync_seen
+    ]
+    violations = unfrozen_syncs + implicit_unfrozen_runs
+    assert violations == [], "unfrozen first-party workflow environments:\n" + (
+        "\n".join(violations)
+    )
+
+
+def test_workflow_sync_guard_reports_invalid_shell_line(tmp_path: Path) -> None:
+    """Malformed candidate commands identify their workflow location."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "broken.yml").write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Broken sync\n"
+        "        run: 'uv sync \"unterminated'\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        AssertionError,
+        match=r"broken\.yml:test:Broken sync: invalid shell line",
+    ):
+        _workflow_uv_environment_commands(tmp_path)
 
 
 def test_relocated_repository_contract_fails_topology(tmp_path: Path) -> None:
