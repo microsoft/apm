@@ -43,6 +43,8 @@ def _compile_hint_targets(
             continue
         if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
             continue
+        if not user_scope and scoped.compile_family == "claude":
+            continue
         families.add(scoped.compile_family)
         if scoped.name not in seen:
             seen.add(scoped.name)

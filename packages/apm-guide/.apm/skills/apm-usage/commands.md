@@ -71,6 +71,12 @@ root context files. Run `apm compile` explicitly for `AGENTS.md`, `CLAUDE.md`,
 or `GEMINI.md`; `apm run` separately compiles referenced prompt files at
 execution time.
 
+After a project install stages dependency instructions for Gemini, Codex,
+OpenCode, or experimental Hermes, `apm install` prints an `[i]` hint naming
+`apm compile` and the root context files it will update. Targets such as Claude
+that receive instructions directly in a native rules directory do not print
+this hint.
+
 `apm compile --watch` live-reloads `apm.yml`: editing `target:` / `targets:` mid-session takes effect on the next file event without restarting the watcher. The CLI `--target` flag, when passed to `apm compile --watch`, still outranks `apm.yml`. Re-resolution is gated on the changed file's basename being `apm.yml`, so `.instructions.md` edits do not pay an extra resolver round-trip and a stray `backup_apm.yml` cannot trigger a reload. `--clean` is ignored in watch mode and the watcher prints an explicit `[!]` warning at startup (`--clean is ignored in watch mode; run 'apm compile --clean' separately to remove orphaned outputs.`); run `apm compile --clean` separately between watch sessions to remove orphans.
 
 When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the Project Standards section from `CLAUDE.md` to avoid Claude Code seeing every instruction twice. Detection is a simple glob (`.claude/rules/*.md`). `CLAUDE.md` is still generated when it carries a constitution block or dependency `@import` paths -- only the instructions section is suppressed. An informational log message is emitted when zero `CLAUDE.md` files are generated because all content was already deployed via rules.

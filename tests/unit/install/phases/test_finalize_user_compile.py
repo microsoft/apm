@@ -445,7 +445,7 @@ class TestHintProjectCompileNeeded:
         ctx = _make_install_context(
             targets=[
                 _make_target("Gemini CLI", "gemini"),
-                _make_target("Claude Code", "claude"),
+                _make_target("Codex", "agents"),
                 _make_target("Gemini CLI", "gemini"),
             ]
         )
@@ -455,10 +455,25 @@ class TestHintProjectCompileNeeded:
         _hint_project_compile_needed(ctx)
 
         ctx.logger.info.assert_called_once_with(
-            "Instructions installed for Gemini CLI, Claude Code. "
-            "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md.",
+            "Instructions installed for Gemini CLI, Codex. "
+            "Run 'apm compile' to update AGENTS.md / GEMINI.md.",
             symbol="info",
         )
+
+    def test_hint_not_fired_for_claude_target(self, tmp_path):
+        """Claude receives dependency instructions directly in .claude/rules."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        ctx = _make_install_context(targets=[_make_target("Claude Code", "claude")])
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
 
     def test_hint_ignores_target_without_project_scope(self, tmp_path):
         """A target unavailable at project scope cannot trigger the hint."""

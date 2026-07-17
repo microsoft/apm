@@ -47,9 +47,9 @@ gated behind experimental flags and not listed above. See
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `claude`, `codex`, `gemini`, and
-`opencode`, plus experimental `hermes` when enabled. It emits the
-[`req-tg-007`](/apm/specs/openapm-v01/#req-tg-007) reminder for those targets.
+separate root-context compile for `codex`, `gemini`, and `opencode`, plus
+experimental `hermes` when enabled. It emits the
+[`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
 root-context reader, so they do not trigger that reminder. A target not
