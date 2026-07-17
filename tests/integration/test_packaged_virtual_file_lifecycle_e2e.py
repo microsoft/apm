@@ -36,17 +36,20 @@ def test_packaged_binary_installs_compiles_and_locks_virtual_file(
 ) -> None:
     inherited = {
         **os.environ,
-        "GITHUB_APM_PAT": "ambient-github-token",
-        "GITHUB_TOKEN": "ambient-actions-token",
-        "ADO_APM_PAT": "ambient-ado-token",
+        "GITHUB_APM_PAT": "POISONED_DO_NOT_USE_GITHUB_APM_PAT",
+        "GITHUB_TOKEN": "POISONED_DO_NOT_USE_GITHUB_TOKEN",
+        "GH_TOKEN": "POISONED_DO_NOT_USE_GH_TOKEN",
+        "ADO_APM_PAT": "POISONED_DO_NOT_USE_ADO_APM_PAT",
     }
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=inherited)
     environment = isolated.subprocess_env()
     assert {
         "GITHUB_APM_PAT",
         "GITHUB_TOKEN",
+        "GH_TOKEN",
         "ADO_APM_PAT",
     }.isdisjoint(environment)
+    assert environment["GIT_ALLOW_PROTOCOL"] == "file"
 
     source = isolated.package_root / _REPO_NAME
     source_packages = LocalPackageFactory(source / "packages")
@@ -67,7 +70,7 @@ def test_packaged_binary_installs_compiles_and_locks_virtual_file(
     repository = repositories.create(_REPO_NAME, source_tree=source)
     commit = repositories.commit(repository, message="seed packaged virtual file")
     child_env = repositories.url_rewrite_subprocess_env(repository, _REMOTE_URL)
-    assert child_env["GIT_ALLOW_PROTOCOL"] == "file"
+    assert child_env["GIT_CONFIG_COUNT"] == "2"
 
     project = LocalPackageFactory(isolated.work_root).create(
         "packaged-virtual-file-consumer",

@@ -14,7 +14,7 @@ from tests.workflow_contracts import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HERO_MODULE_PATH = "tests/integration/test_guardrailing_hero_e2e.py"
+HERO_MODULE_PATH = Path("tests", "integration", "test_guardrailing_hero_e2e.py").as_posix()
 HERO_MODULE = REPO_ROOT / HERO_MODULE_PATH
 RUNTIME_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-runtime.yml"
 HERO_NODE = f"{HERO_MODULE_PATH}::TestGuardrailingHeroScenario::test_2_minute_guardrailing_flow"
