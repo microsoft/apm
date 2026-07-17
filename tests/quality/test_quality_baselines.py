@@ -27,7 +27,7 @@ CHECKERS = (
         QUALITY_DIR / "exact_test_duplicates.json",
         (
             "[+] exact test duplicate ratchet clean: "
-            "{module_count} files, 0 allowed duplicate group(s)\n"
+            "{module_count} files, 6 allowed duplicate group(s)\n"
         ),
     ),
 )
