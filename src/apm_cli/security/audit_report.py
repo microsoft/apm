@@ -1,4 +1,4 @@
-"""Audit report serialization — JSON and SARIF output for apm audit."""
+"""Audit report serialization -- JSON and SARIF output for apm audit."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ _TOOL_NAME = "apm-audit"
 _TOOL_INFO_URI = "https://apm.github.io/apm/enterprise/security/"
 _DEPLOYMENT_OWNER_RULE = "apm/lockfile/deployment-owner"
 
-# Severity mapping: APM → SARIF
+# Severity mapping: APM -> SARIF
 _SEVERITY_MAP = {
     "critical": "error",
     "warning": "warning",

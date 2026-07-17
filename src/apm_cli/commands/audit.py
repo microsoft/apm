@@ -901,6 +901,7 @@ def _audit_content_scan(
                 findings_by_file, files_scanned = scan_lockfile_packages(
                     project_root,
                     package_filter=package,
+                    lockfile=lockfile,
                 )
             except LockfileFormatError as exc:
                 logger.error(f"Cannot audit invalid apm.lock.yaml: {exc}")
