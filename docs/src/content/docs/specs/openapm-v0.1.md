@@ -1483,8 +1483,12 @@ manifest:
 ### 6.8 Integrity controls (governance)
 
 The `security.integrity` and `security.audit` blocks declare opt-in,
-fail-closed controls. Both are default-off; a policy that omits them
-is unaffected.
+fail-closed controls. [req-pl-013](#req-pl-013) and
+[req-pl-014](#req-pl-014) are default-off; a policy that omits these
+two controls is unaffected by them. [req-pl-016](#req-pl-016) is an
+exception: it defines an unconditional integrity invariant that
+applies regardless of policy configuration, independent of any
+`security.audit` control.
 
 <a id="req-pl-013"></a>
 **[req-pl-013]** A conforming **governance** implementation that
@@ -1510,9 +1514,10 @@ MUST be reported without, by itself, altering the audit exit status.
 
 <a id="req-pl-016"></a>
 **[req-pl-016]** A conforming **governance** implementation MUST treat
-a canonical deployment-ledger owner that does not resolve to a
-dependency entry in `apm.lock.yaml` as a **hard integrity failure**,
-independent of the `security.audit.fail_on_drift` control. This
+a canonical deployment-ledger owner (a dependency-identity reference
+recorded as an owner of a deployment row in `apm.lock.yaml`) that does
+not resolve to a dependency entry in `apm.lock.yaml` as a
+**hard integrity failure**, independent of the `security.audit.fail_on_drift` control. This
 failure is distinct from the ordinary deployed-file drift governed by
 [req-pl-014](#req-pl-014): an owner is a durable ownership record
 carried in the lockfile, not an edit to a deployed file, so a stale
@@ -1521,10 +1526,15 @@ or `false`. When at least one such stale ownership record is present,
 an audit operation MUST terminate with a non-zero exit status in
 **both** its default and CI modes, and MUST NOT mutate any deployed
 byte (for example under a strip operation) while the ownership record
-remains invalid. The diagnostic MUST name each affected deployment
-locator together with its invalid owner reference(s), and MUST carry a
-single remediation directing the operator to reconcile ownership
-(prune the departed owners, then re-audit).
+remains invalid. When a deployment locator (the target-qualified
+identifier of a single tracked deployment row in the ledger) resolves
+to more than one owner and any one of those owners does not resolve in
+`apm.lock.yaml`, the hard-failure and mutation-block obligations apply
+to the entire audit operation, not only to the paths co-owned by the
+stale owner. The diagnostic MUST name each affected deployment locator
+together with its invalid owner reference(s), and MUST carry a single
+remediation directing the operator to reconcile ownership (prune the
+departed owners, then re-audit).
 
 ### 6.9 Conformance requirements (governance)
 
