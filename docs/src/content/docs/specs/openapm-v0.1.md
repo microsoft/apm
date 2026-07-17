@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **101 normative statements** indexed in
+- OpenAPM v0.1 carries **102 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1508,6 +1508,24 @@ miss, does not by itself alter the exit status. When
 `security.audit.fail_on_drift` is absent or `false`, detected drift
 MUST be reported without, by itself, altering the audit exit status.
 
+<a id="req-pl-016"></a>
+**[req-pl-016]** A conforming **governance** implementation MUST treat
+a canonical deployment-ledger owner that does not resolve to a
+dependency entry in `apm.lock.yaml` as a **hard integrity failure**,
+independent of the `security.audit.fail_on_drift` control. This
+failure is distinct from the ordinary deployed-file drift governed by
+[req-pl-014](#req-pl-014): an owner is a durable ownership record
+carried in the lockfile, not an edit to a deployed file, so a stale
+owner MUST surface even when `security.audit.fail_on_drift` is absent
+or `false`. When at least one such stale ownership record is present,
+an audit operation MUST terminate with a non-zero exit status in
+**both** its default and CI modes, and MUST NOT mutate any deployed
+byte (for example under a strip operation) while the ownership record
+remains invalid. The diagnostic MUST name each affected deployment
+locator together with its invalid owner reference(s), and MUST carry a
+single remediation directing the operator to reconcile ownership
+(prune the departed owners, then re-audit).
+
 ### 6.9 Conformance requirements (governance)
 
 This section's normative statements are:
@@ -1519,7 +1537,7 @@ This section's normative statements are:
   [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
   [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
-  [req-pl-015](#req-pl-015).
+  [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
 
 ---
 
@@ -2751,7 +2769,8 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-007](#req-pl-007), [req-pl-008](#req-pl-008),
 [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
 [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
-[req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014).
+[req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
+[req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -3103,6 +3122,7 @@ renumbering of conformance classes.
 | [req-pl-013](#req-pl-013)                | MUST    | 6.8     | governance  |
 | [req-pl-014](#req-pl-014)                | MUST    | 6.8     | governance  |
 | [req-pl-015](#req-pl-015)                | MUST    | 6.3.5   | governance  |
+| [req-pl-016](#req-pl-016)                | MUST    | 6.8     | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -3146,7 +3166,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 101** (96 MUST, 5 SHOULD).
+**Total normative statements: 102** (97 MUST, 5 SHOULD).
 
 ---
 
@@ -3172,6 +3192,7 @@ renumbering of conformance classes.
 | 0.1.14  | 2026-07-15 | Spec-citation fold for complete repository identity through resolution and materialization (closes #2191). Added [req-rs-016] (Section 7.2, consumer MUST): repository identity includes normalized host, explicit port, and the complete credential-free repository path; distinct identities MUST NOT share cached source material merely because they use the same ref or a common path prefix; identical identity and ref MAY reuse cached source material. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
 | 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
 | 0.1.16  | 2026-07-17 | Spec-citation fold for dropped-target merge-hook reconciliation (closes the #2253 Mode-B silent-extension gate). Added [req-lk-021] (Section 5.2, consumer MUST): extends [req-lk-020]'s target-reconciliation preserve/remove decision to merge-based hook configuration and its ownership record, since that state is deliberately outside `deployed_files`/`local_deployed_files` tracking and so was never reachable by req-lk-020's literal text -- narrowing a project's declared target set now also reconciles the dropped target's consumer-owned merge-hook entries, while preserving entries not carrying consumer ownership and preserving state for targets still attributable per req-lk-020's own (a)-(c) test. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 100 -> 101 (96 MUST, 5 SHOULD). |
+| 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

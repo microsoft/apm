@@ -263,6 +263,11 @@ requirements:
     keyword: MUST
     section: "6.3.5"
     conformance_class: governance
+  - id: req-pl-016
+    keyword: MUST
+    section: "6.8"
+    conformance_class: governance
+    notes: "a canonical deployment-ledger owner absent from apm.lock.yaml is a hard integrity failure independent of security.audit.fail_on_drift; audit exits non-zero in both default and CI modes and refuses to mutate deployed bytes while ownership is invalid"
   - id: req-rs-001
     keyword: MUST
     section: "7.2"

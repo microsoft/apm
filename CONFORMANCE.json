@@ -688,6 +688,17 @@
       ]
     },
     {
+      "conformance_class": "governance",
+      "id": "req-pl-016",
+      "keyword": "MUST",
+      "section": "6.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_deployment_ledger_owner_is_hard_integrity_failure"
+      ]
+    },
+    {
       "conformance_class": "consumer",
       "id": "req-pr-001",
       "keyword": "MUST",
@@ -1158,7 +1169,7 @@
       "xfail": 0
     },
     "governance": {
-      "active": 15,
+      "active": 16,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1176,5 +1187,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 101
+  "total_requirements": 102
 }
