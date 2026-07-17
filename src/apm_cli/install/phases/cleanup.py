@@ -53,6 +53,14 @@ def run(ctx: InstallContext) -> None:
     diagnostics = ctx.diagnostics
     logger = ctx.logger
     package_deployed_files = ctx.package_deployed_files
+    orphan_cleanup_retained = getattr(ctx, "orphan_cleanup_retained", None)
+    if orphan_cleanup_retained is None:
+        orphan_cleanup_retained = {}
+        ctx.orphan_cleanup_retained = orphan_cleanup_retained
+    package_cleanup_retained = getattr(ctx, "package_cleanup_retained", None)
+    if package_cleanup_retained is None:
+        package_cleanup_retained = {}
+        ctx.package_cleanup_retained = package_cleanup_retained
 
     # ------------------------------------------------------------------
     # Orphan cleanup: remove deployed files for packages that were
@@ -110,7 +118,7 @@ def run(ctx: InstallContext) -> None:
             _orphan_total_deleted += len(_orphan_result.deleted)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
             if _orphan_result.retained:
-                ctx.orphan_cleanup_retained[_orphan_key] = {
+                orphan_cleanup_retained[_orphan_key] = {
                     path: _orphan_dep.deployed_file_hashes.get(path)
                     for path in _orphan_result.retained
                 }
@@ -184,7 +192,7 @@ def run(ctx: InstallContext) -> None:
                 path for path in cleanup_result.retained if path not in new_deployed
             )
             if cleanup_result.retained:
-                ctx.package_cleanup_retained[dep_key] = {
+                package_cleanup_retained[dep_key] = {
                     path: prev_dep.deployed_file_hashes.get(path)
                     for path in cleanup_result.retained
                 }
