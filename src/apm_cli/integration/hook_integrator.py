@@ -1959,41 +1959,27 @@ class HookIntegrator(BaseIntegrator):
     ) -> dict:
         """Reconcile merged-hook ownership after packages leave apm.yml.
 
-        ``_clean_apm_entries_from_json`` (invoked by ``sync_integration``)
-        strips *every* ``_apm_source``-tagged entry from a merge target's
-        JSON file and deletes its ownership sidecar unconditionally -- it
-        has no notion of "this package only". A caller that wants to drop
-        one package's hooks therefore cannot call ``sync_integration``
-        alone without also erasing entries owned by packages that remain
-        declared: it must wipe, then rebuild from what is still installed.
-
-        This mirrors the "clear + rebuild" pattern
-        ``apm uninstall`` already uses (see
+        ``_clean_apm_entries_from_json`` (used by ``sync_integration``)
+        strips every ``_apm_source``-tagged entry unconditionally, so a
+        caller wanting to drop just one package's hooks must wipe, then
+        rebuild from what remains installed -- mirroring the "clear +
+        rebuild" pattern ``apm uninstall`` uses (see
         ``_sync_integrations_after_uninstall`` in
-        ``commands/uninstall/engine.py``), scoped to hooks only, so
-        callers such as ``apm prune`` orchestrate the existing
-        ownership-aware cleanup instead of reimplementing hook filtering.
+        ``commands/uninstall/engine.py``), scoped to hooks only.
 
-        Uses ``get_all_apm_dependencies()`` (prod + dev) rather than
-        uninstall's prod-only dependency set, matching ``apm prune``'s
-        own orphan-detection scope (prune already treats dev deps as
-        first-class for removal purposes).
+        Uses ``get_all_apm_dependencies()`` (prod + dev), matching ``apm
+        prune``'s own orphan-detection scope. Best-effort by design: a
+        re-integration failure for one dependency is logged and skipped.
 
-        Best-effort by design: a re-integration failure for one
-        dependency is logged and skipped rather than aborting the
-        reconcile, consistent with prune's existing per-package
-        error-tolerant semantics.
+        Target scope (#2250): the wipe below is scoped to the SAME resolved
+        ``targets`` the rebuild loop uses, so a target dropped from
+        ``targets:`` is never wiped for still-declared packages while the
+        rebuild silently skips repopulating it -- see
+        ``reconcile_dropped_targets`` for the dedicated fix to that gap.
 
-        Target scope (#2250): the merged-hook JSON wipe below is scoped to
-        the SAME resolved ``targets`` the rebuild loop uses, so a harness
-        dropped from ``targets:`` (but still holding stale merged-hook
-        entries) is never wiped for still-declared, still-installed
-        packages while the rebuild silently skips repopulating it.
-
-        Known boundary (shared with uninstall, #2250): rebuilds only
-        direct dependencies from ``get_all_apm_dependencies()`` -- a
-        transitive dependency's merged hooks are wiped above but never
-        re-integrated here.
+        Known boundary (shared with uninstall, #2250): only direct
+        dependencies are rebuilt here; a transitive dependency's merged
+        hooks are wiped above but never re-integrated.
         """
         from apm_cli.constants import APM_MODULES_DIR
         from apm_cli.models.apm_package import build_installed_package_info
@@ -2037,6 +2023,18 @@ class HookIntegrator(BaseIntegrator):
                 _log.warning("Best-effort hook re-integration skipped for %s: %s", pkg_id, e)
 
         return stats
+
+    def reconcile_dropped_targets(
+        self,
+        project_root: Path,
+        dropped_target_names: list[str] | set[str],
+        *,
+        user_scope: bool = False,
+    ) -> dict[str, int]:
+        """Reconcile dropped-target merge-hook state; see _hook_dropped_targets (#2253)."""
+        from ._hook_dropped_targets import reconcile_dropped_targets as _impl
+
+        return _impl(project_root, dropped_target_names, user_scope=user_scope)
 
     @staticmethod
     def _clean_apm_entries_from_json(

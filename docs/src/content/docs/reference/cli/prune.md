@@ -87,7 +87,11 @@ cleanup `apm uninstall` uses; it does not duplicate the filtering logic.
 Hook reconciliation is best-effort: a failure is logged as a warning but
 does not abort the run, since package and lockfile cleanup has already
 completed by that point. If reconciliation logs a warning, run `apm
-install` to rebuild hook configuration from the current dependency set.
+install` to rebuild hook configuration from the current dependency set --
+this is now also the correct remedy for a target *dropped from*
+`targets:` in `apm.yml`: dropped-target hook cleanup is owned by the
+install/compile/update lifecycle, not by `apm prune`, which only
+reconciles hook ownership among packages and targets still declared.
 
 Notes:
 

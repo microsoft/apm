@@ -848,3 +848,127 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     assert "to_repository_cache_url" not in downloader
     for retired_derivation in ("cache_owner", "cache_repo", '_canonical_url = f"https://'):
         assert retired_derivation not in downloader
+
+
+def _load_hook_config_write_owner_checker() -> ModuleType:
+    """Import scripts/check_hook_config_write_owner.py as a standalone module.
+
+    The semantic AST checker is the single detection owner for the
+    "composed path bypasses HookIntegrator" case (see
+    tests/unit/scripts/test_check_hook_config_write_owner.py for its own
+    unit coverage); this integration test reuses it rather than
+    re-implementing any part of its algorithm.
+    """
+    root = Path(__file__).parents[2]
+    script_path = root / "scripts" / "check_hook_config_write_owner.py"
+    spec = importlib.util.spec_from_file_location("check_hook_config_write_owner", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_hook_config_write_guard_rejects_composed_path_outside_hook_integrator(
+    tmp_path: Path,
+) -> None:
+    """AC15 must reject a competing owner writing merge-hook config via an
+    assigned-variable composed path, even though it never references either
+    private HookIntegrator symbol (``_MERGE_HOOK_TARGETS``/
+    ``_APM_HOOKS_SIDECAR``) -- proving the semantic AST checker closes the
+    bypass a lexical/private-symbol-only guard would miss."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    manifest_reconcile_path = sandbox / "src/apm_cli/install/manifest_reconcile.py"
+    manifest_reconcile_source = manifest_reconcile_path.read_text(encoding="utf-8")
+    bypass = (
+        "\n\ndef _rogue_hook_cleanup(project_root):\n"
+        '    hook_path = project_root / ".codex" / "hooks.json"\n'
+        '    hook_path.write_text("{}")\n'
+    )
+    manifest_reconcile_path.write_text(manifest_reconcile_source + bypass, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "must stay owned by HookIntegrator" in result.stdout
+
+
+def test_hook_ownership_guard_rejects_prune_calling_contraction_api(
+    tmp_path: Path,
+) -> None:
+    """AC15 must reject `apm prune`/`apm uninstall` calling the
+    target-contraction hook-cleanup API directly -- that stays exclusively
+    the install/compile/update-lifecycle owner's job (#2250/#2252 scope)."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    prune_path = sandbox / "src/apm_cli/commands/prune.py"
+    prune_source = prune_path.read_text(encoding="utf-8")
+    bypass = (
+        "\n\ndef _rogue_prune_hook_cleanup(project_root):\n"
+        "    from apm_cli.install.manifest_reconcile import "
+        "reconcile_dropped_merge_hook_targets\n"
+        "    reconcile_dropped_merge_hook_targets(project_root, "
+        "active_targets=[], declared_targets=None)\n"
+    )
+    prune_path.write_text(prune_source + bypass, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "#2250 scope" in result.stdout
+
+
+def test_hook_config_write_ast_checker_passes_on_real_consumers() -> None:
+    """The real, fixed src/apm_cli tree must be clean under the AST checker
+    today -- a cheap, non-sandboxed positive control (mirrors
+    test_skill_subset_ast_checker_passes_on_real_consumers) proving the
+    checker does not false-positive on the actual codebase, including the
+    new HookIntegrator.reconcile_dropped_targets method itself, without
+    paying for a full repo copy on every run."""
+    root = Path(__file__).parents[2]
+    checker = _load_hook_config_write_owner_checker()
+
+    violations = checker.find_violations(root)
+
+    assert violations == []
