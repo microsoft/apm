@@ -972,3 +972,124 @@ def test_hook_config_write_ast_checker_passes_on_real_consumers() -> None:
     violations = checker.find_violations(root)
 
     assert violations == []
+
+
+def test_ac15_uninstall_reachability_has_single_owner() -> None:
+    """AC15 keeps post-uninstall dependency reachability behind one owner."""
+    root = Path(__file__).parents[2]
+    engine = (root / "src/apm_cli/commands/uninstall/engine.py").read_text(encoding="utf-8")
+    reachability = (root / "src/apm_cli/deps/reachability.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def compute_forward_reachable_keys(" in reachability
+    assert "from ...deps.reachability import compute_forward_reachable_keys" in engine
+    assert "compute_forward_reachable_keys" in engine
+    assert "AC16: post-uninstall reachability owner authority" in guard
+    assert "compute_forward_reachable_keys" in guard
+    assert "get_apm_dependencies" in guard
+    assert "resolve_local_dep_dir" in guard
+    assert "Post-uninstall dependency reachability" in architecture_doc
+    assert "deps/reachability.py" in architecture_doc
+
+
+def test_ac15_reachability_owner_guard_rejects_manifest_bypass(tmp_path: Path) -> None:
+    """AC15 must reject a manifest-parsing bypass reintroduced in commands/uninstall."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    engine_path = sandbox / "src/apm_cli/commands/uninstall/engine.py"
+    engine_source = engine_path.read_text(encoding="utf-8")
+    # Simulate a bypass: re-derive reachability inline by parsing a nested
+    # package's own manifest directly inside commands/uninstall, instead of
+    # going through the single deps/reachability.py owner.
+    bypass_source = engine_source.replace(
+        "def _compute_actual_orphans(",
+        (
+            "def _bypass_manifest_scan(apm_package):\n"
+            "    return list(apm_package.get_apm_dependencies())\n"
+            "\n"
+            "\n"
+            "def _compute_actual_orphans("
+        ),
+        1,
+    )
+    assert bypass_source != engine_source
+    engine_path.write_text(bypass_source, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Only deps/reachability.py may walk an installed package's own manifest dependencies"
+        in (result.stdout)
+    )
+
+
+def test_ac15_reachability_owner_guard_rejects_parallel_local_walk(tmp_path: Path) -> None:
+    """AC15 must reject re-deriving a parallel local-anchor reachability walk."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    engine_path = sandbox / "src/apm_cli/commands/uninstall/engine.py"
+    engine_source = engine_path.read_text(encoding="utf-8")
+    bypass_source = engine_source.replace(
+        "def _compute_actual_orphans(",
+        (
+            "def _bypass_local_walk(dep_ref, lockfile, project_root):\n"
+            "    return resolve_local_dep_dir(dep_ref, lockfile, project_root)\n"
+            "\n"
+            "\n"
+            "def _compute_actual_orphans("
+        ),
+        1,
+    )
+    assert bypass_source != engine_source
+    engine_path.write_text(bypass_source, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Uninstall must not re-derive a parallel local-anchor reachability walk" in (
+        result.stdout
+    )

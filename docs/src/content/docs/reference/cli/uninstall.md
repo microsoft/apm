@@ -77,7 +77,7 @@ What gets removed, in order:
 
 1. The package entry in `apm.yml` under `dependencies.apm` or `devDependencies.apm`.
 2. The package folder under `apm_modules/owner/repo/`.
-3. Transitive dependencies that no remaining package depends on (npm-style pruning, computed from `apm.lock.yaml`).
+3. Transitive dependencies that no remaining package depends on (npm-style pruning, computed from `apm.lock.yaml`). A transitive dependency still declared by any surviving package is preserved, even when two packages share it (a diamond-shaped install). If a surviving package's manifest can't be read, APM keeps every remaining candidate for that run rather than guessing -- re-run with `--verbose` to see which manifest failed, then fix or restore it and re-run to complete cleanup.
 4. Every file in the lockfile's `deployed_files` for the removed packages and pruned orphans, across all harness folders (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.codex/`, `.windsurf/`, `.kiro/`).
 5. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`, `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages contributed.
 6. MCP servers contributed only by the removed packages.

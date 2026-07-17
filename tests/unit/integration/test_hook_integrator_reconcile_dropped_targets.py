@@ -117,6 +117,105 @@ class TestReconcileDroppedTargetsNormalCleanup:
         assert second == {"files_removed": 0, "errors": 0}
 
 
+class TestReconcileDroppedTargetsCursor:
+    """Required-gate node-2 evidence: Cursor is registered in
+    ``_MERGE_HOOK_TARGETS`` with the same ``schema_strict=True`` default as
+    Codex/Claude, so it must be cleaned by the SAME generic code path --
+    not a Codex-specific one. Mirrors the exact evidence shape reported
+    against a real widen-then-narrow (Claude -> Claude+Cursor -> Claude)
+    CLI run: a package-owned ``PreToolUse`` entry in ``.cursor/hooks.json``,
+    a user-authored sibling entry, and an ``apm-hooks.json`` sidecar
+    recording ``_apm_source``. Direct end-to-end CLI coverage of this same
+    scenario lives in ``tests/integration/
+    test_hook_target_contraction_reconciliation.py::
+    test_widen_then_narrow_removes_dropped_cursor_hook_state`` and
+    ``test_widen_then_narrow_preserves_user_owned_cursor_entries``."""
+
+    def test_cursor_native_and_sidecar_cleaned_preserving_user_entry(self, tmp_path: Path) -> None:
+        cursor_dir = tmp_path / ".cursor"
+        _write_json(
+            cursor_dir / "hooks.json",
+            {
+                "version": 1,
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "echo scope"}],
+                        },
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "echo user-authored"}],
+                        },
+                    ]
+                },
+            },
+        )
+        _write_json(
+            cursor_dir / "apm-hooks.json",
+            {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo scope"}],
+                        "_apm_source": "scope-kit",
+                    }
+                ]
+            },
+        )
+        # Retained target's state, alongside the dropped target -- must
+        # survive completely untouched.
+        claude_dir = tmp_path / ".claude"
+        _write_json(
+            claude_dir / "settings.json",
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo scope"}]}
+                    ]
+                }
+            },
+        )
+        _write_json(
+            claude_dir / "apm-hooks.json",
+            {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo scope"}],
+                        "_apm_source": "scope-kit",
+                    }
+                ]
+            },
+        )
+
+        stats = HookIntegrator().reconcile_dropped_targets(tmp_path, ["cursor"])
+
+        assert stats == {"files_removed": 1, "errors": 0}
+        assert not (cursor_dir / "apm-hooks.json").exists(), (
+            "dropped cursor target's ownership sidecar must be removed"
+        )
+        native_data = json.loads((cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+        remaining_commands = [
+            handler["command"]
+            for entry in native_data.get("hooks", {}).get("PreToolUse", [])
+            for handler in entry.get("hooks", [])
+        ]
+        assert "echo scope" not in remaining_commands, (
+            "package-owned cursor entry must be stripped from the native merged config"
+        )
+        assert "echo user-authored" in remaining_commands, (
+            "user-authored cursor entry must survive untouched"
+        )
+        assert (claude_dir / "apm-hooks.json").exists(), (
+            "retained claude target's ownership sidecar must not be touched"
+        )
+        claude_sidecar = json.loads((claude_dir / "apm-hooks.json").read_text(encoding="utf-8"))
+        assert claude_sidecar["PreToolUse"][0]["_apm_source"] == "scope-kit", (
+            "retained claude target's ownership record must be byte-for-byte preserved"
+        )
+
+
 class TestReconcileDroppedTargetsSidecarOnlyOrphan:
     def test_sidecar_only_orphan_is_removed(self, tmp_path: Path) -> None:
         """Native file absent (manually deleted, or never re-created) but the
