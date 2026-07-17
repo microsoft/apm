@@ -316,5 +316,9 @@ def hermetic_packaged_sample(
 def packaged_sample(
     hermetic_packaged_sample: HermeticPackagedSample,
 ) -> HermeticPackagedSample:
-    """Expose the hermetic packaged fixture to established lifecycle suites."""
+    """Back-compat alias for established lifecycle suites.
+
+    Prefer ``hermetic_packaged_sample`` in new tests; this alias only preserves the
+    shorter name used by the pre-hermetic deployed-files and silent-adopt suites.
+    """
     return hermetic_packaged_sample

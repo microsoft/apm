@@ -232,11 +232,22 @@ installation, deployment lifecycle, and exact lock provenance without
 credentials or live HTTP.
 
 ```bash
+# The three hermetic packaged counterparts (real binary, local file:// origin, no creds):
 uv run pytest tests/integration/test_packaged_virtual_file_lifecycle_e2e.py -v
+uv run pytest tests/integration/test_deployed_files_e2e.py -v
+uv run pytest tests/integration/test_silent_adopt_existing_files_e2e.py -v
+
+# Supporting hermetic foundation + contract suites:
 uv run pytest tests/integration/test_local_package_factory_contract.py -v
 uv run pytest tests/integration/test_hermetic_lifecycle_foundation.py -v
 uv run pytest -n auto tests/integration/test_hermetic_lifecycle_foundation.py -v
 ```
+
+These suites need no PAT and make no live HTTP calls: the packaged binary reaches
+the dependency through a process-scoped `file://` URL rewrite. If one fails with a
+network or authentication error, the rewrite did not apply -- confirm the test uses
+the `hermetic_packaged_sample` fixture (which sets `GIT_CONFIG_COUNT` and
+`GIT_ALLOW_PROTOCOL=file`) rather than invoking `apm` against the raw GitHub URL.
 
 ### Apm binary resolution
 

@@ -41,6 +41,10 @@ def create_hermetic_packaged_sample(
     project_name: str,
 ) -> HermeticPackagedSample:
     """Create a realistic source package behind an owned GitHub-shaped remote."""
+    # Inject deliberately-unusable ("POISONED") values for every APM credential
+    # variable. IsolatedApmEnvironment.create strips them all (asserted below), proving
+    # the packaged binary reaches the owned origin with no usable credentials -- only via
+    # the file:// rewrite.
     inherited_environment = {
         **os.environ,
         "GITHUB_APM_PAT": "POISONED_DO_NOT_USE_GITHUB_APM_PAT",
@@ -50,6 +54,17 @@ def create_hermetic_packaged_sample(
     }
     isolated = IsolatedApmEnvironment.create(root / "isolated", base_env=inherited_environment)
     base_environment = isolated.subprocess_env()
+    # Fail loudly if the isolation contract regresses: no APM auth variable may survive,
+    # and only file:// Git transport is permitted. GIT_ALLOW_PROTOCOL=file (not the
+    # Python-only PYTHONPATH network guard, which the PyInstaller binary ignores) is the
+    # load-bearing fail-closed gate for the packaged binary.
+    assert {
+        "GITHUB_APM_PAT",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "ADO_APM_PAT",
+    }.isdisjoint(base_environment)
+    assert base_environment["GIT_ALLOW_PROTOCOL"] == "file"
     packages = LocalPackageFactory(isolated.package_root)
     source = packages.create("apm-sample-package", targets=("copilot",))
     packages.add_prompt(
@@ -83,6 +98,9 @@ def create_hermetic_packaged_sample(
     repository = repositories.create(source.name, source_tree=source.root)
     repositories.commit(repository, message="seed hermetic packaged sample")
     environment = repositories.url_rewrite_subprocess_env(repository, REMOTE_URL)
+    # Two rewrite rules (bare + bare.git form) prove the GitHub-shaped URL is redirected
+    # to the owned local origin rather than reaching github.com.
+    assert environment["GIT_CONFIG_COUNT"] == "2"
 
     project = LocalPackageFactory(isolated.work_root).create(
         project_name,
@@ -93,6 +111,9 @@ def create_hermetic_packaged_sample(
         ),
         targets=("copilot",),
     )
+    # 240s per-scenario cap (below the 300s runner default): a hermetic file:// install
+    # has no network variance, so a scenario exceeding 240s signals a real regression
+    # rather than transient slowness.
     return HermeticPackagedSample(
         project=project,
         environment=environment,
