@@ -223,10 +223,13 @@ as shown in the cross-module contract. `ApmLifecycleRunner()` invokes `apm`
 through `PATH`; packaged-binary tests use the
 [binary-resolution fixture](#apm-binary-resolution).
 
-`test_packaged_virtual_file_lifecycle_e2e.py` is the narrow hermetic packaged
-counterpart to the live hero. It runs the real binary against a local bare Git
-origin through process-scoped URL rewriting, then checks install,
-compile/deploy, and exact lock provenance without credentials or live HTTP.
+`test_packaged_virtual_file_lifecycle_e2e.py`,
+`test_deployed_files_e2e.py`, and
+`test_silent_adopt_existing_files_e2e.py` are narrow hermetic packaged
+counterparts to the live hero. They run the real binary against a local bare
+Git origin through process-scoped URL rewriting, then check package
+installation, deployment lifecycle, and exact lock provenance without
+credentials or live HTTP.
 
 ```bash
 uv run pytest tests/integration/test_packaged_virtual_file_lifecycle_e2e.py -v

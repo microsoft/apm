@@ -88,5 +88,13 @@ path = "tests/integration/test_packaged_virtual_file_lifecycle_e2e.py"
 marker = "e2e"
 
 [[modules]]
+path = "tests/integration/test_deployed_files_e2e.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_silent_adopt_existing_files_e2e.py"
+marker = "e2e"
+
+[[modules]]
 path = "tests/integration/test_primitive_target_covering_array.py"
 marker = "e2e"
