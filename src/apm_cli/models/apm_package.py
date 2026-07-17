@@ -6,10 +6,11 @@ Dependency and validation types have been extracted to sibling modules
 compatibility.
 """
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -33,6 +34,11 @@ from .validation import (
     ValidationResult,
     validate_apm_package,
 )
+
+if TYPE_CHECKING:
+    from apm_cli.deps.lockfile import LockFile
+
+_log = logging.getLogger(__name__)
 
 # Re-export all moved symbols so `from apm_cli.models.apm_package import X` keeps working
 __all__ = [  # noqa: RUF022
@@ -810,7 +816,7 @@ def surviving_dependency_refs_for_reintegration(
     apm_package: "APMPackage",
     project_root: Path,
     *,
-    lockfile=None,
+    lockfile: "LockFile | None" = None,
 ) -> list[DependencyReference]:
     """Return packages still present after removal, for clear+rebuild.
 
@@ -829,8 +835,22 @@ def surviving_dependency_refs_for_reintegration(
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
     resolved = lockfile
+    lockfile_source = "caller-provided"
     if resolved is None:
+        lockfile_source = "on-disk"
         resolved = LockFile.read(get_lockfile_path(project_root))
     if resolved is not None:
-        return [dep.to_dependency_ref() for dep in resolved.get_package_dependencies()]
-    return list(apm_package.get_all_apm_dependencies())
+        deps = [dep.to_dependency_ref() for dep in resolved.get_package_dependencies()]
+        _log.debug(
+            "Survivor set for re-integration: %d package(s) from %s lockfile",
+            len(deps),
+            lockfile_source,
+        )
+        return deps
+    deps = list(apm_package.get_all_apm_dependencies())
+    _log.debug(
+        "Survivor set for re-integration: %d package(s) from manifest fallback "
+        "(lockfile unavailable)",
+        len(deps),
+    )
+    return deps

@@ -23,6 +23,8 @@ from apm_cli.models.apm_package import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = [pytest.mark.unit]
+
 
 @pytest.fixture(autouse=True)
 def _clear_package_cache() -> None:
@@ -129,6 +131,21 @@ def test_surviving_refs_prefer_passed_in_memory_lockfile(tmp_path: Path) -> None
     urls = {ref.repo_url for ref in refs}
     assert urls == {"acme/keeper", "acme/transitive"}
     assert "acme/removed" not in urls
+
+
+@pytest.mark.parametrize("count", [5, 50])
+def test_surviving_refs_scales_with_lockfile_package_count(tmp_path: Path, count: int) -> None:
+    """Survivor discovery should map each lockfile package exactly once."""
+    (tmp_path / "apm.yml").write_text("name: root\nversion: 0.0.0\n", encoding="utf-8")
+    lockfile = LockFile()
+    lockfile.add_dependency(LockedDependency(repo_url=".", local_path="."))
+    for index in range(count):
+        lockfile.add_dependency(LockedDependency(repo_url=f"acme/pkg-{index}", depth=index + 1))
+
+    apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+    refs = surviving_dependency_refs_for_reintegration(apm_package, tmp_path, lockfile=lockfile)
+
+    assert [ref.repo_url for ref in refs] == [f"acme/pkg-{index}" for index in range(count)]
 
 
 def test_reconcile_after_removal_rebuilds_transitive_hooks(

@@ -648,13 +648,13 @@ def _cleanup_transitive_orphans(
 
 
 def _sync_integrations_after_uninstall(
-    apm_package,
-    project_root,
-    all_deployed_files,
-    logger,
-    user_scope=False,
-    lockfile=None,
-):
+    apm_package: object,
+    project_root: Path,
+    all_deployed_files: set[str],
+    logger: CommandLogger,
+    user_scope: bool = False,
+    lockfile: LockFile | None = None,
+) -> tuple[dict[str, int], dict[str, list[str]]]:
     """Remove deployed files and re-integrate from remaining packages.
 
     When *user_scope* is ``True``, targets are resolved for user-level
@@ -880,9 +880,12 @@ def _sync_integrations_after_uninstall(
             for path in skill_result.target_paths:
                 deployed_files.append(_deployed_path_entry(path, project_root, _targets))
                 deployed_files.extend(_skill_bundle_file_entries(path, project_root, _targets))
-        except Exception:
+        except Exception as exc:
             pkg_id = dep_ref.get_identity() if hasattr(dep_ref, "get_identity") else str(dep_ref)
-            logger.warning(f"Best-effort re-integration skipped for {pkg_id}")
+            logger.warning(
+                f"Best-effort re-integration skipped for {pkg_id}: {exc}. "
+                "Run 'apm install' to rebuild integrated files."
+            )
 
     return counts, package_deployed_files
 

@@ -49,7 +49,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -76,6 +76,9 @@ from apm_cli.utils.path_security import (
     validate_path_segments,
 )
 from apm_cli.utils.paths import portable_relpath
+
+if TYPE_CHECKING:
+    from apm_cli.deps.lockfile import LockFile
 
 _log = logging.getLogger(__name__)
 
@@ -1956,7 +1959,7 @@ class HookIntegrator(BaseIntegrator):
         project_root: Path,
         *,
         user_scope: bool = False,
-        lockfile=None,
+        lockfile: "LockFile | None" = None,
     ) -> dict:
         """Reconcile merged-hook ownership after packages leave apm.yml.
 
