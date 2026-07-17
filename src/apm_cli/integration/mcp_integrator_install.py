@@ -335,6 +335,39 @@ def _discover_installed_runtimes_fallback(
     return installed_runtimes
 
 
+def _declared_manifest_target_runtimes(apm_config: dict | None) -> list[str] | None:
+    """Return apm.yml's declared ``targets:`` as canonical runtime names.
+
+    Delegates to :func:`apm_cli.core.apm_yml.parse_targets_field`, the same
+    parser the v2 file-deployment target resolver and
+    :meth:`MCPIntegrator._gate_project_scoped_runtimes` both use, so a
+    manifest-declared target list is interpreted identically everywhere
+    (including folding the legacy ``all`` value back to auto-detect).
+
+    Returns ``None`` when the manifest does not restrict targets (no
+    ``targets:``/``target:`` key, or legacy ``all``) so the caller falls
+    back to local-machine runtime auto-discovery. Malformed declarations
+    (conflicting keys, empty list, unknown name) also return ``None`` here;
+    auto-discovery proceeds and ``_gate_project_scoped_runtimes`` -- which
+    re-parses the same field -- is left as the single place that renders
+    the fail-closed error to the user.
+    """
+    if not apm_config:
+        return None
+    from apm_cli.core.apm_yml import (
+        ConflictingTargetsError,
+        EmptyTargetsListError,
+        UnknownTargetError,
+        parse_targets_field,
+    )
+
+    try:
+        parsed = parse_targets_field(apm_config)
+    except (ConflictingTargetsError, EmptyTargetsListError, UnknownTargetError):
+        return None
+    return parsed or None
+
+
 def _resolve_target_runtimes(
     runtime: str | None,
     exclude: str | None,
@@ -355,6 +388,20 @@ def _resolve_target_runtimes(
     """
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
+    project_root_path = Path(project_root) if project_root is not None else Path.cwd()
+
+    if apm_config is None:
+        try:
+            apm_yml = project_root_path / "apm.yml"
+            if apm_yml.exists():
+                from apm_cli.utils.yaml_io import load_yaml
+
+                apm_config = load_yaml(apm_yml)
+        except Exception:
+            apm_config = None
+
+    declared_targets = _declared_manifest_target_runtimes(apm_config)
+
     if runtime:
         # Single runtime mode - skip auto-discovery entirely.
         logger.progress(f"Targeting specific runtime: {runtime}")
@@ -368,19 +415,20 @@ def _resolve_target_runtimes(
         )
         runtime_label = "runtime" if len(target_runtimes) == 1 else "runtimes"
         logger.progress(f"Targeting specific {runtime_label}: {', '.join(target_runtimes)}")
+    elif declared_targets is not None:
+        # apm.yml declares `targets:` explicitly -- that is the deterministic,
+        # committed source of truth for MCP ownership too. Using it instead of
+        # local-machine runtime auto-discovery keeps `mcp_target_servers` (and
+        # the deployment ledger `runtime` field) byte-identical across
+        # developers with different harnesses installed, instead of each
+        # `apm install` "stealing" MCP ownership toward whatever the current
+        # machine happens to have (issue #2298).
+        target_runtimes = declared_targets
+        runtime_label = "runtime" if len(target_runtimes) == 1 else "runtimes"
+        logger.progress(
+            f"Targeting declared {runtime_label} from apm.yml: {', '.join(target_runtimes)}"
+        )
     else:
-        project_root_path = Path(project_root) if project_root is not None else Path.cwd()
-
-        if apm_config is None:
-            try:
-                apm_yml = project_root_path / "apm.yml"
-                if apm_yml.exists():
-                    from apm_cli.utils.yaml_io import load_yaml
-
-                    apm_config = load_yaml(apm_yml)
-            except Exception:
-                apm_config = None
-
         # Step 1: Get all installed runtimes on the system
         installed_runtimes = _discover_installed_runtimes(project_root_path, user_scope=user_scope)
 

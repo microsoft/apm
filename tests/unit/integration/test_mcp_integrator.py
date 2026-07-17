@@ -755,12 +755,53 @@ class TestInstallProjectRootDetection:
     def test_install_uses_explicit_project_root_for_workspace_runtime_detection(
         self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
     ):
+        # A single, unambiguous directory signal in `nested` (none in
+        # `tmp_path`/cwd) isolates what this test asserts: auto-detection
+        # (and the active-targets gate it feeds) probes the explicit
+        # `project_root`, not `Path.cwd()`. apm.yml declares no `targets:`
+        # here -- a manifest-declared value now resolves MCP ownership
+        # deterministically from the declaration itself (issue #2298) and
+        # would bypass the auto-detection this test exercises; see
+        # `test_declared_targets_override_local_runtime_detection` below for
+        # that path.
         nested = tmp_path / "nested-project"
         (nested / ".cursor").mkdir(parents=True)
-        (nested / ".opencode").mkdir()
-        (nested / ".vscode").mkdir()
-        # Copilot's project profile detects on `.github/` (targets.py:330);
-        # without it the active-targets gate would drop vscode here.
+
+        mock_mgr = mock_mgr_cls.return_value
+        mock_mgr.is_runtime_available.return_value = False
+        mock_install_rt.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+            MCPIntegrator.install(
+                mcp_deps=["test/server"],
+                project_root=nested,
+            )
+
+        called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
+        assert called_runtimes == {"cursor"}
+
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    def test_declared_targets_override_local_runtime_detection(
+        self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
+    ):
+        """Regression for #2298: declared `targets:` must not gain undeclared runtimes.
+
+        `.vscode/` exists on disk (as it would on one developer's machine
+        but not another's) but is NOT declared, so it must not be
+        targeted even though it would otherwise be auto-detected.
+        """
+        nested = tmp_path / "nested-project"
+        (nested / ".vscode").mkdir(parents=True)
         (nested / ".github").mkdir()
 
         mock_mgr = mock_mgr_cls.return_value
@@ -778,19 +819,12 @@ class TestInstallProjectRootDetection:
             MCPIntegrator.install(
                 mcp_deps=["test/server"],
                 project_root=nested,
-                # Declare every target the multi-signal nested project
-                # supports. Without this, the strict resolver raises
-                # AmbiguousHarnessError on >=2 signals (cursor, opencode,
-                # copilot from .github/) and the gate fails closed -- which
-                # is correct UX in production but obscures what THIS test
-                # is asserting (workspace project_root resolution).
                 apm_config={"targets": ["copilot", "cursor", "opencode"]},
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert "vscode" in called_runtimes
-        assert "cursor" in called_runtimes
-        assert "opencode" in called_runtimes
+        assert called_runtimes == {"copilot", "cursor", "opencode"}
+        assert "vscode" not in called_runtimes
 
 
 # ===========================================================================
