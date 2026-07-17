@@ -24,6 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import pytest
+import rich
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -47,7 +48,7 @@ def _integration_process_cwd_guard():
 
 @pytest.fixture(autouse=True)
 def _reset_console_state():
-    """Reset the console singleton after each test.
+    """Reset APM and Rich console singletons before and after each test.
 
     Several commands (e.g. ``pack --json``) call
     ``set_console_stderr(True)`` to route rich/click output to stderr.
@@ -56,14 +57,20 @@ def _reset_console_state():
     tests see empty stdout because ``click.echo(..., err=True)``
     silently diverts output.
 
-    This fixture is a safety net -- it yields first (so the test runs
-    with whatever state it sets up) and unconditionally resets
-    afterwards.
+    Tests that initialize Rich's process-global console while its
+    ``Console`` class is patched can also leave a ``MagicMock`` clock
+    behind. Rich progress then compares mock timestamps in later tests.
+
+    This fixture resets both singletons before and after each test so an
+    xdist worker cannot carry console state across test boundaries.
     """
-    yield
     from apm_cli.utils.console import _reset_console
 
     _reset_console()
+    rich._console = None
+    yield
+    _reset_console()
+    rich._console = None
     try:
         os.getcwd()
     except (FileNotFoundError, OSError):

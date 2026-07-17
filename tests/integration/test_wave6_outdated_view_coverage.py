@@ -22,10 +22,12 @@ from typing import Never
 from unittest.mock import MagicMock, patch
 
 import pytest
+import rich
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+from tests.integration.conftest import _reset_console_state
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -563,6 +565,19 @@ class TestOutdatedSequential:
 
 class TestOutdatedParallel:
     """Multiple deps trigger the parallel code path."""
+
+    def test_console_guard_resets_rich_singleton_before_and_after(self) -> None:
+        """The integration guard isolates Rich's process-global console."""
+        guard = _reset_console_state.__wrapped__()
+        rich._console = MagicMock()
+
+        next(guard)
+        assert rich._console is None
+
+        rich._console = MagicMock()
+        with pytest.raises(StopIteration):
+            next(guard)
+        assert rich._console is None
 
     def test_multiple_deps_parallel(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
