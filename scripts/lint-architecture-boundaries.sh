@@ -574,7 +574,21 @@ if ! grep -q 'with_derived_provider_coordinates' \
     violations=$((violations + 1))
 fi
 
-echo "[*] AC15: post-uninstall reachability owner authority"
+echo "[*] AC15: hook target-contraction cleanup authority"
+check_pattern \
+    "Prune/uninstall must stay outside target-contraction hook cleanup (#2250 scope)" \
+    'reconcile_dropped_merge_hook_targets\(|reconcile_dropped_targets\(' \
+    src/apm_cli/commands/prune.py \
+    src/apm_cli/commands/uninstall/*.py
+hook_config_write_output=$(python3 scripts/check_hook_config_write_owner.py --root "$ROOT" 2>&1)
+hook_config_write_status=$?
+if [ "$hook_config_write_status" -ne 0 ]; then
+    echo "[x] Merge-hook config/sidecar writes must stay owned by HookIntegrator"
+    echo "$hook_config_write_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC16: post-uninstall reachability owner authority"
 if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
     src/apm_cli/commands/uninstall/engine.py; then
     echo "[x] Uninstall engine must call deps/reachability.py's compute_forward_reachable_keys"
