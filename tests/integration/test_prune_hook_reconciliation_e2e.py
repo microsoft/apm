@@ -202,6 +202,10 @@ def _run_prune(project: Path, monkeypatch: pytest.MonkeyPatch, *, dry_run: bool 
     return _run_cli(project, monkeypatch, args)
 
 
+def _run_uninstall(project: Path, monkeypatch: pytest.MonkeyPatch, package: str) -> object:
+    return _run_cli(project, monkeypatch, ["uninstall", package])
+
+
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -380,6 +384,52 @@ def test_prune_preserves_transitive_dependency_hooks(
         "transitive dependency's hook command must survive reconcile_after_removal"
     )
     assert "./scripts/to-prune-hook.sh" not in commands
+
+
+def test_uninstall_preserves_transitive_dependency_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2254: uninstall's CLI path must rebuild transitive survivor hooks.
+
+    Unit tests cover the Phase 2 helper directly. This test drives the
+    user-facing ``apm uninstall`` command so the CLI wiring, in-memory
+    lockfile mutation, clear+rebuild integration pass, and native hook files
+    stay covered together.
+    """
+    project = tmp_path / "proj-uninstall-transitive-hooks"
+    _write_project(project, ["acme/keeper", "acme/to-uninstall"], ["claude"])
+
+    install_result = _run_install(
+        project,
+        monkeypatch,
+        {
+            "acme/transitive-hooks": "./scripts/transitive-hook.sh",
+            "acme/to-uninstall": "./scripts/to-uninstall-hook.sh",
+        },
+        package_deps={"acme/keeper": ["acme/transitive-hooks"]},
+    )
+    assert install_result.exit_code == 0, install_result.output
+
+    transitive_dir = project / "apm_modules" / "acme" / "transitive-hooks"
+    assert transitive_dir.is_dir(), "precondition: transitive package installed"
+    settings_path = project / ".claude" / "settings.json"
+    sidecar_path = project / ".claude" / "apm-hooks.json"
+    assert {"transitive-hooks", "to-uninstall"} <= _sidecar_sources(sidecar_path)
+
+    uninstall_result = _run_uninstall(project, monkeypatch, "acme/to-uninstall")
+    assert uninstall_result.exit_code == 0, uninstall_result.output
+
+    assert not (project / "apm_modules" / "acme" / "to-uninstall").exists()
+    assert transitive_dir.is_dir(), "transitive package must survive via keeper"
+    remaining_sources = _sidecar_sources(sidecar_path)
+    assert "to-uninstall" not in remaining_sources
+    assert "transitive-hooks" in remaining_sources, (
+        "uninstall must rebuild transitive dependency hook ownership from "
+        "the in-memory survivor lockfile"
+    )
+    commands = _pre_tool_use_commands(settings_path)
+    assert "./scripts/transitive-hook.sh" in commands
+    assert "./scripts/to-uninstall-hook.sh" not in commands
 
 
 def test_prune_hook_reconciliation_is_idempotent(

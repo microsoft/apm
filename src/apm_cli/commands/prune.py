@@ -172,7 +172,9 @@ def prune(ctx, dry_run):
             try:
                 from ..integration.hook_integrator import HookIntegrator
 
-                hook_stats = HookIntegrator().reconcile_after_removal(apm_package, project_root)
+                hook_stats = HookIntegrator().reconcile_after_removal(
+                    apm_package, project_root, lockfile=lockfile
+                )
                 hook_errors = hook_stats.get("errors", 0)
                 if hook_errors:
                     logger.warning(

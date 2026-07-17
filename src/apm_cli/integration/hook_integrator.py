@@ -1956,6 +1956,7 @@ class HookIntegrator(BaseIntegrator):
         project_root: Path,
         *,
         user_scope: bool = False,
+        lockfile=None,
     ) -> dict:
         """Reconcile merged-hook ownership after packages leave apm.yml.
 
@@ -1975,12 +1976,11 @@ class HookIntegrator(BaseIntegrator):
         ownership-aware cleanup instead of reimplementing hook filtering.
 
         Rebuilds from every package still recorded in the post-removal
-        lockfile (direct *and* transitive), via
-        ``surviving_dependency_refs_for_reintegration`` -- the same
-        survivor set uninstall Phase 2 uses (#2254). Falls back to
-        ``get_all_apm_dependencies()`` (prod + dev directs) only when no
-        lockfile is available, matching ``apm prune``'s orphan-detection
-        scope that already treats dev deps as first-class.
+        lockfile (direct *and* transitive), via the same survivor set
+        uninstall Phase 2 uses (#2254). Callers that already hold that
+        lockfile may pass it through; otherwise the helper reads disk.
+        Falls back to ``get_all_apm_dependencies()`` only when no
+        lockfile is available.
 
         Best-effort by design: a re-integration failure for one
         dependency is logged and skipped rather than aborting the
@@ -2010,7 +2010,9 @@ class HookIntegrator(BaseIntegrator):
         targets = resolve_targets(
             project_root, user_scope=user_scope, explicit_target=config_target or None
         )
-        surviving_deps = surviving_dependency_refs_for_reintegration(apm_package, project_root)
+        surviving_deps = surviving_dependency_refs_for_reintegration(
+            apm_package, project_root, lockfile=lockfile
+        )
 
         # Empty managed_files (not None) skips file-level deletion while
         # still triggering the merged-hook JSON wipe, scoped to the same

@@ -23,8 +23,6 @@ from apm_cli.models.apm_package import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = [pytest.mark.unit]
-
 
 @pytest.fixture(autouse=True)
 def _clear_package_cache() -> None:
