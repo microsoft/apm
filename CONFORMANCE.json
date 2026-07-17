@@ -1147,12 +1147,23 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-007",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_project_compile_guidance_for_dependency_instructions"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 72,
+      "active": 73,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1176,5 +1187,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 101
+  "total_requirements": 102
 }

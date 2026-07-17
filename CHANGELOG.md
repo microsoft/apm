@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project-scope installs for Gemini, agents-protocol, and Claude targets now
   prompt users to run `apm compile` when dependency instructions need root
   context compilation, instead of silently leaving those instructions unapplied
-  -- by @sergio-sisternes-epam (closes #2057; supersedes #2115).
+  -- by @sergio-sisternes-epam. The behavior is bound by
+  `docs/src/content/docs/specs/openapm-v0.1.md` requirement `req-tg-007`.
+  (closes #2057; supersedes #2115)
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

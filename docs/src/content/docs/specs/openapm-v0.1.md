@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **101 normative statements** indexed in
+- OpenAPM v0.1 carries **102 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2203,6 +2203,33 @@ returns.
 > process in [Section 9.3](#93-amendment-process) without weakening the
 > preservation-or-diagnostic contract above.
 
+#### 8.5.2 Post-install compilation guidance
+
+<a id="req-tg-007"></a>
+**[req-tg-007]** A conforming **consumer** implementation that completes a
+non-dry-run, project-scope install MUST emit a default-visible, actionable
+diagnostic before returning when all of the following are true: (a) at least
+one package was installed during this operation; (b) the full installed
+dependency tree, including packages installed during earlier operations,
+contains an instruction primitive; and (c) at least one active target is
+classified as requiring post-install root-context compilation in the companion
+[target support matrix](../../reference/targets-matrix/#post-install-instruction-compilation).
+The diagnostic MUST name the follow-up compilation operation (for example,
+`apm compile` or an equivalent) and at least one applicable root context output
+class (for example, `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`). A diagnostic
+that names the complete canonical output set is conforming even when only one
+target is active. The consumer MUST NOT emit this diagnostic for a dry run, an
+install that installed no package, an installed dependency tree without
+instruction primitives, or a target set with no active target classified as
+requiring post-install root-context compilation. An unclassified target MUST
+NOT trigger the diagnostic by itself.
+
+> **Editorial note.** The presence check covers the consumer's complete
+> installed dependency store because a later install can make instructions
+> from an earlier dependency newly relevant to an active target. The
+> requirement does not prescribe a lockfile field for this check:
+> compile-only instruction sources are not necessarily deployed outputs.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2216,7 +2243,7 @@ without a spec revision. The current matrix is in the companion
   [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
-  [req-tg-006](#req-tg-006).
+  [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007).
 
 ---
 
@@ -2716,7 +2743,8 @@ conformance statement identifying:
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
-[req-tg-006](#req-tg-006), [req-sc-001](#req-sc-001),
+[req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
+[req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
@@ -3130,6 +3158,7 @@ renumbering of conformance classes.
 | [req-tg-004](#req-tg-004)                | MUST    | 4.2.1   | consumer    |
 | [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
 | [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
+| [req-tg-007](#req-tg-007)                | MUST    | 8.5     | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3146,7 +3175,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 101** (96 MUST, 5 SHOULD).
+**Total normative statements: 102** (97 MUST, 5 SHOULD).
 
 ---
 
@@ -3172,6 +3201,7 @@ renumbering of conformance classes.
 | 0.1.14  | 2026-07-15 | Spec-citation fold for complete repository identity through resolution and materialization (closes #2191). Added [req-rs-016] (Section 7.2, consumer MUST): repository identity includes normalized host, explicit port, and the complete credential-free repository path; distinct identities MUST NOT share cached source material merely because they use the same ref or a common path prefix; identical identity and ref MAY reuse cached source material. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
 | 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
 | 0.1.16  | 2026-07-17 | Spec-citation fold for dropped-target merge-hook reconciliation (closes the #2253 Mode-B silent-extension gate). Added [req-lk-021] (Section 5.2, consumer MUST): extends [req-lk-020]'s target-reconciliation preserve/remove decision to merge-based hook configuration and its ownership record, since that state is deliberately outside `deployed_files`/`local_deployed_files` tracking and so was never reachable by req-lk-020's literal text -- narrowing a project's declared target set now also reconciles the dropped target's consumer-owned merge-hook entries, while preserving entries not carrying consumer ownership and preserving state for targets still attributable per req-lk-020's own (a)-(c) test. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 100 -> 101 (96 MUST, 5 SHOULD). |
+| 0.1.17  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

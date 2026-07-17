@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
-req-tg-001..006, req-cf-001..002.
+req-tg-001..007, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -11,9 +11,13 @@ or (c) a real apm_cli loader call where the surface exists.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import jsonschema
 import pytest
 
+from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
@@ -458,6 +462,41 @@ def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
         "default-visible",
         "MUST be rendered before\nthe overall operation returns",
         "does not mandate a nonzero\nexit status",
+    )
+
+
+@pytest.mark.req("req-tg-007")
+def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp_path):
+    apm_modules = tmp_path / "apm_modules"
+    instruction_dir = apm_modules / "example" / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (instruction_dir / "example.instructions.md").write_text(
+        "Apply this instruction.\n",
+        encoding="ascii",
+    )
+    target = SimpleNamespace(name="Gemini CLI", compile_family="gemini")
+    target.for_scope = MagicMock(return_value=target)
+    logger = MagicMock()
+    ctx = SimpleNamespace(
+        apm_modules_dir=apm_modules,
+        dry_run=False,
+        installed_count=1,
+        logger=logger,
+        project_root=tmp_path,
+        targets=[target],
+    )
+
+    _hint_project_compile_needed(ctx)
+
+    logger.info.assert_called_once_with(
+        "Instructions installed for Gemini CLI. "
+        "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md.",
+        symbol="info",
+    )
+    assert_spec_contains(
+        "default-visible, actionable\ndiagnostic",
+        "follow-up compilation operation",
+        "MUST NOT emit this diagnostic for a dry run",
     )
 
 
