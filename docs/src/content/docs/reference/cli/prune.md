@@ -89,6 +89,9 @@ Hook reconciliation is best-effort: a failure is logged as a warning but
 does not abort the run, since package and lockfile cleanup has already
 completed by that point. If reconciliation logs a warning, run `apm
 install` to rebuild hook configuration from the current dependency set.
+To clean up hooks left by a target removed from `targets:` in `apm.yml`,
+run `apm install` (or `apm compile` / `apm update`); `apm prune` only
+reconciles hooks for packages and targets still declared.
 
 Notes:
 

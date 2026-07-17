@@ -25,6 +25,58 @@ from apm_cli.core.target_catalog import TARGET_CAPABILITIES, manifest_target_nam
 # Canonical target names accepted by APM.
 CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
 
+# --- Legacy 'all' migration bridge (#2271) ---------------------------------
+# 'all' predates the canonical catalog (#1154): manifests published before
+# 0.25.0 could legally declare `targets: [all]`, meaning "no restriction".
+# The catalog keeps 'all' flag-only by design, but already-published tags
+# cannot be re-validated, so the parser folds the token to the
+# field-omitted behavior (fall through to --target / auto-detect) and warns
+# once per process. Hard rejection returns after a deprecation window.
+
+_legacy_all_warned: bool = False
+_LEGACY_ALL_TARGET_NAME = "all"
+
+
+def _reset_legacy_all_warning() -> None:
+    """Test hook: re-arm the once-per-process legacy 'all' warning."""
+    global _legacy_all_warned
+    _legacy_all_warned = False
+
+
+def _fold_legacy_all(tokens: list[str]) -> tuple[list[str], bool]:
+    """Split the legacy 'all' token out of *tokens*.
+
+    Returns ``(remaining_tokens, folded)`` where *folded* is True when the
+    token was present. Callers validate the remainder first and only then
+    emit the warning via :func:`_warn_legacy_all_once`, so a manifest that
+    still hard-fails on a sibling token does not consume the warning latch.
+    """
+    if _LEGACY_ALL_TARGET_NAME not in tokens:
+        return tokens, False
+    return [t for t in tokens if t != _LEGACY_ALL_TARGET_NAME], True
+
+
+def _warn_legacy_all_once() -> None:
+    """Emit the legacy 'all' deprecation warning at most once per process.
+
+    Dependency graphs can contain many affected manifests; one warning is
+    enough. The unlocked check-then-set is a benign race: a concurrent
+    parse can at worst duplicate the warning, never suppress it.
+    """
+    global _legacy_all_warned
+    if _legacy_all_warned:
+        return
+    _legacy_all_warned = True
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(
+        "'all' in apm.yml targets is deprecated and will become a hard "
+        "error in a future release. APM is treating the field as omitted "
+        "for this install so --target / auto-detect decide. If you "
+        "maintain this package, remove 'all' from the manifest.",
+        symbol="warning",
+    )
+
 
 def _validate_canonical(tokens: list[str]) -> None:
     """Validate every token is in CANONICAL_TARGETS. Raises UnknownTargetError."""
@@ -32,6 +84,16 @@ def _validate_canonical(tokens: list[str]) -> None:
         capability = TARGET_CAPABILITIES.get(token)
         if capability is None or capability.experimental_flag is not None or capability.mcp_only:
             raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
+
+
+def _validate_and_fold_legacy_all(tokens: list[str]) -> list[str]:
+    """Validate tokens and fold legacy 'all' to the omitted-field behavior."""
+    tokens, folded = _fold_legacy_all(tokens)
+    _validate_canonical(tokens)
+    if folded:
+        _warn_legacy_all_once()
+        return []
+    return tokens
 
 
 def parse_targets_field(yaml_data: dict) -> list[str]:
@@ -70,8 +132,7 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
             # Single value under targets: key, treat as one-element list
             raw = [str(raw)]
         tokens = [str(t).strip() for t in raw if str(t).strip()]
-        _validate_canonical(tokens)
-        return tokens
+        return _validate_and_fold_legacy_all(tokens)
 
     if has_target:
         raw = yaml_data["target"]
@@ -84,15 +145,13 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
             tokens = [str(t).strip() for t in raw if str(t).strip()]
             if not tokens:
                 return []
-            _validate_canonical(tokens)
-            return tokens
+            return _validate_and_fold_legacy_all(tokens)
         raw_str = str(raw).strip()
         if not raw_str:
             return []
         # CSV sugar: "claude,copilot" -> ['claude', 'copilot']
         tokens = [t.strip() for t in raw_str.split(",") if t.strip()]
-        _validate_canonical(tokens)
-        return tokens
+        return _validate_and_fold_legacy_all(tokens)
 
     # Neither key present
     return []

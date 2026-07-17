@@ -127,10 +127,10 @@ Stems with target tokens outside the trailing target suffix (for example
 warning naming the ignored token.
 
 During the deprecation window, existing suffix-named hook files still
-route to their matching harness and emit an install-time warning. Once a
-consumer adds per-dependency `targets:`, APM bypasses filename routing
-for that dependency and deploys all its hook files to the narrowed target
-set.
+route to their matching harness and emit an install-time warning. A
+consumer's per-dependency `targets:` list only narrows the active target
+set; filename routing still runs inside that set, so the two filters
+compose by intersection.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
