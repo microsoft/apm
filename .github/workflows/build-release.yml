@@ -67,7 +67,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra build
+        run: uv sync --frozen --extra dev --extra build
 
       # Keep the installer gate ahead of the broad unit suite so an unrelated
       # platform test failure cannot hide installer-specific Windows evidence.
@@ -177,7 +177,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra build
+        run: uv sync --frozen --extra dev --extra build
 
       - name: Run unit tests
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
@@ -196,6 +196,7 @@ jobs:
           test -x "$APM_BINARY_PATH"
           uv run --frozen pytest \
             tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
+            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_rich_table_runs \
             -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
@@ -298,7 +299,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra build
+        run: uv sync --frozen --extra dev --extra build
 
       - name: Run unit tests
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
@@ -308,6 +309,17 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      - name: Test macOS non-shell binary startup
+        env:
+          APM_E2E_TESTS: "1"
+          APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-arm64/apm
+        run: |
+          test -x "$APM_BINARY_PATH"
+          uv run --frozen pytest \
+            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
+            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_rich_table_runs \
+            -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
@@ -419,7 +431,7 @@ jobs:
           enable-cache: true
 
       - name: Install test dependencies
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
 
       - name: Run integration tests (Unix)
         if: matrix.platform != 'windows'

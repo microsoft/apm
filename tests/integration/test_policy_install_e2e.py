@@ -41,6 +41,9 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+# Load this owner before decorators patch discovery, or its import-time binding
+# can capture the discovery mock permanently and leak policy state across tests.
+from apm_cli.policy import install_preflight as install_preflight_module
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
@@ -59,7 +62,7 @@ FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "policy"
 # install_preflight.py does a top-level ``from .discovery import
 # discover_policy_with_chain`` -> must also patch where it's used.
 _PATCH_DISCOVER_GATE = "apm_cli.policy.discovery.discover_policy_with_chain"
-_PATCH_DISCOVER_PREFLIGHT = "apm_cli.policy.install_preflight.discover_policy_with_chain"
+_PATCH_DISCOVER_PREFLIGHT = f"{install_preflight_module.__name__}.discover_policy_with_chain"
 
 # Version-check noise suppressor
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
