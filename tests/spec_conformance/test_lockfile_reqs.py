@@ -387,6 +387,81 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
     )
 
 
+class TestFinalLockfileTargetContraction:
+    """req-lk-020 coverage for the final-lockfile deployed-file owner.
+
+    ``reconcile_target_deployed_files`` is the file-only contraction
+    owner the LockfileBuilder routes both the normal and zero-install
+    paths through, so req-lk-020's remove-prior-path decision reaches
+    the physical deployed instruction file, not just the in-memory list.
+    """
+
+    @pytest.mark.req("req-lk-020")
+    def test_removes_dropped_target_instruction_file(self, tmp_path):
+        """Narrowing a declared target set from claude+cursor to claude
+        MUST remove the dropped cursor instruction's ``deployed_files``
+        row *and* its corresponding hash entry, and delete the orphaned
+        file from disk through the cleanup chokepoint, while preserving
+        the retained claude instruction (row, hash, and bytes)."""
+        from apm_cli.deps.lockfile import LockFile, LockedDependency
+        from apm_cli.install.manifest_reconcile import reconcile_target_deployed_files
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.content_hash import compute_file_hash
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        claude_rel = ".claude/rules/scope.md"
+        cursor_rel = ".cursor/rules/scope.mdc"
+        claude_abs = tmp_path / claude_rel
+        cursor_abs = tmp_path / cursor_rel
+        for path, body in ((claude_abs, "# claude rule\n"), (cursor_abs, "# cursor rule\n")):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/acme/pkg",
+                resolved_ref="1.0.0",
+                deployed_files=[claude_rel, cursor_rel],
+                deployed_file_hashes={
+                    claude_rel: compute_file_hash(claude_abs),
+                    cursor_rel: compute_file_hash(cursor_abs),
+                },
+            )
+        )
+
+        changed = reconcile_target_deployed_files(
+            project_root=tmp_path,
+            lockfile=lockfile,
+            active_targets=[KNOWN_TARGETS["claude"]],
+            declared_targets=[KNOWN_TARGETS["claude"]],
+            diagnostics=DiagnosticCollector(),
+        )
+
+        dependency = next(iter(lockfile.dependencies.values()))
+        assert changed is True
+        assert dependency.deployed_files == [claude_rel], (
+            "dropped-target path attributable to no declared target MUST be removed"
+        )
+        assert cursor_rel not in dependency.deployed_file_hashes, (
+            "the removed path's hash entry MUST be removed alongside it"
+        )
+        assert not cursor_abs.exists(), (
+            "the orphaned dropped-target instruction MUST be deleted from disk"
+        )
+        assert claude_abs.exists()
+        assert claude_abs.read_text(encoding="utf-8") == "# claude rule\n", (
+            "a path attributable to the retained target MUST be preserved untouched"
+        )
+        assert dependency.deployed_file_hashes.get(claude_rel) == compute_file_hash(claude_abs)
+
+        assert_spec_contains(
+            "MUST remove a prior path attributable",
+            "This reconciliation applies identically to",
+            "per-entry `deployed_files` and top-level `local_deployed_files`",
+        )
+
+
 @pytest.mark.req("req-lk-021")
 def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
     """req-lk-021 extends req-lk-020's preserve/remove decision to
