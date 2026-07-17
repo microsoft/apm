@@ -408,6 +408,31 @@ check_pattern \
     "Neutral hook IR must not contain native harness vocabulary" \
     'copilot|gemini|antigravity|timeoutSec|powershell|_apm_source|["'\'']hooks["'\'']' \
     src/apm_cli/integration/hook_ir.py
+hook_routing_gate_hits=$(python3 - <<'PY'
+from pathlib import Path
+
+paths = (
+    Path("src/apm_cli/integration/hook_integrator.py"),
+    Path("src/apm_cli/integration/kiro_hook_integrator.py"),
+)
+for path in paths:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if "if not dep_targets_active" not in line:
+            continue
+        window = "\n".join(lines[index : index + 8])
+        if "_filter_hook_files_for_target(" in window:
+            print(
+                f"{path}:{index + 1}: dep_targets_active gates "
+                "_filter_hook_files_for_target"
+            )
+PY
+)
+if [ -n "$hook_routing_gate_hits" ]; then
+    echo "[x] Per-file hook routing must not be gated by dep_targets_active"
+    echo "$hook_routing_gate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Manifest schema negotiation belongs in manifest_contract.py" \
     'get\\(["'\'']\\$schema["'\'']\\)' \
