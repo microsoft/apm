@@ -69,7 +69,11 @@ the [policy schema](../policy-schema/).
 
 - **What it verifies.** That every dependency's `reference` in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`) matches the `resolved_ref` recorded in the lockfile.
 - **Fails when.** A manifest ref differs from the lockfile entry, or the manifest declares a dependency that is missing from the lockfile.
-- **Remediation.** Run `apm install` so the lockfile re-resolves to the manifest, then commit `apm.lock.yaml`.
+- **Remediation.** Run the command named in the check message -- `apm install`
+  for a first resolution, or `apm install --update` when the lockfile already
+  resolved the dependency and must be refreshed (the source-identity rewrite and
+  commit-pin mismatch cases) -- so the lockfile re-resolves to the manifest, then
+  commit `apm.lock.yaml`.
 - **Runs before `deployment-ledger-owners`.** This external manifest-versus-lockfile
   identity check is evaluated ahead of the internal ledger-owner check on purpose.
   A source-identity tamper (a rewritten dependency `host`/`repo_url` in the lockfile)
