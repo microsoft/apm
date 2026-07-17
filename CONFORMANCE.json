@@ -524,6 +524,17 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-mf-022",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match"
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",

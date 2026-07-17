@@ -1,6 +1,6 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
+Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
 req-tg-001..007, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
@@ -11,6 +11,7 @@ or (c) a real apm_cli loader call where the surface exists.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -19,6 +20,7 @@ import pytest
 
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_WARNING,
@@ -219,6 +221,34 @@ def test_consumer_enforces_yaml_safe_subset():
 def test_producer_workspaces_must_not_use_in_v0_1():
     """req-mf-021 forbids workspaces in v0.1."""
     assert_spec_contains("workspaces", "v0.1")
+
+
+@pytest.mark.req("req-mf-022")
+def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
+    """A stale persisted skill subset must identify the mismatch."""
+    skills_dir = tmp_path / "skills"
+    available_dir = skills_dir / "available"
+    available_dir.mkdir(parents=True)
+    (available_dir / "SKILL.md").write_text("# Available", encoding="utf-8")
+    diagnostics = DiagnosticCollector()
+
+    SkillIntegrator._warn_no_skill_filter_match(
+        skills_dir,
+        {"missing"},
+        "owner/bundle",
+        diagnostics=diagnostics,
+    )
+
+    warnings = diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].package == "owner/bundle"
+    assert "Requested: missing" in warnings[0].message
+    assert "Available: available" in warnings[0].message
+    assert_spec_contains(
+        "a non-empty `skills:` subset",
+        "MUST emit a default-visible diagnostic",
+        "the requested skill names, and the available skill names",
+    )
 
 
 # --- req-ext-001..002 --------------------------------------------------
