@@ -236,8 +236,9 @@ in the current directory. To target explicitly, see the
 > print a hint after `apm install` when dependency instructions need
 > `apm compile`.
 > Gemini and Claude also receive commands, skills, hooks, and MCP via
-> `apm install`. Copilot and Cursor read the per-skill directories directly --
-> no compile step needed.
+> `apm install`. Claude instructions deploy directly to `.claude/rules/`, while
+> Copilot and Cursor read their native instruction directories -- none of those
+> instruction paths needs a compile step.
 > If your project commits those generated files, set `targets:` in `apm.yml`
 > to keep the committed set consistent across machines. See
 > [Pin committed output with targets:](/apm/reference/cli/compile/#pin-committed-output-with-targets).

@@ -128,14 +128,14 @@ Claude Code.
 - **Deploy directory.** `.claude/` (project and user scope; user scope honors `CLAUDE_CONFIG_DIR` if set).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
-  - instructions: staged by `apm install`, then materialized by `apm compile`
-    under `.claude/rules/<name>.md`
+  - instructions: deployed directly by `apm install` to
+    `.claude/rules/<name>.md`
   - agents: `.claude/agents/<name>.md`
   - commands: `.claude/commands/<name>.md`
   - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
-- **Compile output.** `CLAUDE.md` and per-rule files under `.claude/rules/`;
-  dependency instruction sources remain staged until this step runs.
+- **Compile output.** `CLAUDE.md`; instructions already deployed under
+  `.claude/rules/` are omitted from `CLAUDE.md` to avoid duplicate context.
 
 ## cursor
 
