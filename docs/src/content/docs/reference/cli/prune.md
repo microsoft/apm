@@ -107,13 +107,17 @@ After processing all orphaned packages, `apm prune` also reconciles merged
 hook configuration (`.claude/settings.json`, `.cursor/hooks.json`, and
 similar merge targets, plus their `apm-hooks.json` ownership sidecars):
 entries owned by a pruned package are removed, while entries owned by
-packages that remain declared -- and any manually authored entries -- are
-preserved and rewritten back. This orchestrates the same ownership-aware
-cleanup `apm uninstall` uses; it does not duplicate the filtering logic.
+packages that remain in the post-prune lockfile -- direct *and*
+transitive -- and any manually authored entries are preserved and
+rewritten back. This orchestrates the same ownership-aware cleanup
+`apm uninstall` uses; it does not duplicate the filtering logic.
 Hook reconciliation is best-effort: a failure is logged as a warning but
 does not abort the run, since package and lockfile cleanup has already
 completed by that point. If reconciliation logs a warning, run `apm
 install` to rebuild hook configuration from the current dependency set.
+To clean up hooks left by a target removed from `targets:` in `apm.yml`,
+run `apm install` (or `apm compile` / `apm update`); `apm prune` only
+reconciles hooks for packages and targets still declared.
 
 Notes:
 

@@ -198,6 +198,11 @@ requirements:
     section: "5.2"
     conformance_class: consumer
     notes: "target and identity reconciliation preserves legitimate, indeterminate, and freshly redeployed paths while dropping inactive-target ghosts"
+  - id: req-lk-021
+    keyword: MUST
+    section: "5.2"
+    conformance_class: consumer
+    notes: "extends req-lk-020's preserve/remove decision to merge-based hook configuration and its ownership record"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"

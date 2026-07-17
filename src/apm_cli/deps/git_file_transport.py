@@ -30,6 +30,7 @@ import sys
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,14 @@ class GitFileTransportError(RuntimeError):
 
 class GitFileTransportSecurityError(ValueError):
     """Security validation failure before invoking git transport."""
+
+
+@dataclass(frozen=True)
+class GitFileFetchResult:
+    """A sparse-file payload and the exact commit Git fetched for it."""
+
+    content: bytes
+    resolved_commit: str
 
 
 def _debug(message: str) -> None:
@@ -116,6 +125,22 @@ class GitSparseFileTransport:
 
     def fetch_file(self, file_path: str) -> bytes:
         """Fetch one file from the transport's repository/ref."""
+        result = self._fetch_file(file_path, include_commit=False)
+        if not isinstance(result, bytes):
+            raise GitFileTransportError(
+                "git file fetch returned commit metadata for a bytes request"
+            )
+        return result
+
+    def fetch_file_with_commit(self, file_path: str) -> GitFileFetchResult:
+        """Fetch one file and return the exact commit selected by ``FETCH_HEAD``."""
+        result = self._fetch_file(file_path, include_commit=True)
+        if not isinstance(result, GitFileFetchResult):
+            raise GitFileTransportError("git file fetch omitted commit metadata")
+        return result
+
+    def _fetch_file(self, file_path: str, *, include_commit: bool) -> bytes | GitFileFetchResult:
+        """Materialize and read one containment-checked sparse file."""
         validate_path_segments(file_path, context="path")
         with self._state:
             if self._closed:
@@ -128,7 +153,7 @@ class GitSparseFileTransport:
                 target = self._work_dir / file_path
                 ensure_path_within(target, self._work_dir)
                 if not target.exists():
-                    raise RuntimeError(
+                    raise GitFileTransportError(
                         f"File '{file_path}' not found after git sparse checkout of "
                         f"{self._dep_ref.host}/{self._dep_ref.repo_url}@{self._ref}. "
                         "Verify the path exists at that ref "
@@ -138,7 +163,16 @@ class GitSparseFileTransport:
                 # The lock serializes sparse-checkout expansion and the
                 # containment/read pair so another checkout cannot race the
                 # target between ensure_path_within() and read_bytes().
-                return target.read_bytes()
+                content = target.read_bytes()
+                if not include_commit:
+                    return content
+                result = self._run(["git", "rev-parse", "--verify", "FETCH_HEAD^{commit}"])
+                resolved_commit = result.stdout.strip()
+                if not re.fullmatch(r"[0-9a-f]{40}", resolved_commit, flags=re.IGNORECASE):
+                    raise GitFileTransportError(
+                        "git file fetch did not resolve FETCH_HEAD to a full commit SHA"
+                    )
+                return GitFileFetchResult(content=content, resolved_commit=resolved_commit.lower())
         finally:
             with self._state:
                 self._active_fetches -= 1
@@ -178,7 +212,7 @@ class GitSparseFileTransport:
         self._sparse_paths.update(file_paths)
         self._run(["git", "sparse-checkout", "set", "--no-cone", "--", *sorted(self._sparse_paths)])
 
-    def _run(self, cmd: list[str]) -> None:
+    def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
         """Run one git command and raise a sanitized error on failure."""
         try:
             result = subprocess.run(
@@ -196,6 +230,7 @@ class GitSparseFileTransport:
             raise GitFileTransportError(
                 f"git file fetch failed: {' '.join(cmd[:3])}: {safe_stderr}"
             )
+        return result
 
 
 def fetch_file_via_git_sparse(

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.deployment_state import DeploymentLedger
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -105,7 +106,12 @@ def union_preserving(
     targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None = None,
     on_ghost_drop: Callable[[str], None] | None = None,
-) -> tuple[list[str], dict[str, str]]:
+    prior_ledger: DeploymentLedger | None = None,
+    cleanup_retained_hashes: dict[str, str | None] | None = None,
+    current_run_trusted: bool = True,
+    owner: str = "legacy",
+    include_ledger: bool = False,
+) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Union the current install's manifest with preserved other-target entries.
 
     ``current_files`` / ``current_hashes`` describe what THIS install
@@ -150,6 +156,8 @@ def union_preserving(
         if declared_targets is not None
         else None
     )
+    active_prefixes, active_schemes = install_governance(targets)
+    cleanup_retained_hashes = cleanup_retained_hashes or {}
 
     def _target_for(path: str) -> str:
         ordered = [
@@ -176,25 +184,46 @@ def union_preserving(
             scope="project",
         )
 
-    prior_records: dict[str, DeploymentRecord] = {}
+    prior_values = set(prior_files or ())
+    prior_records = {
+        key: record
+        for key, record in (prior_ledger.records.items() if prior_ledger is not None else ())
+        if record.locator.value in prior_values
+    }
+    prior_record_values = {record.locator.value for record in prior_records.values()}
     for path in prior_files or ():
+        if path in prior_record_values:
+            continue
         locator = _locator(path)
         prior_records[locator.key] = DeploymentRecord(
             locator=locator,
-            owners=("legacy",),
-            active_owner="legacy",
+            owners=(owner,),
+            active_owner=owner,
             content_hash=prior_hashes.get(path),
         )
+        prior_record_values.add(path)
     current_results = [
         MaterializationResult(
             locator=_locator(path),
-            owners=frozenset({"legacy"}),
+            owners=frozenset({owner}),
             status=MaterializationStatus.UNCHANGED,
             content_hash=current_hashes.get(path),
             validation=NativePayloadValidation(valid=True, contract="legacy-file"),
         )
         for path in current_files or ()
+        if path not in cleanup_retained_hashes
     ]
+    current_results.extend(
+        MaterializationResult(
+            locator=_locator(path),
+            owners=frozenset({owner}),
+            status=MaterializationStatus.FAILED,
+            content_hash=prior_hashes.get(path),
+            validation=NativePayloadValidation(valid=True, contract="legacy-file"),
+        )
+        for path in cleanup_retained_hashes
+        if path in current_files
+    )
     reconciled = DeploymentReconciler(
         Path.cwd(),
         KNOWN_TARGETS,
@@ -207,24 +236,47 @@ def union_preserving(
             declared_targets=(
                 frozenset(declared_by_name) if declared_by_name is not None else None
             ),
-            desired_owners=frozenset({"legacy"}),
-            authoritative_targets=True,
+            desired_owners=None,
+            authoritative_targets=current_run_trusted,
+            generic_governed_values=(
+                frozenset(
+                    path
+                    for path in prior_values
+                    if is_governed_by_install(path, active_prefixes, active_schemes)
+                )
+                if (
+                    current_run_trusted
+                    and declared_by_name is not None
+                    and set(active_by_name) == set(declared_by_name)
+                )
+                else None
+            ),
         ),
     )
     retained_values = {record.locator.value for record in reconciled.ledger.records.values()}
     current_set = set(current_files or ())
     if on_ghost_drop is not None:
         for locator in reconciled.removed:
-            if locator.value not in current_set and locator.target not in active_by_name:
+            if (
+                locator.value not in current_set
+                and locator.target in KNOWN_TARGETS
+                and locator.target not in active_by_name
+            ):
                 on_ghost_drop(locator.value)
     preserved = [
         path for path in prior_files or () if path not in current_set and path in retained_values
     ]
     merged_hashes = dict(current_hashes or {})
+    for path in cleanup_retained_hashes:
+        if path in current_set and path in prior_hashes:
+            merged_hashes[path] = prior_hashes[path]
     for path in preserved:
         if path in prior_hashes:
             merged_hashes[path] = prior_hashes[path]
-    return list(current_files or ()) + preserved, merged_hashes
+    files = list(current_files or ()) + preserved
+    if include_ledger:
+        return files, merged_hashes, reconciled.ledger
+    return files, merged_hashes
 
 
 def declared_target_profiles(
@@ -267,6 +319,56 @@ def declared_target_profiles(
     return profiles or None
 
 
+def reconcile_dropped_merge_hook_targets(
+    project_root: Path,
+    active_targets: list[TargetProfile],
+    declared_targets: list[TargetProfile] | None,
+    *,
+    user_scope: bool = False,
+) -> dict[str, int]:
+    """Clean merge-hook JSON/sidecar state for targets dropped from ``targets:``.
+
+    Complements :func:`reconcile_deployed_state` for the one class of
+    APM-owned state that function structurally cannot see: merge-hook
+    config files (``.codex/hooks.json``, ``.claude/settings.json``, etc.)
+    are deliberately excluded from ``deployed_files`` tracking -- ownership
+    lives in an ``_apm_source`` marker / ``apm-hooks.json`` ownership
+    sidecar instead of a tracked path list (see
+    ``apm_cli.integration.hook_integrator.HookIntegrator``). Narrowing a
+    project's declared ``targets:`` (e.g. ``[claude, codex]`` ->
+    ``[claude]``) therefore never reached this state before: prune/uninstall
+    intentionally scope their merge-hook wipe to the SAME resolved target
+    set as rebuild (#2250/#2252) and never clean a dropped target's residue
+    by design.
+
+    Mirrors :func:`reconcile_deployed_state`'s own
+    ``allowed = active_targets union declared_targets`` semantics exactly,
+    including the ``declared_targets is None`` legacy preserve-all no-op
+    (issue #2059 symmetry: with no declared universe there is no dropped-
+    target detection to perform). A known target name outside that allowed
+    set is a candidate drop; this function only computes WHICH names
+    dropped -- exactly as :func:`reconcile_deployed_state` already does for
+    file-based state -- and delegates ALL merge-hook JSON/sidecar mutation
+    to ``HookIntegrator.reconcile_dropped_targets``, the sole owner of that
+    state. Names that are not merge-hook targets at all (e.g. ``copilot``,
+    already correctly cleaned via the generic ``deployed_files``
+    reconciliation) are silently skipped by that owner.
+    """
+    if declared_targets is None:
+        return {"files_removed": 0, "errors": 0}
+
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    allowed_names = {t.name for t in active_targets} | {t.name for t in declared_targets}
+    dropped_names = [name for name in KNOWN_TARGETS if name not in allowed_names]
+    if not dropped_names:
+        return {"files_removed": 0, "errors": 0}
+    return HookIntegrator().reconcile_dropped_targets(
+        project_root, dropped_names, user_scope=user_scope
+    )
+
+
 def reconcile_deployed_block(
     *,
     project_root: Path,
@@ -279,9 +381,14 @@ def reconcile_deployed_block(
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
     on_ghost_drop: Callable[[str], None] | None = None,
-) -> tuple[list[str], dict[str, str]]:
+    prior_ledger: DeploymentLedger | None = None,
+    cleanup_retained_hashes: dict[str, str | None] | None = None,
+    current_run_trusted: bool = True,
+    owner: str = "legacy",
+    include_ledger: bool = False,
+) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths."""
-    files, hashes = union_preserving(
+    files, hashes, ledger = union_preserving(
         current_files,
         current_hashes,
         prior_files,
@@ -289,9 +396,16 @@ def reconcile_deployed_block(
         active_targets,
         declared_targets=declared_targets,
         on_ghost_drop=on_ghost_drop,
+        prior_ledger=prior_ledger,
+        cleanup_retained_hashes=cleanup_retained_hashes,
+        current_run_trusted=current_run_trusted,
+        owner=owner,
+        include_ledger=True,
     )
     dropped = set(prior_files) - set(files)
     if not dropped:
+        if include_ledger:
+            return files, hashes, ledger
         return files, hashes
 
     from apm_cli.integration.base_integrator import BaseIntegrator
@@ -305,13 +419,28 @@ def reconcile_deployed_block(
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
     )
-    for path in cleanup.failed:
+    for path in cleanup.retained:
         if path not in files:
             files.append(path)
         if path in prior_hashes:
             hashes[path] = prior_hashes[path]
+    if cleanup.retained and prior_ledger is not None:
+        from apm_cli.core.deployment_state import DeploymentLedger
+
+        retained_values = set(cleanup.retained)
+        records = dict(ledger.records)
+        records.update(
+            {
+                key: record
+                for key, record in prior_ledger.records.items()
+                if record.locator.value in retained_values
+            }
+        )
+        ledger = DeploymentLedger(records=records)
     if cleanup.deleted_targets:
         BaseIntegrator.cleanup_empty_parents(cleanup.deleted_targets, project_root)
+    if include_ledger:
+        return files, hashes, ledger
     return files, hashes
 
 
@@ -322,8 +451,10 @@ def reconcile_deployed_state(
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    user_scope: bool = False,
 ) -> bool:
     """Prune undeclared-target ownership from every lockfile deployment block."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import _SELF_KEY
     from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -344,6 +475,7 @@ def reconcile_deployed_state(
         ]
 
     changed = False
+    prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
     for dep_key, dependency in lockfile.dependencies.items():
         if dep_key == _SELF_KEY:
             continue
@@ -363,10 +495,9 @@ def reconcile_deployed_state(
             active_targets=active_targets,
             declared_targets=declared_targets,
             diagnostics=diagnostics,
+            prior_ledger=prior_ledger,
         )
         if files != prior_files or hashes != prior_hashes:
-            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
             DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
             changed = True
 
@@ -386,12 +517,18 @@ def reconcile_deployed_state(
         active_targets=active_targets,
         declared_targets=declared_targets,
         diagnostics=diagnostics,
+        prior_ledger=prior_ledger,
     )
     if local_files != prior_local or local_hashes != prior_local_hashes:
-        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
         DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
         changed = True
+
+    reconcile_dropped_merge_hook_targets(
+        project_root,
+        active_targets=active_targets,
+        declared_targets=declared_targets,
+        user_scope=user_scope,
+    )
     return changed
 
 
@@ -427,6 +564,7 @@ def reconcile_project_deployed_state(
         active_targets=targets,
         declared_targets=declared,
         diagnostics=DiagnosticCollector(verbose=verbose),
+        user_scope=user_scope,
     )
     if changed:
         lockfile.save(lock_path)

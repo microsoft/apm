@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.install.phases import cleanup
+from apm_cli.integration.cleanup import CleanupResult
 
 
 def _make_ctx(
@@ -24,6 +25,8 @@ def _make_ctx(
     ctx.package_deployed_files = (
         package_deployed_files if package_deployed_files is not None else {}
     )
+    ctx.orphan_cleanup_retained = {}
+    ctx.package_cleanup_retained = {}
     ctx.project_root = project_root or Path("/fake/project")
     ctx.targets = []
     ctx.diagnostics = MagicMock()
@@ -263,6 +266,27 @@ class TestOrphanCleanupFullRun:
 
         ctx.logger.cleanup_skipped_user_edit.assert_called_once_with("docs/edited.md", "old-doc")
 
+    def test_orphan_cleanup_refusal_retains_existing_hash_and_owner_key(self, tmp_path):
+        """A failed orphan cleanup remains attributable without a new owner."""
+        path = ".agents/skills/alpha/SKILL.md"
+        orphan_dep = _make_orphan_dep([path], file_hashes={path: "sha256:original"})
+        lf = _make_lockfile({"old-skill": orphan_dep})
+        ctx = _make_ctx(
+            existing_lockfile=lf,
+            only_packages=False,
+            intended_dep_keys=set(),
+            project_root=tmp_path,
+        )
+        result = CleanupResult(skipped_user_edit=[path])
+
+        with patch(
+            "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+            return_value=result,
+        ):
+            cleanup.run(ctx)
+
+        assert ctx.orphan_cleanup_retained == {"old-skill": {path: "sha256:original"}}
+
     def test_orphan_no_logger_no_crash(self, tmp_path):
         """When logger is None, orphan cleanup should not raise."""
         orphan_dep = _make_orphan_dep(["file.md"])
@@ -426,6 +450,7 @@ class TestStaleCleanupFullRun:
 
         mock_result = MagicMock()
         mock_result.failed = ["old.md"]
+        mock_result.retained = ["old.md"]
         mock_result.deleted = []
         mock_result.deleted_targets = []
         mock_result.skipped_user_edit = []
@@ -442,6 +467,48 @@ class TestStaleCleanupFullRun:
 
         # failed paths must be re-inserted for retry
         assert "old.md" in new_deployed
+
+    def test_stale_user_edited_and_unmanaged_paths_remain_tracked(self, tmp_path):
+        """Cleanup refusals retain their existing ownership rows for later review."""
+        user_edited = ".agents/skills/alpha/SKILL.md"
+        unmanaged = ".agents/skills/alpha/extra.txt"
+        prev_dep = _make_orphan_dep(
+            [user_edited, unmanaged],
+            file_hashes={user_edited: "sha256:original"},
+        )
+        lf = _make_lockfile({"pkg": prev_dep})
+        lf.get_dependency.return_value = prev_dep
+        new_deployed: list[str] = []
+        ctx = _make_ctx(
+            existing_lockfile=lf,
+            intended_dep_keys={"pkg"},
+            package_deployed_files={"pkg": new_deployed},
+            project_root=tmp_path,
+        )
+        result = CleanupResult(
+            skipped_user_edit=[user_edited],
+            skipped_unmanaged=[unmanaged],
+        )
+
+        with (
+            patch(
+                "apm_cli.install.phases.cleanup.detect_stale_files",
+                return_value=[user_edited, unmanaged],
+            ),
+            patch(
+                "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+                return_value=result,
+            ),
+        ):
+            cleanup.run(ctx)
+
+        assert new_deployed == [user_edited, unmanaged]
+        assert ctx.package_cleanup_retained == {
+            "pkg": {
+                user_edited: "sha256:original",
+                unmanaged: None,
+            }
+        }
 
     def test_stale_cleanup_empty_parents_called(self, tmp_path):
         prev_dep = _make_orphan_dep(["dir/old.md"])

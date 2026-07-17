@@ -72,6 +72,21 @@ dependencies:
 
 The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
 
+### GitHub API throttle containment
+
+For a virtual-file dependency, APM treats only an HTTP `429`, an HTTP `403`
+with `X-RateLimit-Remaining: 0`, or an HTTP `403` with a finite positive
+`Retry-After` value as an indeterminate API probe. It then makes one sparse
+Git fetch and records that fetch's exact commit SHA in the lockfile; normal
+content hashing still verifies the materialized package.
+
+The fallback does not retry the API, sleep, or use a raw-content CDN. Public
+repositories use normal non-interactive Git. Private repositories use only the
+Git environment already resolved by `AuthResolver`; no token is put in the
+repository URL or diagnostic. Authentication failures (`401`), ordinary
+authorization failures (`403`), and missing paths (`404`) remain fail-closed
+and never select this fallback.
+
 ### Registry security model
 
 By default, APM resolves dependencies as git repository URLs, eliminating the centralized-registry compromise vector.

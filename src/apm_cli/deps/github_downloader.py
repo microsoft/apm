@@ -51,6 +51,7 @@ from .git_remote_ops import (
     semver_sort_key,
     sort_remote_refs,
 )
+from .github_rate_limit import GitHubThrottleError
 from .transport_selection import (
     ProtocolPreference,
     TransportSelector,
@@ -515,10 +516,16 @@ class GitHubPackageDownloader:
         max_retries: int = 3,
         *,
         stream: bool = False,
+        retry_throttles: bool = True,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
         return self._strategies.resilient_get(
-            url, headers, timeout=timeout, max_retries=max_retries, stream=stream
+            url,
+            headers,
+            timeout=timeout,
+            max_retries=max_retries,
+            stream=stream,
+            retry_throttles=retry_throttles,
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:
@@ -952,9 +959,20 @@ class GitHubPackageDownloader:
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=50, total=100)
 
-        # Download the file content
+        # Download the file content. A confirmed API throttle is
+        # indeterminate, not an accessibility failure, so select the one
+        # sparse-Git fallback and use its observed commit for lock provenance.
         try:
             file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, ref)
+        except GitHubThrottleError as throttle:
+            fetched = self._strategies.download_github_file_via_throttle_fallback(
+                dep_ref,
+                dep_ref.virtual_path,
+                ref,
+                throttle,
+            )
+            file_content = fetched.content
+            resolved_commit = fetched.resolved_commit
         except RuntimeError as e:
             raise RuntimeError(f"Failed to download virtual package: {e}") from e
 

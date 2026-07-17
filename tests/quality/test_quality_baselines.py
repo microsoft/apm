@@ -20,14 +20,14 @@ CHECKERS = (
     (
         REPO_ROOT / "scripts" / "check_test_assertions.py",
         QUALITY_DIR / "assertion_quality_baseline.json",
-        "[+] assertion-quality ratchet clean: AQ001=5, AQ002=12\n",
+        "[+] assertion-quality ratchet clean: AQ001=4, AQ002=12\n",
     ),
     (
         REPO_ROOT / "scripts" / "check_exact_test_duplicates.py",
         QUALITY_DIR / "exact_test_duplicates.json",
         (
             "[+] exact test duplicate ratchet clean: "
-            "{module_count} files, 6 allowed duplicate group(s)\n"
+            "{module_count} files, 0 allowed duplicate group(s)\n"
         ),
     ),
 )

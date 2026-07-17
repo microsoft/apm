@@ -48,6 +48,8 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
 | Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
 | Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) | `src/apm_cli/policy/discovery.py` |
+| Post-uninstall dependency reachability | deps/reachability.py (compute_forward_reachable_keys) | `src/apm_cli/deps/reachability.py` |
+| GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |
 <!-- /canonical-owner-table -->
 
 If you are about to compute one of these locally, stop and call the
