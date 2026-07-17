@@ -25,6 +25,24 @@ from ._helpers import (
 from .uninstall.lockfile_state import lockfile_has_persisted_state
 
 
+def _lock_keys_by_install_path(
+    lockfile: LockFile,
+    apm_modules_dir: Path,
+) -> dict[str, tuple[str, ...]]:
+    """Index canonical lock keys by their host-blind installed path."""
+    grouped: dict[str, list[str]] = {}
+    for dep_key, dependency in sorted(lockfile.dependencies.items()):
+        if dep_key == ".":
+            continue
+        install_path = dependency.to_dependency_ref().get_install_path(apm_modules_dir)
+        try:
+            relative_path = install_path.relative_to(apm_modules_dir).as_posix()
+        except ValueError:
+            continue
+        grouped.setdefault(relative_path, []).append(dep_key)
+    return {path: tuple(keys) for path, keys in grouped.items()}
+
+
 @click.command(
     help=(
         "Remove APM packages absent from the resolved dependency graph "
@@ -82,8 +100,18 @@ def prune(ctx, dry_run):
             expected_installed,
             standalone_installed,
         )
+        lock_keys_by_path = (
+            _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
+        )
         orphaned_packages = sorted(
             p for p in installed_packages if p not in expected_with_ancestors
+        )
+        missing_orphaned_keys = sorted(
+            dep_key
+            for relative_path, dep_keys in lock_keys_by_path.items()
+            if relative_path not in expected_with_ancestors
+            and not (apm_modules_dir / relative_path).exists()
+            for dep_key in dep_keys
         )
         owner_violations = (
             DeploymentLedgerCodec.owner_reference_violations(lockfile)
@@ -91,7 +119,7 @@ def prune(ctx, dry_run):
             else ()
         )
 
-        if not orphaned_packages and not owner_violations:
+        if not orphaned_packages and not missing_orphaned_keys and not owner_violations:
             if not apm_modules_dir.exists():
                 logger.progress("No apm_modules/ directory found. Nothing to prune.")
             else:
@@ -111,8 +139,17 @@ def prune(ctx, dry_run):
                 f"Found {len(owner_violations)} invalid deployment ownership "
                 "record(s) in apm.lock.yaml."
             )
+        if missing_orphaned_keys:
+            logger.progress(
+                f"Found {len(missing_orphaned_keys)} stale lockfile dependency "
+                "record(s) without installed package content."
+            )
 
         if dry_run:
+            if missing_orphaned_keys:
+                logger.dry_run_notice(
+                    f"remove {len(missing_orphaned_keys)} stale lockfile dependency record(s)"
+                )
             if owner_violations:
                 logger.dry_run_notice(
                     f"repair {len(owner_violations)} deployment ownership record(s)"
@@ -121,7 +158,8 @@ def prune(ctx, dry_run):
             return
 
         removed_count = 0
-        pruned_keys: list[str] = []
+        pruned_keys = list(missing_orphaned_keys)
+        pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
         for org_repo_name in orphaned_packages:
             path_parts = org_repo_name.split("/")
@@ -130,7 +168,10 @@ def prune(ctx, dry_run):
                 safe_rmtree(pkg_path, apm_modules_dir)
                 logger.progress(f"Removed {org_repo_name}")
                 removed_count += 1
-                pruned_keys.append(org_repo_name)
+                for dep_key in lock_keys_by_path.get(org_repo_name, ()):
+                    if dep_key not in pruned_key_set:
+                        pruned_keys.append(dep_key)
+                        pruned_key_set.add(dep_key)
                 deleted_pkg_paths.append(pkg_path)
             except Exception as e:
                 logger.error(f"Failed to remove {org_repo_name}: {e}")
@@ -153,9 +194,8 @@ def prune(ctx, dry_run):
                 diagnostics=logger.diagnostics,
             )
             retained_paths = {
-                record.locator.value
+                DeploymentLedgerCodec.legacy_value(record.locator)
                 for record in reconciled.ledger.records.values()
-                if record.locator.kind == LocatorKind.PROJECT_RELATIVE
             }
             deleted_targets: list[Path] = []
             deployed_cleaned = 0
@@ -250,6 +290,8 @@ def prune(ctx, dry_run):
 
         if removed_count > 0:
             logger.success(f"Pruned {removed_count} orphaned package(s)")
+        elif pruned_keys:
+            logger.success(f"Repaired {len(pruned_keys)} stale dependency record(s)")
         elif owner_violations:
             logger.success(f"Repaired {len(owner_violations)} deployment ownership record(s)")
         else:

@@ -40,7 +40,9 @@ file the orphan deployed into your harness directories (using the
 
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
-no package is orphaned -- a lockfile with a stale owner reference is not
+no package is orphaned. It also removes stale direct-dependency records whose
+package directory is already absent, allowing a retry to finish after an
+earlier lockfile write failed. A stale dependency or owner reference is not
 "nothing to prune." If `apm.yml` is missing, the command exits with an error.
 
 ## Options
@@ -90,7 +92,8 @@ For each orphaned package, `apm prune`:
   pre-transition `deployed_files` and `deployed_file_hashes` -- captured
   before that dependency's entry is removed this run -- authorize deleting
   its bytes. Paths still claimed by a surviving owner after reconciliation
-  are subtracted from that claim first and are never deleted.
+  are subtracted from that claim first and are never deleted, including
+  external URI deployments such as `cowork://` skills.
 - **Ghost rows are metadata-only repair.** A canonical row referencing an
   owner that no longer exists in the lockfile is repaired in the ledger, but
   that repair never authorizes deleting the file the row points at. Existing
@@ -101,7 +104,8 @@ For each orphaned package, `apm prune`:
 - **`--dry-run`** previews both the packages that would be removed and the
   ownership records that would be repaired, without mutating anything.
 - Rerunning `apm prune` after a partial or interrupted run converges to the
-  same clean state (idempotent).
+  same clean state (idempotent), even when package deletion succeeded before
+  the prior run failed to write `apm.lock.yaml`.
 
 After processing all orphaned packages, `apm prune` also reconciles merged
 hook configuration (`.claude/settings.json`, `.cursor/hooks.json`, and

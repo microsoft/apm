@@ -8,7 +8,7 @@ import ast
 from pathlib import Path
 
 _REQUIRED_CALLS = {
-    "prune.py": {"reconcile_owner_references"},
+    "prune.py": {"legacy_value", "reconcile_owner_references"},
     "audit.py": {"owner_reference_violations"},
     "ci_checks.py": {"owner_reference_violations"},
 }

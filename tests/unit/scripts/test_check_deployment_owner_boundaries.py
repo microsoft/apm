@@ -97,6 +97,21 @@ def test_mutating_prune_codec_delegation_breaks_guard() -> None:
     assert any("reconcile_owner_references is missing" in item for item in violations)
 
 
+def test_mutating_prune_legacy_projection_delegation_breaks_guard() -> None:
+    checker = _load_checker()
+    root = Path(__file__).parents[3]
+    source = (root / "src/apm_cli/commands/prune.py").read_text(encoding="utf-8")
+    mutated = source.replace(
+        "DeploymentLedgerCodec.legacy_value(record.locator)",
+        "record.locator.value",
+        1,
+    )
+
+    violations = checker.analyze_source(mutated, filename="prune.py")
+
+    assert any("legacy_value is missing" in item for item in violations)
+
+
 def test_mutating_cleanup_to_ghost_selector_breaks_guard() -> None:
     checker = _load_checker()
     root = Path(__file__).parents[3]

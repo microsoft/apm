@@ -204,7 +204,7 @@ class DeploymentLedgerCodec:
             if locator.target == "mcp" and locator.runtime:
                 mcp_targets.setdefault(locator.runtime, []).append(locator.value)
                 continue
-            path = DeploymentLedgerCodec._legacy_value(locator)
+            path = DeploymentLedgerCodec.legacy_value(locator)
             for owner in record.owners:
                 if owner == ".":
                     local_files.append(path)
@@ -284,7 +284,7 @@ class DeploymentLedgerCodec:
         for record in ledger.records.values():
             if record.active_owner != _LOCAL_BUNDLE_OWNER:
                 continue
-            path = DeploymentLedgerCodec._legacy_value(record.locator)
+            path = DeploymentLedgerCodec.legacy_value(record.locator)
             _require_local_bundle_hash(path, record.content_hash)
             paths.add(path)
         return frozenset(paths)
@@ -413,7 +413,7 @@ class DeploymentLedgerCodec:
         records = dict(lockfile.deployment_ledger.records)
         marked_paths: set[str] = set()
         for key, record in records.items():
-            path = DeploymentLedgerCodec._legacy_value(record.locator)
+            path = DeploymentLedgerCodec.legacy_value(record.locator)
             if path not in bundle_paths:
                 continue
             _require_local_bundle_hash(path, record.content_hash)
@@ -630,5 +630,6 @@ class DeploymentLedgerCodec:
         )
 
     @staticmethod
-    def _legacy_value(locator: DeploymentLocator) -> str:
+    def legacy_value(locator: DeploymentLocator) -> str:
+        """Return the canonical compatibility value for any locator kind."""
         return locator.value
