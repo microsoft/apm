@@ -662,9 +662,12 @@ class SkillIntegrator(BaseIntegrator):
         elif logger:
             logger.warning(f"Package '{parent_name}': {details}")
         else:
-            from apm_cli.utils.console import _rich_warning
+            try:
+                from apm_cli.utils.console import _rich_warning
 
-            _rich_warning(f"Package '{parent_name}': {details}", symbol="warning")
+                _rich_warning(f"Package '{parent_name}': {details}", symbol="warning")
+            except ImportError:
+                pass
 
     @staticmethod
     def _promote_sub_skills(
