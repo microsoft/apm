@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the single-valued, first-wins `resolved_by` field, and repairs a rescued
   dependency's `resolved_by`/`local_path` so it remains correctly
   garbage-collectable on a later uninstall of its true last parent. (#2269)
+- Release binaries no longer crash with missing Rich Unicode modules when
+  `apm deps list` renders non-ASCII package names. Repeated
+  `apm runtime setup llm` completes without TLS recursion, and first-party CI
+  and release environments resolve exactly from `uv.lock`. (#2264)
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
   dropped from a project's `targets:` list -- the hook wipe is now scoped to

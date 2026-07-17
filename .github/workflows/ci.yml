@@ -30,10 +30,10 @@ jobs:
     - uses: astral-sh/setup-uv@v6
 
     - name: Ruff lint
-      run: uv run --extra dev ruff check src/ tests/
+      run: uv run --frozen --extra dev ruff check src/ tests/
 
     - name: Ruff format check
-      run: uv run --extra dev ruff format --check src/ tests/
+      run: uv run --frozen --extra dev ruff format --check src/ tests/
 
     - name: Check YAML encoding safety
       run: |
@@ -73,7 +73,7 @@ jobs:
 
     - name: Code duplication guardrail (pylint R0801)
       run: |
-        uv run --extra dev python -m pylint \
+        uv run --frozen --extra dev python -m pylint \
           --disable=all --enable=R0801 \
           --min-similarity-lines=10 \
           --fail-on=R0801 \
@@ -119,7 +119,7 @@ jobs:
         enable-cache: true
 
     - name: Install dependencies
-      run: uv sync --extra dev
+      run: uv sync --frozen --extra dev
 
     - name: Diagnostics (platform, git, python)
       run: |
@@ -164,11 +164,14 @@ jobs:
       with:
         enable-cache: true
 
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
     - name: Run ratchet contract tests
       env:
         APM_ALLOW_PROVISIONAL_BASELINES: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && '1' || '0' }}
       run: |
-        uv run --extra dev pytest -p no:cacheprovider -q \
+        uv run --frozen --extra dev pytest -p no:cacheprovider -q \
           tests/unit/scripts/test_check_test_assertions.py \
           tests/unit/scripts/test_check_exact_test_duplicates.py \
           tests/quality/test_test_taxonomy.py \
@@ -223,7 +226,7 @@ jobs:
     # binary build still runs in ci-integration.yml on merge_group and
     # in build-release.yml on release.
     - name: Install dependencies
-      run: uv sync --extra dev
+      run: uv sync --frozen --extra dev
 
     # --splits 2 --group N matches the layout used by ci-integration.yml.
     # -n 2 --dist worksteal parallelises within the shard.
@@ -345,7 +348,7 @@ jobs:
         enable-cache: true
 
     - name: Install dependencies
-      run: uv sync --extra dev --extra build
+      run: uv sync --frozen --extra dev --extra build
 
     - name: Install UPX
       run: |
@@ -400,7 +403,7 @@ jobs:
       # --no-drift is therefore safe and closes the gap where committed
       # .agents/skills/ content could silently diverge from source (#1716).
       - name: apm audit --ci
-        run: uv run apm audit --ci
+        run: uv run --frozen apm audit --ci
 
   # Promotes the smallest stable hermetic slice of the real Consume/Produce/
   # Govern lifecycle contracts to a PR-time required check. Tier 1.
@@ -521,7 +524,7 @@ jobs:
         enable-cache: true
 
     - name: Install dependencies
-      run: uv sync --extra dev
+      run: uv sync --frozen --extra dev
 
     - name: Run required lifecycle smoke subset
       run: |
