@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit --ci` now surfaces the safe remediation when a lockfile's source
+  identity is tampered. A rewritten dependency `host`/`repo_url` trips both the
+  external `ref-consistency` check (remedy `apm install --update`, which
+  re-resolves from the trusted manifest) and the internal
+  `deployment-ledger-owners` check (remedy `apm prune`, which would reconcile
+  ownership toward the tampered lockfile). Under the default fail-fast the
+  runner now reports `ref-consistency` first, so operators get the
+  manifest-driven fix instead of the attacker-entrenching one. Genuine
+  departed-owner detection is unchanged. (#2300)
 - Project-scope installs for Gemini, Codex, OpenCode, and experimental Hermes now prompt users to run `apm compile` when dependency instructions need root context compilation, instead of silently leaving those instructions unapplied -- by @sergio-sisternes-epam (closes #2057; supersedes #2115) (#2293).
 - Removing a dependency and running `apm prune` now fully cleans its deployment
   ownership records while preserving shared deployments and user-edited files.
