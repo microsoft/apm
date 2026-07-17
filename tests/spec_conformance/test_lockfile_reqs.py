@@ -403,7 +403,7 @@ class TestFinalLockfileTargetContraction:
         row *and* its corresponding hash entry, and delete the orphaned
         file from disk through the cleanup chokepoint, while preserving
         the retained claude instruction (row, hash, and bytes)."""
-        from apm_cli.deps.lockfile import LockFile, LockedDependency
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
         from apm_cli.install.manifest_reconcile import reconcile_target_deployed_files
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.content_hash import compute_file_hash

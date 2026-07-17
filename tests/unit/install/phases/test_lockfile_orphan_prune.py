@@ -130,3 +130,41 @@ class TestHasOrphanLockfileEntries:
         LockfileBuilder(ctx).build_and_save()
 
         assert observed == [existing]
+
+    def test_lockfile_only_run_skips_target_deployed_file_reconciliation(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """`apm lock` (lockfile_only) must never physically contract deployed files.
+
+        The final-lockfile path calls ``_reconcile_target_deployed_files``,
+        which routes through the cleanup chokepoint and can delete a dropped
+        target's instruction files on disk. ``apm lock`` is documented to
+        never touch deployed state (mirroring the merge-hook guard), so the
+        call must be skipped in lockfile_only mode. A positive control in the
+        same harness proves the reconciliation still runs on a normal install.
+        """
+
+        def _build(*, lockfile_only: bool) -> list:
+            existing = _existing_with("acme/pkg")
+            existing.write(tmp_path / "apm.lock.yaml")
+            ctx = InstallContext(
+                project_root=tmp_path,
+                apm_dir=tmp_path,
+                installed_packages=[],
+                existing_lockfile=existing,
+                intended_dep_keys=set(),  # orphan -> fall through to final path
+                lockfile_only=lockfile_only,
+            )
+            observed: list = []
+            monkeypatch.setattr(
+                LockfileBuilder,
+                "_reconcile_target_deployed_files",
+                lambda self, lockfile: observed.append(lockfile),
+            )
+            LockfileBuilder(ctx).build_and_save()
+            return observed
+
+        # Positive control: a normal install still reconciles deployed files.
+        assert len(_build(lockfile_only=False)) == 1
+        # Guarded path: `apm lock` skips the deployed-file contraction.
+        assert _build(lockfile_only=True) == []

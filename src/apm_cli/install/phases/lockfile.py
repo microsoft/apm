@@ -162,7 +162,13 @@ class LockfileBuilder:
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
             self._write_if_changed(lockfile, lockfile_path, _LF)
-            self._reconcile_target_deployed_files(lockfile)
+            # Target-scoped deployed-file contraction physically deletes the
+            # dropped target's instruction files (via the cleanup chokepoint).
+            # Guard it by `lockfile_only` for the same reason the merge-hook
+            # reconciliation above is guarded: `apm lock` never touches
+            # deployed state -- it only (re)materialises the lockfile YAML.
+            if not self.ctx.lockfile_only:
+                self._reconcile_target_deployed_files(lockfile)
             # Self-heal cache pin markers EVERY install, regardless of
             # whether the lockfile YAML changed. This unblocks users
             # whose caches pre-date the supply-chain hardening (PR
