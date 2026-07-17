@@ -163,7 +163,11 @@ def test_stale_persisted_skill_pin_warns_instead_of_silent_noop(
     assert "missing" in result.output
     assert "Available:" in result.output
     assert "tdd" in result.output
-    assert "edit 'skills:' in apm.yml" in result.output
+    normalized_output = " ".join(result.output.split())
+    assert (
+        "Edit 'skills:' in apm.yml to use an available name or remove the filter"
+        in normalized_output
+    )
     assert not (consumer / ".github" / "skills" / "missing").exists()
 
 

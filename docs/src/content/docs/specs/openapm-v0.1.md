@@ -2094,12 +2094,12 @@ the recognised package layouts:
   Artifacts are mapped into deploy directories per the plugin
   manifest.
 
-A package **exposes selectable skills** when layout resolution yields
-one or more individually addressable named skill entries. This includes
-an APM package with `.apm/skills/` entries, a skill collection, and a
-plugin collection with named skill artifacts. A skill bundle with
-`SKILL.md` at its root deploys as a unit and does not expose selectable
-skills.
+A package **exposes selectable skills** when layout resolution identifies a
+container for individually addressable named skill entries, whether that
+container currently yields zero or more entries. This includes an APM package
+with a `.apm/skills/` container, a skill collection, and a plugin collection
+with a named-skills container. A skill bundle with `SKILL.md` at its root
+deploys as a unit and does not expose selectable skills.
 
 ### 8.2 Discovery and source tracking
 

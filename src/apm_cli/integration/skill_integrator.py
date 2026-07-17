@@ -627,13 +627,10 @@ class SkillIntegrator(BaseIntegrator):
         normalized = package_path / ".apm" / "skills"
         root_bundle = package_path / "skills"
         if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
-            skills_dir = normalized
-        elif root_bundle.is_dir() and SkillIntegrator._skill_names_in_directory(root_bundle):
-            skills_dir = root_bundle
-        else:
-            skills_dir = normalized
+            return SkillIntegrator._skill_names_in_directory(normalized)
 
-        return SkillIntegrator._skill_names_in_directory(skills_dir)
+        root_names = SkillIntegrator._skill_names_in_directory(root_bundle)
+        return root_names or SkillIntegrator._skill_names_in_directory(normalized)
 
     @staticmethod
     def _skill_filter_misses_available(
@@ -657,7 +654,8 @@ class SkillIntegrator(BaseIntegrator):
         details = (
             "Skill selection matched no available skills. "
             f"Requested: {requested_display}. Available: {available_display}. "
-            "Choose an available skill or edit 'skills:' in apm.yml, then run 'apm install'."
+            "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
+            "then run 'apm install'."
         )
         if diagnostics is not None:
             diagnostics.warn(details, package=parent_name)

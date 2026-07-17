@@ -244,10 +244,23 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
     assert warnings[0].package == "owner/bundle"
     assert "Requested: missing" in warnings[0].message
     assert "Available: available" in warnings[0].message
+
+    empty_diagnostics = DiagnosticCollector()
+    SkillIntegrator._warn_no_skill_filter_match(
+        frozenset(),
+        ("missing",),
+        "owner/empty-bundle",
+        diagnostics=empty_diagnostics,
+    )
+    empty_warnings = empty_diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(empty_warnings) == 1
+    assert empty_warnings[0].package == "owner/empty-bundle"
+    assert "Available: (none)" in empty_warnings[0].message
+
     assert_spec_contains(
         "a non-empty `skills:` subset",
         "a dependency that exposes selectable",
-        "one or more individually addressable named skill entries",
+        "container currently yields zero or more entries",
         "Skill-subset selection for dependencies that expose selectable skills",
         "Selected skill names for dependencies that expose selectable skills",
         "MUST emit a default-visible diagnostic",
