@@ -105,6 +105,14 @@ def _assert_windows_installer_step(workflow: dict) -> None:
     assert "--tb=short" in tokens
 
 
+def _assert_standalone_integration_timeouts(workflow: dict) -> None:
+    job = workflow_job(workflow, "integration-tests")
+    unix_step = workflow_step(job, "Run integration tests (Unix)")
+    windows_step = workflow_step(job, "Run integration tests (Windows)")
+    assert unix_step.get("timeout-minutes") == 30
+    assert windows_step.get("timeout-minutes") == 20
+
+
 def test_macos_jobs_run_non_shell_binary_startup_after_build() -> None:
     """Both macOS jobs execute the exact generated artifact before upload."""
     _assert_macos_startup_steps(_workflow())
@@ -113,6 +121,37 @@ def test_macos_jobs_run_non_shell_binary_startup_after_build() -> None:
 def test_windows_installer_contract_is_windows_only_and_tokenless() -> None:
     """The Windows E2E has exact gating and no effective repository token."""
     _assert_windows_installer_step(_workflow())
+
+
+def test_standalone_integration_timeouts_are_platform_specific() -> None:
+    """Standalone Unix has headroom while Windows retains its proven bound."""
+    _assert_standalone_integration_timeouts(_workflow())
+
+
+def test_unix_integration_twenty_minute_timeout_mutation_is_rejected() -> None:
+    """The prior Unix timeout cannot satisfy the packaged timing contract."""
+    workflow = deepcopy(_workflow())
+    unix_step = workflow_step(
+        workflow_job(workflow, "integration-tests"),
+        "Run integration tests (Unix)",
+    )
+    unix_step["timeout-minutes"] = 20
+
+    with pytest.raises(AssertionError):
+        _assert_standalone_integration_timeouts(workflow)
+
+
+def test_missing_unix_integration_timeout_mutation_is_rejected() -> None:
+    """Removing the Unix timeout cannot silently make the step unbounded."""
+    workflow = deepcopy(_workflow())
+    unix_step = workflow_step(
+        workflow_job(workflow, "integration-tests"),
+        "Run integration tests (Unix)",
+    )
+    del unix_step["timeout-minutes"]
+
+    with pytest.raises(AssertionError):
+        _assert_standalone_integration_timeouts(workflow)
 
 
 @pytest.mark.parametrize("scope", ("workflow", "job", "step"))
