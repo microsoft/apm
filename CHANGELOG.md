@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.agents/skills/<name>/SKILL.md`, instead of leaving it on disk with no
   lockfile ownership row. User-edited copies are still preserved, and a copy a
   surviving target continues to claim is kept. `apm audit --ci` no longer
-  reports a clean bill of health while such an orphan lingers.
+  reports a clean bill of health while such an orphan lingers. (#2299)
 - Copilot hooks installed with `apm install -g` now resolve from any working
   directory by writing absolute user-scope script commands, while project-scope
   hooks remain repo-relative for portability -- reported by @sproott, fixed by
