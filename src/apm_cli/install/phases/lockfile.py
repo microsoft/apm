@@ -79,6 +79,19 @@ class LockfileBuilder:
         # for unpinned deps are surfaced by the primary post-build sync, so
         # this secondary pass stays silent.
         self._sync_cache_pin_markers_from_existing()
+        # Reconcile dropped-target merge-hook JSON/sidecar state (issue
+        # #2253) unconditionally, before the early-return below. Whether
+        # this cleanup is needed depends purely on "did the declared
+        # target set shrink", not on whether this run installed or
+        # orphaned any package -- coupling it to `installed_packages`
+        # would miss narrow+remove-all-deps shapes that reach the
+        # early-return below with nothing installed. Guarded only by
+        # `lockfile_only` (`apm lock` never touches deployed state).
+        # Structurally unreachable under `--dry-run`: `apm install
+        # --dry-run` never calls `build_and_save()` at all (see the
+        # separate `render_and_exit` preview path in `commands/install.py`).
+        if not self.ctx.lockfile_only:
+            self._reconcile_dropped_merge_hook_targets()
         if (
             not self.ctx.installed_packages
             and not self.ctx.lockfile_only
@@ -468,6 +481,34 @@ class LockfileBuilder:
         except Exception as exc:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(f"Cache pin marker sync skipped: {exc}")
+
+    def _reconcile_dropped_merge_hook_targets(self) -> None:
+        """Clean merge-hook JSON/sidecar state for targets dropped from ``targets:``.
+
+        Best-effort, matching ``_sync_cache_pin_markers_from_existing``'s own
+        convention: a failure here must never abort the install. Internal
+        malformed-state handling already fails closed and warns (see
+        ``HookIntegrator.reconcile_dropped_targets``); this wrapper only
+        guards against an unexpected exception escaping that call.
+        """
+        try:
+            from apm_cli.core.scope import InstallScope
+            from apm_cli.install.manifest_reconcile import (
+                reconcile_dropped_merge_hook_targets,
+            )
+            from apm_cli.install.phases.targets import declared_target_profiles
+
+            declared = declared_target_profiles(self.ctx)
+            is_user = getattr(self.ctx, "scope", None) is InstallScope.USER
+            reconcile_dropped_merge_hook_targets(
+                self.ctx.project_root,
+                active_targets=self.ctx.targets,
+                declared_targets=declared,
+                user_scope=is_user,
+            )
+        except Exception as exc:
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(f"Dropped-target hook reconciliation skipped: {exc}")
 
     def _sync_cache_pin_markers_from_existing(self) -> None:
         """Self-heal markers from the pre-existing in-memory lockfile.

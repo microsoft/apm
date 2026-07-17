@@ -153,7 +153,11 @@ Merged hook files contain only each target's native upstream fields. APM writes
 ownership metadata to a sibling `apm-hooks.json` sidecar for Claude, Cursor,
 Gemini, Codex, Windsurf, and Antigravity. The sidecar is created and cleaned up
 automatically alongside the native config; it is an APM implementation detail
-and should not be edited by hand.
+and should not be edited by hand. When a target is dropped from `targets:` in
+`apm.yml`, the next `apm install`, `apm compile`, or `apm update` also removes
+that target's own hook entries and sidecar -- see
+[`apm install`'s target-contraction note](../../../reference/cli/install/#notes)
+for the exact preserve/remove contract.
 
 Verified against `src/apm_cli/integration/targets.py` and
 `src/apm_cli/integration/hook_integrator.py`.

@@ -52,6 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.claude/settings.json`, `.cursor/hooks.json`, and similar merge targets
   (plus their `apm-hooks.json` ownership sidecars), while sibling packages'
   and manually authored entries are preserved. (closes #2245)
+- Narrowing a project's `targets:` (e.g. `[claude, codex]` -> `[claude]`) no
+  longer leaves the dropped target's merge-hook config and `apm-hooks.json`
+  ownership sidecar behind: the next `apm install`, `apm compile`, or
+  `apm update` now removes the dropped target's own hook entries, while
+  preserving hand-authored entries and any target still declared anywhere.
+  `apm prune`/`apm uninstall` behavior is unchanged. (closes #2253)
 - Four classes of Windows-only CI failures (CRLF baseline drift in JSON
   reports, backslash-path authority-check diagnostics, bare-`git`-argv
   subprocess resolution, and a WebSocket shutdown race) no longer slip

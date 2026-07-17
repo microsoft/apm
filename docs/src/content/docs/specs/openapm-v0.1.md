@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **100 normative statements** indexed in
+- OpenAPM v0.1 carries **101 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -920,6 +920,42 @@ During orphan cleanup, the consumer MUST preserve any path freshly
 deployed by an active dependency in the current install, even when the
 same path is also recorded by a prior lockfile entry under a different
 dependency identity.
+
+<a id="req-lk-021"></a>
+**[req-lk-021]** When a non-frozen install, compile, or update
+rewrites deployed state and the implementation maintains merge-based
+hook configuration (a shared,
+non-per-file configuration document for a target that supports the
+`hooks` primitive type, together with an ownership record identifying
+which entries the consumer itself wrote), a conforming **consumer**
+implementation MUST apply the same preserve-or-remove decision defined
+by [req-lk-020](#req-lk-020) to that merge-based hook configuration.
+It MUST remove only the consumer-owned entries -- and any ownership
+record left empty by that removal -- attributable to a target that is
+not attributable to (a) the current install targets, (b) another
+declared target, or (c) an implementation-recognized target whose
+activation is outside the manifest target field. It MUST preserve
+every entry that does not carry the consumer's own ownership
+attribution, regardless of target, and every consumer-owned entry for
+a target that remains attributable under (a)-(c). If the manifest does
+not declare a `target` field, or the consumer cannot determine which
+target governs a prior entry, the consumer MUST preserve that entry
+and its ownership attribution, mirroring
+[req-lk-020](#req-lk-020)'s indeterminate case.
+If the merge-based hook configuration document is already absent for a
+target while its ownership record remains, a conforming consumer MUST
+still apply this requirement's preserve-or-remove decision to that
+orphaned ownership record: after verifying the record is well-formed,
+it MUST remove a record attributable to none of (a)-(c) above, and MUST
+preserve a record attributable to a target that remains attributable
+under (a)-(c). A consumer that encounters a merge-based hook
+configuration document or ownership record that is malformed or
+cannot be parsed MUST leave that document or record unmodified and
+emit an actionable diagnostic naming the affected path, rather than
+partially or silently repairing it. This requirement does not mandate
+how ownership is recorded (inline marker vs. a separate ownership
+record) or which merge-hook targets exist; it binds only the
+preserve-or-remove decision once ownership is determinate.
 
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit
@@ -2495,7 +2531,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020); self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
@@ -2666,6 +2702,7 @@ conformance statement identifying:
 [req-lk-015](#req-lk-015), [req-lk-016](#req-lk-016),
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
+[req-lk-021](#req-lk-021),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -3049,6 +3086,7 @@ renumbering of conformance classes.
 | [req-lk-018](#req-lk-018)                | SHOULD  | 5.5     | consumer    |
 | [req-lk-019](#req-lk-019)                | MUST    | 5.2     | consumer    |
 | [req-lk-020](#req-lk-020)                | MUST    | 5.2     | consumer    |
+| [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -3107,7 +3145,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 100** (95 MUST, 5 SHOULD).
+**Total normative statements: 101** (96 MUST, 5 SHOULD).
 
 ---
 
@@ -3132,6 +3170,7 @@ renumbering of conformance classes.
 | 0.1.13  | 2026-07-14 | Defensive clarification of existing lockfile requirements (no new normative statements; statement count remains 98 (93 MUST, 5 SHOULD)). [req-lk-003] now requires a conformance audit to reject disagreement between a full-SHA manifest pin and `resolved_commit`. [req-lk-020] now preserves paths freshly deployed by an active dependency when orphan cleanup encounters the same path under a prior dependency identity. |
 | 0.1.14  | 2026-07-15 | Spec-citation fold for complete repository identity through resolution and materialization (closes #2191). Added [req-rs-016] (Section 7.2, consumer MUST): repository identity includes normalized host, explicit port, and the complete credential-free repository path; distinct identities MUST NOT share cached source material merely because they use the same ref or a common path prefix; identical identity and ref MAY reuse cached source material. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
 | 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
+| 0.1.16  | 2026-07-17 | Spec-citation fold for dropped-target merge-hook reconciliation (closes the #2253 Mode-B silent-extension gate). Added [req-lk-021] (Section 5.2, consumer MUST): extends [req-lk-020]'s target-reconciliation preserve/remove decision to merge-based hook configuration and its ownership record, since that state is deliberately outside `deployed_files`/`local_deployed_files` tracking and so was never reachable by req-lk-020's literal text -- narrowing a project's declared target set now also reconciles the dropped target's consumer-owned merge-hook entries, while preserving entries not carrying consumer ownership and preserving state for targets still attributable per req-lk-020's own (a)-(c) test. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 100 -> 101 (96 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
