@@ -151,6 +151,60 @@ def test_cleanup_current_claim_protection_has_single_owner() -> None:
     assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
 
 
+def test_shared_target_contraction_has_single_reconciler_owner() -> None:
+    """Generic shared-root supersession must remain inside DeploymentReconciler."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/deployment_state.py").read_text()
+    consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_shared_target_contraction_owner_checker(root)
+
+    assert "def _superseding_generic_proofs" in owner
+    assert "generic_governed_values" in owner
+    assert "DeploymentReconciler(" in consumer
+    assert checker.analyze_path(root / "src/apm_cli/install/manifest_reconcile.py") == []
+    assert "Shared target contraction must use DeploymentReconciler" in guard
+
+
+def test_shared_target_contraction_guard_rejects_missing_reconciler_delegation(
+    tmp_path: Path,
+) -> None:
+    """The boundary guard rejects a consumer that bypasses canonical reconciliation."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer_path = sandbox / "src/apm_cli/install/manifest_reconcile.py"
+    source = consumer_path.read_text(encoding="utf-8")
+    consumer_path.write_text(
+        source.replace(").reconcile(", ").reconcile_without_owner(", 1),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Shared target contraction must use DeploymentReconciler" in result.stdout
+
+
 def test_deployment_owner_reconciliation_has_single_owner() -> None:
     """Prune and audit must consume canonical owner and cleanup decisions."""
     root = Path(__file__).parents[2]
@@ -251,6 +305,18 @@ def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
 def _load_cleanup_claim_owner_checker(root: Path) -> ModuleType:
     """Import the semantic cleanup claim-authority checker."""
     module_name = "check_cleanup_claim_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_shared_target_contraction_owner_checker(root: Path) -> ModuleType:
+    """Import the semantic generic deployment-row owner checker."""
+    module_name = "check_shared_target_contraction_owner"
     script_path = root / "scripts" / f"{module_name}.py"
     spec = importlib.util.spec_from_file_location(module_name, script_path)
     assert spec is not None and spec.loader is not None
