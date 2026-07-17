@@ -628,6 +628,12 @@ def test_uninstalling_one_shared_root_retains_shared_dependency_ownership(
 
     after_first_uninstall = _dependency_rows(project.root)
     assert set(after_first_uninstall) == {"_local/root-b", "_local/shared"}
+    assert after_first_uninstall["_local/shared"].get("resolved_ref") == before[
+        "_local/shared"
+    ].get("resolved_ref")
+    assert after_first_uninstall["_local/shared"].get("resolved_commit") == before[
+        "_local/shared"
+    ].get("resolved_commit")
     assert shared_instruction.is_file()
 
     _runner(apm_binary_path).run_sequence(
