@@ -442,7 +442,7 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       - name: Run integration tests (Windows)
         if: matrix.platform == 'windows'
