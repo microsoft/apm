@@ -1181,8 +1181,6 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
-        if deploy_root_for_rewrite is not None:
-            _log.debug("Copilot user-scope hook rewrite root: %s", deploy_root_for_rewrite)
 
         hooks_integrated = 0
         scripts_copied = 0
