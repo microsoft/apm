@@ -993,6 +993,26 @@ class TestDownloadGithubFile:
         assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
         assert exc_info.value.throttle.signal == "remaining-zero"
 
+    def test_confirmed_throttle_with_token_is_typed(self) -> None:
+        """A confirmed throttle renders identically whether or not a token is set."""
+        host = _make_host(github_token="tok")
+        delegate = DownloadDelegate(host)
+        dep = _make_dep_ref("owner/repo", host="github.com")
+        host.auth_resolver.resolve.return_value = MagicMock(token="tok", source="env")
+        rate_limited = _make_mock_response(403, headers={"X-RateLimit-Remaining": "0"})
+        rate_limited_err = requests.exceptions.HTTPError(response=rate_limited)
+        rate_limited.raise_for_status.side_effect = rate_limited_err
+
+        with (
+            patch.object(delegate, "try_raw_download", return_value=None),
+            patch.object(host, "_resilient_get", return_value=rate_limited),
+        ):
+            with pytest.raises(GitHubThrottleError) as exc_info:
+                delegate.download_github_file(dep, "apm.yml", ref="main")
+
+        assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
+        assert exc_info.value.throttle.signal == "remaining-zero"
+
     def test_network_error_wrapped_in_runtime_error(self) -> None:
         """ConnectionError is wrapped in RuntimeError."""
         host = _make_host(github_token="tok")
