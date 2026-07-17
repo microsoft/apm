@@ -994,9 +994,86 @@ class TestIntegrateSkillBundleSubsetNoMatch:
         warning_msg = diagnostics.warn.call_args.args[0]
         assert "nonexistent" in warning_msg
         assert "tdd" in warning_msg
-        assert "owner/bundle-pkg" in warning_msg
+        assert "owner/bundle-pkg" not in warning_msg
+        assert "'skills:' in apm.yml" in warning_msg
         assert diagnostics.warn.call_args.kwargs == {"package": "owner/bundle-pkg"}
         mock_warn.assert_not_called()
+
+    def test_path_request_displays_only_declared_name(self, tmp_path: Path) -> None:
+        """Diagnostics hide expanded filter tokens used for internal matching."""
+        pkg_dir = tmp_path / "bundle-pkg"
+        skills_dir = pkg_dir / "skills"
+        tdd_dir = skills_dir / "tdd"
+        tdd_dir.mkdir(parents=True)
+        (tdd_dir / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+        pi = _make_package_info(pkg_dir)
+        diagnostics = MagicMock()
+
+        with patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})):
+            SkillIntegrator()._integrate_skill_bundle(
+                pi,
+                tmp_path,
+                skills_dir,
+                diagnostics=diagnostics,
+                targets=[_make_target()],
+                skill_subset=("skills/productivity/missing",),
+            )
+
+        warning_msg = diagnostics.warn.call_args.args[0]
+        assert "Requested: skills/productivity/missing." in warning_msg
+        assert "Requested: missing," not in warning_msg
+
+    def test_matching_skill_protected_as_user_authored_is_not_filter_miss(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A protected destination is not misdiagnosed as a stale source pin."""
+        pkg_dir = tmp_path / "bundle-pkg"
+        skills_dir = pkg_dir / "skills"
+        source = skills_dir / "tdd"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# upstream", encoding="utf-8")
+        destination = tmp_path / ".github" / "skills" / "tdd"
+        destination.mkdir(parents=True)
+        (destination / "SKILL.md").write_text("# local", encoding="utf-8")
+        diagnostics = MagicMock()
+
+        with patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})):
+            result = SkillIntegrator()._integrate_skill_bundle(
+                _make_package_info(pkg_dir),
+                tmp_path,
+                skills_dir,
+                diagnostics=diagnostics,
+                managed_files=set(),
+                targets=[_make_target()],
+                skill_subset=("tdd",),
+            )
+
+        assert result.sub_skills_promoted == 0
+        diagnostics.skip.assert_called_once()
+        diagnostics.warn.assert_not_called()
+
+    def test_first_skills_capable_target_owns_promotion_count(self, tmp_path: Path) -> None:
+        """An unsupported first target cannot suppress later promotion accounting."""
+        pkg_dir = tmp_path / "bundle-pkg"
+        skills_dir = pkg_dir / "skills"
+        source = skills_dir / "tdd"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+        unsupported = _make_target(name="instructions-only", supports_skills=False)
+        supported = _make_target(name="claude", root_dir=".claude")
+
+        with patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})):
+            result = SkillIntegrator()._integrate_skill_bundle(
+                _make_package_info(pkg_dir),
+                tmp_path,
+                skills_dir,
+                targets=[unsupported, supported],
+                skill_subset=("tdd",),
+            )
+
+        assert result.sub_skills_promoted == 1
+        assert (tmp_path / ".claude" / "skills" / "tdd" / "SKILL.md").is_file()
 
     def test_no_match_does_not_warn_when_no_filter(self, tmp_path: Path) -> None:
         """No warning when skill_subset is None (all skills are deployed)."""
@@ -1072,7 +1149,24 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
         assert "nonexistent" in warning_msg
         assert "tdd" in warning_msg
         assert "owner/instr-pkg" in warning_msg
+        assert "'skills:' in apm.yml" in warning_msg
         mock_warn.assert_not_called()
+
+    def test_missing_skills_directory_warns_without_crashing(self, tmp_path: Path) -> None:
+        """An absent source directory is represented as an empty available set."""
+        available = SkillIntegrator._skill_names_in_directory(tmp_path / "missing")
+
+        with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+            SkillIntegrator._warn_no_skill_filter_match(
+                available,
+                ("missing",),
+                "owner/instr-pkg",
+            )
+
+        assert available == frozenset()
+        warning_msg = mock_warn.call_args.args[0]
+        assert "Available: (none)." in warning_msg
+        assert mock_warn.call_args.kwargs == {"symbol": "warning"}
 
     def test_no_match_does_not_warn_when_no_filter(self, tmp_path: Path) -> None:
         """No warning when skill_subset is None."""

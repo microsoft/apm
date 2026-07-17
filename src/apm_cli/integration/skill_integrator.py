@@ -602,6 +602,20 @@ class SkillIntegrator(BaseIntegrator):
         return links_resolved
 
     @staticmethod
+    def _skill_names_in_directory(skills_dir: Path) -> frozenset[str]:
+        """Return deployable skill names from a directory that may be absent."""
+        if not skills_dir.is_dir():
+            return frozenset()
+        try:
+            return frozenset(
+                child.name
+                for child in skills_dir.iterdir()
+                if child.is_dir() and (child / "SKILL.md").is_file()
+            )
+        except FileNotFoundError:
+            return frozenset()
+
+    @staticmethod
     def available_skill_names(package_info) -> frozenset[str] | None:
         """Return names selectable through ``--skill`` for one package."""
         package_path = package_info.install_path
@@ -614,50 +628,45 @@ class SkillIntegrator(BaseIntegrator):
         root_bundle = package_path / "skills"
         if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
             skills_dir = normalized
-        elif root_bundle.is_dir() and any(
-            (child / "SKILL.md").is_file() for child in root_bundle.iterdir() if child.is_dir()
-        ):
+        elif root_bundle.is_dir() and SkillIntegrator._skill_names_in_directory(root_bundle):
             skills_dir = root_bundle
         else:
             skills_dir = normalized
 
-        if not skills_dir.is_dir():
-            return frozenset()
-        return frozenset(
-            child.name
-            for child in skills_dir.iterdir()
-            if child.is_dir() and (child / "SKILL.md").is_file()
-        )
+        return SkillIntegrator._skill_names_in_directory(skills_dir)
+
+    @staticmethod
+    def _skill_filter_misses_available(
+        name_filter: set[str] | None,
+        available_names: frozenset[str],
+    ) -> bool:
+        """Return whether a requested subset has no deployable source match."""
+        return name_filter is not None and name_filter.isdisjoint(available_names)
 
     @staticmethod
     def _warn_no_skill_filter_match(
-        skills_dir: Path,
-        name_filter: set[str],
+        available_names: frozenset[str],
+        requested_names: tuple[str, ...],
         parent_name: str,
         diagnostics=None,
         logger=None,
     ) -> None:
-        """Report a post-validation skill filter miss through the output cascade."""
-        available = sorted(
-            child.name
-            for child in skills_dir.iterdir()
-            if child.is_dir() and (child / "SKILL.md").is_file()
-        )
-        available_display = ", ".join(available) if available else "(none)"
-        requested_display = ", ".join(sorted(name_filter))
-        message = (
-            f"--skill filter matched no deployable skills in '{parent_name}'. "
+        """Report a post-validation skill selection miss through the output cascade."""
+        available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
+        requested_display = ", ".join(sorted(set(requested_names)))
+        details = (
+            "Skill selection matched no available skills. "
             f"Requested: {requested_display}. Available: {available_display}. "
-            "Choose an available skill or update the package's skills pin, then reinstall."
+            "Choose an available skill or edit 'skills:' in apm.yml, then run 'apm install'."
         )
         if diagnostics is not None:
-            diagnostics.warn(message, package=parent_name)
+            diagnostics.warn(details, package=parent_name)
         elif logger:
-            logger.warning(message)
+            logger.warning(f"Package '{parent_name}': {details}")
         else:
             from apm_cli.utils.console import _rich_warning
 
-            _rich_warning(message)
+            _rich_warning(f"Package '{parent_name}': {details}", symbol="warning")
 
     @staticmethod
     def _promote_sub_skills(
@@ -896,12 +905,13 @@ class SkillIntegrator(BaseIntegrator):
         count = 0
         all_deployed: list[Path] = []
         seen_skill_dirs: set[Path] = set()
+        primary_selected = False
+        available_names = self._skill_names_in_directory(sub_skills_dir)
 
-        for idx, target in enumerate(targets):
+        for target in targets:
             if not target.supports("skills"):
                 continue
 
-            is_primary = idx == 0  # first active target owns diagnostics
             target_skills_root = self._target_skills_root(target, project_root)
 
             # Dedup: skip if same resolved skills root already processed.
@@ -914,6 +924,8 @@ class SkillIntegrator(BaseIntegrator):
                     )
                 continue
             seen_skill_dirs.add(resolved_root)
+            is_primary = not primary_selected
+            primary_selected = True
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -936,10 +948,10 @@ class SkillIntegrator(BaseIntegrator):
                 count = n
             all_deployed.extend(deployed)
 
-        if name_filter is not None and count == 0:
+        if self._skill_filter_misses_available(name_filter, available_names):
             self._warn_no_skill_filter_match(
-                sub_skills_dir,
-                name_filter,
+                available_names,
+                tuple(skill_subset or ()),
                 parent_name,
                 diagnostics=diagnostics,
                 logger=logger,
@@ -1237,15 +1249,16 @@ class SkillIntegrator(BaseIntegrator):
         all_deployed: list[Path] = []
         any_created = False
         seen_skill_dirs: set[Path] = set()
+        primary_selected = False
+        available_names = self._skill_names_in_directory(skills_dir)
 
         # Convert skill_subset tuple to promotion filter tokens for O(1) lookup.
         _name_filter = skill_subset_filter_tokens(skill_subset)
 
-        for idx, target in enumerate(targets):
+        for target in targets:
             if not target.supports("skills"):
                 continue
 
-            is_primary = idx == 0
             skills_mapping = target.primitives["skills"]
             effective_root = skills_mapping.deploy_root or target.root_dir
             target_skills_root = project_root / effective_root / "skills"
@@ -1260,6 +1273,8 @@ class SkillIntegrator(BaseIntegrator):
                     )
                 continue
             seen_skill_dirs.add(resolved_root)
+            is_primary = not primary_selected
+            primary_selected = True
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -1284,10 +1299,10 @@ class SkillIntegrator(BaseIntegrator):
                     any_created = True
             all_deployed.extend(deployed)
 
-        if _name_filter is not None and total_promoted == 0:
+        if self._skill_filter_misses_available(_name_filter, available_names):
             self._warn_no_skill_filter_match(
-                skills_dir,
-                _name_filter,
+                available_names,
+                tuple(skill_subset or ()),
                 parent_name,
                 diagnostics=diagnostics,
                 logger=logger,

@@ -233,8 +233,8 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
     diagnostics = DiagnosticCollector()
 
     SkillIntegrator._warn_no_skill_filter_match(
-        skills_dir,
-        {"missing"},
+        SkillIntegrator._skill_names_in_directory(skills_dir),
+        ("missing",),
         "owner/bundle",
         diagnostics=diagnostics,
     )
@@ -246,8 +246,12 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
     assert "Available: available" in warnings[0].message
     assert_spec_contains(
         "a non-empty `skills:` subset",
+        "a dependency that exposes selectable",
+        "one or more individually addressable named skill entries",
+        "Skill-subset selection for dependencies that expose selectable skills",
+        "Selected skill names for dependencies that expose selectable skills",
         "MUST emit a default-visible diagnostic",
-        "the requested skill names, and the available skill names",
+        "requested skill names, and the available skill names",
     )
 
 

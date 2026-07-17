@@ -158,9 +158,12 @@ def test_stale_persisted_skill_pin_warns_instead_of_silent_noop(
     result = CliRunner().invoke(cli, ["install"])
 
     assert result.exit_code == 0, result.output
-    assert "--skill filter matched no deployable skills" in result.output
-    assert "Requested: missing" in result.output
-    assert "Available: tdd" in result.output
+    assert "Skill selection matched no available skills" in result.output
+    assert "Requested:" in result.output
+    assert "missing" in result.output
+    assert "Available:" in result.output
+    assert "tdd" in result.output
+    assert "edit 'skills:' in apm.yml" in result.output
     assert not (consumer / ".github" / "skills" / "missing").exists()
 
 
