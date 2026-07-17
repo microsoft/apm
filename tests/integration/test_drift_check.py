@@ -411,7 +411,30 @@ class TestSectionBRegressions:
         combined = (result.stdout or "") + (result.stderr or "")
         assert "Drift detected" not in combined
 
-    def test_b5_skill_subset_excludes_unselected_skills_from_drift(
+    def test_b5_install_legacy_all_targets_uses_explicit_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: `targets: [all]` no longer blocks install (#2271)."""
+        from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+        project = _make_apm_project(tmp_path, target=None)
+        manifest = {"name": "legacy-all-fixture", "version": "1.0.0", "targets": ["all"]}
+        (project / "apm.yml").write_bytes(yaml.safe_dump(manifest).encode("utf-8"))
+
+        _reset_legacy_all_warning()
+        monkeypatch.chdir(project)
+        result = CliRunner().invoke(
+            cli,
+            ["install", "--target", "copilot"],
+            catch_exceptions=False,
+        )
+
+        combined = (result.stdout or "") + (result.stderr or "")
+        assert result.exit_code == 0, combined
+        assert "deprecated" in combined
+        assert (project / ".github" / "instructions" / "rules.instructions.md").exists()
+
+    def test_b6_skill_subset_excludes_unselected_skills_from_drift(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Regression: audit replay must honor a dependency's skill subset."""

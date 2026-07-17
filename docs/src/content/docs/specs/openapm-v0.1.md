@@ -1176,7 +1176,8 @@ This section's normative statements are:
   [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013),
   [req-lk-014](#req-lk-014), [req-lk-015](#req-lk-015),
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
-  [req-lk-020](#req-lk-020).
+  [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
+  [req-lk-021](#req-lk-021).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 

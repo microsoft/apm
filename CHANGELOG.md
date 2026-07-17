@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Copilot hooks installed with `apm install -g` now resolve from any working
+  directory by writing absolute user-scope script commands, while project-scope
+  hooks remain repo-relative for portability -- reported by @sproott, fixed by
+  @danielmeppiel (closes #2232; #2236).
 - `apm uninstall` no longer deletes a shared transitive dependency that a
   surviving direct dependency still declares (e.g. two packages that both
   depend on the same local or remote package). When a dependency's
@@ -40,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apm deps list` renders non-ASCII package names. Repeated
   `apm runtime setup llm` completes without TLS recursion, and first-party CI
   and release environments resolve exactly from `uv.lock`. (#2264)
+- Legacy manifests that declared `targets: [all]` are no longer hard-rejected;
+  APM treats the field as omitted with a deprecation warning, restoring
+  installability for packages published before the canonical target catalog
+  migration. (closes #2271) -- by @kotalab (#2272)
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
   dropped from a project's `targets:` list -- the hook wipe is now scoped to
