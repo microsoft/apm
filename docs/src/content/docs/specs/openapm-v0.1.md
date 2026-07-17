@@ -923,8 +923,8 @@ dependency identity.
 
 <a id="req-lk-021"></a>
 **[req-lk-021]** When a non-frozen install, compile, or update
-reconciles installed state under [req-lk-020](#req-lk-020) and the
-implementation maintains merge-based hook configuration (a shared,
+rewrites deployed state and the implementation maintains merge-based
+hook configuration (a shared,
 non-per-file configuration document for a target that supports the
 `hooks` primitive type, together with an ownership record identifying
 which entries the consumer itself wrote), a conforming **consumer**
@@ -940,8 +940,8 @@ attribution, regardless of target, and every consumer-owned entry for
 a target that remains attributable under (a)-(c). If the manifest does
 not declare a `target` field, or the consumer cannot determine which
 target governs a prior entry, the consumer MUST preserve that entry
-rather than remove it solely because it was not written by the current
-install, mirroring [req-lk-020](#req-lk-020)'s indeterminate case.
+and its ownership attribution, mirroring
+[req-lk-020](#req-lk-020)'s indeterminate case.
 If the merge-based hook configuration document is already absent for a
 target while its ownership record remains, a conforming consumer MUST
 still apply this requirement's preserve-or-remove decision to that
@@ -2531,7 +2531,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020); self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
