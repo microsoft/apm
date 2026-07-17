@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Copilot hooks installed with `apm install -g` now resolve from any working
+  directory by writing absolute user-scope script commands, while project-scope
+  hooks remain repo-relative for portability -- reported by @sproott, fixed by
+  @danielmeppiel (closes #2232; #2236).
 - `apm uninstall` no longer deletes a shared transitive dependency that a
   surviving direct dependency still declares (e.g. two packages that both
   depend on the same local or remote package). When a dependency's
@@ -40,12 +44,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apm deps list` renders non-ASCII package names. Repeated
   `apm runtime setup llm` completes without TLS recursion, and first-party CI
   and release environments resolve exactly from `uv.lock`. (#2264)
+- Legacy manifests that declared `targets: [all]` are no longer hard-rejected;
+  APM treats the field as omitted with a deprecation warning, restoring
+  installability for packages published before the canonical target catalog
+  migration. (closes #2271) -- by @kotalab (#2272)
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
   dropped from a project's `targets:` list -- the hook wipe is now scoped to
   the same resolved target set the rebuild step repopulates, so a narrowed
   `targets:` no longer silently deletes a sibling package's hooks (and its
   `apm-hooks.json` sidecar) in the now-undeclared harness. (closes #2250)
+- `apm prune` / `apm uninstall` clear-then-rebuild of merged hooks (and
+  uninstall's broader primitive reintegration) now walks every surviving
+  lockfile package -- including transitive dependencies still required by
+  a remaining direct dep -- instead of only `apm.yml` directs. (closes #2254)
+- Packages with per-target hook files (for example separate Claude and Codex
+  hooks) no longer cross-contaminate sibling tool configs when a dependency
+  `targets:` list is set. APM now intersects dependency targets with filename
+  routing, preserves the deprecation warning for target-suffixed hook filenames,
+  and avoids duplicate shared entries -- by @srobroek. (closes #2258; #2259)
 - `apm prune` no longer leaves stale, executable hook entries behind for a
   removed package: it now reconciles merged hook ownership when it removes
   an orphaned package, clearing entries it contributed to

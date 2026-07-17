@@ -648,18 +648,31 @@ def _cleanup_transitive_orphans(
 
 
 def _sync_integrations_after_uninstall(
-    apm_package, project_root, all_deployed_files, logger, user_scope=False
-):
+    apm_package: object,
+    project_root: Path,
+    all_deployed_files: set[str],
+    logger: CommandLogger,
+    user_scope: bool = False,
+    lockfile: LockFile | None = None,
+) -> tuple[dict[str, int], dict[str, list[str]]]:
     """Remove deployed files and re-integrate from remaining packages.
 
     When *user_scope* is ``True``, targets are resolved for user-level
     deployment so cleanup and re-integration use the correct paths.
+
+    *lockfile*, when provided, must be the post-removal in-memory
+    lockfile (orphans already deleted). The on-disk lockfile is still
+    stale at this point in the uninstall pipeline, so Phase 2 must not
+    re-read it from disk.
     """
     from ...install.services import _deployed_path_entry, _skill_bundle_file_entries
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
-    from ...models.apm_package import build_installed_package_info
+    from ...models.apm_package import (
+        build_installed_package_info,
+        surviving_dependency_refs_for_reintegration,
+    )
     from ...primitives.discovery import clear_discovery_cache
 
     # Phase 2 re-integration walks the on-disk primitive set after Phase 1
@@ -832,17 +845,12 @@ def _sync_integrations_after_uninstall(
     clear_discovery_cache()
     _targets = _resolved_targets
 
-    # Pre-existing direct-dependency re-integration rebuild (Phase 2),
-    # unrelated to and predating the deps/reachability.py forward-
-    # reachability owner -- this reads the PROJECT's own direct deps to
-    # rebuild integrated files, not a transitive-dependency reachability
-    # walk. A separate, known, out-of-scope defect (this loop only covers
-    # DIRECT deps, never transitive ones) is tracked independently; see
-    # this fix's PR description for the recommended follow-up issue.
-    for dep in apm_package.get_apm_dependencies():  # architecture-authority-exempt: direct rebuild
-        dep_ref = dep if hasattr(dep, "repo_url") else None
-        if not dep_ref:
-            continue
+    # Lockfile survivors include transitive packages still required by a
+    # remaining direct dep (#2254). Pass the in-memory post-removal
+    # lockfile when the caller has one -- disk is still stale here.
+    for dep_ref in surviving_dependency_refs_for_reintegration(
+        apm_package, project_root, lockfile=lockfile
+    ):
         pkg_info = build_installed_package_info(dep_ref, Path(APM_MODULES_DIR))
         if pkg_info is None:
             continue
@@ -872,9 +880,12 @@ def _sync_integrations_after_uninstall(
             for path in skill_result.target_paths:
                 deployed_files.append(_deployed_path_entry(path, project_root, _targets))
                 deployed_files.extend(_skill_bundle_file_entries(path, project_root, _targets))
-        except Exception:
+        except Exception as exc:
             pkg_id = dep_ref.get_identity() if hasattr(dep_ref, "get_identity") else str(dep_ref)
-            logger.warning(f"Best-effort re-integration skipped for {pkg_id}")
+            logger.warning(
+                f"Best-effort re-integration skipped for {pkg_id}: {exc}. "
+                "Run 'apm install' to rebuild integrated files."
+            )
 
     return counts, package_deployed_files
 
