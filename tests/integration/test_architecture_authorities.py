@@ -1093,3 +1093,60 @@ def test_ac15_reachability_owner_guard_rejects_parallel_local_walk(tmp_path: Pat
     assert "Uninstall must not re-derive a parallel local-anchor reachability walk" in (
         result.stdout
     )
+
+
+def test_github_throttle_classification_has_single_owner() -> None:
+    """Rate-header interpretation belongs only to deps/github_rate_limit.py."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/deps/github_rate_limit.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def classify_github_throttle(" in owner
+    assert "class GitHubThrottleError" in owner
+    assert "AC17: GitHub API throttle classification authority" in guard
+    assert "GitHub throttle signals must be classified only by deps/github_rate_limit.py" in guard
+    assert "GitHub API throttle classification" in architecture_doc
+    assert "src/apm_cli/deps/github_rate_limit.py" in architecture_doc
+
+
+def test_github_throttle_owner_guard_rejects_parallel_header_parsing(tmp_path: Path) -> None:
+    """AC17 must reject an ad-hoc rate-header parser outside the owner."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/download_strategies.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\ndef _parallel_rate_header_parser(response):\n"
+        + '    return response.headers.get("X-RateLimit-Remaining")\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "GitHub throttle signals must be classified only by deps/github_rate_limit.py" in (
+        result.stdout
+    )

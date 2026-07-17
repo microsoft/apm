@@ -603,6 +603,24 @@ check_pattern \
     'resolve_local_dep_dir' \
     $(find src/apm_cli/commands/uninstall -name '*.py')
 
+echo "[*] AC17: GitHub API throttle classification authority"
+github_throttle_owner="src/apm_cli/deps/github_rate_limit.py"
+github_throttle_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'X-RateLimit-Remaining|Retry-After' \
+        src/apm_cli \
+        | grep -v "^${github_throttle_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^def classify_github_throttle(' "$github_throttle_owner" \
+    || ! grep -q '^class GitHubThrottleError' "$github_throttle_owner" \
+    || [ -n "$github_throttle_duplicate_hits" ]; then
+    echo "[x] GitHub throttle signals must be classified only by deps/github_rate_limit.py"
+    [ -n "$github_throttle_duplicate_hits" ] && echo "$github_throttle_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

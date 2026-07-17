@@ -54,6 +54,7 @@ from ..utils.path_security import (
     safe_rmtree,
     validate_path_segments,
 )
+from .github_rate_limit import GitHubThrottleError, raise_for_github_throttle
 
 if TYPE_CHECKING:
     from ..models.dependency.reference import DependencyReference
@@ -147,6 +148,8 @@ def validate_virtual_package_exists(
             downloader.download_raw_file(dep_ref, path, ref)
             _log(f"  [+] {path}@{ref}")
             return True
+        except GitHubThrottleError:
+            raise
         except RuntimeError as exc:
             # Marker-file misses on the success path are expected, not
             # errors -- reserve [x] for genuine failures.
@@ -276,7 +279,13 @@ def _directory_exists_at_ref(
         headers["Authorization"] = f"token {token}"
 
     try:
-        response = downloader._resilient_get(api_url, headers=headers, timeout=30)
+        response = downloader._resilient_get(
+            api_url,
+            headers=headers,
+            timeout=30,
+            retry_throttles=False,
+        )
+        raise_for_github_throttle(response, host)
         if response.status_code == 200:
             log(f"  [+] {path}@{ref} (directory)")
             return True
@@ -288,6 +297,8 @@ def _directory_exists_at_ref(
         else:
             log(f"  [x] {path}@{ref} (HTTP {response.status_code})")
         return False
+    except GitHubThrottleError:
+        raise
     except (requests.exceptions.RequestException, RuntimeError) as exc:
         log(f"  [x] {path}@{ref} ({exc})")
         return False

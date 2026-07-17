@@ -139,6 +139,46 @@ class TestFetchFileViaGitSparse:
         assert any("--filter=blob:none" in cmd for cmd in fetch_cmds)
 
     @patch("apm_cli.deps.git_file_transport.subprocess.run")
+    def test_fetch_with_commit_uses_exact_fetch_head_sha(
+        self, mock_run: Mock, tmp_path: Path
+    ) -> None:
+        """Sparse Git fallback must preserve the exact fetched commit."""
+        from apm_cli.deps.git_file_transport import GitSparseFileTransport
+
+        expected_sha = "0123456789abcdef0123456789abcdef01234567"
+        work_parent = tmp_path / "fetch-with-sha"
+        work_parent.mkdir()
+        work_dir = work_parent / "work"
+        work_dir.mkdir()
+        (work_dir / "agents").mkdir()
+        (work_dir / "agents" / "spec.agent.md").write_bytes(b"# Agent")
+
+        def fake_run(cmd: list[str], **_kwargs) -> Mock:
+            result = _mock_subprocess_success()
+            result.stdout = expected_sha + "\n" if "rev-parse" in cmd else ""
+            return result
+
+        mock_run.side_effect = fake_run
+        with patch(
+            "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+            return_value=_FakeTemporaryDirectory(work_parent),
+        ):
+            with GitSparseFileTransport(
+                _make_gitlab_dep(),
+                "main",
+                build_repo_url_fn=lambda *a, **kw: "https://gitlab.example.com/g/r.git",
+                git_env={},
+            ) as transport:
+                result = transport.fetch_file_with_commit("agents/spec.agent.md")
+
+        assert result.content == b"# Agent"
+        assert result.resolved_commit == expected_sha
+        assert any(
+            call.args[0] == ["git", "rev-parse", "--verify", "FETCH_HEAD^{commit}"]
+            for call in mock_run.call_args_list
+        )
+
+    @patch("apm_cli.deps.git_file_transport.subprocess.run")
     def test_git_commands_not_rest_api(self, mock_run: Mock, tmp_path: Path) -> None:
         """File is fetched via git subprocess, not via requests.get / REST API."""
         from apm_cli.deps.git_file_transport import fetch_file_via_git_sparse

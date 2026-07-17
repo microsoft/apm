@@ -14,7 +14,10 @@ from click.testing import CliRunner, Result
 from git import Repo
 
 from apm_cli.cli import cli
+from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.git_file_transport import GitFileFetchResult
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.apm_package import (
     DependencyReference,
@@ -190,6 +193,7 @@ def _invoke(
     args: tuple[str, ...],
     *,
     newline_domain: str,
+    use_throttle_fallback: bool = False,
 ) -> Result:
     """Run one real CLI command with remote I/O redirected to the local repository."""
 
@@ -231,7 +235,9 @@ def _invoke(
         _self: GitHubPackageDownloader,
         _dep_ref: DependencyReference,
         _ref: str,
-    ) -> str:
+    ) -> str | None:
+        if use_throttle_fallback:
+            return None
         return resolve_local_ref(_self, _dep_ref).resolved_commit or ""
 
     def download_virtual_file(
@@ -241,6 +247,38 @@ def _invoke(
         _ref: str,
     ) -> bytes:
         return (scenario.repository.worktree / file_path).read_bytes()
+
+    throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+    def validate_virtual_package(
+        _self: GitHubPackageDownloader,
+        dep_ref: DependencyReference,
+        **_kwargs: object,
+    ) -> bool:
+        if use_throttle_fallback and dep_ref.is_virtual_file():
+            raise throttle
+        return True
+
+    def download_throttled_virtual_file(
+        _self: GitHubPackageDownloader,
+        _dep_ref: DependencyReference,
+        _file_path: str,
+        _ref: str,
+    ) -> bytes:
+        raise throttle
+
+    def sparse_throttle_fallback(
+        _self: DownloadDelegate,
+        _dep_ref: DependencyReference,
+        file_path: str,
+        _ref: str,
+        error: GitHubThrottleError,
+    ) -> GitFileFetchResult:
+        assert error is throttle
+        return GitFileFetchResult(
+            (scenario.repository.worktree / file_path).read_bytes(),
+            scenario.initial_commit,
+        )
 
     original_write_text = Path.write_text
 
@@ -280,7 +318,7 @@ def _invoke(
         patch.setattr(
             GitHubPackageDownloader,
             "validate_virtual_package_exists",
-            lambda _self, *_args, **_kwargs: True,
+            validate_virtual_package,
         )
         patch.setattr(
             GitHubPackageDownloader,
@@ -290,8 +328,14 @@ def _invoke(
         patch.setattr(
             GitHubPackageDownloader,
             "download_raw_file",
-            download_virtual_file,
+            download_throttled_virtual_file if use_throttle_fallback else download_virtual_file,
         )
+        if use_throttle_fallback:
+            patch.setattr(
+                DownloadDelegate,
+                "download_github_file_via_throttle_fallback",
+                sparse_throttle_fallback,
+            )
         return CliRunner().invoke(cli, list(args), env=scenario.environment)
 
 
@@ -623,3 +667,22 @@ def test_virtual_package_lifecycle_matrix(
                 expected_commit=scenario.initial_commit,
             )
     _assert_last_good_preserved(scenario.project, install_state)
+
+
+def test_virtual_throttle_fallback_records_fetch_head_sha_and_content_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A throttled virtual API path locks the exact sparse-Git commit and bytes."""
+    scenario = _create_scenario(tmp_path / "throttle-fallback")
+
+    installed = _invoke(
+        scenario,
+        monkeypatch,
+        _INSTALL_ARGS,
+        newline_domain="lf",
+        use_throttle_fallback=True,
+    )
+
+    _assert_result(installed, 0, "throttle-fallback-install")
+    _assert_lock_and_materialization(scenario, expected_commit=scenario.initial_commit)
