@@ -67,5 +67,4 @@ def test_typed_error_contains_no_response_header_or_credential_value() -> None:
     error = github_throttle_error(response, "github.com")
 
     assert isinstance(error, GitHubThrottleError)
-    assert "github.com" in str(error)
-    assert "secret-value" not in str(error)
+    assert str(error) == "GitHub API throttle for github.com (HTTP 403)"
