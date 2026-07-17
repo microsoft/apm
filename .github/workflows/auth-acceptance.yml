@@ -67,7 +67,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Install APM in dev mode
         run: uv run pip install -e .
@@ -136,7 +136,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
 
       - name: Install APM in dev mode
         run: uv run pip install -e .

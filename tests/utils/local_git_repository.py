@@ -6,6 +6,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
 
@@ -154,11 +155,59 @@ class LocalGitRepositoryFactory:
             cwd=repository.worktree,
         )
 
+    def install_url_rewrite(
+        self,
+        repository: LocalGitRepository,
+        remote_url: str,
+    ) -> tuple[str, str]:
+        """Route bare and ``.git`` HTTP(S) forms to an owned local repository.
+
+        Rewrites are written only to the explicit fixture global config. The
+        local replacement ends in ``/`` so Git's prefix matching cannot append
+        an adjacent remote suffix onto a sibling fixture repository path.
+        """
+        repository = self._owned_repository(repository)
+        remote_forms = self._remote_url_forms(remote_url)
+        config_path = self._fixture_git_config_path()
+        rewrite_base = f"{repository.file_url}/"
+        key = f"url.{rewrite_base}.insteadOf"
+        configured = self._run(
+            (
+                "git",
+                "config",
+                "--file",
+                str(config_path),
+                "--get-all",
+                key,
+            ),
+            cwd=self._root,
+            check=False,
+        )
+        # Fixture setup is single-writer; serial dedup keeps repeated calls idempotent.
+        existing = set(configured.stdout.splitlines())
+        for remote_form in remote_forms:
+            if remote_form in existing:
+                continue
+            self._run(
+                (
+                    "git",
+                    "config",
+                    "--file",
+                    str(config_path),
+                    "--add",
+                    key,
+                    remote_form,
+                ),
+                cwd=self._root,
+            )
+        return remote_forms
+
     def _run(
         self,
         command: tuple[str, ...],
         *,
         cwd: Path,
+        check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         timeout_seconds = self._timeout_seconds
         if self._deadline is not None:
@@ -172,9 +221,58 @@ class LocalGitRepositoryFactory:
             env=self._env,
             capture_output=True,
             text=True,
-            check=True,
+            check=check,
             timeout=timeout_seconds,
         )
+
+    @staticmethod
+    def _remote_url_forms(remote_url: str) -> tuple[str, str]:
+        if not remote_url or remote_url.strip() != remote_url:
+            raise ValueError("Remote URL must be a non-empty string without surrounding whitespace")
+        parsed = urlsplit(remote_url)
+        if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+            raise ValueError("Remote URL must use an HTTP(S) production host")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("Remote URL must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("Remote URL must not contain a query or fragment")
+        if parsed.path.endswith("/"):
+            raise ValueError("Remote URL must identify a repository, not a directory")
+        path = parsed.path.lstrip("/")
+        validate_path_segments(path, context="remote repository URL", reject_empty=True)
+        if len(path.split("/")) < 2:
+            raise ValueError("Remote URL must include an owner and repository path")
+        bare = remote_url.removesuffix(".git")
+        if bare.endswith("/"):
+            raise ValueError("Remote URL must include a repository name before .git")
+        return bare, f"{bare}.git"
+
+    def _fixture_git_config_path(self) -> Path:
+        """Return the explicit config after anchoring it to fixture ``HOME``."""
+        if self._env.get("GIT_CONFIG_NOSYSTEM") != "1":
+            raise ValueError("Fixture Git rewrites require GIT_CONFIG_NOSYSTEM=1")
+        raw_global = self._env.get("GIT_CONFIG_GLOBAL")
+        raw_home = self._env.get("HOME")
+        if not raw_global or not raw_home:
+            raise ValueError("Fixture Git rewrites require explicit GIT_CONFIG_GLOBAL and HOME")
+        global_config = Path(raw_global)
+        home = Path(raw_home)
+        if not global_config.is_absolute() or not home.is_absolute():
+            raise ValueError("Fixture Git config and HOME paths must be absolute")
+        if home.is_symlink() or not home.is_dir():
+            raise ValueError(f"Fixture HOME must be a non-symlink directory: {home}")
+        fixture_root = home.parent
+        ensure_path_within(self._root, fixture_root)
+        if global_config.is_symlink():
+            raise ValueError(f"Refusing symlinked fixture Git config: {global_config}")
+        ensure_path_within(global_config, fixture_root)
+        if not global_config.parent.is_dir():
+            raise ValueError(
+                f"Fixture Git config parent must be a directory: {global_config.parent}"
+            )
+        if global_config.exists() and not global_config.is_file():
+            raise ValueError(f"Fixture Git config must be a regular file: {global_config}")
+        return global_config
 
     def _owned_repository(self, repository: LocalGitRepository) -> LocalGitRepository:
         if self._repositories.get(id(repository)) is not repository:

@@ -1,4 +1,8 @@
-"""Read-only snapshots and assertions for filesystem artifact tests."""
+"""Read-only snapshots and assertions for filesystem artifact tests.
+
+For lifecycle-aware manifest, lock, config, and deployment state, use
+``LifecycleStateSnapshot`` instead.
+"""
 
 from __future__ import annotations
 
