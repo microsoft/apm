@@ -49,7 +49,7 @@ gated behind experimental flags and not listed above. See
 After a project install stages dependency instructions, the reference consumer
 requires a separate root-context compile for `claude`, `codex`, `gemini`, and
 `opencode`, plus experimental `hermes` when enabled. It emits the
-[`req-tg-007`](../../specs/openapm-v0.1/#req-tg-007) reminder for those targets.
+[`req-tg-007`](/apm/specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
 root-context reader, so they do not trigger that reminder. A target not
