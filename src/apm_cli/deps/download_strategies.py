@@ -28,6 +28,7 @@ from ..utils.archive import ArchiveError, safe_extract_zip
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
+    build_authorization_header_git_env,
     build_https_clone_url,
     build_raw_content_url,
     build_ssh_url,
@@ -36,10 +37,12 @@ from ..utils.github_host import (
 )
 from ..utils.path_security import PathTraversalError
 from .git_file_transport import (
+    GitFileFetchResult,
     GitFileTransportError,
     GitFileTransportSecurityError,
     GitSparseFileTransport,
 )
+from .github_rate_limit import GitHubThrottleError, github_throttle_error
 from .host_backends import backend_for
 
 # ---------------------------------------------------------------------------
@@ -127,8 +130,9 @@ class DownloadDelegate:
         max_retries: int = 3,
         *,
         stream: bool = False,
+        retry_throttles: bool = True,
     ) -> requests.Response:
-        """HTTP GET with retry on 429/503 and rate-limit header awareness.
+        """HTTP GET with selectable retries for transient HTTP failures.
 
         Args:
             url: Request URL
@@ -136,6 +140,9 @@ class DownloadDelegate:
             timeout: Request timeout in seconds
             max_retries: Maximum total attempts, including the initial request
             stream: Whether to stream the response body instead of buffering it
+            retry_throttles: Whether general callers retry a classified
+                throttle. Virtual-file download callers disable this so they
+                can select sparse Git without a retry or sleep.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -149,55 +156,36 @@ class DownloadDelegate:
             try:
                 response = requests.get(url, headers=headers, timeout=timeout, stream=stream)
 
-                # Handle rate limiting -- GitHub returns 429 for secondary limits
-                # and 403 with X-RateLimit-Remaining: 0 for primary limits.
-                is_rate_limited = response.status_code in (429, 503)
-                if not is_rate_limited and response.status_code == 403:
-                    try:
-                        remaining = response.headers.get("X-RateLimit-Remaining")
-                        if remaining is not None and int(remaining) == 0:
-                            is_rate_limited = True
-                    except (TypeError, ValueError):
-                        pass
-
-                if is_rate_limited:
+                throttle = github_throttle_error(response, "GitHub API")
+                if throttle is not None:
+                    if not retry_throttles:
+                        return response
                     last_response = response
-                    retry_after = response.headers.get("Retry-After")
-                    reset_at = response.headers.get("X-RateLimit-Reset")
-                    if retry_after:
-                        try:
-                            wait = min(float(retry_after), 60)
-                        except (TypeError, ValueError):
-                            # Retry-After may be an HTTP-date; fall back to exponential backoff
-                            wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
-                    elif reset_at:
-                        try:
-                            wait = max(0, min(int(reset_at) - time.time(), 60))
-                        except (TypeError, ValueError):
-                            wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
-                    else:
-                        wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
                     if attempt < max_retries - 1:
+                        wait = throttle.throttle.retry_after_seconds
+                        if wait is None:
+                            wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
+                        else:
+                            wait = min(wait, 60)
                         _debug(
                             f"Rate limited ({response.status_code}), retry in "
                             f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
                         )
                         _close_response(response, "rate-limit retry")
                         time.sleep(wait)
-                    else:
-                        _debug(
-                            f"Rate limited ({response.status_code}), no retries left "
-                            f"(attempt {attempt + 1}/{max_retries})"
-                        )
                     continue
 
-                # Log rate limit proximity
-                remaining = response.headers.get("X-RateLimit-Remaining")
-                try:
-                    if remaining and int(remaining) < 10:
-                        _debug(f"GitHub API rate limit low: {remaining} requests remaining")
-                except (TypeError, ValueError):
-                    pass
+                if response.status_code == 503:
+                    last_response = response
+                    if attempt < max_retries - 1:
+                        wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
+                        _debug(
+                            f"Service unavailable, retry in {wait:.1f}s "
+                            f"(attempt {attempt + 1}/{max_retries})"
+                        )
+                        _close_response(response, "service-unavailable retry")
+                        time.sleep(wait)
+                    continue
 
                 return response
             except requests.exceptions.ConnectionError as e:
@@ -214,9 +202,8 @@ class DownloadDelegate:
                 if attempt < max_retries - 1:
                     _debug(f"Timeout, retrying (attempt {attempt + 1}/{max_retries})")
 
-        # If rate limiting exhausted all retries, return the last response so
-        # callers can inspect headers (e.g. X-RateLimit-Remaining) and raise
-        # an appropriate user-facing error.
+        # A retryable service failure returns its final response for the caller
+        # to inspect and render.
         if last_response is not None:
             return last_response
 
@@ -712,13 +699,13 @@ class DownloadDelegate:
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 
-    def _gitlab_file_transport_key(
+    def _git_file_transport_key(
         self, dep_ref: DependencyReference, ref: str
     ) -> tuple[str, str, str, int | None]:
-        """Return the cache key for one GitLab git-file checkout."""
+        """Return the cache key for one path-scoped Git file checkout."""
         return (dep_ref.host or default_host(), dep_ref.repo_url, ref, dep_ref.port)
 
-    def _discard_gitlab_file_transport(self, key: tuple[str, str, str, int | None]) -> None:
+    def _discard_git_file_transport(self, key: tuple[str, str, str, int | None]) -> None:
         """Close and remove a failed cached git-file checkout."""
         with self._git_file_transports_lock:
             transport = self._git_file_transports.pop(key, None)
@@ -732,7 +719,7 @@ class DownloadDelegate:
         ref: str,
     ) -> bytes:
         """Fetch a GitLab path: file via a reusable sparse checkout."""
-        key = self._gitlab_file_transport_key(dep_ref, ref)
+        key = self._git_file_transport_key(dep_ref, ref)
         with self._git_file_transports_lock:
             transport = self._git_file_transports.get(key)
             if transport is None:
@@ -748,8 +735,79 @@ class DownloadDelegate:
         try:
             return transport.fetch_file(file_path)
         except GitFileTransportError:
-            self._discard_gitlab_file_transport(key)
+            self._discard_git_file_transport(key)
             raise
+
+    def _download_github_file_via_git(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str,
+    ) -> GitFileFetchResult:
+        """Fetch a throttled GitHub virtual file through one sparse Git transport."""
+        key = self._git_file_transport_key(dep_ref, ref)
+        auth_ctx = self._host.auth_resolver.resolve_for_dep(dep_ref)
+        if auth_ctx.token:
+            # AuthResolver owns credential resolution. Convert its resolved
+            # GitHub credential into Git's header channel so the token remains
+            # out of the remote URL and is actually consumed by git.
+            git_env = {
+                **auth_ctx.git_env,
+                **build_authorization_header_git_env("Bearer", auth_ctx.token),
+            }
+            git_env.pop("GIT_TOKEN", None)
+            auth_scheme = "basic"
+        else:
+            # Public repositories use normal non-interactive Git. Do not
+            # inherit an unrelated downloader token into this fallback.
+            git_env = self._host._build_noninteractive_git_env()
+            auth_scheme = "basic"
+
+        def _tokenless_repo_url(repo_ref: str, *, dep_ref: DependencyReference) -> str:
+            return self.build_repo_url(
+                repo_ref,
+                dep_ref=dep_ref,
+                token="",
+                auth_scheme=auth_scheme,
+            )
+
+        with self._git_file_transports_lock:
+            transport = self._git_file_transports.get(key)
+            if transport is None:
+                transport_factory = self._git_file_transport_factory or GitSparseFileTransport
+                transport = transport_factory(
+                    dep_ref,
+                    ref,
+                    build_repo_url_fn=_tokenless_repo_url,
+                    git_env=git_env,
+                )
+                self._git_file_transports[key] = transport
+        try:
+            return transport.fetch_file_with_commit(file_path)
+        except GitFileTransportError:
+            self._discard_git_file_transport(key)
+            raise
+
+    def download_github_file_via_throttle_fallback(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str,
+        throttle: GitHubThrottleError,
+    ) -> GitFileFetchResult:
+        """Select the sole sparse-Git fallback for a confirmed GitHub throttle."""
+        if dep_ref.is_insecure:
+            raise RuntimeError(
+                f"{throttle}; sparse Git fallback is unavailable for insecure HTTP dependencies"
+            )
+        try:
+            return self._download_github_file_via_git(dep_ref, file_path, ref)
+        except GitFileTransportError as exc:
+            raise RuntimeError(
+                f"{throttle}; sparse Git transport failed: {exc}. "
+                "Retry after GitHub quota recovery; for private repositories, "
+                "verify GITHUB_APM_PAT can read the repository."
+            ) from exc
 
     # ------------------------------------------------------------------
     # GitLab file download
@@ -981,13 +1039,22 @@ class DownloadDelegate:
         try:
             if verbose_callback and host.lower() != "github.com":
                 verbose_callback(f"Trying Contents API on {host}: {api_url}")
-            response = self._host._resilient_get(api_url, headers=headers, timeout=30)
+            response = self._host._resilient_get(
+                api_url,
+                headers=headers,
+                timeout=30,
+                retry_throttles=not is_github_host,
+            )
             response.raise_for_status()
             if verbose_callback:
                 verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
             return self._extract_contents_api_payload(response, is_github_host)
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response is not None else "unknown"
+            if is_github_host and e.response is not None:
+                throttle = github_throttle_error(e.response, host)
+                if throttle is not None:
+                    raise throttle from e
             if status == 404:
                 # For generic hosts, try remaining API version candidates before ref fallback
                 for candidate_url in api_url_candidates[1:]:
@@ -1047,7 +1114,10 @@ class DownloadDelegate:
                         if verbose_callback:
                             verbose_callback(f"Trying Contents API on {host}: {fallback_url}")
                         response = self._host._resilient_get(
-                            fallback_url, headers=headers, timeout=30
+                            fallback_url,
+                            headers=headers,
+                            timeout=30,
+                            retry_throttles=not is_github_host,
                         )
                         response.raise_for_status()
                         if verbose_callback:
@@ -1056,6 +1126,10 @@ class DownloadDelegate:
                             )
                         return self._extract_contents_api_payload(response, is_github_host)
                     except requests.exceptions.HTTPError as fe:
+                        if is_github_host and fe.response is not None:
+                            throttle = github_throttle_error(fe.response, host)
+                            if throttle is not None:
+                                raise throttle from fe
                         status = fe.response.status_code if fe.response is not None else "unknown"
                         if status != 404:
                             raise RuntimeError(  # noqa: B904
@@ -1080,47 +1154,16 @@ class DownloadDelegate:
                     )
                 )
             elif status in (401, 403):
-                # Distinguish rate limiting from auth failure.
-                # X-RateLimit-* headers are GitHub-specific; treat as
-                # rate-limit only when the host is in the GitHub family.
-                is_rate_limit = False
-                if is_github_host:
-                    try:
-                        rl_remaining = e.response.headers.get("X-RateLimit-Remaining")
-                        if rl_remaining is not None and int(rl_remaining) == 0:
-                            is_rate_limit = True
-                    except (TypeError, ValueError):
-                        pass
-
-                if is_rate_limit:
-                    error_msg = f"GitHub API rate limit exceeded for {dep_ref.repo_url}. "
-                    if not token:
-                        error_msg += (
-                            "Unauthenticated requests are limited to "
-                            "60/hour (shared per IP). "
-                            + self._host.auth_resolver.build_error_context(
-                                host,
-                                "API request (rate limited)",
-                                org=owner,
-                                port=(dep_ref.port if dep_ref else None),
-                                dep_url=(dep_ref.repo_url if dep_ref else None),
-                            )
-                        )
-                    else:
-                        error_msg += (
-                            "Authenticated rate limit exhausted. "
-                            "Wait a few minutes or check your token's "
-                            "rate-limit quota."
-                        )
-                    raise RuntimeError(error_msg) from e
-
                 # Retry without auth -- the repo might be public.
                 # GHES/GHE-DR don't support unauthenticated org-scoped retries.
                 if token and is_github_host and not host.lower().endswith(".ghe.com"):
                     try:
                         unauth_headers: dict[str, str] = {"Accept": "application/vnd.github.v3.raw"}
                         response = self._host._resilient_get(
-                            api_url, headers=unauth_headers, timeout=30
+                            api_url,
+                            headers=unauth_headers,
+                            timeout=30,
+                            retry_throttles=False,
                         )
                         response.raise_for_status()
                         if verbose_callback:

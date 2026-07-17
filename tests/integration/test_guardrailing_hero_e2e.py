@@ -22,15 +22,13 @@ from pathlib import Path
 
 import pytest
 
-# Skip all tests in this module if not in E2E mode
-E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
-
-# Token detection for test requirements
-GITHUB_APM_PAT = os.environ.get("GITHUB_APM_PAT")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-PRIMARY_TOKEN = GITHUB_APM_PAT or GITHUB_TOKEN
-
-pytestmark = pytest.mark.requires_e2e_mode
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.live,
+    pytest.mark.requires_e2e_mode,
+    pytest.mark.requires_github_token,
+    pytest.mark.requires_apm_binary,
+]
 
 
 def run_command(
@@ -80,7 +78,6 @@ def run_command(
 class TestGuardrailingHeroScenario:
     """Test README Hero Scenario 2: 2-Minute Guardrailing"""
 
-    @pytest.mark.skipif(not PRIMARY_TOKEN, reason="GitHub token required for E2E tests")
     def test_2_minute_guardrailing_flow(self, apm_binary_path):
         """Test the exact 2-minute guardrailing flow from README.
 
@@ -258,10 +255,3 @@ class TestGuardrailingHeroScenario:
             print("[OK] Multiple APM package installation")
             print("[OK] Copilot instruction compilation with combined instructions")
             print("[OK] Prompt execution from installed package")
-
-
-if __name__ == "__main__":
-    if E2E_MODE:
-        pytest.main([__file__, "-v", "-s"])
-    else:
-        print("E2E mode not enabled. Set APM_E2E_TESTS=1 to run these tests.")

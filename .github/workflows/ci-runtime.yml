@@ -63,6 +63,16 @@ jobs:
           ln -s "$(pwd)/dist/apm-linux-x86_64/apm" "$(pwd)/apm"
           echo "$(pwd)" >> $GITHUB_PATH
 
+      - name: Run live guardrailing hero
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          APM_E2E_TESTS: "1"
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+        run: >-
+          uv run pytest
+          tests/integration/test_guardrailing_hero_e2e.py::TestGuardrailingHeroScenario::test_2_minute_guardrailing_flow
+          -m live -v
+
       - name: Run smoke tests
         env:
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}

@@ -88,6 +88,7 @@ def _reconciler(tmp_path: Path) -> DeploymentReconciler:
     profiles = {
         "copilot": _target("copilot", ".github"),
         "claude": _target("claude", ".claude"),
+        "cursor": _target("cursor", ".cursor"),
     }
     return DeploymentReconciler(
         tmp_path,
@@ -215,6 +216,98 @@ def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
     assert record.active_owner in record.owners
 
 
+def test_codec_reports_invalid_owner_references_deterministically() -> None:
+    alpha = LockedDependency(repo_url="alpha")
+    lockfile = LockFile(dependencies={"alpha": alpha})
+    first = _locator(".claude/rules/first.md", target="claude")
+    second = _locator(".claude/rules/second.md", target="claude")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            second.key: _record(second, owners=("missing",), active="missing"),
+            first.key: _record(
+                first,
+                owners=("alpha", "missing"),
+                active="missing",
+            ),
+        }
+    )
+    lockfile._deployments_present = True
+
+    violations = DeploymentLedgerCodec.owner_reference_violations(lockfile)
+
+    assert [violation.locator.value for violation in violations] == [
+        ".claude/rules/first.md",
+        ".claude/rules/second.md",
+    ]
+    assert violations[0].invalid_owners == ("missing",)
+    assert violations[0].invalid_active_owner == "missing"
+    assert violations[1].invalid_owners == ("missing",)
+    assert violations[1].invalid_active_owner == "missing"
+
+
+def test_codec_valid_owner_keys_include_workspace_and_local_bundle() -> None:
+    lockfile = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha"),
+            "beta": LockedDependency(repo_url="beta"),
+        }
+    )
+
+    assert DeploymentLedgerCodec.valid_owner_keys(lockfile) == frozenset(
+        {".", "local-bundle", "alpha", "beta"}
+    )
+    assert DeploymentLedgerCodec.valid_owner_keys(
+        lockfile,
+        excluded_dependency_keys={"beta"},
+    ) == frozenset({".", "local-bundle", "alpha"})
+
+
+def test_codec_reconciles_owners_through_canonical_reconciler(tmp_path: Path) -> None:
+    lockfile = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha"),
+            "beta": LockedDependency(repo_url="beta"),
+        }
+    )
+    shared = _locator(".claude/rules/shared.md", target="claude")
+    beta_only = _locator(".claude/rules/beta.md", target="claude")
+    workspace = _locator(".claude/rules/local.md", target="claude")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            shared.key: _record(
+                shared,
+                owners=("alpha", "beta"),
+                active="beta",
+            ),
+            beta_only.key: _record(
+                beta_only,
+                owners=("beta",),
+                active="beta",
+            ),
+            workspace.key: _record(
+                workspace,
+                owners=(".", "local-bundle"),
+                active="local-bundle",
+            ),
+        }
+    )
+    lockfile._deployments_present = True
+
+    reconciled = DeploymentLedgerCodec.reconcile_owner_references(
+        lockfile,
+        excluded_dependency_keys={"beta"},
+        project_root=tmp_path,
+        diagnostics=DiagnosticCollector(),
+    )
+
+    assert reconciled.changed is True
+    assert beta_only.key not in reconciled.ledger.records
+    assert reconciled.ledger.records[shared.key].owners == ("alpha",)
+    assert reconciled.ledger.records[shared.key].active_owner == "alpha"
+    assert reconciled.ledger.records[workspace.key].owners == (".", "local-bundle")
+    assert lockfile.deployment_ledger.records[shared.key].active_owner == "beta"
+
+
 def test_deployment_record_rejects_active_owner_outside_owners() -> None:
     with pytest.raises(ValueError, match="active_owner must be present in owners"):
         _record(_locator(), owners=("survivor",), active="removed")
@@ -254,6 +347,97 @@ def test_same_target_stale_and_undeclared_target_are_removed(tmp_path: Path) -> 
 
     assert reconciled.ledger.records == {}
     assert set(reconciled.removed) == {active, ghost}
+
+
+@pytest.mark.parametrize(
+    ("dropped_target", "surviving_target"),
+    (
+        ("claude", "cursor"),
+        ("copilot", "cursor"),
+    ),
+)
+def test_shared_agents_rows_contract_by_value_with_current_skill_claims(
+    tmp_path: Path,
+    dropped_target: str,
+    surviving_target: str,
+) -> None:
+    """A generic shared skill row must yield to a current concrete target row."""
+    del dropped_target  # Target identity must not change shared-root semantics.
+    shared = ".agents/skills/shared/SKILL.md"
+    beta_only = ".agents/skills/beta-only/SKILL.md"
+    alpha_only = ".agents/skills/alpha-only/SKILL.md"
+    generic_shared = _locator(shared, target="agents")
+    generic_beta = _locator(beta_only, target="agents")
+    generic_alpha = _locator(alpha_only, target="agents")
+    previous = DeploymentLedger(
+        records={
+            generic_shared.key: _record(
+                generic_shared,
+                owners=("alpha", "beta"),
+                active="beta",
+            ),
+            generic_beta.key: _record(generic_beta, owners=("beta",), active="beta"),
+            generic_alpha.key: _record(generic_alpha, owners=("alpha",), active="alpha"),
+        }
+    )
+    current_shared = _locator(shared, target=surviving_target)
+    current_beta = _locator(beta_only, target=surviving_target)
+    intent = _intent(
+        active=frozenset({surviving_target}),
+        declared=frozenset({surviving_target}),
+        owners=frozenset({"beta"}),
+    )
+    intent = replace(
+        intent,
+        generic_governed_values=frozenset({shared, beta_only, alpha_only}),
+    )
+    results = [
+        _materialization("beta", current_shared, content_hash="sha256:shared-current"),
+        _materialization("beta", current_beta, content_hash="sha256:beta-current"),
+    ]
+
+    reconciled = _reconciler(tmp_path).reconcile(previous, results, intent)
+
+    assert set(reconciled.ledger.records) == {current_shared.key, current_beta.key}
+    assert reconciled.ledger.records[current_shared.key].owners == ("beta",)
+    assert reconciled.ledger.records[current_shared.key].content_hash == "sha256:shared-current"
+    assert reconciled.ledger.records[current_beta.key].owners == ("beta",)
+    assert reconciled.ledger.records[current_beta.key].content_hash == "sha256:beta-current"
+    assert reconciled.removed == (generic_alpha,)
+
+    repeated = _reconciler(tmp_path).reconcile(reconciled.ledger, results, intent)
+    assert repeated.ledger == reconciled.ledger
+    assert repeated.changed is False
+    assert repeated.removed == ()
+
+
+def test_generic_agents_contraction_dry_run_and_failed_cleanup_preserve_row(tmp_path: Path) -> None:
+    """No generic row is removed without a successful, non-dry-run cleanup proof."""
+    alpha = _locator(".agents/skills/alpha-only/SKILL.md", target="agents")
+    previous = DeploymentLedger(
+        records={alpha.key: _record(alpha, owners=("alpha",), active="alpha")}
+    )
+    intent = replace(
+        _intent(
+            active=frozenset({"cursor"}),
+            declared=frozenset({"cursor"}),
+            owners=frozenset({"alpha"}),
+        ),
+        generic_governed_values=frozenset({alpha.value}),
+    )
+    reconciler = _reconciler(tmp_path)
+
+    dry_run = reconciler.reconcile(previous, [], replace(intent, dry_run=True))
+    failed = reconciler.reconcile(
+        previous,
+        [_materialization("alpha", alpha, status=MaterializationStatus.FAILED)],
+        intent,
+    )
+
+    assert dry_run.ledger is previous
+    assert dry_run.changed is False
+    assert failed.ledger == previous
+    assert failed.failed == (alpha,)
 
 
 def test_unknown_declared_universe_preserves_sibling_target(tmp_path: Path) -> None:
@@ -369,6 +553,43 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
 
     assert rebuilt.deployment_ledger == ledger
     assert rebuilt.is_semantically_equivalent(lockfile)
+
+
+def test_legacy_owner_update_preserves_canonical_shared_root_locator() -> None:
+    """A compatibility projection must not demote a concrete shared-root target."""
+    path = ".agents/skills/demo/SKILL.md"
+    owner = "owner/package"
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url=owner,
+            deployed_files=[path],
+            deployed_file_hashes={path: "sha256:demo"},
+        )
+    )
+    concrete = _locator(path, target="copilot")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            concrete.key: DeploymentRecord(
+                locator=concrete,
+                owners=(owner,),
+                active_owner=owner,
+                content_hash="sha256:demo",
+            )
+        }
+    )
+    lockfile._deployments_present = True
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        owner,
+        [path],
+        {path: "sha256:demo"},
+    )
+
+    records = tuple(lockfile.deployment_ledger.records.values())
+    assert len(records) == 1
+    assert records[0].locator.target == "copilot"
 
 
 def test_local_bundle_provenance_round_trips_beside_authored_local_files() -> None:

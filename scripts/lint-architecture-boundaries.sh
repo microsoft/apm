@@ -74,6 +74,25 @@ if [ -z "$validation_line" ] || [ -z "$continue_line" ] || [ -z "$write_line" ] 
     echo "[x] Hook payload validation must continue before the native payload write"
     violations=$((violations + 1))
 fi
+hook_scope_owner_count=$(grep -Ec \
+    '^    def _deploy_root_for_hook_rewrite\(' "$hook_file" || true)
+hook_scope_duplicate_hits=$(
+    grep -REn --include='*hook_integrator.py' \
+        'deploy_root_for_rewrite[[:space:]]*=.*user_scope' \
+        src/apm_cli/integration \
+        | grep -v "^${hook_file}:" \
+        | grep -v 'integrator\._deploy_root_for_hook_rewrite' \
+        || true
+)
+if [ "$hook_scope_owner_count" -ne 1 ] \
+    || ! grep -q \
+        'deploy_root_for_rewrite = integrator\._deploy_root_for_hook_rewrite' \
+        src/apm_cli/integration/kiro_hook_integrator.py \
+    || [ -n "$hook_scope_duplicate_hits" ]; then
+    echo "[x] Hook rewrite scope must route through HookIntegrator"
+    [ -n "$hook_scope_duplicate_hits" ] && echo "$hook_scope_duplicate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Lockfile supported-version authority belongs in deps/lockfile.py" \
     'SUPPORTED_LOCKFILE_VERSIONS|lockfile_version[[:space:]]+(==|!=|in)' \
@@ -242,6 +261,15 @@ if [ "$cleanup_claim_status" -ne 0 ]; then
     echo "$cleanup_claim_output"
     violations=$((violations + 1))
 fi
+shared_target_contraction="src/apm_cli/install/manifest_reconcile.py"
+shared_target_output=$(python3 scripts/check_shared_target_contraction_owner.py \
+    "$shared_target_contraction" 2>&1)
+shared_target_status=$?
+if [ "$shared_target_status" -ne 0 ]; then
+    echo "[x] Shared target contraction must use DeploymentReconciler"
+    echo "$shared_target_output"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
@@ -408,6 +436,13 @@ check_pattern \
     "Neutral hook IR must not contain native harness vocabulary" \
     'copilot|gemini|antigravity|timeoutSec|powershell|_apm_source|["'\'']hooks["'\'']' \
     src/apm_cli/integration/hook_ir.py
+hook_routing_gate_hits=$(python3 scripts/check_hook_file_routing_owner.py 2>&1)
+hook_routing_gate_status=$?
+if [ "$hook_routing_gate_status" -ne 0 ]; then
+    echo "[x] Per-file hook routing must not be gated by dep_targets_active"
+    echo "$hook_routing_gate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Manifest schema negotiation belongs in manifest_contract.py" \
     'get\\(["'\'']\\$schema["'\'']\\)' \
@@ -571,6 +606,65 @@ if ! grep -q 'with_derived_provider_coordinates' \
     || grep -Eq '(self\.)?repo_url\.split\(' src/apm_cli/deps/lockfile.py \
     || grep -Eq 'owner_repo\.split\(' src/apm_cli/marketplace/ref_resolver.py; then
     echo "[x] ADO coordinates must be derived by DependencyReference, never persisted"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC15: hook target-contraction cleanup authority"
+check_pattern \
+    "Prune/uninstall must stay outside target-contraction hook cleanup (#2250 scope)" \
+    'reconcile_dropped_merge_hook_targets\(|reconcile_dropped_targets\(' \
+    src/apm_cli/commands/prune.py \
+    src/apm_cli/commands/uninstall/*.py
+hook_config_write_output=$(python3 scripts/check_hook_config_write_owner.py --root "$ROOT" 2>&1)
+hook_config_write_status=$?
+if [ "$hook_config_write_status" -ne 0 ]; then
+    echo "[x] Merge-hook config/sidecar writes must stay owned by HookIntegrator"
+    echo "$hook_config_write_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC16: post-uninstall reachability owner authority"
+if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
+    src/apm_cli/commands/uninstall/engine.py; then
+    echo "[x] Uninstall engine must call deps/reachability.py's compute_forward_reachable_keys"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "Only deps/reachability.py may walk an installed package's own manifest dependencies" \
+    'get_apm_dependencies' \
+    $(find src/apm_cli/commands/uninstall -name '*.py')
+check_pattern \
+    "Uninstall must not re-derive a parallel local-anchor reachability walk" \
+    'resolve_local_dep_dir' \
+    $(find src/apm_cli/commands/uninstall -name '*.py')
+
+echo "[*] AC17: GitHub API throttle classification authority"
+github_throttle_owner="src/apm_cli/deps/github_rate_limit.py"
+github_throttle_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'X-RateLimit-Remaining|Retry-After' \
+        src/apm_cli \
+        | grep -v "^${github_throttle_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^def classify_github_throttle(' "$github_throttle_owner" \
+    || ! grep -q '^class GitHubThrottleError' "$github_throttle_owner" \
+    || [ -n "$github_throttle_duplicate_hits" ]; then
+    echo "[x] GitHub throttle signals must be classified only by deps/github_rate_limit.py"
+    [ -n "$github_throttle_duplicate_hits" ] && echo "$github_throttle_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC18: deployment owner and cleanup authority"
+deployment_owner_output=$(python3 scripts/check_deployment_owner_boundaries.py \
+    src/apm_cli/commands/prune.py \
+    src/apm_cli/commands/audit.py \
+    src/apm_cli/policy/ci_checks.py 2>&1)
+deployment_owner_status=$?
+if [ "$deployment_owner_status" -ne 0 ]; then
+    echo "[x] Deployment ownership must route through DeploymentLedgerCodec"
+    echo "$deployment_owner_output"
     violations=$((violations + 1))
 fi
 

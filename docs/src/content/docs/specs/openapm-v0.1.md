@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **100 normative statements** indexed in
+- OpenAPM v0.1 carries **102 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -921,6 +921,42 @@ deployed by an active dependency in the current install, even when the
 same path is also recorded by a prior lockfile entry under a different
 dependency identity.
 
+<a id="req-lk-021"></a>
+**[req-lk-021]** When a non-frozen install, compile, or update
+rewrites deployed state and the implementation maintains merge-based
+hook configuration (a shared,
+non-per-file configuration document for a target that supports the
+`hooks` primitive type, together with an ownership record identifying
+which entries the consumer itself wrote), a conforming **consumer**
+implementation MUST apply the same preserve-or-remove decision defined
+by [req-lk-020](#req-lk-020) to that merge-based hook configuration.
+It MUST remove only the consumer-owned entries -- and any ownership
+record left empty by that removal -- attributable to a target that is
+not attributable to (a) the current install targets, (b) another
+declared target, or (c) an implementation-recognized target whose
+activation is outside the manifest target field. It MUST preserve
+every entry that does not carry the consumer's own ownership
+attribution, regardless of target, and every consumer-owned entry for
+a target that remains attributable under (a)-(c). If the manifest does
+not declare a `target` field, or the consumer cannot determine which
+target governs a prior entry, the consumer MUST preserve that entry
+and its ownership attribution, mirroring
+[req-lk-020](#req-lk-020)'s indeterminate case.
+If the merge-based hook configuration document is already absent for a
+target while its ownership record remains, a conforming consumer MUST
+still apply this requirement's preserve-or-remove decision to that
+orphaned ownership record: after verifying the record is well-formed,
+it MUST remove a record attributable to none of (a)-(c) above, and MUST
+preserve a record attributable to a target that remains attributable
+under (a)-(c). A consumer that encounters a merge-based hook
+configuration document or ownership record that is malformed or
+cannot be parsed MUST leave that document or record unmodified and
+emit an actionable diagnostic naming the affected path, rather than
+partially or silently repairing it. This requirement does not mandate
+how ownership is recorded (inline marker vs. a separate ownership
+record) or which merge-hook targets exist; it binds only the
+preserve-or-remove decision once ownership is determinate.
+
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit
 hash values as `<algo>:<hex>` envelopes (for example
@@ -1140,7 +1176,8 @@ This section's normative statements are:
   [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013),
   [req-lk-014](#req-lk-014), [req-lk-015](#req-lk-015),
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
-  [req-lk-020](#req-lk-020).
+  [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
+  [req-lk-021](#req-lk-021).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -1446,8 +1483,12 @@ manifest:
 ### 6.8 Integrity controls (governance)
 
 The `security.integrity` and `security.audit` blocks declare opt-in,
-fail-closed controls. Both are default-off; a policy that omits them
-is unaffected.
+fail-closed controls. [req-pl-013](#req-pl-013) and
+[req-pl-014](#req-pl-014) are default-off; a policy that omits these
+two controls is unaffected by them. [req-pl-016](#req-pl-016) is an
+exception: it defines an unconditional integrity invariant that
+applies regardless of policy configuration, independent of any
+`security.audit` control.
 
 <a id="req-pl-013"></a>
 **[req-pl-013]** A conforming **governance** implementation that
@@ -1471,6 +1512,30 @@ miss, does not by itself alter the exit status. When
 `security.audit.fail_on_drift` is absent or `false`, detected drift
 MUST be reported without, by itself, altering the audit exit status.
 
+<a id="req-pl-016"></a>
+**[req-pl-016]** A conforming **governance** implementation MUST treat
+a canonical deployment-ledger owner (a dependency-identity reference
+recorded as an owner of a deployment row in `apm.lock.yaml`) that does
+not resolve to a dependency entry in `apm.lock.yaml` as a
+**hard integrity failure**, independent of the `security.audit.fail_on_drift` control. This
+failure is distinct from the ordinary deployed-file drift governed by
+[req-pl-014](#req-pl-014): an owner is a durable ownership record
+carried in the lockfile, not an edit to a deployed file, so a stale
+owner MUST surface even when `security.audit.fail_on_drift` is absent
+or `false`. When at least one such stale ownership record is present,
+an audit operation MUST terminate with a non-zero exit status in
+**both** its default and CI modes, and MUST NOT mutate any deployed
+byte (for example under a strip operation) while the ownership record
+remains invalid. When a deployment locator (the target-qualified
+identifier of a single tracked deployment row in the ledger) resolves
+to more than one owner and any one of those owners does not resolve in
+`apm.lock.yaml`, the hard-failure and mutation-block obligations apply
+to the entire audit operation, not only to the paths co-owned by the
+stale owner. The diagnostic MUST name each affected deployment locator
+together with its invalid owner reference(s), and MUST carry a single
+remediation directing the operator to reconcile ownership (prune the
+departed owners, then re-audit).
+
 ### 6.9 Conformance requirements (governance)
 
 This section's normative statements are:
@@ -1482,7 +1547,7 @@ This section's normative statements are:
   [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
   [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
-  [req-pl-015](#req-pl-015).
+  [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
 
 ---
 
@@ -2495,7 +2560,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020); self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
@@ -2666,6 +2731,7 @@ conformance statement identifying:
 [req-lk-015](#req-lk-015), [req-lk-016](#req-lk-016),
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
+[req-lk-021](#req-lk-021),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -2713,7 +2779,8 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-007](#req-pl-007), [req-pl-008](#req-pl-008),
 [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
 [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
-[req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014).
+[req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
+[req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -3049,6 +3116,7 @@ renumbering of conformance classes.
 | [req-lk-018](#req-lk-018)                | SHOULD  | 5.5     | consumer    |
 | [req-lk-019](#req-lk-019)                | MUST    | 5.2     | consumer    |
 | [req-lk-020](#req-lk-020)                | MUST    | 5.2     | consumer    |
+| [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -3064,6 +3132,7 @@ renumbering of conformance classes.
 | [req-pl-013](#req-pl-013)                | MUST    | 6.8     | governance  |
 | [req-pl-014](#req-pl-014)                | MUST    | 6.8     | governance  |
 | [req-pl-015](#req-pl-015)                | MUST    | 6.3.5   | governance  |
+| [req-pl-016](#req-pl-016)                | MUST    | 6.8     | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -3107,7 +3176,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 100** (95 MUST, 5 SHOULD).
+**Total normative statements: 102** (97 MUST, 5 SHOULD).
 
 ---
 
@@ -3132,6 +3201,8 @@ renumbering of conformance classes.
 | 0.1.13  | 2026-07-14 | Defensive clarification of existing lockfile requirements (no new normative statements; statement count remains 98 (93 MUST, 5 SHOULD)). [req-lk-003] now requires a conformance audit to reject disagreement between a full-SHA manifest pin and `resolved_commit`. [req-lk-020] now preserves paths freshly deployed by an active dependency when orphan cleanup encounters the same path under a prior dependency identity. |
 | 0.1.14  | 2026-07-15 | Spec-citation fold for complete repository identity through resolution and materialization (closes #2191). Added [req-rs-016] (Section 7.2, consumer MUST): repository identity includes normalized host, explicit port, and the complete credential-free repository path; distinct identities MUST NOT share cached source material merely because they use the same ref or a common path prefix; identical identity and ref MAY reuse cached source material. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 98 -> 99 (94 MUST, 5 SHOULD). |
 | 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
+| 0.1.16  | 2026-07-17 | Spec-citation fold for dropped-target merge-hook reconciliation (closes the #2253 Mode-B silent-extension gate). Added [req-lk-021] (Section 5.2, consumer MUST): extends [req-lk-020]'s target-reconciliation preserve/remove decision to merge-based hook configuration and its ownership record, since that state is deliberately outside `deployed_files`/`local_deployed_files` tracking and so was never reachable by req-lk-020's literal text -- narrowing a project's declared target set now also reconciles the dropped target's consumer-owned merge-hook entries, while preserving entries not carrying consumer ownership and preserving state for targets still attributable per req-lk-020's own (a)-(c) test. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 100 -> 101 (96 MUST, 5 SHOULD). |
+| 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

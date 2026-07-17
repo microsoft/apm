@@ -135,6 +135,10 @@ class InstallContext:
     # ------------------------------------------------------------------
     intended_dep_keys: set[str] = field(default_factory=set)
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
+    # Cleanup refusals retain the original lockfile hash, not a hash of
+    # user-edited bytes. Lockfile assembly consumes this after cleanup.
+    package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
     # Declared-license provenance (issue #1777, U6): maps dep_key -> the SPDX
@@ -193,6 +197,7 @@ class InstallContext:
     # ------------------------------------------------------------------
     old_local_deployed: list[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: list[str] = field(default_factory=list)  # integrate (root)
+    local_cleanup_retained: dict[str, str | None] = field(default_factory=dict)
     local_content_errors_before: int = 0  # integrate (pre-root)
 
     # ------------------------------------------------------------------

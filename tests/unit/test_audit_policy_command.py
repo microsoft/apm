@@ -286,5 +286,5 @@ class TestCiWithoutPolicy:
         # found; JSON is on stdout. Read stdout explicitly so the warning does
         # not corrupt JSON parsing.
         data = json.loads(result.stdout)
-        # Only baseline checks (max 8 incl. skill-subset + includes-consent)
-        assert data["summary"]["total"] <= 8
+        # Only the nine baseline checks, including deployment ownership.
+        assert data["summary"]["total"] == 9

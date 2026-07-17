@@ -145,7 +145,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 2: Dry run
         modules_dir = get_modules_dir(scope)
         if dry_run:
-            _dry_run_uninstall(packages_to_remove, modules_dir, logger)
+            _dry_run_uninstall(packages_to_remove, modules_dir, logger, apm_yml_path)
             return
 
         # Step 3: Remove from apm.yml
@@ -243,6 +243,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 all_deployed_files,
                 logger,
                 user_scope=scope is InstallScope.USER,
+                lockfile=lockfile,
             )
         except Exception as _sync_err:
             # Surface why integration cleanup failed instead of swallowing

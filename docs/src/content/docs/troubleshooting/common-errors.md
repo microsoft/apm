@@ -225,6 +225,26 @@ See also: [Reference](../../reference/), [Troubleshooting migration](../migratio
 
 ## Auth and network
 
+### `GitHub API throttle for <host> (HTTP <status>)`
+
+```
+GitHub API throttle for github.com (HTTP 429)
+```
+
+Cause: GitHub conclusively throttled a virtual-file API probe. APM treats this
+as unknown rather than claiming the dependency is missing. It makes one sparse
+Git attempt; a later `sparse Git transport failed` message identifies a
+separate Git connectivity or authorization problem.
+
+Fix: for public repositories, retry after the GitHub quota recovers if the
+sparse Git attempt also failed. For private repositories, configure the normal
+GitHub credential chain (for example `GITHUB_APM_PAT`) and confirm that the
+token can read the repository. A `401`, ordinary `403`, or `404` is not a
+throttle and requires fixing authentication, authorization, or the dependency
+path instead.
+
+See also: [Install failures](../install-failures/), [Authentication](../../getting-started/authentication/)
+
 ### `Authentication failed for <host>`
 
 ```

@@ -31,6 +31,7 @@ from pathlib import Path
 
 import requests
 
+from ..deps.github_rate_limit import GitHubThrottleError, raise_for_github_throttle
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.github_host import (
     default_host,
@@ -64,43 +65,6 @@ def _is_tls_failure(exc: BaseException) -> bool:
         cur = cur.__cause__ or cur.__context__
         seen += 1
     return False
-
-
-# Marker prefix used on RuntimeError messages raised when the GitHub REST
-# probe is throttled (primary 60/hr or secondary concurrency rate limit).
-# A throttled response is NOT evidence the repo is missing, so the marker
-# lets the caller proceed to the download step (the real source of truth)
-# instead of surfacing a false "package not accessible" error.
-_RATE_LIMIT_PREFIX = "GitHub API rate limit"
-
-
-def _is_rate_limit_failure(exc: BaseException) -> bool:
-    """Return True if exc (or any cause in its chain) is a rate-limit throttle."""
-    cur: BaseException | None = exc
-    seen = 0
-    while cur is not None and seen < 8:
-        if _RATE_LIMIT_PREFIX in str(cur):
-            return True
-        cur = cur.__cause__ or cur.__context__
-        seen += 1
-    return False
-
-
-def _raise_if_rate_limited(resp, host_display: str) -> None:
-    """Raise a marked RuntimeError when *resp* is a GitHub rate-limit throttle.
-
-    GitHub signals primary exhaustion with HTTP 403 + ``X-RateLimit-Remaining: 0``
-    and secondary (concurrency) limits with 403/429 + a ``Retry-After`` header.
-    Either way the repo's existence is unknown, so the marker lets the caller
-    proceed rather than report a false negative. Plain 403s (SSO / permission)
-    carry neither signal and fall through to the normal not-accessible path.
-    """
-    if resp.status_code not in (403, 429):
-        return
-    remaining = resp.headers.get("X-RateLimit-Remaining")
-    retry_after = resp.headers.get("Retry-After")
-    if resp.status_code == 429 or remaining == "0" or retry_after:
-        raise RuntimeError(f"{_RATE_LIMIT_PREFIX} hit for {host_display} ({resp.status_code})")
 
 
 def _log_rate_limit_allow(host_display: str, verbose_log, logger) -> None:
@@ -682,7 +646,7 @@ def _validate_github_package(
         if resp.status_code == 404 and token:
             # 404 with token could mean no access -- raise to trigger fallback
             raise RuntimeError(f"API returned {resp.status_code}")
-        _raise_if_rate_limited(resp, host_info.display_name)
+        raise_for_github_throttle(resp, host_info.display_name)
         raise RuntimeError(f"API returned {resp.status_code}: {resp.reason}")
 
     try:
@@ -698,13 +662,13 @@ def _validate_github_package(
             unauth_first=True,
             verbose_callback=verbose_log,
         )
+    except GitHubThrottleError:
+        _log_rate_limit_allow(host_info.display_name, verbose_log, logger)
+        return True
     except Exception as exc:
         if _is_tls_failure(exc):
             _log_tls_failure(host_info.display_name, exc, verbose_log, logger)
             return False
-        if _is_rate_limit_failure(exc):
-            _log_rate_limit_allow(host_info.display_name, verbose_log, logger)
-            return True
         if verbose_log:
             try:
                 ctx = auth_resolver.build_error_context(
@@ -780,7 +744,7 @@ def _validate_parse_failure_fallback(
             return True
         if verbose_log:
             verbose_log(f"API fallback -> {resp.status_code} {resp.reason}")
-        _raise_if_rate_limited(resp, host_info.display_name)
+        raise_for_github_throttle(resp, host_info.display_name)
         raise RuntimeError(f"API returned {resp.status_code}")
 
     try:
@@ -792,14 +756,14 @@ def _validate_parse_failure_fallback(
             unauth_first=True,
             verbose_callback=verbose_log,
         )
+    except GitHubThrottleError:
+        _log_rate_limit_allow(host, verbose_log, logger)
+        return True
     except Exception as exc:
         if _is_tls_failure(exc):
             # See note above: logged once here, skip auth context render.
             _log_tls_failure(host, exc, verbose_log, logger)
             return False
-        if _is_rate_limit_failure(exc):
-            _log_rate_limit_allow(host, verbose_log, logger)
-            return True
         if verbose_log:
             try:
                 ctx = auth_resolver.build_error_context(
@@ -884,6 +848,11 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         # #1015: let auth failures propagate to the caller for proper
         # rendering -- the outer try/except is only for parse failures.
         raise
+    except GitHubThrottleError:
+        # A virtual-file probe carries a typed throttle through its local
+        # validation helpers so it cannot become a generic false negative.
+        _log_rate_limit_allow(dep_ref.host or default_host(), verbose_log, logger)
+        return True
     except Exception:
         # If parsing fails, assume it's a regular GitHub package
         return _validate_parse_failure_fallback(package, auth_resolver, verbose_log, logger)

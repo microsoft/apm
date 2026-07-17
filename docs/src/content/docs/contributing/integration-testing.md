@@ -47,6 +47,13 @@ APM uses a tiered approach to integration testing:
     -m lifecycle_smoke tests/integration
   ```
 
+### 4. **Live Guardrailing Hero** (scheduled/manual)
+- **Location**: `tests/integration/test_guardrailing_hero_e2e.py`
+- **Purpose**: Preserve the real remote, token-gated packaged CLI hero without multiplying it across the default packaged platform matrix
+- **Scope**: project initialization, two GitHub-backed installs, compile/deploy, and prompt startup through the built Linux x64 binary
+- **Trigger**: one `ci-runtime.yml` invocation on schedule or manual dispatch that fails the workflow on error (`continue-on-error` is not set); never pull requests or the generic integration script
+- **Selection mechanism**: the explicit test node with `-m live`; collection gates remain owned by `tests/integration/conftest.py`
+
 ## Running Tests Locally
 
 Integration tests live under `tests/integration/` and run via `pytest`
@@ -216,11 +223,31 @@ as shown in the cross-module contract. `ApmLifecycleRunner()` invokes `apm`
 through `PATH`; packaged-binary tests use the
 [binary-resolution fixture](#apm-binary-resolution).
 
+`test_packaged_virtual_file_lifecycle_e2e.py`,
+`test_deployed_files_e2e.py`, and
+`test_silent_adopt_existing_files_e2e.py` are narrow hermetic packaged
+counterparts to the live hero. They run the real binary against a local bare
+Git origin through process-scoped URL rewriting, then check package
+installation, deployment lifecycle, and exact lock provenance without
+credentials or live HTTP.
+
 ```bash
+# The three hermetic packaged counterparts (real binary, local file:// origin, no creds):
+uv run pytest tests/integration/test_packaged_virtual_file_lifecycle_e2e.py -v
+uv run pytest tests/integration/test_deployed_files_e2e.py -v
+uv run pytest tests/integration/test_silent_adopt_existing_files_e2e.py -v
+
+# Supporting hermetic foundation + contract suites:
 uv run pytest tests/integration/test_local_package_factory_contract.py -v
 uv run pytest tests/integration/test_hermetic_lifecycle_foundation.py -v
 uv run pytest -n auto tests/integration/test_hermetic_lifecycle_foundation.py -v
 ```
+
+These suites need no PAT and make no live HTTP calls: the packaged binary reaches
+the dependency through a process-scoped `file://` URL rewrite. If one fails with a
+network or authentication error, the rewrite did not apply -- confirm the test uses
+the `hermetic_packaged_sample` fixture (which sets `GIT_CONFIG_COUNT` and
+`GIT_ALLOW_PROTOCOL=file`) rather than invoking `apm` against the raw GitHub URL.
 
 ### Apm binary resolution
 

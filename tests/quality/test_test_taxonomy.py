@@ -89,6 +89,8 @@ def _collect_inventory(root: Path, output: Path) -> dict[str, list[str]]:
             INVENTORY_PLUGIN,
             "--collect-only",
             "-q",
+            "-m",
+            "not benchmark",
             "tests",
         ],
         cwd=root,
@@ -135,7 +137,7 @@ def test_tm001_behavioral_marker_definitions_match_spec() -> None:
 
 def test_tm002_manifest_is_finite_unique_and_existing() -> None:
     modules = _manifest_modules()
-    assert len(modules) == 18
+    assert len(modules) == 26
     paths = [entry["path"] for entry in modules]
     assert len(paths) == len(set(paths))
     assert {entry["marker"] for entry in modules} == BEHAVIORAL_MARKERS

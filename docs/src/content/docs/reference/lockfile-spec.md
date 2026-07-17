@@ -120,6 +120,16 @@ local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
   .github/skills/my-local-skill/SKILL.md: "a1b2c3..."
+deployments:
+  - kind: project-relative
+    target: copilot
+    value: .github/instructions/security.instructions.md
+    runtime: null
+    scope: project
+    owners:
+      - https://github.com/acme-corp/security-baseline
+    active_owner: https://github.com/acme-corp/security-baseline
+    content_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 ```
 
 | Field | Type | Required | Notes |
@@ -136,6 +146,40 @@ local_deployed_file_hashes:
 | `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
+| `deployments` | list | no | Canonical deployment ownership rows, additive alongside the legacy `deployed_files`/`local_deployed_files` views. See [Canonical deployment rows](#canonical-deployment-rows). |
+
+## Canonical deployment rows
+
+Each item in `deployments` is one locator -- one deployed file or native
+runtime entry -- with its full ownership history:
+
+| Field | Type | Notes |
+|---|---|---|
+| `kind` | string | Locator storage form: `project-relative`, `target-relative`, or `uri` (e.g. an MCP server entry). |
+| `target` | string | Deploy target name (`copilot`, `claude`, `mcp`, etc.). |
+| `value` | string | The path (relative to its `kind`) or URI value. |
+| `runtime` | string or null | Runtime scoping the row, when applicable (e.g. an MCP client name). |
+| `scope` | string | Install scope, typically `project`. |
+| `owners` | list of strings | Every dependency key that has ever claimed this locator, oldest to newest. |
+| `active_owner` | string | The current claimant. Always one of `owners`; a row where it is not is malformed. |
+| `content_hash` | string or null | `sha256:<hex>` digest of the deployed content, when known. |
+
+`owners` and `active_owner` must each resolve to a member of the **valid
+owner universe** for that lockfile: every current key in `dependencies`,
+the workspace self-owner `.`, or `local-bundle` (imperative content added
+outside the replayable install pipeline, e.g. `apm unpack`). A reference to
+a dependency key no longer present in `dependencies` is a stale owner --
+`apm audit` reports it as `deployment-ledger-owners` and `apm prune`
+repairs it; see [Baseline checks](../baseline-checks/#deployment-ledger-owners)
+and [`apm prune`](../cli/prune/#canonical-deployment-ownership).
+
+`deployments` is the canonical source APM writes to going forward. The
+per-dependency `deployed_files`/`deployed_file_hashes` and the top-level
+`local_deployed_files`/`local_deployed_file_hashes`/`mcp_target_servers`
+fields remain on disk as derived, one-cycle-compatible legacy views of the
+same ledger -- older tooling that only reads the flat fields still sees a
+consistent projection. Author neither view by hand; both are written by
+`apm install`, `apm prune`, and related commands.
 
 ## Per-entry fields
 
@@ -155,7 +199,7 @@ Each item in `dependencies` describes one resolved package.
 | `virtual_path` | string | no | Subpath inside the repo for virtual packages (monorepo subpaths). |
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
-| `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. |
+| `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. Rewritten by `apm uninstall` when a rescued transitive dependency's original parent is removed, so the entry stays keyed on a genuine surviving parent -- this never changes the entry's identity or lock key, only which parent it points to. |
 | `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
@@ -275,7 +319,7 @@ shipped.
 | `apm install --frozen` | required | never writes; fails on missing pin |
 | `apm compile` | yes (resolution + integrity) | no |
 | `apm audit` | yes | no |
-| `apm prune` | yes (to identify orphans) | yes (after removing orphans) |
+| `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |
 | `apm view --lock` | yes | no |
 | `apm unpack` | bundle's pack-enriched lockfile | merges into project lockfile |
 
@@ -290,6 +334,7 @@ check maps to specific lockfile fields:
 
 | Check | Backed by |
 |---|---|
+| `deployment-ledger-owners` | `deployments` rows' `owners` and `active_owner` vs. the valid owner universe |
 | `lockfile-exists` | file presence at project root |
 | `ref-consistency` | `resolved_ref` per entry vs. `apm.yml` |
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
@@ -309,6 +354,11 @@ Orphan detection works in two directions:
   declares. `apm prune` removes them and their `deployed_files`.
 - **Orphan files** - files under managed target directories that no lockfile
   entry claims. `apm prune` removes them too.
+
+`apm prune` is the only command that reconciles `deployments` rows. The valid
+owner universe and metadata-only repair boundary are defined in
+[Canonical deployment rows](#canonical-deployment-rows); cleanup behavior is
+documented under [`apm prune`](../cli/prune/#canonical-deployment-ownership).
 
 ## Versioning
 

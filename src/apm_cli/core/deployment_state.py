@@ -99,6 +99,7 @@ class DeploymentIntent:
     desired_owners: frozenset[str] | None
     authoritative_targets: bool
     dry_run: bool = False
+    generic_governed_values: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -242,9 +243,14 @@ class DeploymentReconciler:
         removed: list[DeploymentLocator] = []
         retained: list[DeploymentLocator] = []
         handoffs: list[tuple[str, str, str]] = []
+        successful_by_value = self._successful_by_value(successful)
+        failed_values = {locator.value for locator in failed_by_key.values()}
+        superseded_success_keys: set[str] = set()
 
         for key, prior in previous.records.items():
             proofs = successful.get(key)
+            if proofs is None:
+                proofs = self._superseding_generic_proofs(prior, successful_by_value)
             if proofs:
                 next_record = self._record_from_proofs(proofs, intent)
                 if next_record is None:
@@ -257,14 +263,24 @@ class DeploymentReconciler:
                     and prior.active_owner not in next_record.owners
                 ):
                     handoffs.append((key, prior.active_owner, next_record.active_owner))
-                next_records[key] = next_record
+                next_records[next_record.locator.key] = next_record
+                superseded_success_keys.add(next_record.locator.key)
                 continue
 
             if key in failed_by_key:
                 next_records[key] = prior
                 retained.append(prior.locator)
                 continue
-            if key in removed_by_key or self._is_stale(prior, intent):
+            if (
+                key in removed_by_key
+                or self._is_stale(prior, intent)
+                or self._is_generic_stale(
+                    prior,
+                    intent,
+                    successful_by_value,
+                    failed_values,
+                )
+            ):
                 removed.append(prior.locator)
                 continue
 
@@ -276,7 +292,7 @@ class DeploymentReconciler:
                 retained.append(prior.locator)
 
         for key, proofs in successful.items():
-            if key in previous.records:
+            if key in previous.records or key in superseded_success_keys:
                 continue
             record = self._record_from_proofs(proofs, intent)
             if record is None:
@@ -293,6 +309,44 @@ class DeploymentReconciler:
             failed=tuple(failed_by_key.values()),
             changed=dict(previous.records) != next_records,
         )
+
+    @staticmethod
+    def _successful_by_value(
+        successful: Mapping[str, list[MaterializationResult]],
+    ) -> dict[str, list[MaterializationResult]]:
+        """Group trusted current-run materializations by their persisted value."""
+        by_value: dict[str, list[MaterializationResult]] = {}
+        for proofs in successful.values():
+            for proof in proofs:
+                by_value.setdefault(proof.locator.value, []).append(proof)
+        return by_value
+
+    def _superseding_generic_proofs(
+        self,
+        prior: DeploymentRecord,
+        successful_by_value: Mapping[str, list[MaterializationResult]],
+    ) -> list[MaterializationResult] | None:
+        """Return current proofs that supersede one legacy generic row by value."""
+        if prior.locator.target in self.target_profiles:
+            return None
+        return successful_by_value.get(prior.locator.value)
+
+    def _is_generic_stale(
+        self,
+        record: DeploymentRecord,
+        intent: DeploymentIntent,
+        successful_by_value: Mapping[str, list[MaterializationResult]],
+        failed_values: set[str],
+    ) -> bool:
+        """Decide whether a governed generic row has no safe surviving claim."""
+        if (
+            record.locator.target in self.target_profiles
+            or intent.generic_governed_values is None
+            or record.locator.value not in intent.generic_governed_values
+        ):
+            return False
+        value = record.locator.value
+        return value not in successful_by_value and value not in failed_values
 
     def _record_from_proofs(
         self,
@@ -348,8 +402,10 @@ class DeploymentReconciler:
         )
 
     def _is_stale(self, record: DeploymentRecord, intent: DeploymentIntent) -> bool:
+        if not intent.authoritative_targets:
+            return False
         target = record.locator.target
-        if intent.authoritative_targets and target in intent.active_targets:
+        if target in intent.active_targets:
             return True
         return (
             intent.declared_targets is not None

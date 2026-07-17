@@ -17,6 +17,10 @@ path = "tests/unit/deps/test_lockfile_field_properties.py"
 marker = "unit"
 
 [[modules]]
+path = "tests/unit/test_surviving_deps_reintegration.py"
+marker = "unit"
+
+[[modules]]
 path = "tests/integration/test_install_content_hash_roundtrip.py"
 marker = "component"
 
@@ -68,5 +72,33 @@ path = "tests/integration/test_ado_lock_consumer_contract.py"
 marker = "e2e"
 
 [[modules]]
+path = "tests/integration/test_config_surface_lifecycle_contract.py"
+marker = "e2e"
+
+[[modules]]
 path = "tests/integration/test_package_shape_lifecycle_contract.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_guardrailing_hero_e2e.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_packaged_virtual_file_lifecycle_e2e.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_deployed_files_e2e.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_silent_adopt_existing_files_e2e.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_primitive_target_covering_array.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_prune_deployment_ledger_e2e.py"
 marker = "e2e"

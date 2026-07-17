@@ -17,6 +17,11 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import CommandLogger
+from ..core.deployment_ledger import (
+    DEPLOYMENT_OWNER_REMEDIATION,
+    DeploymentLedgerCodec,
+    DeploymentOwnerViolation,
+)
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
@@ -311,6 +316,25 @@ def _render_summary(
 
     if info > 0 and (critical > 0 or warning > 0):
         logger.progress(f"  Plus {info} info-level finding(s) (use --verbose to see)")
+
+
+def _render_owner_violations(
+    violations: tuple[DeploymentOwnerViolation, ...],
+    logger: CommandLogger,
+) -> None:
+    """Render invalid canonical owner references with one remediation."""
+    if not violations:
+        return
+    logger.error(f"{len(violations)} invalid deployment ownership record(s) in apm.lock.yaml")
+    for violation in violations:
+        invalid = ", ".join(violation.invalid_owners)
+        active = (
+            f"; active owner={violation.invalid_active_owner}"
+            if violation.invalid_active_owner is not None
+            else ""
+        )
+        logger.error_detail(f"  {violation.locator.key}: invalid owner(s)={invalid}{active}")
+    logger.error_detail(DEPLOYMENT_OWNER_REMEDIATION)
 
 
 def _apply_strip(
@@ -844,6 +868,7 @@ def _audit_content_scan(
         # -- File mode: scan a single arbitrary file --
         findings_by_file, files_scanned = _scan_single_file(Path(file_path), logger)
         scan_paths = [Path(file_path)]
+        owner_violations: tuple[DeploymentOwnerViolation, ...] = ()
     else:
         scan_paths = [project_root]
         # -- Package mode: scan from lockfile --
@@ -858,23 +883,31 @@ def _audit_content_scan(
             # empty native result set so their findings still surface.
             findings_by_file, files_scanned = {}, 0
         else:
-            if package:
-                logger.progress(f"Scanning package: {package}")
-            else:
-                logger.start("Scanning all installed packages...")
+            if effective_format == "text":
+                if package:
+                    logger.progress(f"Scanning package: {package}")
+                else:
+                    logger.start("Scanning all installed packages...")
 
             from apm_cli.deps.lockfile import LockfileFormatError
 
             try:
+                lockfile = LockFile.read(lockfile_path)
+                owner_violations = (
+                    DeploymentLedgerCodec.owner_reference_violations(lockfile)
+                    if lockfile is not None
+                    else ()
+                )
                 findings_by_file, files_scanned = scan_lockfile_packages(
                     project_root,
                     package_filter=package,
+                    lockfile=lockfile,
                 )
             except LockfileFormatError as exc:
                 logger.error(f"Cannot audit invalid apm.lock.yaml: {exc}")
                 sys.exit(1)
 
-            if files_scanned == 0 and not external:
+            if files_scanned == 0 and not external and not owner_violations:
                 if package:
                     logger.warning(
                         f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
@@ -882,6 +915,8 @@ def _audit_content_scan(
                 else:
                     logger.progress("No deployed files found in apm.lock.yaml")
                 sys.exit(0)
+        if not lockfile_path.exists():
+            owner_violations = ()
 
     # -- External scanners (opt-in, additive) -----------------------
     if external:
@@ -899,6 +934,10 @@ def _audit_content_scan(
 
     # -- Strip mode --
     if strip:
+        if owner_violations:
+            _render_owner_violations(owner_violations, logger)
+            logger.error_detail("Content was not modified while lockfile ownership is invalid.")
+            sys.exit(1)
         if not findings_by_file:
             logger.progress("Nothing to clean -- no hidden characters found")
             sys.exit(0)
@@ -975,6 +1014,8 @@ def _audit_content_scan(
     else:
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
+    if owner_violations:
+        exit_code = 1
 
     # Bare `apm audit` is advisory for drift by default: drift findings are
     # rendered (text/json/sarif) but DO NOT escalate the exit code. When
@@ -997,7 +1038,10 @@ def _audit_content_scan(
             sys.exit(1)
         if findings_by_file:
             _render_findings_table(findings_by_file, verbose=cfg.verbose)
-        _render_summary(findings_by_file, files_scanned, logger)
+            _render_summary(findings_by_file, files_scanned, logger)
+        elif not owner_violations:
+            _render_summary(findings_by_file, files_scanned, logger)
+        _render_owner_violations(owner_violations, logger)
         if not file_path:
             _render_canvas_note(cfg.project_root, package, logger)
         if drift_findings:
@@ -1008,7 +1052,11 @@ def _audit_content_scan(
     elif effective_format == "markdown":
         from ..security.audit_report import findings_to_markdown
 
-        md_report = findings_to_markdown(findings_by_file, files_scanned=files_scanned)
+        md_report = findings_to_markdown(
+            findings_by_file,
+            files_scanned=files_scanned,
+            owner_violations=owner_violations,
+        )
         if cfg.output_path:
             Path(cfg.output_path).parent.mkdir(parents=True, exist_ok=True)
             Path(cfg.output_path).write_text(md_report, encoding="utf-8")
@@ -1024,12 +1072,17 @@ def _audit_content_scan(
         )
 
         if effective_format == "sarif":
-            report = findings_to_sarif(findings_by_file, files_scanned=files_scanned)
+            report = findings_to_sarif(
+                findings_by_file,
+                files_scanned=files_scanned,
+                owner_violations=owner_violations,
+            )
         else:
             report = findings_to_json(
                 findings_by_file,
                 files_scanned=files_scanned,
                 exit_code=exit_code,
+                owner_violations=owner_violations,
             )
 
         if cfg.output_path:
