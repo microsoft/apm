@@ -105,11 +105,12 @@ def _warn_reachability_incomplete(reachability, logger):
     """
     logger.warning(
         f"Skipped transitive dependency cleanup -- {len(reachability.unverifiable)} "
-        "package manifest(s) could not be verified during reachability "
-        "analysis. Keeping all transitive candidates as a precaution."
+        "package manifest(s) could not be verified. Keeping all transitive "
+        "dependencies as a precaution."
     )
     if not logger.verbose:
         logger.info("Run with --verbose to see which manifest(s) failed.")
+    logger.info("Fix or restore the affected manifest(s), then re-run to complete cleanup.")
     for pkg_id, reason in reachability.unverifiable:
         logger.verbose_detail(f"    {pkg_id}: {reason}")
 

@@ -31,13 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm uninstall` no longer deletes a shared transitive dependency that a
-  surviving direct dependency still declares (a diamond-shaped install where
-  two packages both depend on the same local or remote transitive package).
-  A new canonical reachability owner (`deps/reachability.py`) recomputes
-  forward reachability from the real manifest/lock graph instead of trusting
-  the single-valued, first-wins `resolved_by` field, and repairs a rescued
-  dependency's `resolved_by`/`local_path` so it remains correctly
-  garbage-collectable on a later uninstall of its true last parent. (#2269)
+  surviving direct dependency still declares (e.g. two packages that both
+  depend on the same local or remote package). When a dependency's
+  reachability cannot be proven, APM now preserves it rather than guessing,
+  and it remains correctly removable once its true last parent is later
+  uninstalled. (#2269)
 - Release binaries no longer crash with missing Rich Unicode modules when
   `apm deps list` renders non-ASCII package names. Repeated
   `apm runtime setup llm` completes without TLS recursion, and first-party CI
