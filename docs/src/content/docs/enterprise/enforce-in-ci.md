@@ -20,12 +20,12 @@ playbook, see [Governance deep-dive](../governance-guide/) and
 apm audit --ci
 ```
 
-One command. It runs the eight baseline lockfile checks
-(`lockfile-exists`, `ref-consistency`, `deployed-files-present`,
-`no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`,
-`content-integrity`, `includes-consent`), the install-replay drift
-check, and -- if an `apm-policy.yml` is discovered -- the org policy
-checks. Exit code is `0` clean, `1` on any violation.
+One command. It runs the nine baseline lockfile checks
+(`deployment-ledger-owners`, `lockfile-exists`, `ref-consistency`,
+`deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`,
+`config-consistency`, `content-integrity`, `includes-consent`), the
+install-replay drift check, and -- if an `apm-policy.yml` is discovered --
+the org policy checks. Exit code is `0` clean, `1` on any violation.
 
 Useful flags:
 
@@ -123,7 +123,7 @@ The two patterns serve different goals:
 | Full install then audit | Catching developers who skipped `apm install` after editing `apm.yml`; ensuring deployed files are present on a fresh runner |
 | Audit-only (`setup-only: true`) | Detecting modification of deployed files after install; committed files and lockfile are the ground truth |
 
-Both patterns enforce policy and the eight baseline lockfile checks. The
+Both patterns enforce policy and the nine baseline lockfile checks. The
 difference is only in whether content-integrity can see tampered bytes.
 
 ## Recipe: SARIF for GitHub Code Scanning
@@ -194,6 +194,12 @@ The fix path depends on which check failed.
   The author skipped `apm install` after editing `apm.yml`. They run
   `apm install`, commit `apm.lock.yaml` and the integrated files, and
   push.
+- **`deployment-ledger-owners`.** A canonical deployment row references
+  an owner no longer in the lockfile (typically a dependency removed
+  without running `apm prune`). Run `apm prune`, then rerun `apm audit`.
+  Prune repairs the stale ownership record; it never deletes a file on the
+  strength of a ghost row alone -- untrusted bytes it cannot verify are
+  preserved for manual review.
 - **`content-integrity` or a hidden-Unicode finding.** A primitive was
   hand-edited. The author runs `apm audit --strip` to clean it (or
   reverts the edit), then `apm install` to refresh the lockfile.

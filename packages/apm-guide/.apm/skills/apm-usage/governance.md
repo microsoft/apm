@@ -114,6 +114,13 @@ The same registry-source rule applies to `apm install`,
 Two additive, optional, default-off keys under the existing `security:`
 namespace, both backed by enforcement that exists today.
 
+Canonical deployment ownership is an always-on integrity boundary, not a
+policy option. Every `deployments` owner and `active_owner` must resolve to a
+current dependency, the workspace owner `.`, or `local-bundle`. A stale owner
+fails both bare `apm audit` and `apm audit --ci` with
+`deployment-ledger-owners`, even though ordinary drift remains advisory in
+bare audit. Run `apm prune`, then rerun `apm audit`.
+
 ```yaml
 # .github/apm-policy.yml
 security:
@@ -346,11 +353,14 @@ Deny is evaluated first. Empty allow list permits all (except denied).
 These checks run without a policy file:
 
 - `lockfile-exists` -- apm.lock.yaml present
+- `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `ref-consistency` -- dependency refs match lockfile
 - `deployed-files-present` -- all deployed files exist
 - `no-orphaned-packages` -- no packages in lockfile absent from manifest
+- `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
+- `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
 ## Policy checks (with --policy)
 

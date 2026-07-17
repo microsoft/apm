@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence  # noqa: UP035
 
+from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
@@ -168,6 +169,38 @@ def _check_deployed_files_present(
         passed=False,
         message=(f"{len(missing)} deployed file(s) missing -- run 'apm install' to restore"),
         details=missing,
+    )
+
+
+def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
+    """Require every canonical deployment owner to resolve in the lockfile."""
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+
+    violations = DeploymentLedgerCodec.owner_reference_violations(lock)
+    if not violations:
+        return CheckResult(
+            name="deployment-ledger-owners",
+            passed=True,
+            message="All deployment ledger owners are valid",
+        )
+
+    details = []
+    for violation in violations:
+        invalid = ", ".join(violation.invalid_owners)
+        active = (
+            f"; invalid active owner {violation.invalid_active_owner}"
+            if violation.invalid_active_owner is not None
+            else ""
+        )
+        details.append(f"{violation.locator.key}: invalid owner(s) {invalid}{active}")
+    return CheckResult(
+        name="deployment-ledger-owners",
+        passed=False,
+        message=(
+            f"{len(violations)} invalid deployment ownership record(s) - "
+            f"{DEPLOYMENT_OWNER_REMEDIATION}"
+        ),
+        details=details,
     )
 
 
@@ -647,31 +680,35 @@ def run_baseline_checks(
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # Check 2: Ref consistency
+    # Check 2: Canonical deployment owner references
+    if _run(_check_deployment_ledger_owners(lock)):
+        return result
+
+    # Check 3: Ref consistency
     if _run(_check_ref_consistency(manifest, lock)):
         return result
 
-    # Check 3: Deployed files present
+    # Check 4: Deployed files present
     if _run(_check_deployed_files_present(project_root, lock)):
         return result
 
-    # Check 4: No orphaned packages
+    # Check 5: No orphaned packages
     if _run(_check_no_orphans(manifest, lock)):
         return result
 
-    # Check 4.5: Skill subset consistency (manifest vs lockfile)
+    # Check 6: Skill subset consistency (manifest vs lockfile)
     if _run(_check_skill_subset_consistency(manifest, lock)):
         return result
 
-    # Check 5: Config consistency (MCP)
+    # Check 7: Config consistency (MCP)
     if _run(_check_config_consistency(manifest, lock)):
         return result
 
-    # Check 6: Content integrity
+    # Check 8: Content integrity
     if _run(_check_content_integrity(project_root, lock)):
         return result
 
-    # Check 7: Includes consent (advisory; never hard-fails)
+    # Check 9: Includes consent (advisory; never hard-fails)
     _run(_check_includes_consent(manifest, lock))
 
     return result

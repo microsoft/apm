@@ -32,6 +32,7 @@ first failure to skip expensive I/O.
 |---|---|---|---|
 | `manifest-parse` | block | `ci_checks.py` | only when `apm.yml` cannot be parsed |
 | `lockfile-exists` | block | `ci_checks.py` | yes |
+| `deployment-ledger-owners` | block | `ci_checks.py` | yes |
 | `ref-consistency` | block | `ci_checks.py` | yes |
 | `deployed-files-present` | block | `ci_checks.py` | yes |
 | `no-orphaned-packages` | block | `ci_checks.py` | yes |
@@ -63,6 +64,25 @@ the [policy schema](../policy-schema/).
 - **Fails when.** `apm.yml` declares dependencies (production or dev) but no lockfile is on disk.
 - **Effect.** Subsequent checks are skipped (the lockfile is required input).
 - **Remediation.** Run `apm install` to generate `apm.lock.yaml` and commit it.
+
+### `deployment-ledger-owners`
+
+- **What it verifies.** That every canonical `deployments` row's `owners` and
+  `active_owner` resolve to a member of the valid owner universe: a current
+  key in `apm.lock.yaml`'s `dependencies`, the workspace self-owner `.`, or
+  `local-bundle`.
+- **Fails when.** A row references a dependency key that has since been
+  removed from the lockfile (a stale, "ghost" owner), or `active_owner`
+  itself is invalid. This is a hard integrity failure, distinct from
+  ordinary drift -- unlike hand-edits or missing files, it fails in both
+  bare `apm audit` and `apm audit --ci`.
+- **Effect.** Findings render in text, JSON, SARIF, and markdown output
+  alike, naming the locator and its invalid owner(s). `apm audit --strip`
+  refuses to modify content while any reference is invalid.
+- **Remediation.** Run `apm prune`, then rerun `apm audit`. Prune repairs
+  the stale ownership metadata; it does not delete files based on a ghost
+  row alone. See [`apm prune`](../cli/prune/#canonical-deployment-ownership)
+  and [Lockfile spec](../lockfile-spec/#canonical-deployment-rows).
 
 ### `ref-consistency`
 
@@ -122,13 +142,14 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `deployment-ledger-owners`, `ref-consistency`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 
 ## Related
 
 - [`apm audit`](../cli/audit/) -- the command surface and modes.
+- [`apm prune`](../cli/prune/) -- reconciles `deployment-ledger-owners` findings.
 - [`apm policy`](../cli/policy/) -- inspect, validate, and resolve org policy.
 - [Policy schema](../policy-schema/) -- the policy-gated checks layered on top of this baseline.
 - [Enforce in CI](../../enterprise/enforce-in-ci/) -- wiring the gate into branch protection.

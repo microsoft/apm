@@ -574,6 +574,18 @@ if ! grep -q 'with_derived_provider_coordinates' \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC15: deployment owner and cleanup authority"
+deployment_owner_output=$(python3 scripts/check_deployment_owner_boundaries.py \
+    src/apm_cli/commands/prune.py \
+    src/apm_cli/commands/audit.py \
+    src/apm_cli/policy/ci_checks.py 2>&1)
+deployment_owner_status=$?
+if [ "$deployment_owner_status" -ne 0 ]; then
+    echo "[x] Deployment ownership must route through DeploymentLedgerCodec"
+    echo "$deployment_owner_output"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

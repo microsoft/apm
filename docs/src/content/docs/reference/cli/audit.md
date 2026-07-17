@@ -18,6 +18,14 @@ apm audit [PACKAGE] [OPTIONS]
 - **Content scan mode** (default). Scans deployed prompt, instruction, skill, and rules files for hidden Unicode that can embed invisible instructions in agent context, and replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate findings with `--strip` or scan an arbitrary file with `--file`.
 - **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
+Both modes also validate the lockfile's canonical deployment ownership
+records (the `deployments` rows in `apm.lock.yaml`; see
+[Lockfile spec](../../../reference/lockfile-spec/#canonical-deployment-rows)).
+A stale or invalid owner reference is a **hard integrity failure** and
+always exits `1`, in bare `apm audit` and in `--ci` alike -- unlike ordinary
+drift (hand-edits, missing integrations, orphaned files), which stays
+advisory in bare `apm audit`. See [Deployment-owner integrity](#deployment-owner-integrity).
+
 This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
 `PACKAGE`, when supplied, is the lockfile package key (the repo URL) of a single installed dependency to scan. Omit it to scan every installed package plus local `.apm/` content.
@@ -53,6 +61,12 @@ When LLM mode is active APM prints a `[!]` egress banner before the scan noting 
 |---|---|---|
 | `--format`, `-f text\|json\|sarif\|markdown` | `text` | Output format. `sarif` targets GitHub Code Scanning. `markdown` is for GitHub step summaries and is not allowed with `--ci`. |
 | `--output`, `-o PATH` | stdout | Write the report to a file. Format is auto-detected from extension (`.sarif`, `.sarif.json`, `.json`, `.md`) when `--format` is omitted. |
+
+`-f json` in default (non-`--ci`) mode includes a top-level `"passed"`
+boolean (`exit_code == 0`), alongside the existing `summary` and finding
+list. Deployment-owner integrity findings render in every format --
+text, JSON, SARIF, and markdown -- as a `deployment-owner` category entry
+naming the locator, its invalid owner(s), and the remediation.
 
 ### CI gate
 
@@ -161,11 +175,26 @@ For the full workflow, see [Enforce in CI](../../../enterprise/enforce-in-ci/).
 
 ### Drift detection
 
-The default audit replays the install pipeline into a scratch tree and diffs the result against the working tree. It catches hand-edits to deployed files, missing integrations from a skipped `apm install`, and orphaned files. Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it. Use `--no-drift` to opt out (not recommended outside performance-constrained CI loops).
+The default audit replays the install pipeline into a scratch tree and diffs the result against the working tree. It catches hand-edits to deployed files, missing integrations from a skipped `apm install`, and orphaned files. Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it. Use `--no-drift` to opt out (not recommended outside performance-constrained CI loops). In bare `apm audit`, drift findings are advisory: they render but do not change the exit code (see [Exit codes](#exit-codes)).
+
+### Deployment-owner integrity
+
+Before content scanning or drift, both modes validate the lockfile's
+canonical `deployments` rows: every `owners` entry and the `active_owner`
+must resolve to a current lock dependency key, the workspace self-owner
+(`.`), or `local-bundle`. A stale reference -- typically left behind when a
+dependency was removed without running `apm prune` -- is a hard failure,
+not drift: it always exits `1`, in bare `apm audit` and `--ci` alike, and
+is reported under the `deployment-ledger-owners` check ID in `--ci` output.
+The finding names the owning locator and its invalid owner(s) with one
+remediation: `Run 'apm prune', then rerun 'apm audit'.` `--strip` refuses to
+modify content while any owner reference is invalid. Stale owner rows never
+authorize deleting files -- only `apm prune` reconciles them, and only ever
+as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 
 ### CI checks (`--ci`)
 
-`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity (Unicode plus per-file SHA-256 hash drift on every deployed file, including local `.apm/` content via the synthesized self-entry), and an advisory `includes` consent check. Drift detection runs alongside and contributes to the exit code unless `--no-drift` is set. With policy discovery active, declared policy rules are evaluated against the resolved manifest.
+`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: canonical deployment-owner integrity (`deployment-ledger-owners`), lockfile presence, ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity (Unicode plus per-file SHA-256 hash drift on every deployed file, including local `.apm/` content via the synthesized self-entry), and an advisory `includes` consent check. Drift detection runs alongside and contributes to the exit code unless `--no-drift` is set. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
 
 ### Mutual exclusions
 
@@ -181,7 +210,7 @@ The default audit replays the install pipeline into a scratch tree and diffs the
 | Code | Meaning |
 |---|---|
 | `0` | Clean, info-only findings, drift-only (advisory) in bare audit, or successful `--strip`. |
-| `1` | Critical findings detected. |
+| `1` | Critical findings detected, or an invalid canonical deployment-owner reference in `apm.lock.yaml` (always hard-fails, unlike ordinary drift). |
 | `2` | Warning-only findings, or usage error (mutually exclusive flags). |
 | `3` | Configuration or infrastructure error (feature not enabled, scanner not found, malformed SARIF). |
 
@@ -190,10 +219,11 @@ The default audit replays the install pipeline into a scratch tree and diffs the
 | Code | Meaning |
 |---|---|
 | `0` | All checks passed. |
-| `1` | One or more checks failed (including drift, hash drift, or policy violations). |
+| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations). |
 
 ## Related
 
 - [`apm install`](../install/) -- the built-in scan that blocks critical findings before deployment.
+- [`apm prune`](../prune/) -- reconciles the canonical deployment-owner references this check validates.
 - [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) -- consumer-side overview of the two-layer security model.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.

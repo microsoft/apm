@@ -28,7 +28,8 @@ wiring) and rewrites the lockfile.
 
 1. Packages declared in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`)
 2. Packages installed under `apm_modules/`
-3. Packages recorded in `apm.lock.yaml` with their `deployed_files`
+3. Packages recorded in `apm.lock.yaml`, including their `deployed_files` and
+   canonical deployment ownership rows
 
 An installed package is **orphaned** when it is neither declared in either
 dependency list nor retained as a lockfile-resolved transitive dependency.
@@ -37,7 +38,10 @@ file the orphan deployed into your harness directories (using the
 `deployed_files` manifest in the lockfile), removes the entry from
 `apm.lock.yaml`, and cleans up empty parent directories.
 
-If `apm_modules/` does not exist, the command exits cleanly with nothing to do. If `apm.yml` is missing, it exits with an error.
+`apm prune` also parses and reconciles the lockfile's canonical deployment
+ownership metadata on every run, even when `apm_modules/` does not exist or
+no package is orphaned -- a lockfile with a stale owner reference is not
+"nothing to prune." If `apm.yml` is missing, the command exits with an error.
 
 ## Options
 
@@ -77,6 +81,28 @@ For each orphaned package, `apm prune`:
 4. Cleans up empty parent directories under both `apm_modules/` and the harness deploy roots.
 5. Deletes `apm.lock.yaml` if pruning leaves it with zero dependencies.
 
+### Canonical deployment ownership
+
+`apm prune` also reconciles the canonical `deployments` rows in
+`apm.lock.yaml` (see [Lockfile spec](../../lockfile-spec/#canonical-deployment-rows)):
+
+- **Trusted deletion authority.** Only a pruned dependency's own
+  pre-transition `deployed_files` and `deployed_file_hashes` -- captured
+  before that dependency's entry is removed this run -- authorize deleting
+  its bytes. Paths still claimed by a surviving owner after reconciliation
+  are subtracted from that claim first and are never deleted.
+- **Ghost rows are metadata-only repair.** A canonical row referencing an
+  owner that no longer exists in the lockfile is repaired in the ledger, but
+  that repair never authorizes deleting the file the row points at. Existing
+  bytes that no trusted claim covers are preserved; `apm prune` logs a
+  warning naming the path and asking you to inspect and remove it manually.
+- **User-edited, failed, or unmanaged files** follow the same rule: prune
+  removes the stale ownership record, never the untrusted bytes.
+- **`--dry-run`** previews both the packages that would be removed and the
+  ownership records that would be repaired, without mutating anything.
+- Rerunning `apm prune` after a partial or interrupted run converges to the
+  same clean state (idempotent).
+
 After processing all orphaned packages, `apm prune` also reconciles merged
 hook configuration (`.claude/settings.json`, `.cursor/hooks.json`, and
 similar merge targets, plus their `apm-hooks.json` ownership sidecars):
@@ -99,12 +125,15 @@ Notes:
 
 ## Exit codes
 
-| Code | Meaning                                               |
-|------|-------------------------------------------------------|
-| 0    | Prune completed (including "nothing to prune").       |
-| 1    | `apm.yml` missing, parse failure, or unhandled error. |
+| Code | Meaning                                                                       |
+|------|--------------------------------------------------------------------------------|
+| 0    | Prune completed (including "nothing to prune").                              |
+| 1    | `apm.yml` missing, parse failure, lockfile write failure, or unhandled error. |
 
-Per-package removal failures are logged but do not abort the run; remaining orphans still process.
+Per-package removal failures are logged but do not abort the run; remaining
+orphans still process. A lockfile write failure after filesystem cleanup has
+already started exits `1` with a partial-cleanup warning: rerun `apm prune`,
+then run `apm audit` to confirm the resulting state.
 
 ## Related
 

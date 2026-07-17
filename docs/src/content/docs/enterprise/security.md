@@ -183,6 +183,15 @@ apm audit -f markdown -o report.md     # Step summaries
 
 See [Content scanning with `apm audit`](../../reference/cli/audit/) for usage details and exit codes.
 
+Both bare `apm audit` and `apm audit --ci` also validate the lockfile's
+canonical deployment-owner records before anything else. A stale owner
+reference is a hard lockfile-integrity failure -- unlike ordinary drift
+(hand-edits, missing integrations), which stays advisory in bare `apm
+audit`, an invalid owner always exits `1` in both modes and is reported as
+`deployment-ledger-owners` in `--ci` output. These findings never authorize
+deleting the file they point at; the fix is `apm prune`, then rerun `apm
+audit`. See [Baseline CI checks](../../reference/baseline-checks/#deployment-ledger-owners).
+
 :::tip[External scanners (Experimental)]
 `apm audit` can also ingest findings from **third-party SARIF scanners** (Semgrep, CodeQL, NVIDIA SkillSpector, etc.) so a single audit run reports both APM's native findings and external tool results. See [External scanners](../../integrations/external-scanners/) for setup.
 :::

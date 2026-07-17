@@ -215,6 +215,98 @@ def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
     assert record.active_owner in record.owners
 
 
+def test_codec_reports_invalid_owner_references_deterministically() -> None:
+    alpha = LockedDependency(repo_url="alpha")
+    lockfile = LockFile(dependencies={"alpha": alpha})
+    first = _locator(".claude/rules/first.md", target="claude")
+    second = _locator(".claude/rules/second.md", target="claude")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            second.key: _record(second, owners=("missing",), active="missing"),
+            first.key: _record(
+                first,
+                owners=("alpha", "missing"),
+                active="missing",
+            ),
+        }
+    )
+    lockfile._deployments_present = True
+
+    violations = DeploymentLedgerCodec.owner_reference_violations(lockfile)
+
+    assert [violation.locator.value for violation in violations] == [
+        ".claude/rules/first.md",
+        ".claude/rules/second.md",
+    ]
+    assert violations[0].invalid_owners == ("missing",)
+    assert violations[0].invalid_active_owner == "missing"
+    assert violations[1].invalid_owners == ("missing",)
+    assert violations[1].invalid_active_owner == "missing"
+
+
+def test_codec_valid_owner_keys_include_workspace_and_local_bundle() -> None:
+    lockfile = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha"),
+            "beta": LockedDependency(repo_url="beta"),
+        }
+    )
+
+    assert DeploymentLedgerCodec.valid_owner_keys(lockfile) == frozenset(
+        {".", "local-bundle", "alpha", "beta"}
+    )
+    assert DeploymentLedgerCodec.valid_owner_keys(
+        lockfile,
+        excluded_dependency_keys={"beta"},
+    ) == frozenset({".", "local-bundle", "alpha"})
+
+
+def test_codec_reconciles_owners_through_canonical_reconciler(tmp_path: Path) -> None:
+    lockfile = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha"),
+            "beta": LockedDependency(repo_url="beta"),
+        }
+    )
+    shared = _locator(".claude/rules/shared.md", target="claude")
+    beta_only = _locator(".claude/rules/beta.md", target="claude")
+    workspace = _locator(".claude/rules/local.md", target="claude")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            shared.key: _record(
+                shared,
+                owners=("alpha", "beta"),
+                active="beta",
+            ),
+            beta_only.key: _record(
+                beta_only,
+                owners=("beta",),
+                active="beta",
+            ),
+            workspace.key: _record(
+                workspace,
+                owners=(".", "local-bundle"),
+                active="local-bundle",
+            ),
+        }
+    )
+    lockfile._deployments_present = True
+
+    reconciled = DeploymentLedgerCodec.reconcile_owner_references(
+        lockfile,
+        excluded_dependency_keys={"beta"},
+        project_root=tmp_path,
+        diagnostics=DiagnosticCollector(),
+    )
+
+    assert reconciled.changed is True
+    assert beta_only.key not in reconciled.ledger.records
+    assert reconciled.ledger.records[shared.key].owners == ("alpha",)
+    assert reconciled.ledger.records[shared.key].active_owner == "alpha"
+    assert reconciled.ledger.records[workspace.key].owners == (".", "local-bundle")
+    assert lockfile.deployment_ledger.records[shared.key].active_owner == "beta"
+
+
 def test_deployment_record_rejects_active_owner_outside_owners() -> None:
     with pytest.raises(ValueError, match="active_owner must be present in owners"):
         _record(_locator(), owners=("survivor",), active="removed")

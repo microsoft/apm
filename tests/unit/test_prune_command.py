@@ -13,6 +13,7 @@ Tests cover:
 """
 
 import contextlib
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -21,6 +22,16 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import (
+    DeploymentLedger,
+    DeploymentLocator,
+    DeploymentReconcileResult,
+    DeploymentRecord,
+    LocatorKind,
+)
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.integration.cleanup import remove_stale_deployed_files
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
 # ---------------------------------------------------------------------------
@@ -59,6 +70,42 @@ def _write_lockfile(root: Path, yaml_content: str) -> Path:
     if "lockfile_version:" not in yaml_content:
         yaml_content = "lockfile_version: '1'\n" + yaml_content
     lockfile_path.write_text(yaml_content)
+    return lockfile_path
+
+
+def _deployment_record(
+    value: str,
+    *,
+    owners: tuple[str, ...],
+    active_owner: str,
+    content_hash: str | None = None,
+) -> DeploymentRecord:
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="copilot",
+        value=value,
+        runtime=None,
+        scope="project",
+    )
+    return DeploymentRecord(
+        locator=locator,
+        owners=owners,
+        active_owner=active_owner,
+        content_hash=content_hash,
+    )
+
+
+def _write_canonical_lockfile(
+    root: Path,
+    *,
+    dependencies: dict[str, LockedDependency],
+    records: tuple[DeploymentRecord, ...],
+) -> Path:
+    lockfile = LockFile(dependencies=dependencies)
+    ledger = DeploymentLedger(records={record.locator.key: record for record in records})
+    DeploymentLedgerCodec.apply_to_lockfile(ledger, lockfile)
+    lockfile_path = root / "apm.lock.yaml"
+    lockfile.write(lockfile_path)
     return lockfile_path
 
 
@@ -454,6 +501,337 @@ dependencies:
             content = lockfile_path.read_text()
             assert "declared-org/declared-repo" in content
             assert "orphan-org/orphan-repo" not in content
+
+    def test_prune_repairs_ghost_owner_without_deleting_existing_bytes(self):
+        """A ghost row is repairable metadata, never deletion authority."""
+        ghost_path = ".github/prompts/ghost.prompt.md"
+        alpha_path = ".github/prompts/alpha.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            ghost = tmp / ghost_path
+            ghost.parent.mkdir(parents=True)
+            ghost.write_text("# Manual sentinel\n")
+            lockfile_path = _write_canonical_lockfile(
+                tmp,
+                dependencies={},
+                records=(
+                    _deployment_record(
+                        ghost_path,
+                        owners=("removed/beta",),
+                        active_owner="removed/beta",
+                    ),
+                    _deployment_record(
+                        alpha_path,
+                        owners=(".",),
+                        active_owner=".",
+                    ),
+                ),
+            )
+
+            result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert ghost.read_text() == "# Manual sentinel\n"
+            assert "without deleting untrusted bytes" in result.output
+            repaired = LockFile.read(lockfile_path)
+            assert repaired is not None
+            assert DeploymentLedgerCodec.owner_reference_violations(repaired) == ()
+            assert {
+                record.locator.value for record in repaired.deployment_ledger.records.values()
+            } == {alpha_path}
+
+    def test_prune_repairs_missing_ghost_without_deletion_attempt(self):
+        """A missing ghost path is metadata-only repair."""
+        ghost_path = ".github/prompts/missing-ghost.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            lockfile_path = _write_canonical_lockfile(
+                tmp,
+                dependencies={},
+                records=(
+                    _deployment_record(
+                        ghost_path,
+                        owners=("removed/beta",),
+                        active_owner="removed/beta",
+                    ),
+                ),
+            )
+
+            with patch(
+                "apm_cli.commands.prune.remove_stale_deployed_files",
+                wraps=remove_stale_deployed_files,
+            ) as cleanup:
+                result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert cleanup.call_count == 0
+            assert not (tmp / ghost_path).exists()
+            assert not lockfile_path.exists()
+
+    def test_prune_cleans_trusted_path_but_preserves_unrelated_ghost(self):
+        """Current-run claims may delete beta bytes, never ghost-only bytes."""
+        beta_key = "orphan-org/orphan-repo"
+        beta_path = ".github/prompts/beta.prompt.md"
+        ghost_path = ".github/prompts/ghost.prompt.md"
+        beta_content = b"# Managed beta\n"
+        beta_hash = f"sha256:{hashlib.sha256(beta_content).hexdigest()}"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            beta = tmp / beta_path
+            beta.parent.mkdir(parents=True)
+            beta.write_bytes(beta_content)
+            ghost = tmp / ghost_path
+            ghost.write_text("# Manual sentinel\n")
+            _write_canonical_lockfile(
+                tmp,
+                dependencies={
+                    beta_key: LockedDependency(
+                        repo_url=beta_key,
+                        deployed_files=[beta_path],
+                        deployed_file_hashes={beta_path: beta_hash},
+                    )
+                },
+                records=(
+                    _deployment_record(
+                        beta_path,
+                        owners=(beta_key,),
+                        active_owner=beta_key,
+                        content_hash=beta_hash,
+                    ),
+                    _deployment_record(
+                        ghost_path,
+                        owners=("removed/ghost",),
+                        active_owner="removed/ghost",
+                    ),
+                ),
+            )
+
+            with patch(
+                "apm_cli.commands.prune.remove_stale_deployed_files",
+                wraps=remove_stale_deployed_files,
+            ) as cleanup:
+                result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert not beta.exists()
+            assert ghost.read_text() == "# Manual sentinel\n"
+            assert cleanup.call_count == 1
+            assert cleanup.call_args.args[0] == {beta_path}
+            assert ghost_path not in cleanup.call_args.args[0]
+            assert "without deleting untrusted bytes" in result.output
+
+    def test_prune_dry_run_does_not_repair_ghost_owner(self):
+        """Dry-run reports a ghost repair without changing lockfile or bytes."""
+        ghost_path = ".github/prompts/ghost.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            ghost = tmp / ghost_path
+            ghost.parent.mkdir(parents=True)
+            ghost.write_text("# Manual sentinel\n")
+            lockfile_path = _write_canonical_lockfile(
+                tmp,
+                dependencies={},
+                records=(
+                    _deployment_record(
+                        ghost_path,
+                        owners=("removed/beta",),
+                        active_owner="removed/beta",
+                    ),
+                ),
+            )
+            before = lockfile_path.read_bytes()
+
+            result = self.runner.invoke(cli, ["prune", "--dry-run"])
+
+            assert result.exit_code == 0
+            assert "repair 1 deployment ownership record" in result.output
+            assert lockfile_path.read_bytes() == before
+            assert ghost.read_text() == "# Manual sentinel\n"
+
+    def test_prune_hands_shared_row_to_surviving_owner(self):
+        """Removing a ghost co-owner preserves the survivor and content."""
+        shared_path = ".github/prompts/shared.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            shared = tmp / shared_path
+            shared.parent.mkdir(parents=True)
+            shared.write_text("# Shared\n")
+            lockfile_path = _write_canonical_lockfile(
+                tmp,
+                dependencies={"kept/alpha": LockedDependency(repo_url="kept/alpha")},
+                records=(
+                    _deployment_record(
+                        shared_path,
+                        owners=("kept/alpha", "removed/beta"),
+                        active_owner="removed/beta",
+                        content_hash="sha256:shared",
+                    ),
+                ),
+            )
+
+            result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0
+            assert shared.read_text() == "# Shared\n"
+            repaired = LockFile.read(lockfile_path)
+            assert repaired is not None
+            record = next(iter(repaired.deployment_ledger.records.values()))
+            assert record.owners == ("kept/alpha",)
+            assert record.active_owner == "kept/alpha"
+            assert record.content_hash == "sha256:shared"
+
+    def test_prune_preserves_user_edited_file_but_removes_departed_owner(self):
+        """An orphan's edited file becomes unmanaged instead of being deleted."""
+        beta_key = "orphan-org/orphan-repo"
+        deployed_path = ".github/prompts/orphan.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            deployed = tmp / deployed_path
+            deployed.parent.mkdir(parents=True)
+            deployed.write_text("# User edit\n")
+            _write_canonical_lockfile(
+                tmp,
+                dependencies={
+                    beta_key: LockedDependency(
+                        repo_url=beta_key,
+                        deployed_files=[deployed_path],
+                        deployed_file_hashes={deployed_path: f"sha256:{'0' * 64}"},
+                    )
+                },
+                records=(
+                    _deployment_record(
+                        deployed_path,
+                        owners=(beta_key,),
+                        active_owner=beta_key,
+                        content_hash=f"sha256:{'0' * 64}",
+                    ),
+                ),
+            )
+
+            result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert deployed.read_text() == "# User edit\n"
+            assert "edited since APM deployed it" in result.output
+            lockfile_path = tmp / "apm.lock.yaml"
+            if lockfile_path.exists():
+                repaired = LockFile.read(lockfile_path)
+                assert repaired is not None
+                assert beta_key not in repaired.dependencies
+                assert DeploymentLedgerCodec.owner_reference_violations(repaired) == ()
+
+    def test_prune_keeps_owner_when_module_removal_fails(self):
+        """A failed module removal cannot authorize owner reconciliation."""
+        beta_key = "bad-org/bad-repo"
+        deployed_path = ".github/prompts/bad.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            _make_package_dir(tmp, "bad-org", "bad-repo")
+            lockfile_path = _write_canonical_lockfile(
+                tmp,
+                dependencies={
+                    beta_key: LockedDependency(
+                        repo_url=beta_key,
+                        deployed_files=[deployed_path],
+                    )
+                },
+                records=(
+                    _deployment_record(
+                        deployed_path,
+                        owners=(beta_key,),
+                        active_owner=beta_key,
+                    ),
+                ),
+            )
+
+            with patch(
+                "apm_cli.commands.prune.safe_rmtree",
+                side_effect=OSError("permission denied"),
+            ):
+                result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0
+            retained = LockFile.read(lockfile_path)
+            assert retained is not None
+            assert beta_key in retained.dependencies
+            assert DeploymentLedgerCodec.owner_reference_violations(retained) == ()
+
+    def test_prune_codec_delegation_is_load_bearing(self):
+        """Neutralizing codec reconciliation recreates the stale owner defect."""
+        beta_key = "orphan-org/orphan-repo"
+        beta_path = ".github/prompts/beta.prompt.md"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            lockfile_path = _write_canonical_lockfile(
+                tmp,
+                dependencies={beta_key: LockedDependency(repo_url=beta_key)},
+                records=(
+                    _deployment_record(
+                        beta_path,
+                        owners=(beta_key,),
+                        active_owner=beta_key,
+                    ),
+                ),
+            )
+            original = LockFile.read(lockfile_path)
+            assert original is not None
+            no_op = DeploymentReconcileResult(
+                ledger=original.deployment_ledger,
+                removed=(),
+                retained=(),
+                owner_handoffs=(),
+                failed=(),
+                changed=False,
+            )
+
+            with patch.object(
+                DeploymentLedgerCodec,
+                "reconcile_owner_references",
+                return_value=no_op,
+            ):
+                result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            mutated = LockFile.read(lockfile_path)
+            assert mutated is not None
+            violations = DeploymentLedgerCodec.owner_reference_violations(mutated)
+            assert len(violations) == 1
+            assert violations[0].invalid_owners == (beta_key,)
+
+    def test_prune_lockfile_write_failure_exits_nonzero(self):
+        """Lock persistence errors are visible after partial filesystem cleanup."""
+        beta_key = "orphan-org/orphan-repo"
+        alpha_key = "kept/alpha"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            alpha_record = _deployment_record(
+                ".github/prompts/alpha.prompt.md",
+                owners=(alpha_key,),
+                active_owner=alpha_key,
+            )
+            _write_canonical_lockfile(
+                tmp,
+                dependencies={
+                    alpha_key: LockedDependency(repo_url=alpha_key),
+                    beta_key: LockedDependency(repo_url=beta_key),
+                },
+                records=(alpha_record,),
+            )
+
+            with patch.object(
+                LockFile,
+                "write",
+                side_effect=OSError("disk full"),
+            ):
+                result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 1
+            assert "Failed to update apm.lock.yaml" in result.output
+            assert "Rerun 'apm prune'" in result.output
 
     # ------------------------------------------------------------------
     # No lockfile present

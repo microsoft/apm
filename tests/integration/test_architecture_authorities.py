@@ -151,6 +151,17 @@ def test_cleanup_current_claim_protection_has_single_owner() -> None:
     assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
 
 
+def test_deployment_owner_reconciliation_has_single_owner() -> None:
+    """Prune and audit must consume canonical owner and cleanup decisions."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker_path = root / "scripts/check_deployment_owner_boundaries.py"
+
+    assert checker_path.is_file()
+    assert "scripts/check_deployment_owner_boundaries.py" in guard
+    assert "Deployment ownership must route through DeploymentLedgerCodec" in guard
+
+
 def test_local_bundle_replay_provenance_has_single_owner() -> None:
     """Bundle persistence and drift exclusion must consume the deployment ledger."""
     root = Path(__file__).parents[2]

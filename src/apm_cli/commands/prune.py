@@ -1,6 +1,5 @@
 """APM prune command."""
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -8,9 +7,13 @@ import click
 
 from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..core.deployment_ledger import DeploymentLedgerCodec
+from ..core.deployment_state import LocatorKind
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..integration.base_integrator import BaseIntegrator
+from ..integration.cleanup import remove_stale_deployed_files
 from ..models.apm_package import APMPackage
 from ..utils.path_security import safe_rmtree
 from ._helpers import (
@@ -19,16 +22,27 @@ from ._helpers import (
     _scan_installed_packages,
     _standalone_installed_packages,
 )
+from .uninstall.lockfile_state import lockfile_has_persisted_state
 
 
-@click.command(help="Remove APM packages absent from the resolved dependency graph")
-@click.option("--dry-run", is_flag=True, help="Show what would be removed without removing")
+@click.command(
+    help=(
+        "Remove APM packages absent from the resolved dependency graph "
+        "and repair stale deployment owners"
+    )
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Preview package removal and ownership repair without mutating anything",
+)
 @click.pass_context
 def prune(ctx, dry_run):
-    """Remove installed APM packages absent from the resolved dependency graph (like npm prune).
+    """Remove orphaned packages and repair stale deployment ownership.
 
     This command cleans up the apm_modules/ directory by removing packages that are
     neither declared in apm.yml nor retained as transitive nodes in apm.lock.yaml.
+    It also reconciles invalid canonical deployment owners in the lockfile.
 
     Examples:
         apm prune           # Remove orphaned packages
@@ -36,24 +50,19 @@ def prune(ctx, dry_run):
     """
     logger = CommandLogger("prune", dry_run=dry_run)
     try:
-        # Check if apm.yml exists
         if not Path(APM_YML_FILENAME).exists():
             logger.error("No apm.yml found. Run 'apm init' first.")
             sys.exit(1)
 
-        # Check if apm_modules exists
         apm_modules_dir = Path(APM_MODULES_DIR)
-        if not apm_modules_dir.exists():
-            logger.progress("No apm_modules/ directory found. Nothing to prune.")
-            return
-
         logger.start("Analyzing installed packages vs apm.yml...")
 
-        # Build expected vs installed using shared helpers
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
             declared_deps = apm_package.get_all_apm_dependencies()
-            lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
+            project_root = Path.cwd()
+            lockfile_path = get_lockfile_path(project_root)
+            lockfile = LockFile.read(lockfile_path)
             expected_installed = _build_expected_install_paths(
                 declared_deps, lockfile, apm_modules_dir
             )
@@ -61,102 +70,151 @@ def prune(ctx, dry_run):
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
-        installed_packages = _scan_installed_packages(apm_modules_dir)
-        # Mirror _check_orphaned_packages: filter installed paths to
-        # real standalone packages (lockfile-membership + apm.yml
-        # fallback) so ancestor expansion does NOT silently mask a
-        # genuinely orphaned ``owner/repo`` package when a sibling
-        # subdirectory dep shares the same install root.
-        # ``apm prune`` is a destructive command -- it MUST behave
-        # identically to its advisory display path.
-        standalone_installed = _standalone_installed_packages(
-            installed_packages, apm_modules_dir, lockfile=lockfile
+        installed_packages = (
+            _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
         )
-        expected_with_ancestors = _expand_with_ancestors(expected_installed, standalone_installed)
+        standalone_installed = _standalone_installed_packages(
+            installed_packages,
+            apm_modules_dir,
+            lockfile=lockfile,
+        )
+        expected_with_ancestors = _expand_with_ancestors(
+            expected_installed,
+            standalone_installed,
+        )
         orphaned_packages = sorted(
             p for p in installed_packages if p not in expected_with_ancestors
         )
+        owner_violations = (
+            DeploymentLedgerCodec.owner_reference_violations(lockfile)
+            if lockfile is not None
+            else ()
+        )
 
-        if not orphaned_packages:
-            logger.success("No orphaned packages found. apm_modules/ is clean.", symbol="check")
+        if not orphaned_packages and not owner_violations:
+            if not apm_modules_dir.exists():
+                logger.progress("No apm_modules/ directory found. Nothing to prune.")
+            else:
+                logger.success(
+                    "No orphaned packages found. apm_modules/ is clean.",
+                    symbol="check",
+                )
             return
 
-        # Show what will be removed
-        logger.warning(f"Found {len(orphaned_packages)} orphaned package(s):")
-        for pkg_name in orphaned_packages:
-            if dry_run:
-                logger.warning(f"  - {pkg_name} (would be removed)")
-            else:
-                logger.warning(f"  - {pkg_name}")
+        if orphaned_packages:
+            logger.warning(f"Found {len(orphaned_packages)} orphaned package(s):")
+            for pkg_name in orphaned_packages:
+                suffix = " (would be removed)" if dry_run else ""
+                logger.warning(f"  - {pkg_name}{suffix}")
+        if owner_violations:
+            logger.warning(
+                f"Found {len(owner_violations)} invalid deployment ownership "
+                "record(s) in apm.lock.yaml."
+            )
 
         if dry_run:
+            if owner_violations:
+                logger.dry_run_notice(
+                    f"repair {len(owner_violations)} deployment ownership record(s)"
+                )
             logger.success("Dry run complete - no changes made")
             return
 
-        # Remove orphaned packages
         removed_count = 0
-        pruned_keys = []
-        deleted_pkg_paths: list = []
+        pruned_keys: list[str] = []
+        deleted_pkg_paths: list[Path] = []
         for org_repo_name in orphaned_packages:
             path_parts = org_repo_name.split("/")
             pkg_path = apm_modules_dir.joinpath(*path_parts)
             try:
                 safe_rmtree(pkg_path, apm_modules_dir)
-                logger.progress(f"+ Removed {org_repo_name}")
+                logger.progress(f"Removed {org_repo_name}")
                 removed_count += 1
                 pruned_keys.append(org_repo_name)
                 deleted_pkg_paths.append(pkg_path)
             except Exception as e:
-                logger.error(f"x Failed to remove {org_repo_name}: {e}")
-
-        # Batch parent cleanup  -- single bottom-up pass
-        from ..integration.base_integrator import BaseIntegrator
+                logger.error(f"Failed to remove {org_repo_name}: {e}")
 
         BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
 
-        # Clean deployed files for pruned packages and update lockfile
-        if pruned_keys:
-            lockfile_path = get_lockfile_path(Path("."))
-            lockfile = LockFile.read(lockfile_path)
-            project_root = Path(".")
-            if lockfile:
-                deployed_cleaned = 0
-                deleted_targets: list = []
-                for dep_key in pruned_keys:
-                    dep = lockfile.get_dependency(dep_key)
-                    if not dep or not dep.deployed_files:
-                        # No deployed files to clean — just remove lockfile entry
-                        if dep_key in lockfile.dependencies:
-                            del lockfile.dependencies[dep_key]
-                        continue
-                    for rel_path in dep.deployed_files:
-                        if not BaseIntegrator.validate_deploy_path(rel_path, project_root):
-                            continue
-                        target = project_root / rel_path
-                        if target.is_file():
-                            target.unlink()
-                            deployed_cleaned += 1
-                            deleted_targets.append(target)
-                        elif target.is_dir():
-                            shutil.rmtree(target)
-                            deployed_cleaned += 1
-                            deleted_targets.append(target)
-                    # Remove from lockfile
-                    if dep_key in lockfile.dependencies:
-                        del lockfile.dependencies[dep_key]
-                # Batch parent cleanup  -- single bottom-up pass
-                BaseIntegrator.cleanup_empty_parents(deleted_targets, stop_at=project_root)
-                if deployed_cleaned > 0:
-                    logger.progress(f"+ Cleaned {deployed_cleaned} deployed integration file(s)")
-                # Write updated lockfile (or remove if empty)
-                try:
-                    if lockfile.dependencies:
-                        lockfile.write(lockfile_path)
-                    else:
-                        lockfile_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
+        if lockfile is not None:
+            cleanup_claims = {
+                dep_key: (
+                    tuple(lockfile.dependencies[dep_key].deployed_files),
+                    dict(lockfile.dependencies[dep_key].deployed_file_hashes),
+                )
+                for dep_key in pruned_keys
+                if dep_key in lockfile.dependencies
+            }
+            reconciled = DeploymentLedgerCodec.reconcile_owner_references(
+                lockfile,
+                excluded_dependency_keys=pruned_keys,
+                project_root=project_root,
+                diagnostics=logger.diagnostics,
+            )
+            retained_paths = {
+                record.locator.value
+                for record in reconciled.ledger.records.values()
+                if record.locator.kind == LocatorKind.PROJECT_RELATIVE
+            }
+            deleted_targets: list[Path] = []
+            deployed_cleaned = 0
+            trusted_cleanup_paths: set[str] = set()
+            for dep_key, (paths, hashes) in cleanup_claims.items():
+                trusted_paths = set(paths)
+                trusted_cleanup_paths.update(trusted_paths)
+                cleanup = remove_stale_deployed_files(
+                    trusted_paths - retained_paths,
+                    project_root,
+                    dep_key=dep_key,
+                    targets=None,
+                    diagnostics=logger.diagnostics,
+                    recorded_hashes=hashes,
+                    failed_path_retained=False,
+                )
+                deployed_cleaned += len(cleanup.deleted)
+                deleted_targets.extend(cleanup.deleted_targets)
 
+            BaseIntegrator.cleanup_empty_parents(
+                deleted_targets,
+                stop_at=project_root,
+            )
+            if deployed_cleaned:
+                logger.progress(f"Cleaned {deployed_cleaned} deployed integration file(s)")
+
+            for violation in owner_violations:
+                locator = violation.locator
+                if (
+                    locator.kind == LocatorKind.PROJECT_RELATIVE
+                    and locator.value not in trusted_cleanup_paths
+                    and (project_root / locator.value).exists()
+                ):
+                    logger.diagnostics.warn(
+                        f"Preserved {locator.value}: its deployment owner is "
+                        "invalid, so the lockfile record was repaired without "
+                        "deleting untrusted bytes. Inspect and remove the path "
+                        "manually if it is no longer needed."
+                    )
+
+            for dep_key in pruned_keys:
+                lockfile.dependencies.pop(dep_key, None)
+            DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
+            try:
+                if lockfile_has_persisted_state(lockfile):
+                    lockfile.write(lockfile_path)
+                else:
+                    lockfile_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.render_summary()
+                logger.error(f"Failed to update apm.lock.yaml: {e}")
+                logger.error_detail(
+                    "Filesystem cleanup may be partial. Rerun 'apm prune', then run 'apm audit'."
+                )
+                sys.exit(1)
+
+        logger.render_summary()
+
+        if pruned_keys:
             # Reconcile merged-hook ownership (settings.json / hooks.json
             # entries and their apm-hooks.json sidecars) for the packages
             # just pruned. This delegates to the same canonical
@@ -181,16 +239,17 @@ def prune(ctx, dry_run):
                         "Run 'apm install' to rebuild hook configuration."
                     )
                 else:
-                    logger.progress("+ Reconciled merged hook ownership for pruned package(s)")
+                    logger.progress("Reconciled merged hook ownership for pruned package(s)")
             except Exception as e:
                 logger.warning(
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
                     "stale -- run 'apm install' to rebuild hook configuration."
                 )
 
-        # Final summary
         if removed_count > 0:
             logger.success(f"Pruned {removed_count} orphaned package(s)")
+        elif owner_violations:
+            logger.success(f"Repaired {len(owner_violations)} deployment ownership record(s)")
         else:
             logger.warning("No packages were removed")
 
