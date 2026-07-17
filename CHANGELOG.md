@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Manifest auto-bootstrap now rejects empty project names and falls back to
   `my-project` at filesystem roots, fixing first-run failures in containers
   without a configured working directory -- by @nadav-y (#2200).
+- Fixed first-run failures in containers without a configured working
+  directory: manifest auto-bootstrap now falls back to `my-project` at
+  filesystem roots instead of writing an invalid empty name -- by @nadav-y
+  (#2200).
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

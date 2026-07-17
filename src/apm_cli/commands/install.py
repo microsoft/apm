@@ -1438,7 +1438,7 @@ def install(  # noqa: PLR0913
             if project_name != derived_project_name:
                 logger.verbose_detail(
                     f'Using default project name "{project_name}" because '
-                    "the derived directory name is invalid"
+                    f"derived name {derived_project_name!a} is invalid"
                 )
             config = _get_default_config(project_name)
             if manifest_targets := manifest_targets_from_target_option(target):

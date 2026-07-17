@@ -172,7 +172,7 @@ def _perform_init(
             if final_project_name != derived_project_name:
                 logger.verbose_detail(
                     f'Using default project name "{final_project_name}" because '
-                    "the derived directory name is invalid"
+                    f"derived name {derived_project_name!a} is invalid"
                 )
         project_root = Path.cwd()
 

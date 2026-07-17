@@ -341,7 +341,7 @@ class TestInstallCommandAutoBootstrap:
             mock_resolve_project_name.assert_called_once_with("my-awesome-project")
             assert (
                 'Using default project name "resolved-name" because '
-                "the derived directory name is invalid"
+                "derived name 'my-awesome-project' is invalid"
             ) in " ".join(result.output.split())
 
             # Verify centrally resolved project name
