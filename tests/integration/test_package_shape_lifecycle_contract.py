@@ -661,7 +661,9 @@ def test_tampered_local_bundle_fails_before_consumer_state_writes(
         env=fixture.environment,
     )
     assert result.returncode != 0
-    assert "Hash mismatch for skills/shape-skill/SKILL.md" in (result.stdout + result.stderr)
+    failure_output = result.stdout + result.stderr
+    assert "Bundle integrity check failed" in failure_output
+    assert "Hash mismatch for skills/shape-skill/SKILL.md" in failure_output
     after = _snapshot(consumer.root)
     assert after.semantic_bytes == before.semantic_bytes
     assert after.deployment_records == ()
