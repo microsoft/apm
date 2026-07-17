@@ -122,6 +122,48 @@ def test_requested_plugin_skill_with_no_match_fails_closed(
     assert not (consumer / ".claude" / "skills" / "resolving-merge-conflicts").exists()
 
 
+def test_stale_persisted_skill_pin_warns_instead_of_silent_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A persisted skill pin that deploys nothing must remain visible."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    bundle = tmp_path / "bundle"
+    skill = bundle / "skills" / "tdd"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# tdd\n", encoding="utf-8")
+    (bundle / "apm.yml").write_text(
+        "name: skill-bundle\nversion: 1.0.0\ndescription: local skill bundle\n",
+        encoding="utf-8",
+    )
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / ".github").mkdir()
+    (consumer / "apm.yml").write_text(
+        "name: consumer\n"
+        "version: 1.0.0\n"
+        "targets: [copilot]\n"
+        "dependencies:\n"
+        "  apm:\n"
+        "    - path: ../bundle\n"
+        "      skills: [missing]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code == 0, result.output
+    assert "--skill filter matched no deployable skills" in result.output
+    assert "Requested: missing" in result.output
+    assert "Available: tdd" in result.output
+    assert not (consumer / ".github" / "skills" / "missing").exists()
+
+
 def test_pipeline_diagnostics_make_install_exit_one(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

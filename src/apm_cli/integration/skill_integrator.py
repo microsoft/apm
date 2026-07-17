@@ -630,6 +630,36 @@ class SkillIntegrator(BaseIntegrator):
         )
 
     @staticmethod
+    def _warn_no_skill_filter_match(
+        skills_dir: Path,
+        name_filter: set[str],
+        parent_name: str,
+        diagnostics=None,
+        logger=None,
+    ) -> None:
+        """Report a post-validation skill filter miss through the output cascade."""
+        available = sorted(
+            child.name
+            for child in skills_dir.iterdir()
+            if child.is_dir() and (child / "SKILL.md").is_file()
+        )
+        available_display = ", ".join(available) if available else "(none)"
+        requested_display = ", ".join(sorted(name_filter))
+        message = (
+            f"--skill filter matched no deployable skills in '{parent_name}'. "
+            f"Requested: {requested_display}. Available: {available_display}. "
+            "Choose an available skill or update the package's skills pin, then reinstall."
+        )
+        if diagnostics is not None:
+            diagnostics.warn(message, package=parent_name)
+        elif logger:
+            logger.warning(message)
+        else:
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(message)
+
+    @staticmethod
     def _promote_sub_skills(
         sub_skills_dir: Path,
         target_skills_root: Path,
@@ -897,6 +927,7 @@ class SkillIntegrator(BaseIntegrator):
                 managed_files=managed_files if is_primary else None,
                 force=force,
                 project_root=project_root,
+                logger=logger if is_primary else None,
                 name_filter=name_filter,
                 link_rewriter=self,
                 skip_bin=skip_bin,
@@ -906,17 +937,12 @@ class SkillIntegrator(BaseIntegrator):
             all_deployed.extend(deployed)
 
         if name_filter is not None and count == 0:
-            from apm_cli.utils.console import _rich_warning
-
-            available = sorted(
-                d.name for d in sub_skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
-            )
-            available_str = ", ".join(available) if available else "(none)"
-            requested_str = ", ".join(sorted(name_filter))
-            _rich_warning(
-                f"--skill filter matched no skills in this package. "
-                f"Requested: {requested_str}. "
-                f"Available: {available_str}."
+            self._warn_no_skill_filter_match(
+                sub_skills_dir,
+                name_filter,
+                parent_name,
+                diagnostics=diagnostics,
+                logger=logger,
             )
 
         return count, all_deployed
@@ -1259,17 +1285,12 @@ class SkillIntegrator(BaseIntegrator):
             all_deployed.extend(deployed)
 
         if _name_filter is not None and total_promoted == 0:
-            from apm_cli.utils.console import _rich_warning
-
-            available = sorted(
-                d.name for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
-            )
-            available_str = ", ".join(available) if available else "(none)"
-            requested_str = ", ".join(sorted(_name_filter))
-            _rich_warning(
-                f"--skill filter matched no skills in this package. "
-                f"Requested: {requested_str}. "
-                f"Available: {available_str}."
+            self._warn_no_skill_filter_match(
+                skills_dir,
+                _name_filter,
+                parent_name,
+                diagnostics=diagnostics,
+                logger=logger,
             )
 
         return SkillIntegrationResult(

@@ -975,6 +975,7 @@ class TestIntegrateSkillBundleSubsetNoMatch:
 
         target = _make_target(name="copilot", root_dir=".github")
         integrator = SkillIntegrator()
+        diagnostics = MagicMock()
 
         with (
             patch("apm_cli.utils.console._rich_warning") as mock_warn,
@@ -984,14 +985,18 @@ class TestIntegrateSkillBundleSubsetNoMatch:
                 pi,
                 tmp_path,
                 skills_dir,
+                diagnostics=diagnostics,
                 targets=[target],
                 skill_subset=("nonexistent",),
             )
 
-        mock_warn.assert_called_once()
-        warning_msg = mock_warn.call_args[0][0]
+        diagnostics.warn.assert_called_once()
+        warning_msg = diagnostics.warn.call_args.args[0]
         assert "nonexistent" in warning_msg
         assert "tdd" in warning_msg
+        assert "owner/bundle-pkg" in warning_msg
+        assert diagnostics.warn.call_args.kwargs == {"package": "owner/bundle-pkg"}
+        mock_warn.assert_not_called()
 
     def test_no_match_does_not_warn_when_no_filter(self, tmp_path: Path) -> None:
         """No warning when skill_subset is None (all skills are deployed)."""
@@ -1048,6 +1053,7 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
 
         target = _make_target(name="copilot", root_dir=".github")
         integrator = SkillIntegrator()
+        logger = MagicMock()
 
         with (
             patch("apm_cli.utils.console._rich_warning") as mock_warn,
@@ -1056,14 +1062,17 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
             integrator._promote_sub_skills_standalone(
                 pi,
                 tmp_path,
+                logger=logger,
                 targets=[target],
                 skill_subset=("nonexistent",),
             )
 
-        mock_warn.assert_called_once()
-        warning_msg = mock_warn.call_args[0][0]
+        logger.warning.assert_called_once()
+        warning_msg = logger.warning.call_args.args[0]
         assert "nonexistent" in warning_msg
         assert "tdd" in warning_msg
+        assert "owner/instr-pkg" in warning_msg
+        mock_warn.assert_not_called()
 
     def test_no_match_does_not_warn_when_no_filter(self, tmp_path: Path) -> None:
         """No warning when skill_subset is None."""
