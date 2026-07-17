@@ -66,6 +66,10 @@ def _reset_console_state():
     """
     from apm_cli.utils.console import _reset_console
 
+    # ``rich._console`` is Rich's process-global default console (the one
+    # ``rich.get_console()``/``rich.print`` lazily create). Nulling it forces
+    # a fresh real console next call. The attribute has lived at this name
+    # since Rich 10.0; the project pins ``rich>=13.0.0`` (verified on 15.x).
     _reset_console()
     rich._console = None
     yield
