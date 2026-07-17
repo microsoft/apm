@@ -551,6 +551,7 @@ def test_url_rewrite_subprocess_env_rejects_preexisting_process_git_config_case_
         factory_with_mixed_slot.url_rewrite_subprocess_env(repository_with_mixed_slot, remote_base)
     assert factory_with_mixed_slot._env == snapshot_before_slot
 
+
 def test_install_url_rewrite_rejects_unsafe_inputs_before_config_mutation(
     tmp_path: Path,
 ) -> None:

@@ -268,6 +268,7 @@ class LocalGitRepositoryFactory:
             raise ValueError(
                 "Fixture env already declares indexed Git config overrides: " + ", ".join(stray)
             )
+
     def _run(
         self,
         command: tuple[str, ...],
