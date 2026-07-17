@@ -154,7 +154,11 @@ Merged hook files contain only each target's native upstream fields. APM writes
 ownership metadata to a sibling `apm-hooks.json` sidecar for Claude, Cursor,
 Gemini, Codex, Windsurf, and Antigravity. The sidecar is created and cleaned up
 automatically alongside the native config; it is an APM implementation detail
-and should not be edited by hand.
+and should not be edited by hand. When a target is dropped from `targets:` in
+`apm.yml`, the next `apm install`, `apm compile`, or `apm update` also removes
+that target's own hook entries and sidecar -- see
+[`apm install`'s target-contraction note](../../../reference/cli/install/#notes)
+for the exact preserve/remove contract.
 
 Verified against `src/apm_cli/integration/targets.py` and
 `src/apm_cli/integration/hook_integrator.py`.
@@ -225,10 +229,10 @@ agent a procedure" fits a skill -- and reaches every harness.
   paths break on consumers' machines.
 - **Hook script path resolution.** `apm install -g` (user-scope)
   rewrites `${PLUGIN_ROOT}` and relative `./` references to absolute
-  paths so Claude Code can execute scripts regardless of the working
-  directory. Project-scope `apm install` (no `-g`) keeps `command`
-  paths repo-relative so checked-in configs stay portable across
-  clones, contributors, and CI. Either way, if a referenced script
+  paths so Claude Code and Copilot CLI can execute scripts regardless
+  of the working directory. Project-scope `apm install` (no `-g`)
+  keeps `command` paths repo-relative so checked-in configs stay portable
+  across clones, contributors, and CI. Either way, if a referenced script
   is missing at install time the installer emits a warning -- in
   user-scope the unexpanded variable is rewritten to the absolute
   source path so the hook fails loudly at runtime; in project-scope

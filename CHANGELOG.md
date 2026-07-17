@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Copilot hooks installed with `apm install -g` now resolve from any working
+  directory by writing absolute user-scope script commands, while project-scope
+  hooks remain repo-relative for portability -- reported by @sproott, fixed by
+  @danielmeppiel (closes #2232; #2236).
 - `apm uninstall` no longer deletes a shared transitive dependency that a
   surviving direct dependency still declares (e.g. two packages that both
   depend on the same local or remote package). When a dependency's
@@ -40,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apm deps list` renders non-ASCII package names. Repeated
   `apm runtime setup llm` completes without TLS recursion, and first-party CI
   and release environments resolve exactly from `uv.lock`. (#2264)
+- Legacy manifests that declared `targets: [all]` are no longer hard-rejected;
+  APM treats the field as omitted with a deprecation warning, restoring
+  installability for packages published before the canonical target catalog
+  migration. (closes #2271) -- by @kotalab (#2272)
 - `apm uninstall` and `apm prune` no longer wipe still-installed dependencies'
   merged hook entries out of a harness (e.g. `.cursor/hooks.json`) that was
   dropped from a project's `targets:` list -- the hook wipe is now scoped to
@@ -57,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.claude/settings.json`, `.cursor/hooks.json`, and similar merge targets
   (plus their `apm-hooks.json` ownership sidecars), while sibling packages'
   and manually authored entries are preserved. (closes #2245)
+- Narrowing a project's `targets:` (e.g. `[claude, codex]` -> `[claude]`) no
+  longer leaves the dropped target's merge-hook config and `apm-hooks.json`
+  ownership sidecar behind: the next `apm install`, `apm compile`, or
+  `apm update` now removes the dropped target's own hook entries, while
+  preserving hand-authored entries and any target still declared anywhere.
+  `apm prune`/`apm uninstall` behavior is unchanged. (closes #2253)
 - Four classes of Windows-only CI failures (CRLF baseline drift in JSON
   reports, backslash-path authority-check diagnostics, bare-`git`-argv
   subprocess resolution, and a WebSocket shutdown race) no longer slip

@@ -1124,6 +1124,11 @@ class HookIntegrator(BaseIntegrator):
             return False
         return HookIntegrator._hook_entry_content_key(entry) in fresh_content_keys
 
+    @staticmethod
+    def _deploy_root_for_hook_rewrite(project_root: Path, user_scope: bool) -> Path | None:
+        # User scope needs cwd-independent paths; project scope stays portable.
+        return project_root if user_scope else None
+
     def integrate_package_hooks(
         self,
         package_info,
@@ -1132,6 +1137,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks from a package into hooks dir (Copilot target).
 
@@ -1144,6 +1150,8 @@ class HookIntegrator(BaseIntegrator):
             force: If True, overwrite user-authored files on collision
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
+            user_scope: If True, rewrite hook script commands to absolute paths
+                so global hooks resolve from any working directory
 
         Returns:
             HookIntegrationResult: Results of the integration operation
@@ -1175,6 +1183,7 @@ class HookIntegrator(BaseIntegrator):
         root_dir = target.root_dir if target else ".github"
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
+        deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
 
         hooks_integrated = 0
         scripts_copied = 0
@@ -1188,7 +1197,7 @@ class HookIntegrator(BaseIntegrator):
             if data is None:
                 continue
 
-            # Rewrite script paths for VSCode target
+            # Rewrite script paths for Copilot target
             rewritten, scripts = self._rewrite_hooks_data(
                 data,
                 package_info.install_path,
@@ -1196,6 +1205,7 @@ class HookIntegrator(BaseIntegrator):
                 "vscode",
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
+                deploy_root=deploy_root_for_rewrite,
             )
 
             # Generate target filename (clean, no -apm suffix)
@@ -1355,18 +1365,7 @@ class HookIntegrator(BaseIntegrator):
         if config.require_dir and not target_dir.exists():
             return _empty
 
-        # Absolutize hook commands only for user-scope deploys.  Claude
-        # Code (and the Codex/Cursor/Gemini equivalents) reads
-        # ``~/.claude/settings.json`` without a fixed cwd and does not
-        # expand ``${CLAUDE_PLUGIN_ROOT}`` in that file (see #1310 / #1354),
-        # so user-scope deploys must write absolute paths.  Project-scope
-        # ``<repo>/.claude/settings.json`` is typically checked in and runs
-        # with cwd at the repo root, where repo-relative paths resolve
-        # correctly -- baking absolute machine paths into checked-in config
-        # breaks portability across clones, contributors, and CI (#1394).
-        # ``user_scope`` is threaded from the caller's ``InstallScope`` so
-        # the gate is explicit rather than inferred from deploy-root shape.
-        _deploy_root_for_rewrite = project_root if user_scope else None
+        _deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
 
         hook_files = self.find_hook_files(package_info.install_path)
         package_name = self._get_package_name(package_info, project_root)
@@ -1833,6 +1832,7 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+                user_scope=user_scope,
             )
 
         if target.name == "kiro":
@@ -1961,41 +1961,27 @@ class HookIntegrator(BaseIntegrator):
     ) -> dict:
         """Reconcile merged-hook ownership after packages leave apm.yml.
 
-        ``_clean_apm_entries_from_json`` (invoked by ``sync_integration``)
-        strips *every* ``_apm_source``-tagged entry from a merge target's
-        JSON file and deletes its ownership sidecar unconditionally -- it
-        has no notion of "this package only". A caller that wants to drop
-        one package's hooks therefore cannot call ``sync_integration``
-        alone without also erasing entries owned by packages that remain
-        declared: it must wipe, then rebuild from what is still installed.
-
-        This mirrors the "clear + rebuild" pattern
-        ``apm uninstall`` already uses (see
+        ``_clean_apm_entries_from_json`` (used by ``sync_integration``)
+        strips every ``_apm_source``-tagged entry unconditionally, so a
+        caller wanting to drop just one package's hooks must wipe, then
+        rebuild from what remains installed -- mirroring the "clear +
+        rebuild" pattern ``apm uninstall`` uses (see
         ``_sync_integrations_after_uninstall`` in
-        ``commands/uninstall/engine.py``), scoped to hooks only, so
-        callers such as ``apm prune`` orchestrate the existing
-        ownership-aware cleanup instead of reimplementing hook filtering.
+        ``commands/uninstall/engine.py``), scoped to hooks only.
 
-        Uses ``get_all_apm_dependencies()`` (prod + dev) rather than
-        uninstall's prod-only dependency set, matching ``apm prune``'s
-        own orphan-detection scope (prune already treats dev deps as
-        first-class for removal purposes).
+        Uses ``get_all_apm_dependencies()`` (prod + dev), matching ``apm
+        prune``'s own orphan-detection scope. Best-effort by design: a
+        re-integration failure for one dependency is logged and skipped.
 
-        Best-effort by design: a re-integration failure for one
-        dependency is logged and skipped rather than aborting the
-        reconcile, consistent with prune's existing per-package
-        error-tolerant semantics.
+        Target scope (#2250): the wipe below is scoped to the SAME resolved
+        ``targets`` the rebuild loop uses, so a target dropped from
+        ``targets:`` is never wiped for still-declared packages while the
+        rebuild silently skips repopulating it -- see
+        ``reconcile_dropped_targets`` for the dedicated fix to that gap.
 
-        Target scope (#2250): the merged-hook JSON wipe below is scoped to
-        the SAME resolved ``targets`` the rebuild loop uses, so a harness
-        dropped from ``targets:`` (but still holding stale merged-hook
-        entries) is never wiped for still-declared, still-installed
-        packages while the rebuild silently skips repopulating it.
-
-        Known boundary (shared with uninstall, #2250): rebuilds only
-        direct dependencies from ``get_all_apm_dependencies()`` -- a
-        transitive dependency's merged hooks are wiped above but never
-        re-integrated here.
+        Known boundary (shared with uninstall, #2250): only direct
+        dependencies are rebuilt here; a transitive dependency's merged
+        hooks are wiped above but never re-integrated.
         """
         from apm_cli.constants import APM_MODULES_DIR
         from apm_cli.models.apm_package import build_installed_package_info
@@ -2039,6 +2025,18 @@ class HookIntegrator(BaseIntegrator):
                 _log.warning("Best-effort hook re-integration skipped for %s: %s", pkg_id, e)
 
         return stats
+
+    def reconcile_dropped_targets(
+        self,
+        project_root: Path,
+        dropped_target_names: list[str] | set[str],
+        *,
+        user_scope: bool = False,
+    ) -> dict[str, int]:
+        """Reconcile dropped-target merge-hook state; see _hook_dropped_targets (#2253)."""
+        from ._hook_dropped_targets import reconcile_dropped_targets as _impl
+
+        return _impl(project_root, dropped_target_names, user_scope=user_scope)
 
     @staticmethod
     def _clean_apm_entries_from_json(

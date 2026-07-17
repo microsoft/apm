@@ -13,6 +13,60 @@ from types import ModuleType
 import pytest
 
 
+def test_hook_rewrite_scope_has_single_owner() -> None:
+    """Native hook paths must consume HookIntegrator's scope decision."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
+    kiro = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("def _deploy_root_for_hook_rewrite(") == 1
+    assert owner.count("self._deploy_root_for_hook_rewrite(") == 2
+    assert "integrator._deploy_root_for_hook_rewrite(project_root, user_scope)" in kiro
+    assert "Hook rewrite scope must route through HookIntegrator" in guard
+
+
+def test_hook_rewrite_scope_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The boundary lint must reject scope decisions outside HookIntegrator."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    kiro_path = sandbox / "src/apm_cli/integration/kiro_hook_integrator.py"
+    kiro_source = kiro_path.read_text(encoding="utf-8")
+    kiro_path.write_text(
+        kiro_source.replace(
+            "integrator._deploy_root_for_hook_rewrite(project_root, user_scope)",
+            "project_root if user_scope else None",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Hook rewrite scope must route through HookIntegrator" in result.stdout
+
+
 def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
     """Approval fallback outcomes must come from policy outcome routing."""
     from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
@@ -887,6 +941,130 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
         assert retired_derivation not in downloader
 
 
+def _load_hook_config_write_owner_checker() -> ModuleType:
+    """Import scripts/check_hook_config_write_owner.py as a standalone module.
+
+    The semantic AST checker is the single detection owner for the
+    "composed path bypasses HookIntegrator" case (see
+    tests/unit/scripts/test_check_hook_config_write_owner.py for its own
+    unit coverage); this integration test reuses it rather than
+    re-implementing any part of its algorithm.
+    """
+    root = Path(__file__).parents[2]
+    script_path = root / "scripts" / "check_hook_config_write_owner.py"
+    spec = importlib.util.spec_from_file_location("check_hook_config_write_owner", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_hook_config_write_guard_rejects_composed_path_outside_hook_integrator(
+    tmp_path: Path,
+) -> None:
+    """AC15 must reject a competing owner writing merge-hook config via an
+    assigned-variable composed path, even though it never references either
+    private HookIntegrator symbol (``_MERGE_HOOK_TARGETS``/
+    ``_APM_HOOKS_SIDECAR``) -- proving the semantic AST checker closes the
+    bypass a lexical/private-symbol-only guard would miss."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    manifest_reconcile_path = sandbox / "src/apm_cli/install/manifest_reconcile.py"
+    manifest_reconcile_source = manifest_reconcile_path.read_text(encoding="utf-8")
+    bypass = (
+        "\n\ndef _rogue_hook_cleanup(project_root):\n"
+        '    hook_path = project_root / ".codex" / "hooks.json"\n'
+        '    hook_path.write_text("{}")\n'
+    )
+    manifest_reconcile_path.write_text(manifest_reconcile_source + bypass, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "must stay owned by HookIntegrator" in result.stdout
+
+
+def test_hook_ownership_guard_rejects_prune_calling_contraction_api(
+    tmp_path: Path,
+) -> None:
+    """AC15 must reject `apm prune`/`apm uninstall` calling the
+    target-contraction hook-cleanup API directly -- that stays exclusively
+    the install/compile/update-lifecycle owner's job (#2250/#2252 scope)."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    prune_path = sandbox / "src/apm_cli/commands/prune.py"
+    prune_source = prune_path.read_text(encoding="utf-8")
+    bypass = (
+        "\n\ndef _rogue_prune_hook_cleanup(project_root):\n"
+        "    from apm_cli.install.manifest_reconcile import "
+        "reconcile_dropped_merge_hook_targets\n"
+        "    reconcile_dropped_merge_hook_targets(project_root, "
+        "active_targets=[], declared_targets=None)\n"
+    )
+    prune_path.write_text(prune_source + bypass, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "#2250 scope" in result.stdout
+
+
+def test_hook_config_write_ast_checker_passes_on_real_consumers() -> None:
+    """The real, fixed src/apm_cli tree must be clean under the AST checker
+    today -- a cheap, non-sandboxed positive control (mirrors
+    test_skill_subset_ast_checker_passes_on_real_consumers) proving the
+    checker does not false-positive on the actual codebase, including the
+    new HookIntegrator.reconcile_dropped_targets method itself, without
+    paying for a full repo copy on every run."""
+    root = Path(__file__).parents[2]
+    checker = _load_hook_config_write_owner_checker()
+
+    violations = checker.find_violations(root)
+
+    assert violations == []
+
+
 def test_ac15_uninstall_reachability_has_single_owner() -> None:
     """AC15 keeps post-uninstall dependency reachability behind one owner."""
     root = Path(__file__).parents[2]
@@ -900,7 +1078,7 @@ def test_ac15_uninstall_reachability_has_single_owner() -> None:
     assert "def compute_forward_reachable_keys(" in reachability
     assert "from ...deps.reachability import compute_forward_reachable_keys" in engine
     assert "compute_forward_reachable_keys" in engine
-    assert "AC15: post-uninstall reachability owner authority" in guard
+    assert "AC16: post-uninstall reachability owner authority" in guard
     assert "compute_forward_reachable_keys" in guard
     assert "get_apm_dependencies" in guard
     assert "resolve_local_dep_dir" in guard

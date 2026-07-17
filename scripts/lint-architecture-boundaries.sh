@@ -74,6 +74,25 @@ if [ -z "$validation_line" ] || [ -z "$continue_line" ] || [ -z "$write_line" ] 
     echo "[x] Hook payload validation must continue before the native payload write"
     violations=$((violations + 1))
 fi
+hook_scope_owner_count=$(grep -Ec \
+    '^    def _deploy_root_for_hook_rewrite\(' "$hook_file" || true)
+hook_scope_duplicate_hits=$(
+    grep -REn --include='*hook_integrator.py' \
+        'deploy_root_for_rewrite[[:space:]]*=.*user_scope' \
+        src/apm_cli/integration \
+        | grep -v "^${hook_file}:" \
+        | grep -v 'integrator\._deploy_root_for_hook_rewrite' \
+        || true
+)
+if [ "$hook_scope_owner_count" -ne 1 ] \
+    || ! grep -q \
+        'deploy_root_for_rewrite = integrator\._deploy_root_for_hook_rewrite' \
+        src/apm_cli/integration/kiro_hook_integrator.py \
+    || [ -n "$hook_scope_duplicate_hits" ]; then
+    echo "[x] Hook rewrite scope must route through HookIntegrator"
+    [ -n "$hook_scope_duplicate_hits" ] && echo "$hook_scope_duplicate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Lockfile supported-version authority belongs in deps/lockfile.py" \
     'SUPPORTED_LOCKFILE_VERSIONS|lockfile_version[[:space:]]+(==|!=|in)' \
@@ -581,7 +600,21 @@ if ! grep -q 'with_derived_provider_coordinates' \
     violations=$((violations + 1))
 fi
 
-echo "[*] AC15: post-uninstall reachability owner authority"
+echo "[*] AC15: hook target-contraction cleanup authority"
+check_pattern \
+    "Prune/uninstall must stay outside target-contraction hook cleanup (#2250 scope)" \
+    'reconcile_dropped_merge_hook_targets\(|reconcile_dropped_targets\(' \
+    src/apm_cli/commands/prune.py \
+    src/apm_cli/commands/uninstall/*.py
+hook_config_write_output=$(python3 scripts/check_hook_config_write_owner.py --root "$ROOT" 2>&1)
+hook_config_write_status=$?
+if [ "$hook_config_write_status" -ne 0 ]; then
+    echo "[x] Merge-hook config/sidecar writes must stay owned by HookIntegrator"
+    echo "$hook_config_write_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC16: post-uninstall reachability owner authority"
 if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
     src/apm_cli/commands/uninstall/engine.py; then
     echo "[x] Uninstall engine must call deps/reachability.py's compute_forward_reachable_keys"

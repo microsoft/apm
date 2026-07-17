@@ -267,6 +267,56 @@ def declared_target_profiles(
     return profiles or None
 
 
+def reconcile_dropped_merge_hook_targets(
+    project_root: Path,
+    active_targets: list[TargetProfile],
+    declared_targets: list[TargetProfile] | None,
+    *,
+    user_scope: bool = False,
+) -> dict[str, int]:
+    """Clean merge-hook JSON/sidecar state for targets dropped from ``targets:``.
+
+    Complements :func:`reconcile_deployed_state` for the one class of
+    APM-owned state that function structurally cannot see: merge-hook
+    config files (``.codex/hooks.json``, ``.claude/settings.json``, etc.)
+    are deliberately excluded from ``deployed_files`` tracking -- ownership
+    lives in an ``_apm_source`` marker / ``apm-hooks.json`` ownership
+    sidecar instead of a tracked path list (see
+    ``apm_cli.integration.hook_integrator.HookIntegrator``). Narrowing a
+    project's declared ``targets:`` (e.g. ``[claude, codex]`` ->
+    ``[claude]``) therefore never reached this state before: prune/uninstall
+    intentionally scope their merge-hook wipe to the SAME resolved target
+    set as rebuild (#2250/#2252) and never clean a dropped target's residue
+    by design.
+
+    Mirrors :func:`reconcile_deployed_state`'s own
+    ``allowed = active_targets union declared_targets`` semantics exactly,
+    including the ``declared_targets is None`` legacy preserve-all no-op
+    (issue #2059 symmetry: with no declared universe there is no dropped-
+    target detection to perform). A known target name outside that allowed
+    set is a candidate drop; this function only computes WHICH names
+    dropped -- exactly as :func:`reconcile_deployed_state` already does for
+    file-based state -- and delegates ALL merge-hook JSON/sidecar mutation
+    to ``HookIntegrator.reconcile_dropped_targets``, the sole owner of that
+    state. Names that are not merge-hook targets at all (e.g. ``copilot``,
+    already correctly cleaned via the generic ``deployed_files``
+    reconciliation) are silently skipped by that owner.
+    """
+    if declared_targets is None:
+        return {"files_removed": 0, "errors": 0}
+
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    allowed_names = {t.name for t in active_targets} | {t.name for t in declared_targets}
+    dropped_names = [name for name in KNOWN_TARGETS if name not in allowed_names]
+    if not dropped_names:
+        return {"files_removed": 0, "errors": 0}
+    return HookIntegrator().reconcile_dropped_targets(
+        project_root, dropped_names, user_scope=user_scope
+    )
+
+
 def reconcile_deployed_block(
     *,
     project_root: Path,
@@ -322,6 +372,7 @@ def reconcile_deployed_state(
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    user_scope: bool = False,
 ) -> bool:
     """Prune undeclared-target ownership from every lockfile deployment block."""
     from apm_cli.deps.lockfile import _SELF_KEY
@@ -392,6 +443,13 @@ def reconcile_deployed_state(
 
         DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
         changed = True
+
+    reconcile_dropped_merge_hook_targets(
+        project_root,
+        active_targets=active_targets,
+        declared_targets=declared_targets,
+        user_scope=user_scope,
+    )
     return changed
 
 
@@ -427,6 +485,7 @@ def reconcile_project_deployed_state(
         active_targets=targets,
         declared_targets=declared,
         diagnostics=DiagnosticCollector(verbose=verbose),
+        user_scope=user_scope,
     )
     if changed:
         lockfile.save(lock_path)
