@@ -1,6 +1,6 @@
 """Lockfile (apm.lock.yaml) conformance tests -- sec.5.
 
-Covers req-lk-001..020. The integrity sub-cluster (req-lk-012..017)
+Covers req-lk-001..021. The integrity sub-cluster (req-lk-012..017)
 now drives REAL fail-closed oracles against the committed binary
 fixture pair under `integrity/`.
 """
@@ -384,4 +384,90 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
         "MUST remove a prior path attributable",
         "MUST preserve that path and its corresponding hash entry",
         "MUST preserve any path freshly\ndeployed by an active dependency",
+    )
+
+
+@pytest.mark.req("req-lk-021")
+def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
+    """req-lk-021 extends req-lk-020's preserve/remove decision to
+    merge-based hook configuration: a dropped target's consumer-owned
+    entries are removed (and an emptied ownership record with them),
+    a retained target's entries survive untouched, and an entry that
+    does not carry the consumer's own ownership attribution survives
+    even in the dropped target's own file."""
+    import json
+
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "owned"}],
+                        },
+                        {
+                            "matcher": "Write",
+                            "hooks": [{"type": "command", "command": "user-authored"}],
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (codex_dir / "apm-hooks.json").write_text(
+        json.dumps(
+            {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "owned"}],
+                        "_apm_source": "req-lk-021-fixture",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}}),
+        encoding="utf-8",
+    )
+    (claude_dir / "apm-hooks.json").write_text(
+        json.dumps({"PreToolUse": [{"matcher": "Bash", "_apm_source": "req-lk-021-fixture"}]}),
+        encoding="utf-8",
+    )
+    claude_snapshot = (claude_dir / "settings.json").read_text(encoding="utf-8")
+
+    stats = HookIntegrator().reconcile_dropped_targets(tmp_path, ["codex"])
+
+    assert stats["errors"] == 0
+    codex_native = json.loads((codex_dir / "hooks.json").read_text(encoding="utf-8"))
+    codex_entries = codex_native.get("hooks", {}).get("PreToolUse", [])
+    assert not any(e.get("hooks", [{}])[0].get("command") == "owned" for e in codex_entries), (
+        "consumer-owned entry for the dropped target MUST be removed"
+    )
+    assert any(e.get("hooks", [{}])[0].get("command") == "user-authored" for e in codex_entries), (
+        "entry without consumer ownership attribution MUST be preserved"
+    )
+    assert not (codex_dir / "apm-hooks.json").exists(), (
+        "ownership record left empty by the removal MUST also be removed"
+    )
+    assert claude_snapshot == (claude_dir / "settings.json").read_text(encoding="utf-8"), (
+        "a target still attributable to the declared set MUST be preserved untouched"
+    )
+    assert (claude_dir / "apm-hooks.json").exists(), "retained target's ownership record survives"
+
+    assert_spec_contains(
+        "MUST apply the same preserve-or-remove decision",
+        "MUST remove only the consumer-owned entries",
+        "It MUST preserve\nevery entry that does not carry the consumer's own ownership",
     )
