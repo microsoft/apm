@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Project-scope installs for Gemini, Codex, OpenCode, and experimental Hermes now prompt users to run `apm compile` when dependency instructions need root context compilation, instead of silently leaving those instructions unapplied -- by @sergio-sisternes-epam (closes #2057; supersedes #2115) (#2293).
+- Removing a dependency and running `apm prune` now fully cleans its deployment
+  ownership records while preserving shared deployments and user-edited files.
+  `apm audit` now catches leftover ownership instead of reporting a clean bill
+  of health; run `apm prune`, then rerun `apm audit` to repair it.
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

@@ -210,4 +210,69 @@ def test_unmanaged_files_surfacing_completeness(tmp_path):
     )
 
 
+@pytest.mark.req("req-pl-016")
+def test_deployment_ledger_owner_is_hard_integrity_failure():
+    """req-pl-016: a canonical deployment-ledger owner absent from the
+    lockfile is a hard integrity failure, independent of
+    ``security.audit.fail_on_drift``.
+
+    Binds the spec MUST to the shared authority --
+    ``DeploymentLedgerCodec.owner_reference_violations`` and the
+    ``deployment-ledger-owners`` baseline check -- so a regression that
+    lets a stale owner pass silently breaks at PR time. The non-zero
+    audit-exit path (default and CI) is exercised by
+    ``tests/unit/test_audit_deployment_owners.py``; here we assert the
+    detection surface and the spec language that mandates the unconditional
+    hard failure are intact.
+    """
+    from apm_cli.core.deployment_ledger import (
+        DEPLOYMENT_OWNER_REMEDIATION,
+        DeploymentLedgerCodec,
+    )
+    from apm_cli.core.deployment_state import (
+        DeploymentLedger,
+        DeploymentLocator,
+        DeploymentRecord,
+        LocatorKind,
+    )
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.policy.ci_checks import _check_deployment_ledger_owners
+
+    ghost_owner = "removed/beta"
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="claude",
+        value=".claude/rules/beta.md",
+        runtime=None,
+        scope="project",
+    )
+    record = DeploymentRecord(
+        locator=locator,
+        owners=(ghost_owner,),
+        active_owner=ghost_owner,
+        content_hash=f"sha256:{'a' * 64}",
+    )
+    # Empty dependency set -> the ghost owner resolves to no lockfile entry.
+    lockfile = LockFile(dependencies={})
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(records={record.locator.key: record}),
+        lockfile,
+    )
+
+    violations = DeploymentLedgerCodec.owner_reference_violations(lockfile)
+    assert violations, "a ghost owner absent from the lockfile MUST be detected"
+    assert ghost_owner in violations[0].invalid_owners
+
+    check = _check_deployment_ledger_owners(lockfile)
+    assert check.passed is False
+    assert DEPLOYMENT_OWNER_REMEDIATION in check.message
+
+    # Spec-text drift guard: the normative phrasing MUST stay in the body.
+    assert_spec_contains(
+        "hard integrity failure",
+        "independent of the `security.audit.fail_on_drift` control",
+        "**both** its default and CI modes",
+    )
+
+
 _ = waive  # keep import for any future structural waiver

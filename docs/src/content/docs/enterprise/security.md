@@ -198,6 +198,11 @@ apm audit -f markdown -o report.md     # Step summaries
 
 See [Content scanning with `apm audit`](../../reference/cli/audit/) for usage details and exit codes.
 
+Both bare `apm audit` and `apm audit --ci` fail closed on stale canonical
+deployment owners; see
+[Baseline CI checks](../../reference/baseline-checks/#deployment-ledger-owners)
+for the boundary and remediation.
+
 :::tip[External scanners (Experimental)]
 `apm audit` can also ingest findings from **third-party SARIF scanners** (Semgrep, CodeQL, NVIDIA SkillSpector, etc.) so a single audit run reports both APM's native findings and external tool results. See [External scanners](../../integrations/external-scanners/) for setup.
 :::
