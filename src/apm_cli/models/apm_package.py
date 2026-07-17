@@ -565,8 +565,9 @@ class APMPackage:
             )
             canonical_targets = ()
         elif "targets" in data:
-            targets_value = parse_targets_field(data)
-            canonical_targets = tuple(targets_value)
+            parsed_targets = parse_targets_field(data)
+            targets_value = parsed_targets or None
+            canonical_targets = tuple(parsed_targets)
         else:
             target_value = parse_target_field(
                 data.get("target"),

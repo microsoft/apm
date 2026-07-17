@@ -327,6 +327,7 @@ def test_target_singular_with_all_token_folds_to_auto_detect():
     from apm_cli.core.apm_yml import _reset_legacy_all_warning
 
     _reset_legacy_all_warning()
+    # Mutation guard: deleting the legacy-all fold makes this raise UnknownTargetError.
     assert parse_targets_field({"target": ["all", "claude"]}) == []
 
 

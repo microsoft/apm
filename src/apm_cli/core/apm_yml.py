@@ -34,6 +34,7 @@ CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
 # once per process. Hard rejection returns after a deprecation window.
 
 _legacy_all_warned: bool = False
+_LEGACY_ALL_TARGET_NAME = "all"
 
 
 def _reset_legacy_all_warning() -> None:
@@ -50,9 +51,9 @@ def _fold_legacy_all(tokens: list[str]) -> tuple[list[str], bool]:
     emit the warning via :func:`_warn_legacy_all_once`, so a manifest that
     still hard-fails on a sibling token does not consume the warning latch.
     """
-    if "all" not in tokens:
+    if _LEGACY_ALL_TARGET_NAME not in tokens:
         return tokens, False
-    return [t for t in tokens if t != "all"], True
+    return [t for t in tokens if t != _LEGACY_ALL_TARGET_NAME], True
 
 
 def _warn_legacy_all_once() -> None:
@@ -69,11 +70,10 @@ def _warn_legacy_all_once() -> None:
     from apm_cli.utils.console import _rich_warning
 
     _rich_warning(
-        "'all' in apm.yml targets is deprecated -- treating the field as "
-        "omitted so --target / auto-detect decide (its legacy meaning; any "
-        "sibling targets listed alongside 'all' are ignored). Remove the "
-        "field from the manifest; 'all' will become a hard error in a "
-        "future release.",
+        "'all' in apm.yml targets is deprecated and will become a hard "
+        "error in a future release. APM is treating the field as omitted "
+        "for this install so --target / auto-detect decide. If you "
+        "maintain this package, remove 'all' from the manifest.",
         symbol="warning",
     )
 
@@ -84,6 +84,16 @@ def _validate_canonical(tokens: list[str]) -> None:
         capability = TARGET_CAPABILITIES.get(token)
         if capability is None or capability.experimental_flag is not None or capability.mcp_only:
             raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
+
+
+def _validate_and_fold_legacy_all(tokens: list[str]) -> list[str]:
+    """Validate tokens and fold legacy 'all' to the omitted-field behavior."""
+    tokens, folded = _fold_legacy_all(tokens)
+    _validate_canonical(tokens)
+    if folded:
+        _warn_legacy_all_once()
+        return []
+    return tokens
 
 
 def parse_targets_field(yaml_data: dict) -> list[str]:
@@ -122,12 +132,7 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
             # Single value under targets: key, treat as one-element list
             raw = [str(raw)]
         tokens = [str(t).strip() for t in raw if str(t).strip()]
-        tokens, folded = _fold_legacy_all(tokens)
-        _validate_canonical(tokens)
-        if folded:
-            _warn_legacy_all_once()
-            return []
-        return tokens
+        return _validate_and_fold_legacy_all(tokens)
 
     if has_target:
         raw = yaml_data["target"]
@@ -140,23 +145,13 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
             tokens = [str(t).strip() for t in raw if str(t).strip()]
             if not tokens:
                 return []
-            tokens, folded = _fold_legacy_all(tokens)
-            _validate_canonical(tokens)
-            if folded:
-                _warn_legacy_all_once()
-                return []
-            return tokens
+            return _validate_and_fold_legacy_all(tokens)
         raw_str = str(raw).strip()
         if not raw_str:
             return []
         # CSV sugar: "claude,copilot" -> ['claude', 'copilot']
         tokens = [t.strip() for t in raw_str.split(",") if t.strip()]
-        tokens, folded = _fold_legacy_all(tokens)
-        _validate_canonical(tokens)
-        if folded:
-            _warn_legacy_all_once()
-            return []
-        return tokens
+        return _validate_and_fold_legacy_all(tokens)
 
     # Neither key present
     return []
