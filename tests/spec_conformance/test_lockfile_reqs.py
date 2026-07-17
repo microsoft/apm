@@ -470,4 +470,7 @@ def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
         "MUST apply the same preserve-or-remove decision",
         "MUST remove only the consumer-owned entries",
         "It MUST preserve\nevery entry that does not carry the consumer's own ownership",
+        "the merge-based hook configuration document is already absent for a\n"
+        "target while its ownership record remains",
+        "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
     )

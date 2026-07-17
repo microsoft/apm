@@ -48,19 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and manually authored entries are preserved. (closes #2245)
 - Narrowing a project's `targets:` (e.g. `[claude, codex]` -> `[claude]`) no
   longer leaves the dropped target's merge-hook config and `apm-hooks.json`
-  ownership sidecar behind after `apm install`/`apm compile`/`apm update` --
-  #2252 correctly scoped `apm prune`/`apm uninstall`'s hook wipe to the
-  currently resolved target set (#2250), but that also walled prune off from
-  ever cleaning a target dropped from `apm.yml` entirely. Dropped-target hook
-  reconciliation is now owned by the install/compile/update lifecycle
-  (`HookIntegrator.reconcile_dropped_targets` +
-  `manifest_reconcile.reconcile_dropped_merge_hook_targets`), applying the
-  same "still declared anywhere" union rule as the existing deployed-file
-  reconciliation; `apm prune`/`apm uninstall` are unchanged and remain
-  scoped to #2250's contract. Empirically confirmed against a real local Git
-  hook package fixture targeting Claude + Codex (evidence-only; not modified
-  by this change) from the PR #2266 primitive-target lifecycle test suite.
-  (closes #2253)
+  ownership sidecar behind: the next `apm install`, `apm compile`, or
+  `apm update` now removes the dropped target's own hook entries, while
+  preserving hand-authored entries and any target still declared anywhere.
+  `apm prune`/`apm uninstall` behavior is unchanged. (closes #2253)
 - Four classes of Windows-only CI failures (CRLF baseline drift in JSON
   reports, backslash-path authority-check diagnostics, bare-`git`-argv
   subprocess resolution, and a WebSocket shutdown race) no longer slip

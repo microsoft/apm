@@ -941,11 +941,21 @@ a target that remains attributable under (a)-(c). If the manifest does
 not declare a `target` field, or the consumer cannot determine which
 target governs a prior entry, the consumer MUST preserve that entry
 rather than remove it solely because it was not written by the current
-install, mirroring [req-lk-020](#req-lk-020)'s indeterminate case. This
-requirement does not mandate how ownership is recorded (inline marker
-vs. a separate ownership record) or which merge-hook targets exist; it
-binds only the preserve-or-remove decision once ownership is
-determinate.
+install, mirroring [req-lk-020](#req-lk-020)'s indeterminate case.
+If the merge-based hook configuration document is already absent for a
+target while its ownership record remains, a conforming consumer MUST
+still apply this requirement's preserve-or-remove decision to that
+orphaned ownership record: after verifying the record is well-formed,
+it MUST remove a record attributable to none of (a)-(c) above, and MUST
+preserve a record attributable to a target that remains attributable
+under (a)-(c). A consumer that encounters a merge-based hook
+configuration document or ownership record that is malformed or
+cannot be parsed MUST leave that document or record unmodified and
+emit an actionable diagnostic naming the affected path, rather than
+partially or silently repairing it. This requirement does not mandate
+how ownership is recorded (inline marker vs. a separate ownership
+record) or which merge-hook targets exist; it binds only the
+preserve-or-remove decision once ownership is determinate.
 
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit

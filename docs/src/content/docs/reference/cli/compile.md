@@ -34,9 +34,9 @@ After a successful non-dry-run compile, APM also reconciles deployed-file
 ownership with the current `targets:` declaration. If the declared target set
 contracts, artifacts and lockfile entries owned by the removed target are
 cleaned up with the same hash and user-edit safeguards as `apm install` --
-this also includes merge-hook config/sidecar entries (`.claude/settings.json`,
-`.codex/hooks.json`, etc., plus their `apm-hooks.json` ownership sidecars)
-even though compile does not itself *deploy* hooks.
+this also includes merge-hook config/sidecar entries (see
+[Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks)
+for what those files are) even though compile does not itself *deploy* hooks.
 
 **When you actually need it:** compile is **optional for the
 `copilot` target** -- GitHub Copilot natively reads
