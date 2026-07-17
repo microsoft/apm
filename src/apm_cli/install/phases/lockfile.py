@@ -576,6 +576,7 @@ class LockfileBuilder:
             declared_targets=declared,
             diagnostics=self.ctx.diagnostics,
             user_scope=is_user,
+            logger=getattr(self.ctx, "logger", None),
         )
         if changed:
             lockfile.save(get_lockfile_path(self.ctx.apm_dir))

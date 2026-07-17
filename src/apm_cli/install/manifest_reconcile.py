@@ -26,14 +26,35 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.deployment_state import DeploymentLedger
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+def _surface_target_cleanup(
+    logger: InstallLogger | None, dep_key: str, cleanup: CleanupResult
+) -> None:
+    """Report a target-contraction cleanup pass at default verbosity.
+
+    Deleting a dropped target's deployed file is a destructive operation in
+    the user's tracked workspace, so -- like every other caller of the
+    cleanup chokepoint (see ``install/phases/cleanup.py``) -- it must be
+    visible without ``--verbose``. Surfaces each user-edit skip as a yellow
+    inline and the deletion count as an info line.
+    """
+    if logger is None:
+        return
+    for skipped in cleanup.skipped_user_edit:
+        logger.cleanup_skipped_user_edit(skipped, dep_key)
+    logger.stale_cleanup(dep_key, len(cleanup.deleted))
 
 
 def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]]:
@@ -369,7 +390,7 @@ def reconcile_dropped_merge_hook_targets(
     )
 
 
-def reconcile_deployed_block(
+def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrapper; each knob is orthogonal
     *,
     project_root: Path,
     dep_key: str,
@@ -381,6 +402,7 @@ def reconcile_deployed_block(
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
     on_ghost_drop: Callable[[str], None] | None = None,
+    on_cleanup: Callable[[CleanupResult], None] | None = None,
     prior_ledger: DeploymentLedger | None = None,
     cleanup_retained_hashes: dict[str, str | None] | None = None,
     current_run_trusted: bool = True,
@@ -419,6 +441,8 @@ def reconcile_deployed_block(
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
     )
+    if on_cleanup is not None:
+        on_cleanup(cleanup)
     for path in cleanup.retained:
         if path not in files:
             files.append(path)
@@ -452,13 +476,17 @@ def reconcile_target_deployed_files(
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
     user_scope: bool = False,
+    logger: InstallLogger | None = None,
 ) -> bool:
     """Prune undeclared-target file ownership from every lockfile deployment block.
 
     This is the canonical target-contraction owner for physical deployed
     files. It calculates stale target-owned rows and delegates every deletion
     to :func:`reconcile_deployed_block`, which routes through the cleanup
-    chokepoint and its path, directory, and provenance safety gates.
+    chokepoint and its path, directory, and provenance safety gates. When a
+    *logger* is supplied, each deletion pass is surfaced at default verbosity
+    (deletion count + user-edit skips) so the destructive workspace change is
+    never silent.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import _SELF_KEY
@@ -502,6 +530,7 @@ def reconcile_target_deployed_files(
             declared_targets=declared_targets,
             diagnostics=diagnostics,
             prior_ledger=prior_ledger,
+            on_cleanup=partial(_surface_target_cleanup, logger, dep_key),
         )
         if files != prior_files or hashes != prior_hashes:
             DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
@@ -524,6 +553,7 @@ def reconcile_target_deployed_files(
         declared_targets=declared_targets,
         diagnostics=diagnostics,
         prior_ledger=prior_ledger,
+        on_cleanup=partial(_surface_target_cleanup, logger, "<local .apm/>"),
     )
     if local_files != prior_local or local_hashes != prior_local_hashes:
         DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
