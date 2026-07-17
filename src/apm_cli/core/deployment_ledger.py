@@ -153,6 +153,7 @@ class DeploymentLedgerCodec:
         hashes: dict[str, str],
     ) -> None:
         """Update one compatibility ownership view and invalidate its projection."""
+        prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
         if owner == ".":
             lockfile.local_deployed_files = list(files)
@@ -161,7 +162,11 @@ class DeploymentLedgerCodec:
             dependency = lockfile.dependencies[owner]
             dependency.deployed_files = list(files)
             dependency.deployed_file_hashes = dict(hashes)
-        DeploymentLedgerCodec._rebuild_from_legacy(lockfile, prior_bundle_paths)
+        DeploymentLedgerCodec._rebuild_from_legacy(
+            lockfile,
+            prior_bundle_paths,
+            prior_ledger=prior_ledger,
+        )
 
     @staticmethod
     def record_local_bundle_files(
@@ -222,8 +227,13 @@ class DeploymentLedgerCodec:
     @staticmethod
     def refresh_from_legacy(lockfile: LockFile) -> None:
         """Rebuild canonical rows after a compatibility view mutates in place."""
+        prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
-        DeploymentLedgerCodec._rebuild_from_legacy(lockfile, prior_bundle_paths)
+        DeploymentLedgerCodec._rebuild_from_legacy(
+            lockfile,
+            prior_bundle_paths,
+            prior_ledger=prior_ledger,
+        )
 
     @staticmethod
     def invalidate_legacy_projection(lockfile: LockFile) -> None:
@@ -267,12 +277,46 @@ class DeploymentLedgerCodec:
     def _rebuild_from_legacy(
         lockfile: LockFile,
         prior_bundle_paths: frozenset[str],
+        *,
+        prior_ledger: DeploymentLedger | None = None,
     ) -> None:
         """Rebuild compatibility rows and restore surviving bundle provenance."""
         lockfile.deployment_ledger = DeploymentLedger(records={})
         lockfile._deployments_present = False
         lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         lockfile._deployments_present = True
+        if prior_ledger is not None:
+            previous_by_locator = {
+                (
+                    record.locator.kind,
+                    record.locator.value,
+                    record.locator.runtime,
+                    record.locator.scope,
+                ): record
+                for record in prior_ledger.records.values()
+            }
+            records: dict[str, DeploymentRecord] = {}
+            for record in lockfile.deployment_ledger.records.values():
+                locator = record.locator
+                previous = previous_by_locator.get(
+                    (locator.kind, locator.value, locator.runtime, locator.scope)
+                )
+                if previous is None:
+                    records[locator.key] = record
+                    continue
+                active_owner = (
+                    previous.active_owner
+                    if previous.active_owner in record.owners
+                    else record.active_owner
+                )
+                preserved = DeploymentRecord(
+                    locator=previous.locator,
+                    owners=record.owners,
+                    active_owner=active_owner,
+                    content_hash=record.content_hash,
+                )
+                records[preserved.locator.key] = preserved
+            lockfile.deployment_ledger = DeploymentLedger(records=records)
         surviving_paths = prior_bundle_paths.intersection(lockfile.local_deployed_files)
         DeploymentLedgerCodec._mark_local_bundle_paths(lockfile, surviving_paths)
 

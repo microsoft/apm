@@ -463,6 +463,43 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
     assert rebuilt.is_semantically_equivalent(lockfile)
 
 
+def test_legacy_owner_update_preserves_canonical_shared_root_locator() -> None:
+    """A compatibility projection must not demote a concrete shared-root target."""
+    path = ".agents/skills/demo/SKILL.md"
+    owner = "owner/package"
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url=owner,
+            deployed_files=[path],
+            deployed_file_hashes={path: "sha256:demo"},
+        )
+    )
+    concrete = _locator(path, target="copilot")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            concrete.key: DeploymentRecord(
+                locator=concrete,
+                owners=(owner,),
+                active_owner=owner,
+                content_hash="sha256:demo",
+            )
+        }
+    )
+    lockfile._deployments_present = True
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        owner,
+        [path],
+        {path: "sha256:demo"},
+    )
+
+    records = tuple(lockfile.deployment_ledger.records.values())
+    assert len(records) == 1
+    assert records[0].locator.target == "copilot"
+
+
 def test_local_bundle_provenance_round_trips_beside_authored_local_files() -> None:
     authored = ".github/instructions/authored.instructions.md"
     bundled = ".agents/skills/bundled/SKILL.md"
