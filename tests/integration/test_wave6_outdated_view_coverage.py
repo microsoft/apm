@@ -17,15 +17,15 @@ Target modules
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Never
 from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.models.dependency.types import GitReferenceType
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -50,16 +50,9 @@ dependencies:
 """
 
 
-def _make_remote_ref(name: str, ref_type: GitReferenceType, sha: str):
-    """Create a minimal RemoteRef-like object."""
-
-    @dataclass
-    class _Ref:
-        name: str
-        ref_type: GitReferenceType
-        commit_sha: str
-
-    return _Ref(name=name, ref_type=ref_type, commit_sha=sha)
+def _make_remote_ref(name: str, ref_type: GitReferenceType, sha: str) -> RemoteRef:
+    """Create a production-shaped remote reference."""
+    return RemoteRef(name=name, ref_type=ref_type, commit_sha=sha)
 
 
 def _write_lockfile(tmp_path: Path, deps_yaml: str) -> None:
@@ -589,9 +582,12 @@ class TestOutdatedParallel:
 
         branch_ref = _make_remote_ref("main", GitReferenceType.BRANCH, sha)
 
+        def _list_remote_refs(_downloader: object, _dep_ref: object) -> list[RemoteRef]:
+            return [branch_ref]
+
         with patch(
             "apm_cli.deps.github_downloader.GitHubPackageDownloader.list_remote_refs",
-            return_value=[branch_ref],
+            new=_list_remote_refs,
         ):
             result = runner.invoke(cli, ["outdated", "-j", "2"])
 
@@ -615,13 +611,12 @@ class TestOutdatedParallel:
             f"    resolved_commit: {new_sha}\n",
         )
 
-        def _side_effect(dep_ref):
-            sha = new_sha
-            return [_make_remote_ref("main", GitReferenceType.BRANCH, sha)]
+        def _list_remote_refs(_downloader: object, _dep_ref: object) -> list[RemoteRef]:
+            return [_make_remote_ref("main", GitReferenceType.BRANCH, new_sha)]
 
         with patch(
             "apm_cli.deps.github_downloader.GitHubPackageDownloader.list_remote_refs",
-            side_effect=_side_effect,
+            new=_list_remote_refs,
         ):
             result = runner.invoke(cli, ["outdated"])
 
@@ -650,9 +645,12 @@ class TestOutdatedParallel:
             f"    resolved_commit: {sha}\n",
         )
 
+        def _raise_check_error(*_args: object, **_kwargs: object) -> Never:
+            raise TypeError("'<' not supported between MagicMock and MagicMock")
+
         with patch(
             "apm_cli.commands.outdated._check_one_dep",
-            side_effect=TypeError("'<' not supported between MagicMock and MagicMock"),
+            new=_raise_check_error,
         ):
             result = runner.invoke(cli, ["outdated", "-j", "2"])
 
