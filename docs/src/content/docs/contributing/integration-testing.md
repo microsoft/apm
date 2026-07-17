@@ -47,6 +47,13 @@ APM uses a tiered approach to integration testing:
     -m lifecycle_smoke tests/integration
   ```
 
+### 4. **Live Guardrailing Hero** (scheduled/manual)
+- **Location**: `tests/integration/test_guardrailing_hero_e2e.py`
+- **Purpose**: Preserve the real remote, token-gated packaged CLI hero without multiplying it across the default packaged platform matrix
+- **Scope**: project initialization, two GitHub-backed installs, compile/deploy, and prompt startup through the built Linux x64 binary
+- **Trigger**: one `ci-runtime.yml` invocation on schedule or manual dispatch that fails the workflow on error (`continue-on-error` is not set); never pull requests or the generic integration script
+- **Selection mechanism**: the explicit test node with `-m live`; collection gates remain owned by `tests/integration/conftest.py`
+
 ## Running Tests Locally
 
 Integration tests live under `tests/integration/` and run via `pytest`
@@ -216,7 +223,13 @@ as shown in the cross-module contract. `ApmLifecycleRunner()` invokes `apm`
 through `PATH`; packaged-binary tests use the
 [binary-resolution fixture](#apm-binary-resolution).
 
+`test_packaged_virtual_file_lifecycle_e2e.py` is the narrow hermetic packaged
+counterpart to the live hero. It runs the real binary against a local bare Git
+origin through process-scoped URL rewriting, then checks install,
+compile/deploy, and exact lock provenance without credentials or live HTTP.
+
 ```bash
+uv run pytest tests/integration/test_packaged_virtual_file_lifecycle_e2e.py -v
 uv run pytest tests/integration/test_local_package_factory_contract.py -v
 uv run pytest tests/integration/test_hermetic_lifecycle_foundation.py -v
 uv run pytest -n auto tests/integration/test_hermetic_lifecycle_foundation.py -v

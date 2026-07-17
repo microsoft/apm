@@ -13,6 +13,60 @@ from types import ModuleType
 import pytest
 
 
+def test_hook_rewrite_scope_has_single_owner() -> None:
+    """Native hook paths must consume HookIntegrator's scope decision."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
+    kiro = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("def _deploy_root_for_hook_rewrite(") == 1
+    assert owner.count("self._deploy_root_for_hook_rewrite(") == 2
+    assert "integrator._deploy_root_for_hook_rewrite(project_root, user_scope)" in kiro
+    assert "Hook rewrite scope must route through HookIntegrator" in guard
+
+
+def test_hook_rewrite_scope_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The boundary lint must reject scope decisions outside HookIntegrator."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    kiro_path = sandbox / "src/apm_cli/integration/kiro_hook_integrator.py"
+    kiro_source = kiro_path.read_text(encoding="utf-8")
+    kiro_path.write_text(
+        kiro_source.replace(
+            "integrator._deploy_root_for_hook_rewrite(project_root, user_scope)",
+            "project_root if user_scope else None",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Hook rewrite scope must route through HookIntegrator" in result.stdout
+
+
 def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
     """Approval fallback outcomes must come from policy outcome routing."""
     from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
@@ -248,6 +302,43 @@ def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
     assert "require_hashes_enabled(" in handler
     assert "Local bundle installs must route policy through install_preflight.py" in guard
     assert "require_hashes enforcement must route through install/integrity.py" in guard
+
+
+def test_hook_file_routing_dep_targets_gate_has_static_guard() -> None:
+    """Per-file hook routing must compose with dependency target filtering."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "Per-file hook routing must not be gated by dep_targets_active" in guard
+    assert "scripts/check_hook_file_routing_owner.py" in guard
+
+
+def test_hook_file_routing_guard_rejects_dep_targets_gate(tmp_path: Path) -> None:
+    """AC6 must reject restoring the dependency-target bypass."""
+    root = Path(__file__).parents[2]
+    hook_integrator = tmp_path / "hook_integrator.py"
+    hook_integrator.write_text(
+        (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    with hook_integrator.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n\ndef _architecture_test_dep_target_gate() -> None:\n"
+            "    if dep_targets_active is False:\n"
+            "        _filter_hook_files_for_target([])\n"
+        )
+
+    result = subprocess.run(
+        (sys.executable, "scripts/check_hook_file_routing_owner.py", str(hook_integrator)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "dep_targets_active gates _filter_hook_files_for_target" in result.stdout
 
 
 def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(

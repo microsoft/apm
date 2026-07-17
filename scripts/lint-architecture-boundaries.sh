@@ -74,6 +74,25 @@ if [ -z "$validation_line" ] || [ -z "$continue_line" ] || [ -z "$write_line" ] 
     echo "[x] Hook payload validation must continue before the native payload write"
     violations=$((violations + 1))
 fi
+hook_scope_owner_count=$(grep -Ec \
+    '^    def _deploy_root_for_hook_rewrite\(' "$hook_file" || true)
+hook_scope_duplicate_hits=$(
+    grep -REn --include='*hook_integrator.py' \
+        'deploy_root_for_rewrite[[:space:]]*=.*user_scope' \
+        src/apm_cli/integration \
+        | grep -v "^${hook_file}:" \
+        | grep -v 'integrator\._deploy_root_for_hook_rewrite' \
+        || true
+)
+if [ "$hook_scope_owner_count" -ne 1 ] \
+    || ! grep -q \
+        'deploy_root_for_rewrite = integrator\._deploy_root_for_hook_rewrite' \
+        src/apm_cli/integration/kiro_hook_integrator.py \
+    || [ -n "$hook_scope_duplicate_hits" ]; then
+    echo "[x] Hook rewrite scope must route through HookIntegrator"
+    [ -n "$hook_scope_duplicate_hits" ] && echo "$hook_scope_duplicate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Lockfile supported-version authority belongs in deps/lockfile.py" \
     'SUPPORTED_LOCKFILE_VERSIONS|lockfile_version[[:space:]]+(==|!=|in)' \
@@ -417,6 +436,13 @@ check_pattern \
     "Neutral hook IR must not contain native harness vocabulary" \
     'copilot|gemini|antigravity|timeoutSec|powershell|_apm_source|["'\'']hooks["'\'']' \
     src/apm_cli/integration/hook_ir.py
+hook_routing_gate_hits=$(python3 scripts/check_hook_file_routing_owner.py 2>&1)
+hook_routing_gate_status=$?
+if [ "$hook_routing_gate_status" -ne 0 ]; then
+    echo "[x] Per-file hook routing must not be gated by dep_targets_active"
+    echo "$hook_routing_gate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Manifest schema negotiation belongs in manifest_contract.py" \
     'get\\(["'\'']\\$schema["'\'']\\)' \
