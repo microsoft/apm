@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -43,9 +42,6 @@ _SKILL_BYTES = (
 _REMOTE_URL = f"https://github.com/{_OWNER}/{_REPO_NAME}"
 _DEPENDENCY = f"{_OWNER}/{_REPO_NAME}/{_SKILL_PATH}#main"
 _INSTALL_ARGS = (
-    sys.executable,
-    "-m",
-    "apm_cli.cli",
     "install",
     "--target",
     "copilot",
@@ -57,6 +53,7 @@ _INSTALL_ARGS = (
 
 def test_url_rewrite_subprocess_env_reaches_owned_commit_through_real_cli_install(
     tmp_path: Path,
+    apm_binary_path: Path,
 ) -> None:
     """A real ``apm install`` resolves the owned commit through the returned env."""
     isolated = IsolatedApmEnvironment.create(
@@ -85,7 +82,7 @@ def test_url_rewrite_subprocess_env_reaches_owned_commit_through_real_cli_instal
     )
 
     result = subprocess.run(
-        _INSTALL_ARGS,
+        (str(apm_binary_path), *_INSTALL_ARGS),
         cwd=project.root,
         env=child_env,
         capture_output=True,
