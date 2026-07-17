@@ -1152,6 +1152,7 @@ class HookIntegrator(BaseIntegrator):
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
             user_scope: If True, rewrite hook script commands to absolute paths
+                so global hooks resolve from any working directory
             dep_targets_active: If True, hook files were already target-filtered
 
         Returns:

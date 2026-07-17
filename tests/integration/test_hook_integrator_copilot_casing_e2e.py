@@ -187,6 +187,50 @@ def test_copilot_install_scope_controls_script_paths(
         assert Path(command).resolve() == installed_script
 
 
+@pytest.mark.parametrize("user_scope", [False, True])
+def test_kiro_install_scope_controls_script_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    user_scope: bool,
+) -> None:
+    """Kiro consumes the shared hook scope rewrite decision."""
+    project_root = tmp_path / ("home" if user_scope else "project")
+    (project_root / ".kiro").mkdir(parents=True)
+    package_info = _make_hook_package(
+        tmp_path,
+        {"sessionStart": [_hook_entry("./run.sh")]},
+        name=f"kiro-scope-{'user' if user_scope else 'project'}",
+    )
+    script = package_info.install_path / ".apm" / "hooks" / "run.sh"
+    script.write_text("#!/bin/sh\necho scope\n", encoding="utf-8")
+    target = KNOWN_TARGETS["kiro"].for_scope(user_scope=user_scope)
+
+    result = _integrate_package_hooks(
+        package_info,
+        project_root,
+        target_name="kiro",
+        user_scope=user_scope,
+    )
+
+    assert result["hooks"] == 1
+    hook_docs = sorted((project_root / target.root_dir / "hooks").glob("*.json"))
+    assert len(hook_docs) == 1
+    hook_doc = json.loads(hook_docs[0].read_text(encoding="utf-8"))
+    command = hook_doc["hooks"][0]["action"]["command"]
+    installed_script = (
+        project_root / target.root_dir / "hooks" / package_info.package.name / "run.sh"
+    ).resolve()
+    monkeypatch.chdir(package_info.install_path)
+    if user_scope:
+        assert Path(command).is_absolute()
+        assert Path(command).resolve() == installed_script
+    else:
+        assert not Path(command).is_absolute()
+        assert command == f"{target.root_dir}/hooks/{package_info.package.name}/run.sh"
+        monkeypatch.chdir(project_root)
+        assert Path(command).resolve() == installed_script
+
+
 def test_claude_install_preserves_pascal_case_hook_events(tmp_path: Path) -> None:
     """Claude hook integration keeps PascalCase events in settings.json."""
     project_root = tmp_path / "project"
