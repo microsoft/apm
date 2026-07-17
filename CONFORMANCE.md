@@ -19,7 +19,7 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 73 | 1 | 0 | 0 |
+| Consumer | 74 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 16 | 0 | 0 | 0 |
 
