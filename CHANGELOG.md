@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ownership records while preserving shared deployments and user-edited files.
   `apm audit` now catches leftover ownership instead of reporting a clean bill
   of health; run `apm prune`, then rerun `apm audit` to repair it.
+- Manifest auto-bootstrap now rejects empty project names, falls back to
+  `my-project` at filesystem roots, and routes `init`, `install`, and zero-config
+  script execution through one validator -- by @nadav-y (#2200).
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

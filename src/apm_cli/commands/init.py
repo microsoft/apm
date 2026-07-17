@@ -10,6 +10,10 @@ import click
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..core.project_name import (
+    resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
+)
+from ..core.project_name import validate_project_name as _validate_project_name
 from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
@@ -27,10 +31,8 @@ from ._helpers import (
     _create_plugin_json,
     _get_console,
     _get_default_config,
-    _resolve_bootstrap_project_name,
     _rich_blank_line,
     _validate_plugin_name,
-    _validate_project_name,
 )
 
 
@@ -164,11 +166,14 @@ def _perform_init(
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
-            # project_dir.name is '' at a filesystem/drive root (e.g. cwd == "/",
-            # or a container WORKDIR of "/"). With --yes this flows straight to
-            # _get_default_config with no further validation, silently writing
-            # apm.yml with 'name: ""'.
-            final_project_name = _resolve_bootstrap_project_name(project_dir.name)
+            # A filesystem root has no directory name, so resolve a valid fallback.
+            derived_project_name = project_dir.name
+            final_project_name = _resolve_bootstrap_project_name(derived_project_name)
+            if final_project_name != derived_project_name:
+                logger.verbose_detail(
+                    f'Using default project name "{final_project_name}" because '
+                    "the derived directory name is invalid"
+                )
         project_root = Path.cwd()
 
         # Validate plugin name early

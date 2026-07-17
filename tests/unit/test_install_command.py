@@ -299,10 +299,18 @@ class TestInstallCommandAutoBootstrap:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
+    @patch(
+        "apm_cli.commands.install._resolve_bootstrap_project_name",
+        return_value="resolved-name",
+    )
     def test_install_auto_created_apm_yml_has_correct_metadata(
-        self, mock_install_apm, mock_apm_package, mock_validate
+        self,
+        mock_resolve_project_name,
+        mock_install_apm,
+        mock_apm_package,
+        mock_validate,
     ):
-        """Test that auto-created apm.yml has correct metadata."""
+        """Auto-bootstrap must write the centrally resolved project name."""
         with self._chdir_tmp() as tmp_dir:
             # Create a directory with a specific name to test project name detection
             project_dir = tmp_dir / "my-awesome-project"
@@ -325,15 +333,21 @@ class TestInstallCommandAutoBootstrap:
                 )
             )
 
-            result = self.runner.invoke(cli, ["install", "test/package"])
+            result = self.runner.invoke(cli, ["install", "test/package", "--verbose"])
 
             assert result.exit_code == 0
             assert Path("apm.yml").exists()
 
-            # Verify auto-detected project name
+            mock_resolve_project_name.assert_called_once_with("my-awesome-project")
+            assert (
+                'Using default project name "resolved-name" because '
+                "the derived directory name is invalid"
+            ) in " ".join(result.output.split())
+
+            # Verify centrally resolved project name
             with open("apm.yml", encoding="utf-8") as f:
                 config = yaml.safe_load(f)
-                assert config["name"] == "my-awesome-project"
+                assert config["name"] == "resolved-name"
                 assert "version" in config
                 assert "description" in config
                 assert "APM project" in config["description"]

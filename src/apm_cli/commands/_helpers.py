@@ -19,6 +19,7 @@ from ..constants import (
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
+from ..core import project_name as _project_name
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
@@ -28,6 +29,9 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
 from ..version import get_build_sha, get_version
 from .deps._utils import _scan_installed_packages
+
+_resolve_bootstrap_project_name = _project_name.resolve_bootstrap_project_name
+_validate_project_name = _project_name.validate_project_name
 
 # CRITICAL: Shadow Click commands at module level to prevent namespace collision
 # When Click commands like 'config set' are defined, calling set() can invoke the command
@@ -615,39 +619,6 @@ def _validate_plugin_name(name):
     import re
 
     return bool(re.match(r"^[a-z][a-z0-9-]{0,63}$", name))
-
-
-def _validate_project_name(name):
-    """Validate that a project name is safe to use as a directory name.
-
-    Project names are used directly as directory names and must not contain
-    '/' or '\' so the name is not interpreted as a filesystem path,
-    and must not be '..' to prevent directory traversal. Must also be
-    non-empty: an empty/whitespace name writes an apm.yml with 'name: ""',
-    which APMPackage.from_apm_yml's identity check rejects on every later
-    install/lock/compile run (#2155).
-
-    Returns True if valid, False otherwise.
-    """
-    if not name or not name.strip():
-        return False
-    if "/" in name or "\\" in name:
-        return False
-    if name == "..":  # noqa: SIM103
-        return False
-    return True
-
-
-def _resolve_bootstrap_project_name(candidate: str) -> str:
-    """Return a valid apm.yml project name for the install auto-bootstrap path.
-
-    ``Path.cwd().name`` (or ``Path.home().name``) is '' at a filesystem/drive
-    root -- e.g. a container with ``WORKDIR /``. Writing that candidate
-    straight into apm.yml would produce ``name: ''``, which
-    ``APMPackage.from_apm_yml``'s identity check rejects on every later
-    install/lock/compile run (#2155). Falls back to a generic default instead.
-    """
-    return candidate if _validate_project_name(candidate) else "my-project"
 
 
 def _create_plugin_json(config):
