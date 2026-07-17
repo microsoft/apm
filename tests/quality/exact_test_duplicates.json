@@ -3,13 +3,6 @@
   "duplicate_groups": [
     {
       "paths": [
-        "tests/integration/test_deps_resolver_phase3b.py",
-        "tests/integration/test_deps_resolver_resolution.py"
-      ],
-      "sha256": "228e15b22951f92a6b91f278be05b58775b4f0b3671060259719f15ce0f70726"
-    },
-    {
-      "paths": [
         "tests/unit/test_output_formatters_phase3.py",
         "tests/unit/test_output_formatters_rendering.py"
       ],

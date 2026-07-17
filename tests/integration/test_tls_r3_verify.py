@@ -36,12 +36,14 @@ still a foreign venv with NO ``apm_cli``.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -335,6 +337,37 @@ def test_v4_setup_llm_truststore_is_best_effort_and_pinned():
     tail = ps1[ps1.index("truststore>=0.10.0") :]
     assert "} catch {" in tail
     assert "Write-WarningText" in tail
+
+
+@pytest.mark.parametrize(
+    ("argv", "original_args"),
+    (
+        (["/managed/llm-venv/bin/pip"], ["python", "/managed/llm-venv/bin/pip"]),
+        (["pip/__main__.py"], ["python", "-m", "pip", "install", "llm"]),
+    ),
+)
+def test_child_bootstrap_leaves_pip_vendored_truststore_in_control(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    original_args: list[str],
+) -> None:
+    """Repeated runtime setup must not inject twice into pip's SSL module."""
+    bootstrap = _repo_root() / "src" / "apm_cli" / "core" / "_child_tls" / "_apm_tls_bootstrap.py"
+    injections: list[bool] = []
+    fake_truststore = SimpleNamespace(
+        inject_into_ssl=lambda: injections.append(True),
+    )
+    monkeypatch.setitem(sys.modules, "truststore", fake_truststore)
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(sys, "orig_argv", original_args)
+
+    spec = importlib.util.spec_from_file_location("_test_apm_tls_bootstrap", bootstrap)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert injections == []
 
 
 def test_v4_best_effort_control_flow_does_not_abort(tmp_path):

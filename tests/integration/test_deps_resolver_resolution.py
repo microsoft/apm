@@ -861,7 +861,7 @@ class TestResolverTryLoadDependencyPackageWithCallback:
         assert result is None
         assert len(called_with) == 1
 
-    def test_callback_not_invoked_for_already_installed(self, tmp_path: Path) -> None:
+    def test_callback_invoked_without_lock_provenance(self, tmp_path: Path) -> None:
         from apm_cli.deps.apm_resolver import APMDependencyResolver
 
         apm_modules = tmp_path / "apm_modules"
@@ -880,8 +880,7 @@ class TestResolverTryLoadDependencyPackageWithCallback:
         )
         dep = _make_dep_ref(repo_url="owner/installed-repo")
         result = resolver._try_load_dependency_package(dep)
-        # Callback not called since package is already present
-        assert len(callback_calls) == 0
+        assert len(callback_calls) == 1
         assert result is not None
 
     def test_skill_md_without_apm_yml_returns_package(self, tmp_path: Path) -> None:
