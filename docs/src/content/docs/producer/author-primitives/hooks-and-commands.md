@@ -226,8 +226,8 @@ agent a procedure" fits a skill -- and reaches every harness.
   rewrites `${PLUGIN_ROOT}` and relative `./` references to absolute
   paths so Claude Code and Copilot CLI can execute scripts regardless
   of the working directory. Project-scope `apm install` (no `-g`)
-  keeps `command` paths repo-relative so checked-in configs stay
-  portable across clones, contributors, and CI. Either way, if a referenced script
+  keeps `command` paths repo-relative so checked-in configs stay portable
+  across clones, contributors, and CI. Either way, if a referenced script
   is missing at install time the installer emits a warning -- in
   user-scope the unexpanded variable is rewritten to the absolute
   source path so the hook fails loudly at runtime; in project-scope
