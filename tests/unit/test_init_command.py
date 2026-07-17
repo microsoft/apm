@@ -488,7 +488,7 @@ class TestResolveBootstrapProjectName:
 
 
 class TestInitProjectNameValidation:
-    """Integration tests: apm init rejects project names with path separators or '..'."""
+    """Integration tests for invalid explicit project names."""
 
     def setup_method(self):
         self.runner = CliRunner()
@@ -518,6 +518,14 @@ class TestInitProjectNameValidation:
             assert result.exit_code != 0
             assert "Invalid project name" in result.output
             assert ".." in result.output
+
+    def test_init_rejects_empty_explicit_name(self):
+        """An explicit empty argument must not be treated as omission."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, ["init", "", "--yes"])
+            assert result.exit_code != 0
+            assert "Invalid project name" in result.output
+            assert not Path("apm.yml").exists()
 
     def test_init_accepts_plain_name(self):
         """apm init with a simple name still works normally."""

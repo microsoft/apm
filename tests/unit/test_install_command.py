@@ -352,6 +352,48 @@ class TestInstallCommandAutoBootstrap:
                 assert "description" in config
                 assert "APM project" in config["description"]
 
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_install_auto_bootstrap_at_root_writes_valid_name(
+        self,
+        mock_install_apm,
+        mock_apm_package,
+        mock_validate,
+    ):
+        """A filesystem-root candidate must produce a valid manifest name."""
+        with self._chdir_tmp():
+            mock_validate.return_value = True
+            mock_pkg_instance = MagicMock()
+            mock_pkg_instance.get_apm_dependencies.return_value = [
+                MagicMock(repo_url="test/package", reference="main")
+            ]
+            mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
+            )
+
+            real_path = Path
+
+            class RootCwdPath:
+                def __new__(cls, *args):
+                    return real_path(*args)
+
+                @classmethod
+                def cwd(cls):
+                    return real_path("/")
+
+            with patch("apm_cli.commands.install.Path", RootCwdPath):
+                result = self.runner.invoke(cli, ["install", "test/package"])
+
+            assert result.exit_code == 0, f"{result.output}\n{result.exception!r}"
+            with open("apm.yml", encoding="utf-8") as f:
+                assert yaml.safe_load(f)["name"] == "my-project"
+
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_install_positional_url_total_validation_failure_exits_one(self, mock_validate):
         """A positional URL that cannot be validated must fail the command."""

@@ -1366,6 +1366,9 @@ def test_bootstrap_project_names_have_single_owner() -> None:
     assert "_resolve_bootstrap_project_name(derived_project_name)" in init_source
     assert "_resolve_bootstrap_project_name(derived_project_name)" in install_source
     assert "resolve_bootstrap_project_name(Path.cwd().name)" in runner_source
+    assert "project_name = DEFAULT_BOOTSTRAP_PROJECT_NAME" in (
+        root / "src/apm_cli/commands/deps/cli.py"
+    ).read_text(encoding="utf-8")
     assert "AC18: bootstrap project-name authority" in guard
     assert "Manifest bootstrap names must route through core/project_name.py" in guard
     assert "Bootstrap project-name validation and fallback" in architecture_doc
@@ -1381,6 +1384,7 @@ def test_bootstrap_project_name_guard_rejects_variable_bypass(tmp_path: Path) ->
         "src/apm_cli/core/script_runner.py",
         "src/apm_cli/commands/init.py",
         "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/deps/cli.py",
     ):
         source = root / relative_path
         destination = sandbox / relative_path

@@ -30,6 +30,7 @@ from ..utils.version_checker import check_for_updates
 from ..version import get_build_sha, get_version
 from .deps._utils import _scan_installed_packages
 
+# Thin compatibility aliases only; core/project_name.py remains the AC18 owner.
 _resolve_bootstrap_project_name = _project_name.resolve_bootstrap_project_name
 _validate_project_name = _project_name.validate_project_name
 

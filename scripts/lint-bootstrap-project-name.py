@@ -58,6 +58,17 @@ def _minimal_config_name(tree: ast.Module) -> ast.AST | None:
     return None
 
 
+def _has_named_assignment(tree: ast.Module, target_name: str, value_name: str) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(_is_name(target, target_name) for target in node.targets) and _is_name(
+            node.value, value_name
+        ):
+            return True
+    return False
+
+
 def _definitions(name: str) -> list[Path]:
     definitions = []
     for path in SOURCE_ROOT.rglob("*.py"):
@@ -98,6 +109,12 @@ def main() -> int:
     runner_value = _minimal_config_name(_tree(SOURCE_ROOT / "core" / "script_runner.py"))
     if not _is_resolver_call(runner_value):
         errors.append("ScriptRunner bootstrap name must be the resolver result")
+
+    deps_tree = _tree(SOURCE_ROOT / "commands" / "deps" / "cli.py")
+    if not _has_named_assignment(
+        deps_tree, "project_name", "DEFAULT_BOOTSTRAP_PROJECT_NAME"
+    ):
+        errors.append("dependency tree fallback must use the canonical constant")
 
     if errors:
         for error in errors:

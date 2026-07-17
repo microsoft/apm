@@ -149,7 +149,7 @@ def _perform_init(
             project_name = None
 
         # Reject names containing path separators before any filesystem use
-        if project_name and not _validate_project_name(project_name):
+        if project_name is not None and not _validate_project_name(project_name):
             logger.error(
                 f"Invalid project name '{project_name}': "
                 "project names must be non-empty and must not contain "
