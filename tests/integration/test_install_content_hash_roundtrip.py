@@ -84,7 +84,7 @@ class _ContentHashOnlyDownloader:
         )
 
 
-def _write_project(project: Path) -> None:
+def _write_project(project: Path, *, target: str = "copilot") -> None:
     project.mkdir(parents=True, exist_ok=True)
     (project / ".github").mkdir()
     (project / ".github" / "copilot-instructions.md").write_text("# Project\n", encoding="utf-8")
@@ -93,7 +93,7 @@ def _write_project(project: Path) -> None:
             {
                 "name": "content-hash-roundtrip",
                 "version": "1.0.0",
-                "target": "copilot",
+                "target": target,
                 "dependencies": {"apm": ["acme/fixture-pkg"], "mcp": []},
             }
         ),
@@ -187,6 +187,29 @@ def test_no_resolved_commit_content_hash_reuses_on_disk_package(
     second = _run_install(runner, project, monkeypatch)
     assert second.exit_code == 0, second.output
     assert downloader.calls == 1
+
+
+def test_project_install_with_dependency_instructions_prints_compile_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ordinary dependency installs surface the post-install compile step."""
+    project = tmp_path / "project"
+    _write_project(project, target="gemini")
+    downloader = _ContentHashOnlyDownloader()
+
+    from apm_cli.deps import github_downloader as _ghd
+
+    monkeypatch.setattr(
+        _ghd.GitHubPackageDownloader, "download_package", downloader.download_package
+    )
+
+    result = _run_install(CliRunner(), project, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    normalized_output = " ".join(result.output.split())
+    assert (
+        "Instructions installed for gemini. Run 'apm compile' to update AGENTS.md / GEMINI.md."
+    ) in normalized_output
 
 
 def test_virtual_lock_replays_across_synthetic_manifest_newline_domains(

@@ -407,7 +407,7 @@ class TestHintProjectCompileNeeded:
         message = ctx.logger.info.call_args.args[0]
         assert message == (
             "Instructions installed for Gemini CLI. "
-            "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md."
+            "Run 'apm compile' to update AGENTS.md / GEMINI.md."
         )
 
     def test_instruction_scan_ignores_symlink_outside_apm_modules(self, tmp_path):
@@ -430,6 +430,67 @@ class TestHintProjectCompileNeeded:
         ctx.project_root = tmp_path
 
         assert _has_dep_instruction_files(ctx) is False
+        ctx.diagnostics.warn.assert_called_once_with(
+            "Ignored unsafe instruction link that resolves outside "
+            "apm_modules: pkg/.apm/instructions/linked.instructions.md"
+        )
+
+    def test_hint_lists_only_outputs_for_active_compile_families(self, tmp_path):
+        """Mixed target hints name each output that compile will produce."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        ctx = _make_install_context(
+            targets=[
+                _make_target("Gemini CLI", "gemini"),
+                _make_target("Claude Code", "claude"),
+                _make_target("Gemini CLI", "gemini"),
+            ]
+        )
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_called_once_with(
+            "Instructions installed for Gemini CLI, Claude Code. "
+            "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md.",
+            symbol="info",
+        )
+
+    def test_hint_ignores_target_without_project_scope(self, tmp_path):
+        """A target unavailable at project scope cannot trigger the hint."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        target = _make_target("Unavailable", "agents")
+        target.for_scope = MagicMock(return_value=None)
+        ctx = _make_install_context(targets=[target])
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_not_fired_for_intellij_target(self, tmp_path):
+        """IntelliJ is MCP-only and has no verified root-context reader."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        ctx = _make_install_context(targets=[_make_target("intellij", "agents")])
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
 
     def test_hint_not_fired_for_copilot_target(self, tmp_path):
         """Copilot target (native per-file rules) -> no hint."""

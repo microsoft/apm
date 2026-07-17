@@ -24,8 +24,48 @@ if TYPE_CHECKING:
 # user-scope root-context reader, so they should not receive the hint.
 _ROOT_CONTEXT_ONLY_FAMILIES = frozenset({"agents", "claude", "gemini"})
 _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
-    {"antigravity", "copilot", "cursor", "kiro", "windsurf"}
+    {"antigravity", "copilot", "cursor", "intellij", "kiro", "windsurf"}
 )
+
+
+def _compile_hint_targets(
+    ctx: InstallContext, *, user_scope: bool
+) -> tuple[list[str], frozenset[str]]:
+    """Return display names and compiler families that need root-context hints."""
+    target_names: list[str] = []
+    families: set[str] = set()
+    seen: set[str] = set()
+    for target in ctx.targets:
+        scoped = target.for_scope(user_scope=user_scope)
+        if scoped is None:
+            continue
+        if scoped.name.lower() in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS:
+            continue
+        if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
+            continue
+        families.add(scoped.compile_family)
+        if scoped.name not in seen:
+            seen.add(scoped.name)
+            target_names.append(scoped.name)
+    return target_names, frozenset(families)
+
+
+def _root_context_outputs(families: frozenset[str]) -> list[str]:
+    """Return root context filenames produced for compiler families."""
+    from apm_cli.core.target_detection import (
+        should_compile_agents_md,
+        should_compile_claude_md,
+        should_compile_gemini_md,
+    )
+
+    outputs: list[str] = []
+    if should_compile_agents_md(families):
+        outputs.append("AGENTS.md")
+    if should_compile_claude_md(families):
+        outputs.append("CLAUDE.md")
+    if should_compile_gemini_md(families):
+        outputs.append("GEMINI.md")
+    return outputs
 
 
 def _has_dep_instruction_files(ctx: InstallContext) -> bool:
@@ -48,6 +88,11 @@ def _has_dep_instruction_files(ctx: InstallContext) -> bool:
         try:
             candidate = ensure_path_within(candidate, apm_modules)
         except PathTraversalError:
+            relative_candidate = candidate.relative_to(apm_modules).as_posix()
+            ctx.diagnostics.warn(
+                "Ignored unsafe instruction link that resolves outside "
+                f"apm_modules: {relative_candidate}"
+            )
             continue
         if not candidate.is_file():
             continue
@@ -85,20 +130,7 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
     if ctx.installed_count == 0:
         return
 
-    target_names: list[str] = []
-    seen: set[str] = set()
-    for target in ctx.targets:
-        scoped = target.for_scope(user_scope=False)
-        if scoped is None:
-            continue
-        if scoped.name.lower() in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS:
-            continue
-        if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
-            continue
-        if scoped.name not in seen:
-            seen.add(scoped.name)
-            target_names.append(scoped.name)
-
+    target_names, families = _compile_hint_targets(ctx, user_scope=False)
     if not target_names:
         return
 
@@ -107,10 +139,8 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
 
     if ctx.logger:
         targets = ", ".join(target_names)
-        message = (
-            f"Instructions installed for {targets}. "
-            "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md."
-        )
+        outputs = " / ".join(_root_context_outputs(families))
+        message = f"Instructions installed for {targets}. Run 'apm compile' to update {outputs}."
         ctx.logger.info(message, symbol="info")
 
 
@@ -139,20 +169,7 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
     if not discover_global_instructions(source_root):
         return
 
-    target_names: list[str] = []
-    seen: set[str] = set()
-    for target in ctx.targets:
-        scoped = target.for_scope(user_scope=True)
-        if scoped is None:
-            continue
-        if scoped.name.lower() in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS:
-            continue
-        if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
-            continue
-        if scoped.name not in seen:
-            seen.add(scoped.name)
-            target_names.append(scoped.name)
-
+    target_names, _ = _compile_hint_targets(ctx, user_scope=True)
     if not target_names:
         return
 

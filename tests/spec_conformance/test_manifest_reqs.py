@@ -489,8 +489,7 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
     _hint_project_compile_needed(ctx)
 
     logger.info.assert_called_once_with(
-        "Instructions installed for Gemini CLI. "
-        "Run 'apm compile' to update AGENTS.md / CLAUDE.md / GEMINI.md.",
+        "Instructions installed for Gemini CLI. Run 'apm compile' to update AGENTS.md / GEMINI.md.",
         symbol="info",
     )
     assert_spec_contains(

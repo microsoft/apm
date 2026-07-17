@@ -231,9 +231,10 @@ in the current directory. To target explicitly, see the
 
 > **What about `apm compile`?** Compile is a different concern: it
 > generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools
-> that read a top-level context document for instructions (Codex, Gemini,
-> plain `agents`-protocol hosts, and Claude). Those compile-only targets print
-> a hint after `apm install` when dependency instructions need `apm compile`.
+> that read a top-level context document for instructions. Targets listed under
+> [post-install instruction compilation](../../reference/targets-matrix/#post-install-instruction-compilation)
+> print a hint after `apm install` when dependency instructions need
+> `apm compile`.
 > Gemini and Claude also receive commands, skills, hooks, and MCP via
 > `apm install`. Copilot and Cursor read the per-skill directories directly --
 > no compile step needed.

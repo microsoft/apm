@@ -2215,10 +2215,9 @@ contains an instruction primitive; and (c) at least one active target is
 classified as requiring post-install root-context compilation in the companion
 [target support matrix](../../reference/targets-matrix/#post-install-instruction-compilation).
 The diagnostic MUST name the follow-up compilation operation (for example,
-`apm compile` or an equivalent) and at least one applicable root context output
-class (for example, `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`). A diagnostic
-that names the complete canonical output set is conforming even when only one
-target is active. The consumer MUST NOT emit this diagnostic for a dry run, an
+`apm compile` or an equivalent) and only the applicable root context output
+classes (for example, `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`) for the active
+targets. The consumer MUST NOT emit this diagnostic for a dry run, an
 install that installed no package, an installed dependency tree without
 instruction primitives, or a target set with no active target classified as
 requiring post-install root-context compilation. An unclassified target MUST
