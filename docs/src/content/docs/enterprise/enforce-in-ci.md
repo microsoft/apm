@@ -21,7 +21,7 @@ apm audit --ci
 ```
 
 One command. It runs the nine baseline lockfile checks
-(`deployment-ledger-owners`, `lockfile-exists`, `ref-consistency`,
+(`lockfile-exists`, `deployment-ledger-owners`, `ref-consistency`,
 `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`,
 `config-consistency`, `content-integrity`, `includes-consent`), the
 install-replay drift check, and -- if an `apm-policy.yml` is discovered --

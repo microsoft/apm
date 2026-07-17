@@ -559,14 +559,22 @@ dependencies:
                 ),
             )
 
-            with patch(
-                "apm_cli.commands.prune.remove_stale_deployed_files",
-                wraps=remove_stale_deployed_files,
-            ) as cleanup:
+            with (
+                patch(
+                    "apm_cli.commands.prune.remove_stale_deployed_files",
+                    wraps=remove_stale_deployed_files,
+                ) as cleanup,
+                patch.object(
+                    DeploymentLedgerCodec,
+                    "from_lockfile",
+                    wraps=DeploymentLedgerCodec.from_lockfile,
+                ) as read_ledger,
+            ):
                 result = self.runner.invoke(cli, ["prune"])
 
             assert result.exit_code == 0, result.output
             assert cleanup.call_count == 0
+            assert read_ledger.call_count == 1
             assert not (tmp / ghost_path).exists()
             assert not lockfile_path.exists()
 
@@ -648,6 +656,8 @@ dependencies:
 
             assert result.exit_code == 0
             assert "repair 1 deployment ownership record" in result.output
+            assert ghost_path in result.output
+            assert "removed/beta" in result.output
             assert lockfile_path.read_bytes() == before
             assert ghost.read_text() == "# Manual sentinel\n"
 
@@ -957,6 +967,7 @@ dependencies:
 
             assert result.exit_code == 1
             assert "Failed to update apm.lock.yaml" in result.output
+            assert "Package directories already removed: orphan-org/orphan-repo." in result.output
             assert "Rerun 'apm prune'" in result.output
 
     def test_prune_retry_repairs_lock_after_prior_write_failure(self):
@@ -1012,6 +1023,7 @@ dependencies:
         """Dry-run reports retry cleanup without changing durable lock state."""
         alpha_key = "declared-org/declared-repo"
         beta_key = "orphan-org/orphan-repo"
+        beta_path = ".github/prompts/beta.prompt.md"
         with self._chdir_tmp() as tmp:
             (tmp / "apm.yml").write_text(_APM_YML_WITH_DEP)
             _make_package_dir(tmp, "declared-org", "declared-repo")
@@ -1021,7 +1033,13 @@ dependencies:
                     alpha_key: LockedDependency(repo_url=alpha_key),
                     beta_key: LockedDependency(repo_url=beta_key),
                 },
-                records=(),
+                records=(
+                    _deployment_record(
+                        beta_path,
+                        owners=(beta_key,),
+                        active_owner=beta_key,
+                    ),
+                ),
             )
             before = lockfile_path.read_bytes()
 
@@ -1029,6 +1047,9 @@ dependencies:
 
             assert result.exit_code == 0
             assert "remove 1 stale lockfile dependency record" in result.output
+            assert "repair 1 deployment ownership record" in result.output
+            assert beta_path in result.output
+            assert beta_key in result.output
             assert lockfile_path.read_bytes() == before
             retained = LockFile.read(lockfile_path)
             assert retained is not None

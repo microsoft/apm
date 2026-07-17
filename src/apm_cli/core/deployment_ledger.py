@@ -84,13 +84,21 @@ class DeploymentLedgerCodec:
     @staticmethod
     def owner_reference_violations(
         lockfile: LockFile,
+        *,
+        excluded_dependency_keys: Collection[str] = (),
+        ledger: DeploymentLedger | None = None,
     ) -> tuple[DeploymentOwnerViolation, ...]:
         """Return invalid canonical owner references in locator-key order."""
-        valid_owners = DeploymentLedgerCodec.valid_owner_keys(lockfile)
+        valid_owners = DeploymentLedgerCodec.valid_owner_keys(
+            lockfile,
+            excluded_dependency_keys=excluded_dependency_keys,
+        )
         violations: list[DeploymentOwnerViolation] = []
-        ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
-        for key in sorted(ledger.records):
-            record = ledger.records[key]
+        source_ledger = (
+            ledger if ledger is not None else DeploymentLedgerCodec.from_lockfile(lockfile)
+        )
+        for key in sorted(source_ledger.records):
+            record = source_ledger.records[key]
             invalid_owners = tuple(owner for owner in record.owners if owner not in valid_owners)
             invalid_active_owner = (
                 record.active_owner if record.active_owner not in valid_owners else None
@@ -112,6 +120,7 @@ class DeploymentLedgerCodec:
         lockfile: LockFile,
         *,
         excluded_dependency_keys: Collection[str] = (),
+        ledger: DeploymentLedger | None = None,
         project_root: Path,
         diagnostics: DiagnosticCollector,
     ) -> DeploymentReconcileResult:
@@ -121,7 +130,7 @@ class DeploymentLedgerCodec:
             {},
             diagnostics=diagnostics,
         ).reconcile(
-            DeploymentLedgerCodec.from_lockfile(lockfile),
+            ledger if ledger is not None else DeploymentLedgerCodec.from_lockfile(lockfile),
             materializations=(),
             intent=DeploymentIntent(
                 active_targets=frozenset(),

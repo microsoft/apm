@@ -121,8 +121,14 @@ def prune(ctx, dry_run):
             for dep_key in dep_keys
             if dep_key not in expected_lock_keys
         )
+        deployment_ledger = (
+            DeploymentLedgerCodec.from_lockfile(lockfile) if lockfile is not None else None
+        )
         owner_violations = (
-            DeploymentLedgerCodec.owner_reference_violations(lockfile)
+            DeploymentLedgerCodec.owner_reference_violations(
+                lockfile,
+                ledger=deployment_ledger,
+            )
             if lockfile is not None
             else ()
         )
@@ -158,14 +164,39 @@ def prune(ctx, dry_run):
                 logger.dry_run_notice(
                     f"remove {len(missing_orphaned_keys)} stale lockfile dependency record(s)"
                 )
-            if owner_violations:
-                logger.dry_run_notice(
-                    f"repair {len(owner_violations)} deployment ownership record(s)"
+            planned_pruned_keys = set(missing_orphaned_keys)
+            for orphaned_package in orphaned_packages:
+                planned_pruned_keys.update(
+                    key
+                    for key in lock_keys_by_path.get(orphaned_package, ())
+                    if key not in expected_lock_keys
                 )
+            planned_owner_repairs = (
+                DeploymentLedgerCodec.owner_reference_violations(
+                    lockfile,
+                    excluded_dependency_keys=planned_pruned_keys,
+                    ledger=deployment_ledger,
+                )
+                if lockfile is not None
+                else ()
+            )
+            if planned_owner_repairs:
+                logger.dry_run_notice(
+                    f"repair {len(planned_owner_repairs)} deployment ownership record(s)"
+                )
+                for violation in planned_owner_repairs:
+                    removed_owners = set(violation.invalid_owners)
+                    if violation.invalid_active_owner is not None:
+                        removed_owners.add(violation.invalid_active_owner)
+                    logger.dry_run_notice(
+                        f"repair {violation.locator.key} "
+                        f"(remove owner(s): {', '.join(sorted(removed_owners))})"
+                    )
             logger.success("Dry run complete - no changes made")
             return
 
         removed_count = 0
+        removed_packages: list[str] = []
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
@@ -176,6 +207,7 @@ def prune(ctx, dry_run):
                 safe_rmtree(pkg_path, apm_modules_dir)
                 logger.progress(f"Removed {org_repo_name}")
                 removed_count += 1
+                removed_packages.append(org_repo_name)
                 for dep_key in (
                     key
                     for key in lock_keys_by_path.get(org_repo_name, ())
@@ -202,6 +234,7 @@ def prune(ctx, dry_run):
             reconciled = DeploymentLedgerCodec.reconcile_owner_references(
                 lockfile,
                 excluded_dependency_keys=pruned_keys,
+                ledger=deployment_ledger,
                 project_root=project_root,
                 diagnostics=logger.diagnostics,
             )
@@ -259,6 +292,10 @@ def prune(ctx, dry_run):
             except Exception as e:
                 logger.render_summary()
                 logger.error(f"Failed to update apm.lock.yaml: {e}")
+                if removed_packages:
+                    logger.error_detail(
+                        f"Package directories already removed: {', '.join(removed_packages)}."
+                    )
                 logger.error_detail(
                     "Filesystem cleanup may be partial. Rerun 'apm prune', then run 'apm audit'."
                 )
@@ -301,7 +338,10 @@ def prune(ctx, dry_run):
                 )
 
         if removed_count > 0:
-            logger.success(f"Pruned {removed_count} orphaned package(s)")
+            message = f"Pruned {removed_count} orphaned package(s)"
+            if owner_violations:
+                message += f" and repaired {len(owner_violations)} deployment ownership record(s)"
+            logger.success(message)
         elif pruned_keys:
             logger.success(f"Repaired {len(pruned_keys)} stale dependency record(s)")
         elif owner_violations:

@@ -355,14 +355,10 @@ Orphan detection works in two directions:
 - **Orphan files** - files under managed target directories that no lockfile
   entry claims. `apm prune` removes them too.
 
-`apm prune` is also the only command that reconciles `deployments` rows.
-A row whose owner reference has gone stale (a "ghost" owner no longer in
-`dependencies`) is repaired as metadata only -- the invalid reference is
-dropped from the ledger, but that repair never authorizes deleting the file
-the row points at. Deleting bytes requires a trusted claim: only a pruned
-dependency's own pre-transition `deployed_files`/`deployed_file_hashes`,
-minus paths a surviving owner still claims, authorize physical removal. See
-[`apm prune`](../cli/prune/#canonical-deployment-ownership).
+`apm prune` is the only command that reconciles `deployments` rows. The valid
+owner universe and metadata-only repair boundary are defined in
+[Canonical deployment rows](#canonical-deployment-rows); cleanup behavior is
+documented under [`apm prune`](../cli/prune/#canonical-deployment-ownership).
 
 ## Versioning
 

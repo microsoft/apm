@@ -30,12 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm prune` now removes departed and stale canonical deployment owners while
-  preserving surviving owners, shared URI deployments, and untrusted bytes.
-  Interrupted retries also remove host-qualified stale lock entries after
-  package cleanup. `apm audit` now treats unresolved deployment ownership as a
-  hard integrity failure in default and CI modes with a convergent
-  prune-then-audit remediation.
+- Removing a dependency and running `apm prune` now fully cleans its deployment
+  ownership records while preserving shared deployments and user-edited files.
+  `apm audit` now catches leftover ownership instead of reporting a clean bill
+  of health; run `apm prune`, then rerun `apm audit` to repair it.
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

@@ -197,7 +197,7 @@ def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
         name="deployment-ledger-owners",
         passed=False,
         message=(
-            f"{len(violations)} invalid deployment ownership record(s) - "
+            f"{len(violations)} invalid deployment ownership record(s) -- "
             f"{DEPLOYMENT_OWNER_REMEDIATION}"
         ),
         details=details,
