@@ -1970,7 +1970,6 @@ class HookIntegrator(BaseIntegrator):
         one package's hooks therefore cannot call ``sync_integration``
         alone without also erasing entries owned by packages that remain
         declared: it must wipe, then rebuild from what is still installed.
-
         This mirrors the "clear + rebuild" pattern
         ``apm uninstall`` already uses (see
         ``_sync_integrations_after_uninstall`` in
