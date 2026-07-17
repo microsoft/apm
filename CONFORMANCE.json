@@ -272,8 +272,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::TestFinalLockfileTargetContraction::test_removes_dropped_target_instruction_file",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
       ]
     },

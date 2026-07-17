@@ -623,6 +623,16 @@ if [ "$hook_config_write_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC15a: target-specific instruction contraction authority"
+target_instruction_contraction_output=$(python3 scripts/check_target_instruction_contraction_owner.py \
+    --root "$ROOT" 2>&1)
+target_instruction_contraction_status=$?
+if [ "$target_instruction_contraction_status" -ne 0 ]; then
+    echo "[x] Target-specific instruction contraction must route through manifest_reconcile.py"
+    echo "$target_instruction_contraction_output"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC16: post-uninstall reachability owner authority"
 if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
     src/apm_cli/commands/uninstall/engine.py; then
