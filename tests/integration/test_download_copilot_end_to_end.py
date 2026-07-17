@@ -56,6 +56,7 @@ from apm_cli.adapters.client.copilot import (
     _translate_env_placeholder,
 )
 from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.github_rate_limit import GitHubThrottleError
 from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
@@ -306,8 +307,10 @@ class TestResilientGet:
         assert result.status_code == 200
         mock_sleep.assert_called_once()
 
-    def test_ratelimit_remaining_low_logged(self, capsys: pytest.CaptureFixture) -> None:
-        """Low X-RateLimit-Remaining triggers debug log when APM_DEBUG set."""
+    def test_ratelimit_remaining_low_is_not_logged_by_transport(
+        self, capsys: pytest.CaptureFixture
+    ) -> None:
+        """A successful low-quota response is not a rendered throttle."""
         host = _make_host()
         delegate = DownloadDelegate(host)
         resp = _make_mock_response(200, headers={"X-RateLimit-Remaining": "5"})
@@ -317,7 +320,7 @@ class TestResilientGet:
         ):
             delegate.resilient_get("https://api.github.com/test", {}, max_retries=1)
         captured = capsys.readouterr()
-        assert "rate limit low" in captured.err
+        assert captured.err == ""
 
     def test_x_ratelimit_reset_header_used_for_wait(self) -> None:
         """X-RateLimit-Reset used to compute wait when Retry-After absent."""
@@ -970,8 +973,8 @@ class TestDownloadGithubFile:
 
         assert result == b"master content"
 
-    def test_rate_limit_error_message_without_token(self) -> None:
-        """Rate-limit error message instructs user to set GITHUB_APM_PAT."""
+    def test_confirmed_throttle_without_token_is_typed(self) -> None:
+        """A confirmed GitHub throttle retains its typed public contract."""
         host = _make_host(github_token=None)
         delegate = DownloadDelegate(host)
         dep = _make_dep_ref("owner/repo", host="github.com")
@@ -984,8 +987,31 @@ class TestDownloadGithubFile:
             patch.object(delegate, "try_raw_download", return_value=None),
             patch.object(host, "_resilient_get", return_value=rate_limited),
         ):
-            with pytest.raises(RuntimeError, match="rate limit"):
+            with pytest.raises(GitHubThrottleError) as exc_info:
                 delegate.download_github_file(dep, "apm.yml", ref="main")
+
+        assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
+        assert exc_info.value.throttle.signal == "remaining-zero"
+
+    def test_confirmed_throttle_with_token_is_typed(self) -> None:
+        """A confirmed throttle renders identically whether or not a token is set."""
+        host = _make_host(github_token="tok")
+        delegate = DownloadDelegate(host)
+        dep = _make_dep_ref("owner/repo", host="github.com")
+        host.auth_resolver.resolve.return_value = MagicMock(token="tok", source="env")
+        rate_limited = _make_mock_response(403, headers={"X-RateLimit-Remaining": "0"})
+        rate_limited_err = requests.exceptions.HTTPError(response=rate_limited)
+        rate_limited.raise_for_status.side_effect = rate_limited_err
+
+        with (
+            patch.object(delegate, "try_raw_download", return_value=None),
+            patch.object(host, "_resilient_get", return_value=rate_limited),
+        ):
+            with pytest.raises(GitHubThrottleError) as exc_info:
+                delegate.download_github_file(dep, "apm.yml", ref="main")
+
+        assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
+        assert exc_info.value.throttle.signal == "remaining-zero"
 
     def test_network_error_wrapped_in_runtime_error(self) -> None:
         """ConnectionError is wrapped in RuntimeError."""

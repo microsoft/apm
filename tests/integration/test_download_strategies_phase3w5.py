@@ -11,6 +11,7 @@ import pytest
 import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.github_rate_limit import GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -775,7 +776,7 @@ class TestDownloadGithubFilePhase3W5:
             with pytest.raises(RuntimeError, match="HTTP 500"):
                 delegate.download_github_file(dep, "README.md", ref="main")
 
-    def test_rate_limit_error_without_token_uses_error_context(self) -> None:
+    def test_confirmed_throttle_without_token_is_typed(self) -> None:
         host = make_host(resolved_token=None)
         delegate = DownloadDelegate(host)
         dep = make_dep("owner/repo", host="github.com")
@@ -784,10 +785,13 @@ class TestDownloadGithubFilePhase3W5:
             headers={"X-RateLimit-Remaining": "0"},
         )
 
-        with pytest.raises(RuntimeError, match="Unauthenticated requests are limited"):
+        with pytest.raises(GitHubThrottleError) as exc_info:
             delegate.download_github_file(dep, "README.md")
 
-    def test_rate_limit_error_with_token_mentions_quota(self) -> None:
+        assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
+        assert exc_info.value.throttle.signal == "remaining-zero"
+
+    def test_confirmed_throttle_with_token_is_typed(self) -> None:
         host = make_host(resolved_token="gh-token")
         delegate = DownloadDelegate(host)
         dep = make_dep("owner/repo", host="github.com")
@@ -796,8 +800,11 @@ class TestDownloadGithubFilePhase3W5:
             headers={"X-RateLimit-Remaining": "0"},
         )
 
-        with pytest.raises(RuntimeError, match="rate-limit quota"):
+        with pytest.raises(GitHubThrottleError) as exc_info:
             delegate.download_github_file(dep, "README.md")
+
+        assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
+        assert exc_info.value.throttle.signal == "remaining-zero"
 
     def test_auth_failure_retries_without_auth_and_succeeds(self) -> None:
         host = make_host(resolved_token="gh-token")
