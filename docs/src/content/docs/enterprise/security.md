@@ -74,11 +74,11 @@ The `resolved_commit` field is a full 40-character SHA, not a branch name or tag
 
 ### GitHub API throttle containment
 
-For a virtual-file dependency, APM treats only an HTTP `429`, or an HTTP
-`403` with an exhausted GitHub rate-limit signal, as an indeterminate API
-probe. It then makes one sparse Git fetch and records that fetch's exact commit
-SHA in the lockfile; normal content hashing still verifies the materialized
-package.
+For a virtual-file dependency, APM treats only an HTTP `429`, an HTTP `403`
+with `X-RateLimit-Remaining: 0`, or an HTTP `403` with a finite positive
+`Retry-After` value as an indeterminate API probe. It then makes one sparse
+Git fetch and records that fetch's exact commit SHA in the lockfile; normal
+content hashing still verifies the materialized package.
 
 The fallback does not retry the API, sleep, or use a raw-content CDN. Public
 repositories use normal non-interactive Git. Private repositories use only the

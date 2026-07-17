@@ -220,4 +220,56 @@ def test_sparse_transport_failure_reports_the_throttle_and_transport_error() -> 
     message = str(exc_info.value)
     assert "GitHub API throttle" in message
     assert "sparse Git transport failed" in message
+    assert "Retry after GitHub quota recovery" in message
     assert "private-token" not in message
+
+
+def test_general_retry_caps_retry_after_delay() -> None:
+    """A shared retry cannot sleep longer than the pre-existing 60-second cap."""
+    delegate = DownloadDelegate(_host(token=None))
+    throttled = _response(429, {"Retry-After": "3600"})
+    recovered = _response(200)
+
+    with (
+        patch("requests.get", side_effect=[throttled, recovered]),
+        patch("time.sleep") as sleep,
+    ):
+        result = delegate.resilient_get("https://example.test", {}, max_retries=2)
+
+    assert result is recovered
+    sleep.assert_called_once_with(60)
+
+
+def test_auth_failure_stays_closed_when_unauthenticated_retry_throttles() -> None:
+    """A later 429 cannot rewrite the first authenticated authorization failure."""
+    host = _host(token="private-token")
+    host._resilient_get.side_effect = [
+        _response(403),
+        _response(429),
+    ]
+    delegate = DownloadDelegate(host)
+
+    with pytest.raises(RuntimeError, match="Authentication failed"):
+        delegate.download_github_file(_dep(), "instructions/example.instructions.md", "main")
+
+
+def test_insecure_http_throttle_never_selects_authorized_sparse_git() -> None:
+    """Explicit HTTP never receives an AuthResolver credential through fallback."""
+    delegate = DownloadDelegate(_host(token="private-token"))
+    dep = _dep()
+    dep.is_insecure = True
+    throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+    with (
+        patch.object(delegate, "_download_github_file_via_git") as sparse_fetch,
+        pytest.raises(RuntimeError, match="insecure HTTP dependencies") as exc_info,
+    ):
+        delegate.download_github_file_via_throttle_fallback(
+            dep,
+            "instructions/example.instructions.md",
+            "main",
+            throttle,
+        )
+
+    sparse_fetch.assert_not_called()
+    assert "private-token" not in str(exc_info.value)

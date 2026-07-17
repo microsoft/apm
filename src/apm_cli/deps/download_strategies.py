@@ -165,6 +165,8 @@ class DownloadDelegate:
                         wait = throttle.throttle.retry_after_seconds
                         if wait is None:
                             wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
+                        else:
+                            wait = min(wait, 60)
                         _debug(
                             f"Rate limited ({response.status_code}), retry in "
                             f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
@@ -794,10 +796,18 @@ class DownloadDelegate:
         throttle: GitHubThrottleError,
     ) -> GitFileFetchResult:
         """Select the sole sparse-Git fallback for a confirmed GitHub throttle."""
+        if dep_ref.is_insecure:
+            raise RuntimeError(
+                f"{throttle}; sparse Git fallback is unavailable for insecure HTTP dependencies"
+            )
         try:
             return self._download_github_file_via_git(dep_ref, file_path, ref)
         except GitFileTransportError as exc:
-            raise RuntimeError(f"{throttle}; sparse Git transport failed: {exc}") from exc
+            raise RuntimeError(
+                f"{throttle}; sparse Git transport failed: {exc}. "
+                "Retry after GitHub quota recovery; for private repositories, "
+                "verify GITHUB_APM_PAT can read the repository."
+            ) from exc
 
     # ------------------------------------------------------------------
     # GitLab file download
@@ -1161,11 +1171,7 @@ class DownloadDelegate:
                                 f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}"
                             )
                         return self._extract_contents_api_payload(response, is_github_host)
-                    except requests.exceptions.HTTPError as unauth_error:
-                        if unauth_error.response is not None:
-                            throttle = github_throttle_error(unauth_error.response, host)
-                            if throttle is not None:
-                                raise throttle from unauth_error
+                    except requests.exceptions.HTTPError:
                         pass  # Fall through to the original error
 
                 error_msg = (
