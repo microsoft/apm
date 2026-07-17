@@ -149,6 +149,8 @@ actionable nudge (the authoring path only).
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
+**Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently — `all` will become a hard parse error in a future release.
+
 When `target:` is omitted, APM auto-detects targets from folder presence (`.github/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`). Auto-detection applies only when `target:` is unset; once set, the field is authoritative.
 
 ```yaml

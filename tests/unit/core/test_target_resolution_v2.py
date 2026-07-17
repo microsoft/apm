@@ -315,10 +315,60 @@ def test_target_singular_with_yaml_list_non_string_coerced():
         parse_targets_field({"target": [42]})
 
 
-def test_target_singular_with_all_token_in_list_rejected():
-    """'all' is a CLI flag-only meta-target; must not validate inside YAML."""
+def test_target_singular_with_all_token_folds_to_auto_detect():
+    """Legacy 'all' folds the field to auto-detect (deprecation bridge, #2271).
+
+    'all' stays a CLI flag-only meta-target by design, but manifests
+    published before the canonical catalog (#1154) carry it inside
+    already-released tags. The parser treats such a field as omitted
+    (fall through to --target / auto-detect) instead of hard-failing,
+    until the deprecation window closes.
+    """
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
+    assert parse_targets_field({"target": ["all", "claude"]}) == []
+
+
+def test_targets_plural_with_all_folds_to_auto_detect(capsys):
+    """`targets: [all]` returns [] and warns once per process."""
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
+    assert parse_targets_field({"targets": ["all"]}) == []
+    out = capsys.readouterr()
+    combined = out.out + out.err
+    assert "deprecated" in combined
+    # Second parse in the same process stays silent (once-per-process guard).
+    assert parse_targets_field({"targets": ["all"]}) == []
+    out = capsys.readouterr()
+    assert "deprecated" not in (out.out + out.err)
+
+
+def test_target_csv_with_all_folds_to_auto_detect():
+    """CSV sugar containing 'all' folds the whole field to auto-detect."""
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
+    assert parse_targets_field({"target": "all"}) == []
+    assert parse_targets_field({"target": "all,claude"}) == []
+
+
+def test_targets_with_all_still_validates_siblings(capsys):
+    """Unknown sibling tokens are still rejected even when 'all' folds.
+
+    The hard-failing manifest must not consume the once-per-process
+    warning latch: a later valid legacy manifest still warns.
+    """
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
     with pytest.raises(UnknownTargetError):
-        parse_targets_field({"target": ["all", "claude"]})
+        parse_targets_field({"targets": ["all", "nonsense"]})
+    capsys.readouterr()
+    assert parse_targets_field({"targets": ["all"]}) == []
+    out = capsys.readouterr()
+    assert "deprecated" in (out.out + out.err)
 
 
 def test_target_singular_with_yaml_list_preserves_duplicates():
