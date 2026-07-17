@@ -14,6 +14,7 @@ from ..runtime.registry import (
     runtime_names,
 )
 from ..runtime.utils import find_runtime_binary
+from .project_name import resolve_bootstrap_project_name
 from .token_manager import setup_runtime_environment
 
 
@@ -889,7 +890,7 @@ class ScriptRunner:
         This enables running virtual packages without apm init.
         """
         minimal_config = {
-            "name": Path.cwd().name,
+            "name": resolve_bootstrap_project_name(Path.cwd().name),
             "version": "1.0.0",
             "description": "Auto-generated for zero-config virtual package execution",
         }

@@ -453,9 +453,42 @@ class TestProjectNameValidation:
 
         assert _validate_project_name("a/../b") is False  # slash catches it
 
+    def test_invalid_empty_or_whitespace(self):
+        """Empty/whitespace names must be rejected (#2155 regression).
+
+        An empty ``name`` passes through undetected into apm.yml, then
+        every later `from_apm_yml` call (install/lock/compile) fails with
+        "Invalid apm.yml identity: 'name' must be a non-empty string".
+        """
+        from apm_cli.commands._helpers import _validate_project_name
+
+        assert _validate_project_name("") is False
+        assert _validate_project_name(" ") is False
+        assert _validate_project_name("\t\n") is False
+
+
+class TestResolveBootstrapProjectName:
+    """Unit tests for _resolve_bootstrap_project_name (install auto-bootstrap)."""
+
+    def test_passes_through_valid_name(self):
+        from apm_cli.commands._helpers import _resolve_bootstrap_project_name
+
+        assert _resolve_bootstrap_project_name("my-project") == "my-project"
+
+    def test_falls_back_when_empty(self):
+        """Path.cwd().name is '' at a filesystem/drive root (#2155 regression)."""
+        from apm_cli.commands._helpers import _resolve_bootstrap_project_name
+
+        assert _resolve_bootstrap_project_name("") == "my-project"
+
+    def test_falls_back_when_whitespace(self):
+        from apm_cli.commands._helpers import _resolve_bootstrap_project_name
+
+        assert _resolve_bootstrap_project_name("   ") == "my-project"
+
 
 class TestInitProjectNameValidation:
-    """Integration tests: apm init rejects project names with path separators or '..'."""
+    """Integration tests for invalid explicit project names."""
 
     def setup_method(self):
         self.runner = CliRunner()
@@ -486,12 +519,46 @@ class TestInitProjectNameValidation:
             assert "Invalid project name" in result.output
             assert ".." in result.output
 
+    def test_init_rejects_empty_explicit_name(self):
+        """An explicit empty argument must not be treated as omission."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, ["init", "", "--yes"])
+            assert result.exit_code != 0
+            assert "Invalid project name" in result.output
+            assert not Path("apm.yml").exists()
+
     def test_init_accepts_plain_name(self):
         """apm init with a simple name still works normally."""
         with self.runner.isolated_filesystem() as tmp_dir:
             result = self.runner.invoke(cli, ["init", "my-project", "--yes"])
             assert result.exit_code == 0
             assert (Path(tmp_dir) / "my-project" / "apm.yml").exists()
+
+    def test_init_no_arg_yes_validates_cwd_derived_name(self):
+        """apm init --yes (no project_name) must run the cwd-derived name
+        through _resolve_bootstrap_project_name, not _get_default_config
+        directly.
+
+        Regression test for the PR #2200 review finding: when no
+        project_name arg is given, the early `_validate_project_name`
+        check (guarded by `if project_name and ...`) is skipped entirely,
+        so with --yes the cwd-derived name flowed straight into
+        _get_default_config unvalidated. At a filesystem/drive root
+        (Path.cwd().name == '') this silently wrote apm.yml with
+        'name: ""'.
+        """
+        with self.runner.isolated_filesystem():
+            with patch(
+                "apm_cli.commands.init._resolve_bootstrap_project_name",
+                return_value="resolved-name",
+            ) as mock_resolve:
+                result = self.runner.invoke(cli, ["init", "--yes"], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            mock_resolve.assert_called_once()
+            with open("apm.yml", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                assert data["name"] == "resolved-name"
 
     def test_init_interactive_reprompts_on_invalid_name_click(self):
         """In interactive mode, an invalid name triggers a re-prompt."""
@@ -519,6 +586,27 @@ class TestInitProjectNameValidation:
             )
             assert "Invalid project name" in result.output
             assert (Path(tmp_dir) / "apm.yml").exists()
+
+    def test_init_interactive_reprompts_on_blank_name_click(self):
+        """A blank/whitespace name must re-prompt instead of writing name: ''.
+
+        Regression test for #2155: an empty name silently accepted here used
+        to write an apm.yml that every later `apm install`/`lock`/`compile`
+        rejected with "Invalid apm.yml identity: 'name' must be a non-empty
+        string", since APMPackage.from_apm_yml enforces a non-empty name.
+        """
+        with self.runner.isolated_filesystem() as tmp_dir:
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input=" \nmy-project\n1.0.0\n\n\ny\ndone\ny\n",
+                catch_exceptions=False,
+            )
+            assert "Invalid project name" in result.output
+            apm_yml_path = Path(tmp_dir) / "apm.yml"
+            assert apm_yml_path.exists()
+            data = yaml.safe_load(apm_yml_path.read_text(encoding="utf-8"))
+            assert data["name"] == "my-project"
 
 
 class TestInitTargetPrompt:

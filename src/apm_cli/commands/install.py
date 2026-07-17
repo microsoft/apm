@@ -100,6 +100,9 @@ from ..constants import (
 )
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger, _ValidationOutcome
+from ..core.project_name import (
+    resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
+)
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
 
@@ -1428,7 +1431,15 @@ def install(  # noqa: PLR0913
         )
 
         if not apm_yml_exists and packages:
-            project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
+            derived_project_name = (
+                Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
+            )
+            project_name = _resolve_bootstrap_project_name(derived_project_name)
+            if project_name != derived_project_name:
+                logger.verbose_detail(
+                    f'Using default project name "{project_name}" because '
+                    f"derived name {derived_project_name!a} is invalid"
+                )
             config = _get_default_config(project_name)
             if manifest_targets := manifest_targets_from_target_option(target):
                 config["targets"] = manifest_targets

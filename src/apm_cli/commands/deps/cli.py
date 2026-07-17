@@ -11,6 +11,7 @@ import click
 # Import existing APM components
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
+from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_detection import TargetParamType
 from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
@@ -644,7 +645,7 @@ def _build_dep_tree(apm_dir):
     apm_modules_path = apm_dir / APM_MODULES_DIR
 
     # Load project info
-    project_name = "my-project"
+    project_name = DEFAULT_BOOTSTRAP_PROJECT_NAME
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
         if apm_yml_path.exists():

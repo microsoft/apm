@@ -97,7 +97,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 
 ## Behavior
 
-- **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
+- **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Its name comes from the current directory (or home directory for global installs) and falls back to `my-project` if that derived name is invalid. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
 - **Target persistence on bootstrap.** When `--target` maps to recognized manifest targets, those target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` redeploys to the same targets without re-specifying `--target`.
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically; `--update` is only needed to pull a newer ref under a floating constraint. MCP servers with matching config are skipped (`already configured`); changed config is re-applied (`updated`).
 - **Lockfile replay.** For unchanged Git dependencies, install reuses the locked commit for the whole resolved graph, including transitive packages. Upstream changes to a transitive package's `apm.yml` are picked up only when you regenerate the graph, for example with `apm update` or `apm lock --update`. See the [lockfile specification](../../lockfile-spec/) for the replay contract.

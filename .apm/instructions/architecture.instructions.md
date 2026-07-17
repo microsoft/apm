@@ -51,6 +51,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) | `src/apm_cli/policy/discovery.py` |
 | Post-uninstall dependency reachability | deps/reachability.py (compute_forward_reachable_keys) | `src/apm_cli/deps/reachability.py` |
 | GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |
+| Bootstrap project-name validation and fallback | core/project_name.py (resolve_bootstrap_project_name) | `src/apm_cli/core/project_name.py` |
 <!-- /canonical-owner-table -->
 
 If you are about to compute one of these locally, stop and call the

@@ -1347,3 +1347,68 @@ def test_github_throttle_owner_guard_rejects_parallel_header_parsing(tmp_path: P
     assert "GitHub throttle signals must be classified only by deps/github_rate_limit.py" in (
         result.stdout
     )
+
+
+def test_bootstrap_project_names_have_single_owner() -> None:
+    """All generated manifest names must route through the shared resolver."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/project_name.py").read_text(encoding="utf-8")
+    init_source = (root / "src/apm_cli/commands/init.py").read_text(encoding="utf-8")
+    install_source = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
+    runner_source = (root / "src/apm_cli/core/script_runner.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'DEFAULT_BOOTSTRAP_PROJECT_NAME = "my-project"' in owner
+    assert "def resolve_bootstrap_project_name(" in owner
+    assert "_resolve_bootstrap_project_name(derived_project_name)" in init_source
+    assert "_resolve_bootstrap_project_name(derived_project_name)" in install_source
+    assert "resolve_bootstrap_project_name(Path.cwd().name)" in runner_source
+    assert "project_name = DEFAULT_BOOTSTRAP_PROJECT_NAME" in (
+        root / "src/apm_cli/commands/deps/cli.py"
+    ).read_text(encoding="utf-8")
+    assert "AC18: bootstrap project-name authority" in guard
+    assert "Manifest bootstrap names must route through core/project_name.py" in guard
+    assert "Bootstrap project-name validation and fallback" in architecture_doc
+
+
+def test_bootstrap_project_name_guard_rejects_variable_bypass(tmp_path: Path) -> None:
+    """AC18 must reject a variable-mediated resolver bypass."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    for relative_path in (
+        "scripts/lint-bootstrap-project-name.py",
+        "src/apm_cli/core/project_name.py",
+        "src/apm_cli/core/script_runner.py",
+        "src/apm_cli/commands/init.py",
+        "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/deps/cli.py",
+    ):
+        source = root / relative_path
+        destination = sandbox / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    runner_path = sandbox / "src/apm_cli/core/script_runner.py"
+    runner_source = runner_path.read_text(encoding="utf-8")
+    runner_path.write_text(
+        runner_source.replace(
+            '"name": resolve_bootstrap_project_name(Path.cwd().name),',
+            '"name": derived_project_name,',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        (sys.executable, "scripts/lint-bootstrap-project-name.py"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert "ScriptRunner bootstrap name must be the resolver result" in result.stdout

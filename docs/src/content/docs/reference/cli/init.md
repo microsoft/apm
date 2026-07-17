@@ -26,7 +26,7 @@ and [`apm marketplace init`](../marketplace/) instead.
 
 | Argument | Description |
 |---|---|
-| `PROJECT_NAME` | Optional. Name of a new directory to create and `cd` into. Pass `.` to initialize in the current directory (same as omitting). Must not contain `/`, `\`, or be `..`. |
+| `PROJECT_NAME` | Optional. Name of a new directory to create and `cd` into. Pass `.` to initialize in the current directory (same as omitting). Must be non-empty, must not contain `/` or `\`, and must not be `..`. |
 
 ## Options
 
@@ -100,7 +100,8 @@ $ apm init --yes --target copilot,claude,cursor
   set. The `marketplace:` block is appended to `apm.yml` when
   `--marketplace` is set.
 - **Auto-detected fields:**
-  - `name` -- from `PROJECT_NAME` or current directory name.
+  - `name` -- from `PROJECT_NAME` or the current directory name. If a
+    filesystem root has no directory name, APM uses `my-project`.
   - `author` -- from `git config user.name`, fallback `Developer`.
   - `description` -- generated from project name.
   - `version` -- `1.0.0` (or `0.1.0` with `--plugin --yes`).

@@ -678,6 +678,12 @@ if [ "$deployment_owner_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC18: bootstrap project-name authority"
+if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
+    echo "[x] Manifest bootstrap names must route through core/project_name.py"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

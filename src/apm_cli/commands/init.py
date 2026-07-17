@@ -10,6 +10,10 @@ import click
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..core.project_name import (
+    resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
+)
+from ..core.project_name import validate_project_name as _validate_project_name
 from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
@@ -29,7 +33,6 @@ from ._helpers import (
     _get_default_config,
     _rich_blank_line,
     _validate_plugin_name,
-    _validate_project_name,
 )
 
 
@@ -146,10 +149,11 @@ def _perform_init(
             project_name = None
 
         # Reject names containing path separators before any filesystem use
-        if project_name and not _validate_project_name(project_name):
+        if project_name is not None and not _validate_project_name(project_name):
             logger.error(
                 f"Invalid project name '{project_name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'."
+                "project names must be non-empty and must not contain "
+                "path separators ('/' or '\\\\') or be '..'."
             )
             sys.exit(1)
 
@@ -162,7 +166,14 @@ def _perform_init(
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
-            final_project_name = project_dir.name
+            # A filesystem root has no directory name, so resolve a valid fallback.
+            derived_project_name = project_dir.name
+            final_project_name = _resolve_bootstrap_project_name(derived_project_name)
+            if final_project_name != derived_project_name:
+                logger.verbose_detail(
+                    f'Using default project name "{final_project_name}" because '
+                    f"derived name {derived_project_name!a} is invalid"
+                )
         project_root = Path.cwd()
 
         # Validate plugin name early
@@ -395,7 +406,8 @@ def _interactive_project_setup(default_name, logger):
                 break
             console.print(
                 f"[error]Invalid project name '{name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'.[/error]"
+                "project names must be non-empty and must not contain "
+                "path separators ('/' or '\\\\') or be '..'.[/error]"
             )
 
         version = Prompt.ask("Version", default="1.0.0").strip()
@@ -412,7 +424,8 @@ def _interactive_project_setup(default_name, logger):
                 break
             click.echo(
                 f"{ERROR}Invalid project name '{name}': "
-                f"project names must not contain path separators ('/' or '\\\\') or be '..'.{RESET}"
+                f"project names must be non-empty and must not contain "
+                f"path separators ('/' or '\\\\') or be '..'.{RESET}"
             )
 
         version = click.prompt("Version", default="1.0.0").strip()
