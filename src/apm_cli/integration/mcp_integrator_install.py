@@ -428,9 +428,9 @@ def _resolve_target_runtimes(
             # `apm install` "stealing" MCP ownership toward whatever the current
             # machine happens to have (issue #2298).
             target_runtimes = declared_targets
-            runtime_label = "runtime" if len(target_runtimes) == 1 else "runtimes"
+            target_label = "target" if len(target_runtimes) == 1 else "targets"
             logger.progress(
-                f"Targeting declared {runtime_label} from apm.yml: {', '.join(target_runtimes)}"
+                f"Targeting declared {target_label} from apm.yml: {', '.join(target_runtimes)}"
             )
             if exclude:
                 target_runtimes = [r for r in target_runtimes if r != exclude]
@@ -457,7 +457,9 @@ def _resolve_target_runtimes(
 
                 if verbose:
                     if console:
-                        console.print(f"|  [cyan]{STATUS_SYMBOLS['info']}  Runtime Detection[/cyan]")
+                        console.print(
+                            f"|  [cyan]{STATUS_SYMBOLS['info']}  Runtime Detection[/cyan]"
+                        )
                         console.print(f"|     +- Installed: {', '.join(installed_runtimes)}")
                         console.print(f"|     +- Used in scripts: {', '.join(script_runtimes)}")
                         if target_runtimes:
@@ -467,7 +469,9 @@ def _resolve_target_runtimes(
                             )
                         console.print("|")
                     else:
-                        logger.verbose_detail(f"Installed runtimes: {', '.join(installed_runtimes)}")
+                        logger.verbose_detail(
+                            f"Installed runtimes: {', '.join(installed_runtimes)}"
+                        )
                         logger.verbose_detail(f"Script runtimes: {', '.join(script_runtimes)}")
                         if target_runtimes:
                             logger.verbose_detail(f"Target runtimes: {', '.join(target_runtimes)}")
