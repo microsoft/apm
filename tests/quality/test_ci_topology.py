@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
@@ -52,26 +53,39 @@ REQUIRED_SHARD_ROOTS = (
 # Consume/Produce/Govern lifecycle contracts, promoted to a PR-time required
 # check. See ci.yml's lifecycle-smoke job comment for full rationale.
 #
-# Selection is declarative via the `lifecycle_smoke` pytest marker (see
-# pyproject.toml's [tool.pytest.ini_options].markers), not an explicit
-# file/node-id list. The marker is applied at the source: module-level
-# `pytestmark` on the four lifecycle-contract modules, and a single
-# function-level `@pytest.mark.lifecycle_smoke` on the one #2226 AC14
-# static guard inside test_architecture_authorities.py (that module's
-# other 32 tests are deliberately NOT marked). This intentionally means
-# no target list lives here or in any other test constant/manifest --
-# the marker registration + a live collection count are the only source
-# of truth, so a maintainer adding/removing a lifecycle_smoke-marked test
-# anywhere under tests/integration changes the required job's scope
-# without ever touching this file or ci.yml.
+# The full marker family stays merge-group covered while the required release
+# expression excludes three unique extended contracts to remain bounded.
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 5
+LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 3
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
+LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
+LIFECYCLE_SMOKE_E2E_VALUE = "1"
+LIFECYCLE_SMOKE_FULL_EXPRESSION = "lifecycle_smoke"
+LIFECYCLE_SMOKE_MERGE_GROUP_MARKER = "lifecycle_merge_group"
+LIFECYCLE_SMOKE_REQUIRED_EXPRESSION = (
+    f"{LIFECYCLE_SMOKE_FULL_EXPRESSION} and not {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}"
+)
+LIFECYCLE_SMOKE_FULL_COUNT = 23
+LIFECYCLE_SMOKE_MERGE_GROUP_COUNT = 3
+LIFECYCLE_SMOKE_REQUIRED_COUNT = 20
+LIFECYCLE_SMOKE_MERGE_GROUP_NODES = (
+    "tests/integration/test_prune_deployment_ledger_e2e.py"
+    "::test_prune_cascades_dependency_state_and_audit_sees_no_ghost",
+    "tests/integration/test_prune_deployment_ledger_e2e.py"
+    "::test_audit_prune_audit_repairs_injected_ghost_without_deleting_bytes",
+    "tests/integration/test_virtual_package_lifecycle_matrix.py"
+    "::test_virtual_throttle_fallback_records_fetch_head_sha_and_content_hash",
+)
+MERGE_GROUP_INTEGRATION_WORKFLOW = REPO_ROOT / ".github/workflows/ci-integration.yml"
+MERGE_GROUP_INTEGRATION_JOB = "integration-tests-shard"
+MERGE_GROUP_INTEGRATION_STEP = "Run integration tests (sharded + parallelized)"
+MERGE_GROUP_INTEGRATION_SCRIPT = REPO_ROOT / "scripts/test-integration.sh"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 FORBIDDEN_CREDENTIAL_ENV = ("GITHUB_APM_PAT", "ADO_APM_PAT", "GITHUB_TOKEN")
+FORBIDDEN_NETWORK_ENV = ("APM_RUN_INTEGRATION_TESTS",)
 # Covers the `${{ github.token }}` context alias, which does not contain any
 # FORBIDDEN_CREDENTIAL_ENV substring but resolves to the same automatic token.
 FORBIDDEN_CREDENTIAL_EXPRESSIONS = (*FORBIDDEN_CREDENTIAL_ENV, "github.token")
@@ -461,16 +475,13 @@ def _assert_lifecycle_smoke_marker_registered(markers: list[str]) -> None:
         "pyproject.toml's [tool.pytest.ini_options].markers so "
         "--strict-markers does not reject it"
     )
+    assert any(marker.startswith(f"{LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}:") for marker in markers), (
+        f"{LIFECYCLE_SMOKE_MERGE_GROUP_MARKER} marker must be registered"
+    )
 
 
 def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
-    """The run step must select declaratively via the `lifecycle_smoke`
-    marker expression, pass `--strict-markers`, and bound collection to
-    `tests/integration` -- never the bare `tests` root or full repo.
-    Dropping the marker expression (or widening the root) would silently
-    make this job re-run the entire integration suite inside the PR-time
-    critical path, duplicating ci-integration.yml's merge_group-only job
-    rather than staying the smallest stable hermetic subset."""
+    """The run step must select the complete lifecycle marker family."""
     step = workflow_step(job, LIFECYCLE_SMOKE_RUN_STEP)
     for tokens in shell_commands(step):
         if "pytest" not in tokens:
@@ -480,20 +491,12 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
             "or typo'd marker name fails loudly instead of silently "
             "selecting zero tests"
         )
-        assert "-m" in tokens, (
-            "lifecycle-smoke must select tests declaratively via a marker "
-            "expression (-m), not explicit file/node-id targets"
-        )
+        assert "-m" in tokens
         marker_index = tokens.index("-m")
-        assert marker_index + 1 < len(tokens), "lifecycle-smoke's -m flag is missing its value"
-        assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_MARKER, (
-            f"lifecycle-smoke's -m expression must be exactly {LIFECYCLE_SMOKE_MARKER!r}, "
-            f"got {tokens[marker_index + 1]!r}"
-        )
+        assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
         targets = [token for token in tokens if token.startswith("tests/")]
         assert targets == [LIFECYCLE_SMOKE_ROOT], (
-            f"lifecycle-smoke must bound collection to exactly {LIFECYCLE_SMOKE_ROOT!r} "
-            f"(never the full repo or bare tests/) -- got {targets!r}"
+            f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
         )
         return
     raise AssertionError("lifecycle-smoke run step contains no pytest invocation")
@@ -508,17 +511,17 @@ def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
     # test-coverage-expert independently found and proved this gap).
     job_env = job.get("env")
     if isinstance(job_env, dict):
-        for key in FORBIDDEN_CREDENTIAL_ENV:
+        for key in (*FORBIDDEN_CREDENTIAL_ENV, *FORBIDDEN_NETWORK_ENV):
             assert key not in job_env, f"lifecycle-smoke job-level env must not bind {key}"
 
     for step in _run_steps(job):
         env = step.get("env")
         if isinstance(env, dict):
-            for key in FORBIDDEN_CREDENTIAL_ENV:
+            for key in (*FORBIDDEN_CREDENTIAL_ENV, *FORBIDDEN_NETWORK_ENV):
                 assert key not in env, f"lifecycle-smoke step must not bind {key}"
         run = step.get("run")
         if isinstance(run, str):
-            for key in FORBIDDEN_CREDENTIAL_ENV:
+            for key in (*FORBIDDEN_CREDENTIAL_ENV, *FORBIDDEN_NETWORK_ENV):
                 assert key not in run, f"lifecycle-smoke step must not reference {key}"
         # `with:` values can smuggle a credential expression (e.g. a
         # checkout `token:` input) past the env/run-only checks above.
@@ -531,6 +534,29 @@ def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
                     assert key not in value, (
                         f"lifecycle-smoke step `with:` must not reference {key}"
                     )
+
+
+def _assert_lifecycle_smoke_e2e_mode(job: WorkflowNode) -> None:
+    """Pin the non-network E2E opt-in to the pytest step only."""
+    job_env = job.get("env")
+    assert not isinstance(job_env, dict) or LIFECYCLE_SMOKE_E2E_ENV not in job_env, (
+        f"{LIFECYCLE_SMOKE_E2E_ENV} must not be job-level"
+    )
+
+    run_step = workflow_step(job, LIFECYCLE_SMOKE_RUN_STEP)
+    assert run_step.get("env") == {
+        LIFECYCLE_SMOKE_E2E_ENV: LIFECYCLE_SMOKE_E2E_VALUE,
+    }, (
+        f"{LIFECYCLE_SMOKE_RUN_STEP!r} must bind exactly "
+        f"{LIFECYCLE_SMOKE_E2E_ENV}={LIFECYCLE_SMOKE_E2E_VALUE!r}"
+    )
+    for step in _run_steps(job):
+        if step is run_step:
+            continue
+        env = step.get("env")
+        assert not isinstance(env, dict) or LIFECYCLE_SMOKE_E2E_ENV not in env, (
+            f"{LIFECYCLE_SMOKE_E2E_ENV} must appear only on {LIFECYCLE_SMOKE_RUN_STEP!r}"
+        )
 
 
 def _assert_lifecycle_smoke_required(merge_gate: WorkflowNode) -> None:
@@ -574,14 +600,60 @@ def _assert_marker_collection_non_empty(marker: str) -> None:
     assert "collected" in result.stdout, f"expected a collection summary, got: {result.stdout}"
 
 
-def _assert_lifecycle_smoke_collection_non_empty() -> None:
-    """Proves the marker-based family is non-empty right now: a real
-    `--collect-only` subprocess run against the exact CI invocation. If
-    every `@pytest.mark.lifecycle_smoke` were stripped from the four
-    modules and the AC14 function, pytest would exit 5 ("no tests
-    collected") -- exactly what the CI job itself would do, per
-    test_lifecycle_smoke_marker_family_empty_fails below."""
-    _assert_marker_collection_non_empty(LIFECYCLE_SMOKE_MARKER)
+def _collect_lifecycle_nodes(expression: str) -> tuple[str, ...]:
+    """Collect one lifecycle marker expression under the required environment."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "--collect-only",
+            "--strict-markers",
+            "-m",
+            expression,
+            LIFECYCLE_SMOKE_ROOT,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env={**os.environ, LIFECYCLE_SMOKE_E2E_ENV: LIFECYCLE_SMOKE_E2E_VALUE},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return tuple(line for line in result.stdout.splitlines() if line.startswith("tests/"))
+
+
+def _assert_lifecycle_marker_partition(
+    *,
+    expected_full_count: int = LIFECYCLE_SMOKE_FULL_COUNT,
+    expected_merge_group_nodes: tuple[str, ...] = LIFECYCLE_SMOKE_MERGE_GROUP_NODES,
+    expected_required_count: int = LIFECYCLE_SMOKE_REQUIRED_COUNT,
+) -> None:
+    """Pin the full, merge-group-only, and required marker partition."""
+    full = _collect_lifecycle_nodes(LIFECYCLE_SMOKE_FULL_EXPRESSION)
+    merge_group = _collect_lifecycle_nodes(LIFECYCLE_SMOKE_MERGE_GROUP_MARKER)
+    required = _collect_lifecycle_nodes(LIFECYCLE_SMOKE_REQUIRED_EXPRESSION)
+    assert len(full) == expected_full_count
+    assert merge_group == expected_merge_group_nodes
+    assert len(merge_group) == LIFECYCLE_SMOKE_MERGE_GROUP_COUNT
+    assert len(required) == expected_required_count
+    assert set(required).isdisjoint(merge_group)
+    assert set(required) | set(merge_group) == set(full)
+
+
+def _assert_merge_group_full_lifecycle_path() -> None:
+    """Pin the merge-group workflow path that executes the full integration root."""
+    workflow = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    job = workflow_job(workflow, MERGE_GROUP_INTEGRATION_JOB)
+    step = workflow_step(job, MERGE_GROUP_INTEGRATION_STEP)
+    assert step["env"][LIFECYCLE_SMOKE_E2E_ENV] == LIFECYCLE_SMOKE_E2E_VALUE
+    assert "uv run ./scripts/test-integration.sh" in step["run"]
+    script = MERGE_GROUP_INTEGRATION_SCRIPT.read_text(encoding="utf-8")
+    assert "pytest tests/integration/ -v" in script
 
 
 def test_lifecycle_smoke_is_required_and_hermetic() -> None:
@@ -607,8 +679,10 @@ def test_lifecycle_smoke_is_required_and_hermetic() -> None:
 
     _assert_lifecycle_smoke_marker_registered(_pytest_ini_markers())
     _assert_lifecycle_smoke_command(job)
+    _assert_lifecycle_smoke_e2e_mode(job)
     _assert_lifecycle_smoke_hermetic(job)
-    _assert_lifecycle_smoke_collection_non_empty()
+    _assert_lifecycle_marker_partition()
+    _assert_merge_group_full_lifecycle_path()
 
     merge_gate = load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml")
     _assert_lifecycle_smoke_required(merge_gate)
@@ -619,30 +693,27 @@ def provisional_lifecycle_job(provisional_ci: WorkflowNode) -> WorkflowNode:
     return workflow_job(provisional_ci, LIFECYCLE_SMOKE_JOB)
 
 
-def test_lifecycle_smoke_marker_expression_dropped_fails(
+def test_lifecycle_smoke_exclusion_dropped_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    """Proves the guard fails if the `-m lifecycle_smoke` marker
-    expression is silently dropped -- without it, this job would
-    silently re-run the ENTIRE tests/integration suite inside the
-    PR-time critical path, duplicating ci-integration.yml's
-    merge_group-only job and blowing the 60-90s time budget."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace("-m lifecycle_smoke ", "")
+    step["run"] = step["run"].replace(
+        LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
+        LIFECYCLE_SMOKE_FULL_EXPRESSION,
+    )
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
 
 
-def test_lifecycle_smoke_wrong_marker_expression_fails(
+def test_lifecycle_smoke_marker_expression_substitution_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    """Proves the guard fails if the marker expression is swapped for a
-    different, broader, pre-existing marker (e.g. `integration`) --
-    which would still select *some* tests but silently change this job's
-    curated scope away from the lifecycle_smoke family."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace("lifecycle_smoke", "integration")
+    step["run"] = step["run"].replace(
+        LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
+        "lifecycle_smoke or lifecycle_merge_group",
+    )
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
@@ -651,10 +722,6 @@ def test_lifecycle_smoke_wrong_marker_expression_fails(
 def test_lifecycle_smoke_unbounded_root_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    """Proves the guard fails if the collection root is silently widened
-    from tests/integration to the full tests/ tree -- even with the
-    marker expression intact, collecting over the entire suite adds
-    unbounded, unbudgeted collection overhead to every PR."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
     step["run"] = step["run"].replace("tests/integration", "tests")
 
@@ -674,6 +741,39 @@ def test_lifecycle_smoke_strict_markers_flag_dropped_fails(
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_e2e_flag_dropped_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step.pop("env")
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_e2e_mode(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_e2e_flag_wrong_value_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["env"][LIFECYCLE_SMOKE_E2E_ENV] = "true"
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_e2e_mode(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_e2e_flag_at_job_level_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step.pop("env")
+    provisional_lifecycle_job["env"] = {
+        LIFECYCLE_SMOKE_E2E_ENV: LIFECYCLE_SMOKE_E2E_VALUE,
+    }
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_e2e_mode(provisional_lifecycle_job)
 
 
 def test_lifecycle_smoke_marker_not_registered_fails() -> None:
@@ -699,6 +799,20 @@ def test_lifecycle_smoke_marker_family_empty_fails() -> None:
         _assert_marker_collection_non_empty("lifecycle_smoke_nonexistent_probe_marker")
 
 
+def test_lifecycle_smoke_membership_drift_fails() -> None:
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_marker_partition(
+            expected_merge_group_nodes=LIFECYCLE_SMOKE_MERGE_GROUP_NODES[:-1],
+        )
+
+
+def test_lifecycle_smoke_selected_count_drift_fails() -> None:
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_marker_partition(
+            expected_required_count=LIFECYCLE_SMOKE_REQUIRED_COUNT - 1,
+        )
+
+
 def test_lifecycle_smoke_credential_env_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
@@ -707,6 +821,16 @@ def test_lifecycle_smoke_credential_env_fails(
     critical path depends on."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
     step["env"] = {"GITHUB_APM_PAT": "${{ secrets.GITHUB_APM_PAT }}"}
+
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_hermetic(provisional_lifecycle_job)
+
+
+def test_lifecycle_smoke_network_integration_env_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["env"]["APM_RUN_INTEGRATION_TESTS"] = "1"
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_hermetic(provisional_lifecycle_job)
