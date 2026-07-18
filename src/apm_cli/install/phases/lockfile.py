@@ -445,7 +445,8 @@ class LockfileBuilder:
                 self.ctx.logger.verbose_detail(
                     "MCP state unchanged -- carrying forward "
                     f"{len(lockfile.mcp_servers)} server(s), "
-                    f"{len(lockfile.mcp_configs)} config(s)"
+                    f"{len(lockfile.mcp_configs)} config(s), "
+                    f"{len(lockfile.mcp_target_servers)} target mapping(s)"
                 )
 
     def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:
