@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Target contraction during `apm install` no longer reintroduces an
   inactive target's missing local deployment path after the canonical
   reconciliation pass removed it, so a fresh checkout converges to an
-  audit-clean lockfile in one install (release validation run 29634869304).
+  audit-clean lockfile in one install (#2310).
 - Selective `apm update <package>` plans no longer report unselected direct or
   transitive dependencies as removed; dependencies absent from the complete
   post-update graph are still reported as removals -- reported by
