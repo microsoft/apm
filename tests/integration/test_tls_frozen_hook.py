@@ -21,6 +21,7 @@ import subprocess
 import sys
 import types
 from pathlib import Path
+from unittest.mock import Mock
 
 import certifi
 import pytest
@@ -151,16 +152,24 @@ def test_frozen_hook_ssl_cert_file_does_not_disable_injection():
     assert "truststore" in ssl.SSLContext.__module__
 
 
-def test_user_override_still_wins_under_frozen_hook():
+@_requires_truststore
+def test_user_override_still_wins_under_frozen_hook(monkeypatch):
     # A user-pinned REQUESTS_CA_BUNDLE makes the hook leave SSL_CERT_FILE unset,
     # and we must honour that bundle rather than inject the OS store.
+    import truststore
+
+    truststore.inject_into_ssl()
+    assert "truststore" in ssl.SSLContext.__module__
+    inject = Mock()
+    monkeypatch.setattr(truststore, "inject_into_ssl", inject)
+
     os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
     sys.frozen = True
     _run_runtime_hook()
 
     assert os.environ.get("SSL_CERT_FILE") is None
     assert configure_tls_trust() is False
-    assert "truststore" not in ssl.SSLContext.__module__
+    inject.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
