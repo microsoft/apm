@@ -284,6 +284,7 @@ class LockfileBuilder:
                 current_run_trusted=diagnostics.count_for_package(dep_key, "error") == 0,
                 owner=dep_key,
                 include_ledger=True,
+                cleanup_dropped=not getattr(self.ctx, "lockfile_only", False),
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;

@@ -408,6 +408,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     current_run_trusted: bool = True,
     owner: str = "legacy",
     include_ledger: bool = False,
+    cleanup_dropped: bool = True,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths."""
     files, hashes, ledger = union_preserving(
@@ -426,6 +427,10 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     )
     dropped = set(prior_files) - set(files)
     if not dropped:
+        if include_ledger:
+            return files, hashes, ledger
+        return files, hashes
+    if not cleanup_dropped:
         if include_ledger:
             return files, hashes, ledger
         return files, hashes

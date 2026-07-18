@@ -16,7 +16,7 @@ apm lock export [OPTIONS]
 
 ## Description
 
-`apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, cleanup, post-deps-local, and audit phases. The integrate phase still runs but deploys nothing because the target set is empty in lockfile-only mode -- no files are copied to `.github/`, `.agents/`, or any other harness directory.
+`apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, cleanup, post-deps-local, and audit phases. The integrate phase still runs but deploys nothing because the target set is empty in lockfile-only mode -- no files are copied to or deleted from `.github/`, `.agents/`, or any other harness directory.
 
 Use `apm lock` to:
 
@@ -66,8 +66,8 @@ apm lock --verbose
 ## Behavior
 
 - **Resolve and download.** Every dependency in `apm.yml` is resolved and, if not already cached, downloaded. Fresh downloads pin the commit SHA and compute a content hash.
-- **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. `deployed_files` entries are empty because no files are deployed.
-- **No files deployed.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
+- **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. Existing `deployed_files` rows may be reconciled with the declared target set, but no on-disk deployed files are pruned.
+- **No files deployed or deleted.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
 
 ## Export (SBOM inventory)
