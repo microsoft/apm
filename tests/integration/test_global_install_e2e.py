@@ -203,9 +203,10 @@ class TestGlobalInstallDeploysRealPackage:
 
         # Manifest should no longer list the package.
         manifest_after = yaml.safe_load((apm_dir / "apm.yml").read_text(encoding="utf-8"))
+        assert isinstance(manifest_after, dict)
         apm_deps = manifest_after.get("dependencies", {}).get("apm", []) or []
-        assert SAMPLE_PKG not in apm_deps, (
-            f"{SAMPLE_PKG} still in ~/.apm/apm.yml after uninstall: {apm_deps}"
+        assert apm_deps == [], (
+            f"~/.apm/apm.yml should have no apm dependencies after uninstall: {apm_deps}"
         )
 
         # Previously deployed primitive files must be gone.
