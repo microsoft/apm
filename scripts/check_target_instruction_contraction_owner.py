@@ -10,6 +10,7 @@ from pathlib import Path
 _MANIFEST_OWNER = "reconcile_target_deployed_files"
 _LIFECYCLE_ROUTER = "_reconcile_target_deployed_files"
 _CLEANUP_OWNER = "reconcile_deployed_block"
+_LOCAL_POST_PHASE = "run"
 
 
 def _function_calls(source: str) -> dict[str, set[str]]:
@@ -29,10 +30,15 @@ def _function_calls(source: str) -> dict[str, set[str]]:
     return calls
 
 
-def analyze_sources(manifest_source: str, lockfile_source: str) -> list[str]:
+def analyze_sources(
+    manifest_source: str,
+    lockfile_source: str,
+    post_local_source: str,
+) -> list[str]:
     """Return violations of target-file contraction ownership."""
     manifest_calls = _function_calls(manifest_source)
     lockfile_calls = _function_calls(lockfile_source)
+    post_local_calls = _function_calls(post_local_source)
     violations: list[str] = []
 
     if _MANIFEST_OWNER not in manifest_calls:
@@ -53,6 +59,12 @@ def analyze_sources(manifest_source: str, lockfile_source: str) -> list[str]:
         violations.append(
             "LockfileBuilder must route target contraction through manifest_reconcile"
         )
+    if "remove_stale_deployed_files" in post_local_calls.get(_LOCAL_POST_PHASE, set()):
+        violations.append("post-deps local must not delete target files directly")
+    if _CLEANUP_OWNER not in post_local_calls.get(_LOCAL_POST_PHASE, set()):
+        violations.append(
+            "post-deps local must route target contraction through reconcile_deployed_block"
+        )
     return violations
 
 
@@ -60,9 +72,11 @@ def analyze_paths(root: Path) -> list[str]:
     """Analyze the repository's manifest and install lifecycle consumers."""
     manifest_path = root / "src/apm_cli/install/manifest_reconcile.py"
     lockfile_path = root / "src/apm_cli/install/phases/lockfile.py"
+    post_local_path = root / "src/apm_cli/install/phases/post_deps_local.py"
     return analyze_sources(
         manifest_path.read_text(encoding="utf-8"),
         lockfile_path.read_text(encoding="utf-8"),
+        post_local_path.read_text(encoding="utf-8"),
     )
 
 

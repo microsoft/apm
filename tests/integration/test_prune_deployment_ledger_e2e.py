@@ -333,8 +333,9 @@ def test_audit_prune_audit_repairs_injected_ghost_without_deleting_bytes(
     )
     _assert_exit(ci_audit, expected=1)
     ci_report = json.loads(before_ci.read_text(encoding="utf-8"))
-    assert ci_report["checks"][1]["name"] == "deployment-ledger-owners"
-    assert ci_report["checks"][1]["passed"] is False
+    checks = {check["name"]: check for check in ci_report["checks"]}
+    assert checks["ref-consistency"]["passed"] is True
+    assert checks["deployment-ledger-owners"]["passed"] is False
 
     prune = runner.run(
         ("prune",),

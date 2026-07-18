@@ -141,15 +141,13 @@ def test_install_repairs_ghost_before_fresh_checkout_audit(tmp_path: Path, monke
 
     repair = _invoke(runner, checkout, monkeypatch, "install", "--target", "copilot", "--verbose")
     assert repair.exit_code == 0, repair.output
-    assert f"Removed stale lockfile path {GHOST}" in repair.output
-    assert f"Removed stale local lockfile path {GHOST}" in repair.output
-    assert "Repaired 1 inactive-target lockfile entry" in repair.output
-    assert "Repaired 1 inactive-target local lockfile entry" in repair.output
 
     repaired_lock = yaml.safe_load((checkout / "apm.lock.yaml").read_text(encoding="utf-8"))
     deployed = (repaired_lock.get("dependencies") or [])[0].get("deployed_files") or []
     assert GHOST not in deployed
     assert GHOST not in (repaired_lock.get("local_deployed_files") or [])
+    assert GHOST not in {record.get("value") for record in (repaired_lock.get("deployments") or [])}
+    assert not (checkout / GHOST).exists()
 
     clean_audit = _invoke(
         runner, checkout, monkeypatch, "audit", "--ci", "--no-policy", "--no-fail-fast"

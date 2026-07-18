@@ -45,8 +45,12 @@ def reconcile_deployed_state():
 def _reconcile_target_deployed_files():
     remove_stale_deployed_files()
 """
+    post_local_source = """
+def run():
+    reconcile_deployed_block()
+"""
 
-    assert checker.analyze_sources(manifest_source, lockfile_source) == [
+    assert checker.analyze_sources(manifest_source, lockfile_source, post_local_source) == [
         "LockfileBuilder must not delete target files directly",
         "LockfileBuilder must route target contraction through manifest_reconcile",
     ]
@@ -69,7 +73,39 @@ def reconcile_deployed_state():
 def _reconcile_target_deployed_files():
     reconcile_target_deployed_files()
 """
+    post_local_source = """
+def run():
+    reconcile_deployed_block()
+"""
 
-    assert checker.analyze_sources(manifest_source, lockfile_source) == [
+    assert checker.analyze_sources(manifest_source, lockfile_source, post_local_source) == [
         "target-file contraction owner must delegate deletion through reconcile_deployed_block"
+    ]
+
+
+def test_checker_rejects_post_deps_local_direct_cleanup_mutation() -> None:
+    """Local persistence must not bypass the canonical reconciliation block."""
+    checker = _load_checker()
+    manifest_source = """
+def reconcile_deployed_block():
+    remove_stale_deployed_files()
+
+def reconcile_target_deployed_files():
+    reconcile_deployed_block()
+
+def reconcile_deployed_state():
+    reconcile_target_deployed_files()
+"""
+    lockfile_source = """
+def _reconcile_target_deployed_files():
+    reconcile_target_deployed_files()
+"""
+    post_local_source = """
+def run():
+    remove_stale_deployed_files()
+"""
+
+    assert checker.analyze_sources(manifest_source, lockfile_source, post_local_source) == [
+        "post-deps local must not delete target files directly",
+        "post-deps local must route target contraction through reconcile_deployed_block",
     ]

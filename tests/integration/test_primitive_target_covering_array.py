@@ -146,16 +146,13 @@ def _feature_flags(row: _Row) -> tuple[str, ...]:
 
 
 def _expected_ledger_targets(row: _Row, targets: tuple[str, ...] | None = None) -> set[str]:
-    """Resolve ledger target ownership through each canonical primitive mapping."""
+    """Resolve ledger ownership through each canonical target profile."""
     owners = set()
     for target_name in targets or row.targets:
         profile = KNOWN_TARGETS[target_name].for_scope(user_scope=row.user_scope)
         assert profile is not None
-        for primitive in row.primitives:
-            if primitive not in profile.primitives:
-                continue
-            mapping = profile.primitives[primitive]
-            owners.add("agents" if mapping.deploy_root == ".agents" else target_name)
+        if any(primitive in profile.primitives for primitive in row.primitives):
+            owners.add(profile.name)
     return owners
 
 

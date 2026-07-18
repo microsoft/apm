@@ -198,7 +198,6 @@ class InstallContext:
     # ------------------------------------------------------------------
     old_local_deployed: list[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: list[str] = field(default_factory=list)  # integrate (root)
-    local_cleanup_retained: dict[str, str | None] = field(default_factory=dict)
     local_content_errors_before: int = 0  # integrate (pre-root)
 
     # ------------------------------------------------------------------
