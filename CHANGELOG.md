@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- MCP lockfile ownership now follows declared `apm.yml` `targets:` before local runtime detection, so teammates with different harnesses installed stop rewriting `mcp_target_servers` differently -- by @rrazvd (closes #2298) (#2302).
+- MCP lockfile ownership now follows declared `apm.yml` `targets:` before local runtime detection, so teammates with different harnesses installed stop rewriting `mcp_target_servers` differently -- by @rrazvd (closes #2298) (#2307).
 - `apm audit --ci` now surfaces the safe remediation when a lockfile's source
   identity is tampered. A rewritten dependency `host`/`repo_url` trips both the
   external `ref-consistency` check (remedy `apm install --update`, which

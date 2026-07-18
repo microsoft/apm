@@ -8,7 +8,7 @@ live network calls or installed runtimes.
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -828,6 +828,35 @@ class TestInstallProjectRootDetection:
 
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.integration.mcp_integrator_install._discover_installed_runtimes")
+    def test_explicit_runtime_overrides_manifest_and_machine(
+        self, mock_discover, mock_install_rt, mock_ops_cls, tmp_path
+    ):
+        """The legacy explicit runtime flag outranks manifest and discovery."""
+        nested = tmp_path / "nested-project"
+        nested.mkdir()
+        mock_discover.return_value = ["codex"]
+        mock_install_rt.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        MCPIntegrator.install(
+            mcp_deps=["test/server"],
+            runtime="cursor",
+            project_root=nested,
+            apm_config={"targets": ["claude"]},
+        )
+
+        assert {call.args[0] for call in mock_install_rt.call_args_list} == {"cursor"}
+        mock_discover.assert_not_called()
+
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.runtime.manager.RuntimeManager")
     @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
     def test_exclude_applies_to_declared_targets(
@@ -847,6 +876,7 @@ class TestInstallProjectRootDetection:
         mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
         mock_ops.collect_environment_variables.return_value = {}
         mock_ops.collect_runtime_variables.return_value = {}
+        logger = MagicMock()
 
         with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
             MCPIntegrator.install(
@@ -854,10 +884,28 @@ class TestInstallProjectRootDetection:
                 exclude="cursor",
                 project_root=nested,
                 apm_config={"targets": ["copilot", "cursor"]},
+                logger=logger,
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
         assert called_runtimes == {"copilot"}
+        logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
+
+    @patch("apm_cli.integration.mcp_integrator_install._discover_installed_runtimes")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    def test_invalid_manifest_does_not_fall_through_to_machine_discovery(
+        self, mock_install_rt, mock_discover, tmp_path
+    ):
+        """Malformed target declarations fail closed before machine discovery."""
+        result = MCPIntegrator.install(
+            mcp_deps=["test/server"],
+            project_root=tmp_path,
+            apm_config={"target": "claude", "targets": ["copilot"]},
+        )
+
+        assert result == 0
+        mock_discover.assert_not_called()
+        mock_install_rt.assert_not_called()
 
 
 # ===========================================================================
