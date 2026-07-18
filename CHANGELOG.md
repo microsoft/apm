@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Transient GitHub REST pre-flight failures no longer reject an otherwise
+  downloadable package; connection failures, timeouts, HTTP 408, throttles,
+  and 5xx responses now defer to the authoritative download while TLS,
+  authentication, permission, and not-found failures remain closed. (#2313)
 - Target contraction during `apm install` no longer reintroduces an
   inactive target's missing local deployment path after the canonical
   reconciliation pass removed it, so a fresh checkout converges to an

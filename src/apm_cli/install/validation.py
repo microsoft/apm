@@ -52,6 +52,15 @@ from .errors import AuthenticationError
 _TLS_ERROR_PREFIX = "TLS verification failed"
 
 
+class _GitHubRestStatusError(RuntimeError):
+    """Preserve a failed GitHub REST response status across auth fallback."""
+
+    def __init__(self, status_code: int, reason: str) -> None:
+        self.status_code = status_code
+        self.reason = reason
+        super().__init__(f"GitHub API returned HTTP {status_code}: {reason}")
+
+
 def _is_tls_failure(exc: BaseException) -> bool:
     """Return True if exc (or any cause in its chain) is a TLS verification failure."""
     cur: BaseException | None = exc
@@ -65,6 +74,38 @@ def _is_tls_failure(exc: BaseException) -> bool:
         cur = cur.__cause__ or cur.__context__
         seen += 1
     return False
+
+
+def _inconclusive_github_probe_detail(exc: BaseException) -> str | None:
+    """Describe failures that leave repository accessibility unproven."""
+    if _is_tls_failure(exc):
+        return None
+    if isinstance(exc, _GitHubRestStatusError):
+        if exc.status_code == 408 or 500 <= exc.status_code < 600:
+            return f"HTTP {exc.status_code}"
+        return None
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "request timeout"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "connection failure"
+    return None
+
+
+def _allow_download_after_inconclusive_github_probe(
+    exc: BaseException,
+    host_display: str,
+    verbose_log,
+) -> bool:
+    """Let the downloader decide only when the REST probe was inconclusive."""
+    detail = _inconclusive_github_probe_detail(exc)
+    if detail is None:
+        return False
+    if verbose_log:
+        verbose_log(
+            f"GitHub API pre-flight for {host_display} was inconclusive ({detail}); "
+            "continuing because the download step will verify repository access"
+        )
+    return True
 
 
 def _log_rate_limit_allow(host_display: str, verbose_log, logger) -> None:
@@ -643,11 +684,8 @@ def _validate_github_package(
             verbose_log(f"API {api_url} -> {resp.status_code}")
         if resp.ok:
             return True
-        if resp.status_code == 404 and token:
-            # 404 with token could mean no access -- raise to trigger fallback
-            raise RuntimeError(f"API returned {resp.status_code}")
         raise_for_github_throttle(resp, host_info.display_name)
-        raise RuntimeError(f"API returned {resp.status_code}: {resp.reason}")
+        raise _GitHubRestStatusError(resp.status_code, resp.reason)
 
     try:
         return auth_resolver.try_with_fallback(
@@ -669,6 +707,10 @@ def _validate_github_package(
         if _is_tls_failure(exc):
             _log_tls_failure(host_info.display_name, exc, verbose_log, logger)
             return False
+        if _allow_download_after_inconclusive_github_probe(
+            exc, host_info.display_name, verbose_log
+        ):
+            return True
         if verbose_log:
             try:
                 ctx = auth_resolver.build_error_context(
@@ -745,7 +787,7 @@ def _validate_parse_failure_fallback(
         if verbose_log:
             verbose_log(f"API fallback -> {resp.status_code} {resp.reason}")
         raise_for_github_throttle(resp, host_info.display_name)
-        raise RuntimeError(f"API returned {resp.status_code}")
+        raise _GitHubRestStatusError(resp.status_code, resp.reason)
 
     try:
         return auth_resolver.try_with_fallback(
@@ -764,6 +806,8 @@ def _validate_parse_failure_fallback(
             # See note above: logged once here, skip auth context render.
             _log_tls_failure(host, exc, verbose_log, logger)
             return False
+        if _allow_download_after_inconclusive_github_probe(exc, host, verbose_log):
+            return True
         if verbose_log:
             try:
                 ctx = auth_resolver.build_error_context(
