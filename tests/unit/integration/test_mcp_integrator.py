@@ -8,7 +8,7 @@ live network calls or installed runtimes.
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -755,12 +755,53 @@ class TestInstallProjectRootDetection:
     def test_install_uses_explicit_project_root_for_workspace_runtime_detection(
         self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
     ):
+        # A single, unambiguous directory signal in `nested` (none in
+        # `tmp_path`/cwd) isolates what this test asserts: auto-detection
+        # (and the active-targets gate it feeds) probes the explicit
+        # `project_root`, not `Path.cwd()`. apm.yml declares no `targets:`
+        # here -- a manifest-declared value now resolves MCP ownership
+        # deterministically from the declaration itself (issue #2298) and
+        # would bypass the auto-detection this test exercises; see
+        # `test_declared_targets_override_local_runtime_detection` below for
+        # that path.
         nested = tmp_path / "nested-project"
         (nested / ".cursor").mkdir(parents=True)
-        (nested / ".opencode").mkdir()
-        (nested / ".vscode").mkdir()
-        # Copilot's project profile detects on `.github/` (targets.py:330);
-        # without it the active-targets gate would drop vscode here.
+
+        mock_mgr = mock_mgr_cls.return_value
+        mock_mgr.is_runtime_available.return_value = False
+        mock_install_rt.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+            MCPIntegrator.install(
+                mcp_deps=["test/server"],
+                project_root=nested,
+            )
+
+        called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
+        assert called_runtimes == {"cursor"}
+
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    def test_declared_targets_override_local_runtime_detection(
+        self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
+    ):
+        """Regression for #2298: declared `targets:` must not gain undeclared runtimes.
+
+        `.vscode/` exists on disk (as it would on one developer's machine
+        but not another's) but is NOT declared, so it must not be
+        targeted even though it would otherwise be auto-detected.
+        """
+        nested = tmp_path / "nested-project"
+        (nested / ".vscode").mkdir(parents=True)
         (nested / ".github").mkdir()
 
         mock_mgr = mock_mgr_cls.return_value
@@ -778,19 +819,93 @@ class TestInstallProjectRootDetection:
             MCPIntegrator.install(
                 mcp_deps=["test/server"],
                 project_root=nested,
-                # Declare every target the multi-signal nested project
-                # supports. Without this, the strict resolver raises
-                # AmbiguousHarnessError on >=2 signals (cursor, opencode,
-                # copilot from .github/) and the gate fails closed -- which
-                # is correct UX in production but obscures what THIS test
-                # is asserting (workspace project_root resolution).
                 apm_config={"targets": ["copilot", "cursor", "opencode"]},
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert "vscode" in called_runtimes
-        assert "cursor" in called_runtimes
-        assert "opencode" in called_runtimes
+        assert called_runtimes == {"copilot", "cursor", "opencode"}
+        assert "vscode" not in called_runtimes
+
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.integration.mcp_integrator_install._discover_installed_runtimes")
+    def test_explicit_runtime_overrides_manifest_and_machine(
+        self, mock_discover, mock_install_rt, mock_ops_cls, tmp_path
+    ):
+        """The legacy explicit runtime flag outranks manifest and discovery."""
+        nested = tmp_path / "nested-project"
+        nested.mkdir()
+        mock_discover.return_value = ["codex"]
+        mock_install_rt.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        MCPIntegrator.install(
+            mcp_deps=["test/server"],
+            runtime="cursor",
+            project_root=nested,
+            apm_config={"targets": ["claude"]},
+        )
+
+        assert {call.args[0] for call in mock_install_rt.call_args_list} == {"cursor"}
+        mock_discover.assert_not_called()
+
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    def test_exclude_applies_to_declared_targets(
+        self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
+    ):
+        """Regression: --exclude must still drop a runtime from a declared `targets:` list."""
+        nested = tmp_path / "nested-project"
+        nested.mkdir()
+
+        mock_mgr = mock_mgr_cls.return_value
+        mock_mgr.is_runtime_available.return_value = False
+        mock_install_rt.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+        logger = MagicMock()
+
+        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+            MCPIntegrator.install(
+                mcp_deps=["test/server"],
+                exclude="cursor",
+                project_root=nested,
+                apm_config={"targets": ["copilot", "cursor"]},
+                logger=logger,
+            )
+
+        called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
+        assert called_runtimes == {"copilot"}
+        logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
+
+    @patch("apm_cli.integration.mcp_integrator_install._discover_installed_runtimes")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    def test_invalid_manifest_does_not_fall_through_to_machine_discovery(
+        self, mock_install_rt, mock_discover, tmp_path
+    ):
+        """Malformed target declarations fail closed before machine discovery."""
+        result = MCPIntegrator.install(
+            mcp_deps=["test/server"],
+            project_root=tmp_path,
+            apm_config={"target": "claude", "targets": ["copilot"]},
+        )
+
+        assert result == 0
+        mock_discover.assert_not_called()
+        mock_install_rt.assert_not_called()
 
 
 # ===========================================================================

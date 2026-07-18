@@ -678,6 +678,22 @@ if [ "$deployment_owner_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC19: MCP manifest target precedence authority"
+mcp_manifest_adapter=$(
+    awk '
+        /^def _declared_manifest_target_runtimes\(/ { capture = 1 }
+        /^def _resolve_target_runtimes\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/integration/mcp_integrator_install.py
+)
+if ! grep -q 'parse_targets_field(apm_config)' <<<"$mcp_manifest_adapter" \
+    || grep -Eq \
+        'TARGET_CAPABILITIES|CANONICAL_TARGETS|KNOWN_TARGETS|\[[^]]*(copilot|claude|cursor|codex|gemini|opencode|windsurf|kiro)' \
+        <<<"$mcp_manifest_adapter"; then
+    echo "[x] MCP manifest target selection must route through parse_targets_field"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

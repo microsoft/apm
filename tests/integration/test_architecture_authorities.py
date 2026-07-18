@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import shutil
 import subprocess
@@ -531,6 +532,36 @@ def test_target_catalog_matches_native_profiles() -> None:
         if capability.primitive_profile is not None and not capability.mcp_only
     }
     assert set(KNOWN_TARGETS) == expected
+
+
+def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> None:
+    """MCP precedence may adapt canonical targets but must not fork vocabulary."""
+    root = Path(__file__).parents[2]
+    source_path = root / "src/apm_cli/integration/mcp_integrator_install.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    adapter = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_declared_manifest_target_runtimes"
+    )
+    calls = {
+        node.func.id
+        for node in ast.walk(adapter)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    local_string_collections = [
+        node
+        for node in ast.walk(adapter)
+        if isinstance(node, (ast.List, ast.Set, ast.Tuple))
+        and any(
+            isinstance(item, ast.Constant) and isinstance(item.value, str) for item in node.elts
+        )
+    ]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "parse_targets_field" in calls
+    assert local_string_collections == []
+    assert "MCP manifest target selection must route through parse_targets_field" in guard
 
 
 @pytest.mark.parametrize(

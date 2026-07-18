@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP lockfile ownership now follows declared `apm.yml` `targets:` before local runtime detection, so teammates with different harnesses installed stop rewriting `mcp_target_servers` differently -- by @rrazvd (closes #2298) (#2307).
 - Selective `apm update <package>` plans no longer report unselected direct or
   transitive dependencies as removed; dependencies absent from the complete
   post-update graph are still reported as removals -- reported by
