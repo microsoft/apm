@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **103 normative statements** indexed in
+- OpenAPM v0.1 carries **104 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -541,12 +541,24 @@ and MUST NOT use both on the same entry.
 | `ref`    | no                                      | Branch, tag, semver range, or commit SHA (git form).                  |
 | `path`   | no / yes (local form)                   | Subpath within repo, or local filesystem path.                        |
 | `alias`  | no                                      | Local alias.                                                          |
-| `skills` | no                                      | Skill-subset selection for skill collections (see [Section 8.1](#81-primitive-types)). |
+| `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
 
 <a id="req-mf-011"></a>
 **[req-mf-011]** A conforming **consumer** implementation MUST reject
 any object-form entry that sets both `id:` and `git:` on the same
 entry. The diagnostic MUST name the entry and the conflicting keys.
+
+<a id="req-mf-022"></a>
+**[req-mf-022]** A conforming **consumer** implementation that applies
+a non-empty `skills:` subset to a dependency that exposes selectable
+skills (see [Section 8.1](#81-primitive-types)) and deploys zero skills
+from that dependency because no selected name matches an available
+skill MUST emit a default-visible diagnostic before the install
+operation returns. The diagnostic MUST identify the dependency, the
+requested skill names, and the available skill names (or state that
+none are available). The consumer MAY complete the overall install
+successfully when no other error exists; this requirement does not turn
+a stale persisted subset into an install failure.
 
 <a id="req-mf-010"></a>
 **[req-mf-010]** A conforming **consumer** implementation MUST treat
@@ -737,7 +749,8 @@ This section's normative statements are:
   [req-mf-012](#req-mf-012), [req-mf-013](#req-mf-013),
   [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
-  [req-mf-021](#req-mf-021), [req-ext-001](#req-ext-001),
+  [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
+  [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
 
@@ -805,7 +818,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `depth`                   | Tree depth (0 = self, 1 = direct, >1 = transitive).                             |
 | `resolved_by`             | `repo_url` of the parent that pulled this transitive dep.                       |
 | `package_type`            | One of `apm_package`, `skill_bundle`, etc.                                      |
-| `skill_subset`            | Selected skill names for `skill_bundle` packages.                               |
+| `skill_subset`            | Selected skill names for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
 | `deployed_files`          | Project-relative paths the consumer wrote for this entry.                       |
 | `deployed_file_hashes`    | `path -> <algo>:<hex>` for the files in `deployed_files`.                       |
 | `source`                  | `local` for path deps, `registry` for registry deps; absent for git.            |
@@ -2081,6 +2094,13 @@ the recognised package layouts:
   Artifacts are mapped into deploy directories per the plugin
   manifest.
 
+A package **exposes selectable skills** when layout resolution identifies a
+container for individually addressable named skill entries, whether that
+container currently yields zero or more entries. This includes an APM package
+with a `.apm/skills/` container, a skill collection, and a plugin collection
+with a named-skills container. A skill bundle with `SKILL.md` at its root
+deploys as a unit and does not expose selectable skills.
+
 ### 8.2 Discovery and source tracking
 
 <a id="req-pr-001"></a>
@@ -2746,7 +2766,8 @@ conformance statement identifying:
 [req-mf-012](#req-mf-012), [req-mf-013](#req-mf-013),
 [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
-[req-mf-021](#req-mf-021), [req-ext-001](#req-ext-001),
+[req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
+[req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
 [req-lk-005](#req-lk-005), [req-lk-006](#req-lk-006),
@@ -3121,6 +3142,7 @@ renumbering of conformance classes.
 | [req-mf-019](#req-mf-019)                | MUST    | 4.2.4   | consumer    |
 | [req-mf-020](#req-mf-020)                | MUST    | 4.1     | consumer    |
 | [req-mf-021](#req-mf-021)                | MUST    | 4.8     | producer    |
+| [req-mf-022](#req-mf-022)                | MUST    | 4.3.2   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-lk-001](#req-lk-001)                | MUST    | 5.1     | consumer    |
@@ -3204,7 +3226,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 103** (98 MUST, 5 SHOULD).
+**Total normative statements: 104** (99 MUST, 5 SHOULD).
 
 ---
 
@@ -3232,6 +3254,7 @@ renumbering of conformance classes.
 | 0.1.16  | 2026-07-17 | Spec-citation fold for dropped-target merge-hook reconciliation (closes the #2253 Mode-B silent-extension gate). Added [req-lk-021] (Section 5.2, consumer MUST): extends [req-lk-020]'s target-reconciliation preserve/remove decision to merge-based hook configuration and its ownership record, since that state is deliberately outside `deployed_files`/`local_deployed_files` tracking and so was never reachable by req-lk-020's literal text -- narrowing a project's declared target set now also reconciles the dropped target's consumer-owned merge-hook entries, while preserving entries not carrying consumer ownership and preserving state for targets still attributable per req-lk-020's own (a)-(c) test. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 100 -> 101 (96 MUST, 5 SHOULD). |
 | 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
+| 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

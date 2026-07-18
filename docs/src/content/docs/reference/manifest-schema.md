@@ -425,7 +425,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
-| `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a skill bundle. |
+| `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
 | `targets` | `list<string>` | OPTIONAL | Subset of canonical target keys (`copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`) | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
