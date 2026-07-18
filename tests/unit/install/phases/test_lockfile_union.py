@@ -485,6 +485,205 @@ class TestCurrentInstallGovernance:
         assert files == [uri]
         assert hashes == {uri: original_hash}
 
+    def test_stale_owner_orphan_lingering_in_files_is_removed(self, tmp_path):
+        """A shared-root value that lost its ledger owner but lingers in the
+        current claim is a physical orphan and must be routed to cleanup.
+
+        This is the shared-root skill orphan: a prior Cursor-owned
+        ``.agents/skills/<s>/SKILL.md`` row is reconciled away on a narrow to
+        Claude, yet the file lingers in the current claim (a stale-cleanup
+        retention re-insertion). It must not survive as a rowless on-disk orphan.
+        """
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        shared = ".agents/skills/scope/SKILL.md"
+        shared_path = tmp_path / shared
+        shared_path.parent.mkdir(parents=True)
+        shared_path.write_text("skill body", encoding="utf-8")
+        recorded = compute_file_hash(shared_path)
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="cursor",
+            value=shared,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("owner/pkg",),
+                    active_owner="owner/pkg",
+                    content_hash=recorded,
+                )
+            }
+        )
+
+        files, hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[shared],
+            current_hashes={shared: recorded},
+            prior_files=[shared],
+            prior_hashes={shared: recorded},
+            active_targets=[_known("claude")],
+            declared_targets=[_known("claude")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+            cleanup_retained_hashes={shared: recorded},
+        )
+
+        assert shared not in files
+        assert shared not in hashes
+        assert not shared_path.exists()
+
+    def test_stale_orphan_preserved_when_another_active_target_still_owns(self, tmp_path):
+        """The shared-root value survives while a concrete active target claims it.
+
+        When Cursor stays active alongside Claude, the reconciled ledger keeps a
+        surviving record for the shared skill, so it must never be treated as an
+        orphan even though a prior row named Cursor as owner.
+        """
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        shared = ".agents/skills/scope/SKILL.md"
+        shared_path = tmp_path / shared
+        shared_path.parent.mkdir(parents=True)
+        shared_path.write_text("skill body", encoding="utf-8")
+        recorded = compute_file_hash(shared_path)
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="cursor",
+            value=shared,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("owner/pkg",),
+                    active_owner="owner/pkg",
+                    content_hash=recorded,
+                )
+            }
+        )
+
+        files, _hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[shared],
+            current_hashes={shared: recorded},
+            prior_files=[shared],
+            prior_hashes={shared: recorded},
+            active_targets=[_known("claude"), _known("cursor")],
+            declared_targets=[_known("claude"), _known("cursor")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+        )
+
+        assert shared in files
+        assert shared_path.exists()
+
+    def test_lingering_stale_orphan_preserves_user_edits(self, tmp_path):
+        """A user-modified lingering orphan is refused by the provenance gate.
+
+        The bytes differ from the recorded hash, so the cleanup chokepoint keeps
+        the file and its prior owner row is re-established -- no data loss, no
+        rowless orphan.
+        """
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        shared = ".agents/skills/scope/SKILL.md"
+        shared_path = tmp_path / shared
+        shared_path.parent.mkdir(parents=True)
+        shared_path.write_text("user edit", encoding="utf-8")
+        recorded = "sha256:original"
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="cursor",
+            value=shared,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("owner/pkg",),
+                    active_owner="owner/pkg",
+                    content_hash=recorded,
+                )
+            }
+        )
+
+        files, hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[shared],
+            current_hashes={shared: recorded},
+            prior_files=[shared],
+            prior_hashes={shared: recorded},
+            active_targets=[_known("claude")],
+            declared_targets=[_known("claude")],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+            cleanup_retained_hashes={shared: recorded},
+        )
+
+        assert shared in files
+        assert hashes[shared] == recorded
+        assert shared_path.read_text(encoding="utf-8") == "user edit"
+
+    def test_lingering_stale_orphan_failed_cleanup_retains_row(self, tmp_path):
+        """A failed unlink fails closed: the lingering orphan keeps its row."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        shared = ".agents/skills/scope/SKILL.md"
+        recorded = "sha256:original"
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="cursor",
+            value=shared,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("owner/pkg",),
+                    active_owner="owner/pkg",
+                    content_hash=recorded,
+                )
+            }
+        )
+
+        with patch(
+            "apm_cli.integration.cleanup.remove_stale_deployed_files",
+            return_value=CleanupResult(failed=[shared]),
+        ):
+            files, hashes = reconcile_deployed_block(
+                project_root=tmp_path,
+                dep_key="owner/pkg",
+                current_files=[shared],
+                current_hashes={shared: recorded},
+                prior_files=[shared],
+                prior_hashes={shared: recorded},
+                active_targets=[_known("claude")],
+                declared_targets=[_known("claude")],
+                diagnostics=DiagnosticCollector(),
+                prior_ledger=ledger,
+                cleanup_retained_hashes={shared: recorded},
+            )
+
+        assert shared in files
+        assert hashes[shared] == recorded
+
 
 class TestLocalDeployedFilesUnion:
     def test_copilot_app_install_preserves_prior_copilot_local_files(self):

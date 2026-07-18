@@ -680,12 +680,24 @@ def run_baseline_checks(
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # Check 2: Canonical deployment owner references
-    if _run(_check_deployment_ledger_owners(lock)):
+    # Check 2: Ref consistency (external manifest <-> lockfile identity)
+    #
+    # External-boundary identity checks MUST surface before internal
+    # reconciliation checks (Check 3, deployment-ledger-owners) because the
+    # latter's remedy assumes the lockfile's identity claims are legitimate.
+    # A source-identity tamper (attacker rewrites a dependency's host/repo_url)
+    # trips both: ref-consistency ("not found in lockfile" -> re-resolve from the
+    # trusted manifest via 'apm install --update') and deployment-ledger-owners
+    # (stale owner -> 'apm prune'). Under fail-fast the first failing check wins,
+    # and 'apm prune' on a tampered lockfile would reconcile ownership toward the
+    # attacker source, so ref-consistency -- the safe, manifest-driven remedy --
+    # must be evaluated first. The ledger-owner check still owns the genuine
+    # departed-owner case (req-pl-016), where ref-consistency passes.
+    if _run(_check_ref_consistency(manifest, lock)):
         return result
 
-    # Check 3: Ref consistency
-    if _run(_check_ref_consistency(manifest, lock)):
+    # Check 3: Canonical deployment owner references
+    if _run(_check_deployment_ledger_owners(lock)):
         return result
 
     # Check 4: Deployed files present
