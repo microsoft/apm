@@ -1,4 +1,4 @@
-"""End-to-end integration tests for `apm install -g` / `apm uninstall -g`.
+"""End-to-end integration tests for ``apm install -g`` / ``apm uninstall -g``.
 
 Covers gaps that existing scope tests do not exercise:
 - G1: real package install under user scope deploys primitive files to ~/.apm/
@@ -6,88 +6,104 @@ Covers gaps that existing scope tests do not exercise:
 - Cross-scope coexistence: a global install and a project install of the same
   package live side by side without colliding.
 
-Uses the public `microsoft/apm-sample-package` repo (ref `main`) as the real
-fixture, the same canonical sample referenced by other e2e suites.
-
-Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
+Uses an owned local Git origin exposed as ``microsoft/apm-sample-package`` so
+the user-scope lifecycle stays hermetic while preserving GitHub-shaped
+lockfile provenance.
 """
 
-import os
-import subprocess
-import sys
+from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 import yaml
 
-pytestmark = pytest.mark.requires_github_token
+from apm_cli.utils.yaml_io import dump_yaml
+from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.hermetic_packaged_sample import DEPENDENCY, HermeticPackagedSample
+
+pytestmark = [
+    pytest.mark.requires_apm_binary,
+]
 
 
-SAMPLE_PKG = "microsoft/apm-sample-package"
+SAMPLE_PKG = DEPENDENCY
+SAMPLE_REMOTE_URL = f"https://github.com/{SAMPLE_PKG}"
 
 
-@pytest.fixture
-def fake_home(tmp_path):
-    """Isolated HOME directory so user-scope installs never touch the real home."""
-    home_dir = tmp_path / "fakehome"
-    home_dir.mkdir()
-    return home_dir
+def _home(packaged_sample: HermeticPackagedSample) -> Path:
+    return Path(packaged_sample.environment["HOME"])
 
 
-def _env_with_home(fake_home):
-    env = os.environ.copy()
-    env["HOME"] = str(fake_home)
-    if sys.platform == "win32":
-        env["USERPROFILE"] = str(fake_home)
-    return env
+def _apm_home(packaged_sample: HermeticPackagedSample) -> Path:
+    return Path(packaged_sample.environment["APM_HOME"])
 
 
-def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=180):
-    return subprocess.run(
-        [apm_binary_path] + args,  # noqa: RUF005
+def _run_apm(
+    packaged_sample: HermeticPackagedSample,
+    args: tuple[str, ...],
+    *,
+    cwd: Path,
+    scenario_id: str,
+) -> CommandResult:
+    return packaged_sample.runner.run(
+        args,
+        scenario_id=scenario_id,
         cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=_env_with_home(fake_home),
+        env=packaged_sample.environment,
     )
 
 
-def _write_user_manifest(fake_home, packages):
+def _ensure_home_target_signal(packaged_sample: HermeticPackagedSample) -> None:
+    home_dir = _home(packaged_sample)
+    github_dir = home_dir / ".github"
+    github_dir.mkdir(exist_ok=True)
+    (github_dir / "copilot-instructions.md").write_text("# test\n", encoding="utf-8")
+
+
+def _write_user_manifest(packaged_sample: HermeticPackagedSample, packages: list[object]) -> None:
     """Seed ~/.apm/apm.yml with the given APM dependency list."""
-    apm_dir = fake_home / ".apm"
+    _ensure_home_target_signal(packaged_sample)
+    apm_dir = _apm_home(packaged_sample)
     apm_dir.mkdir(parents=True, exist_ok=True)
-    (apm_dir / "apm.yml").write_text(
-        yaml.dump(
-            {
-                "name": "global-project",
-                "version": "1.0.0",
-                "dependencies": {"apm": packages, "mcp": []},
-            },
-            default_flow_style=False,
-        ),
-        encoding="utf-8",
+    dump_yaml(
+        {
+            "name": "global-project",
+            "version": "1.0.0",
+            "dependencies": {"apm": packages, "mcp": []},
+        },
+        apm_dir / "apm.yml",
     )
 
 
-def _read_lockfile(directory):
+def _read_lockfile(directory: Path) -> dict[str, object] | None:
     lock_path = directory / "apm.lock.yaml"
     if not lock_path.exists():
         return None
-    return yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    lockfile = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    assert lockfile is None or isinstance(lockfile, dict)
+    return lockfile
 
 
-def _get_locked_dep(lockfile, repo_url):
+def _get_locked_dep(
+    lockfile: dict[str, object] | None,
+    repo_url: str,
+) -> dict[str, object] | None:
     if not lockfile or "dependencies" not in lockfile:
         return None
     deps = lockfile["dependencies"]
     if isinstance(deps, list):
         for entry in deps:
+            assert isinstance(entry, dict)
             if entry.get("repo_url") == repo_url:
                 return entry
     return None
 
 
-def _existing_deployed_files(deploy_root, dep_entry):
+def _existing_deployed_files(
+    deploy_root: Path,
+    dep_entry: dict[str, object] | None,
+) -> list[str]:
     """Return deployed_files entries that exist on disk under *deploy_root*.
 
     User-scope deploy_root is ``~/`` (Path.home()), not ``~/.apm/``: integrators
@@ -99,28 +115,39 @@ def _existing_deployed_files(deploy_root, dep_entry):
     return [f for f in dep_entry["deployed_files"] if (deploy_root / f).exists()]
 
 
+def _make_workdir(packaged_sample: HermeticPackagedSample, name: str) -> Path:
+    work_dir = packaged_sample.project.root.parent / name
+    work_dir.mkdir()
+    return work_dir
+
+
 class TestGlobalInstallDeploysRealPackage:
     """Verify `apm install -g` actually deploys primitive files under ~/.apm/."""
 
     def test_install_global_deploys_real_package_to_user_scope(
-        self, apm_binary_path, fake_home, tmp_path
-    ):
-        _write_user_manifest(fake_home, [SAMPLE_PKG])
-        work_dir = tmp_path / "workdir"
-        work_dir.mkdir()
+        self,
+        hermetic_packaged_sample: HermeticPackagedSample,
+    ) -> None:
+        _write_user_manifest(hermetic_packaged_sample, [{"git": SAMPLE_REMOTE_URL}])
+        work_dir = _make_workdir(hermetic_packaged_sample, "global-install-workdir")
 
-        result = _run_apm(apm_binary_path, ["install", "-g"], work_dir, fake_home)
+        result = _run_apm(
+            hermetic_packaged_sample,
+            ("install", "-g"),
+            cwd=work_dir,
+            scenario_id="global-install-user-scope",
+        )
         assert result.returncode == 0, (
             f"global install failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )
 
-        apm_dir = fake_home / ".apm"
+        apm_dir = _apm_home(hermetic_packaged_sample)
         lockfile = _read_lockfile(apm_dir)
         assert lockfile is not None, "~/.apm/apm.lock.yaml was not created"
         dep = _get_locked_dep(lockfile, SAMPLE_PKG)
         assert dep is not None, f"{SAMPLE_PKG} not present in user-scope lockfile: {lockfile}"
 
-        deployed = _existing_deployed_files(fake_home, dep)
+        deployed = _existing_deployed_files(_home(hermetic_packaged_sample), dep)
         assert len(deployed) > 0, (
             f"No primitive files deployed under user-scope deploy root. "
             f"deployed_files={dep.get('deployed_files')}\n"
@@ -132,29 +159,35 @@ class TestGlobalInstallDeploysRealPackage:
         assert not (work_dir / "apm.lock.yaml").exists(), "lockfile leaked into cwd"
         assert not (work_dir / "apm_modules").exists(), "apm_modules leaked into cwd"
 
-    def test_uninstall_global_removes_deployed_files(self, apm_binary_path, fake_home, tmp_path):
-        _write_user_manifest(fake_home, [SAMPLE_PKG])
-        work_dir = tmp_path / "workdir"
-        work_dir.mkdir()
+    def test_uninstall_global_removes_deployed_files(
+        self,
+        hermetic_packaged_sample: HermeticPackagedSample,
+    ) -> None:
+        _write_user_manifest(hermetic_packaged_sample, [{"git": SAMPLE_REMOTE_URL}])
+        work_dir = _make_workdir(hermetic_packaged_sample, "global-uninstall-workdir")
 
-        install_result = _run_apm(apm_binary_path, ["install", "-g"], work_dir, fake_home)
+        install_result = _run_apm(
+            hermetic_packaged_sample,
+            ("install", "-g"),
+            cwd=work_dir,
+            scenario_id="global-install-before-uninstall",
+        )
         assert install_result.returncode == 0, (
             f"setup install failed:\nSTDOUT: {install_result.stdout}\n"
             f"STDERR: {install_result.stderr}"
         )
 
-        apm_dir = fake_home / ".apm"
+        apm_dir = _apm_home(hermetic_packaged_sample)
         dep_before = _get_locked_dep(_read_lockfile(apm_dir), SAMPLE_PKG)
         assert dep_before is not None, "Package missing from lockfile after install"
-        deployed_before = _existing_deployed_files(fake_home, dep_before)
-        if not deployed_before:
-            pytest.skip("Sample package deployed no files; nothing to verify removal of")
+        deployed_before = _existing_deployed_files(_home(hermetic_packaged_sample), dep_before)
+        assert deployed_before, "Fixture package must deploy user-scope files before uninstall"
 
         uninstall_result = _run_apm(
-            apm_binary_path,
-            ["uninstall", SAMPLE_PKG, "-g"],
-            work_dir,
-            fake_home,
+            hermetic_packaged_sample,
+            ("uninstall", SAMPLE_PKG, "-g"),
+            cwd=work_dir,
+            scenario_id="global-uninstall-user-scope",
         )
         assert uninstall_result.returncode == 0, (
             f"global uninstall failed:\nSTDOUT: {uninstall_result.stdout}\n"
@@ -177,45 +210,39 @@ class TestGlobalInstallDeploysRealPackage:
 
         # Previously deployed primitive files must be gone.
         for rel_path in deployed_before:
-            assert not (fake_home / rel_path).exists(), (
+            assert not (_home(hermetic_packaged_sample) / rel_path).exists(), (
                 f"Deployed file {rel_path} not removed by uninstall -g"
             )
 
     def test_install_global_then_project_install_does_not_collide(
-        self, apm_binary_path, fake_home, tmp_path
-    ):
+        self,
+        hermetic_packaged_sample: HermeticPackagedSample,
+    ) -> None:
         # Install globally first.
-        _write_user_manifest(fake_home, [SAMPLE_PKG])
-        global_workdir = tmp_path / "global-workdir"
-        global_workdir.mkdir()
-        global_result = _run_apm(apm_binary_path, ["install", "-g"], global_workdir, fake_home)
+        _write_user_manifest(hermetic_packaged_sample, [{"git": SAMPLE_REMOTE_URL}])
+        global_workdir = _make_workdir(hermetic_packaged_sample, "global-coexistence-workdir")
+        global_result = _run_apm(
+            hermetic_packaged_sample,
+            ("install", "-g"),
+            cwd=global_workdir,
+            scenario_id="global-install-before-project",
+        )
         assert global_result.returncode == 0, (
             f"global install failed:\nSTDOUT: {global_result.stdout}\n"
             f"STDERR: {global_result.stderr}"
         )
 
-        apm_dir = fake_home / ".apm"
+        apm_dir = _apm_home(hermetic_packaged_sample)
         global_dep = _get_locked_dep(_read_lockfile(apm_dir), SAMPLE_PKG)
         assert global_dep is not None, "Global lockfile missing the package"
 
-        # Now create a separate project and install the same package locally.
-        project_dir = tmp_path / "project"
-        project_dir.mkdir()
-        (project_dir / ".github").mkdir()
-        (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
-        (project_dir / "apm.yml").write_text(
-            yaml.dump(
-                {
-                    "name": "local-project",
-                    "version": "1.0.0",
-                    "dependencies": {"apm": [SAMPLE_PKG], "mcp": []},
-                },
-                default_flow_style=False,
-            ),
-            encoding="utf-8",
+        project_dir = hermetic_packaged_sample.project.root
+        local_result = _run_apm(
+            hermetic_packaged_sample,
+            ("install",),
+            cwd=project_dir,
+            scenario_id="project-install-after-global",
         )
-
-        local_result = _run_apm(apm_binary_path, ["install"], project_dir, fake_home)
         assert local_result.returncode == 0, (
             f"project install failed:\nSTDOUT: {local_result.stdout}\nSTDERR: {local_result.stderr}"
         )
