@@ -353,8 +353,8 @@ Deny is evaluated first. Empty allow list permits all (except denied).
 These checks run without a policy file:
 
 - `lockfile-exists` -- apm.lock.yaml present
-- `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `ref-consistency` -- dependency refs match lockfile
+- `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `deployed-files-present` -- all deployed files exist
 - `no-orphaned-packages` -- no packages in lockfile absent from manifest
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
