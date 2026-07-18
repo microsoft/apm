@@ -81,7 +81,7 @@ def _inconclusive_github_probe_detail(exc: BaseException) -> str | None:
     if _is_tls_failure(exc):
         return None
     if isinstance(exc, _GitHubRestStatusError):
-        if exc.status_code in (408, 429) or 500 <= exc.status_code < 600:
+        if exc.status_code == 408 or 500 <= exc.status_code < 600:
             return f"HTTP {exc.status_code}"
         return None
     if isinstance(exc, requests.exceptions.Timeout):

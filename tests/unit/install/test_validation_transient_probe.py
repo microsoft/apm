@@ -115,7 +115,7 @@ def test_transport_failure_defers_to_authoritative_download(
 
 
 @pytest.mark.parametrize("probe_path", PROBE_PATHS)
-@pytest.mark.parametrize("status_code", [408, 429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status_code", [408, 500, 502, 503, 504])
 def test_transient_http_status_defers_to_authoritative_download(
     probe_path: str,
     status_code: int,
