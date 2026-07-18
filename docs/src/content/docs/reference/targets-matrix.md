@@ -112,9 +112,8 @@ GitHub Copilot (CLI and IDE).
   - hooks: `.github/hooks/<name>.json`
   - generated: `.github/copilot-instructions.md` (compile output)
 - **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`;
-  `instructions` from all packages are concatenated into
-  `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file
-  at user scope). User-scope deploys land under `~/.copilot/`, not
+  `instructions` deploy individually under `~/.copilot/instructions/`, mirroring
+  the project-scope layout. User-scope deploys land under `~/.copilot/`, not
   `~/.github/`; hook script commands are written as absolute paths so Copilot
   CLI can invoke them from any working directory.
 - **Global compile.** `apm compile -g` can also render global instructions to

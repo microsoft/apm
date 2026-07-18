@@ -1,9 +1,9 @@
 """Acceptance tests for 'apm install -g' copilot user-scope instructions.
 
-Issue #650: apm install -g should write instruction primitives to
-~/.copilot/copilot-instructions.md by concatenating all instruction files
-from the package, since Copilot CLI reads a single file at user scope
-instead of individual *.instructions.md files.
+Copilot CLI supports modular, path-scoped instructions at user scope via
+``~/.copilot/instructions/**/*.instructions.md``, mirroring the project-scope
+``.github/instructions/`` layout. So ``apm install -g`` deploys each
+instruction file individually rather than concatenating them.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _make_package_info(package_dir: Path, name: str = "test-pkg") -> PackageInfo
 
 
 class TestCopilotUserScopeTargetProfile:
-    """Copilot target must support instructions at user scope after #650."""
+    """Copilot target must support instructions at user scope."""
 
     def test_instructions_supported_at_user_scope(self):
         """instructions must NOT be listed in unsupported_user_primitives."""
@@ -56,14 +56,15 @@ class TestCopilotUserScopeTargetProfile:
         copilot = KNOWN_TARGETS["copilot"]
         assert copilot.supports_at_user_scope("instructions") is True
 
-    def test_for_scope_user_instructions_uses_concat_format(self):
-        """for_scope(user_scope=True) must map instructions to copilot_user_instructions."""
+    def test_for_scope_user_instructions_uses_modular_format(self):
+        """for_scope(user_scope=True) must keep the standard github_instructions mapping."""
         copilot = KNOWN_TARGETS["copilot"]
         user_profile = copilot.for_scope(user_scope=True)
         assert user_profile is not None
         mapping = user_profile.primitives.get("instructions")
         assert mapping is not None
-        assert mapping.format_id == "copilot_user_instructions"
+        assert mapping.format_id == "github_instructions"
+        assert mapping.subdir == "instructions"
 
     def test_for_scope_user_root_is_copilot_dir(self):
         """User-scope profile must have root_dir == '.copilot'."""
@@ -74,12 +75,12 @@ class TestCopilotUserScopeTargetProfile:
 
 
 # ---------------------------------------------------------------------------
-# Integration: instruction files -> ~/.copilot/copilot-instructions.md
+# Integration: instruction files -> ~/.copilot/instructions/*.instructions.md
 # ---------------------------------------------------------------------------
 
 
 class TestCopilotUserInstructionsIntegration:
-    """InstructionIntegrator must concatenate files into copilot-instructions.md."""
+    """InstructionIntegrator must deploy each file individually under .copilot/instructions/."""
 
     def setup_method(self):
         import tempfile
@@ -102,8 +103,8 @@ class TestCopilotUserInstructionsIntegration:
             (inst_dir / fname).write_text(content, encoding="utf-8")
         return _make_package_info(pkg_dir)
 
-    def test_single_instruction_file_written_to_copilot_instructions_md(self):
-        """A single instruction file is written to ~/.copilot/copilot-instructions.md."""
+    def test_single_instruction_file_written_to_copilot_instructions_dir(self):
+        """A single instruction file is written to ~/.copilot/instructions/<name>.instructions.md."""
         pkg_info = self._make_pkg(
             {
                 "coding.instructions.md": (
@@ -120,16 +121,16 @@ class TestCopilotUserInstructionsIntegration:
             self.home,
         )
 
-        out_file = self.home / ".copilot" / "copilot-instructions.md"
-        assert out_file.exists(), "copilot-instructions.md must be created"
+        out_file = self.home / ".copilot" / "instructions" / "coding.instructions.md"
+        assert out_file.exists()
         content = out_file.read_text(encoding="utf-8")
         assert "# Coding standards" in content
         assert "Use type hints." in content
         assert isinstance(result, IntegrationResult)
         assert result.files_integrated == 1
 
-    def test_multiple_instruction_files_concatenated(self):
-        """Multiple instruction files are concatenated into a single output file."""
+    def test_multiple_instruction_files_deployed_individually(self):
+        """Multiple instruction files each land as their own file, not concatenated."""
         pkg_info = self._make_pkg(
             {
                 "coding.instructions.md": (
@@ -143,21 +144,19 @@ class TestCopilotUserInstructionsIntegration:
         copilot = KNOWN_TARGETS["copilot"]
         user_profile = copilot.for_scope(user_scope=True)
 
-        self.integrator.integrate_instructions_for_target(
+        result = self.integrator.integrate_instructions_for_target(
             user_profile,
             pkg_info,
             self.home,
         )
 
-        out_file = self.home / ".copilot" / "copilot-instructions.md"
-        content = out_file.read_text(encoding="utf-8")
-        assert "# Python coding" in content
-        assert "Use type hints." in content
-        assert "# Security" in content
-        assert "Sanitize inputs." in content
+        instructions_dir = self.home / ".copilot" / "instructions"
+        assert (instructions_dir / "coding.instructions.md").exists()
+        assert (instructions_dir / "security.instructions.md").exists()
+        assert result.files_integrated == 2
 
-    def test_frontmatter_stripped_from_output(self):
-        """YAML frontmatter must not appear in the concatenated output."""
+    def test_frontmatter_preserved_in_output(self):
+        """YAML frontmatter must be preserved verbatim, matching project-scope behavior."""
         pkg_info = self._make_pkg(
             {
                 "coding.instructions.md": (
@@ -175,14 +174,13 @@ class TestCopilotUserInstructionsIntegration:
             self.home,
         )
 
-        out_file = self.home / ".copilot" / "copilot-instructions.md"
+        out_file = self.home / ".copilot" / "instructions" / "coding.instructions.md"
         content = out_file.read_text(encoding="utf-8")
-        assert "applyTo:" not in content
-        assert "description: Python guide" not in content
-        assert "---" not in content
+        assert "applyTo: '**/*.py'" in content
+        assert "description: Python guide" in content
 
     def test_no_instructions_returns_zero_integrated(self):
-        """No instruction files in package -> zero files integrated, no output."""
+        """No instruction files in package -> zero files integrated, no output dir."""
         pkg_dir = self.home / "empty-pkg"
         pkg_dir.mkdir(parents=True, exist_ok=True)
         pkg_info = _make_package_info(pkg_dir)
@@ -196,17 +194,12 @@ class TestCopilotUserInstructionsIntegration:
             self.home,
         )
 
-        out_file = self.home / ".copilot" / "copilot-instructions.md"
-        assert not out_file.exists()
+        instructions_dir = self.home / ".copilot" / "instructions"
+        assert not instructions_dir.exists() or not any(instructions_dir.iterdir())
         assert result.files_integrated == 0
 
-    def test_multi_package_instructions_all_concatenated(self):
-        """Instructions from two packages must both appear in copilot-instructions.md.
-
-        Regression test for the multi-package collision bug: the second package's
-        instructions must not be silently dropped because the file already exists
-        after the first package's integration.
-        """
+    def test_multi_package_instructions_no_collision(self):
+        """Instructions from two packages must both land, each under its own filename."""
         pkg_a_dir = self.home / "pkg-a"
         (pkg_a_dir / ".apm" / "instructions").mkdir(parents=True, exist_ok=True)
         (pkg_a_dir / ".apm" / "instructions" / "a.instructions.md").write_text(
@@ -224,23 +217,18 @@ class TestCopilotUserInstructionsIntegration:
         copilot = KNOWN_TARGETS["copilot"]
         user_profile = copilot.for_scope(user_scope=True)
 
-        self.integrator.integrate_instructions_for_target(user_profile, pkg_a, self.home)
-        self.integrator.integrate_instructions_for_target(user_profile, pkg_b, self.home)
+        result_a = self.integrator.integrate_instructions_for_target(user_profile, pkg_a, self.home)
+        result_b = self.integrator.integrate_instructions_for_target(user_profile, pkg_b, self.home)
 
-        out_file = self.home / ".copilot" / "copilot-instructions.md"
-        content = out_file.read_text(encoding="utf-8")
-        assert "# Package A" in content, "Package A instructions must be present"
-        assert "Always use type hints." in content
-        assert "# Package B" in content, "Package B instructions must be present"
-        assert "Always sanitize inputs." in content
-
-    def test_strip_frontmatter_strips_crlf_line_endings(self):
-        """_strip_frontmatter must handle Windows CRLF line endings."""
-        crlf_content = "---\r\napplyTo: '**'\r\n---\r\n\r\n# Body content\r\n"
-        result = InstructionIntegrator._strip_frontmatter(crlf_content)
-        assert "# Body content" in result
-        assert "applyTo:" not in result
-        assert "---" not in result
+        instructions_dir = self.home / ".copilot" / "instructions"
+        assert (instructions_dir / "a.instructions.md").read_text(encoding="utf-8") == (
+            "# Package A\n\nAlways use type hints.\n"
+        )
+        assert (instructions_dir / "b.instructions.md").read_text(encoding="utf-8") == (
+            "# Package B\n\nAlways sanitize inputs.\n"
+        )
+        assert result_a.files_integrated == 1
+        assert result_b.files_integrated == 1
 
     def test_project_scope_unaffected(self):
         """Project-scope integration still deploys individual .instructions.md files."""

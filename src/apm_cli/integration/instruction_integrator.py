@@ -139,17 +139,6 @@ class InstructionIntegrator(BaseIntegrator):
 
         fmt = mapping.format_id
 
-        if fmt == "copilot_user_instructions":
-            return self._integrate_copilot_user_instructions(
-                instruction_files,
-                deploy_dir,
-                project_root,
-                force=force,
-                managed_files=managed_files,
-                diagnostics=diagnostics,
-                pkg_source=getattr(getattr(package_info, "package", None), "source", None),
-            )
-
         # APM-owned rule dirs (.claude/rules, .cursor/rules, .windsurf/rules):
         # the deployed file is a format-transform of its source and the target
         # name derives 1:1 from the source, so APM owns it per-file. Gates both
@@ -258,28 +247,23 @@ class InstructionIntegrator(BaseIntegrator):
         if not mapping:
             return {"files_removed": 0, "errors": 0}
         effective_root = mapping.deploy_root or target.root_dir
-        if mapping.format_id == "copilot_user_instructions":
-            prefix = f"{effective_root}/copilot-instructions.md"
+        prefix = f"{effective_root}/{mapping.subdir}/"
+        legacy_dir = project_root / effective_root / mapping.subdir
+        if mapping.format_id == "cursor_rules":
+            legacy_pattern = "*.mdc"
+        elif mapping.format_id == "windsurf_rules":
+            # Do not use a broad legacy glob for Windsurf rules to avoid
+            # deleting user-authored .md files under .windsurf/rules/.
             legacy_pattern = None
-            legacy_dir = None
+        elif mapping.format_id == "claude_rules":
+            # Do not use a broad legacy glob for Claude rules to avoid
+            # deleting user-authored .md files under .claude/rules/.
+            legacy_pattern = None
+        elif mapping.format_id == "kiro_steering":
+            # Do not delete user-authored steering markdown under .kiro/steering/.
+            legacy_pattern = None
         else:
-            prefix = f"{effective_root}/{mapping.subdir}/"
-            legacy_dir = project_root / effective_root / mapping.subdir
-            if mapping.format_id == "cursor_rules":
-                legacy_pattern = "*.mdc"
-            elif mapping.format_id == "windsurf_rules":
-                # Do not use a broad legacy glob for Windsurf rules to avoid
-                # deleting user-authored .md files under .windsurf/rules/.
-                legacy_pattern = None
-            elif mapping.format_id == "claude_rules":
-                # Do not use a broad legacy glob for Claude rules to avoid
-                # deleting user-authored .md files under .claude/rules/.
-                legacy_pattern = None
-            elif mapping.format_id == "kiro_steering":
-                # Do not delete user-authored steering markdown under .kiro/steering/.
-                legacy_pattern = None
-            else:
-                legacy_pattern = "*.instructions.md"
+            legacy_pattern = "*.instructions.md"
         return self.sync_remove_files(
             project_root,
             managed_files,
@@ -288,134 +272,6 @@ class InstructionIntegrator(BaseIntegrator):
             legacy_glob_pattern=legacy_pattern,
             targets=[target],
         )
-
-    # ------------------------------------------------------------------
-    # Copilot user-scope concat support
-    # ------------------------------------------------------------------
-
-    # Sentinel line written as the first line of every APM-managed
-    # copilot-instructions.md.  Its presence distinguishes the file from
-    # a user-authored one, enabling multi-package accumulation without
-    # collision false-positives.
-    _APM_COPILOT_HEADER: str = "<!-- apm-managed: copilot-instructions.md -->"
-
-    # Matches a single package's provenance-marked section.
-    _APM_SOURCE_RE: re.Pattern[str] = re.compile(
-        r"<!-- apm:source:(?P<source>[^>]*?) -->\n(?P<body>.*?)<!-- /apm:source -->",
-        re.DOTALL,
-    )
-
-    @staticmethod
-    def _strip_frontmatter(content: str) -> str:
-        """Strip YAML frontmatter from instruction content.
-
-        Returns only the body text following the closing ``---`` delimiter.
-        If no frontmatter is present, returns the content unchanged.
-        Handles both LF and CRLF line endings.
-        """
-        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
-        if fm_match:
-            return content[fm_match.end() :]
-        return content
-
-    @classmethod
-    def _is_apm_managed_copilot(cls, content: str) -> bool:
-        """Return True if *content* starts with the APM managed-file sentinel."""
-        return content.startswith(cls._APM_COPILOT_HEADER)
-
-    @classmethod
-    def _build_copilot_section(cls, pkg_source: str, body: str) -> str:
-        """Wrap *body* in APM provenance markers for *pkg_source*."""
-        # Sanitize source so it cannot accidentally close the HTML comment.
-        safe_source = pkg_source.replace("-->", "__")
-        return f"<!-- apm:source:{safe_source} -->\n{body}\n<!-- /apm:source -->"
-
-    @classmethod
-    def _update_copilot_managed(cls, existing: str, pkg_source: str, section: str) -> str:
-        """Replace or append *section* in the APM-managed file content.
-
-        If a section for *pkg_source* already exists, it is replaced in-place
-        so that the file stays ordered and does not grow on re-install.
-        Otherwise the section is appended.
-        """
-        for m in cls._APM_SOURCE_RE.finditer(existing):
-            if m.group("source") == pkg_source.replace("-->", "__"):
-                return existing[: m.start()] + section + existing[m.end() :]
-        # Not yet present: append after stripping trailing newlines.
-        return existing.rstrip("\n") + "\n\n" + section + "\n"
-
-    def _integrate_copilot_user_instructions(
-        self,
-        instruction_files: list[Path],
-        deploy_dir: Path,
-        project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set[str] | None = None,
-        diagnostics=None,
-        pkg_source: str | None = None,
-    ) -> IntegrationResult:
-        """Concatenate all instruction files into ~/.copilot/copilot-instructions.md.
-
-        Copilot CLI at user scope reads a single file rather than individual
-        ``*.instructions.md`` files.  This method strips YAML frontmatter from
-        each source file, wraps the combined body in a per-package provenance
-        marker, and accumulates sections across packages in the same file so
-        that multi-package installs are fully represented.
-
-        File ownership logic:
-        - APM-managed (starts with ``_APM_COPILOT_HEADER``): always update --
-          either replace this package's existing section or append a new one.
-          This path is taken even when the file is not in *managed_files*,
-          allowing a second package in the same install session to contribute
-          without a false collision.
-        - In *managed_files* but no header (pre-provenance format): upgrade to
-          the sectioned format in-place.
-        - User-authored (no header, not in *managed_files*, not *force*):
-          collision -- skip and warn.
-        - *force* is True: overwrite any existing content.
-        """
-        target_path = deploy_dir / "copilot-instructions.md"
-        ensure_path_within(target_path, deploy_dir)
-        rel_path = portable_relpath(target_path, project_root)
-
-        bodies: list[str] = []
-        for source_file in instruction_files:
-            raw = source_file.read_text(encoding="utf-8")
-            body = self._strip_frontmatter(raw).strip()
-            if body:
-                bodies.append(body)
-
-        if not bodies:
-            return IntegrationResult(0, 0, 0, [])
-
-        deploy_dir.mkdir(parents=True, exist_ok=True)
-        combined_body = "\n\n".join(bodies)
-        section = self._build_copilot_section(pkg_source or "unknown", combined_body)
-
-        if target_path.exists():
-            existing = target_path.read_text(encoding="utf-8")
-            if self._is_apm_managed_copilot(existing):
-                # APM-managed: update or append this package's provenance section.
-                updated = self._update_copilot_managed(existing, pkg_source or "unknown", section)
-                write_text_lf(target_path, updated)
-                return IntegrationResult(1, 0, 0, [target_path])
-            norm_rel = rel_path.replace("\\", "/")
-            if norm_rel in (managed_files or set()) or force:
-                # Either was managed on a previous run (pre-provenance format)
-                # or caller explicitly requested overwrite.
-                new_content = self._APM_COPILOT_HEADER + "\n" + section + "\n"
-                write_text_lf(target_path, new_content)
-                return IntegrationResult(1, 0, 0, [target_path])
-            # User-authored file: emit collision warning and skip.
-            self.check_collision(
-                target_path, rel_path, managed_files, force, diagnostics=diagnostics
-            )
-            return IntegrationResult(0, 0, 1, [])
-
-        new_content = self._APM_COPILOT_HEADER + "\n" + section + "\n"
-        write_text_lf(target_path, new_content)
-        return IntegrationResult(1, 0, 0, [target_path])
 
     # ------------------------------------------------------------------
     # Legacy per-target API (DEPRECATED)

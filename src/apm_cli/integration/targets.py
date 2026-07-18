@@ -172,11 +172,7 @@ class TargetProfile:
     ``for_scope(user_scope=True)``.
 
     Use this when a primitive must be deployed to a *different* location
-    or via a *different* transform at user scope.  The canonical example
-    is the Copilot target: at project scope each ``*.instructions.md``
-    file deploys individually to ``.github/instructions/``; at user scope
-    they are all concatenated into the single file that Copilot CLI reads
-    (``~/.copilot/copilot-instructions.md``).
+    or via a *different* transform at user scope than at project scope.
     """
 
     user_root_resolver: Callable[[], Path | None] | None = None
@@ -489,10 +485,10 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
-    # instead of ~/.github/.  Instructions are concatenated into
-    # ~/.copilot/copilot-instructions.md because Copilot CLI reads only
-    # that single file at user scope (not individual *.instructions.md).
-    # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
+    # instead of ~/.github/. Copilot CLI supports modular, path-scoped
+    # instructions at user scope via ~/.copilot/instructions/**/*.instructions.md,
+    # mirroring the project-scope .github/instructions/ layout.
+    # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions
     "copilot": TargetProfile(
         capability=TARGET_CAPABILITIES["copilot"],
         root_dir=".github",
@@ -515,9 +511,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".copilot",
-        user_primitive_overrides={
-            "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
-        },
         generated_files=("copilot-instructions.md",),
     ),
     # Claude Code -- the user-level config directory is whatever
