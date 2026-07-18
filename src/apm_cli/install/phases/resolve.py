@@ -21,7 +21,7 @@ from __future__ import annotations
 import builtins
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
@@ -738,10 +738,13 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
         allow_insecure_hosts=ctx.allow_insecure_hosts,
     )
 
-    ctx.deps_to_install = annotate_update_plan_refs(
-        deps_to_install,
-        downloader,
-        update_refs=update_refs,
+    ctx.deps_to_install = _record_update_plan_complete_dep_keys(
+        ctx,
+        annotate_update_plan_refs(
+            deps_to_install,
+            downloader,
+            update_refs=update_refs,
+        ),
     )
 
     # ------------------------------------------------------------------
@@ -870,6 +873,12 @@ def _apply_only_filter(ctx: InstallContext) -> None:
     ctx.deps_to_install = [
         dep for dep in ctx.deps_to_install if dep.get_identity() in only_identities
     ]
+
+
+def _record_update_plan_complete_dep_keys(ctx: InstallContext, deps: list[Any]) -> list[Any]:
+    """Record complete graph keys before selective update filtering."""
+    ctx.update_plan_complete_dep_keys = builtins.set(dep.get_unique_key() for dep in deps)
+    return deps
 
 
 def _compute_intended_dep_keys(ctx: InstallContext) -> None:

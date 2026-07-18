@@ -211,6 +211,37 @@ class TestBuildUpdatePlan:
         assert plan.entries[0].action == "remove"
         assert plan.entries[0].old_resolved_commit == "d" * 40
 
+    def test_selective_update_retains_unselected_complete_graph_deps(self):
+        lock = _new_lockfile()
+        for repo_url, commit, depth in (
+            ("https://github.com/acme/selected", "a" * 40, 1),
+            ("https://github.com/acme/unselected-direct", "b" * 40, 1),
+            ("https://github.com/acme/unselected-transitive", "c" * 40, 2),
+            ("https://github.com/acme/old-selected-transitive", "d" * 40, 2),
+        ):
+            locked = _locked(repo_url, "main", commit)
+            locked.depth = depth
+            lock.add_dependency(locked)
+
+        plan = build_update_plan(
+            lock,
+            [_resolved_dep("https://github.com/acme/selected", "main", "e" * 40)],
+            complete_resolved_dep_keys={
+                "https://github.com/acme/selected",
+                "https://github.com/acme/unselected-direct",
+                "https://github.com/acme/unselected-transitive",
+            },
+        )
+
+        actions_by_key = {entry.dep_key: entry.action for entry in plan.entries}
+        assert actions_by_key == {
+            "https://github.com/acme/selected": "update",
+            "https://github.com/acme/unselected-direct": "unchanged",
+            "https://github.com/acme/unselected-transitive": "unchanged",
+            "https://github.com/acme/old-selected-transitive": "remove",
+        }
+        assert plan.summary_counts["remove"] == 1
+
     def test_summary_counts_aggregate_correctly(self):
         lock = _new_lockfile()
         lock.add_dependency(_locked("https://github.com/u/r", "main", "a" * 40))
