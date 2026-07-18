@@ -102,3 +102,7 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_prune_deployment_ledger_e2e.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_required_lifecycle_state_machine.py"
+marker = "e2e"

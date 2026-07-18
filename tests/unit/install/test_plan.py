@@ -211,6 +211,111 @@ class TestBuildUpdatePlan:
         assert plan.entries[0].action == "remove"
         assert plan.entries[0].old_resolved_commit == "d" * 40
 
+    def test_selective_update_retains_unselected_complete_graph_deps(self):
+        lock = _new_lockfile()
+        for repo_url, commit, depth in (
+            ("https://github.com/acme/selected", "a" * 40, 1),
+            ("https://github.com/acme/unselected-direct", "b" * 40, 1),
+            ("https://github.com/acme/unselected-transitive", "c" * 40, 2),
+            ("https://github.com/acme/old-selected-transitive", "d" * 40, 2),
+        ):
+            locked = _locked(repo_url, "main", commit)
+            locked.depth = depth
+            lock.add_dependency(locked)
+
+        plan = build_update_plan(
+            lock,
+            [_resolved_dep("https://github.com/acme/selected", "main", "e" * 40)],
+            complete_resolved_dep_keys={
+                "https://github.com/acme/selected",
+                "https://github.com/acme/unselected-direct",
+                "https://github.com/acme/unselected-transitive",
+            },
+        )
+
+        actions_by_key = {entry.dep_key: entry.action for entry in plan.entries}
+        assert actions_by_key == {
+            "https://github.com/acme/selected": "update",
+            "https://github.com/acme/unselected-direct": "unchanged",
+            "https://github.com/acme/unselected-transitive": "unchanged",
+            "https://github.com/acme/old-selected-transitive": "remove",
+        }
+        assert plan.summary_counts["remove"] == 1
+
+    def test_selective_update_complete_keys_use_canonical_identity_for_all_sources(self):
+        lock = _new_lockfile()
+        identity_pairs = (
+            (
+                DependencyReference(repo_url="Acme/Git", host="github.com"),
+                LockedDependency(repo_url="Acme/Git", host="github.com"),
+            ),
+            (
+                DependencyReference(repo_url="Team/CaseSensitive", host="git.example.com"),
+                LockedDependency(repo_url="Team/CaseSensitive", host="git.example.com"),
+            ),
+            (
+                DependencyReference(
+                    repo_url="_local/tool",
+                    is_local=True,
+                    local_path="../Tool",
+                ),
+                LockedDependency(
+                    repo_url="_local/tool",
+                    source="local",
+                    local_path="../Tool",
+                ),
+            ),
+            (
+                DependencyReference(
+                    repo_url="Acme/Mono",
+                    is_virtual=True,
+                    virtual_path="skills/Review",
+                ),
+                LockedDependency(
+                    repo_url="Acme/Mono",
+                    is_virtual=True,
+                    virtual_path="skills/Review",
+                ),
+            ),
+            (
+                DependencyReference(
+                    repo_url="Acme/Registry",
+                    source="registry",
+                    artifactory_prefix="artifactory/github",
+                ),
+                LockedDependency(
+                    repo_url="Acme/Registry",
+                    source="registry",
+                    registry_prefix="artifactory/github",
+                ),
+            ),
+        )
+        complete_keys = set()
+        for resolved, locked in identity_pairs:
+            assert resolved.get_unique_key() == locked.get_unique_key()
+            complete_keys.add(resolved.get_unique_key())
+            lock.add_dependency(locked)
+
+        assert complete_keys == {
+            "acme/git",
+            "git.example.com/Team/CaseSensitive",
+            "../Tool",
+            "acme/mono/skills/Review",
+            "acme/registry",
+        }
+
+        unreachable = LockedDependency(repo_url="acme/unreachable")
+        lock.add_dependency(unreachable)
+        plan = build_update_plan(
+            lock,
+            [],
+            complete_resolved_dep_keys=complete_keys,
+        )
+
+        actions_by_key = {entry.dep_key: entry.action for entry in plan.entries}
+        assert {actions_by_key[key] for key in complete_keys} == {"unchanged"}
+        assert actions_by_key[unreachable.get_unique_key()] == "remove"
+
     def test_summary_counts_aggregate_correctly(self):
         lock = _new_lockfile()
         lock.add_dependency(_locked("https://github.com/u/r", "main", "a" * 40))

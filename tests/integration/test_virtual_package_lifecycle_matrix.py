@@ -669,6 +669,7 @@ def test_virtual_package_lifecycle_matrix(
     _assert_last_good_preserved(scenario.project, install_state)
 
 
+@pytest.mark.lifecycle_merge_group
 def test_virtual_throttle_fallback_records_fetch_head_sha_and_content_hash(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

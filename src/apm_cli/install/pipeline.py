@@ -646,7 +646,12 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     if plan_callback is not None:
         from .plan import build_update_plan
 
-        plan = build_update_plan(_early_lockfile, ctx.deps_to_install)
+        complete_dep_keys = ctx.update_plan_complete_dep_keys if ctx.only_packages else None
+        plan = build_update_plan(
+            _early_lockfile,
+            ctx.deps_to_install,
+            complete_resolved_dep_keys=complete_dep_keys,
+        )
         proceed = plan_callback(plan)
         if not proceed:
             transaction.rollback()

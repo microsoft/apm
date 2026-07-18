@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit target mappings now preserve `generated_at`, deployment ownership,
   and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of
   rewriting it. (#2306)
+- Selective `apm update <package>` plans no longer report unselected direct or
+  transitive dependencies as removed; dependencies absent from the complete
+  post-update graph are still reported as removals -- reported by
+  @IldarMinaev (closes #2291; #2305).
 - `apm audit --ci` now surfaces the safe remediation when a lockfile's source
   identity is tampered. A rewritten dependency `host`/`repo_url` trips both the
   external `ref-consistency` check (remedy `apm install --update`, which

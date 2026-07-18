@@ -29,7 +29,7 @@ from apm_cli.models.apm_package import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.content_hash import compute_package_hash
 
-pytestmark = [pytest.mark.component, pytest.mark.lifecycle_smoke]
+pytestmark = [pytest.mark.component]
 
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 _VIRTUAL_COMMIT = "a" * 40
@@ -155,6 +155,7 @@ def _locked_virtual_dep(project: Path) -> dict:
     )
 
 
+@pytest.mark.lifecycle_smoke
 def test_no_resolved_commit_content_hash_reuses_on_disk_package(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -212,6 +213,7 @@ def test_project_install_with_dependency_instructions_prints_compile_hint(
     ) in normalized_output
 
 
+@pytest.mark.lifecycle_smoke
 def test_virtual_lock_replays_across_synthetic_manifest_newline_domains(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
