@@ -435,6 +435,11 @@ def _resolve_target_runtimes(
             # machine happens to have (issue #2298).
             target_runtimes = declared_targets
             selection_source = "manifest"
+            if verbose:
+                logger.verbose_detail(
+                    "Resolved MCP targets from apm.yml declaration: "
+                    f"{', '.join(target_runtimes)} (machine discovery skipped)"
+                )
         else:
             # Step 1: Get all installed runtimes on the system
             installed_runtimes = _discover_installed_runtimes(
@@ -497,6 +502,7 @@ def _resolve_target_runtimes(
     # Apply it before progress output so the message names only actual writes.
     if exclude:
         target_runtimes = [candidate for candidate in target_runtimes if candidate != exclude]
+        # Invalid manifests continue to the shared gate for canonical rendering.
         if not target_runtimes and selection_source != "invalid-manifest":
             logger.warning(
                 f"All selected MCP runtimes excluded (--exclude {exclude}), "

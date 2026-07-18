@@ -153,13 +153,12 @@ This single rule replaces two older ones that used to coexist:
   without telling you.
 
 A malformed `targets:` field (both `target:` and `targets:` set,
-`targets: []`, or an unknown target name) fails closed before machine
-discovery: no MCP files are written and an `[x]` error names the field to fix. A greenfield
-project with no `targets:`, no `--target` flag, AND no detected
-signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also
-fails closed with the same `[x]` voice -- consistent with how
-`apm install` treats the same input. Pin a target with `--target` or
-declare one in `apm.yml`. (#1335)
+`targets: []`, or an unknown target name) fails closed before machine discovery:
+no MCP files are written and an `[x]` error names the field to fix. A
+greenfield project with no `targets:`, no `--target` flag, AND no detected
+signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also fails closed
+with the same `[x]` voice -- consistent with how `apm install` treats the same
+input. Pin a target with `--target` or declare one in `apm.yml`. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to
