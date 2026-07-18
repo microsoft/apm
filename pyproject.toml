@@ -218,4 +218,5 @@ markers = [
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
     "lifecycle_smoke: promoted to the required PR-time Lifecycle Smoke (Linux) job -- see ci.yml's lifecycle-smoke job and docs/src/content/docs/contributing/integration-testing.md",
+    "lifecycle_merge_group: unique lifecycle contracts retained in the full merge-group integration suite",
 ]

@@ -34,17 +34,19 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ### 3. **Lifecycle Smoke** (PR-time required check)
-- **Location**: selected declaratively via the registered `lifecycle_smoke` pytest marker, applied to all of `tests/integration/test_install_content_hash_roundtrip.py`, `test_policy_pinned_constraint_e2e.py`, `test_virtual_claude_skill_lock_convergence.py`, `test_virtual_package_lifecycle_matrix.py` (module-level), to only `test_architecture_authorities.py::test_ado_lock_coordinates_have_single_owner` (function-level -- the file's other tests are not part of this family), and to only the `[claude]` parametrization of `test_prune_hook_reconciliation_e2e.py::test_prune_removes_merged_hook_entries_and_sidecar` (the sibling `[cursor]` parametrization is deliberately excluded)
-- **Purpose**: Promote the smallest stable, hermetic slice of the real Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so a regression in install/lock/audit convergence, ADO lock-coordinate handling, or prune-time hook reconciliation fails the PR instead of only surfacing once a change reaches the merge queue
-- **Scope**: install content-hash roundtrip, policy pinned-constraint enforcement, virtual-skill lock convergence, the virtual/manifestless lifecycle matrix, the ADO lock-coordinate ownership guard, and prune's merged-hook/sidecar reconciliation -- no built binary, no network, no credentials
-- **Duration**: ~65-70s job wall time (hard 3-minute timeout)
+- **Location**: selected declaratively via `lifecycle_smoke and not lifecycle_merge_group`. The original 14 nodes plus six real-subprocess state-machine nodes form the bounded required set. Three unique prune-ledger/throttle regressions carry both markers and remain in the full merge-group integration suite.
+- **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
+- **Scope**: the existing family contains one static authority guard plus in-process/mocked content-hash, policy, hook, virtual-skill, and virtual-package rows. The six added rows invoke the uv-installed `apm` console script through real subprocesses and local Git. This is not frozen PyInstaller coverage.
+- **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so the six subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
+- **Duration**: the 20-node required expression must remain inside its hard 3-minute job timeout; hosted duration is authoritative.
 - **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
-- **Selection mechanism**: `pytest --strict-markers -m lifecycle_smoke tests/integration` -- declarative, not an explicit file/node-id list. If every `@pytest.mark.lifecycle_smoke` mark were ever removed, the marker family collects zero tests and pytest exits code 5 ("no tests collected"), failing the job loudly rather than silently shrinking. The marker is registered in `pyproject.toml`'s `[tool.pytest.ini_options]` markers list; `--strict-markers` rejects any typo'd or unregistered mark used as a decorator.
-- **Drift guard**: `tests/quality/test_ci_topology.py` pins the marker's registration, the command's use of `--strict-markers`/`-m lifecycle_smoke`/the bounded `tests/integration` root, hermeticity (no credentials at job- or step-level `env`, no credential expressions in `run:`/`with:`), required-check membership, and that the marker family collects a non-empty set of tests right now -- editing the job without updating that guard fails CI
+- **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. The full `lifecycle_smoke` family has 23 nodes; `lifecycle_merge_group` has exactly three named nodes; the difference is the required 20.
+- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs `pytest tests/integration/`, so all 23 lifecycle nodes remain exercised.
+- **Drift guard**: `tests/quality/test_ci_topology.py` pins the 23/3/20 partition, exact merge-group membership, required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
 - **Run it locally** (the exact command CI runs):
   ```bash
-  uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
-    -m lifecycle_smoke tests/integration
+  APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+    -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
   ```
 
 ### 4. **Live Guardrailing Hero** (scheduled/manual)
@@ -169,6 +171,7 @@ contract. Complete the [development setup](../development-guide/) first.
 | `local_git_repository.py` | Deterministic local Git origins | `test_local_git_repository_factory_contract.py` |
 | `local_package.py` | Source-only package inputs | `test_local_package_factory_contract.py` |
 | `apm_lifecycle_runner.py` | Bounded process execution and evidence | `test_apm_lifecycle_runner_contract.py` |
+| `lifecycle_state.py` | Exact bytes and semantic durable-state receipts | `test_lifecycle_state_snapshot_contract.py` |
 | `artifact_snapshot.py` | Read-only filesystem observations | `test_artifact_snapshot_contract.py` |
 | `scenario_rows.py` | Immutable scenario data | `test_scenario_rows_contract.py` |
 
@@ -189,7 +192,8 @@ hostile post-creation filesystem races are outside the contract.
 `GIT_ALLOW_PROTOCOL=file` and local `url.*.insteadOf` rewriting separately
 restrict Git transport in reviewed scenarios.
 
-Keep modules flat. Inside a pytest test with `tmp_path`, compose them directly:
+Keep modules flat. Inside a pytest test with `tmp_path` and
+`apm_binary_path`, compose them directly:
 
 ```python
 import os
@@ -208,7 +212,7 @@ sources.add_skill(
     "example",
     "---\nname: example\ndescription: Fixture\n---\n# Example\n",
 )
-result = ApmLifecycleRunner().run(
+result = ApmLifecycleRunner((str(apm_binary_path),)).run(
     ("install", "--target", "copilot"),
     cwd=project.root,
     env=environment,
@@ -218,10 +222,13 @@ assert result.returncode == 0
 assert "apm.lock.yaml" in snapshot.paths
 ```
 
-For remote-package scenarios, add `LocalGitRepositoryFactory` and `ScenarioRow`
-as shown in the cross-module contract. `ApmLifecycleRunner()` invokes `apm`
-through `PATH`; packaged-binary tests use the
-[binary-resolution fixture](#apm-binary-resolution).
+For auth-bearing remote-package scenarios, create a local origin with
+`LocalGitRepositoryFactory` and pass the complete environment returned by
+`url_rewrite_subprocess_env()` to `ApmLifecycleRunner`. That process-scoped Git
+rewrite survives the production auth environment builder; do not hand-merge
+`GIT_CONFIG_*` slots or rely on the older global-config-only rewrite.
+`ApmLifecycleRunner((str(apm_binary_path),))` invokes the fixture-selected
+console script. Packaged-binary tests belong to the separate platform lane.
 
 `test_packaged_virtual_file_lifecycle_e2e.py`,
 `test_deployed_files_e2e.py`, and

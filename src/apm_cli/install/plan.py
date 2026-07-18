@@ -177,6 +177,8 @@ def _display_name(dep_key: str, locked: LockedDependency | None) -> str:
 def build_update_plan(
     old_lockfile: LockFile | None,
     resolved_deps: Iterable[DependencyReference],
+    *,
+    complete_resolved_dep_keys: Iterable[str] | None = None,
 ) -> UpdatePlan:
     """Compare an existing lockfile against freshly-resolved deps.
 
@@ -187,6 +189,11 @@ def build_update_plan(
             ``DependencyReference`` carries a ``resolved_reference``
             populated by the resolver.  Typically
             ``InstallContext.deps_to_install``.
+        complete_resolved_dep_keys: Optional dep keys from the complete
+            post-update dependency graph before selective-update filtering.
+            When present, locked entries missing from ``resolved_deps`` but
+            still present in this set are retained as unchanged instead of
+            being reported as removals.
 
     Returns:
         A frozen :class:`UpdatePlan` summarising the diff.
@@ -201,6 +208,9 @@ def build_update_plan(
 
     seen_keys: set[str] = set()
     plan_entries: list[PlanEntry] = []
+    complete_key_set = (
+        set(complete_resolved_dep_keys) if complete_resolved_dep_keys is not None else None
+    )
 
     for dep in resolved_deps:
         key = _dep_ref_key(dep)
@@ -282,6 +292,21 @@ def build_update_plan(
 
     for key, old in old_entries.items():
         if key in seen_keys:
+            continue
+        if complete_key_set is not None and key in complete_key_set:
+            plan_entries.append(
+                PlanEntry(
+                    dep_key=key,
+                    action=_ACTION_UNCHANGED,
+                    display_name=_display_name(key, old),
+                    old_resolved_ref=old.resolved_ref,
+                    old_resolved_commit=old.resolved_commit,
+                    old_content_hash=old.content_hash,
+                    new_resolved_ref=old.resolved_ref,
+                    new_resolved_commit=old.resolved_commit,
+                    deployed_files=tuple(old.deployed_files),
+                )
+            )
             continue
         plan_entries.append(
             PlanEntry(
