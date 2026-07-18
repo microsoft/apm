@@ -765,7 +765,7 @@ def _ssh_key_auth_diagnostic(
     return (
         " SSH key authentication failed while APM ran git non-interactively. "
         "Verify that the key is available to SSH. For a passphrase-protected key, "
-        "Load the key into ssh-agent before running APM: start ssh-agent if needed, "
+        "load the key into ssh-agent before running APM: start ssh-agent if needed, "
         "then run 'ssh-add <key-file>' (or 'ssh-add' for the default key). "
         "In CI, load a dedicated deploy key non-interactively, or switch the "
         "dependency to token-backed HTTPS. APM does not open an interactive "

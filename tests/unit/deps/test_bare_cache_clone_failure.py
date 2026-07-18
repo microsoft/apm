@@ -77,7 +77,7 @@ def test_clone_failure_message_explains_passphrase_protected_ssh_key() -> None:
     )
 
     assert "SSH key authentication failed" in message
-    assert "Load the key into ssh-agent" in message
+    assert "load the key into ssh-agent" in message
     assert "ssh-add <key-file>" in message
     assert "start ssh-agent" in message
     assert "Verify that the key is available to SSH" in message
@@ -94,7 +94,7 @@ def test_clone_failure_message_explains_explicit_ssh_publickey_failure() -> None
     )
 
     assert "SSH key authentication failed" in message
-    assert "Load the key into ssh-agent" in message
+    assert "load the key into ssh-agent" in message
     assert "ssh-add <key-file>" in message
     assert "start ssh-agent" in message
     assert "token-backed HTTPS" in message
