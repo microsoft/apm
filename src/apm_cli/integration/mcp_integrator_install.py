@@ -530,13 +530,20 @@ def _resolve_target_runtimes(
     # active project target (silent skip, same as Cursor/OpenCode/Gemini).
     # Claude Code is gated identically: a host-wide `claude` binary should
     # not opt every APM project into `.mcp.json` writes.
-    target_runtimes = MCPIntegrator._gate_project_scoped_runtimes(
-        target_runtimes,
-        user_scope=user_scope,
-        project_root=project_root,
-        apm_config=apm_config,
-        explicit_target=runtime or explicit_target,
-    )
+    # Preserve direct-call compatibility for unknown legacy runtime strings:
+    # the adapter layer owns their warning/error behavior. Known runtime names
+    # are equivalent to explicit --target and therefore outrank manifest/signals.
+    from apm_cli.core.target_catalog import accepted_target_values
+
+    runtime_is_known = runtime is None or runtime in accepted_target_values("install")
+    if runtime_is_known:
+        target_runtimes = MCPIntegrator._gate_project_scoped_runtimes(
+            target_runtimes,
+            user_scope=user_scope,
+            project_root=project_root,
+            apm_config=apm_config,
+            explicit_target=runtime or explicit_target,
+        )
 
     # Explicit runtime/exclusion/gating can leave nothing to configure.
     if not target_runtimes:
