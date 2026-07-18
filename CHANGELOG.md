@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Repeated `apm install` runs with unchanged self-defined MCP dependencies and
   explicit target mappings now preserve `generated_at`, deployment ownership,
   and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of
-  rewriting it. (#2306)
+  rewriting it. One bounded hermetic regression joins the PR-time lifecycle
+  gate. (#2306)
 - Selective `apm update <package>` plans no longer report unselected direct or
   transitive dependencies as removed; dependencies absent from the complete
   post-update graph are still reported as removals -- reported by

@@ -34,15 +34,15 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ### 3. **Lifecycle Smoke** (PR-time required check)
-- **Location**: selected declaratively via `lifecycle_smoke and not lifecycle_merge_group`. The original 14 nodes plus six real-subprocess state-machine nodes form the bounded required set. Three unique prune-ledger/throttle regressions carry both markers and remain in the full merge-group integration suite.
+- **Location**: selected declaratively via `lifecycle_smoke and not lifecycle_merge_group`. Fifteen in-process/static nodes plus six real-subprocess state-machine nodes form the bounded required set. Three unique prune-ledger/throttle regressions carry both markers and remain in the full merge-group integration suite.
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
-- **Scope**: the existing family contains one static authority guard plus in-process/mocked content-hash, policy, hook, virtual-skill, and virtual-package rows. The six added rows invoke the uv-installed `apm` console script through real subprocesses and local Git. This is not frozen PyInstaller coverage.
+- **Scope**: the existing family contains one static authority guard plus in-process/mocked content-hash, policy, hook, MCP lock-convergence, virtual-skill, and virtual-package rows. The six state-machine rows invoke the uv-installed `apm` console script through real subprocesses and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so the six subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: the 20-node required expression must remain inside its hard 3-minute job timeout; hosted duration is authoritative.
+- **Duration**: the 21-node required expression must remain inside its hard 3-minute job timeout; hosted duration is authoritative.
 - **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
-- **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. The full `lifecycle_smoke` family has 23 nodes; `lifecycle_merge_group` has exactly three named nodes; the difference is the required 20.
-- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs `pytest tests/integration/`, so all 23 lifecycle nodes remain exercised.
-- **Drift guard**: `tests/quality/test_ci_topology.py` pins the 23/3/20 partition, exact merge-group membership, required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
+- **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. The full `lifecycle_smoke` family has 24 nodes; `lifecycle_merge_group` has exactly three named nodes; the difference is the required 21.
+- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs `pytest tests/integration/`, so all 24 lifecycle nodes remain exercised.
+- **Drift guard**: `tests/quality/test_ci_topology.py` pins the 24/3/21 partition, exact merge-group membership, required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
 - **Run it locally** (the exact command CI runs):
   ```bash
   APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
