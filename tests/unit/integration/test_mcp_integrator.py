@@ -826,6 +826,39 @@ class TestInstallProjectRootDetection:
         assert called_runtimes == {"copilot", "cursor", "opencode"}
         assert "vscode" not in called_runtimes
 
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    def test_exclude_applies_to_declared_targets(
+        self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
+    ):
+        """Regression: --exclude must still drop a runtime from a declared `targets:` list."""
+        nested = tmp_path / "nested-project"
+        nested.mkdir()
+
+        mock_mgr = mock_mgr_cls.return_value
+        mock_mgr.is_runtime_available.return_value = False
+        mock_install_rt.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+            MCPIntegrator.install(
+                mcp_deps=["test/server"],
+                exclude="cursor",
+                project_root=nested,
+                apm_config={"targets": ["copilot", "cursor"]},
+            )
+
+        called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
+        assert called_runtimes == {"copilot"}
+
 
 # ===========================================================================
 # MCPIntegrator.remove_stale - copilot
