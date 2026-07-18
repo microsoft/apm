@@ -187,7 +187,7 @@ class TestRunInstallPipelinePlanCallback:
             patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
             patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
             patch("apm_cli.install.plan.build_update_plan", return_value=MagicMock()) as build_plan,
-            patch("apm_cli.install.phases.resolve", mock_resolve, create=True),
+            patch("apm_cli.install.phases.resolve", mock_resolve),
         ):
             mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
             mock_ctx.tui.__exit__ = MagicMock(return_value=False)
@@ -242,7 +242,7 @@ class TestRunInstallPipelinePlanCallback:
             patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
             patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
             patch("apm_cli.install.plan.build_update_plan", return_value=MagicMock()),
-            patch("apm_cli.install.phases.resolve", mock_resolve, create=True),
+            patch("apm_cli.install.phases.resolve", mock_resolve),
             patch("apm_cli.install.phases.policy_gate.run"),
             patch("apm_cli.install.phases.targets.run"),
             patch("apm_cli.install.phases.policy_target_check.run"),
@@ -312,7 +312,7 @@ class TestRunInstallPipelineExceptionHandling:
             patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
             patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
             patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
-            patch("apm_cli.install.phases.resolve", resolve_phase, create=True),
+            patch("apm_cli.install.phases.resolve", resolve_phase),
         ):
             mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
             mock_ctx.tui.__exit__ = MagicMock(return_value=False)
@@ -345,7 +345,7 @@ class TestRunInstallPipelineExceptionHandling:
             patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
             patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
             patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
-            patch("apm_cli.install.phases.resolve", resolve_phase, create=True),
+            patch("apm_cli.install.phases.resolve", resolve_phase),
         ):
             mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
             mock_ctx.tui.__exit__ = MagicMock(return_value=False)

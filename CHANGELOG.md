@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Selective `apm update <package>` plans no longer report unselected direct or
+  transitive dependencies as removed; dependencies absent from the complete
+  post-update graph are still reported as removals -- reported by
+  @IldarMinaev (closes #2291; #2305).
 - `apm audit --ci` now surfaces the safe remediation when a lockfile's source
   identity is tampered. A rewritten dependency `host`/`repo_url` trips both the
   external `ref-consistency` check (remedy `apm install --update`, which
