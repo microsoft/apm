@@ -60,6 +60,7 @@ def _mutation_lines(source: str) -> list[int]:
         "lock.local_deployed_files.clear()",
         "lock.local_deployed_file_hashes.update({'path': 'hash'})",
         "lock.local_deployed_files.insert(0, 'path')",
+        "lock.mcp_target_servers = {'vscode': ['server']}",
     ],
 )
 def test_mutation_detector_catches_negative_controls(source: str) -> None:
