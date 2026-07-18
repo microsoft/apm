@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ownership records while preserving shared deployments and user-edited files.
   `apm audit` now catches leftover ownership instead of reporting a clean bill
   of health; run `apm prune`, then rerun `apm audit` to repair it.
+- Bare `apm install` now reports a stale persisted `skills:` subset that
+  matches no available skill, naming the package plus requested and available
+  names while retaining the existing successful install status. OpenAPM
+  `req-mf-022` codifies this diagnostic contract -- by
+  @sergio-sisternes-epam (#2294).
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)
