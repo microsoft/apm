@@ -32,8 +32,8 @@ first failure to skip expensive I/O.
 |---|---|---|---|
 | `manifest-parse` | block | `ci_checks.py` | only when `apm.yml` cannot be parsed |
 | `lockfile-exists` | block | `ci_checks.py` | yes |
-| `deployment-ledger-owners` | block | `ci_checks.py` | yes |
 | `ref-consistency` | block | `ci_checks.py` | yes |
+| `deployment-ledger-owners` | block | `ci_checks.py` | yes |
 | `deployed-files-present` | block | `ci_checks.py` | yes |
 | `no-orphaned-packages` | block | `ci_checks.py` | yes |
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
@@ -65,6 +65,23 @@ the [policy schema](../policy-schema/).
 - **Effect.** Subsequent checks are skipped (the lockfile is required input).
 - **Remediation.** Run `apm install` to generate `apm.lock.yaml` and commit it.
 
+### `ref-consistency`
+
+- **What it verifies.** That every dependency's `reference` in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`) matches the `resolved_ref` recorded in the lockfile.
+- **Fails when.** A manifest ref differs from the lockfile entry, or the manifest declares a dependency that is missing from the lockfile.
+- **Remediation.** Run the command the check message names: `apm install --update`
+  when the lockfile already holds a resolution that must be refreshed or re-keyed
+  (the source-identity rewrite and commit-pin mismatch cases), or plain `apm install`
+  for a first resolution -- so the lockfile re-resolves to the manifest, then commit
+  `apm.lock.yaml`.
+- **Runs before `deployment-ledger-owners`.** This external manifest-versus-lockfile
+  identity check is evaluated ahead of the internal ledger-owner check on purpose.
+  A source-identity tamper (a rewritten dependency `host`/`repo_url` in the lockfile)
+  trips both, but only `ref-consistency` points at the safe fix -- re-resolving from
+  the trusted manifest via `apm install --update`. The ledger-owner remedy (`apm prune`)
+  reconciles ownership toward the *current* lockfile, so it must never be the surfaced
+  cause when the manifest and lockfile disagree about a dependency's identity.
+
 ### `deployment-ledger-owners`
 
 - **What it verifies.** That every canonical `deployments` row's `owners` and
@@ -83,12 +100,6 @@ the [policy schema](../policy-schema/).
   the stale ownership metadata; it does not delete files based on a ghost
   row alone. See [`apm prune`](../cli/prune/#canonical-deployment-ownership)
   and [Lockfile spec](../lockfile-spec/#canonical-deployment-rows).
-
-### `ref-consistency`
-
-- **What it verifies.** That every dependency's `reference` in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`) matches the `resolved_ref` recorded in the lockfile.
-- **Fails when.** A manifest ref differs from the lockfile entry, or the manifest declares a dependency that is missing from the lockfile.
-- **Remediation.** Run `apm install` so the lockfile re-resolves to the manifest, then commit `apm.lock.yaml`.
 
 ### `deployed-files-present`
 
@@ -142,7 +153,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `deployment-ledger-owners`, `ref-consistency`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 
