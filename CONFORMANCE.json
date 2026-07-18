@@ -524,6 +524,17 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-mf-022",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match"
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -1175,7 +1186,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 73,
+      "active": 74,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1199,5 +1210,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 103
+  "total_requirements": 104
 }

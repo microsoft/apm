@@ -950,3 +950,250 @@ class TestSkipBinDenialPath:
         assert (promoted_skill / "bin" / "helper").exists(), (
             "bin/ must be included when skip_bin=False"
         )
+
+
+# ---------------------------------------------------------------------------
+# _integrate_skill_bundle -- --skill filter matches nothing (issue #2116)
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrateSkillBundleSubsetNoMatch:
+    """--skill filter that matches zero skills emits a warning with available names."""
+
+    def test_no_match_warns_with_available_names(self, tmp_path: Path) -> None:
+        pkg_dir = tmp_path / "bundle-pkg"
+        pkg_dir.mkdir()
+        skills_dir = pkg_dir / "skills"
+        tdd_dir = skills_dir / "tdd"
+        tdd_dir.mkdir(parents=True)
+        (tdd_dir / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+
+        dep_ref = MagicMock()
+        dep_ref.is_virtual = False
+        dep_ref.get_unique_key.return_value = "owner/bundle-pkg"
+        pi = _make_package_info(pkg_dir, dep_ref=dep_ref)
+
+        target = _make_target(name="copilot", root_dir=".github")
+        integrator = SkillIntegrator()
+        diagnostics = MagicMock()
+
+        with (
+            patch("apm_cli.utils.console._rich_warning") as mock_warn,
+            patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})),
+        ):
+            integrator._integrate_skill_bundle(
+                pi,
+                tmp_path,
+                skills_dir,
+                diagnostics=diagnostics,
+                targets=[target],
+                skill_subset=("nonexistent",),
+            )
+
+        diagnostics.warn.assert_called_once()
+        warning_msg = diagnostics.warn.call_args.args[0]
+        assert "nonexistent" in warning_msg
+        assert "tdd" in warning_msg
+        assert "owner/bundle-pkg" not in warning_msg
+        assert "'skills:' in apm.yml" in warning_msg
+        assert diagnostics.warn.call_args.kwargs == {"package": "owner/bundle-pkg"}
+        mock_warn.assert_not_called()
+
+    def test_path_request_displays_only_declared_name(self, tmp_path: Path) -> None:
+        """Diagnostics hide expanded filter tokens used for internal matching."""
+        pkg_dir = tmp_path / "bundle-pkg"
+        skills_dir = pkg_dir / "skills"
+        tdd_dir = skills_dir / "tdd"
+        tdd_dir.mkdir(parents=True)
+        (tdd_dir / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+        pi = _make_package_info(pkg_dir)
+        diagnostics = MagicMock()
+
+        with patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})):
+            SkillIntegrator()._integrate_skill_bundle(
+                pi,
+                tmp_path,
+                skills_dir,
+                diagnostics=diagnostics,
+                targets=[_make_target()],
+                skill_subset=("skills/productivity/missing",),
+            )
+
+        warning_msg = diagnostics.warn.call_args.args[0]
+        assert "Requested: skills/productivity/missing." in warning_msg
+        assert "Requested: missing," not in warning_msg
+
+    def test_matching_skill_protected_as_user_authored_is_not_filter_miss(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A protected destination is not misdiagnosed as a stale source pin."""
+        pkg_dir = tmp_path / "bundle-pkg"
+        skills_dir = pkg_dir / "skills"
+        source = skills_dir / "tdd"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# upstream", encoding="utf-8")
+        destination = tmp_path / ".github" / "skills" / "tdd"
+        destination.mkdir(parents=True)
+        (destination / "SKILL.md").write_text("# local", encoding="utf-8")
+        diagnostics = MagicMock()
+
+        with patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})):
+            result = SkillIntegrator()._integrate_skill_bundle(
+                _make_package_info(pkg_dir),
+                tmp_path,
+                skills_dir,
+                diagnostics=diagnostics,
+                managed_files=set(),
+                targets=[_make_target()],
+                skill_subset=("tdd",),
+            )
+
+        assert result.sub_skills_promoted == 0
+        diagnostics.skip.assert_called_once()
+        diagnostics.warn.assert_not_called()
+
+    def test_first_skills_capable_target_owns_promotion_count(self, tmp_path: Path) -> None:
+        """An unsupported first target cannot suppress later promotion accounting."""
+        pkg_dir = tmp_path / "bundle-pkg"
+        skills_dir = pkg_dir / "skills"
+        source = skills_dir / "tdd"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+        unsupported = _make_target(name="instructions-only", supports_skills=False)
+        supported = _make_target(name="claude", root_dir=".claude")
+
+        with patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})):
+            result = SkillIntegrator()._integrate_skill_bundle(
+                _make_package_info(pkg_dir),
+                tmp_path,
+                skills_dir,
+                targets=[unsupported, supported],
+                skill_subset=("tdd",),
+            )
+
+        assert result.sub_skills_promoted == 1
+        assert (tmp_path / ".claude" / "skills" / "tdd" / "SKILL.md").is_file()
+
+    def test_no_match_does_not_warn_when_no_filter(self, tmp_path: Path) -> None:
+        """No warning when skill_subset is None (all skills are deployed)."""
+        pkg_dir = tmp_path / "bundle-pkg"
+        pkg_dir.mkdir()
+        skills_dir = pkg_dir / "skills"
+        tdd_dir = skills_dir / "tdd"
+        tdd_dir.mkdir(parents=True)
+        (tdd_dir / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+
+        dep_ref = MagicMock()
+        dep_ref.is_virtual = False
+        dep_ref.get_unique_key.return_value = "owner/bundle-pkg"
+        pi = _make_package_info(pkg_dir, dep_ref=dep_ref)
+
+        target = _make_target(name="copilot", root_dir=".github")
+        integrator = SkillIntegrator()
+
+        with (
+            patch("apm_cli.utils.console._rich_warning") as mock_warn,
+            patch.object(SkillIntegrator, "_build_ownership_maps", return_value=({}, {})),
+        ):
+            integrator._integrate_skill_bundle(
+                pi,
+                tmp_path,
+                skills_dir,
+                targets=[target],
+                skill_subset=None,
+            )
+
+        mock_warn.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _promote_sub_skills_standalone -- --skill filter matches nothing (#2116)
+# ---------------------------------------------------------------------------
+
+
+class TestPromoteSubSkillsStandaloneSubsetNoMatch:
+    """--skill filter that matches zero .apm/skills/ entries emits a warning."""
+
+    def test_no_match_warns_with_available_names(self, tmp_path: Path) -> None:
+        pkg_dir = tmp_path / "instr-pkg"
+        pkg_dir.mkdir()
+        sub_skills_dir = pkg_dir / ".apm" / "skills"
+        tdd_dir = sub_skills_dir / "tdd"
+        tdd_dir.mkdir(parents=True)
+        (tdd_dir / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+
+        dep_ref = MagicMock()
+        dep_ref.is_virtual = False
+        dep_ref.get_unique_key.return_value = "owner/instr-pkg"
+        pi = _make_package_info(pkg_dir, dep_ref=dep_ref)
+
+        target = _make_target(name="copilot", root_dir=".github")
+        integrator = SkillIntegrator()
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.utils.console._rich_warning") as mock_warn,
+            patch.object(SkillIntegrator, "_build_skill_ownership_map", return_value={}),
+        ):
+            integrator._promote_sub_skills_standalone(
+                pi,
+                tmp_path,
+                logger=logger,
+                targets=[target],
+                skill_subset=("nonexistent",),
+            )
+
+        logger.warning.assert_called_once()
+        warning_msg = logger.warning.call_args.args[0]
+        assert "nonexistent" in warning_msg
+        assert "tdd" in warning_msg
+        assert "owner/instr-pkg" in warning_msg
+        assert "'skills:' in apm.yml" in warning_msg
+        mock_warn.assert_not_called()
+
+    def test_missing_skills_directory_warns_without_crashing(self, tmp_path: Path) -> None:
+        """An absent source directory is represented as an empty available set."""
+        available = SkillIntegrator._skill_names_in_directory(tmp_path / "missing")
+
+        with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+            SkillIntegrator._warn_no_skill_filter_match(
+                available,
+                ("missing",),
+                "owner/instr-pkg",
+            )
+
+        assert available == frozenset()
+        warning_msg = mock_warn.call_args.args[0]
+        assert "Available: (none)." in warning_msg
+        assert mock_warn.call_args.kwargs == {"symbol": "warning"}
+
+    def test_no_match_does_not_warn_when_no_filter(self, tmp_path: Path) -> None:
+        """No warning when skill_subset is None."""
+        pkg_dir = tmp_path / "instr-pkg"
+        pkg_dir.mkdir()
+        sub_skills_dir = pkg_dir / ".apm" / "skills"
+        tdd_dir = sub_skills_dir / "tdd"
+        tdd_dir.mkdir(parents=True)
+        (tdd_dir / "SKILL.md").write_text("# tdd skill", encoding="utf-8")
+
+        dep_ref = MagicMock()
+        dep_ref.is_virtual = False
+        dep_ref.get_unique_key.return_value = "owner/instr-pkg"
+        pi = _make_package_info(pkg_dir, dep_ref=dep_ref)
+
+        target = _make_target(name="copilot", root_dir=".github")
+        integrator = SkillIntegrator()
+
+        with (
+            patch("apm_cli.utils.console._rich_warning") as mock_warn,
+            patch.object(SkillIntegrator, "_build_skill_ownership_map", return_value={}),
+        ):
+            integrator._promote_sub_skills_standalone(
+                pi,
+                tmp_path,
+                targets=[target],
+                skill_subset=None,
+            )
+
+        mock_warn.assert_not_called()
