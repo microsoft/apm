@@ -1,11 +1,11 @@
 ---
 title: apm lock
-description: Resolve all dependencies and write apm.lock.yaml without deploying any files to agent targets.
+description: Resolve all dependencies and write apm.lock.yaml without deploying or deleting files in agent targets.
 sidebar:
   order: 5
 ---
 
-Resolve all dependencies declared in `apm.yml` and write `apm.lock.yaml` with pinned commit SHAs -- without copying any files to agent targets.
+Resolve all dependencies declared in `apm.yml` and write `apm.lock.yaml` with pinned commit SHAs -- without copying or deleting any files in agent targets.
 
 ## Synopsis
 
@@ -66,7 +66,7 @@ apm lock --verbose
 ## Behavior
 
 - **Resolve and download.** Every dependency in `apm.yml` is resolved and, if not already cached, downloaded. Fresh downloads pin the commit SHA and compute a content hash.
-- **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. Existing `deployed_files` rows may be reconciled with the declared target set, but no on-disk deployed files are pruned.
+- **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. Stale `deployed_files` rows for dropped targets are removed, but no on-disk deployed files are deleted.
 - **No files deployed or deleted.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
 

@@ -44,6 +44,7 @@ def _ctx(*, package_deployed_files, existing_lockfile, targets, project_root):
         existing_lockfile=existing_lockfile,
         targets=targets,
         project_root=project_root,
+        lockfile_only=False,
     )
 
 
@@ -752,6 +753,7 @@ class TestInactiveTargetGhostDrop:
             project_root=tmp_path,
             apm_package=SimpleNamespace(package_path=tmp_path),
             scope=None,
+            lockfile_only=False,
         )
         LockfileBuilder(ctx)._attach_deployed_files(new)
 

@@ -31,6 +31,7 @@ def _ctx(*, package_deployed_files, existing_lockfile=None, targets=None, projec
         existing_lockfile=existing_lockfile,
         targets=targets or [_target("claude")],
         project_root=project_root,
+        lockfile_only=False,
     )
 
 

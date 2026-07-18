@@ -410,7 +410,11 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     include_ledger: bool = False,
     cleanup_dropped: bool = True,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
-    """Reconcile one deployed-state block and safely remove dropped paths."""
+    """Reconcile one deployed-state block and safely remove dropped paths.
+
+    Set ``cleanup_dropped=False`` only for lockfile-only reconciliation: stale
+    lock rows are dropped, but on-disk files are preserved.
+    """
     files, hashes, ledger = union_preserving(
         current_files,
         current_hashes,
