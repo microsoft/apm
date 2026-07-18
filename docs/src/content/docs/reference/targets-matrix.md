@@ -44,6 +44,17 @@ Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
 gated behind experimental flags and not listed above. See
 [Experimental](../experimental/).
 
+## Post-install instruction compilation
+
+After a project install stages dependency instructions, the APM CLI requires a
+separate root-context compile for `codex`, `gemini`, and `opencode`, plus
+experimental `hermes` when enabled. It emits the
+[`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
+All other targets in this matrix either deploy instructions as native per-file
+rules, do not support dependency instructions, or have no verified
+root-context reader, so they do not trigger that reminder. A target not
+classified here does not trigger it by default.
+
 ## Detection and resolution
 
 `apm install` and `apm compile` resolve the active target list with this
@@ -117,12 +128,14 @@ Claude Code.
 - **Deploy directory.** `.claude/` (project and user scope; user scope honors `CLAUDE_CONFIG_DIR` if set).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
-  - instructions: `.claude/rules/<name>.md`
+  - instructions: deployed directly by `apm install` to
+    `.claude/rules/<name>.md`
   - agents: `.claude/agents/<name>.md`
   - commands: `.claude/commands/<name>.md`
   - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
-- **Compile output.** `CLAUDE.md` and per-rule files under `.claude/rules/`.
+- **Compile output.** `CLAUDE.md`; instructions already deployed under
+  `.claude/rules/` are omitted from `CLAUDE.md` to avoid duplicate context.
 
 ## cursor
 

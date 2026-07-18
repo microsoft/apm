@@ -862,6 +862,109 @@ class TestRunBaselineChecks:
         assert len(result.failed_checks) >= 2
 
 
+class TestExternalBeforeInternalCheckOrdering:
+    """Ordering contract: the external manifest<->lockfile identity check
+    (``ref-consistency``) MUST surface before the internal ledger-owner
+    integrity check (``deployment-ledger-owners``).
+
+    Regression guard for the #2292 -> source-identity failure: a
+    source-identity lockfile tamper (attacker rewrites a dependency's
+    host/repo_url) trips BOTH checks, but their remedies diverge --
+    ref-consistency says ``apm install --update`` (re-resolve from the
+    trusted manifest, restoring the legitimate source) while
+    deployment-ledger-owners says ``apm prune`` (reconcile ownership
+    toward the CURRENT/tampered lockfile, which would entrench the
+    attacker). Under fail-fast the first failing check wins, so
+    ref-consistency must be evaluated first. This test locks that order
+    so a future check insertion cannot silently swap the reported cause
+    and its remediation again.
+    """
+
+    _LEGIT_KEY = "gitlab.example.invalid/group/fixture-source-identity"
+
+    def _write_source_identity_tamper(self, project: Path) -> None:
+        """Manifest declares the legitimate source; the lockfile has been
+        source-identity tampered (host/repo_url rewritten to an attacker
+        key) while the persisted deployment ledger still owns the
+        legitimate key -- so both checks fire."""
+        _write_apm_yml(project, deps=[self._LEGIT_KEY])
+        _write_lockfile(
+            project,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: attacker/other
+                    host: attacker.invalid
+                    host_type: gitlab
+                    resolved_ref: '{"0" * 40}'
+                    resolved_commit: '{"0" * 40}'
+                    version: 0.1.0
+                    package_type: skill_bundle
+                deployments:
+                  - kind: project-relative
+                    target: copilot
+                    value: .github/instructions/fixture.instructions.md
+                    runtime: null
+                    scope: project
+                    owners:
+                      - {self._LEGIT_KEY}
+                    active_owner: {self._LEGIT_KEY}
+                    content_hash: sha256:{"a" * 64}
+            """),
+        )
+
+    def test_source_identity_tamper_surfaces_ref_consistency_under_fail_fast(self, tmp_path):
+        self._write_source_identity_tamper(tmp_path)
+        result = run_baseline_checks(tmp_path, fail_fast=True)
+        assert not result.passed
+        # Fail-fast must report the external-boundary cause with the safe
+        # ``apm install --update`` remedy, never the ledger-owner cause
+        # (whose ``apm prune`` remedy would entrench the attacker source).
+        assert len(result.failed_checks) == 1
+        assert result.failed_checks[0].name == "ref-consistency"
+        assert "apm install --update" in result.failed_checks[0].message
+
+    def test_ref_consistency_precedes_deployment_ledger_owners(self, tmp_path):
+        self._write_source_identity_tamper(tmp_path)
+        result = run_baseline_checks(tmp_path, fail_fast=False)
+        names = [check.name for check in result.checks]
+        assert "ref-consistency" in names
+        assert "deployment-ledger-owners" in names
+        assert names.index("ref-consistency") < names.index("deployment-ledger-owners")
+        # Both are genuine failures in this dual-cause tamper.
+        failed = {c.name for c in result.failed_checks}
+        assert {"ref-consistency", "deployment-ledger-owners"} <= failed
+
+    def test_genuine_ghost_owner_still_reported_after_reorder(self, tmp_path):
+        """Reordering must NOT weaken ghost-owner detection: when the
+        manifest declares no deps (ref-consistency passes) but a stale
+        ledger owner does not resolve, deployment-ledger-owners still
+        fires. This is req-pl-016's genuine departed-owner domain."""
+        _write_apm_yml(tmp_path)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+                deployments:
+                  - kind: project-relative
+                    target: claude
+                    value: .claude/rules/ghost.md
+                    runtime: null
+                    scope: project
+                    owners:
+                      - removed/beta
+                    active_owner: removed/beta
+                    content_hash: sha256:{"a" * 64}
+            """),
+        )
+        result = run_baseline_checks(tmp_path, fail_fast=True)
+        assert not result.passed
+        assert result.failed_checks[0].name == "deployment-ledger-owners"
+
+
 # -- Serialization -------------------------------------------------
 
 

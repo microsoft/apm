@@ -196,6 +196,11 @@ file require explicit
 [`apm compile --global`](../../reference/cli/compile/#global-compilation);
 `apm install -g` prints a hint and writes no root context file.
 
+For project-scope installs, targets that require
+[post-install instruction compilation](../../reference/targets-matrix/#post-install-instruction-compilation)
+print a hint when dependency instructions require `apm compile`. The hint names
+the root context files that compile will update.
+
 For the full flag reference, run `apm install --help` or see
 [CLI commands](../../reference/cli/install/).
 
