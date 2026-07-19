@@ -958,3 +958,144 @@ class TestInactiveTargetGhostDrop:
         assert ghost not in dep.deployed_files
         assert ghost not in dep.deployed_file_hashes
         assert active_file in dep.deployed_files
+
+
+def _dropped_target_block(tmp_path):
+    """A prior deploy of three skill files where the current run only claims
+    two, so the third (``alpha_only``) is a dropped, provably-APM-owned file
+    still present on disk. Returns the reconcile kwargs, the dropped path, and
+    the prior hashes so both install- and lock-mode paths can be exercised."""
+    shared = ".agents/skills/shared/SKILL.md"
+    beta_only = ".agents/skills/beta-only/SKILL.md"
+    alpha_only = ".agents/skills/alpha-only/SKILL.md"
+    for path, content in ((shared, "shared"), (beta_only, "beta"), (alpha_only, "alpha")):
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    prior_hashes = {p: compute_file_hash(tmp_path / p) for p in (shared, beta_only, alpha_only)}
+    records = {}
+    for path, owner in ((shared, "beta"), (beta_only, "beta"), (alpha_only, "alpha")):
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="agents",
+            value=path,
+            runtime=None,
+            scope="project",
+        )
+        records[locator.key] = DeploymentRecord(
+            locator=locator,
+            owners=(owner,),
+            active_owner=owner,
+            content_hash=prior_hashes[path],
+        )
+    kwargs = dict(
+        project_root=tmp_path,
+        dep_key="owner/pkg",
+        current_files=[shared, beta_only],
+        current_hashes={shared: "sha256:shared-current", beta_only: "sha256:beta-current"},
+        prior_files=[shared, beta_only, alpha_only],
+        prior_hashes=prior_hashes,
+        active_targets=[_known("cursor")],
+        declared_targets=[_known("cursor")],
+        prior_ledger=DeploymentLedger(records=records),
+    )
+    return kwargs, alpha_only, prior_hashes
+
+
+class TestLockModeDefersDiskDeletion:
+    """Issue #2296: ``apm lock`` (``lockfile_only``) must reconcile lockfile
+    rows WITHOUT unlinking deployed files -- the physical prune is deferred to
+    the next ``apm install``. ``apply_disk_deletion`` is the load-bearing
+    guard: install passes ``True`` (prune), lock passes ``False`` (defer)."""
+
+    def test_lock_mode_preserves_dropped_file_on_disk(self, tmp_path):
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        kwargs, alpha_only, prior_hashes = _dropped_target_block(tmp_path)
+        files, hashes = reconcile_deployed_block(
+            diagnostics=DiagnosticCollector(),
+            apply_disk_deletion=False,
+            **kwargs,
+        )
+
+        # Lock mode never unlinks: the dropped file survives on disk...
+        assert (tmp_path / alpha_only).exists()
+        # ...and its row/hash are retained so `apm install` still has the drop
+        # signal it needs to prune later.
+        assert alpha_only in files
+        assert hashes[alpha_only] == prior_hashes[alpha_only]
+
+    def test_install_mode_still_prunes_dropped_file(self, tmp_path):
+        # Mutation-break: flipping the guard back on (install default) deletes
+        # the very same dropped file, proving apply_disk_deletion is what keeps
+        # lock mode non-destructive.
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        kwargs, alpha_only, _ = _dropped_target_block(tmp_path)
+        files, _hashes = reconcile_deployed_block(
+            diagnostics=DiagnosticCollector(),
+            **kwargs,  # apply_disk_deletion defaults to True
+        )
+
+        assert not (tmp_path / alpha_only).exists()
+        assert alpha_only not in files
+
+    def test_lock_mode_preserves_user_edited_dropped_file(self, tmp_path):
+        """User-edited bytes are trivially safe in lock mode -- nothing is
+        unlinked, so the provenance gate is never even consulted."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        kwargs, alpha_only, _ = _dropped_target_block(tmp_path)
+        (tmp_path / alpha_only).write_text("user edit", encoding="utf-8")
+        files, _hashes = reconcile_deployed_block(
+            diagnostics=DiagnosticCollector(),
+            apply_disk_deletion=False,
+            **kwargs,
+        )
+
+        assert (tmp_path / alpha_only).read_text(encoding="utf-8") == "user edit"
+        assert alpha_only in files
+
+    def test_attach_deployed_files_defers_deletion_in_lock_mode(self, tmp_path):
+        """End-to-end wiring: ``LockfileBuilder._attach_deployed_files`` honours
+        ``ctx.lockfile_only`` and leaves the dropped file untouched on disk."""
+        (tmp_path / "apm.yml").write_text("targets:\n  - claude\n", encoding="utf-8")
+        key = "owner/pkg"
+        active_file = ".claude/skills/demo/SKILL.md"
+        dropped_file = ".github/agents/demo.md"
+        for path, content in ((active_file, "active"), (dropped_file, "dropped")):
+            disk = tmp_path / path
+            disk.parent.mkdir(parents=True, exist_ok=True)
+            disk.write_text(content, encoding="utf-8")
+        prior = LockFile()
+        prior.add_dependency(
+            LockedDependency(
+                repo_url=key,
+                deployed_files=[active_file, dropped_file],
+                deployed_file_hashes={
+                    active_file: compute_file_hash(tmp_path / active_file),
+                    dropped_file: compute_file_hash(tmp_path / dropped_file),
+                },
+            )
+        )
+        new = LockFile()
+        new.add_dependency(LockedDependency(repo_url=key))
+        ctx = SimpleNamespace(
+            package_deployed_files={key: [active_file]},
+            existing_lockfile=prior,
+            targets=[_known("claude")],
+            project_root=tmp_path,
+            apm_package=SimpleNamespace(package_path=tmp_path),
+            scope=None,
+            lockfile_only=True,
+        )
+
+        LockfileBuilder(ctx)._attach_deployed_files(new)
+
+        # The copilot/.github file was dropped from the declared target set but
+        # `apm lock` must leave it on disk and keep its row.
+        assert (tmp_path / dropped_file).exists()
+        assert dropped_file in new.get_dependency(key).deployed_files

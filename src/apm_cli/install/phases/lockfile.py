@@ -245,6 +245,13 @@ class LockfileBuilder:
         cleanup_retained = getattr(self.ctx, "package_cleanup_retained", {})
         from apm_cli.core.deployment_state import DeploymentLedger
 
+        # `apm lock` (lockfile_only) reconciles the lockfile without touching
+        # the working tree: dropped-target files must stay on disk, with the
+        # physical prune deferred to the next `apm install` (issue #2296). In
+        # that mode we also skip ghost-drop accounting -- rows are preserved,
+        # not removed, so a "Repaired inactive-target entries" report would be
+        # misleading.
+        lockfile_only = getattr(self.ctx, "lockfile_only", False)
         canonical_records = {}
         ghost_count = 0
         for dep_key in lockfile.dependencies:
@@ -278,12 +285,13 @@ class LockfileBuilder:
                 active_targets=self.ctx.targets,
                 declared_targets=declared,
                 diagnostics=diagnostics,
-                on_ghost_drop=_log_ghost_drop,
+                on_ghost_drop=None if lockfile_only else _log_ghost_drop,
                 prior_ledger=prior_ledger,
                 cleanup_retained_hashes=retained_hashes,
                 current_run_trusted=diagnostics.count_for_package(dep_key, "error") == 0,
                 owner=dep_key,
                 include_ledger=True,
+                apply_disk_deletion=not lockfile_only,
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;

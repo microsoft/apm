@@ -408,8 +408,17 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     current_run_trusted: bool = True,
     owner: str = "legacy",
     include_ledger: bool = False,
+    apply_disk_deletion: bool = True,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
-    """Reconcile one deployed-state block and safely remove dropped paths."""
+    """Reconcile one deployed-state block and safely remove dropped paths.
+
+    When *apply_disk_deletion* is ``False`` (``apm lock`` / ``lockfile_only``)
+    the block is reconciled without touching the working tree: every path that
+    would otherwise be pruned is retained in the returned rows/hashes/ledger so
+    the lockfile keeps mirroring on-disk reality and the drop signal survives to
+    the next ``apm install``, which performs the physical prune through the
+    ``remove_stale_deployed_files`` chokepoint (issue #2296).
+    """
     files, hashes, ledger = union_preserving(
         current_files,
         current_hashes,
@@ -440,6 +449,33 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         surviving = {record.locator.value for record in ledger.records.values()}
         dropped |= (set(prior_files) & prior_owned) - surviving
     if not dropped:
+        if include_ledger:
+            return files, hashes, ledger
+        return files, hashes
+
+    if not apply_disk_deletion:
+        # Lock mode (`apm lock`): reconcile lockfile rows but never unlink.
+        # Retain every dropped path (row, hash, and prior ledger record) so the
+        # lockfile keeps mirroring what remains on disk and the drop signal is
+        # preserved for the next `apm install`, which does the physical prune.
+        for path in dropped:
+            if path not in files:
+                files.append(path)
+            if path in prior_hashes:
+                hashes[path] = prior_hashes[path]
+        if prior_ledger is not None:
+            from apm_cli.core.deployment_state import DeploymentLedger
+
+            dropped_values = set(dropped)
+            records = dict(ledger.records)
+            records.update(
+                {
+                    key: record
+                    for key, record in prior_ledger.records.items()
+                    if record.locator.value in dropped_values
+                }
+            )
+            ledger = DeploymentLedger(records=records)
         if include_ledger:
             return files, hashes, ledger
         return files, hashes
