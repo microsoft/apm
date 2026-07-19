@@ -61,7 +61,7 @@ _CLI_EPILOG = (
     "  apm init                       Scaffold a new project\n"
     "  apm install                    Install dependencies from apm.yml\n"
     "  apm install --frozen           Reproduce lockfile exactly (CI-safe)\n"
-    "  apm lock                       Resolve deps and write lockfile only\n"
+    "  apm lock                       Resolve deps only (no deploy/delete)\n"
     "  apm outdated                   See what's drifted from upstream\n"
     "  apm update                     Refresh refs and rewrite the lockfile\n"
     "  apm audit --ci                 Validate lockfile integrity for CI gates\n"

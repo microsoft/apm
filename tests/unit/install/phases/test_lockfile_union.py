@@ -44,6 +44,7 @@ def _ctx(*, package_deployed_files, existing_lockfile, targets, project_root):
         existing_lockfile=existing_lockfile,
         targets=targets,
         project_root=project_root,
+        lockfile_only=False,
     )
 
 
@@ -951,6 +952,7 @@ class TestInactiveTargetGhostDrop:
             project_root=tmp_path,
             apm_package=SimpleNamespace(package_path=tmp_path),
             scope=None,
+            lockfile_only=False,
         )
         LockfileBuilder(ctx)._attach_deployed_files(new)
 
@@ -958,3 +960,51 @@ class TestInactiveTargetGhostDrop:
         assert ghost not in dep.deployed_files
         assert ghost not in dep.deployed_file_hashes
         assert active_file in dep.deployed_files
+
+    def test_lockfile_only_drops_ghost_row_without_deleting_disk_file(self, tmp_path):
+        """`apm lock` updates stale rows but never physically prunes files."""
+        key = "owner/pkg"
+        ghost = ".windsurf/skills/demo/SKILL.md"
+        active_file = ".agents/skills/demo/SKILL.md"
+        ghost_path = tmp_path / ghost
+        ghost_path.parent.mkdir(parents=True)
+        ghost_path.write_text("demo", encoding="utf-8")
+        ghost_hash = compute_file_hash(ghost_path)
+        (tmp_path / "apm.yml").write_text("targets:\n  - claude\n  - copilot\n", encoding="utf-8")
+
+        def _attach(*, lockfile_only: bool) -> LockFile:
+            prior = LockFile()
+            prior.add_dependency(
+                LockedDependency(
+                    repo_url=key,
+                    deployed_files=[active_file, ghost],
+                    deployed_file_hashes={active_file: "sha256:a", ghost: ghost_hash},
+                )
+            )
+            new = LockFile()
+            new.add_dependency(LockedDependency(repo_url=key))
+            ctx = SimpleNamespace(
+                package_deployed_files={key: [active_file]},
+                existing_lockfile=prior,
+                targets=[_known("claude"), _known("copilot")],
+                project_root=tmp_path,
+                apm_package=SimpleNamespace(package_path=tmp_path),
+                scope=None,
+                lockfile_only=lockfile_only,
+            )
+            LockfileBuilder(ctx)._attach_deployed_files(new)
+            return new
+
+        locked = _attach(lockfile_only=True)
+
+        dep = locked.get_dependency(key)
+        assert ghost not in dep.deployed_files
+        assert ghost not in dep.deployed_file_hashes
+        assert ghost_path.read_text(encoding="utf-8") == "demo"
+
+        installed = _attach(lockfile_only=False)
+
+        install_dep = installed.get_dependency(key)
+        assert ghost not in install_dep.deployed_files
+        assert ghost not in install_dep.deployed_file_hashes
+        assert not ghost_path.exists()

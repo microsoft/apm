@@ -247,6 +247,7 @@ class LockfileBuilder:
 
         canonical_records = {}
         ghost_count = 0
+        lockfile_only = self.ctx.lockfile_only
         for dep_key in lockfile.dependencies:
             claim = package_claims[dep_key]
             current = list(claim.current_files)
@@ -263,9 +264,13 @@ class LockfileBuilder:
                 ghost_count += 1
                 logger = getattr(self.ctx, "logger", None)
                 if logger:
+                    action = (
+                        "Dropped stale lockfile entry"
+                        if lockfile_only
+                        else "Removed stale deployed path"
+                    )
                     logger.verbose_detail(
-                        f"Removed stale lockfile path {path} "
-                        f"(target not declared in apm.yml) for {package_key}"
+                        f"{action} {path} (target not declared in apm.yml) for {package_key}"
                     )
 
             files, _hashes, ledger = reconcile_deployed_block(
@@ -284,6 +289,7 @@ class LockfileBuilder:
                 current_run_trusted=diagnostics.count_for_package(dep_key, "error") == 0,
                 owner=dep_key,
                 include_ledger=True,
+                cleanup_dropped=not lockfile_only,
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;

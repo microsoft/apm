@@ -408,8 +408,13 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     current_run_trusted: bool = True,
     owner: str = "legacy",
     include_ledger: bool = False,
+    cleanup_dropped: bool = True,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
-    """Reconcile one deployed-state block and safely remove dropped paths."""
+    """Reconcile one deployed-state block and safely remove dropped paths.
+
+    Set ``cleanup_dropped=False`` only for lockfile-only reconciliation: stale
+    lock rows are dropped, but on-disk files are preserved.
+    """
     files, hashes, ledger = union_preserving(
         current_files,
         current_hashes,
@@ -440,6 +445,10 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         surviving = {record.locator.value for record in ledger.records.values()}
         dropped |= (set(prior_files) & prior_owned) - surviving
     if not dropped:
+        if include_ledger:
+            return files, hashes, ledger
+        return files, hashes
+    if not cleanup_dropped:
         if include_ledger:
             return files, hashes, ledger
         return files, hashes

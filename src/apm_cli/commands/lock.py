@@ -1,9 +1,10 @@
-"""``apm lock`` -- resolve dependencies and write ``apm.lock.yaml`` without deploying files.
+"""``apm lock`` -- resolve dependencies and write ``apm.lock.yaml`` without deploying or deleting files.
 
 Mirrors the lockfile-generation ergonomics of ``cargo generate-lockfile``
 and ``pnpm lock``: run the full resolver and downloader so every commit
-SHA is pinned, then write ``apm.lock.yaml`` -- **without** copying any
-primitives into agent targets (no ``.github/``, no ``.agents/``, etc.).
+SHA is pinned, then write ``apm.lock.yaml`` -- **without** copying or
+deleting primitives in agent targets (no ``.github/``, no ``.agents/``,
+etc.).
 
 Use ``apm lock`` to:
 
@@ -83,7 +84,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
 @click.group(
     name="lock",
     invoke_without_command=True,
-    help="Resolve dependencies and write apm.lock.yaml without deploying files",
+    help="Resolve dependencies and write apm.lock.yaml without deploying or deleting files",
 )
 @click.option(
     "--verbose",
@@ -121,7 +122,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     help=(
         "Agent target(s) to scope policy enforcement during resolution "
         "(e.g. claude, copilot, cursor). "
-        "No files are deployed regardless of this value."
+        "No files are deployed or deleted regardless of this value."
     ),
 )
 @click.option(
@@ -141,7 +142,7 @@ def lock(
     target: str | list[str] | None,
     parallel_downloads: int,
 ) -> None:
-    """Resolve dependencies and write apm.lock.yaml without deploying files.
+    """Resolve dependencies and write apm.lock.yaml without deploying or deleting files.
 
     Run bare to (re)generate the lockfile, or use a subcommand such as
     ``apm lock export`` to derive an artifact from the existing lockfile.
