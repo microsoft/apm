@@ -268,6 +268,46 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.req("req-mf-023")
+def test_consumer_preserves_registry_identity_on_structured_rewrite(monkeypatch):
+    """req-mf-023: a registry-sourced (`id:`) entry MUST NOT be silently
+    rewritten to `git:` form when persisting a CLI-driven manifest update
+    (e.g. an additive `--skill` pin) for the same identity."""
+    import apm_cli.config as _conf
+    from apm_cli.install.package_resolution import merge_structured_entry_into_current_deps
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"registries": True}})
+
+    current_deps = [{"id": "acme/demo-pkg", "version": "1.0.0"}]
+
+    with pytest.raises(ValueError, match="already declared as a registry dependency"):
+        merge_structured_entry_into_current_deps(
+            current_deps,
+            {"git": "acme/demo-pkg", "ref": "1.0.0", "skills": ["some-skill"]},
+            "acme/demo-pkg",
+            "acme/demo-pkg#1.0.0",
+            dependency_reference_cls=DependencyReference,
+        )
+    # Refused before mutation -- original registry-form entry untouched.
+    assert current_deps == [{"id": "acme/demo-pkg", "version": "1.0.0"}]
+
+    # A registry-shaped replacement (the correct outcome) is still permitted.
+    merge_structured_entry_into_current_deps(
+        current_deps,
+        {"id": "acme/demo-pkg", "version": "1.0.0", "skills": ["some-skill"]},
+        "acme/demo-pkg",
+        "acme/demo-pkg#1.0.0",
+        dependency_reference_cls=DependencyReference,
+    )
+    assert current_deps == [{"id": "acme/demo-pkg", "version": "1.0.0", "skills": ["some-skill"]}]
+
+    assert_spec_contains(
+        "silently rewrite an existing",
+        "implementation MUST reject the update with a diagnostic naming the",
+    )
+
+
 # --- req-ext-001..002 --------------------------------------------------
 
 
