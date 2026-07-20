@@ -1150,95 +1150,10 @@ class DependencyReference(ProviderCoordinateMixin):
 
     @classmethod
     def _parse_registry_object_entry(cls, entry: dict) -> "DependencyReference":
-        """Parse the object-form registry entry per §3.2.
+        """Parse the object-form registry entry per §3.2. See ``registry_entry.py``."""
+        from .registry_entry import parse_registry_object_entry
 
-        Required keys:
-            id:       <owner>/<repo>   # package identity at the registry
-            version:  <any-string>      # opaque version string; registry resolves it
-
-        Optional:
-            registry: <name>           # routes to named registry; omit to use default
-            path:     prompts/foo.md   # virtual sub-path; omit to install the whole package
-            alias:    <name>           # same meaning as in other object forms
-        """
-        from ...deps.registry.feature_gate import require_package_registry_enabled
-
-        require_package_registry_enabled("Object-form registry dependencies")
-
-        _registry_raw = entry.get("registry")
-        registry_name: str | None = None
-        if _registry_raw is not None:
-            if not isinstance(_registry_raw, str) or not _registry_raw.strip():
-                raise ValueError(
-                    "Object-form registry entry: 'registry' must be a non-empty "
-                    "string (the name of an entry in the apm.yml registries: block)"
-                )
-            registry_name = _registry_raw.strip()
-
-        pkg_id = entry.get("id")
-        if not isinstance(pkg_id, str) or not pkg_id.strip():
-            raise ValueError(
-                "Object-form registry entry: 'id' is required and must be a "
-                "non-empty 'owner/repo' string"
-            )
-        pkg_id = pkg_id.strip()
-        if "/" not in pkg_id:
-            raise ValueError(
-                f"Object-form registry entry: 'id' must be 'owner/repo', got {pkg_id!r}"
-            )
-
-        raw_path = entry.get("path")
-        sub_path: str | None = None
-        if raw_path is not None:
-            if not isinstance(raw_path, str) or not raw_path.strip():
-                raise ValueError(
-                    "Object-form registry entry: 'path' must be a non-empty string "
-                    "when provided (e.g. 'prompts/review.prompt.md')"
-                )
-            sub_path = raw_path.strip().strip("/").replace("\\", "/").strip("/")
-            validate_path_segments(sub_path, context="path")
-
-        version = entry.get("version")
-        if not isinstance(version, str) or not version.strip():
-            raise ValueError("Object-form registry entry: 'version' is required")
-        version = version.strip()
-
-        alias = entry.get("alias")
-        if alias is not None:
-            if not isinstance(alias, str) or not alias.strip():
-                raise ValueError("'alias' field must be a non-empty string")
-            alias = alias.strip()
-            if not re.match(r"^[a-zA-Z0-9._-]+$", alias):
-                raise ValueError(
-                    f"Invalid alias: {alias}. Aliases can only contain "
-                    f"letters, numbers, dots, underscores, and hyphens"
-                )
-
-        # Reject any unknown keys to catch typos early.
-        known = {"registry", "id", "path", "version", "alias"}
-        unknown = set(entry.keys()) - known
-        if unknown:
-            raise ValueError(
-                f"Object-form registry entry has unknown fields: "
-                f"{sorted(unknown)}. Known fields: {sorted(known)}"
-            )
-
-        owner_segments = pkg_id.split("/")
-        validate_path_segments(pkg_id, context="registry id")
-        for seg in owner_segments:
-            if not re.match(r"^[a-zA-Z0-9._-]+$", seg):
-                raise ValueError(f"Invalid registry id segment: {seg!r} in {pkg_id!r}")
-
-        return cls(
-            repo_url=pkg_id,
-            host=default_host(),
-            reference=version,
-            virtual_path=sub_path,
-            is_virtual=sub_path is not None,
-            alias=alias,
-            source="registry",
-            registry_name=registry_name,
-        )
+        return parse_registry_object_entry(cls, entry)
 
     @classmethod
     def _detect_virtual_package(cls, dependency_str: str):
@@ -1992,11 +1907,13 @@ class DependencyReference(ProviderCoordinateMixin):
         - HTTP (insecure) git deps: returns a dict with 'git' and 'allow_insecure' keys.
         - Git deps with skill_subset or target_subset: returns a dict with 'git' plus
           the applicable optional keys.
+        - Registry deps (object-form ``id:``/``registry:``): always returns a dict
+          with 'id', 'version', plus the applicable optional keys.
         - All other deps: returns the canonical string (same as to_canonical()).
 
         Returns:
-            str or dict: String for simple deps; dict for local-with-subsets, HTTP, or
-            skill/target-subset deps.
+            str or dict: String for simple deps; dict for local-with-subsets, HTTP,
+            registry, or skill/target-subset deps.
 
         Raises:
             ValueError: If this is an unresolved marketplace dependency.
@@ -2006,6 +1923,20 @@ class DependencyReference(ProviderCoordinateMixin):
                 f"Cannot serialize unresolved marketplace dependency "
                 f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
             )
+        if self.source == "registry":
+            entry: dict[str, object] = {"id": self.repo_url}
+            if self.registry_name:
+                entry["registry"] = self.registry_name
+            if self.virtual_path:
+                entry["path"] = self.virtual_path
+            entry["version"] = self.reference
+            if self.alias:
+                entry["alias"] = self.alias
+            if self.skill_subset:
+                entry["skills"] = sorted(self.skill_subset)
+            if self.target_subset:
+                entry["targets"] = sorted(self.target_subset)
+            return entry
         if self.is_local and self.local_path:
             if self.skill_subset or self.target_subset or self.alias:
                 return local_path_apm_yml_entry(

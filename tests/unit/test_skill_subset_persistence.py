@@ -749,3 +749,82 @@ class TestSkillSubsetAdditiveMerge:
 
         entry = apm_yml_entries["owner/repo"]
         assert entry["skills"] == ["qa"]
+
+
+# ============================================================================
+# _resolve_package_references -- registry identity must not silently convert
+# to git form (regression: PR #2166 review)
+# ============================================================================
+
+
+class TestResolvePackageReferencesPreservesRegistryForm:
+    """A CLI positional matching an existing registry-longhand identity must
+    not be silently rewritten to git form when combined with --skill."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_package_registry(self, monkeypatch):
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"registries": True}})
+
+    def test_cli_skill_flag_preserves_registry_form(self):
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"id": "testorg/demo-pkg", "version": "1.0.0"}]
+        existing_identities = {"testorg/demo-pkg"}
+
+        with patch(
+            "apm_cli.commands.install._validate_package_exists",
+            return_value=True,
+        ):
+            (
+                valid_outcomes,
+                invalid_outcomes,
+                _validated,
+                _mktplace,
+                apm_yml_entries,
+                _changed,
+            ) = _resolve_package_references(
+                ["testorg/demo-pkg#1.0.0"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("skill-gamma",),
+            )
+
+        assert invalid_outcomes == []
+        assert len(valid_outcomes) == 1
+        entry = apm_yml_entries["testorg/demo-pkg#1.0.0"]
+        assert isinstance(entry, dict)
+        assert entry.get("id") == "testorg/demo-pkg"
+        assert "git" not in entry
+        assert entry["skills"] == ["skill-gamma"]
+
+    def test_current_deps_not_converted_to_git(self):
+        """The persisted current_deps list itself must keep the registry shape."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"id": "testorg/demo-pkg", "version": "1.0.0"}]
+        existing_identities = {"testorg/demo-pkg"}
+
+        with patch(
+            "apm_cli.commands.install._validate_package_exists",
+            return_value=True,
+        ):
+            _resolve_package_references(
+                ["testorg/demo-pkg#1.0.0"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("skill-gamma",),
+            )
+
+        # update_existing_dependency_entry_if_needed only rewrites current_deps
+        # when apm_yml_entries already holds a merged entry for this canonical;
+        # the assertion that matters is that IF it rewrites, it keeps registry shape.
+        assert all("git" not in dep for dep in current_deps if isinstance(dep, dict))
+        assert any(
+            isinstance(dep, dict) and dep.get("id") == "testorg/demo-pkg" for dep in current_deps
+        )
