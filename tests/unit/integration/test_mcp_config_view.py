@@ -355,6 +355,34 @@ def test_manifestless_virtual_package_is_skipped(tmp_path: Path) -> None:
     assert view.problems == ()
 
 
+def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
+    tmp_path: Path,
+) -> None:
+    """`apm audit --ci` without a prior `apm install` leaves apm_modules empty.
+
+    A setup-only CI job installs the CLI then audits, so the package directory
+    never exists on disk and the on-disk shape cannot be probed. The frozen
+    lockfile classification (`claude_skill`) must waive the missing manifest
+    rather than hard-fail, matching the drift check's cold-cache tolerance.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="angular/skills",
+        virtual_path="angular-developer",
+        is_virtual=True,
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not skill_dir.exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
 def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) -> None:
     """A Claude-skill filesystem shape does not waive non-virtual manifests."""
     root = _write_manifest(tmp_path, name="root")
