@@ -217,7 +217,6 @@ brew install microsoft/apm/apm
 **Scoop (Windows):**
 
 ```powershell
-scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 ```
 
