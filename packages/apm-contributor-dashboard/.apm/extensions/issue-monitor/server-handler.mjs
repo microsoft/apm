@@ -6,8 +6,8 @@
 //   const handler = createHandler({ ghExec, session, startedSessions, ... });
 //   const server = createServer(handler);
 
-import { readFileSync } from "node:fs";
-import { join, resolve, normalize } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parsePanelReview, extractFollowUpItems } from "./logic.mjs";
 
@@ -48,6 +48,33 @@ const MIME_TYPES = {
     ".woff": "font/woff",
     ".ttf": "font/ttf",
 };
+
+function isRelativePathUnsafe(relPath) {
+    return relPath === ".." || relPath.startsWith(`..${sep}`) || isAbsolute(relPath);
+}
+
+function isPathWithinDist(root, candidatePath) {
+    try {
+        const canonicalRoot = realpathSync(root);
+        try {
+            const canonicalCandidate = realpathSync(candidatePath);
+            return !isRelativePathUnsafe(relative(canonicalRoot, canonicalCandidate));
+        } catch (error) {
+            if (error.code !== "ENOENT" && error.code !== "ENOTDIR") {
+                return null;
+            }
+            try {
+                const parent = dirname(candidatePath);
+                const canonicalParent = realpathSync(parent);
+                return !isRelativePathUnsafe(relative(canonicalRoot, canonicalParent));
+            } catch {
+                return null;
+            }
+        }
+    } catch {
+        return null;
+    }
+}
 
 // Write endpoints that perform state-changing operations
 const WRITE_ENDPOINTS = new Set([
@@ -599,8 +626,15 @@ query($owner: String!, $repo: String!, $cursor: String) {
                 res.end("Not found");
             }
         } else if (urlPath.startsWith("/assets/")) {
-            const resolved = resolve(distDir, normalize(urlPath.slice(1)));
-            if (!resolved.startsWith(resolve(distDir))) {
+            const root = resolve(distDir);
+            const resolved = resolve(root, normalize(urlPath.slice(1)));
+            const rel = relative(root, resolved);
+            if (isRelativePathUnsafe(rel)) {
+                res.writeHead(403); res.end("Forbidden"); return;
+            }
+
+            const isSafePath = isPathWithinDist(root, resolved);
+            if (isSafePath === false) {
                 res.writeHead(403); res.end("Forbidden"); return;
             }
             serveStatic(res, resolved);
