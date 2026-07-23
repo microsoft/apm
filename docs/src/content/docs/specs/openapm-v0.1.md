@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **104 normative statements** indexed in
+- OpenAPM v0.1 carries **105 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2277,6 +2277,20 @@ NOT trigger the diagnostic by itself.
 > requirement does not prescribe a lockfile field for this check:
 > compile-only instruction sources are not necessarily deployed outputs.
 
+#### 8.5.3 Cursor universal instruction intent
+
+<a id="req-tg-008"></a>
+**[req-tg-008]** A conforming **consumer** implementation that deploys an
+instruction primitive for the `cursor` target MUST write the target-native
+rule under `.cursor/rules/<name>.mdc`. When the source instruction's
+normalized `applyTo` value resolves to exactly one universal `**` glob, the
+emitted frontmatter MUST contain `alwaysApply: true` and MUST NOT contain a
+`globs` field. For any other non-empty `applyTo` set, the emitted frontmatter
+MUST NOT contain `alwaysApply: true` and MUST encode the source patterns in
+`globs`; a single pattern MUST be a YAML scalar and two or more patterns MUST
+be a YAML block sequence. When `applyTo` is absent or empty, the emitted
+frontmatter MUST omit both `alwaysApply` and `globs`.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2290,7 +2304,8 @@ without a spec revision. The current matrix is in the companion
   [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
-  [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007).
+  [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
+  [req-tg-008](#req-tg-008).
 
 ---
 
@@ -2792,6 +2807,7 @@ conformance statement identifying:
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
+[req-tg-008](#req-tg-008),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -3210,6 +3226,7 @@ renumbering of conformance classes.
 | [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
 | [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-tg-007](#req-tg-007)                | MUST    | 8.5     | consumer    |
+| [req-tg-008](#req-tg-008)                | MUST    | 8.5     | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3226,7 +3243,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 104** (99 MUST, 5 SHOULD).
+**Total normative statements: 105** (100 MUST, 5 SHOULD).
 
 ---
 
@@ -3255,6 +3272,7 @@ renumbering of conformance classes.
 | 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
+| 0.1.20  | 2026-07-23 | Spec-citation fold for Cursor universal instruction intent (closes #1744). Added [req-tg-008] (Section 8.5, consumer MUST): Cursor rules deploy under `.cursor/rules/<name>.mdc`; an explicit universal `applyTo: "**"` emits `alwaysApply: true` with no `globs`, while other non-empty patterns remain `globs`-scoped and absent or empty `applyTo` emits neither key. Section 8.7 and Section 11.3.2 consumer enumerations and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

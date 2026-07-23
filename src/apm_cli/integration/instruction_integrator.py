@@ -31,7 +31,7 @@ class InstructionIntegrator(BaseIntegrator):
     Deploys .instructions.md files to target-specific directories:
 
     * Copilot: ``.github/instructions/`` (verbatim, preserving applyTo:)
-    * Cursor: ``.cursor/rules/`` (``.mdc`` format, applyTo: -> globs:)
+    * Cursor: ``.cursor/rules/`` (``.mdc`` format, applyTo: -> globs:/alwaysApply:)
     * Claude Code: ``.claude/rules/`` (``.md`` format, applyTo: -> paths:)
     * Gemini CLI: compile-only (GEMINI.md) -- no per-file rule deployment
     """
@@ -108,7 +108,7 @@ class InstructionIntegrator(BaseIntegrator):
 
         Selects the content transform via ``format_id``:
 
-        * ``cursor_rules``    -- convert ``applyTo:`` to ``globs:`` frontmatter
+        * ``cursor_rules``    -- convert ``applyTo:`` to Cursor rule frontmatter
         * ``claude_rules``    -- convert ``applyTo:`` to ``paths:`` frontmatter
         * ``windsurf_rules``  -- convert ``applyTo:`` to ``trigger: glob`` frontmatter
         * anything else       -- copy verbatim (identity transform)
@@ -477,24 +477,47 @@ class InstructionIntegrator(BaseIntegrator):
 
         Parses existing YAML frontmatter, maps ``applyTo`` → ``globs``,
         extracts or generates a ``description``, and rewrites the
-        frontmatter in Cursor's expected format.
+        frontmatter in Cursor's expected format. Explicit universal
+        ``applyTo: "**"`` becomes ``alwaysApply: true`` instead of a glob.
         """
+        from ..utils.yaml_io import load_yaml_str
+
         body = content
-        apply_to = ""
+        globs: list[str] = []
         description = ""
 
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        # Parse existing frontmatter with the bounded loader so a hostile
+        # frontmatter block in an untrusted package cannot hang the parser.
+        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
         if fm_match:
             fm_block = fm_match.group(1)
             body = content[fm_match.end() :]
 
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
-                elif line_stripped.startswith("description:"):
-                    description = line_stripped[len("description:") :].strip().strip("'\"")
+            try:
+                fm = load_yaml_str(fm_block) or {}
+            except Exception:
+                fm = {}
+            if not isinstance(fm, dict):
+                fm = {}
+
+            raw_apply_to = fm.get("applyTo", "")
+            if raw_apply_to is None:
+                raw_apply_to = ""
+            if isinstance(raw_apply_to, list):
+                globs = [
+                    s
+                    for item in raw_apply_to
+                    if item is not None
+                    and (s := str(item).replace("\n", " ").replace("\r", " ").strip())
+                ]
+            else:
+                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
+                globs = parse_apply_to(safe_apply_to)
+
+            raw_description = fm.get("description", "")
+            if raw_description is not None:
+                description = str(raw_description)
+                description = description.replace("\n", " ").replace("\r", " ").strip()
 
         # Generate description from first content sentence if missing
         if not description:
@@ -508,8 +531,9 @@ class InstructionIntegrator(BaseIntegrator):
         parts = ["---"]
         if description:
             parts.append(f"description: {description}")
-        globs = parse_apply_to(apply_to)
-        if len(globs) == 1:
+        if globs == ["**"]:
+            parts.append("alwaysApply: true")
+        elif len(globs) == 1:
             parts.append(f"globs: {yaml_double_quote(globs[0])}")
         elif globs:
             parts.append("globs:")

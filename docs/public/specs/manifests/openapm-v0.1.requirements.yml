@@ -385,6 +385,11 @@ requirements:
     keyword: MUST
     section: "8.5"
     conformance_class: consumer
+  - id: req-tg-008
+    keyword: MUST
+    section: "8.5"
+    conformance_class: consumer
+    notes: "Cursor universal applyTo maps to alwaysApply without globs; scoped patterns remain globs"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"
