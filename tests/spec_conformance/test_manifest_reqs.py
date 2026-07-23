@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
-req-tg-001..007, req-cf-001..002.
+req-tg-001..008, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -20,6 +20,7 @@ import pytest
 
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
@@ -543,6 +544,27 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
         "default-visible, actionable\ndiagnostic",
         "follow-up compilation operation",
         "MUST NOT emit this diagnostic for a dry run",
+    )
+
+
+@pytest.mark.req("req-tg-008")
+def test_consumer_preserves_cursor_universal_instruction_intent():
+    universal = InstructionIntegrator._convert_to_cursor_rules(
+        "---\napplyTo: '**'\n---\n\n# Repository guardrails"
+    )
+    scoped = InstructionIntegrator._convert_to_cursor_rules(
+        "---\napplyTo: 'src/**/*.py'\n---\n\n# Python rules"
+    )
+
+    assert "alwaysApply: true" in universal
+    assert "globs" not in universal
+    assert "alwaysApply" not in scoped
+    assert 'globs: "src/**/*.py"' in scoped
+    assert_spec_contains(
+        "`.cursor/rules/<name>.mdc`",
+        "MUST contain `alwaysApply: true` and MUST NOT contain a",
+        "MUST encode the source patterns in\n`globs`",
+        "MUST omit both `alwaysApply` and `globs`",
     )
 
 
