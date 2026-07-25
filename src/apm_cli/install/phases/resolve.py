@@ -235,7 +235,7 @@ def _setup_downloader(ctx: InstallContext) -> None:
     try:
         from apm_cli.deps.tiered_ref_resolver import build_tiered_ref_resolver
 
-        _update_refs = getattr(ctx, "update_refs", False) or getattr(ctx, "refresh", False)
+        _update_refs = ctx.update_refs or ctx.refresh
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=getattr(downloader, "persistent_git_cache", None),
