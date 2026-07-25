@@ -59,7 +59,7 @@ def _derive(
     )
 
 
-def test_derives_root_and_package_production_and_dev_mcp(tmp_path: Path) -> None:
+def test_root_dev_mcp_included_dep_dev_mcp_excluded(tmp_path: Path) -> None:
     """Root dev MCP is included; locked package dev MCP is excluded (#2340)."""
     root = _write_manifest(
         tmp_path,

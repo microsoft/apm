@@ -62,7 +62,8 @@ class CurrentMcpConfigView:
         )
         # Root is the authoring project: both prod and dev MCP are intentionally
         # included here (behaviour introduced in #1780). Transitive package deps
-        # are collected prod-only (see _collect_locked_dependencies).
+        # are collected prod-only (see _collect_locked_dependencies and
+        # _collect_unlocked_compat).
         dependencies = tuple(_deduplicate(root.get_all_mcp_dependencies() + package_deps))
         return cls(
             dependencies=dependencies,
@@ -314,7 +315,7 @@ def _collect_unlocked_compat(
         except (OSError, ValueError, UnicodeError):
             continue
         declarer = package.name or manifest_path.parent.name
-        # Only collect prod MCP from packages; devDependencies.mcp scoped to
+        # Only collect prod MCP from packages; devDependencies.mcp are scoped to
         # the package author's own environment (#2340).
         for dependency in package.get_mcp_dependencies():
             if dependency.is_self_defined and not trust_transitive_self_defined:
