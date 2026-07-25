@@ -107,8 +107,18 @@ def copy_deployed_hook_bundle(
     diagnostics=None,
     target_paths: list[Path],
     hook_descriptor_files: set[Path] | None = None,
+    skip_package_json_sidecar: bool = False,
 ) -> HookBundleCopyResult:
-    """Copy each referenced script's whole hooks root and module type."""
+    """Copy each referenced script's whole hooks root and module type.
+
+    When skip_package_json_sidecar is True, the package.json sidecar that
+    communicates the Node.js module type is not written.  Use this for
+    targets whose hook loader recursively scans the deployment directory for
+    JSON hook descriptors (e.g. Copilot/VSCode), where a bare
+    {"type": "..."} file would be mistaken for a hook descriptor and trigger
+    a schema validation error.  Hook packages that need ES module support
+    on such targets should use the .mjs file extension instead.
+    """
     result = HookBundleCopyResult()
     source_target_roots: dict[tuple[Path, Path], str] = {}
     root_has_js_hook: dict[tuple[Path, Path], bool] = {}
@@ -165,6 +175,9 @@ def copy_deployed_hook_bundle(
         if target_rel in command_target_rels:
             result.scripts_copied += 1
         target_paths.append(target_file)
+
+    if skip_package_json_sidecar:
+        return result
 
     for (_source_root, target_root), module_type in source_target_roots.items():
         if not root_has_js_hook.get((_source_root, target_root), False):

@@ -1316,6 +1316,7 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target_paths=target_paths,
                 hook_descriptor_files=set(hook_files),
+                skip_package_json_sidecar=True,
             )
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
