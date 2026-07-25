@@ -1795,10 +1795,6 @@ class HookIntegrator(BaseIntegrator):
             user_scope=user_scope,
         )
 
-    # ------------------------------------------------------------------
-    # Target-driven API
-    # ------------------------------------------------------------------
-
     def integrate_hooks_for_target(
         self,
         target,
@@ -1827,21 +1823,11 @@ class HookIntegrator(BaseIntegrator):
         """
         if dep_targets_active and (not allowed_targets or target.name not in allowed_targets):
             raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
-
-        # Package-declared-target gate: if the package's own apm.yml restricts
-        # it to specific targets (via target:/targets:), skip targets outside
-        # that declared set.  "all" (or an empty canonical_targets) means the
-        # package is universal and should deploy to every active target.
-        # canonical_package_targets() already normalises "vscode" -> "copilot",
-        # so no alias handling is required here.
-        from apm_cli.models.apm_package import canonical_package_targets
-
-        _pkg_declared = canonical_package_targets(package_info.package)
-        if _pkg_declared and "all" not in _pkg_declared and target.name not in _pkg_declared:
+        _d = package_info.package.canonical_targets
+        if _d and "all" not in _d and target.name not in _d:
             return HookIntegrationResult(
                 files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
             )
-
         if target.name == "copilot":
             return self.integrate_package_hooks(
                 package_info,
