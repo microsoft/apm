@@ -502,6 +502,7 @@ def build_tiered_ref_resolver(
     *,
     downloader: GitHubPackageDownloader,
     git_cache: GitCache | None = None,
+    update_refs: bool = False,
 ) -> TieredRefResolver | None:
     """Construct the production tier stack, or ``None`` if disabled.
 
@@ -509,6 +510,16 @@ def build_tiered_ref_resolver(
     can opt out by simply leaving ``downloader._tiered_resolver = None``;
     the downloader facade falls through to the legacy resolver in that
     case.
+
+    Args:
+        downloader: The package downloader providing auth and legacy resolve.
+        git_cache: Optional persistent git cache for the L2 bare-rev-parse tier.
+        update_refs: When ``True`` (i.e. ``apm update`` or ``apm outdated``),
+            the L2 BareRevParse tier is excluded from the stack. L2 reads only
+            the local bare-repo cache without fetching, so it would silently
+            return a stale SHA during update operations. Excluding it forces
+            resolution through L1 (CommitsAPI) and, if that fails, L3 (legacy
+            clone), both of which always contact the network. See #2342.
     """
     _ = default_host  # keep import side-effect for compat with monkeypatched tests
     if not is_tiered_resolver_enabled():
@@ -526,8 +537,18 @@ def build_tiered_ref_resolver(
     tiers: list[RefResolutionTier] = [
         L0PerRunCache(cache=cache),
         L1CommitsAPI(host=downloader),
-        L2BareRevParse(git_cache=git_cache),
-        legacy,
     ]
+    # L2 reads the local bare-repo cache without fetching from remote.
+    # Exclude it in update/outdated runs so stale cached refs are never
+    # returned in place of the fresh upstream SHA. See #2342.
+    if not update_refs:
+        tiers.append(L2BareRevParse(git_cache=git_cache))
+    tiers.append(legacy)
+
+    if update_refs:
+        _log.debug(
+            "TieredRefResolver: L2BareRevParse excluded (update_refs=True) "
+            "to prevent stale cache reads (#2342)"
+        )
 
     return TieredRefResolver(tiers=tiers, cache=cache, legacy=legacy)
