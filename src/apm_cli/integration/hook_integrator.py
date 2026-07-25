@@ -1835,7 +1835,7 @@ class HookIntegrator(BaseIntegrator):
         # so no alias handling is required here.
         from apm_cli.models.apm_package import canonical_package_targets
 
-        _pkg_declared = set(canonical_package_targets(package_info.package))
+        _pkg_declared = canonical_package_targets(package_info.package)
         if _pkg_declared and "all" not in _pkg_declared and target.name not in _pkg_declared:
             return HookIntegrationResult(
                 files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
