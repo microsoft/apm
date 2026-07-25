@@ -60,6 +60,9 @@ class CurrentMcpConfigView:
             trust_transitive_self_defined=trust_transitive_self_defined,
             diagnostics=diagnostics,
         )
+        # Root is the authoring project: both prod and dev MCP are intentionally
+        # included here (behaviour introduced in #1780). Transitive package deps
+        # are collected prod-only (see _collect_locked_dependencies).
         dependencies = tuple(_deduplicate(root.get_all_mcp_dependencies() + package_deps))
         return cls(
             dependencies=dependencies,
@@ -265,7 +268,9 @@ def _collect_locked_dependencies(
             continue
 
         declarer = package.name or dependency.name or manifest_path.parent.name
-        for mcp_dependency in package.get_all_mcp_dependencies():
+        # Only collect prod MCP from transitive packages; devDependencies.mcp
+        # are scoped to the package author's own environment (#2340).
+        for mcp_dependency in package.get_mcp_dependencies():
             if mcp_dependency.is_self_defined:
                 if dependency.depth == 1:
                     if logger is not None:
@@ -309,7 +314,9 @@ def _collect_unlocked_compat(
         except (OSError, ValueError, UnicodeError):
             continue
         declarer = package.name or manifest_path.parent.name
-        for dependency in package.get_all_mcp_dependencies():
+        # Only collect prod MCP from packages; devDependencies.mcp scoped to
+        # the package author's own environment (#2340).
+        for dependency in package.get_mcp_dependencies():
             if dependency.is_self_defined and not trust_transitive_self_defined:
                 message = (
                     f"Transitive package '{declarer}' declares self-defined MCP server "

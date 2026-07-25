@@ -60,7 +60,7 @@ def _derive(
 
 
 def test_derives_root_and_package_production_and_dev_mcp(tmp_path: Path) -> None:
-    """Root and locked package prod/dev declarations share manifest order."""
+    """Root dev MCP is included; locked package dev MCP is excluded (#2340)."""
     root = _write_manifest(
         tmp_path,
         name="root",
@@ -83,15 +83,14 @@ def test_derives_root_and_package_production_and_dev_mcp(tmp_path: Path) -> None
 
     view = _derive(root, _lock(locked), tmp_path / "apm_modules")
 
+    # Root dev MCP is included (authoring project); dep dev MCP is NOT (#2340).
     assert [dep.name for dep in view.dependencies] == [
         "root-prod",
         "root-dev",
         "package-prod",
-        "package-dev",
     ]
     assert view.provenance == {
         "package-prod": "tools",
-        "package-dev": "tools",
     }
 
 
@@ -500,3 +499,41 @@ def test_view_dependencies_are_mcp_dependency_objects(tmp_path: Path) -> None:
     view = _derive(root, None, tmp_path / "apm_modules")
 
     assert all(isinstance(dep, MCPDependency) for dep in view.dependencies)
+
+
+def test_dependency_dev_mcp_is_excluded_from_consumer(tmp_path: Path) -> None:
+    """Regression #2340: dep devDependencies.mcp must not reach the consumer."""
+    root = _write_manifest(tmp_path, name="root")
+    dep_dir = tmp_path / "packages" / "dep"
+    _write_manifest(
+        dep_dir,
+        name="dep",
+        mcp=[
+            {
+                "name": "prod-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/prod",
+            }
+        ],
+        dev_mcp=[
+            {
+                "name": "dev-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/dev",
+            }
+        ],
+    )
+    locked = LockedDependency(
+        repo_url="_local/dep",
+        source="local",
+        local_path="./packages/dep",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    names = [dep.name for dep in view.dependencies]
+    assert "prod-server" in names, "prod MCP from dependency must be included"
+    assert "dev-server" not in names, "dev MCP from dependency must NOT be included"
