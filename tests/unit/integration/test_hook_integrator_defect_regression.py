@@ -419,20 +419,6 @@ def test_hook_bundle_stale_sibling_removed_from_target_paths(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def _make_target(name: str):
-    """Return a minimal mock TargetProfile for the given target name."""
-    from unittest.mock import MagicMock
-
-    t = MagicMock()
-    t.name = name
-    t.root_dir = f".{name}"
-    t.supports = lambda prim: prim == "hooks"
-    mapping = MagicMock()
-    mapping.deploy_root = None
-    t.primitives = {"hooks": mapping}
-    return t
-
-
 def _write_generic_hook(pkg_dir: Path) -> None:
     """Write a generic hooks.json under .apm/hooks/."""
     hooks_dir = pkg_dir / ".apm" / "hooks"
@@ -478,11 +464,12 @@ class TestIssue2321Fixes:
 
     def test_claude_declared_package_does_not_write_to_cursor(self, project: Path) -> None:
         """Package with target:claude must not deploy hooks to .cursor/hooks.json."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
         pkg = self._pkg(project, "claude-only-pkg", target="claude")
-        cursor_target = _make_target("cursor")
         integrator = HookIntegrator()
 
-        result = integrator.integrate_hooks_for_target(cursor_target, pkg, project)
+        result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["cursor"], pkg, project)
 
         assert result.files_integrated == 0
         assert not (project / ".cursor" / "hooks.json").exists()
@@ -509,7 +496,7 @@ class TestIssue2321Fixes:
         integrator = HookIntegrator()
 
         claude_result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["claude"], pkg, project)
-        cursor_result = integrator.integrate_hooks_for_target(_make_target("cursor"), pkg, project)
+        cursor_result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["cursor"], pkg, project)
 
         assert claude_result.files_integrated == 1
         assert cursor_result.files_integrated == 1
@@ -522,8 +509,8 @@ class TestIssue2321Fixes:
         integrator = HookIntegrator()
 
         claude_result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["claude"], pkg, project)
-        cursor_result = integrator.integrate_hooks_for_target(_make_target("cursor"), pkg, project)
-        codex_result = integrator.integrate_hooks_for_target(_make_target("codex"), pkg, project)
+        cursor_result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["cursor"], pkg, project)
+        codex_result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["codex"], pkg, project)
 
         assert claude_result.files_integrated == 1
         assert cursor_result.files_integrated == 1
