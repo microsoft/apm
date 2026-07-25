@@ -184,6 +184,15 @@ class TestEnableCommand:
         assert "Unknown experimental feature" in result.output
         assert "Did you mean" not in result.output
 
+    def test_enable_graduated_cowork_flag_exits_1(self, runner: CliRunner) -> None:
+        """copilot-cowork graduated to GA; enabling it is now an unknown feature."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["enable", "copilot-cowork"])
+        assert result.exit_code == 1
+        assert "Unknown experimental feature: copilot-cowork" in result.output
+        assert "apm experimental list" in result.output
+
 
 # ---------------------------------------------------------------------------
 # disable subcommand

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `packages/cowork-smoke-test/` sample package: a single skill that
+  returns a fixed sentinel token, used to verify end-to-end that a skill
+  installed by APM is actually loaded by Microsoft 365 Copilot Cowork.
+
+### Changed
+
+- **Microsoft 365 Copilot Cowork is now generally available.** The
+  `copilot-cowork` experimental flag has been removed; `apm install --target
+  copilot-cowork --global` works with no opt-in. `copilot-cowork` is an
+  explicit-only, user-scope-only target: it is never auto-detected and is
+  never included in `--target all`.
+- `copilot-cowork` is now a canonical target key, so it may be listed in
+  `apm.yml` `targets:`. When Cowork is selected implicitly (via `apm.yml`
+  `targets:` or an `apm config target` default) at project scope, APM emits
+  one `[!]` warning, skips Cowork, and continues with the remaining targets.
+  An explicit `--target copilot-cowork` without `--global` remains a hard
+  error.
+- `apm config set copilot-cowork-skills-dir` no longer requires an
+  experimental flag, and `copilot-cowork-skills-dir` is always listed by
+  `apm config` and `apm config get`.
+
+### Removed
+
+- **BREAKING:** `apm experimental enable copilot-cowork` (and `disable` /
+  `reset` for that name) now fail with an unknown-feature error. The flag has
+  graduated; no action is needed beyond dropping it from any scripts. A stale
+  `copilot_cowork` key in `~/.apm/config.json` is reported by
+  `apm experimental list` and cleaned by `apm experimental reset`.
+- **BREAKING:** `apm install --target all --global` no longer deploys to
+  Cowork. Previously, with the experimental flag enabled, `all` at user scope
+  included `copilot-cowork`. Name the target explicitly instead:
+  `apm install --target copilot-cowork --global`.
+
 ### Fixed
 
 - Multi-target `apm compile` now avoids repeating expensive project analysis

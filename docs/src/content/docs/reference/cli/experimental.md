@@ -68,7 +68,6 @@ Reset one flag (when `NAME` is given) or all flags (when omitted) to registry de
 | Flag | What it does | Related command |
 | --- | --- | --- |
 | `verbose-version` | Adds Python version, platform, and install path to `apm --version` output. | `apm --version` |
-| `copilot-cowork` | Enables Microsoft 365 Copilot Cowork skill deployment via OneDrive. | `apm install --target copilot-cowork --global` |
 | `copilot-app` | Deploys prompts as workflows into the GitHub Copilot desktop App. Workflows arrive disabled; enable them from the Copilot app's Workflows tab. | `apm install --target copilot-app` |
 | `marketplace-authoring` | Enables marketplace authoring commands (`init`, `build`, `publish`). | `apm marketplace --help` |
 | `registries` | Enables REST-based APM package registries in `apm.yml` and `~/.apm/config.json`. | `apm install` (with `registries:` configured) |
@@ -116,4 +115,4 @@ apm experimental reset --yes
 
 - [`apm config`](../config/) -- read and write user-level CLI configuration.
 - [Experimental flags reference](../../experimental/) -- detailed notes on each flag and its graduation status.
-- [`apm compile`](../compile/) -- target consumers of the `copilot-cowork` flag.
+- [`apm compile`](../compile/) -- target consumers of experimental target flags.

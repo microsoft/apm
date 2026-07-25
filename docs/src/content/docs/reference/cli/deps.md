@@ -124,7 +124,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 |---|---|
 | `-v, --verbose` | Show detailed update information. |
 | `--force` | Overwrite locally-authored files on collision. |
-| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `all`. `copilot-cowork`, `copilot-app`, and `grok-cloud` (skills only) are also accepted when their experimental flags are enabled. Experimental targets are excluded from `all`. |
+| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `copilot-cowork`, `all`. `copilot-app` and `grok-cloud` (skills only) are also accepted when their experimental flags are enabled. `agent-skills`, `antigravity`, and `copilot-cowork` are explicit-only and excluded from `all`; combine them with `all` when needed. Experimental targets are also excluded from `all`. `copilot-cowork` is user-scope only. |
 | `--parallel-downloads N` | Max concurrent downloads. Default `4`. `0` disables parallelism. |
 | `-g, --global` | Update user-scope dependencies in `~/.apm/`. |
 | `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. |

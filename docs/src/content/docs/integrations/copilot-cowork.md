@@ -1,37 +1,25 @@
 ---
-title: "Microsoft 365 Copilot Cowork (Experimental)"
+title: "Microsoft 365 Copilot Cowork"
 description: "Deploy APM skills to Microsoft 365 Copilot Cowork through a OneDrive-synchronised skills folder."
 sidebar:
   order: 4
 ---
 
-:::caution[Frontier preview]
-This integration is experimental and off by default. You must enable the `copilot-cowork` flag before using it.
-
-```bash
-apm experimental enable copilot-cowork
-```
-
-Until the flag is enabled, the `copilot-cowork` target stays inert: it is hidden from active target detection, and explicit `--target copilot-cowork` installs fail cleanly instead of deploying anything.
-:::
-
 ## What it does
 
-When the `copilot-cowork` flag is enabled, APM can deploy package skills to Microsoft 365 Copilot Cowork at user scope. APM writes each deployed skill to Cowork's fixed OneDrive convention:
+APM deploys package skills to Microsoft 365 Copilot Cowork at user scope. APM writes each deployed skill to Cowork's fixed OneDrive convention:
 
 ```text
 <onedrive-root>/Documents/Cowork/skills/<package-name>/SKILL.md
 ```
 
-## Enable the flag
+`copilot-cowork` is an **explicit-only** target. It is never auto-detected, and it is never included in `--target all`. You always ask for it by name, and always at user scope:
 
 ```bash
-apm experimental enable copilot-cowork
-apm experimental list
-apm experimental disable copilot-cowork
+apm install --target copilot-cowork --global
 ```
 
-Use `apm experimental list` to confirm whether `copilot-cowork` is enabled on the current machine.
+No experimental flag is required.
 
 ## OneDrive auto-detection
 
@@ -70,11 +58,10 @@ Use `apm config` when you want the Cowork skills path to persist across shells. 
 Set a persisted path:
 
 ```bash
-apm experimental enable copilot-cowork
 apm config set copilot-cowork-skills-dir "$HOME/OneDrive/Documents/Cowork/skills"
 ```
 
-`apm config set copilot-cowork-skills-dir` requires the `copilot-cowork` experimental flag. APM expands `~`, rejects empty or whitespace-only values, and rejects relative paths. The path does not need to exist yet, which is useful while OneDrive is still synchronising.
+APM expands `~`, rejects empty or whitespace-only values, and rejects relative paths. The path does not need to exist yet, which is useful while OneDrive is still synchronising.
 
 Inspect the stored value:
 
@@ -82,7 +69,7 @@ Inspect the stored value:
 apm config get copilot-cowork-skills-dir
 ```
 
-`apm config get copilot-cowork-skills-dir` works whether or not the `copilot-cowork` flag is enabled, and prints the stored path or `Not set`.
+`apm config get copilot-cowork-skills-dir` prints the stored path or `Not set`.
 
 Clear the persisted path:
 
@@ -90,16 +77,17 @@ Clear the persisted path:
 apm config unset copilot-cowork-skills-dir
 ```
 
-`apm config unset copilot-cowork-skills-dir` also works whether or not the `copilot-cowork` flag is enabled.
+`apm config unset copilot-cowork-skills-dir` clears the value and restores auto-detection.
 
 ## Install
 
-Cowork is user-scope only. Use `--global`, and add `--target copilot-cowork` when you want to target Cowork explicitly.
+Cowork is user-scope only and explicit-only. You must name it and pass `--global`:
 
 ```bash
-apm install --global
 apm install --target copilot-cowork --global
 ```
+
+Because it is explicit-only, `apm install --global` and `apm install --target all --global` do **not** deploy to Cowork.
 
 Cowork deployments are skills only:
 
@@ -108,7 +96,12 @@ Cowork deployments are skills only:
 -> <onedrive-root>/Documents/Cowork/skills/<name>/SKILL.md
 ```
 
-If you try project scope, APM stops with a clean error that tells you to rerun with `--global`.
+Project-scope behaviour depends on how Cowork was selected:
+
+- **Explicit `--target copilot-cowork` without `--global`** -- APM stops with a clean error telling you to rerun with `--global`.
+- **Selected implicitly** (via `targets:` in `apm.yml`, or an `apm config target` default) -- APM emits one `[!]` warning, skips Cowork, and continues with the remaining targets.
+
+This means you can list `copilot-cowork` in `apm.yml` alongside project targets: project-scope installs quietly skip it, and `apm install --global` picks it up.
 
 ## Skills-only behaviour
 
@@ -138,8 +131,9 @@ This keeps the lockfile portable across machines, users, and OneDrive tenants. A
 - Cowork unavailable or no OneDrive detected: confirm OneDrive is installed and synchronising, then set `APM_COPILOT_COWORK_SKILLS_DIR`.
 - macOS multi-tenant error: set `APM_COPILOT_COWORK_SKILLS_DIR` to the account you want to use.
 - Linux: set `APM_COPILOT_COWORK_SKILLS_DIR` or persist the path with `apm config set copilot-cowork-skills-dir ...`.
-- Path still persists after disabling `copilot-cowork`: run `apm config unset copilot-cowork-skills-dir` to remove the stored value.
-- Project-scope error: rerun with `--global`.
+- Path no longer wanted: run `apm config unset copilot-cowork-skills-dir` to remove the stored value.
+- Project-scope error: rerun with `--global`, or let APM skip Cowork by selecting it through `apm.yml` instead of the CLI.
+- Nothing deployed on `apm install --global`: Cowork is explicit-only. Pass `--target copilot-cowork`.
 - Non-skill primitives skipped: expected behaviour. Cowork only deploys skills.
 
-See also [IDE and Tool Integration](../ide-tool-integration/) and [apm experimental](../../reference/experimental/).
+See also [IDE and Tool Integration](../ide-tool-integration/) and [Targets matrix](../../reference/targets-matrix/).

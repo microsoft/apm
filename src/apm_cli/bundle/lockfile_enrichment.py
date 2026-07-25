@@ -70,7 +70,7 @@ def _all_target_prefixes() -> list[str]:
 
     A target is considered deployable when ``detect_by_dir`` or
     ``auto_create`` is True; ``copilot-cowork`` (both False) is excluded
-    because it is an opt-in pseudo-target.
+    because it deploys outside the project tree via an external URI.
 
     Order is stable: KNOWN_TARGETS insertion order, with deduplication
     preserving first occurrence.  This keeps downstream YAML deterministic.

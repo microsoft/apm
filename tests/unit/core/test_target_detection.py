@@ -1044,15 +1044,22 @@ class TestCoworkParserLayer:
         """'copilot-cowork' must NOT bleed into ALL_CANONICAL_TARGETS (regression guard).
 
         ALL_CANONICAL_TARGETS drives the 'all' expansion at the parser layer.
-        Experimental targets are opt-in only and must live in EXPERIMENTAL_TARGETS.
+        Explicit-only targets are opt-in only and must live in
+        EXPLICIT_ONLY_TARGETS.
         """
         assert "copilot-cowork" not in ALL_CANONICAL_TARGETS
 
-    # -- Case 5: in EXPERIMENTAL_TARGETS --------------------------------
+    # -- Case 5: GA -- explicit-only, not experimental -------------------
 
-    def test_cowork_in_experimental_targets(self):
-        """'copilot-cowork' must appear in EXPERIMENTAL_TARGETS."""
-        assert "copilot-cowork" in EXPERIMENTAL_TARGETS
+    def test_cowork_not_in_experimental_targets(self):
+        """'copilot-cowork' is GA; it must NOT appear in EXPERIMENTAL_TARGETS."""
+        assert "copilot-cowork" not in EXPERIMENTAL_TARGETS
+
+    def test_cowork_in_explicit_only_targets(self):
+        """'copilot-cowork' is an explicit-only GA target."""
+        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+        assert "copilot-cowork" in EXPLICIT_ONLY_TARGETS
 
     # -- Case 6: exact membership lock -----------------------------------
 
@@ -1063,8 +1070,7 @@ class TestCoworkParserLayer:
         requires an intentional test update.
         """
         assert (
-            frozenset({"copilot-cowork", "copilot-app", "grok-cloud", "openclaw", "hermes"})
-            == EXPERIMENTAL_TARGETS
+            frozenset({"copilot-app", "grok-cloud", "openclaw", "hermes"}) == EXPERIMENTAL_TARGETS
         )
 
     # -- Case 7: "all" expansion does NOT include "copilot-cowork" ---------------

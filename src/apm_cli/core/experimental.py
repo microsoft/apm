@@ -61,15 +61,6 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint="Run 'apm --version' to see the new output.",
     ),
-    "copilot_cowork": ExperimentalFlag(
-        name="copilot_cowork",
-        description="Enable Microsoft 365 Copilot Cowork skills deployment via OneDrive.",
-        default=False,
-        hint=(
-            "Use '--target copilot-cowork --global' to deploy skills. "
-            "See https://microsoft.github.io/apm/integrations/copilot-cowork/"
-        ),
-    ),
     "copilot_app": ExperimentalFlag(
         name="copilot_app",
         description="Deploy prompts as workflows into the GitHub Copilot desktop App.",

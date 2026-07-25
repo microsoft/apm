@@ -879,7 +879,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_dir=".hermes",
     ),
-    # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
+    # Microsoft 365 Copilot (Cowork) -- explicit-only, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via
     # copilot_cowork_paths.resolve_copilot_cowork_skills_dir().
@@ -1260,14 +1260,11 @@ def active_targets(
             except KeyError:
                 continue
             if canonical == "all":
-                # Exclude explicit-only targets (agent-skills) -- they must
-                # be requested individually.
-                # Exclude experimental targets (copilot-cowork) -- they must
-                # be opted into explicitly via `--target copilot-cowork`,
-                # matching the documented contract on EXPERIMENTAL_TARGETS in
-                # core/target_detection.py. Including cowork in `all` for
-                # project scope hits the unconditional project-scope gate in
-                # phases/targets.py and aborts the entire install (#1185 b).
+                # Exclude explicit-only targets (agent-skills, antigravity,
+                # copilot-cowork) -- they must be requested individually.
+                # copilot-cowork in particular deploys at user scope only, so
+                # folding it into `all` at project scope would drop it again
+                # with a warning on every install (#1185 b).
                 all_targets = {normalize_target_name(target) for target in expand_all("install")}
                 return [p for p in KNOWN_TARGETS.values() if p.name in all_targets]
             profile = KNOWN_TARGETS.get(canonical)

@@ -116,81 +116,60 @@ class TestCoworkParserE2E:
     """
 
     # ------------------------------------------------------------------ #
-    # Case 1: Flag OFF -- parser accepts cowork, targets phase emits hint #
+    # Case 1: GA -- no experimental flag required, resolver succeeds      #
     # ------------------------------------------------------------------ #
 
-    def test_flag_off_parser_accepts_cowork_and_emits_hint(
-        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    def test_no_flag_required_and_cowork_deploys(
+        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """apm install --target copilot-cowork --global with flag OFF:
-        - Click must NOT reject 'copilot-cowork' ("is not a valid target" must be absent).
-        - The command must exit 0 (enable-hint path).
-        - Output must contain 'apm experimental enable copilot-cowork'.
+        """apm install --target copilot-cowork --global works with no opt-in.
+
+        The copilot-cowork target is GA: Click must accept it, the targets
+        phase must NOT emit an experimental-flag hint, and the install
+        must succeed once a skills directory resolves.
         """
-        # Ensure cowork flag is OFF (no config.json, or explicit false).
-        # With no config.json the config module creates a default one that
-        # does NOT include the copilot_cowork key, so is_enabled("copilot_cowork") == False.
         config_file = fake_home / ".apm" / "config.json"
         if config_file.exists():
             config_file.unlink()
 
-        # Ensure APM_COPILOT_COWORK_SKILLS_DIR is unset so no accidental OneDrive hit.
-        monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork_root))
 
         runner = CliRunner()
         result = runner.invoke(
             cli,
             ["install", "--target", "copilot-cowork", "--global"],
-            env={**_BASE_ENV},
+            env={**_BASE_ENV, "APM_COPILOT_COWORK_SKILLS_DIR": str(cowork_root)},
             catch_exceptions=False,
         )
 
-        # Regression: Click parse-time rejection used exit code 2.
-        # The fix means we reach the install pipeline instead.
-        assert result.exit_code == 0, (
-            f"Expected exit 0 from enable-hint path, got {result.exit_code}.\n"
-            f"Output:\n{result.output}"
-        )
-
         combined = result.output or ""
-
-        # Old bug: Click rejected at parse time.
         assert "is not a valid target" not in combined, (
-            "Parser still rejecting 'copilot-cowork' -- fix may have been reverted.\n"
-            f"Output:\n{combined}"
+            f"Parser rejecting 'copilot-cowork'.\nOutput:\n{combined}"
         )
-
-        # Phases/targets.py must have emitted the enable hint.
-        # Normalize whitespace to handle terminal line-wrapping.
         normalized = " ".join(combined.split())
-        assert "apm experimental enable copilot-cowork" in normalized, (
-            "Enable hint not found in output -- targets phase may not have run.\n"
-            f"Output:\n{combined}"
+        assert "apm experimental enable copilot-cowork" not in normalized, (
+            f"Experimental hint still emitted for a GA target.\nOutput:\n{combined}"
+        )
+        assert result.exit_code == 0, (
+            f"Expected exit 0, got {result.exit_code}.\nOutput:\n{combined}"
         )
 
     # ------------------------------------------------------------------ #
-    # Case 2: Flag ON -- parser accepts cowork, resolver error emitted   #
+    # Case 2: parser accepts cowork, resolver error emitted              #
     # ------------------------------------------------------------------ #
 
-    def test_flag_on_parser_accepts_cowork_resolver_error(
+    def test_parser_accepts_cowork_resolver_error(
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """apm install --target copilot-cowork --global with flag ON but no OneDrive:
+        """apm install --target copilot-cowork --global with no OneDrive:
         - Click must NOT reject 'copilot-cowork'.
         - phases/targets.py must emit the 'no OneDrive path detected' error.
         - The command exits non-zero (cowork resolver failure).
 
         The exit code is 1 (sys.exit(1) in phases/targets.py run()).
         """
-        import apm_cli.config as _conf
-
-        # Enable the cowork experimental flag via direct cache injection.
-        monkeypatch.setattr(
-            _conf,
-            "_config_cache",
-            {"experimental": {"copilot_cowork": True}},
-        )
-
         # Ensure no OneDrive path is available in the sandbox.
         monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
 
@@ -243,14 +222,6 @@ class TestCoworkParserE2E:
         The project-scope gate in phases/targets.py checks that cowork is
         only valid with --global (user scope).
         """
-        import apm_cli.config as _conf
-
-        # Flag ON so cowork passes the flag gate and reaches the scope gate.
-        monkeypatch.setattr(
-            _conf,
-            "_config_cache",
-            {"experimental": {"copilot_cowork": True}},
-        )
         monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
 
         # For project scope, CWD must have an apm.yml.
