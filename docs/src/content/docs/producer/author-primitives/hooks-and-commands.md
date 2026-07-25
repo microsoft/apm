@@ -98,9 +98,20 @@ available at runtime:
   without an explicit `type` deploy as `commonjs`, and shell-only
   bundles do not get a sidecar.
 
-For multi-target packages, prefer simple hook filenames plus consumer
-per-dependency `targets:` in `dependencies.apm` to limit reach. If the
-same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
+For multi-target packages, prefer simple hook filenames. To limit which
+targets receive hook integration, use either:
+
+- **Package-side** (`target:` / `targets:` in the package's own `apm.yml`) --
+  the hook integrator skips every active target whose name is not in the
+  declared set. Works automatically at install time without consumer config.
+- **Consumer-side** (per-dependency `targets:` in `dependencies.apm`) --
+  the consumer restricts which targets the dependency is expanded for.
+
+Both gates are independent and are AND-combined: a package declaring
+`target: claude` will never write to `.cursor/hooks.json`, even if the
+consumer does not restrict the dependency.
+
+If the same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
 integrates the `.apm/hooks/` copy once per target.
 
 :::note

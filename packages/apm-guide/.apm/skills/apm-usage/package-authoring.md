@@ -97,11 +97,21 @@ every primitive. This is the only layout that is symmetric between
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
 files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
 (`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
-Consumers should route a hook package with per-dependency `targets:`
-in their own `dependencies.apm` entry instead.
 
-Package-level `targets:` (top-level) selects the package's own
-compile/install runtimes; per-dependency `targets:` (inside a
+To limit which harnesses receive a package's hooks, use either:
+
+- **Package-side** (`target:` or `targets:` in the package's own `apm.yml`):
+  APM skips every active target not in the declared set. No consumer
+  configuration required. Example -- a package that ships Claude-formatted
+  hooks should declare `target: claude` so `.cursor/hooks.json` is never
+  written.
+- **Consumer-side** (`targets:` inside a `dependencies.apm` entry):
+  the consumer restricts which active targets the dependency is expanded for.
+
+Both gates are independent and AND-combined.
+
+Package-level `targets:` (top-level) controls compile/install runtimes AND
+now also gates hook routing; per-dependency `targets:` (inside a
 `dependencies.apm` entry) selects which active harnesses receive that
 dependency's target-scoped primitives. They compose via intersection. See
 `dependencies.md` for consumer syntax.
