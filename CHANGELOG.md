@@ -9,15 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Copilot hook packages containing JavaScript scripts no longer cause Copilot to
-  abort hook loading with "hooks: hooks must be an object". APM was writing a
-  `{"type": "..."}` `package.json` sidecar into `.github/hooks/scripts/` to
-  communicate the Node.js module type; Copilot's hook loader scans
-  `.github/hooks/` recursively and rejected that file as an invalid hook
-  descriptor. The sidecar is no longer written for the Copilot/VSCode target.
-  Hook packages that require ES module support when targeting Copilot should use
-  the `.mjs` file extension for scripts, which Node.js recognises without a
-  `package.json`. (#2322)
+- Copilot hook packages with JavaScript scripts no longer fail with "hooks: hooks must be an object"; APM no longer writes a `package.json` sidecar into `.github/hooks/scripts/` where Copilot's recursive hook-loader scan would reject it as an invalid descriptor. (#2322)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
