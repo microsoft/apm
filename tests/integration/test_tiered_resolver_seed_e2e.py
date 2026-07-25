@@ -200,11 +200,13 @@ def test_update_refs_skips_seed_and_reresolves_over_network():
 STALE_SHA = "c" * 40
 
 
-class _FakeLegacyRefsWithStaleL2:
-    """Extends _FakeLegacyRefs with a fake L2BareRevParse that returns a stale SHA.
+class _FakeUpdateModeRefs:
+    """Stand-in for ``downloader._refs`` used in the #2342 regression test.
 
-    Used to prove that, when update_refs=True, the L2 tier is absent so
-    the stale SHA can never surface, and resolution flows to L1 (fresh).
+    Returns NETWORK_SHA from both the L1 commits-API path and the L3 legacy-clone
+    path.  The test asserts that, with ``update_refs=True``, resolution reaches
+    one of these network tiers and returns NETWORK_SHA -- never the STALE_SHA that
+    a now-absent L2BareRevParse tier would have supplied.
     """
 
     def __init__(self) -> None:
@@ -241,7 +243,7 @@ def test_update_mode_bypasses_stale_bare_cache():
     from apm_cli.deps.tiered_ref_resolver import L2BareRevParse
 
     downloader = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
-    fake_refs = _FakeLegacyRefsWithStaleL2()
+    fake_refs = _FakeUpdateModeRefs()
     downloader._refs = fake_refs
 
     # Build the resolver in update mode -- L2BareRevParse must be excluded.
@@ -258,7 +260,6 @@ def test_update_mode_bypasses_stale_bare_cache():
     assert "bare_rev_parse" not in tier_names, (
         "L2BareRevParse must not be in the tier stack when update_refs=True (#2342)"
     )
-    # Suppress unused import warning -- L2BareRevParse imported for isinstance checks below.
     assert not any(isinstance(t, L2BareRevParse) for t in resolver._tiers)
 
     # Resolve the branch ref -- must return the fresh upstream SHA, not STALE_SHA.
