@@ -507,66 +507,36 @@ class TestResetReturnType:
 
 
 # ---------------------------------------------------------------------------
-# Cowork flag registration
+# Cowork flag graduation (GA -- flag removed)
 # ---------------------------------------------------------------------------
 
 
-class TestCoworkFlagRegistration:
-    """Tests for the 'cowork' experimental flag registration."""
+class TestCoworkFlagRemoved:
+    """The copilot-cowork target is GA; its experimental flag is gone."""
 
-    def test_cowork_flag_is_registered(self) -> None:
+    def test_cowork_flag_is_not_registered(self) -> None:
         from apm_cli.core.experimental import FLAGS
 
-        assert "copilot_cowork" in FLAGS
+        assert "copilot_cowork" not in FLAGS
 
-    def test_cowork_flag_default_is_false(self) -> None:
-        from apm_cli.core.experimental import FLAGS
-
-        assert FLAGS["copilot_cowork"].default is False
-
-    def test_cowork_flag_is_disabled_by_default(self, inject_config: Any) -> None:
-        inject_config({})
+    def test_is_enabled_raises_for_removed_flag(self) -> None:
         from apm_cli.core.experimental import is_enabled
 
-        assert is_enabled("copilot_cowork") is False
+        with pytest.raises(ValueError, match="Unknown experimental flag"):
+            is_enabled("copilot_cowork")
 
-    def test_cowork_flag_can_be_enabled(self, isolated_config: Any) -> None:
-        from apm_cli.core.experimental import enable, is_enabled
+    def test_validate_flag_name_rejects_removed_flag(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
 
-        enable("copilot_cowork")
-        assert is_enabled("copilot_cowork") is True
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowork")
+        assert "Unknown experimental feature: copilot-cowork" in excinfo.value.args[0]
 
-    def test_cowork_flag_hint_contains_docs_url(self) -> None:
-        """Verify the hint URL is a valid https URL using urlparse."""
-        from urllib.parse import urlparse
+    def test_stale_cowork_config_key_is_reported(self, inject_config: Any) -> None:
+        inject_config({"experimental": {"copilot_cowork": True}})
+        from apm_cli.core.experimental import get_stale_config_keys
 
-        from apm_cli.core.experimental import FLAGS
-
-        hint = FLAGS["copilot_cowork"].hint
-        assert hint is not None
-        # Extract URL portion from the hint string
-        import re as _re
-
-        urls = _re.findall(r"https?://\S+", hint)
-        assert urls, "hint must contain at least one URL"
-        parsed = urlparse(urls[0])
-        assert parsed.scheme == "https"
-        assert parsed.hostname is not None
-        assert parsed.path != ""
-
-    def test_cowork_flag_description_is_printable_ascii(self) -> None:
-        import string
-
-        from apm_cli.core.experimental import FLAGS
-
-        desc = FLAGS["copilot_cowork"].description
-        assert len(desc) <= 80
-        assert all(c in string.printable for c in desc)
-
-    def test_cowork_key_equals_name(self) -> None:
-        from apm_cli.core.experimental import FLAGS
-
-        assert FLAGS["copilot_cowork"].name == "copilot_cowork"
+        assert "copilot_cowork" in get_stale_config_keys()
 
 
 # ---------------------------------------------------------------------------
