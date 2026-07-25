@@ -28,6 +28,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
 # ---------------------------------------------------------------------------
@@ -642,3 +643,200 @@ class TestTryLoadDependencyPackage:
         resolver = APMDependencyResolver(apm_modules_dir=mods, download_callback=legacy_cb)
         resolver._try_load_dependency_package(ref)
         assert len(call_log) == 1
+
+
+class TestShouldForceRecheck:
+    """``_should_force_recheck`` decides whether download_callback gets a
+    chance to run for a dep whose install path already exists on disk --
+    the fix for transitive semver deps never being re-evaluated against the
+    remote during ``apm update`` unless something *above* them in the tree
+    also happened to change. The method delegates to the same canonical drift
+    owner as ``download_callback`` so literal manifest ref changes also reach
+    the callback on a plain install."""
+
+    def _dep(self, *, is_local=False, artifactory_prefix=None, ref_kind="semver"):
+        ref = MagicMock()
+        ref.is_local = is_local
+        ref.artifactory_prefix = artifactory_prefix
+        ref.ref_kind = ref_kind
+        return ref
+
+    def test_true_without_lock_provenance_on_plain_install(self) -> None:
+        resolver = APMDependencyResolver(update_refs=False)
+        assert resolver._should_force_recheck(self._dep()) is True
+
+    def test_true_for_semver_dep_when_update_refs_true(self) -> None:
+        resolver = APMDependencyResolver(update_refs=True)
+        assert resolver._should_force_recheck(self._dep()) is True
+
+    def test_true_without_lock_even_for_literal_ref(self) -> None:
+        """No lock provenance wins over literal-ref update optimization."""
+        resolver = APMDependencyResolver(update_refs=True)
+        assert resolver._should_force_recheck(self._dep(ref_kind="literal")) is True
+
+    def test_true_without_lock_for_default_ref(self) -> None:
+        resolver = APMDependencyResolver(update_refs=True)
+        assert resolver._should_force_recheck(self._dep(ref_kind=None)) is True
+
+    def test_false_for_local_dep(self) -> None:
+        resolver = APMDependencyResolver(update_refs=True)
+        assert resolver._should_force_recheck(self._dep(is_local=True)) is False
+
+    def test_false_for_artifactory_proxied_dep(self) -> None:
+        resolver = APMDependencyResolver(update_refs=True)
+        assert resolver._should_force_recheck(self._dep(artifactory_prefix="proxy")) is False
+
+    def test_default_constructor_is_update_refs_false(self) -> None:
+        """A remote existing path without lock provenance must be rechecked."""
+        resolver = APMDependencyResolver()
+        assert resolver._should_force_recheck(self._dep()) is True
+
+    def test_true_for_changed_literal_ref_on_plain_install(self) -> None:
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref="a" * 40,
+                resolved_commit="a" * 40,
+            )
+        )
+        resolver = APMDependencyResolver(existing_lockfile=lockfile)
+        dep = DependencyReference(repo_url="org/pkg", reference="b" * 40)
+
+        assert resolver._should_force_recheck(dep) is True
+
+    def test_false_for_unchanged_literal_ref_on_plain_install(self) -> None:
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref="a" * 40,
+                resolved_commit="a" * 40,
+            )
+        )
+        resolver = APMDependencyResolver(existing_lockfile=lockfile)
+        dep = DependencyReference(repo_url="org/pkg", reference="a" * 40)
+
+        assert resolver._should_force_recheck(dep) is False
+
+
+class TestTryLoadDependencyPackageForceRecheck:
+    """End-to-end through _try_load_dependency_package: an existing install
+    path must still invoke download_callback when _should_force_recheck is
+    True -- this is what makes a transitive dependency's own semver range
+    get re-evaluated during apm update, not just direct dependencies."""
+
+    def _semver_dep_ref(self, install_path: Path, key: str = "org/pkg"):
+        ref = MagicMock()
+        ref.is_local = False
+        ref.local_path = None
+        ref.artifactory_prefix = None
+        ref.ref_kind = "semver"
+        ref.repo_url = key
+        ref.get_install_path.return_value = install_path
+        ref.get_unique_key.return_value = key
+        ref.get_display_name.return_value = key
+        return ref
+
+    def test_existing_path_calls_callback_when_update_refs_true(self, tmp_path: Path) -> None:
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+
+        call_log: list = []
+
+        def cb(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+            call_log.append(dep_ref)
+            return pkg_dir  # unchanged -- still exists, same content
+
+        ref = self._semver_dep_ref(pkg_dir)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods, download_callback=cb, update_refs=True
+        )
+        result = resolver._try_load_dependency_package(ref)
+
+        assert len(call_log) == 1
+        assert result is not None
+
+    def test_existing_path_without_lock_calls_callback_on_plain_install(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Plain install must not trust an existing path without provenance."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+
+        call_log: list = []
+
+        def cb(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+            call_log.append(dep_ref)
+            return pkg_dir
+
+        ref = self._semver_dep_ref(pkg_dir)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods, download_callback=cb, update_refs=False
+        )
+        result = resolver._try_load_dependency_package(ref)
+
+        assert len(call_log) == 1
+        assert result is not None
+
+    def test_existing_path_calls_callback_for_changed_literal_ref(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref="a" * 40,
+                resolved_commit="a" * 40,
+            )
+        )
+        calls: list[DependencyReference] = []
+
+        def cb(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+            calls.append(dep_ref)
+            return pkg_dir
+
+        ref = DependencyReference(repo_url="org/pkg", reference="b" * 40)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=cb,
+            existing_lockfile=lockfile,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is not None
+        assert calls == [ref]
+
+    def test_existing_path_without_lock_calls_callback_for_literal_ref(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing provenance wins over literal-ref update optimization."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+
+        call_log: list = []
+
+        def cb(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+            call_log.append(dep_ref)
+            return pkg_dir
+
+        ref = self._semver_dep_ref(pkg_dir)
+        ref.ref_kind = "literal"
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods, download_callback=cb, update_refs=True
+        )
+        result = resolver._try_load_dependency_package(ref)
+
+        assert len(call_log) == 1
+        assert result is not None

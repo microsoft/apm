@@ -26,7 +26,10 @@ from pathlib import Path
 
 import yaml
 
+from apm_cli.deps import apm_resolver
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.dependency_graph import DependencyNode
+from apm_cli.models.apm_package import APMPackage, DependencyReference
 
 
 def _write_pkg(root: Path, name: str, deps: list[str] | None = None) -> Path:
@@ -89,6 +92,38 @@ def _resolved_node_keys(graph) -> list[str]:
     return list(graph.dependency_tree.nodes.keys())
 
 
+def test_dependency_winner_selector_matches_flattening_precedence() -> None:
+    """Earliest depth and lowest node ID must select one shared winner."""
+    selector = getattr(apm_resolver, "_select_dependency_winners", None)
+    nodes = [
+        DependencyNode(
+            package=APMPackage(name="shared", version="v0"),
+            dependency_ref=DependencyReference(repo_url="org/shared", reference="v0"),
+            depth=2,
+        ),
+        DependencyNode(
+            package=APMPackage(name="shared", version="v2"),
+            dependency_ref=DependencyReference(repo_url="org/shared", reference="v2"),
+            depth=1,
+        ),
+        DependencyNode(
+            package=APMPackage(name="shared", version="v1"),
+            dependency_ref=DependencyReference(repo_url="org/shared", reference="v1"),
+            depth=1,
+        ),
+    ]
+
+    assert callable(selector)
+    ordered, winner_ids = selector(nodes)
+
+    assert [node.get_id() for node in ordered] == [
+        "org/shared#v1",
+        "org/shared#v2",
+        "org/shared#v0",
+    ]
+    assert winner_ids == {"org/shared": "org/shared#v1"}
+
+
 def test_max_parallel_one_matches_default_resolver(tmp_path):
     """``max_parallel=1`` must produce the exact same tree as the default."""
     project = _make_tree(tmp_path)
@@ -136,6 +171,69 @@ def test_parallel_resolution_is_deterministic_under_jitter(tmp_path):
 
     # Every run produces the same node-insertion order.
     assert all(r == runs[0] for r in runs), runs
+
+
+def test_conflicting_refs_select_winner_before_parallel_download(tmp_path):
+    """The flattened winner, callback, loaded metadata, and disk must agree."""
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    (tmp_path / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "root",
+                "version": "0.0.1",
+                "dependencies": {
+                    "apm": ["org/shared#v2", "org/shared#v1", "org/other"],
+                    "mcp": [],
+                },
+            }
+        )
+    )
+
+    callback_refs: list[tuple[str, str | None]] = []
+    callback_lock = threading.Lock()
+    two_workers_active = threading.Event()
+    active_workers = 0
+    max_active_workers = 0
+
+    def download(dep_ref, mods_dir, parent_chain="", parent_pkg=None):
+        nonlocal active_workers, max_active_workers
+        with callback_lock:
+            active_workers += 1
+            max_active_workers = max(max_active_workers, active_workers)
+            if active_workers == 2:
+                two_workers_active.set()
+        assert two_workers_active.wait(timeout=2)
+        try:
+            with callback_lock:
+                callback_refs.append((dep_ref.repo_url, dep_ref.reference))
+            package_dir = dep_ref.get_install_path(mods_dir)
+            package_dir.mkdir(parents=True, exist_ok=True)
+            version = dep_ref.reference or "unversioned"
+            (package_dir / "apm.yml").write_text(
+                yaml.safe_dump({"name": dep_ref.repo_url.rsplit("/", 1)[-1], "version": version})
+            )
+            return package_dir
+        finally:
+            with callback_lock:
+                active_workers -= 1
+
+    graph = APMDependencyResolver(
+        apm_modules_dir=modules,
+        download_callback=download,
+        max_parallel=2,
+    ).resolve_dependencies(tmp_path)
+
+    winner = graph.flattened_dependencies.get_dependency("org/shared")
+    winner_node = graph.dependency_tree.nodes["org/shared#v1"]
+    disk_manifest = yaml.safe_load((modules / "org" / "shared" / "apm.yml").read_text())
+
+    assert max_active_workers == 2
+    assert [ref for repo, ref in callback_refs if repo == "org/shared"] == ["v1"]
+    assert winner is not None and winner.reference == "v1"
+    assert winner_node.package.version == "v1"
+    assert disk_manifest["version"] == "v1"
+    assert graph.flattened_dependencies.has_conflicts()
 
 
 def test_shared_transitive_dep_is_deduplicated(tmp_path):

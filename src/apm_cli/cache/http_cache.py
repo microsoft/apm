@@ -70,6 +70,7 @@ class HttpCache:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(str(self._cache_dir), 0o700)
         cleanup_incomplete(self._cache_dir)
+        self._tracked_size: int | None = None
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> CacheEntry | None:
         """Look up a cached response for *url*.
@@ -233,6 +234,13 @@ class HttpCache:
         with contextlib.suppress(OSError):
             os.utime(str(entry_path), None)
 
+        # Update tracked size with an upper-bound estimate. Over-counting is
+        # intentional: it triggers a real scan sooner, correcting the estimate,
+        # rather than delaying eviction. The scan in _enforce_size_cap resets
+        # _tracked_size to the real total once it runs.
+        if self._tracked_size is not None:
+            self._tracked_size += len(body) + 512  # body + metadata upper-bound estimate
+
         # Enforce size cap
         self._enforce_size_cap()
 
@@ -321,8 +329,18 @@ class HttpCache:
         return 300.0
 
     def _enforce_size_cap(self) -> None:
-        """Evict LRU entries if total cache size exceeds the cap."""
+        """Evict LRU entries if total cache size exceeds the cap.
+
+        Uses a tracked size estimate to skip the full directory scan
+        when we are clearly under the cap (fast path). Falls back to a
+        full scan when the tracked size exceeds the limit or has not
+        been computed yet.
+        """
         if not self._cache_dir.is_dir():
+            return
+
+        # Fast path: if we have a tracked size and it is under cap, skip scan
+        if self._tracked_size is not None and self._tracked_size <= MAX_HTTP_CACHE_BYTES:
             return
 
         entries: list[tuple[float, str, int]] = []
@@ -343,6 +361,8 @@ class HttpCache:
             except OSError:
                 continue
 
+        self._tracked_size = total_size
+
         if total_size <= MAX_HTTP_CACHE_BYTES:
             return
 
@@ -356,3 +376,5 @@ class HttpCache:
                 break
             robust_rmtree(Path(path), ignore_errors=True)
             total_size -= size
+
+        self._tracked_size = total_size

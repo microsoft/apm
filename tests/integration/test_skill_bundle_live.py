@@ -17,7 +17,6 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 import yaml
@@ -54,19 +53,6 @@ LIVE_REPOS = [
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def apm_command():
-    """Resolve the apm CLI executable (PATH first, then local venv)."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    # Fallback: run as module
-    return None
 
 
 @pytest.fixture
@@ -119,14 +105,10 @@ def _env_with_home(fake_home):
     return env
 
 
-def _run_apm(apm_command, args, cwd, fake_home, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=180):
     """Run apm CLI with isolated HOME."""
-    if apm_command:  # noqa: SIM108
-        cmd = [apm_command] + args  # noqa: RUF005
-    else:
-        cmd = [sys.executable, "-m", "apm_cli"] + args  # noqa: RUF005
     return subprocess.run(
-        cmd,
+        [str(apm_binary_path), *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -188,13 +170,13 @@ def _count_deployed_skills(project_root):
     ids=[r[0] for r in LIVE_REPOS],
 )
 def test_live_install_classifies_and_succeeds(
-    tmp_path, apm_command, fake_home, repo, expected_type, min_skills, is_plugin
+    tmp_path, apm_binary_path, fake_home, repo, expected_type, min_skills, is_plugin
 ):
     """Install a real repo and validate classification + deployment."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
 
-    result = _run_apm(apm_command, ["install", repo, "--verbose"], work_dir, fake_home)
+    result = _run_apm(apm_binary_path, ["install", repo, "--verbose"], work_dir, fake_home)
     assert result.returncode == 0, (
         f"apm install {repo} failed (exit {result.returncode}):\n"
         f"STDOUT:\n{result.stdout[-2000:]}\n"
@@ -236,7 +218,7 @@ def test_live_install_classifies_and_succeeds(
 
 
 @pytest.mark.live
-def test_live_skill_subset_selection(tmp_path, apm_command, fake_home):
+def test_live_skill_subset_selection(tmp_path, apm_binary_path, fake_home):
     """Install a single skill from vercel-labs/agent-skills (6-skill bundle).
 
     Picks one known skill name and asserts only that skill is deployed.
@@ -249,7 +231,7 @@ def test_live_skill_subset_selection(tmp_path, apm_command, fake_home):
     target_skill = "deploy-to-vercel"
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "vercel-labs/agent-skills", "--skill", target_skill, "--verbose"],
         work_dir,
         fake_home,
@@ -291,7 +273,7 @@ def test_live_skill_subset_selection(tmp_path, apm_command, fake_home):
 
 
 @pytest.mark.live
-def test_live_skill_flag_on_non_bundle_deploys_normally(tmp_path, apm_command, fake_home):
+def test_live_skill_flag_on_non_bundle_deploys_normally(tmp_path, apm_binary_path, fake_home):
     """--skill on a MARKETPLACE_PLUGIN that ships .apm/skills/ should still
     deploy those skills normally -- the --skill filter only applies to
     SKILL_BUNDLE packages with a root skills/ directory.
@@ -303,7 +285,7 @@ def test_live_skill_flag_on_non_bundle_deploys_normally(tmp_path, apm_command, f
     work_dir.mkdir()
 
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "pbakaus/impeccable", "--skill", "nonexistent", "--verbose"],
         work_dir,
         fake_home,
@@ -358,14 +340,14 @@ def _get_manifest_entry(manifest, repo):
 
 
 @pytest.mark.live
-def test_skill_subset_persists_to_apm_yml(tmp_path, apm_command, fake_home):
+def test_skill_subset_persists_to_apm_yml(tmp_path, apm_binary_path, fake_home):
     """--skill <name> persists skills: field in apm.yml after install."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
 
     target_skill = "deploy-to-vercel"
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "vercel-labs/agent-skills", "--skill", target_skill, "--verbose"],
         work_dir,
         fake_home,
@@ -387,14 +369,14 @@ def test_skill_subset_persists_to_apm_yml(tmp_path, apm_command, fake_home):
 
 
 @pytest.mark.live
-def test_skill_subset_persists_to_lockfile(tmp_path, apm_command, fake_home):
+def test_skill_subset_persists_to_lockfile(tmp_path, apm_binary_path, fake_home):
     """--skill <name> persists skill_subset in apm.lock.yaml."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
 
     target_skill = "deploy-to-vercel"
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "vercel-labs/agent-skills", "--skill", target_skill, "--verbose"],
         work_dir,
         fake_home,
@@ -415,7 +397,7 @@ def test_skill_subset_persists_to_lockfile(tmp_path, apm_command, fake_home):
 
 
 @pytest.mark.live
-def test_bare_reinstall_respects_persisted_subset(tmp_path, apm_command, fake_home):
+def test_bare_reinstall_respects_persisted_subset(tmp_path, apm_binary_path, fake_home):
     """Bare `apm install` after --skill respects persisted skills: selection."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
@@ -424,7 +406,7 @@ def test_bare_reinstall_respects_persisted_subset(tmp_path, apm_command, fake_ho
 
     # First install with --skill
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "vercel-labs/agent-skills", "--skill", target_skill, "--verbose"],
         work_dir,
         fake_home,
@@ -441,7 +423,7 @@ def test_bare_reinstall_respects_persisted_subset(tmp_path, apm_command, fake_ho
 
     # Re-install bare (no --skill flag)
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "--verbose"],
         work_dir,
         fake_home,
@@ -461,7 +443,7 @@ def test_bare_reinstall_respects_persisted_subset(tmp_path, apm_command, fake_ho
 
 
 @pytest.mark.live
-def test_star_sentinel_clears_subset(tmp_path, apm_command, fake_home):
+def test_star_sentinel_clears_subset(tmp_path, apm_binary_path, fake_home):
     """--skill '*' clears persisted skills: selection and installs all."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
@@ -470,7 +452,7 @@ def test_star_sentinel_clears_subset(tmp_path, apm_command, fake_home):
 
     # First install with --skill to persist subset
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "vercel-labs/agent-skills", "--skill", target_skill, "--verbose"],
         work_dir,
         fake_home,
@@ -486,7 +468,7 @@ def test_star_sentinel_clears_subset(tmp_path, apm_command, fake_home):
 
     # Now install with --skill '*' to clear
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "vercel-labs/agent-skills", "--skill", "*", "--verbose"],
         work_dir,
         fake_home,
@@ -508,14 +490,14 @@ def test_star_sentinel_clears_subset(tmp_path, apm_command, fake_home):
 
 
 @pytest.mark.live
-def test_skill_flag_on_non_bundle_warns_and_does_not_persist(tmp_path, apm_command, fake_home):
+def test_skill_flag_on_non_bundle_warns_and_does_not_persist(tmp_path, apm_binary_path, fake_home):
     """--skill on a non-SKILL_BUNDLE warns and does NOT persist skills:."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
 
     # obra/superpowers is a MARKETPLACE_PLUGIN
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "obra/superpowers", "--skill", "fake-skill", "--verbose"],
         work_dir,
         fake_home,
@@ -549,7 +531,7 @@ def test_skill_flag_on_non_bundle_warns_and_does_not_persist(tmp_path, apm_comma
 
 
 @pytest.mark.live
-def test_audit_detects_lockfile_drift(tmp_path, apm_command, fake_home):
+def test_audit_detects_lockfile_drift(tmp_path, apm_binary_path, fake_home):
     """apm audit --ci detects lockfile drift when skills: changes after install."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
@@ -558,7 +540,7 @@ def test_audit_detects_lockfile_drift(tmp_path, apm_command, fake_home):
 
     # Install with --skill to get consistent state
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["install", "vercel-labs/agent-skills", "--skill", target_skill, "--verbose"],
         work_dir,
         fake_home,
@@ -567,7 +549,7 @@ def test_audit_detects_lockfile_drift(tmp_path, apm_command, fake_home):
 
     # Verify audit passes in consistent state
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["audit", "--ci"],
         work_dir,
         fake_home,
@@ -590,7 +572,7 @@ def test_audit_detects_lockfile_drift(tmp_path, apm_command, fake_home):
 
     # Audit should now detect drift
     result = _run_apm(
-        apm_command,
+        apm_binary_path,
         ["audit", "--ci"],
         work_dir,
         fake_home,

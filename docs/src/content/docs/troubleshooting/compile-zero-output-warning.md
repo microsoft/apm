@@ -28,7 +28,7 @@ If the active list is empty, no harness was detected and no `target:` was pinned
 - Create one of the canonical signals (`.claude/`, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.cursor/`, `.codex/`, `.gemini/` or `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`).
 - Pin targets in `apm.yml` (`target: [claude, copilot]`) or pass `--target` to `apm compile`.
 
-See [`apm targets`](../reference/cli/targets/) and the [manifest schema](../reference/manifest-schema/).
+See [`apm targets`](../../reference/cli/targets/) and the [manifest schema](../../reference/manifest-schema/).
 
 ### 2. Confirm primitives are discovered
 
@@ -56,13 +56,13 @@ dependencies:
       includes: [skills]   # prompts and instructions are excluded
 ```
 
-See [manifest schema](../reference/manifest-schema/) for the full include/exclude semantics.
+See [manifest schema](../../reference/manifest-schema/) for the full include/exclude semantics.
 
 ### 4. Confirm the target supports the primitive types you ship
 
 This is the most common cause. Each target supports a subset of primitive types. Shipping only types a target rejects produces zero output for that target.
 
-Authoritative matrix: [targets matrix](../reference/targets-matrix/).
+Authoritative matrix: [targets matrix](../../reference/targets-matrix/).
 
 [i] Ship only `prompts` to `claude`? Zero output -- Claude has no `prompts` slot.
 [i] Ship only `instructions` to `codex`? Zero output -- Codex has no `instructions` slot.
@@ -75,7 +75,7 @@ Org policy rules can deny specific primitives, sources, or transformers. If a po
 apm policy status
 ```
 
-See [policy schema](../reference/policy-schema/).
+See [policy schema](../../reference/policy-schema/).
 
 ## Worked examples
 
@@ -105,7 +105,7 @@ Expected when targets and primitive types don't intersect uniformly. Example: a 
 - `claude`: instructions (as rules) + commands -- both land.
 - `gemini`: commands only -- instructions are silently skipped because Gemini has no `rules/` slot.
 
-Cross-check against the [targets matrix](../reference/targets-matrix/) before filing a bug.
+Cross-check against the [targets matrix](../../reference/targets-matrix/) before filing a bug.
 
 ## Still nothing?
 
@@ -117,4 +117,4 @@ apm compile --verbose
 
 If `*_files_written` and `*_files_generated` are all zero across the stats block, every target was a no-op. Use the ladder above to find which step silently filtered everything out.
 
-Reference: [`apm compile`](../reference/cli/compile/), [`apm targets`](../reference/cli/targets/), [`apm view`](../reference/cli/view/), [targets matrix](../reference/targets-matrix/), [manifest schema](../reference/manifest-schema/), [policy schema](../reference/policy-schema/).
+Reference: [`apm compile`](../../reference/cli/compile/), [`apm targets`](../../reference/cli/targets/), [`apm view`](../../reference/cli/view/), [targets matrix](../../reference/targets-matrix/), [manifest schema](../../reference/manifest-schema/), [policy schema](../../reference/policy-schema/).

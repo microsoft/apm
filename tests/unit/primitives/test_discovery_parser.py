@@ -597,7 +597,7 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         # picks up the transitive entry. apm_modules dir doesn't need to
         # actually exist for get_installed_paths to return the entries.
         (Path(self.tmp) / "apm.lock.yaml").write_text(
-            "version: 1\n"
+            "lockfile_version: '1'\n"
             "dependencies:\n"
             "  - repo_url: owner/direct-dep\n"
             "    resolved_ref: HEAD\n"

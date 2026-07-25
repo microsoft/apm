@@ -29,14 +29,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..core.auth import HostInfo
+    from ..core.auth import AuthContext, HostInfo
 
 from ..utils.github_host import default_host
 from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str
 from ._io import atomic_write
 from ._shared import iter_semver_tags
-from .auth_helpers import resolve_token_for_host
+from .auth_helpers import resolve_auth_for_host
 from .diagnostics import BuildDiagnostic
 from .errors import (
     BuildError,
@@ -452,24 +452,25 @@ class MarketplaceBuilder:
             cached = self._host_resolvers.get(key)
             if cached is not None:
                 return cached
-            token = self._resolve_token_for_host(resolved_host, org=org)
+            auth = self._resolve_auth_for_host(resolved_host, org=org)
             logger.debug(
                 "Creating per-host RefResolver for %s (org=%s, token=%s)",
                 resolved_host,
                 org or "none",
-                "set" if token else "unset",
+                "set" if auth else "unset",
             )
             resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
                 host=resolved_host,
-                token=token,
+                token=auth.token if auth else None,
+                auth_scheme=auth.auth_scheme if auth else "basic",
             )
             self._host_resolvers[key] = resolver
             return resolver
 
-    def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
-        """Resolve an auth token for *host* via the shared marketplace helper."""
+    def _resolve_auth_for_host(self, host: str, *, org: str | None = None) -> AuthContext | None:
+        """Resolve the complete auth context for marketplace git operations."""
         if self._options.offline:
             return None
         from ..core.auth import AuthResolver  # lazy import
@@ -478,12 +479,17 @@ class MarketplaceBuilder:
         if resolver is None:
             resolver = AuthResolver()
             self._auth_resolver = resolver
-        return resolve_token_for_host(
+        return resolve_auth_for_host(
             host,
             offline=self._options.offline,
             org=org,
             auth_resolver=resolver,
         )
+
+    def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
+        """Resolve an auth token for *host* via the shared marketplace helper."""
+        auth = self._resolve_auth_for_host(host, org=org)
+        return auth.token if auth else None
 
     def _ensure_auth(self) -> None:
         """Lazily resolve host classification and GitHub token.
@@ -647,64 +653,75 @@ class MarketplaceBuilder:
 
         refs = resolver.list_remote_refs(owner_repo)
 
-        # Try as tag first (only check tag refs)
+        # Single-pass index for O(1) lookup by tag name, full refname, and branch
+        tags_by_name: dict[str, Any] = {}
+        refs_by_name: dict[str, Any] = {}
+        branches_by_name: dict[str, Any] = {}
         for remote_ref in refs:
-            if not remote_ref.name.startswith("refs/tags/"):
-                continue
+            refs_by_name[remote_ref.name] = remote_ref
+            if remote_ref.name.startswith("refs/tags/"):
+                tag_name = _strip_ref_prefix(remote_ref.name)
+                tags_by_name[tag_name] = remote_ref
+            elif remote_ref.name.startswith("refs/heads/"):
+                branch_name = remote_ref.name[len("refs/heads/") :]
+                branches_by_name[branch_name] = remote_ref
+
+        # Try as tag first
+        if ref_text in tags_by_name:
+            remote_ref = tags_by_name[ref_text]
             tag_name = _strip_ref_prefix(remote_ref.name)
-            if tag_name == ref_text:
-                sv = parse_semver(tag_name.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=tag_name,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+            sv = parse_semver(tag_name.lstrip("vV"))
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=tag_name,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=sv.is_prerelease if sv else False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+            )
 
         # Try as full refname
-        for remote_ref in refs:
-            if remote_ref.name == ref_text:
-                short = _strip_ref_prefix(remote_ref.name)
-                is_branch = remote_ref.name.startswith("refs/heads/")
-                if is_branch and not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, short)
-                sv = parse_semver(short.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=short,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+        if ref_text in refs_by_name:
+            remote_ref = refs_by_name[ref_text]
+            short = _strip_ref_prefix(remote_ref.name)
+            is_branch = remote_ref.name.startswith("refs/heads/")
+            if is_branch and not self._options.allow_head:
+                raise HeadNotAllowedError(entry.name, short)
+            sv = parse_semver(short.lstrip("vV"))
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=short,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=sv.is_prerelease if sv else False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+            )
 
         # Try as branch name
-        for remote_ref in refs:
-            if remote_ref.name == f"refs/heads/{ref_text}":
-                if not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, ref_text)
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=ref_text,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+        if ref_text in branches_by_name:
+            remote_ref = branches_by_name[ref_text]
+            if not self._options.allow_head:
+                raise HeadNotAllowedError(entry.name, ref_text)
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=ref_text,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+            )
 
         # HEAD special case
         if ref_text.upper() == "HEAD":

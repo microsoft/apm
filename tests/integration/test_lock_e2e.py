@@ -17,7 +17,6 @@ dependencies are used wherever a real dependency is needed.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -32,25 +31,14 @@ pytestmark = pytest.mark.requires_apm_binary
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def apm_command() -> str:
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
-
-
 def _run_apm(
-    apm_command: str,
+    apm_binary_path: str,
     args: list[str],
     cwd: Path,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [apm_command, *args],
+        [apm_binary_path, *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -95,7 +83,7 @@ def _make_local_package(pkg_dir: Path, name: str) -> None:
 
 class TestLockEmptyDeps:
     def test_no_deps_creates_lockfile_and_exits_zero(
-        self, apm_command: str, tmp_path: Path
+        self, apm_binary_path: str, tmp_path: Path
     ) -> None:
         """A project with no dependencies should produce apm.lock.yaml and
         exit 0 -- the core promise of the lockfile-only path."""
@@ -103,7 +91,7 @@ class TestLockEmptyDeps:
         project.mkdir()
         _write_apm_yml(project)
 
-        result = _run_apm(apm_command, ["lock"], project)
+        result = _run_apm(apm_binary_path, ["lock"], project)
 
         assert result.returncode == 0, (
             f"apm lock exited {result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -111,13 +99,13 @@ class TestLockEmptyDeps:
         lockfile = project / "apm.lock.yaml"
         assert lockfile.exists(), "apm.lock.yaml must be created even with no dependencies"
 
-    def test_no_deps_lockfile_is_valid_yaml(self, apm_command: str, tmp_path: Path) -> None:
+    def test_no_deps_lockfile_is_valid_yaml(self, apm_binary_path: str, tmp_path: Path) -> None:
         """The produced lockfile must be parseable YAML."""
         project = tmp_path / "project"
         project.mkdir()
         _write_apm_yml(project)
 
-        _run_apm(apm_command, ["lock"], project)
+        _run_apm(apm_binary_path, ["lock"], project)
 
         lockfile = project / "apm.lock.yaml"
         content = lockfile.read_text(encoding="utf-8")
@@ -127,7 +115,7 @@ class TestLockEmptyDeps:
 
 class TestLockLocalDep:
     def test_local_dep_writes_lockfile_without_deploying(
-        self, apm_command: str, tmp_path: Path
+        self, apm_binary_path: str, tmp_path: Path
     ) -> None:
         """apm lock with a local-path dep must write the lockfile but NOT
         copy any files to .github/, .agents/, or similar harness dirs."""
@@ -139,7 +127,7 @@ class TestLockLocalDep:
 
         _write_apm_yml(project, deps=[str(pkg_dir)])
 
-        result = _run_apm(apm_command, ["lock"], project)
+        result = _run_apm(apm_binary_path, ["lock"], project)
 
         assert result.returncode == 0, (
             f"apm lock exited {result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -157,7 +145,9 @@ class TestLockLocalDep:
             "apm lock must NOT deploy files to .agents/ -- only the lockfile should be written"
         )
 
-    def test_local_dep_lockfile_records_dependency(self, apm_command: str, tmp_path: Path) -> None:
+    def test_local_dep_lockfile_records_dependency(
+        self, apm_binary_path: str, tmp_path: Path
+    ) -> None:
         """The lockfile written by apm lock must record the local dependency."""
         project = tmp_path / "project"
         project.mkdir()
@@ -166,7 +156,7 @@ class TestLockLocalDep:
         _make_local_package(pkg_dir, "my-skills")
 
         _write_apm_yml(project, deps=[str(pkg_dir)])
-        _run_apm(apm_command, ["lock"], project)
+        _run_apm(apm_binary_path, ["lock"], project)
 
         lockfile = project / "apm.lock.yaml"
         content = lockfile.read_text(encoding="utf-8")
@@ -175,7 +165,7 @@ class TestLockLocalDep:
         deps = parsed.get("dependencies", {})
         assert len(deps) > 0, "lockfile must record at least one dependency entry for the local dep"
 
-    def test_lock_is_idempotent(self, apm_command: str, tmp_path: Path) -> None:
+    def test_lock_is_idempotent(self, apm_binary_path: str, tmp_path: Path) -> None:
         """Running apm lock twice with unchanged deps produces the same lockfile."""
         project = tmp_path / "project"
         project.mkdir()
@@ -184,10 +174,10 @@ class TestLockLocalDep:
         _make_local_package(pkg_dir, "my-skills")
         _write_apm_yml(project, deps=[str(pkg_dir)])
 
-        _run_apm(apm_command, ["lock"], project)
+        _run_apm(apm_binary_path, ["lock"], project)
         first = (project / "apm.lock.yaml").read_text(encoding="utf-8")
 
-        _run_apm(apm_command, ["lock"], project)
+        _run_apm(apm_binary_path, ["lock"], project)
         second = (project / "apm.lock.yaml").read_text(encoding="utf-8")
 
         assert first == second, "apm lock must be idempotent -- same lockfile on second run"

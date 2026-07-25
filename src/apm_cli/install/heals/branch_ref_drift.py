@@ -55,7 +55,7 @@ class BranchRefDriftHeal:
         # dep is LEGITIMATE (caused by upstream branch advancing past the
         # lockfile-recorded SHA), not a supply-chain attack. Without
         # this the supply-chain hard-block at sources.py would abort the
-        # install with sys.exit(1) before the repaired lockfile is
+        # install before the repaired lockfile is
         # written.
         hctx.add_bypass_key(hctx.package_key)
         hctx.emit(

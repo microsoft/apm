@@ -1,6 +1,6 @@
 """Lockfile (apm.lock.yaml) conformance tests -- sec.5.
 
-Covers req-lk-001..019. The integrity sub-cluster (req-lk-012..017)
+Covers req-lk-001..021. The integrity sub-cluster (req-lk-012..017)
 now drives REAL fail-closed oracles against the committed binary
 fixture pair under `integrity/`.
 """
@@ -50,6 +50,33 @@ def test_lockfile_declares_apiversion():
 def test_lockfile_carries_dependencies_block():
     schema = load_schema("lockfile-v0.1.schema.json")
     assert "dependencies" in schema["required"]
+
+
+@pytest.mark.req("req-lk-003")
+def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.ci_checks import _check_ref_consistency
+
+    manifest_commit = "a" * 40
+    dependency = DependencyReference.parse(f"owner/repo#{manifest_commit}")
+    lock = LockFile(
+        dependencies={
+            dependency.get_unique_key(): LockedDependency(
+                repo_url="owner/repo",
+                resolved_ref=manifest_commit,
+                resolved_commit="b" * 40,
+            )
+        }
+    )
+    manifest = SimpleNamespace(get_all_apm_dependencies=lambda: [dependency])
+
+    result = _check_ref_consistency(manifest, lock)
+
+    assert not result.passed
+    assert "lockfile resolved_commit" in result.details[0]
 
 
 @pytest.mark.req("req-lk-004")
@@ -258,4 +285,267 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
         "MUST NOT derive any\nidentity or deduplication decision",
         "registry-resolved `version` MAY remain the exact\nregistry selection",
         "MUST NOT change `lockfile_version`",
+    )
+
+
+@pytest.mark.req("req-lk-020")
+def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from apm_cli.install.manifest_reconcile import union_preserving
+    from apm_cli.install.phases import cleanup
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    def target(name: str, root_dir: str | None = None):
+        return SimpleNamespace(name=name, root_dir=root_dir, primitives={})
+
+    ghost = ".windsurf/rules/demo.md"
+    dynamic = "copilot-app-db://workflows/demo"
+    prior = [ghost, dynamic]
+    prior_hashes = {ghost: "sha256:" + "a" * 64, dynamic: "sha256:" + "b" * 64}
+    active = [target("copilot", ".github")]
+    legitimate = [*active, target("copilot-app")]
+
+    reconciled, hashes = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=prior,
+        prior_hashes=prior_hashes,
+        targets=active,
+        declared_targets=legitimate,
+    )
+    assert reconciled == [dynamic]
+    assert hashes == {dynamic: prior_hashes[dynamic]}
+
+    indeterminate, indeterminate_hashes = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=prior,
+        prior_hashes=prior_hashes,
+        targets=active,
+        declared_targets=None,
+    )
+    assert indeterminate == prior
+    assert indeterminate_hashes == prior_hashes
+
+    shared_rule = ".agents/rules/keep.md"
+    shared_files, shared_hashes = union_preserving(
+        current_files=[".agents/skills/demo/SKILL.md"],
+        current_hashes={},
+        prior_files=[shared_rule],
+        prior_hashes={shared_rule: "sha256:" + "c" * 64},
+        targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["antigravity"]],
+    )
+    assert shared_rule in shared_files
+    assert shared_rule in shared_hashes
+
+    indeterminate_path = ".agents/hooks.json.bak"
+    declared_indeterminate, _ = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=[indeterminate_path],
+        prior_hashes={},
+        targets=[KNOWN_TARGETS["antigravity"]],
+        declared_targets=[KNOWN_TARGETS["antigravity"]],
+    )
+    assert declared_indeterminate == [indeterminate_path]
+
+    prior_dependency = SimpleNamespace(
+        deployed_files=["shared.md", "old-only.md"],
+        deployed_file_hashes={},
+    )
+    lockfile = SimpleNamespace(
+        dependencies={"prior-identity": prior_dependency},
+        get_dependency=lambda key: None,
+    )
+    diagnostics = MagicMock()
+    diagnostics.count_for_package.return_value = 0
+    context = SimpleNamespace(
+        existing_lockfile=lockfile,
+        only_packages=False,
+        intended_dep_keys={"active-identity"},
+        project_root=tmp_path,
+        targets=[],
+        diagnostics=diagnostics,
+        logger=MagicMock(),
+        package_deployed_files={"active-identity": ["shared.md"]},
+    )
+    removal = MagicMock(deleted=[], deleted_targets=[], skipped_user_edit=[])
+    with patch(
+        "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+        return_value=removal,
+    ) as remove:
+        cleanup.run(context)
+    assert remove.call_args.args[0] == ["old-only.md"]
+
+    assert_spec_contains(
+        "MUST remove a prior path attributable",
+        "MUST preserve that path and its corresponding hash entry",
+        "MUST preserve any path freshly\ndeployed by an active dependency",
+    )
+
+
+class TestFinalLockfileTargetContraction:
+    """req-lk-020 coverage for the final-lockfile deployed-file owner.
+
+    ``reconcile_target_deployed_files`` is the file-only contraction
+    owner the LockfileBuilder routes both the normal and zero-install
+    paths through, so req-lk-020's remove-prior-path decision reaches
+    the physical deployed instruction file, not just the in-memory list.
+    """
+
+    @pytest.mark.req("req-lk-020")
+    def test_removes_dropped_target_instruction_file(self, tmp_path):
+        """Narrowing a declared target set from claude+cursor to claude
+        MUST remove the dropped cursor instruction's ``deployed_files``
+        row *and* its corresponding hash entry, and delete the orphaned
+        file from disk through the cleanup chokepoint, while preserving
+        the retained claude instruction (row, hash, and bytes)."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.install.manifest_reconcile import reconcile_target_deployed_files
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.content_hash import compute_file_hash
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        claude_rel = ".claude/rules/scope.md"
+        cursor_rel = ".cursor/rules/scope.mdc"
+        claude_abs = tmp_path / claude_rel
+        cursor_abs = tmp_path / cursor_rel
+        for path, body in ((claude_abs, "# claude rule\n"), (cursor_abs, "# cursor rule\n")):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/acme/pkg",
+                resolved_ref="1.0.0",
+                deployed_files=[claude_rel, cursor_rel],
+                deployed_file_hashes={
+                    claude_rel: compute_file_hash(claude_abs),
+                    cursor_rel: compute_file_hash(cursor_abs),
+                },
+            )
+        )
+
+        changed = reconcile_target_deployed_files(
+            project_root=tmp_path,
+            lockfile=lockfile,
+            active_targets=[KNOWN_TARGETS["claude"]],
+            declared_targets=[KNOWN_TARGETS["claude"]],
+            diagnostics=DiagnosticCollector(),
+        )
+
+        dependency = next(iter(lockfile.dependencies.values()))
+        assert changed is True
+        assert dependency.deployed_files == [claude_rel], (
+            "dropped-target path attributable to no declared target MUST be removed"
+        )
+        assert cursor_rel not in dependency.deployed_file_hashes, (
+            "the removed path's hash entry MUST be removed alongside it"
+        )
+        assert not cursor_abs.exists(), (
+            "the orphaned dropped-target instruction MUST be deleted from disk"
+        )
+        assert claude_abs.exists()
+        assert claude_abs.read_text(encoding="utf-8") == "# claude rule\n", (
+            "a path attributable to the retained target MUST be preserved untouched"
+        )
+        assert dependency.deployed_file_hashes.get(claude_rel) == compute_file_hash(claude_abs)
+
+        assert_spec_contains(
+            "MUST remove a prior path attributable",
+            "This reconciliation applies identically to",
+            "per-entry `deployed_files` and top-level `local_deployed_files`",
+        )
+
+
+@pytest.mark.req("req-lk-021")
+def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
+    """req-lk-021 extends req-lk-020's preserve/remove decision to
+    merge-based hook configuration: a dropped target's consumer-owned
+    entries are removed (and an emptied ownership record with them),
+    a retained target's entries survive untouched, and an entry that
+    does not carry the consumer's own ownership attribution survives
+    even in the dropped target's own file."""
+    import json
+
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "owned"}],
+                        },
+                        {
+                            "matcher": "Write",
+                            "hooks": [{"type": "command", "command": "user-authored"}],
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (codex_dir / "apm-hooks.json").write_text(
+        json.dumps(
+            {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "owned"}],
+                        "_apm_source": "req-lk-021-fixture",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}}),
+        encoding="utf-8",
+    )
+    (claude_dir / "apm-hooks.json").write_text(
+        json.dumps({"PreToolUse": [{"matcher": "Bash", "_apm_source": "req-lk-021-fixture"}]}),
+        encoding="utf-8",
+    )
+    claude_snapshot = (claude_dir / "settings.json").read_text(encoding="utf-8")
+
+    stats = HookIntegrator().reconcile_dropped_targets(tmp_path, ["codex"])
+
+    assert stats["errors"] == 0
+    codex_native = json.loads((codex_dir / "hooks.json").read_text(encoding="utf-8"))
+    codex_entries = codex_native.get("hooks", {}).get("PreToolUse", [])
+    assert not any(e.get("hooks", [{}])[0].get("command") == "owned" for e in codex_entries), (
+        "consumer-owned entry for the dropped target MUST be removed"
+    )
+    assert any(e.get("hooks", [{}])[0].get("command") == "user-authored" for e in codex_entries), (
+        "entry without consumer ownership attribution MUST be preserved"
+    )
+    assert not (codex_dir / "apm-hooks.json").exists(), (
+        "ownership record left empty by the removal MUST also be removed"
+    )
+    assert claude_snapshot == (claude_dir / "settings.json").read_text(encoding="utf-8"), (
+        "a target still attributable to the declared set MUST be preserved untouched"
+    )
+    assert (claude_dir / "apm-hooks.json").exists(), "retained target's ownership record survives"
+
+    assert_spec_contains(
+        "MUST apply the same preserve-or-remove decision",
+        "MUST remove only the consumer-owned entries",
+        "It MUST preserve\nevery entry that does not carry the consumer's own ownership",
+        "the merge-based hook configuration document is already absent for a\n"
+        "target while its ownership record remains",
+        "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
     )

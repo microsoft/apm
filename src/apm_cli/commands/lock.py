@@ -55,7 +55,6 @@ from ..utils.console import (
     _rich_error,
     _rich_info,
     _rich_success,
-    set_console_stderr,
 )
 from ._helpers import _find_apm_yml
 
@@ -290,10 +289,6 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
     from apm_cli.core.scope import InstallScope, get_apm_dir
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.export.sbom import export_sbom
-
-    # The SBOM streams to stdout (for `apm lock export | jq`); route every
-    # diagnostic to stderr so it can never corrupt the machine-readable payload.
-    set_console_stderr(True)
 
     if global_:
         project_root = get_apm_dir(InstallScope.USER)

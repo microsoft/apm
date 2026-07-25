@@ -47,6 +47,44 @@ def _mock_subprocess_success() -> Mock:
     return m
 
 
+def _create_local_git_source(
+    tmp_path: Path,
+    file_path: str,
+    content: bytes,
+) -> tuple[Path, dict[str, str], str]:
+    """Create one committed local Git source and return its path, env, and SHA."""
+    source = tmp_path / "source"
+    source.mkdir()
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "APM Test",
+        "GIT_AUTHOR_EMAIL": "apm-test@example.com",
+        "GIT_COMMITTER_NAME": "APM Test",
+        "GIT_COMMITTER_EMAIL": "apm-test@example.com",
+    }
+    subprocess.run(["git", "init"], cwd=source, env=env, check=True, capture_output=True)
+    path = source / file_path
+    path.parent.mkdir(parents=True)
+    path.write_bytes(content)
+    subprocess.run(["git", "add", "."], cwd=source, env=env, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "fixture"],
+        cwd=source,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    resolved_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return source, env, resolved_commit
+
+
 class _FakeTemporaryDirectory:
     """Test double for tempfile.TemporaryDirectory with a fixed path."""
 
@@ -137,6 +175,46 @@ class TestFetchFileViaGitSparse:
         fetch_cmds = [c for c in all_cmds if "fetch" in c]
         assert fetch_cmds, "Expected at least one git fetch call"
         assert any("--filter=blob:none" in cmd for cmd in fetch_cmds)
+
+    @patch("apm_cli.deps.git_file_transport.subprocess.run")
+    def test_fetch_with_commit_uses_exact_fetch_head_sha(
+        self, mock_run: Mock, tmp_path: Path
+    ) -> None:
+        """Sparse Git fallback must preserve the exact fetched commit."""
+        from apm_cli.deps.git_file_transport import GitSparseFileTransport
+
+        expected_sha = "0123456789abcdef0123456789abcdef01234567"
+        work_parent = tmp_path / "fetch-with-sha"
+        work_parent.mkdir()
+        work_dir = work_parent / "work"
+        work_dir.mkdir()
+        (work_dir / "agents").mkdir()
+        (work_dir / "agents" / "spec.agent.md").write_bytes(b"# Agent")
+
+        def fake_run(cmd: list[str], **_kwargs) -> Mock:
+            result = _mock_subprocess_success()
+            result.stdout = expected_sha + "\n" if "rev-parse" in cmd else ""
+            return result
+
+        mock_run.side_effect = fake_run
+        with patch(
+            "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+            return_value=_FakeTemporaryDirectory(work_parent),
+        ):
+            with GitSparseFileTransport(
+                _make_gitlab_dep(),
+                "main",
+                build_repo_url_fn=lambda *a, **kw: "https://gitlab.example.com/g/r.git",
+                git_env={},
+            ) as transport:
+                result = transport.fetch_file_with_commit("agents/spec.agent.md")
+
+        assert result.content == b"# Agent"
+        assert result.resolved_commit == expected_sha
+        assert any(
+            call.args[0] == ["git", "rev-parse", "--verify", "FETCH_HEAD^{commit}"]
+            for call in mock_run.call_args_list
+        )
 
     @patch("apm_cli.deps.git_file_transport.subprocess.run")
     def test_git_commands_not_rest_api(self, mock_run: Mock, tmp_path: Path) -> None:
@@ -458,27 +536,10 @@ class TestFetchFileViaGitSparse:
         if shutil.which("git") is None:
             pytest.skip("git executable not available")
 
-        source = tmp_path / "source"
-        source.mkdir()
-        env = {
-            **os.environ,
-            "GIT_AUTHOR_NAME": "APM Test",
-            "GIT_AUTHOR_EMAIL": "apm-test@example.com",
-            "GIT_COMMITTER_NAME": "APM Test",
-            "GIT_COMMITTER_EMAIL": "apm-test@example.com",
-        }
-        subprocess.run(["git", "init"], cwd=source, env=env, check=True, capture_output=True)
-        (source / "agents").mkdir()
-        (source / "agents" / "hello.agent.md").write_bytes(b"hello agent")
-        (source / "prompts").mkdir()
-        (source / "prompts" / "ignored.prompt.md").write_bytes(b"ignored")
-        subprocess.run(["git", "add", "."], cwd=source, env=env, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-m", "fixture"],
-            cwd=source,
-            env=env,
-            check=True,
-            capture_output=True,
+        source, env, _commit = _create_local_git_source(
+            tmp_path,
+            "agents/hello.agent.md",
+            b"hello agent",
         )
 
         content = fetch_file_via_git_sparse(
@@ -490,6 +551,45 @@ class TestFetchFileViaGitSparse:
         )
 
         assert content == b"hello agent"
+
+    def test_github_throttle_fallback_uses_real_sparse_transport_and_fetch_head(
+        self, tmp_path: Path
+    ) -> None:
+        """A virtual GitHub fallback uses real Git and returns the fetched commit."""
+        from apm_cli.deps.download_strategies import DownloadDelegate
+        from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
+
+        if shutil.which("git") is None:
+            pytest.skip("git executable not available")
+
+        source, env, expected_commit = _create_local_git_source(
+            tmp_path,
+            "instructions/guard.instructions.md",
+            b"---\napplyTo: '**'\n---\n# Guard\n",
+        )
+        auth_context = Mock(token=None, auth_scheme="basic", git_env={})
+        host = Mock()
+        host.auth_resolver.resolve_for_dep.return_value = auth_context
+        host._build_noninteractive_git_env.return_value = env
+        delegate = DownloadDelegate(host)
+        dep_ref = DependencyReference(
+            repo_url="owner/repo",
+            host="github.com",
+            reference="HEAD",
+            virtual_path="instructions/guard.instructions.md",
+            is_virtual=True,
+        )
+
+        with patch.object(delegate, "build_repo_url", return_value=str(source)):
+            fetched = delegate.download_github_file_via_throttle_fallback(
+                dep_ref,
+                dep_ref.virtual_path,
+                "HEAD",
+                GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com"),
+            )
+
+        assert fetched.content == b"---\napplyTo: '**'\n---\n# Guard\n"
+        assert fetched.resolved_commit == expected_commit
 
 
 # ---------------------------------------------------------------------------

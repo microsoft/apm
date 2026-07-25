@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../getting-started/migration/) and come back here for upgrade-time issues.
+This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../../getting-started/migration/) and come back here for upgrade-time issues.
 
 [i] Throughout: replace `<your-version>` with the version you currently have installed (`apm --version`) and `<target>` with the version you are moving to.
 
@@ -25,7 +25,7 @@ git commit -m "Adopt APM"
 
 [!] Do not commit `apm_modules/` -- add it to `.gitignore`. The lockfile is the reproducibility contract, not the installed tree.
 
-See [`apm init`](../reference/cli/init/) and [`apm install`](../reference/cli/install/) for full flag references.
+See [`apm init`](../../reference/cli/init/) and [`apm install`](../../reference/cli/install/) for full flag references.
 
 ## 2. From `awd-cli` (previous project name)
 
@@ -41,7 +41,7 @@ Migration steps:
    which awd && rm "$(which awd)"
    ```
 
-2. Install APM via the documented [installation flow](../getting-started/installation/).
+2. Install APM via the documented [installation flow](../../getting-started/installation/).
 
 3. In your scripts, CI workflows, and docs, replace `awd ` with `apm `. The subcommand surface (`init`, `install`, `compile`, `run`, `audit`) is the same.
 
@@ -75,7 +75,7 @@ Decision matrix:
 
 [i] Migrating in place preserves resolved versions where compatible. Deleting and regenerating re-resolves from `apm.yml` and may bump transitive dependencies. Review the diff before committing.
 
-Schema details: [Lockfile spec](../reference/lockfile-spec/).
+Schema details: [Lockfile spec](../../reference/lockfile-spec/).
 
 ## 4. Compile strategy migration
 
@@ -90,7 +90,7 @@ To switch:
 
 [!] Hand-edited files inside an APM-managed output directory will be lost on recompile. APM owns the output tree; author content lives in source packages.
 
-Reference: [`apm compile`](../reference/cli/compile/) and [`apm prune`](../reference/cli/prune/).
+Reference: [`apm compile`](../../reference/cli/compile/) and [`apm prune`](../../reference/cli/prune/).
 
 ## 5. Target migration
 
@@ -144,7 +144,7 @@ Recommended rollout:
 
 5. **Publish or remove** — deps that must stay on Git use `- git:`; deps moving to the registry need a published version before the team enables the default org-wide.
 
-See [Registries guide — pitfalls](../guides/registries/#pitfalls) for env-var typos and name-sanitization collisions.
+See [Registries guide — pitfalls](../../guides/registries/#pitfalls) for env-var typos and name-sanitization collisions.
 
 ## 7. Marketplace switchover (hand-rolled MCP -> APM-managed)
 
@@ -155,7 +155,7 @@ If your project has a hand-edited `.mcp.json` (or VS Code `mcp.json`) declaring 
 3. Diff the generated MCP config against your previous hand-rolled version and reconcile any custom env vars or args using the marketplace package's documented inputs.
 4. Delete the legacy hand-rolled config once the APM-managed version is verified.
 
-For publishing your own marketplace entries, see [Publish to a marketplace](../producer/publish-to-a-marketplace/).
+For publishing your own marketplace entries, see [Publish to a marketplace](../../producer/publish-to-a-marketplace/).
 
 ## 8. Breaking-change checklist when upgrading APM
 
@@ -170,6 +170,6 @@ Before bumping `apm` across major or minor versions in a project that other peop
 
 ## Related
 
-- [Common errors](./common-errors/) -- diagnostic flowcharts for failures hit during migration.
-- [Lockfile spec](../reference/lockfile-spec/) -- schema reference.
-- [`apm init`](../reference/cli/init/), [`apm install`](../reference/cli/install/), [`apm compile`](../reference/cli/compile/), [`apm prune`](../reference/cli/prune/).
+- [Common errors](../common-errors/) -- diagnostic flowcharts for failures hit during migration.
+- [Lockfile spec](../../reference/lockfile-spec/) -- schema reference.
+- [`apm init`](../../reference/cli/init/), [`apm install`](../../reference/cli/install/), [`apm compile`](../../reference/cli/compile/), [`apm prune`](../../reference/cli/prune/).

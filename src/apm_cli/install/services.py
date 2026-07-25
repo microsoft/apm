@@ -281,37 +281,16 @@ def integrate_package_primitives(  # noqa: PLR0913
         package_name, package_info, allow_executables, ctx=ctx
     )
 
-    # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
-    _cowork_active = any(t.name == "copilot-cowork" for t in targets)
-    if _cowork_active and ctx is not None and not ctx.cowork_nonsupported_warned:
-        _apm_dir = Path(package_info.install_path) / ".apm"
-        _NON_SKILL_DIRS = {
-            "agents": "agents",
-            "prompts": "prompts",
-            "instructions": "instructions",
-            "hooks": "hooks",
-            # Commands live under ``.apm/prompts/`` and cannot be
-            # distinguished from general prompts at directory level
-            # without inspecting frontmatter.  Omitted to avoid
-            # misleading duplicate warnings.
-        }
-        _found_types = [
-            ptype
-            for ptype, subdir in _NON_SKILL_DIRS.items()
-            if (_apm_dir / subdir).is_dir() and any((_apm_dir / subdir).iterdir())
-        ]
-        if _found_types:
-            _pkg_label = package_name or getattr(package_info, "name", "unknown")
-            _types_str = ", ".join(sorted(builtins.set(_found_types)))
-            _warn_msg = (
-                f"copilot-cowork target only supports skills; "
-                f"non-skill primitives in {_pkg_label} "
-                f"({_types_str}) will not deploy to cowork"
-            )
-            if logger:
-                logger.warning(_warn_msg, symbol="warning")
-            diagnostics.warn(_warn_msg)
-            ctx.cowork_nonsupported_warned = True
+    from apm_cli.install.target_warnings import warn_unsupported_primitives
+
+    warn_unsupported_primitives(
+        package_info,
+        package_name,
+        targets,
+        ctx,
+        diagnostics,
+        logger,
+    )
 
     def _log_integration(msg):
         if logger:
@@ -541,8 +520,25 @@ def integrate_package_primitives(  # noqa: PLR0913
             if rel.parts:
                 _skill_target_dirs.add(rel.parts[0])
         except ValueError:
-            # Dynamic-root target (copilot-cowork) -- path is outside project tree.
-            _skill_target_dirs.add("copilot-cowork")
+            from apm_cli.integration.targets import target_name_for_locator
+
+            owner = next(
+                (
+                    target
+                    for target in targets
+                    if target.managed_deploy_root is not None
+                    and tp.is_relative_to(target.managed_deploy_root)
+                ),
+                None,
+            )
+            locator_name = target_name_for_locator(_deployed_path_entry(tp, project_root, targets))
+            _skill_target_dirs.add(
+                owner.name
+                if owner is not None
+                else locator_name
+                if locator_name is not None
+                else "external"
+            )
     _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
     if not _skill_target_paths:
         _skill_target_paths = ["skills/"]

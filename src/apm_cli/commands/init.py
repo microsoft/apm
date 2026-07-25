@@ -7,12 +7,14 @@ from pathlib import Path
 
 import click
 
+from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
     detect_signals,
+    manifest_targets_from_target_option,
 )
 from ..utils.console import (
     _create_files_table,
@@ -219,6 +221,17 @@ def _perform_init(
 
         # Create apm.yml (with devDependencies for plugin mode)
         _create_minimal_apm_yml(config, plugin=plugin)
+        native_sources = find_plugin_root_sources(project_root)
+        if native_sources and not (project_root / ".apm").is_dir():
+            rendered_sources = ", ".join(
+                source if source.endswith(".json") else f"{source}/" for source in native_sources
+            )
+            logger.warning(
+                "Found plugin-native sources at the project root: "
+                f"{rendered_sources}. They remain included by apm pack. "
+                "Move publishable files under .apm/ when you want apm pack "
+                "to source from that directory.",
+            )
 
         # Create plugin.json for plugin mode
         if plugin:
@@ -481,7 +494,9 @@ def _resolve_init_targets(
     """
     # Case 1: --target flag provided -- wins unconditionally
     if target_flag is not None:
-        targets = [target_flag] if isinstance(target_flag, str) else list(target_flag)
+        targets = manifest_targets_from_target_option(target_flag)
+        if not targets:
+            return None
         logger.progress(f"Targets set: {', '.join(targets)} (via --target flag)", symbol="info")
         return targets
 

@@ -73,7 +73,7 @@ class _FakeContext:
 
     # From caller / CLI
     apm_package: Any = None
-    target_override: str | None = None
+    target_override: str | list[str] | None = None
 
     # From policy_gate
     policy_fetch: Any = None
@@ -336,6 +336,53 @@ class TestTargetOverride:
         assert call_kwargs[1]["effective_target"] == "vscode"
 
         ctx.logger.policy_violation.assert_not_called()
+
+    @patch(_PATCH_CHECKS)
+    def test_intellij_override_is_normalized_to_copilot(self, mock_checks):
+        """MCP-only IntelliJ uses its canonical policy target."""
+        mock_checks.return_value = _target_passing_audit()
+        ctx = _make_ctx(
+            enforcement_active=True,
+            policy_fetch=_make_policy_fetch(enforcement="block", allow=("copilot",)),
+            target_override="intellij",
+        )
+
+        run(ctx)
+
+        mock_checks.assert_called_once()
+        assert mock_checks.call_args.kwargs["effective_target"] == "copilot"
+        ctx.logger.policy_violation.assert_not_called()
+
+    @patch(_PATCH_CHECKS)
+    def test_plural_override_is_normalized_as_one_target_set(self, mock_checks):
+        """Plural target policy checks preserve every selected target."""
+        mock_checks.return_value = _target_passing_audit()
+        ctx = _make_ctx(
+            enforcement_active=True,
+            policy_fetch=_make_policy_fetch(
+                enforcement="block",
+                allow=("copilot", "claude"),
+            ),
+            target_override=["intellij", "claude"],
+        )
+
+        run(ctx)
+
+        mock_checks.assert_called_once()
+        assert mock_checks.call_args.kwargs["effective_target"] == ["copilot", "claude"]
+
+    def test_plural_override_blocks_when_any_target_is_disallowed(self):
+        """A plural target set cannot bypass compilation.target.allow."""
+        ctx = _make_ctx(
+            enforcement_active=True,
+            policy_fetch=_make_policy_fetch(enforcement="block", allow=("copilot",)),
+            target_override=["intellij", "claude"],
+        )
+
+        with pytest.raises(PolicyViolationError, match="compilation target"):
+            run(ctx)
+
+        ctx.logger.policy_violation.assert_called_once()
 
 
 # =====================================================================

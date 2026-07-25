@@ -15,6 +15,45 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+
+
+class TestSkillSubsetFilterTokens:
+    """Canonical matching tokens for declared and flattened skill names."""
+
+    @pytest.mark.parametrize(
+        ("skill_subset", "expected"),
+        [
+            pytest.param(None, None, id="none"),
+            pytest.param([], None, id="empty"),
+            pytest.param(["   "], None, id="blank"),
+            pytest.param(
+                [" category\\grill-me "],
+                {"category\\grill-me", "category/grill-me", "grill-me"},
+                id="backslash-prefixed",
+            ),
+        ],
+    )
+    def test_normalizes_subset_tokens(
+        self,
+        skill_subset: list[str] | None,
+        expected: set[str] | None,
+    ) -> None:
+        assert skill_subset_filter_tokens(skill_subset) == expected
+
+    def test_shared_leaf_name_is_one_flattened_token(self) -> None:
+        assert skill_subset_filter_tokens(["one/foo", "two/foo"]) == {
+            "one/foo",
+            "two/foo",
+            "foo",
+        }
+
+    def test_blank_name_does_not_hide_later_names(self) -> None:
+        assert skill_subset_filter_tokens([" ", "category/reviewer"]) == {
+            "category/reviewer",
+            "reviewer",
+        }
+
 
 # ============================================================================
 # DependencyReference — parse_from_dict with skills: field
@@ -47,6 +86,11 @@ class TestDependencyReferenceSkillSubset:
         entry = {"git": "owner/repo", "skills": []}
         with pytest.raises(ValueError, match="must contain at least one"):
             DependencyReference.parse_from_dict(entry)
+
+    @pytest.mark.parametrize("invalid_name", [None, 7, " "])
+    def test_parse_skills_rejects_non_string_or_blank_name(self, invalid_name: object) -> None:
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict({"git": "owner/repo", "skills": [invalid_name]})
 
     def test_parse_skills_path_traversal_rejects(self):
         """Skill name with path traversal is rejected."""
@@ -445,6 +489,8 @@ class TestSkillSubsetConsistencyCheck:
         """Create a manifest mock with given dep_refs."""
         manifest = Mock()
         manifest.get_apm_dependencies.return_value = deps
+        manifest.get_dev_apm_dependencies.return_value = []
+        manifest.get_all_apm_dependencies.return_value = deps
         return manifest
 
     def _make_lock_mock(self, locked_deps):

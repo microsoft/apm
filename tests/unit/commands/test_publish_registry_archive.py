@@ -184,6 +184,9 @@ class TestResolvePackageId:
     def test_bare_owner_repo(self) -> None:
         assert _resolve_package_id("acme/my-skill") == ("acme", "my-skill")
 
+    def test_package_identity_is_lowercase(self) -> None:
+        assert _resolve_package_id("Acme/My-Skill") == ("acme", "my-skill")
+
     def test_github_https_url_stripped(self) -> None:
         assert _resolve_package_id("https://github.com/acme/my-skill") == ("acme", "my-skill")
 

@@ -71,6 +71,7 @@ EXPLICIT):
 ```
 test -f ../shepherd-driver/assets/shepherd-driver-prompt.md \
   && test -f ../shepherd-driver/assets/completion-schema.json \
+  && test -f ../shepherd-driver/scripts/owner_touch_gate.py \
   && echo "shepherd-driver present" \
   || echo "MISSING shepherd-driver - stop and ask the operator"
 ```
@@ -105,16 +106,27 @@ body):
 3. Phase X.2 -- merge follow-ups (LEGIT Copilot + panel
    `recommended_followups`) and apply the fold-vs-defer rubric per
    [assets/fold-vs-defer-rubric.md](assets/fold-vs-defer-rubric.md).
-4. Phase X.3 -- edit code; fold every FOLD item. Run the mutation-
+4. Phase X.2.5 -- canonical-owner + functional-evidence gate (FAIL
+   CLOSED). Run
+   [scripts/owner_touch_gate.py](scripts/owner_touch_gate.py) against
+   the exact base/head. It parses the single canonical owner table in
+   `.apm/instructions/architecture.instructions.md`; no LLM
+   self-classification may override a detected touch. Every touched
+   owner requires executed exact-head functional test IDs/evidence in
+   addition to the boundary lint and any required dual guardrail.
+   Schema-validate and semantically verify the version 2 completion
+   evidence. Missing evidence stays in the loop or returns `blocked`;
+   it is never deferred.
+5. Phase X.3 -- edit code; fold every FOLD item. Run the mutation-
    break gate on any new regression-trap test.
-5. Phase X.4 -- run the lint contract until silent.
-6. Phase X.5 -- push (head branch; fall back to a superseding PR that
+6. Phase X.4 -- run the lint contract until silent.
+7. Phase X.5 -- push (head branch; fall back to a superseding PR that
    preserves authorship via commit trailers).
-7. Phase X.6 -- CI watch + recovery per
+8. Phase X.6 -- CI watch + recovery per
    [assets/ci-recovery-checklist.md](assets/ci-recovery-checklist.md).
-8. Phase X.7 -- decide terminal vs next iteration.
-9. Phase X.8 -- at terminal, capture `head_sha`, `mergeable`,
-   `mergeStateStatus`, and CI status for the completion return.
+9. Phase X.7 -- decide terminal vs next iteration.
+10. Phase X.8 -- at terminal, capture `head_sha`, `mergeable`,
+    `mergeStateStatus`, and CI status for the completion return.
 
 ## Caps (hard limits)
 
@@ -132,7 +144,8 @@ The subagent returns exactly one schema-valid `completion_return`
 matching [assets/completion-schema.json](assets/completion-schema.json):
 
 - `ready-to-merge` -- clean convergence; CI observed green; lint
-  silent.
+  silent; canonical-owner gate passed with schema-valid and
+  semantically verified `architecture_evidence` version 2.
 - `advisory-with-deferred` -- iteration cap hit with foldable items
   remaining (rare); each deferred item carries a scope-boundary note.
 - `superseded` -- push fell back to a superseding PR (records
@@ -152,6 +165,18 @@ ONCE; on a second malformed return, mark the row blocked and continue.
 - Mutation-break gate: every regression-trap test added is proven by
   deleting the guard it protects and confirming the test fails
   without it, then restoring the guard.
+- Canonical-owner gate: deterministic detection parses the executable
+  selectors in the single canonical architecture owner table. Every
+  detected owner touch must map to at least one executed functional
+  test ID with exact command, passing evidence, and exact head SHA.
+  The version 2 completion contract intentionally replaces version 1
+  self-classified `decisions[]`; terminal v1 returns are malformed and
+  re-spawn once. A new owner, centralization, or split-authority repair
+  also requires the full dual guardrail (behavioral regression test,
+  static boundary guard, matching `test_architecture_*.py` assertion,
+  and mutation-break evidence) plus a clean
+  `scripts/lint-architecture-boundaries.sh`. Missing evidence stays in
+  the loop or returns `blocked`; it is never deferred.
 - Lint contract: the canonical ruff pair
   (`uv run --extra dev ruff check src/ tests/` and
   `ruff format --check src/ tests/`) must be silent before any push.
@@ -185,6 +210,9 @@ READ from `gh`/`git` at terminal, never asserted from recall.
 - [assets/completion-schema.json](assets/completion-schema.json) --
   JSON schema for the `completion` and `conflict-resolution` return
   shapes. Schema-validate every subagent return.
+- [scripts/owner_touch_gate.py](scripts/owner_touch_gate.py) --
+  non-interactive deterministic owner-touch detection and terminal
+  functional-evidence verification. Run `--help` for its CLI.
 - [assets/pr-comment-templates.md](assets/pr-comment-templates.md) --
   PR ADVISORY + SUPERSEDE comment shapes (rendered at terminal).
 - [references/mergeability-gate.md](references/mergeability-gate.md) --

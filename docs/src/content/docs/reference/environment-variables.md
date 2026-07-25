@@ -7,11 +7,11 @@ sidebar:
 
 Single source of truth for documented public and operator-facing environment variables APM reads. Variables are grouped by purpose. Unless noted, scope is **process** (the running `apm` invocation and any child processes it spawns); a small number toggle behaviour for the entire shell **session**.
 
-For CLI flags that pair with these variables, see the [reference index](./). For token policy and supply-chain guidance, see [Security model](../enterprise/security/).
+For CLI flags that pair with these variables, see the [reference index](./). For token policy and supply-chain guidance, see [Security model](../../enterprise/security/).
 
 ## Authentication
 
-PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../consumer/authentication/) for the resolution chain and [Security model](../enterprise/security/) for token scoping.
+PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../../consumer/authentication/) for the resolution chain and [Security model](../../enterprise/security/) for token scoping.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
@@ -33,22 +33,32 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 
 ## Transport and protocol
 
-Controls how APM clones packages from Git hosts. These settings can also be persisted via [`apm config set`](./cli/config/) to avoid repeating flags or environment-variable exports.
+Controls how APM clones packages and enumerates refs on Git hosts. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_GIT_PROTOCOL` | Preferred clone protocol for shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
+| `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
 | `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
+
+## TLS trust
+
+APM verifies HTTPS against the operating-system trust store by default. For the full troubleshooting flow, see [SSL / TLS issues](../../troubleshooting/ssl-issues/).
+
+| Variable | Purpose | Default | Notes |
+|---|---|---|---|
+| `REQUESTS_CA_BUNDLE` | PEM bundle for APM's Python HTTP requests. | unset | Explicit override; wins over OS trust-store injection. Use for a per-shell corporate CA bundle. |
+| `CURL_CA_BUNDLE` | PEM bundle fallback honoured by `requests`. | unset | Explicit override; wins over OS trust-store injection when `REQUESTS_CA_BUNDLE` is unset. |
+| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS trust-store injection. | unset | Escape hatch that restores the legacy bundled-`certifi` verification path. |
 
 ## Registry (MCP and proxy)
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp` and `apm install --mcp NAME`. Must be `https://`. | public registry | When set, every `apm mcp` command prints `Registry: <url>`. See [`apm mcp`](./cli/mcp/). |
+| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp` and `apm install --mcp NAME`. Must be `https://`. | public registry | When set, every `apm mcp` command prints `Registry: <url>`. See [`apm mcp`](../cli/mcp/). |
 | `MCP_REGISTRY_ALLOW_HTTP` | Set to `1` to permit a plaintext `http://` `MCP_REGISTRY_URL` (development only). | unset | Required to opt in to HTTP; production should always use HTTPS. |
 | `MCP_REGISTRY_CONNECT_TIMEOUT` | Connect timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
-| `PROXY_REGISTRY_URL` | Enterprise package proxy base URL. See [Registry proxy](../enterprise/registry-proxy/). | unset | When set, APM resolves package downloads through the proxy. |
+| `PROXY_REGISTRY_URL` | Enterprise package proxy base URL. See [Registry proxy](../../enterprise/registry-proxy/). | unset | When set, APM resolves package downloads through the proxy. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token for `PROXY_REGISTRY_URL`. | unset | Required for authenticated proxies. |
 | `PROXY_REGISTRY_ALLOW_HTTP` | Allow `http://` for `PROXY_REGISTRY_URL` (development only). | unset | Mirrors the MCP registry's HTTP opt-in. |
 | `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any download not served by the proxy. | unset | Air-gapped deployments. |
@@ -62,7 +72,7 @@ Controls how APM clones packages from Git hosts. These settings can also be pers
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_CACHE_DIR` | Override the APM cache root. | platform default (XDG / `LOCALAPPDATA`) | Must be writable. See [`apm cache`](./cli/cache/). |
+| `APM_CACHE_DIR` | Override the APM cache root. | platform default (XDG / `LOCALAPPDATA`) | Must be writable. See [`apm cache`](../cli/cache/). |
 | `APM_NO_CACHE` | `1`/`true`/`yes` disables read and write of the cache for the current invocation. | unset | Equivalent to `--no-cache` on commands that support it. |
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
 | `APM_HOME` | Override the APM home directory used for user config and state. | platform default | Must be writable. |
@@ -75,13 +85,13 @@ Controls how APM clones packages from Git hosts. These settings can also be pers
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
-| `CLAUDE_CONFIG_DIR` | Override the destination Claude reads for skills / agents. | Claude default | Read by the Claude integration target. |
+| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are written to `$CLAUDE_CONFIG_DIR/.claude.json`; when unset or blank, APM uses `~/.claude.json`. |
 
 ## Policy
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_POLICY_DISABLE` | Set to `1` to skip policy discovery and enforcement for **the entire shell session**. Loudly logged. | unset | Equivalent to the per-invocation `--no-policy` on commands that expose it. The only escape hatch for `apm deps update`. See [`apm policy`](./cli/policy/). |
+| `APM_POLICY_DISABLE` | Set to `1` to skip policy discovery and enforcement for **the entire shell session**. Loudly logged. | unset | Equivalent to the per-invocation `--no-policy` on commands that expose it. The only escape hatch for `apm deps update`. See [`apm policy`](../cli/policy/). |
 
 ## External scanners
 

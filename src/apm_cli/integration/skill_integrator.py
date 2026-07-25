@@ -10,8 +10,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.targets import TargetProfile
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.atomic_io import write_text_lf
 
 
@@ -60,6 +62,7 @@ class SkillIntegrationResult:
     # layer can surface an actionable hint: "project_scope" | "no_claude_target".
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None  # All deployed directories (for deployed_files manifest)
+    materializations: tuple[MaterializationResult, ...] = ()
 
     def __post_init__(self):
         if self.target_paths is None:
@@ -599,23 +602,72 @@ class SkillIntegrator(BaseIntegrator):
         return links_resolved
 
     @staticmethod
-    def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
-        """Return promotion filter tokens for --skill subset values."""
-        if not skill_subset:
+    def _skill_names_in_directory(skills_dir: Path) -> frozenset[str]:
+        """Return deployable skill names from a directory that may be absent."""
+        if not skills_dir.is_dir():
+            return frozenset()
+        try:
+            return frozenset(
+                child.name
+                for child in skills_dir.iterdir()
+                if child.is_dir() and (child / "SKILL.md").is_file()
+            )
+        except FileNotFoundError:
+            return frozenset()
+
+    @staticmethod
+    def available_skill_names(package_info) -> frozenset[str] | None:
+        """Return names selectable through ``--skill`` for one package."""
+        package_path = package_info.install_path
+        if (package_path / "SKILL.md").is_file():
             return None
 
-        name_filter: set[str] = set()
-        for skill_name in skill_subset:
-            raw_name = str(skill_name).strip()
-            if not raw_name:
-                continue
-            normalized_path = raw_name.replace("\\", "/")
-            leaf_name = Path(normalized_path).name
-            name_filter.add(raw_name)
-            name_filter.add(normalized_path)
-            if leaf_name:
-                name_filter.add(leaf_name)
-        return name_filter or None
+        from apm_cli.models.validation import PackageType
+
+        normalized = package_path / ".apm" / "skills"
+        root_bundle = package_path / "skills"
+        if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
+            return SkillIntegrator._skill_names_in_directory(normalized)
+
+        root_names = SkillIntegrator._skill_names_in_directory(root_bundle)
+        return root_names or SkillIntegrator._skill_names_in_directory(normalized)
+
+    @staticmethod
+    def _skill_filter_misses_available(
+        name_filter: set[str] | None,
+        available_names: frozenset[str],
+    ) -> bool:
+        """Return whether a requested subset has no deployable source match."""
+        return name_filter is not None and name_filter.isdisjoint(available_names)
+
+    @staticmethod
+    def _warn_no_skill_filter_match(
+        available_names: frozenset[str],
+        requested_names: tuple[str, ...],
+        parent_name: str,
+        diagnostics=None,
+        logger=None,
+    ) -> None:
+        """Report a post-validation skill selection miss through the output cascade."""
+        available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
+        requested_display = ", ".join(sorted(set(requested_names)))
+        details = (
+            "Skill selection matched no available skills. "
+            f"Requested: {requested_display}. Available: {available_display}. "
+            "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
+            "then run 'apm install'."
+        )
+        if diagnostics is not None:
+            diagnostics.warn(details, package=parent_name)
+        elif logger:
+            logger.warning(f"Package '{parent_name}': {details}")
+        else:
+            try:
+                from apm_cli.utils.console import _rich_warning
+
+                _rich_warning(f"Package '{parent_name}': {details}", symbol="warning")
+            except ImportError:
+                pass
 
     @staticmethod
     def _promote_sub_skills(
@@ -753,10 +805,18 @@ class SkillIntegrator(BaseIntegrator):
         """Read the lockfile once and build two ownership maps.
 
         Returns a tuple of:
-        - owned_by: skill_name -> last-segment owner name, for sub-skill self-overwrite detection.
+        - owned_by: skill_name -> dep.get_unique_key(), for sub-skill self-overwrite detection.
         - native_owners: skill_name -> dep.get_unique_key(), for native-skill cross-package
           collision detection.  Only paths under a ``/skills/`` prefix are included to avoid
           false attribution from non-skill deployed_files entries (prompts, hooks, commands, etc.).
+
+        Both maps key on the full unique dependency identity (owner/repo, or the
+        equivalent durable key for local/registry deps), NOT the last path
+        segment. Two different packages can share a repo/leaf name (e.g. two
+        orgs each publishing a "shared-skill" or "utils" repo); comparing only
+        the last segment would treat them as the same owner and silently
+        suppress the cross-package collision warning precisely when it matters
+        most -- an unrelated package overwriting another's skill undetected.
         """
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
@@ -766,13 +826,12 @@ class SkillIntegrator(BaseIntegrator):
         if not lockfile:
             return owned_by, native_owners
         for dep in lockfile.get_package_dependencies():
-            short_owner = (dep.virtual_path or dep.repo_url).rsplit("/", 1)[-1]
             unique_key = dep.get_unique_key()
             for deployed_path in dep.deployed_files:
                 normalized = deployed_path.rstrip("/").replace("\\", "/")
                 skill_name = normalized.rsplit("/", 1)[-1]
                 # Both maps cover all paths for sub-skill self-overwrite tracking.
-                owned_by[skill_name] = short_owner
+                owned_by[skill_name] = unique_key
                 # Native-owner map is scoped to skill paths only to avoid false
                 # attribution from prompts/hooks/commands that share a leaf name.
                 if "/skills/" in normalized:
@@ -837,18 +896,23 @@ class SkillIntegrator(BaseIntegrator):
 
             targets = active_targets(project_root)
 
-        parent_name = package_path.name
+        # Durable identity for self-overwrite comparison -- NOT package_path.name,
+        # which is just the repo/leaf name and collides across owners (see
+        # _build_ownership_maps).
+        _dep_ref = getattr(package_info, "dependency_ref", None)
+        parent_name = _dep_ref.get_unique_key() if _dep_ref is not None else package_path.name
         owned_by = self._build_skill_ownership_map(project_root)
-        name_filter = self._skill_subset_name_filter(skill_subset)
+        name_filter = skill_subset_filter_tokens(skill_subset)
         count = 0
         all_deployed: list[Path] = []
         seen_skill_dirs: set[Path] = set()
+        primary_selected = False
+        available_names = self._skill_names_in_directory(sub_skills_dir)
 
-        for idx, target in enumerate(targets):
+        for target in targets:
             if not target.supports("skills"):
                 continue
 
-            is_primary = idx == 0  # first active target owns diagnostics
             target_skills_root = self._target_skills_root(target, project_root)
 
             # Dedup: skip if same resolved skills root already processed.
@@ -861,6 +925,8 @@ class SkillIntegrator(BaseIntegrator):
                     )
                 continue
             seen_skill_dirs.add(resolved_root)
+            is_primary = not primary_selected
+            primary_selected = True
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -874,6 +940,7 @@ class SkillIntegrator(BaseIntegrator):
                 managed_files=managed_files if is_primary else None,
                 force=force,
                 project_root=project_root,
+                logger=logger if is_primary else None,
                 name_filter=name_filter,
                 link_rewriter=self,
                 skip_bin=skip_bin,
@@ -881,6 +948,15 @@ class SkillIntegrator(BaseIntegrator):
             if is_primary:
                 count = n
             all_deployed.extend(deployed)
+
+        if self._skill_filter_misses_available(name_filter, available_names):
+            self._warn_no_skill_filter_match(
+                available_names,
+                tuple(skill_subset or ()),
+                parent_name,
+                diagnostics=diagnostics,
+                logger=logger,
+            )
 
         return count, all_deployed
 
@@ -1080,12 +1156,14 @@ class SkillIntegrator(BaseIntegrator):
             if is_primary:
                 files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
 
-            # Promote sub-skills for this target.
+            # Promote sub-skills for this target. Identify the parent by its
+            # durable unique key (current_key), not skill_name -- the folder
+            # name collides across owners (see _build_ownership_maps).
             target_skills_root = self._target_skills_root(target, project_root)
             _, sub_deployed = self._promote_sub_skills(
                 sub_skills_dir,
                 target_skills_root,
-                skill_name,
+                current_key or skill_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
                 diagnostics=diagnostics if is_primary else None,
@@ -1159,22 +1237,29 @@ class SkillIntegrator(BaseIntegrator):
 
             targets = active_targets(project_root)
 
-        parent_name = package_info.install_path.name
+        # Durable identity for self-overwrite comparison -- NOT install_path.name,
+        # which is just the repo/leaf name and collides across owners (see
+        # _build_ownership_maps).
+        _dep_ref = getattr(package_info, "dependency_ref", None)
+        parent_name = (
+            _dep_ref.get_unique_key() if _dep_ref is not None else package_info.install_path.name
+        )
         owned_by, lockfile_native_owners = self._build_ownership_maps(project_root)  # noqa: RUF059
 
         total_promoted = 0
         all_deployed: list[Path] = []
         any_created = False
         seen_skill_dirs: set[Path] = set()
+        primary_selected = False
+        available_names = self._skill_names_in_directory(skills_dir)
 
         # Convert skill_subset tuple to promotion filter tokens for O(1) lookup.
-        _name_filter = self._skill_subset_name_filter(skill_subset)
+        _name_filter = skill_subset_filter_tokens(skill_subset)
 
-        for idx, target in enumerate(targets):
+        for target in targets:
             if not target.supports("skills"):
                 continue
 
-            is_primary = idx == 0
             skills_mapping = target.primitives["skills"]
             effective_root = skills_mapping.deploy_root or target.root_dir
             target_skills_root = project_root / effective_root / "skills"
@@ -1189,6 +1274,8 @@ class SkillIntegrator(BaseIntegrator):
                     )
                 continue
             seen_skill_dirs.add(resolved_root)
+            is_primary = not primary_selected
+            primary_selected = True
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -1212,6 +1299,15 @@ class SkillIntegrator(BaseIntegrator):
                 if n > 0:
                     any_created = True
             all_deployed.extend(deployed)
+
+        if self._skill_filter_misses_available(_name_filter, available_names):
+            self._warn_no_skill_filter_match(
+                available_names,
+                tuple(skill_subset or ()),
+                parent_name,
+                diagnostics=diagnostics,
+                logger=logger,
+            )
 
         return SkillIntegrationResult(
             skill_created=any_created,

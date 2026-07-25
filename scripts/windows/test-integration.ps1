@@ -159,7 +159,6 @@ function Invoke-IntegrationTests {
     Write-Info "=== Running integration tests (mirroring CI) ==="
     Write-Info "Testing comprehensive runtime scenarios:"
     Write-Info "  - Zero-config auto-install (Hero Scenario 1)"
-    Write-Info "  - 2-minute guardrailing (Hero Scenario 2)"
     Write-Info "  - MCP registry integration"
     Write-Info "  - APM Dependencies with real repositories"
 
@@ -180,15 +179,6 @@ function Invoke-IntegrationTests {
         exit 1
     }
     Write-Success "Zero-config auto-install tests passed!"
-
-    # Hero Scenario 2: 2-minute guardrailing
-    Write-Info "Running HERO SCENARIO 2: 2-minute guardrailing test..."
-    pytest tests/integration/test_guardrailing_hero_e2e.py -v -s --tb=short
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrorText "2-minute guardrailing tests failed!"
-        exit 1
-    }
-    Write-Success "2-minute guardrailing tests passed!"
 
     # MCP registry E2E tests
     Write-Info "Running MCP registry E2E tests..."

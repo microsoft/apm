@@ -3,13 +3,14 @@
 Discovery flow:
 1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
 2. Determine host profile (default or ado) to select candidate repos
-3. Try candidate repos in precedence order (.github > .apm > _apm)
+3. Try candidate repos in precedence order (.github-private > .github > .apm > _apm)
 4. Fetch apm-policy.yml via GitHub Contents API or ADO Items API
 5. Resolve inheritance chain via resolve_policy_chain
 6. Cache the **merged effective policy** with chain metadata
 7. Parse and return ApmPolicy
 
 Candidate repo precedence:
+- .github-private -- private org-wide config (preferred; skipped on ADO)
 - .github  -- GitHub convention (skipped on ADO)
 - .apm     -- cross-platform convention (skipped on ADO)
 - _apm     -- universal fallback (valid on every git host)
@@ -68,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 # Candidate repo names in precedence order (first valid policy wins).
 # Host profiles select which candidates are valid for a given git host.
-_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github", ".apm", "_apm")
+_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
 _ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
 
 # ADO project name for the policy repo (ADO requires a project container).
@@ -196,7 +197,7 @@ def _verify_hash_pin(
 POLICY_CACHE_DIR = ".policy-cache"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "3"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "5"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -229,6 +230,7 @@ class PolicyFetchResult:
     cache_stale: bool = False  # True if cache was served past TTL
     fetch_error: str | None = None  # Network/parse error on refresh attempt
     outcome: str = ""  # See docstring for valid values
+    warnings: list[str] = field(default_factory=list)
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
@@ -246,6 +248,9 @@ def discover_policy_with_chain(
     project_root: Path,
     *,
     expected_hash: str | None = None,
+    policy_override: str | None = None,
+    no_cache: bool = False,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Discover policy with full inheritance chain resolution.
 
@@ -305,17 +310,34 @@ def discover_policy_with_chain(
         if pin is not None:
             expected_hash = pin.normalized
 
+    local_override = bool(policy_override and Path(policy_override).is_file())
+    if cache_only and not local_override and not policy_cache_available(project_root):
+        if expected_hash is not None:
+            return _unverifiable_cache_pin(expected_hash, "")
+        return PolicyFetchResult(outcome="absent")
+
     # -- Base discovery ------------------------------------------------
-    fetch_result = discover_policy(project_root, expected_hash=expected_hash)
+    discovery_kwargs = {"cache_only": True} if cache_only else {}
+    fetch_result = discover_policy(
+        project_root,
+        policy_override=policy_override,
+        no_cache=no_cache,
+        expected_hash=expected_hash,
+        **discovery_kwargs,
+    )
 
     # -- Chain resolution if leaf has extends: -------------------------
     if (
         fetch_result.policy is not None
-        and fetch_result.outcome in ("found", "cached_stale")
         and fetch_result.policy.extends is not None
         and not fetch_result.cached  # Don't re-resolve if served from cache
     ):
-        _resolve_and_persist_chain(fetch_result, project_root)
+        _resolve_and_persist_chain(
+            fetch_result,
+            project_root,
+            no_cache=no_cache,
+            cache_only=cache_only,
+        )
 
     return fetch_result
 
@@ -431,9 +453,110 @@ def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
         )
 
 
+def _resolve_ado_parent_ref(
+    parent_ref: str,
+    current_source: str,
+    leaf_host: str,
+) -> tuple[str, str, str, str] | None:
+    """Normalize an ADO parent ref to ``(org, project, repo, host)``."""
+    current_parts = _strip_source_prefix(current_source).split("/")
+    if is_visualstudio_legacy_hostname(leaf_host):
+        current_org = leaf_host[: -len(".visualstudio.com")]
+    elif len(current_parts) >= 2:
+        current_org = current_parts[1]
+    else:
+        current_org = ""
+
+    if parent_ref == "org":
+        resolved = (current_org, ADO_POLICY_PROJECT, "_apm", leaf_host)
+    else:
+        parts = parent_ref.strip("/").split("/")
+        explicit_host = _extract_extends_host(parent_ref)
+        if explicit_host is None and len(parts) == 2:
+            resolved = (current_org, parts[0], parts[1], leaf_host)
+        elif explicit_host and is_visualstudio_legacy_hostname(explicit_host) and len(parts) >= 3:
+            resolved = (
+                explicit_host[: -len(".visualstudio.com")],
+                parts[1],
+                "/".join(parts[2:]),
+                explicit_host,
+            )
+        elif explicit_host and is_azure_devops_hostname(explicit_host) and len(parts) >= 4:
+            resolved = (
+                parts[1],
+                parts[2],
+                "/".join(parts[3:]),
+                explicit_host,
+            )
+        else:
+            return None
+
+    return resolved if all(resolved[:3]) else None
+
+
+def _fetch_chain_parent(
+    parent_ref: str,
+    *,
+    current_source: str,
+    leaf_host: str | None,
+    project_root: Path,
+    no_cache: bool,
+    cache_only: bool = False,
+) -> PolicyFetchResult:
+    """Fetch one parent without losing the leaf's host or backend.
+
+    GitHub-style ``owner/repo`` refs are qualified with a non-default leaf
+    host. On ADO, ``project/repo`` means a repo in the current ancestor's org,
+    while explicit refs use ``host/org/project/repo`` on ``dev.azure.com`` or
+    ``host/project/repo`` on legacy ``*.visualstudio.com`` hosts. URLs and
+    local-file refs continue through the public single-policy owner.
+    """
+    cache_kwargs = {"cache_only": True} if cache_only else {}
+    if parent_ref.startswith(("http://", "https://")) or Path(parent_ref).is_file():
+        return discover_policy(
+            project_root,
+            policy_override=parent_ref,
+            no_cache=no_cache,
+            **cache_kwargs,
+        )
+
+    if leaf_host and is_azure_devops_hostname(leaf_host):
+        resolved = _resolve_ado_parent_ref(parent_ref, current_source, leaf_host)
+        if resolved is None:
+            return PolicyFetchResult(
+                source=f"org:{parent_ref}",
+                error=f"Invalid Azure DevOps policy reference: {parent_ref}",
+                outcome="cache_miss_fetch_fail",
+            )
+        org, project, repo, host = resolved
+        return _fetch_from_ado_repo(
+            org=org,
+            project=project,
+            repo=repo,
+            host=host,
+            project_root=project_root,
+            no_cache=no_cache,
+            **cache_kwargs,
+        )
+
+    normalized_ref = parent_ref
+    if leaf_host and leaf_host != "github.com" and _extract_extends_host(parent_ref) is None:
+        if "/" in parent_ref:
+            normalized_ref = f"{leaf_host}/{parent_ref}"
+    return discover_policy(
+        project_root,
+        policy_override=normalized_ref,
+        no_cache=no_cache,
+        **cache_kwargs,
+    )
+
+
 def _resolve_and_persist_chain(
     fetch_result: PolicyFetchResult,
     project_root: Path,
+    *,
+    no_cache: bool = False,
+    cache_only: bool = False,
 ) -> None:
     """Resolve inheritance chain and update cache with merged policy + chain_refs.
 
@@ -443,15 +566,13 @@ def _resolve_and_persist_chain(
     refs and ``MAX_CHAIN_DEPTH`` enforcement protect against runaway or
     self-referential chains.
 
-    Partial-chain policy: if any parent fetch fails, emit a warning via
-    ``_rich_warning`` and merge whatever was resolved so far -- never
-    silently drop ancestors.
+    If any parent fetch fails, mark the chain incomplete and clear the
+    partial policy so enforcement cannot proceed with weaker constraints.
 
     Mutates *fetch_result*.policy in-place with the merged effective policy.
     Called by :func:`discover_policy_with_chain` -- not intended for direct
     use.
     """
-    from ..utils.console import _rich_warning
     from . import inheritance as _inheritance_mod
 
     leaf_policy = fetch_result.policy
@@ -473,7 +594,8 @@ def _resolve_and_persist_chain(
     visited: list[str] = [_strip_source_prefix(leaf_source)] if leaf_source else []
 
     current = leaf_policy
-    partial_warning: tuple[str, int, int] | None = None
+    incomplete_chain: tuple[str, int, int] | None = None
+    stale_ancestor: PolicyFetchResult | None = None
 
     while current.extends:
         next_ref = current.extends
@@ -497,18 +619,28 @@ def _resolve_and_persist_chain(
                 f"(chain: {' -> '.join(visited)} -> {next_ref})"
             )
 
-        parent_result = discover_policy(
-            project_root,
-            policy_override=next_ref,
-            no_cache=False,
+        parent_result = _fetch_chain_parent(
+            next_ref,
+            current_source=chain_sources[-1],
+            leaf_host=leaf_host,
+            project_root=project_root,
+            no_cache=no_cache,
+            cache_only=cache_only,
         )
+        fetch_result.warnings.extend(parent_result.warnings)
 
         if parent_result.policy is None:
-            # Parent fetch failed -- merge what we have so far and warn.
+            # Parent fetch failed -- never enforce the weaker partial chain.
             attempted = len(chain_policies) + 1
             resolved = len(chain_policies)
-            partial_warning = (next_ref, resolved, attempted)
+            incomplete_chain = (next_ref, resolved, attempted)
             break
+
+        # Keep the nearest stale ancestor's refresh diagnostic. Continue
+        # merging its usable cached policy, but never relabel that ancestry
+        # as fresh or replace a nearer failure with a farther one.
+        if parent_result.outcome == "cached_stale" and stale_ancestor is None:
+            stale_ancestor = parent_result
 
         chain_policies.append(parent_result.policy)
         chain_sources.append(parent_result.source)
@@ -517,13 +649,14 @@ def _resolve_and_persist_chain(
 
     # No actual ancestors fetched -- nothing to merge or re-cache.
     if len(chain_policies) == 1:
-        if partial_warning is not None:
-            ref, resolved, attempted = partial_warning
-            _rich_warning(
-                f"Policy chain incomplete: {ref} unreachable, "
-                f"using {resolved} of {attempted} policies",
-                symbol="warning",
+        if incomplete_chain is not None:
+            ref, resolved, attempted = incomplete_chain
+            fetch_result.outcome = "incomplete_chain"
+            fetch_result.error = (
+                f"Policy chain incomplete: {ref} unreachable "
+                f"({resolved} of {attempted} policies resolved)"
             )
+            fetch_result.policy = None
         return
 
     # Merge in [root, ..., leaf] order.  We collected leaf-first, so reverse.
@@ -540,17 +673,35 @@ def _resolve_and_persist_chain(
     chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
 
     cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
-    if cache_key:
-        _write_cache(cache_key, merged, project_root, chain_refs=chain_refs)
+    if cache_key and incomplete_chain is None and stale_ancestor is None:
+        _write_cache(
+            cache_key,
+            merged,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=fetch_result.raw_bytes_hash,
+            warnings=fetch_result.warnings,
+        )
+
+    if incomplete_chain is not None:
+        ref, resolved, attempted = incomplete_chain
+        fetch_result.outcome = "incomplete_chain"
+        fetch_result.error = (
+            f"Policy chain incomplete: {ref} unreachable "
+            f"({resolved} of {attempted} policies resolved)"
+        )
+        fetch_result.policy = None
+        return
 
     fetch_result.policy = merged
-
-    if partial_warning is not None:
-        ref, resolved, attempted = partial_warning
-        _rich_warning(
-            f"Policy chain incomplete: {ref} unreachable, using {resolved} of {attempted} policies",
-            symbol="warning",
-        )
+    if stale_ancestor is not None:
+        fetch_result.outcome = "cached_stale"
+        fetch_result.fetch_error = stale_ancestor.fetch_error or stale_ancestor.error
+        fetch_result.cached = True
+        fetch_result.cache_stale = True
+        fetch_result.cache_age_seconds = stale_ancestor.cache_age_seconds
+        return
+    fetch_result.outcome = "empty" if _is_policy_empty(merged) else "found"
 
 
 def discover_policy(
@@ -559,6 +710,7 @@ def discover_policy(
     policy_override: str | None = None,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Discover and load the applicable policy for a project.
 
@@ -590,23 +742,36 @@ def discover_policy(
                 source=f"url:{policy_override}",
             )
         if policy_override.startswith("https://"):
-            return _fetch_from_url(
+            result = _fetch_from_url(
                 policy_override,
                 project_root,
                 no_cache=no_cache,
                 expected_hash=expected_hash,
+                cache_only=cache_only,
             )
+            if cache_only and expected_hash is not None and result.outcome == "absent":
+                return _unverifiable_cache_pin(expected_hash, result.source)
+            return result
         if policy_override != "org":
             # Try as owner/repo reference
-            return _fetch_from_repo(
+            result = _fetch_from_repo(
                 policy_override,
                 project_root,
                 no_cache=no_cache,
                 expected_hash=expected_hash,
+                cache_only=cache_only,
             )
+            if cache_only and expected_hash is not None and result.outcome == "absent":
+                return _unverifiable_cache_pin(expected_hash, result.source)
+            return result
 
     # Auto-discover from git remote
-    return _auto_discover(project_root, no_cache=no_cache, expected_hash=expected_hash)
+    return _auto_discover(
+        project_root,
+        no_cache=no_cache,
+        expected_hash=expected_hash,
+        cache_only=cache_only,
+    )
 
 
 def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFetchResult:
@@ -628,7 +793,7 @@ def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFe
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
         outcome = "empty" if _is_policy_empty(policy) else "found"
         actual_hash = (
             _compute_hash_normalized(content, expected_hash) if expected_hash is not None else None
@@ -639,9 +804,14 @@ def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFe
             outcome=outcome,
             raw_bytes_hash=actual_hash,
             expected_hash=expected_hash,
+            warnings=warnings,
         )
     except PolicyValidationError as e:
-        return PolicyFetchResult(error=f"Invalid policy file {path}: {e}", outcome="malformed")
+        return PolicyFetchResult(
+            error=f"Invalid policy file {path}: {e}",
+            outcome="malformed",
+            warnings=e.warnings,
+        )
 
 
 def _auto_discover(
@@ -649,13 +819,14 @@ def _auto_discover(
     *,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Auto-discover policy by cascading through candidate repos.
 
     1. Run git remote get-url origin
     2. Parse org + host from URL
     3. Select host profile to determine candidate repos
-    4. Try each candidate in precedence order (.github > .apm > _apm)
+    4. Try each candidate in precedence order (.github-private > .github > .apm > _apm)
        - 404/absent -> continue to next candidate
        - Error (auth, timeout, malformed) -> fail-closed immediately
        - Found -> return (first match wins)
@@ -683,13 +854,18 @@ def _auto_discover(
                 project_root=project_root,
                 no_cache=no_cache,
                 expected_hash=expected_hash,
+                cache_only=cache_only,
             )
         else:
             repo_ref = f"{org}/{candidate_repo}"
             if host and host != "github.com":
                 repo_ref = f"{host}/{repo_ref}"
             result = _fetch_from_repo(
-                repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash
+                repo_ref,
+                project_root,
+                no_cache=no_cache,
+                expected_hash=expected_hash,
+                cache_only=cache_only,
             )
 
         # 404 / absent -> try the next candidate
@@ -699,16 +875,26 @@ def _auto_discover(
                 candidate_repo,
                 host,
             )
+            # Warn when .github-private is absent on a GitHub host -- GitHub
+            # returns 404 (not 403) when the token lacks private-repo scope,
+            # so an absent result may mask a token-permission problem.
+            if candidate_repo == ".github-private" and _is_github_host(host):
+                logger.warning(
+                    "Policy repo %s/%s not found (or token lacks private-repo "
+                    "read scope). If your org publishes policy in .github-private, "
+                    "ensure the token has Contents:read permission on that repo.",
+                    org,
+                    candidate_repo,
+                )
             continue
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
         return result
 
     # All candidates exhausted: no policy published anywhere.
-    return PolicyFetchResult(
-        error=None,
-        outcome="absent",
-    )
+    if cache_only and expected_hash is not None:
+        return _unverifiable_cache_pin(expected_hash, "")
+    return PolicyFetchResult(error=None, outcome="absent")
 
 
 def _extract_org_from_git_remote(
@@ -793,10 +979,12 @@ def _fetch_from_url(
     *,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Fetch policy YAML from a direct URL."""
     source_label = f"url:{url}"
     cache_entry: _CacheEntry | None = None
+    cache_entry_persisted = _cache_entry_files_exist(url, project_root)
 
     # Use URL as cache key
     if not no_cache:
@@ -811,7 +999,16 @@ def _fetch_from_url(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
+
+    if cache_only:
+        return _cache_only_policy_result(
+            cache_entry,
+            source_label=source_label,
+            expected_hash=expected_hash,
+            cache_entry_persisted=cache_entry_persisted,
+        )
 
     fetch_error: str | None = None
     content: str | None = None
@@ -860,23 +1057,26 @@ def _fetch_from_url(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy from {url}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [url]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        url,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-    )
+    if policy.extends is None:
+        _write_cache(
+            url,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -884,6 +1084,7 @@ def _fetch_from_url(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -893,6 +1094,7 @@ def _fetch_from_repo(
     *,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Fetch apm-policy.yml from a GitHub repo via Contents API.
 
@@ -900,6 +1102,7 @@ def _fetch_from_repo(
     """
     source_label = f"org:{repo_ref}"
     cache_entry: _CacheEntry | None = None
+    cache_entry_persisted = _cache_entry_files_exist(repo_ref, project_root)
 
     if not no_cache:
         cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
@@ -913,7 +1116,16 @@ def _fetch_from_repo(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
+
+    if cache_only:
+        return _cache_only_policy_result(
+            cache_entry,
+            source_label=source_label,
+            expected_hash=expected_hash,
+            cache_entry_persisted=cache_entry_persisted,
+        )
 
     content, error = _fetch_github_contents(repo_ref, "apm-policy.yml")
 
@@ -938,23 +1150,26 @@ def _fetch_from_repo(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy in {repo_ref}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [repo_ref]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        repo_ref,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-    )
+    if policy.extends is None:
+        _write_cache(
+            repo_ref,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -962,6 +1177,7 @@ def _fetch_from_repo(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -1041,6 +1257,7 @@ def _fetch_from_ado_repo(
     project_root: Path,
     no_cache: bool = False,
     expected_hash: str | None = None,
+    cache_only: bool = False,
 ) -> PolicyFetchResult:
     """Fetch apm-policy.yml from an Azure DevOps repo.
 
@@ -1050,6 +1267,7 @@ def _fetch_from_ado_repo(
     repo_ref = f"{host}/{org}/{project}/{repo}"
     source_label = f"org:{repo_ref}"
     cache_entry: _CacheEntry | None = None
+    cache_entry_persisted = _cache_entry_files_exist(repo_ref, project_root)
 
     if not no_cache:
         cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
@@ -1063,7 +1281,16 @@ def _fetch_from_ado_repo(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
+
+    if cache_only:
+        return _cache_only_policy_result(
+            cache_entry,
+            source_label=source_label,
+            expected_hash=expected_hash,
+            cache_entry_persisted=cache_entry_persisted,
+        )
 
     content, error = _fetch_ado_contents(org, project, repo, "apm-policy.yml", host=host)
 
@@ -1084,23 +1311,26 @@ def _fetch_from_ado_repo(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy in {repo_ref}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [repo_ref]
     actual_hash = _compute_hash_normalized(content, expected_hash)
-    _write_cache(
-        repo_ref,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-    )
+    if policy.extends is None:
+        _write_cache(
+            repo_ref,
+            policy,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=actual_hash,
+            warnings=warnings,
+        )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
@@ -1108,6 +1338,7 @@ def _fetch_from_ado_repo(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -1211,8 +1442,52 @@ class _CacheEntry:
     age_seconds: int
     stale: bool  # True if past TTL (but within MAX_STALE_TTL)
     chain_refs: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     fingerprint: str = ""
     raw_bytes_hash: str = ""  # "<algo>:<hex>" of leaf bytes off wire (#827)
+
+
+def _cache_only_policy_result(
+    cache_entry: _CacheEntry | None,
+    *,
+    source_label: str,
+    expected_hash: str | None,
+    cache_entry_persisted: bool,
+) -> PolicyFetchResult:
+    """Return a cached policy or an offline-safe absent outcome."""
+    if cache_entry is None:
+        if expected_hash is not None and cache_entry_persisted:
+            return PolicyFetchResult(
+                source=source_label,
+                outcome="hash_mismatch",
+                error="Cached policy bytes do not match the project policy.hash pin",
+                expected_hash=expected_hash,
+            )
+        return PolicyFetchResult(source=source_label, outcome="absent")
+    return PolicyFetchResult(
+        policy=cache_entry.policy,
+        source=cache_entry.source,
+        cached=True,
+        cache_stale=True,
+        cache_age_seconds=cache_entry.age_seconds,
+        outcome="cached_stale",
+        raw_bytes_hash=cache_entry.raw_bytes_hash or None,
+        expected_hash=expected_hash,
+        warnings=cache_entry.warnings,
+    )
+
+
+def _unverifiable_cache_pin(
+    expected_hash: str,
+    source: str,
+) -> PolicyFetchResult:
+    """Fail closed when cache-only discovery cannot verify a project pin."""
+    return PolicyFetchResult(
+        source=source,
+        outcome="hash_mismatch",
+        error="Policy hash pin cannot be verified without cached policy bytes",
+        expected_hash=expected_hash,
+    )
 
 
 def _get_cache_dir(project_root: Path) -> Path:
@@ -1250,15 +1525,35 @@ def _cache_key(repo_ref: str) -> str:
     return hashlib.sha256(repo_ref.encode()).hexdigest()[:16]
 
 
+def _cache_entry_files_exist(repo_ref: str, project_root: Path) -> bool:
+    """Return whether both persisted files exist for one policy source."""
+    cache_dir = _get_cache_dir(project_root)
+    key = _cache_key(repo_ref)
+    return (cache_dir / f"{key}.yml").is_file() and (cache_dir / f"{key}.meta.json").is_file()
+
+
+def policy_cache_available(project_root: Path) -> bool:
+    """Return whether the project has any complete persisted policy entry."""
+    cache_dir = _get_cache_dir(project_root)
+    if not cache_dir.is_dir():
+        return False
+    for policy_file in cache_dir.glob("*.yml"):
+        metadata_file = cache_dir / f"{policy_file.stem}.meta.json"
+        if metadata_file.is_file():
+            return True
+    return False
+
+
 def _policy_to_dict(policy: ApmPolicy) -> dict:
     """Serialize an ApmPolicy to a dict matching the YAML schema."""
 
     def _opt_list(val: tuple[str, ...] | None) -> list | None:
         return None if val is None else list(val)
 
-    return {
+    serialized = {
         "name": policy.name,
         "version": policy.version,
+        "extends": policy.extends,
         "enforcement": policy.enforcement,
         "fetch_failure": policy.fetch_failure,
         "cache": {"ttl": policy.cache.ttl},
@@ -1268,6 +1563,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "require": _opt_list(policy.dependencies.require),
             "require_resolution": policy.dependencies.require_resolution,
             "max_depth": policy.dependencies.max_depth,
+            "require_pinned_constraint": policy.dependencies.require_pinned_constraint,
         },
         "mcp": {
             "allow": _opt_list(policy.mcp.allow),
@@ -1292,13 +1588,47 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "required_fields": list(policy.manifest.required_fields),
             "scripts": policy.manifest.scripts,
             "content_types": policy.manifest.content_types,
+            "require_explicit_includes": policy.manifest.require_explicit_includes,
         },
         "unmanaged_files": {
             "action": policy.unmanaged_files.action,
-            "directories": list(policy.unmanaged_files.directories or ()),
-            "exclude": list(policy.unmanaged_files.exclude or ()),
+            "directories": _opt_list(policy.unmanaged_files.directories),
+            "exclude": _opt_list(policy.unmanaged_files.exclude),
+        },
+        "registry_source": {
+            "require": list(policy.registry_source.require),
+            "allow_non_registry": policy.registry_source.allow_non_registry,
+        },
+        "security": {
+            "audit": {
+                "on_install": policy.security.audit.on_install,
+                "external": _opt_list(policy.security.audit.external),
+                "scanners": None
+                if policy.security.audit.scanners is None
+                else {
+                    name: {"allow_args": governance.allow_args}
+                    for name, governance in policy.security.audit.scanners
+                },
+                "fail_on_drift": policy.security.audit.fail_on_drift,
+            },
+            "integrity": {
+                "require_hashes": policy.security.integrity.require_hashes,
+            },
+        },
+        "executables": {
+            "deny_all": policy.executables.deny_all,
+            "deny": list(policy.executables.deny),
+            "require": list(policy.executables.require),
+            "recommend": list(policy.executables.recommend),
+            "enforce": list(policy.executables.enforce),
         },
     }
+    if policy.bin_deploy.deny_all or policy.bin_deploy.deny:
+        serialized["bin_deploy"] = {
+            "deny_all": policy.bin_deploy.deny_all,
+            "deny": list(policy.bin_deploy.deny),
+        }
+    return serialized
 
 
 def _serialize_policy(policy: ApmPolicy) -> str:
@@ -1314,23 +1644,47 @@ def _policy_fingerprint(serialized: str) -> str:
 
 
 def _is_policy_empty(policy: ApmPolicy) -> bool:
-    """Return True if a policy has no actionable restrictions.
-
-    An 'empty' policy is syntactically valid but imposes no constraints
-    beyond the permissive defaults.
-    """
-    return (
-        not policy.dependencies.effective_deny
-        and policy.dependencies.allow is None
-        and not policy.dependencies.effective_require
-        and not policy.mcp.deny
-        and policy.mcp.allow is None
-        and policy.mcp.transport.allow is None
-        and policy.compilation.target.allow is None
-        and not policy.manifest.required_fields
-        and policy.manifest.scripts == "allow"
-        and policy.manifest.content_types is None
-        and policy.unmanaged_files.effective_action == "ignore"
+    """Return True only when the policy has no actionable restrictions."""
+    return not any(
+        (
+            policy.fetch_failure != "warn",
+            policy.dependencies.effective_deny,
+            policy.dependencies.allow is not None,
+            policy.dependencies.effective_require,
+            policy.dependencies.require_resolution != "project-wins",
+            policy.dependencies.max_depth != 50,
+            policy.dependencies.require_pinned_constraint,
+            policy.mcp.deny,
+            policy.mcp.allow is not None,
+            policy.mcp.transport.allow is not None,
+            policy.mcp.self_defined != "warn",
+            policy.mcp.trust_transitive,
+            policy.compilation.target.allow is not None,
+            policy.compilation.target.enforce is not None,
+            policy.compilation.strategy.enforce is not None,
+            policy.compilation.source_attribution,
+            policy.manifest.required_fields,
+            policy.manifest.scripts != "allow",
+            policy.manifest.content_types is not None,
+            policy.manifest.require_explicit_includes,
+            policy.unmanaged_files.effective_action != "ignore",
+            policy.unmanaged_files.directories is not None,
+            policy.unmanaged_files.exclude is not None,
+            policy.registry_source.require,
+            not policy.registry_source.allow_non_registry,
+            policy.security.audit.on_install is not None,
+            policy.security.audit.external is not None,
+            policy.security.audit.scanners is not None,
+            policy.security.audit.fail_on_drift,
+            policy.security.integrity.require_hashes,
+            policy.bin_deploy.deny_all,
+            policy.bin_deploy.deny,
+            policy.executables.deny_all,
+            policy.executables.deny,
+            policy.executables.require,
+            policy.executables.recommend,
+            policy.executables.enforce,
+        )
     )
 
 
@@ -1350,6 +1704,7 @@ def _stale_fallback_or_error(
             cache_age_seconds=cache_entry.age_seconds,
             fetch_error=fetch_error_msg,
             outcome="cached_stale",
+            warnings=cache_entry.warnings,
         )
     return PolicyFetchResult(
         error=fetch_error_msg,
@@ -1386,6 +1741,7 @@ def _detect_garbage(
                 cache_age_seconds=cache_entry.age_seconds,
                 fetch_error=msg,
                 outcome="cached_stale",
+                warnings=cache_entry.warnings,
             )
         return PolicyFetchResult(
             error=msg + " (possible captive portal or redirect)",
@@ -1405,6 +1761,7 @@ def _detect_garbage(
                 cache_age_seconds=cache_entry.age_seconds,
                 fetch_error=msg,
                 outcome="cached_stale",
+                warnings=cache_entry.warnings,
             )
         return PolicyFetchResult(
             error=msg,
@@ -1419,7 +1776,7 @@ def _detect_garbage(
 def _read_cache_entry(
     repo_ref: str,
     project_root: Path,
-    ttl: int = DEFAULT_CACHE_TTL,
+    ttl: int | None = None,
     *,
     expected_hash: str | None = None,
 ) -> _CacheEntry | None:
@@ -1435,6 +1792,9 @@ def _read_cache_entry(
     compared against it; a mismatch invalidates the cache entry so the
     caller falls through to a fresh fetch where the pin can be verified
     against authoritative bytes off the wire.
+
+    When *ttl* is omitted, staleness follows the cached effective policy's
+    ``cache.ttl``. Callers may pass an explicit TTL for diagnostics or tests.
     """
     cache_dir = _get_cache_dir(project_root)
     key = _cache_key(repo_ref)
@@ -1472,7 +1832,15 @@ def _read_cache_entry(
             if raw_bytes_hash.lower() != expected_norm:
                 return None
 
+        # The sidecar preserves warnings from the authored cold input. Parser
+        # warnings from canonical cache YAML are intentionally not user-facing.
         policy, _warnings = load_policy(policy_file)
+        effective_ttl = policy.cache.ttl if ttl is None else ttl
+        cached_warnings = meta.get("warnings", [])
+        if not isinstance(cached_warnings, list):
+            cached_warnings = []
+        else:
+            cached_warnings = [str(warning) for warning in cached_warnings]
 
         # Determine source label
         if repo_ref.startswith("http://") or repo_ref.startswith("https://"):
@@ -1484,8 +1852,9 @@ def _read_cache_entry(
             policy=policy,
             source=source,
             age_seconds=age,
-            stale=age > ttl,
+            stale=age > effective_ttl,
             chain_refs=meta.get("chain_refs", [repo_ref]),
+            warnings=cached_warnings,
             fingerprint=meta.get("fingerprint", ""),
             raw_bytes_hash=raw_bytes_hash,
         )
@@ -1496,11 +1865,12 @@ def _read_cache_entry(
 def _read_cache(
     repo_ref: str,
     project_root: Path,
-    ttl: int = DEFAULT_CACHE_TTL,
+    ttl: int | None = None,
 ) -> PolicyFetchResult | None:
     """Read policy from cache if still valid (within TTL).
 
     Legacy wrapper around ``_read_cache_entry`` for backward compatibility.
+    The cached effective policy's TTL applies unless *ttl* is explicit.
     Returns None if cache miss, expired, or past MAX_STALE_TTL.
     """
     entry = _read_cache_entry(repo_ref, project_root, ttl=ttl)
@@ -1513,6 +1883,7 @@ def _read_cache(
         cached=True,
         cache_age_seconds=entry.age_seconds,
         outcome=outcome,
+        warnings=entry.warnings,
     )
 
 
@@ -1523,6 +1894,7 @@ def _write_cache(
     *,
     chain_refs: list[str] | None = None,
     raw_bytes_hash: str | None = None,
+    warnings: list[str] | None = None,
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
@@ -1566,6 +1938,7 @@ def _write_cache(
         "repo_ref": repo_ref,
         "cached_at": time.time(),
         "chain_refs": chain_refs if chain_refs is not None else [repo_ref],
+        "warnings": warnings or [],
         "schema_version": CACHE_SCHEMA_VERSION,
         "fingerprint": fingerprint,
         "raw_bytes_hash": raw_bytes_hash or "",

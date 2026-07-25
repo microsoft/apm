@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
+from apm_cli.utils.github_host import build_ssh_url
 
 GIT_PARENT_USER_SCOPE_ERROR = (
     "git: parent dependencies are not supported at user scope. "
@@ -22,7 +23,15 @@ GIT_PARENT_USER_SCOPE_ERROR = (
 
 def dependency_reference_to_yaml_entry(dep_ref: Any) -> dict:
     """Serialize a structured dependency reference for ``apm.yml`` storage."""
-    entry = {"git": dep_ref.to_github_url()}
+    git_url = dep_ref.to_github_url()
+    if dep_ref.explicit_scheme == "ssh":
+        git_url = build_ssh_url(
+            dep_ref.host,
+            dep_ref.repo_url,
+            port=dep_ref.port,
+            user=dep_ref.ssh_user or "git",
+        )
+    entry = {"git": git_url}
     if dep_ref.virtual_path:
         entry["path"] = dep_ref.virtual_path
     if dep_ref.reference:

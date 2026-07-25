@@ -10,25 +10,26 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-CLI = [sys.executable, "-m", "apm_cli.cli"]
 
-
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(CLI + list(args), cwd=str(cwd), capture_output=True, text=True)
+def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(apm_binary_path), *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+    )
 
 
 # Per-target on-disk layout descriptors:
 #   - settings_rel: path (relative to project root) of the merged hook config
-#   - sidecar_rel:  path of the apm-hooks.json sidecar (schema-strict targets only)
+#   - sidecar_rel:  path of the APM-owned apm-hooks.json ownership sidecar
 #   - event_key:    event key under which PreToolUse entries land for the target
 #
-# Sidecar-bearing targets (currently Claude) keep _apm_source in the sidecar
-# rather than in settings.json; the heal assertion reads from there.
+# Every merged target keeps ownership outside its native configuration.
 _HARNESS_CASES = [
     pytest.param(
         "claude",
@@ -40,28 +41,28 @@ _HARNESS_CASES = [
     pytest.param(
         "codex",
         ".codex/hooks.json",
-        None,
+        ".codex/apm-hooks.json",
         "PreToolUse",
         id="codex",
     ),
     pytest.param(
         "cursor",
         ".cursor/hooks.json",
-        None,
+        ".cursor/apm-hooks.json",
         "PreToolUse",
         id="cursor",
     ),
     pytest.param(
         "gemini",
         ".gemini/settings.json",
-        None,
+        ".gemini/apm-hooks.json",
         "BeforeTool",
         id="gemini",
     ),
     pytest.param(
         "windsurf",
         ".windsurf/hooks.json",
-        None,
+        ".windsurf/apm-hooks.json",
         "PreToolUse",
         id="windsurf",
     ),
@@ -118,6 +119,7 @@ def _rewrite_source(
 @pytest.mark.parametrize("target, settings_rel, sidecar_rel, event_key", _HARNESS_CASES)
 def test_root_hook_source_drift_heals_on_reinstall(
     tmp_path: Path,
+    apm_binary_path: Path,
     target: str,
     settings_rel: str,
     sidecar_rel: str | None,
@@ -156,7 +158,7 @@ def test_root_hook_source_drift_heals_on_reinstall(
     )
 
     # First install: produces target-shaped entries marked `_local/myapp`.
-    first = _run(project, "install")
+    first = _run(apm_binary_path, project, "install")
     assert first.returncode == 0, first.stderr or first.stdout
     assert _load_sources(project, settings_rel, sidecar_rel, event_key) == ["_local/myapp"], (
         "First install must produce a single _local/myapp entry; "
@@ -185,7 +187,7 @@ def test_root_hook_source_drift_heals_on_reinstall(
     settings_path.write_text(json.dumps(settings_data), encoding="utf-8")
 
     # Second install: must heal the stale marker without touching the user-owned entry.
-    second = _run(project, "install")
+    second = _run(apm_binary_path, project, "install")
     assert second.returncode == 0, second.stderr or second.stdout
 
     sources = _load_sources(project, settings_rel, sidecar_rel, event_key)

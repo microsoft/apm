@@ -1,0 +1,9 @@
+{
+  "algorithm": "sha256-bytes-v1",
+  "duplicate_groups": [],
+  "schema_version": 1,
+  "scope": [
+    "tests/**/test_*.py",
+    "tests/**/*_test.py"
+  ]
+}

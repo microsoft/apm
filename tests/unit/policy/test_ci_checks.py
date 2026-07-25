@@ -168,6 +168,35 @@ class TestRefConsistency:
         assert not result.passed
         assert any("v2.0.0" in d and "v1.0.0" in d for d in result.details)
 
+    def test_fail_full_revision_pin_resolved_commit_mismatch(self, tmp_path):
+        manifest_commit = "a" * 40
+        _write_apm_yml(tmp_path, deps=[f"owner/repo#{manifest_commit}"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    resolved_ref: {manifest_commit}
+                    resolved_commit: {"b" * 40}
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_ref_consistency(manifest, lock)
+
+        assert not result.passed
+        assert "run 'apm install --update'" in result.message
+        assert result.details == [
+            "owner/repo: manifest commit "
+            f"'{manifest_commit}' != lockfile resolved_commit '{'b' * 40}'"
+        ]
+
     def test_fail_dep_not_in_lockfile(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo"])
         _write_lockfile(
@@ -352,6 +381,12 @@ class TestNoOrphans:
 class TestConfigConsistency:
     def test_pass_no_mcp(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo"])
+        package = tmp_path / "apm_modules" / "owner" / "repo"
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text(
+            "name: repo\nversion: 1.0.0\n",
+            encoding="utf-8",
+        )
         _write_lockfile(
             tmp_path,
             textwrap.dedent("""\
@@ -416,6 +451,36 @@ class TestConfigConsistency:
         result = _check_config_consistency(manifest, lock)
         assert not result.passed
         assert any("my-server" in d and "differs" in d for d in result.details)
+
+    def test_genuine_orphan_mcp_still_flagged(self, tmp_path):
+        """Provenance must not mask a real orphan (server absent from manifest
+        and lacking any provenance entry). Negative guard for #2081."""
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        # Root declares 'kept'; lockfile also carries a genuinely orphaned
+        # 'stale' server with no provenance -> must be flagged.
+        _write_apm_yml(tmp_path, mcp=["kept"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+                mcp_configs:
+                  kept:
+                    name: kept
+                  stale:
+                    name: stale
+                mcp_config_provenance:
+                  shadcn: '@qado/agent-config'
+            """),
+        )
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_config_consistency(manifest, lock)
+        assert not result.passed
+        assert any("stale" in d and "not in manifest" in d for d in result.details)
 
 
 # -- Content integrity ----------------------------------------------
@@ -698,6 +763,12 @@ class TestContentIntegrity:
 class TestRunBaselineChecks:
     def test_all_pass(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo#v1.0.0"])
+        package = tmp_path / "apm_modules" / "owner" / "repo"
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text(
+            "name: repo\nversion: 1.0.0\n",
+            encoding="utf-8",
+        )
         _make_deployed_file(tmp_path, ".github/prompts/test.md")
         _write_lockfile(
             tmp_path,
@@ -713,7 +784,7 @@ class TestRunBaselineChecks:
         )
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 8  # all 8 checks ran (incl. skill-subset + includes-consent)
+        assert len(result.checks) == 9
 
     def test_mixed_pass_fail(self, tmp_path):
         # Ref mismatch (fail) + missing file (fail) + clean otherwise
@@ -789,6 +860,109 @@ class TestRunBaselineChecks:
         result = run_baseline_checks(tmp_path, fail_fast=False)
         assert not result.passed
         assert len(result.failed_checks) >= 2
+
+
+class TestExternalBeforeInternalCheckOrdering:
+    """Ordering contract: the external manifest<->lockfile identity check
+    (``ref-consistency``) MUST surface before the internal ledger-owner
+    integrity check (``deployment-ledger-owners``).
+
+    Regression guard for the #2292 -> source-identity failure: a
+    source-identity lockfile tamper (attacker rewrites a dependency's
+    host/repo_url) trips BOTH checks, but their remedies diverge --
+    ref-consistency says ``apm install --update`` (re-resolve from the
+    trusted manifest, restoring the legitimate source) while
+    deployment-ledger-owners says ``apm prune`` (reconcile ownership
+    toward the CURRENT/tampered lockfile, which would entrench the
+    attacker). Under fail-fast the first failing check wins, so
+    ref-consistency must be evaluated first. This test locks that order
+    so a future check insertion cannot silently swap the reported cause
+    and its remediation again.
+    """
+
+    _LEGIT_KEY = "gitlab.example.invalid/group/fixture-source-identity"
+
+    def _write_source_identity_tamper(self, project: Path) -> None:
+        """Manifest declares the legitimate source; the lockfile has been
+        source-identity tampered (host/repo_url rewritten to an attacker
+        key) while the persisted deployment ledger still owns the
+        legitimate key -- so both checks fire."""
+        _write_apm_yml(project, deps=[self._LEGIT_KEY])
+        _write_lockfile(
+            project,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: attacker/other
+                    host: attacker.invalid
+                    host_type: gitlab
+                    resolved_ref: '{"0" * 40}'
+                    resolved_commit: '{"0" * 40}'
+                    version: 0.1.0
+                    package_type: skill_bundle
+                deployments:
+                  - kind: project-relative
+                    target: copilot
+                    value: .github/instructions/fixture.instructions.md
+                    runtime: null
+                    scope: project
+                    owners:
+                      - {self._LEGIT_KEY}
+                    active_owner: {self._LEGIT_KEY}
+                    content_hash: sha256:{"a" * 64}
+            """),
+        )
+
+    def test_source_identity_tamper_surfaces_ref_consistency_under_fail_fast(self, tmp_path):
+        self._write_source_identity_tamper(tmp_path)
+        result = run_baseline_checks(tmp_path, fail_fast=True)
+        assert not result.passed
+        # Fail-fast must report the external-boundary cause with the safe
+        # ``apm install --update`` remedy, never the ledger-owner cause
+        # (whose ``apm prune`` remedy would entrench the attacker source).
+        assert len(result.failed_checks) == 1
+        assert result.failed_checks[0].name == "ref-consistency"
+        assert "apm install --update" in result.failed_checks[0].message
+
+    def test_ref_consistency_precedes_deployment_ledger_owners(self, tmp_path):
+        self._write_source_identity_tamper(tmp_path)
+        result = run_baseline_checks(tmp_path, fail_fast=False)
+        names = [check.name for check in result.checks]
+        assert "ref-consistency" in names
+        assert "deployment-ledger-owners" in names
+        assert names.index("ref-consistency") < names.index("deployment-ledger-owners")
+        # Both are genuine failures in this dual-cause tamper.
+        failed = {c.name for c in result.failed_checks}
+        assert {"ref-consistency", "deployment-ledger-owners"} <= failed
+
+    def test_genuine_ghost_owner_still_reported_after_reorder(self, tmp_path):
+        """Reordering must NOT weaken ghost-owner detection: when the
+        manifest declares no deps (ref-consistency passes) but a stale
+        ledger owner does not resolve, deployment-ledger-owners still
+        fires. This is req-pl-016's genuine departed-owner domain."""
+        _write_apm_yml(tmp_path)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+                deployments:
+                  - kind: project-relative
+                    target: claude
+                    value: .claude/rules/ghost.md
+                    runtime: null
+                    scope: project
+                    owners:
+                      - removed/beta
+                    active_owner: removed/beta
+                    content_hash: sha256:{"a" * 64}
+            """),
+        )
+        result = run_baseline_checks(tmp_path, fail_fast=True)
+        assert not result.passed
+        assert result.failed_checks[0].name == "deployment-ledger-owners"
 
 
 # -- Serialization -------------------------------------------------
@@ -1482,3 +1656,65 @@ class TestManifestMissingWarning:
         names = [c.name for c in result.checks]
         assert "manifest-missing" not in names
         assert result.passed
+
+
+def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -> None:
+    """The consistency check delegates all source derivation to the owner."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+    _write_apm_yml(tmp_path, mcp=["server"])
+    manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+    lock = LockFile(
+        mcp_configs={"server": {"name": "server"}},
+        mcp_config_provenance={"removed": "old-package"},
+    )
+    calls = []
+
+    def fake_derive(
+        cls,
+        derived_root,
+        derived_lock,
+        modules_root,
+        *,
+        trust_transitive_self_defined,
+        diagnostics=None,
+    ):
+        calls.append(
+            (
+                derived_root,
+                derived_lock,
+                modules_root,
+                trust_transitive_self_defined,
+                diagnostics,
+            )
+        )
+        return CurrentMcpConfigView(
+            dependencies=(),
+            configs={"server": {"name": "server"}},
+            provenance={},
+            problems=(),
+        )
+
+    monkeypatch.setattr(CurrentMcpConfigView, "derive", classmethod(fake_derive))
+
+    result = _check_config_consistency(manifest, lock)
+
+    assert result.passed
+    assert calls == [(manifest, lock, tmp_path / "apm_modules", True, None)]
+
+
+def test_mcp_config_consistency_has_no_package_manifest_traversal() -> None:
+    """Architecture guard: the check must not regain sibling traversal logic."""
+    import inspect
+
+    source = inspect.getsource(_check_config_consistency)
+    forbidden = (
+        "APMPackage.from_apm_yml",
+        "collect_transitive",
+        "get_install_path",
+        "resolve_local_dep_dir",
+        "rglob(",
+    )
+
+    assert all(token not in source for token in forbidden)

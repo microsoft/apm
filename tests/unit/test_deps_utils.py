@@ -62,6 +62,15 @@ class TestIsNestedUnderPackage:
         child.mkdir(parents=True)
         assert _is_nested_under_package(child, modules) is True
 
+    def test_child_of_manifestless_package(self, tmp_path):
+        """A subdirectory under a package with only .apm is nested."""
+        modules = tmp_path / "apm_modules"
+        pkg = modules / "org" / "repo"
+        _make_apm_dir(pkg)
+        child = pkg / "sub" / "deep"
+        child.mkdir(parents=True)
+        assert _is_nested_under_package(child, modules) is True
+
     def test_not_nested_when_no_parent_yml(self, tmp_path):
         """Candidate directly under apm_modules is not nested."""
         modules = tmp_path / "apm_modules"
@@ -398,6 +407,25 @@ class TestGetDetailedPackageInfo:
         assert info["version"] == "unknown"
         assert info["description"] == "No apm.yml found"
 
+    def test_empty_version_renders_unknown_symmetric_with_list(self, tmp_path):
+        """A readable manifest with empty version renders '@unknown', not 'error'.
+
+        The strict identity authority (APMPackage.from_apm_yml) rejects the
+        empty version, but the tolerant display path must stay symmetric with
+        `deps list` and surface 'unknown' rather than masking the package.
+        """
+        _make_apm_yml(tmp_path, "nover", version="")
+        info = _get_detailed_package_info(tmp_path)
+        assert info["name"] == "nover"
+        assert info["version"] == "unknown"
+        assert info["version"] != "error"
+
+    def test_malformed_apm_yml_reports_error(self, tmp_path):
+        """Genuinely unparsable apm.yml still reports 'error' for the version."""
+        (tmp_path / APM_YML_FILENAME).write_text(_MALFORMED_YML)
+        info = _get_detailed_package_info(tmp_path)
+        assert info["version"] == "error"
+
     def test_hooks_counted(self, tmp_path):
         """Hook .json files are reflected in the result."""
         _make_apm_yml(tmp_path, "hookpkg", version="1.0.0")
@@ -460,6 +488,18 @@ class TestScanInstalledPackages:
         _make_apm_yml(pkg, "repo")
         result = _scan_installed_packages(tmp_path)
         assert "org/project/repo" in result
+
+    def test_nested_package_manifest_is_part_of_parent(self, tmp_path):
+        """A package manifest nested inside an installed package is not top-level."""
+        parent = tmp_path / "_local" / "package"
+        nested = parent / "sub-package"
+        nested.mkdir(parents=True)
+        _make_apm_yml(parent, "package")
+        _make_apm_yml(nested, "sub-package")
+
+        result = _scan_installed_packages(tmp_path)
+
+        assert result == ["_local/package"]
 
     def test_hidden_dirs_skipped(self, tmp_path):
         """Directories starting with '.' are skipped."""

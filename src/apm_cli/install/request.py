@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.scope import InstallScope
     from apm_cli.install.plan import UpdatePlan
+    from apm_cli.install.transaction import InstallTransaction
     from apm_cli.models.apm_package import APMPackage
 
 
@@ -69,3 +70,4 @@ class InstallRequest:
     # False to abort cleanly with a "no changes applied" message.  Used
     # by ``apm update`` to render the plan and prompt the user.
     plan_callback: Callable[[UpdatePlan], bool] | None = None
+    transaction: InstallTransaction | None = None

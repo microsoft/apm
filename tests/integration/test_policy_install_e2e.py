@@ -41,6 +41,9 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+# Load this owner before decorators patch discovery, or its import-time binding
+# can capture the discovery mock permanently and leak policy state across tests.
+from apm_cli.policy import install_preflight as install_preflight_module
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
@@ -59,7 +62,7 @@ FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "policy"
 # install_preflight.py does a top-level ``from .discovery import
 # discover_policy_with_chain`` -> must also patch where it's used.
 _PATCH_DISCOVER_GATE = "apm_cli.policy.discovery.discover_policy_with_chain"
-_PATCH_DISCOVER_PREFLIGHT = "apm_cli.policy.install_preflight.discover_policy_with_chain"
+_PATCH_DISCOVER_PREFLIGHT = f"{install_preflight_module.__name__}.discover_policy_with_chain"
 
 # Version-check noise suppressor
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
@@ -131,7 +134,7 @@ def _write_apm_yml(
     deps: list | None = None,
     mcp: list | None = None,
     target: str | None = None,
-) -> None:
+) -> Path:
     """Write a minimal apm.yml."""
     data: dict = {"name": name, "version": "1.0.0", "dependencies": {}}
     if deps:
@@ -162,6 +165,7 @@ def _make_pkg(
         deps=apm_deps,
         mcp=mcp,
     )
+    return pkg_dir
 
 
 def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list | None = None):
@@ -510,7 +514,7 @@ class TestI8TransitiveMCPDenied:
 
         # Root depends on carrier-pkg, which has a denied MCP dep
         _write_apm_yml(project_dir / "apm.yml", deps=["acme/carrier-pkg"])
-        _make_pkg(
+        carrier_dir = _make_pkg(
             apm_modules,
             "acme/carrier-pkg",
             mcp=["io.github.untrusted/evil-mcp-server"],
@@ -535,6 +539,17 @@ class TestI8TransitiveMCPDenied:
         fetch = _make_fetch_result("found", policy=policy)
         mock_gate.return_value = fetch
         mock_preflight.return_value = fetch
+        downloaded = mock_dl.return_value.download_package.return_value
+        downloaded.resolved_reference.resolved_commit = "0" * 40
+        downloaded.resolved_reference.ref_name = "main"
+        downloaded.resolved_reference.is_branch = True
+        downloaded.resolved_reference.is_tag = False
+        downloaded.resolved_reference.is_sha = False
+        downloaded.package_type.value = "apm_package"
+        from apm_cli.models.apm_package import APMPackage
+
+        downloaded.package = APMPackage.from_apm_yml(carrier_dir / "apm.yml")
+        downloaded.install_path = carrier_dir
 
         result = _invoke_install(runner, ["--trust-transitive-mcp"])
 

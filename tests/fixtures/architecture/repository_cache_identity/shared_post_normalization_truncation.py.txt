@@ -1,0 +1,7 @@
+class SharedCloneCache:
+    def get_or_clone(self, repository_url, ref, clone_fn, fetch_fn=None):
+        repository = normalize_repo_url(repository_url)
+        repository = "/".join(repository.split("/")[:4])
+        key = (repository, ref)
+        existing_bare = self._find_repo_bare(repository)
+        return key, existing_bare

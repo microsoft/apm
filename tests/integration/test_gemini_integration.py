@@ -369,7 +369,7 @@ class TestGeminiHookIntegration:
         return _make_package_info(pkg, name)
 
     def test_hooks_merge_into_settings_json(self):
-        """Hooks are merged into .gemini/settings.json with _apm_source."""
+        """Hooks use Gemini fields while ownership stays in the APM sidecar."""
         from apm_cli.integration.hook_integrator import HookIntegrator
 
         info = self._setup_hook_package()
@@ -382,7 +382,9 @@ class TestGeminiHookIntegration:
         settings = json.loads((self.root / ".gemini" / "settings.json").read_text())
         assert "hooks" in settings
         assert "preCommit" in settings["hooks"]
-        assert settings["hooks"]["preCommit"][0]["_apm_source"] == "test-hooks"
+        assert "_apm_source" not in settings["hooks"]["preCommit"][0]
+        sidecar = json.loads((self.root / ".gemini" / "apm-hooks.json").read_text())
+        assert sidecar["preCommit"][0]["_apm_source"] == "test-hooks"
 
     def test_hooks_preserve_existing_mcp_servers(self):
         """Hook merge must not clobber existing mcpServers in settings.json."""

@@ -59,6 +59,111 @@ def _resolved_dep(repo_url: str, ref: str, commit: str | None) -> DependencyRefe
 
 
 class TestBuildUpdatePlan:
+    def test_entries_preserve_full_state_and_canonical_action_order(self):
+        lock = _new_lockfile()
+        update = _locked("https://github.com/u/r", "main", "a" * 40, ["update.md"])
+        update.content_hash = "sha256:update"
+        remove = _locked("https://github.com/r/r", "main", "b" * 40, ["remove.md"])
+        remove.content_hash = "sha256:remove"
+        unchanged = _locked("https://github.com/z/r", "main", "c" * 40, ["unchanged.md"])
+        unchanged.content_hash = "sha256:unchanged"
+        for locked in (update, remove, unchanged):
+            lock.add_dependency(locked)
+
+        plan = build_update_plan(
+            lock,
+            [
+                _resolved_dep("https://github.com/n/r", "main", "n" * 40),
+                _resolved_dep("https://github.com/z/r", "main", "c" * 40),
+                _resolved_dep("https://github.com/u/r", "main", "x" * 40),
+            ],
+        )
+
+        assert plan.entries == (
+            PlanEntry(
+                dep_key="https://github.com/u/r",
+                action="update",
+                display_name="https://github.com/u/r",
+                old_resolved_ref="main",
+                old_resolved_commit="a" * 40,
+                old_content_hash="sha256:update",
+                new_resolved_ref="main",
+                new_resolved_commit="x" * 40,
+                deployed_files=("update.md",),
+            ),
+            PlanEntry(
+                dep_key="https://github.com/n/r",
+                action="add",
+                display_name="https://github.com/n/r",
+                new_resolved_ref="main",
+                new_resolved_commit="n" * 40,
+            ),
+            PlanEntry(
+                dep_key="https://github.com/r/r",
+                action="remove",
+                display_name="https://github.com/r/r",
+                old_resolved_ref="main",
+                old_resolved_commit="b" * 40,
+                old_content_hash="sha256:remove",
+                deployed_files=("remove.md",),
+            ),
+            PlanEntry(
+                dep_key="https://github.com/z/r",
+                action="unchanged",
+                display_name="https://github.com/z/r",
+                old_resolved_ref="main",
+                old_resolved_commit="c" * 40,
+                old_content_hash="sha256:unchanged",
+                new_resolved_ref="main",
+                new_resolved_commit="c" * 40,
+                deployed_files=("unchanged.md",),
+            ),
+        )
+
+    def test_non_default_host_display_names_preserve_action_context(self):
+        host = "ghe.example.com"
+        lock = _new_lockfile()
+        for repo_url, commit in (
+            ("owner/update", "a" * 40),
+            ("owner/remove", "b" * 40),
+            ("owner/unchanged", "c" * 40),
+        ):
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url=repo_url,
+                    host=host,
+                    resolved_ref="main",
+                    resolved_commit=commit,
+                    depth=1,
+                )
+            )
+
+        def resolved(repo_url: str, commit: str) -> DependencyReference:
+            dep = DependencyReference(repo_url=repo_url, host=host, reference="main")
+            dep.resolved_reference = ResolvedReference(
+                original_ref="main",
+                ref_type=GitReferenceType.BRANCH,
+                ref_name="main",
+                resolved_commit=commit,
+            )
+            return dep
+
+        plan = build_update_plan(
+            lock,
+            [
+                resolved("owner/add", "n" * 40),
+                resolved("owner/unchanged", "c" * 40),
+                resolved("owner/update", "x" * 40),
+            ],
+        )
+
+        assert [(entry.action, entry.display_name) for entry in plan.entries] == [
+            ("update", "owner/update"),
+            ("add", "ghe.example.com/owner/add"),
+            ("remove", "owner/remove"),
+            ("unchanged", "owner/unchanged"),
+        ]
+
     def test_unchanged_dep_when_ref_and_commit_match(self):
         lock = _new_lockfile()
         lock.add_dependency(_locked("https://github.com/o/r", "main", "a" * 40))
@@ -105,6 +210,111 @@ class TestBuildUpdatePlan:
         assert plan.has_changes is True
         assert plan.entries[0].action == "remove"
         assert plan.entries[0].old_resolved_commit == "d" * 40
+
+    def test_selective_update_retains_unselected_complete_graph_deps(self):
+        lock = _new_lockfile()
+        for repo_url, commit, depth in (
+            ("https://github.com/acme/selected", "a" * 40, 1),
+            ("https://github.com/acme/unselected-direct", "b" * 40, 1),
+            ("https://github.com/acme/unselected-transitive", "c" * 40, 2),
+            ("https://github.com/acme/old-selected-transitive", "d" * 40, 2),
+        ):
+            locked = _locked(repo_url, "main", commit)
+            locked.depth = depth
+            lock.add_dependency(locked)
+
+        plan = build_update_plan(
+            lock,
+            [_resolved_dep("https://github.com/acme/selected", "main", "e" * 40)],
+            complete_resolved_dep_keys={
+                "https://github.com/acme/selected",
+                "https://github.com/acme/unselected-direct",
+                "https://github.com/acme/unselected-transitive",
+            },
+        )
+
+        actions_by_key = {entry.dep_key: entry.action for entry in plan.entries}
+        assert actions_by_key == {
+            "https://github.com/acme/selected": "update",
+            "https://github.com/acme/unselected-direct": "unchanged",
+            "https://github.com/acme/unselected-transitive": "unchanged",
+            "https://github.com/acme/old-selected-transitive": "remove",
+        }
+        assert plan.summary_counts["remove"] == 1
+
+    def test_selective_update_complete_keys_use_canonical_identity_for_all_sources(self):
+        lock = _new_lockfile()
+        identity_pairs = (
+            (
+                DependencyReference(repo_url="Acme/Git", host="github.com"),
+                LockedDependency(repo_url="Acme/Git", host="github.com"),
+            ),
+            (
+                DependencyReference(repo_url="Team/CaseSensitive", host="git.example.com"),
+                LockedDependency(repo_url="Team/CaseSensitive", host="git.example.com"),
+            ),
+            (
+                DependencyReference(
+                    repo_url="_local/tool",
+                    is_local=True,
+                    local_path="../Tool",
+                ),
+                LockedDependency(
+                    repo_url="_local/tool",
+                    source="local",
+                    local_path="../Tool",
+                ),
+            ),
+            (
+                DependencyReference(
+                    repo_url="Acme/Mono",
+                    is_virtual=True,
+                    virtual_path="skills/Review",
+                ),
+                LockedDependency(
+                    repo_url="Acme/Mono",
+                    is_virtual=True,
+                    virtual_path="skills/Review",
+                ),
+            ),
+            (
+                DependencyReference(
+                    repo_url="Acme/Registry",
+                    source="registry",
+                    artifactory_prefix="artifactory/github",
+                ),
+                LockedDependency(
+                    repo_url="Acme/Registry",
+                    source="registry",
+                    registry_prefix="artifactory/github",
+                ),
+            ),
+        )
+        complete_keys = set()
+        for resolved, locked in identity_pairs:
+            assert resolved.get_unique_key() == locked.get_unique_key()
+            complete_keys.add(resolved.get_unique_key())
+            lock.add_dependency(locked)
+
+        assert complete_keys == {
+            "acme/git",
+            "git.example.com/Team/CaseSensitive",
+            "../Tool",
+            "acme/mono/skills/Review",
+            "acme/registry",
+        }
+
+        unreachable = LockedDependency(repo_url="acme/unreachable")
+        lock.add_dependency(unreachable)
+        plan = build_update_plan(
+            lock,
+            [],
+            complete_resolved_dep_keys=complete_keys,
+        )
+
+        actions_by_key = {entry.dep_key: entry.action for entry in plan.entries}
+        assert {actions_by_key[key] for key in complete_keys} == {"unchanged"}
+        assert actions_by_key[unreachable.get_unique_key()] == "remove"
 
     def test_summary_counts_aggregate_correctly(self):
         lock = _new_lockfile()
@@ -234,6 +444,98 @@ class TestBuildUpdatePlan:
         # The git lock's ref must not be borrowed; this is a real change.
         assert entry.new_resolved_ref != "v1.0.0"
         assert entry.action == "update"
+
+    def test_git_semver_tag_dep_unchanged_when_cached_and_ref_matches(self):
+        """A cached git-semver dep already at its locked tag must stay 'unchanged'.
+
+        Regression (git-source parity with #1908's registry fix): on ``apm update``
+        the git-semver resolver rewrites ``dep.reference`` to the concrete tag and
+        computes its SHA, but that SHA is stashed in ``ctx.git_semver_resolutions``
+        and never attached back to ``dep.resolved_reference``. So at plan time the
+        dep carries ``reference='eli5--v2.0.0'`` with ``resolved_reference=None``.
+        Without the locked-commit fallback, ``build_update_plan`` compares the
+        locked SHA against ``None`` and emits a spurious UPDATE on every run -- the
+        lockfile then rewrites the identical SHA, so ``apm update`` never converges.
+
+        The locked entry carries the concrete ``resolved_tag`` produced by semver
+        resolution, so the matching-ref case is safe to treat as unchanged.
+        """
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="srobroek/agentic-packages",
+                resolved_ref="eli5--v2.0.0",
+                resolved_commit="9" * 40,
+                depth=1,
+                is_virtual=True,
+                virtual_path="packages/eli5",
+                constraint=">=2.0.0 <3.0.0",
+                resolved_tag="eli5--v2.0.0",
+            )
+        )
+        # Cached git-semver dep: ref rewritten to the concrete tag by the resolver,
+        # but resolved_reference never populated (SHA not plumbed to the plan).
+        dep = DependencyReference(
+            repo_url="srobroek/agentic-packages",
+            reference="eli5--v2.0.0",
+            is_virtual=True,
+            virtual_path="packages/eli5",
+        )
+        assert getattr(dep, "resolved_reference", None) is None
+
+        plan = build_update_plan(lock, [dep])
+
+        assert plan.has_changes is False
+        entry = plan.entries[0]
+        assert entry.action == "unchanged"
+        assert entry.new_resolved_ref == "eli5--v2.0.0"
+        # The locked commit is borrowed so the display shows a real SHA, not '-'.
+        assert entry.new_resolved_commit == "9" * 40
+
+    def test_git_branch_dep_tip_advance_still_shows_update(self):
+        """A branch dep whose tip advanced must NOT be masked as unchanged.
+
+        Guards the locked-commit fallback: it applies only when no fresh SHA exists
+        and the locked entry carries ``resolved_tag``. A branch dep has no
+        ``resolved_tag`` and its tip can move under a stable ref name, so a freshly
+        resolved commit that differs from the lockfile must still surface as an
+        update.
+        """
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/o/r",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+                depth=1,
+            )
+        )
+        # Branch dep, freshly resolved to a new tip SHA (no resolved_tag on lock).
+        deps = [_resolved_dep("https://github.com/o/r", "main", "b" * 40)]
+
+        plan = build_update_plan(lock, deps)
+
+        assert plan.has_changes is True
+        assert plan.entries[0].action == "update"
+        assert plan.entries[0].new_resolved_commit == "b" * 40
+
+    def test_unannotated_branch_without_sha_is_not_masked_as_unchanged(self):
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/o/r",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+                depth=1,
+            )
+        )
+        dep = DependencyReference(repo_url="https://github.com/o/r", reference="main")
+
+        plan = build_update_plan(lock, [dep])
+
+        assert plan.has_changes is True
+        assert plan.entries[0].action == "update"
+        assert plan.entries[0].new_resolved_commit is None
 
 
 # -----------------------------------------------------------------------------

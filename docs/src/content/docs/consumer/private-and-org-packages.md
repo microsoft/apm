@@ -33,9 +33,11 @@ dependencies:
 ```
 
 Use shorthand when the host follows owner/repo (or ADO's
-org/project/repo). Use the object form for custom ports, non-standard
-schemes, or deep GitLab subgroups shorthand cannot disambiguate. Full
-grammar: `DependencyReference.parse` in
+org/project/repo). HTTPS shorthand also accepts
+`host:PORT/owner/repo`; when authoring `apm.yml` by hand, prefer a full
+URL or object form for custom ports so the transport is explicit. Use
+the object form for non-standard schemes or deep GitLab subgroups
+shorthand cannot disambiguate. Full grammar: `DependencyReference.parse` in
 `src/apm_cli/models/dependency/reference.py`.
 
 ## GitHub.com private repos
@@ -131,8 +133,8 @@ dependencies:
 
 ## Custom ports and self-hosted git
 
-Use the object form for non-default ports. Use `ssh://` -- SCP
-shorthand (`git@host:path`) cannot carry a port:
+For SSH, use `ssh://` -- SCP shorthand (`git@host:path`) cannot carry a
+port. For HTTPS, prefer the full URL or object form:
 
 ```yaml
 dependencies:
@@ -142,6 +144,11 @@ dependencies:
     - git: https://git.acme.internal:8443/team/standards.git
       ref: v1.2.0
 ```
+
+After `apm install`, APM writes this HTTPS dependency in `apm.yml` as
+`git.acme.internal:8443/team/standards#v1.2.0`. This scheme-free
+shorthand preserves the custom port and is valid input on subsequent
+runs.
 
 APM does not fall back across protocols by default. If you need the
 legacy same-port fallback, pass `--allow-protocol-fallback` or set

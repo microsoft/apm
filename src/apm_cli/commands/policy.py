@@ -25,7 +25,6 @@ from ..policy.discovery import (
     MAX_STALE_TTL,
     PolicyFetchResult,
     _read_cache_entry,
-    discover_policy,
     discover_policy_with_chain,
 )
 from ..policy.schema import ApmPolicy
@@ -199,6 +198,7 @@ def _build_report(
         "cached": bool(result.cached),
         "fetch_error": result.fetch_error,
         "error": result.error,
+        "warnings": result.warnings,
         "extends_chain": chain,
         "rule_counts": counts,
         "rule_summary": _summarize_rules(counts),
@@ -227,6 +227,10 @@ def _render_table(report: dict[str, Any]) -> None:
         (
             "Effective rules",
             "; ".join(report["rule_summary"]) if report["rule_summary"] else "none",
+        ),
+        (
+            "Warnings",
+            "; ".join(report["warnings"]) if report["warnings"] else "none",
         ),
     ]
 
@@ -324,18 +328,11 @@ def status(policy_source, no_cache, as_json, output_format, check):
     project_root = Path.cwd()
 
     try:
-        if policy_source is not None:
-            result = discover_policy(
-                project_root,
-                policy_override=policy_source,
-                no_cache=no_cache,
-            )
-        elif no_cache:
-            # discover_policy_with_chain has no `no_cache` knob, so go
-            # through the lower-level entry point when the user opts out.
-            result = discover_policy(project_root, no_cache=True)
-        else:
-            result = discover_policy_with_chain(project_root)
+        result = discover_policy_with_chain(
+            project_root,
+            policy_override=policy_source,
+            no_cache=no_cache,
+        )
     except Exception as e:
         # Diagnostic must never exit non-zero; surface the failure as a
         # synthetic ``cache_miss_fetch_fail`` report and continue.
@@ -388,4 +385,6 @@ def explain(package):
     """
     from .approve import explain_decision
 
-    explain_decision(package)
+    logger = CommandLogger("policy explain")
+    explain_decision(package, logger=logger)
+    logger.render_summary()

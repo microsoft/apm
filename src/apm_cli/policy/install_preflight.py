@@ -69,6 +69,8 @@ def run_policy_preflight(
     logger,
     dry_run: bool = False,
     registries: dict[str, str] | None = None,
+    effective_target: str | list[str] | None = None,
+    cache_only: bool = False,
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -81,6 +83,11 @@ def run_policy_preflight(
         dep checks.
     mcp_deps:
         Iterable of ``MCPDependency``, or ``None`` to skip MCP checks.
+    effective_target:
+        Resolved scalar or plural target selection for compilation policy.
+    cache_only:
+        Resolve policy from persisted cache or local-file sources without
+        remote transport. Used by offline local-bundle installs.
     no_policy:
         CLI ``--no-policy`` flag value.
     logger:
@@ -116,7 +123,8 @@ def run_policy_preflight(
         return None, False
 
     # -- Discovery (chain-aware: resolves extends: + merges) -----------
-    fetch_result = discover_policy_with_chain(project_root)
+    discovery_kwargs = {"cache_only": True} if cache_only else {}
+    fetch_result = discover_policy_with_chain(project_root, **discovery_kwargs)
 
     # -- Route the outcome through the shared 9-outcome table ---------
     # Logging + fail-closed gating live in ``policy/outcome_routing.py``
@@ -150,6 +158,7 @@ def run_policy_preflight(
         lockfile=None,
         policy=policy,
         mcp_deps=mcp_deps,
+        effective_target=effective_target,
         fail_fast=(enforcement == "block"),
         registries=registries,
         direct_dep_keys={d.get_unique_key() for d in apm_deps_list},

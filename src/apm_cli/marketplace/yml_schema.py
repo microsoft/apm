@@ -349,8 +349,8 @@ class PackageEntry:
     author: Mapping[str, str] | None = None
     license: str | None = None
     repository: str | None = None
-    # Marketplace category metadata. Emitted only by output formats that
-    # consume categories, currently Codex repo marketplace output.
+    # Marketplace category metadata. Emitted by both the Claude and Codex
+    # outputs when present; the Codex output additionally requires it.
     category: str | None = None
     # Derived (set by loader, not by user)
     is_local: bool = False
@@ -945,8 +945,8 @@ def _parse_package_entry(
             raise MarketplaceYmlError(f"'packages[{index}].repository' must be a non-empty string")
         repository = repository.strip()
 
-    # Optional marketplace category. Claude output strips this; Codex output
-    # requires and emits it.
+    # Optional marketplace category. Emitted by both the Claude and Codex
+    # outputs when set; the Codex output additionally requires it.
     category: str | None = None
     raw_category = raw.get("category")
     if raw_category is not None:

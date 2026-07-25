@@ -42,6 +42,37 @@ def test_install_global_hints_compile_and_writes_no_root_file(tmp_path, monkeypa
     assert "apm compile -g" in result.output
 
 
+def test_install_global_supports_claude_config_dir_outside_home(tmp_path, monkeypatch):
+    """Global Claude installs support an absolute config root outside HOME."""
+    from apm_cli.commands.install import install as install_cmd
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    package_dir = tmp_path / "global-package"
+    instruction_dir = package_dir / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (package_dir / "apm.yml").write_text(
+        "name: global-package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    (instruction_dir / "global.instructions.md").write_text(
+        "---\ndescription: Global install instructions\n---\nUse integration tests.\n",
+        encoding="utf-8",
+    )
+
+    claude_config = tmp_path / "outside-home" / "claude-config"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config))
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(install_cmd, ["-g", str(package_dir), "--target", "claude"])
+
+    clear_discovery_cache()
+    assert result.exit_code == 0, result.output
+    assert (claude_config / "rules" / "global.md").is_file()
+    assert "[x]" not in result.output
+
+
 def test_compile_global_writes_claude_md_from_real_fixtures(tmp_path, monkeypatch):
     """Run apm compile --global through real discovery and filesystem writes."""
     from apm_cli.commands.compile.cli import compile as compile_cmd

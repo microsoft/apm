@@ -56,6 +56,24 @@ class TestInitCommand:
             finally:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
+    def test_init_preserves_plugin_native_layout(self):
+        """Init explains that native root sources remain packable."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                Path("skills").mkdir()
+
+                result = self.runner.invoke(cli, ["init", "--yes"])
+
+                assert result.exit_code == 0
+                output = " ".join(result.output.split())
+                assert "Found plugin-native sources" in output
+                assert "skills/" in output
+                assert "remain included by apm pack" in output
+                assert not Path(".apm").exists()
+            finally:
+                os.chdir(self.original_dir)
+
     def test_init_explicit_current_directory(self):
         """Test initialization with explicit '.' argument."""
         with tempfile.TemporaryDirectory() as tmp_dir:

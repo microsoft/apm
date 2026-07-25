@@ -11,27 +11,13 @@ Uses real packages from GitHub:
   - microsoft/apm-sample-package (deployed prompts, agents, etc.)
 """
 
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
 
 # Skip all tests if no GitHub token is available
 pytestmark = pytest.mark.requires_github_token
-
-
-@pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 @pytest.fixture
@@ -43,10 +29,10 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, timeout=180):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -114,11 +100,11 @@ class TestPackageRemovedFromManifest:
     """When a package is removed from apm.yml, apm install should clean up
     its deployed files and remove it from the lockfile."""
 
-    def test_removed_package_files_cleaned_on_install(self, temp_project, apm_command):
+    def test_removed_package_files_cleaned_on_install(self, temp_project, apm_binary_path):
         """Files deployed by a removed package disappear on the next apm install."""
         # -- Step 1: install the package --
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -135,7 +121,7 @@ class TestPackageRemovedFromManifest:
         _write_apm_yml(temp_project, [])
 
         # -- Step 4: run apm install (no packages) — should detect orphan --
-        result2 = _run_apm(apm_command, ["install", "--only=apm"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install", "--only=apm"], temp_project)
         assert result2.returncode == 0, (
             f"Install after removal failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -147,11 +133,13 @@ class TestPackageRemovedFromManifest:
                 f"Orphaned file {rel_path} was NOT cleaned up by apm install"
             )
 
-    def test_removed_package_absent_from_lockfile_after_install(self, temp_project, apm_command):
+    def test_removed_package_absent_from_lockfile_after_install(
+        self, temp_project, apm_binary_path
+    ):
         """After removing a package from apm.yml, apm install removes it from lockfile."""
         # -- Install --
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -160,7 +148,7 @@ class TestPackageRemovedFromManifest:
         _write_apm_yml(temp_project, [])
 
         # -- Re-install --
-        result2 = _run_apm(apm_command, ["install", "--only=apm"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install", "--only=apm"], temp_project)
         assert result2.returncode == 0, (
             f"Install after removal failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -171,7 +159,7 @@ class TestPackageRemovedFromManifest:
             dep_after = _get_locked_dep(lockfile_after, "microsoft/apm-sample-package")
             assert dep_after is None, "Removed package still present in apm.lock after apm install"
 
-    def test_remaining_package_unaffected_by_removal(self, temp_project, apm_command):
+    def test_remaining_package_unaffected_by_removal(self, temp_project, apm_binary_path):
         """Files from packages still in the manifest are untouched."""
         # -- Install two packages --
         _write_apm_yml(
@@ -181,7 +169,7 @@ class TestPackageRemovedFromManifest:
                 "github/awesome-copilot/skills/aspire",
             ],
         )
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -193,7 +181,7 @@ class TestPackageRemovedFromManifest:
 
         # -- Remove only apm-sample-package --
         _write_apm_yml(temp_project, ["github/awesome-copilot/skills/aspire"])
-        result2 = _run_apm(apm_command, ["install", "--only=apm"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install", "--only=apm"], temp_project)
         assert result2.returncode == 0, (
             f"Second install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -214,13 +202,13 @@ class TestPackageRemovedFromManifest:
 class TestPackageRefChangedInManifest:
     """When the ref in apm.yml changes, apm install re-downloads without --update."""
 
-    def test_ref_change_triggers_re_download(self, temp_project, apm_command):
+    def test_ref_change_triggers_re_download(self, temp_project, apm_binary_path):
         """Changing the ref in apm.yml from one value to another causes re-download."""
         # -- Step 1: install with an explicit commit-pinned ref --
         # We install first without a ref (using default branch), so the lockfile
         # records the resolved_ref as the default branch or latest commit.
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -242,7 +230,7 @@ class TestPackageRefChangedInManifest:
         )
 
         # -- Step 3: run install WITHOUT --update --
-        result2 = _run_apm(apm_command, ["install", "--only=apm"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install", "--only=apm"], temp_project)
         assert result2.returncode == 0, (
             f"Install with changed ref failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -262,11 +250,11 @@ class TestPackageRefChangedInManifest:
             "Package directory disappeared after re-download for ref change"
         )
 
-    def test_no_ref_change_does_not_re_download(self, temp_project, apm_command):
+    def test_no_ref_change_does_not_re_download(self, temp_project, apm_binary_path):
         """Without a ref change, apm install uses the lockfile SHA (idempotent)."""
         # -- Install --
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -276,7 +264,7 @@ class TestPackageRefChangedInManifest:
         commit_before = dep1.get("resolved_commit") if dep1 else None
 
         # -- Re-install without changing the ref --
-        result2 = _run_apm(apm_command, ["install", "--only=apm"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install", "--only=apm"], temp_project)
         assert result2.returncode == 0, (
             f"Re-install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -300,11 +288,11 @@ class TestPackageRefChangedInManifest:
 class TestFullInstallIdempotent:
     """Running apm install multiple times without manifest changes is safe."""
 
-    def test_repeated_install_does_not_remove_files(self, temp_project, apm_command):
+    def test_repeated_install_does_not_remove_files(self, temp_project, apm_binary_path):
         """Repeated apm install with same manifest preserves deployed files."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"First install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -313,7 +301,7 @@ class TestFullInstallIdempotent:
         dep1 = _get_locked_dep(lockfile1, "microsoft/apm-sample-package")
         files_before = dep1.get("deployed_files", []) if dep1 else []
 
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             f"Second install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -403,7 +391,7 @@ class TestBranchRefDriftRegression:
     content_hash, and the on-disk content.
     """
 
-    def test_branch_ref_picks_up_upstream_advance(self, temp_project, apm_command):
+    def test_branch_ref_picks_up_upstream_advance(self, temp_project, apm_binary_path):
         """Lockfile SHA != current branch HEAD -> plain ``apm install``
         re-downloads and updates the lockfile to the current HEAD."""
         # -- Step 1: install with ref=main, lockfile records current HEAD --
@@ -411,7 +399,7 @@ class TestBranchRefDriftRegression:
             temp_project,
             [{"git": f"https://github.com/{FIXTURE_REPO}.git", "ref": "main"}],
         )
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -431,7 +419,7 @@ class TestBranchRefDriftRegression:
         )
 
         # -- Step 3: plain ``apm install`` with NO --update flag --
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             f"Second install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -448,7 +436,7 @@ class TestBranchRefDriftRegression:
             f"got {dep2['resolved_commit']}"
         )
 
-    def test_self_heal_recovers_buggy_version_lockfile(self, temp_project, apm_command):
+    def test_self_heal_recovers_buggy_version_lockfile(self, temp_project, apm_binary_path):
         """Lockfile generated by APM <= 0.12.2 with a stale resolved_commit
         and matching disk content (the corrupted state)
         triggers the version-gated self-heal on next plain install."""
@@ -457,7 +445,7 @@ class TestBranchRefDriftRegression:
             temp_project,
             [{"git": f"https://github.com/{FIXTURE_REPO}.git", "ref": "main"}],
         )
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -472,7 +460,7 @@ class TestBranchRefDriftRegression:
         )
 
         # -- Step 3: plain install -- self-heal should fire --
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             f"Self-heal install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -494,14 +482,14 @@ class TestBranchRefDriftRegression:
         # because the re-download produces identical bytes. On the
         # released version (post 0.12.2) self-heal will not re-fire at
         # all. Either way, install must converge to the same state.
-        result3 = _run_apm(apm_command, ["install"], temp_project)
+        result3 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result3.returncode == 0
         lockfile3 = _read_lockfile(temp_project)
         dep3 = _get_locked_dep(lockfile3, FIXTURE_REPO)
         assert dep3["resolved_commit"] == dep2["resolved_commit"]
         assert dep3["content_hash"] == dep2["content_hash"]
 
-    def test_virtual_package_branch_ref_drift_recovers(self, temp_project, apm_command):
+    def test_virtual_package_branch_ref_drift_recovers(self, temp_project, apm_binary_path):
         """Reported reproduction shape: virtual package
         (path: virtual-pkg) with ref: main. Branch drift on a virtual
         package always falls back to content-hash matching (install_path
@@ -516,7 +504,7 @@ class TestBranchRefDriftRegression:
                 }
             ],
         )
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -531,7 +519,7 @@ class TestBranchRefDriftRegression:
         _rewrite_lockfile_resolved_commit(
             temp_project, "apm-update-repro", new_commit=KNOWN_OLD_COMMIT
         )
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             f"Second install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
         )
@@ -544,7 +532,9 @@ class TestBranchRefDriftRegression:
         )
         assert dep2["resolved_commit"] == head_sha
 
-    def test_corrupted_state_self_heal_does_not_trip_supply_chain(self, temp_project, apm_command):
+    def test_corrupted_state_self_heal_does_not_trip_supply_chain(
+        self, temp_project, apm_binary_path
+    ):
         """Reproduce the EXACT corrupted state and verify the
         self-heal completes without tripping the supply-chain hard-block.
 
@@ -568,7 +558,7 @@ class TestBranchRefDriftRegression:
             temp_project,
             [{"git": f"https://github.com/{FIXTURE_REPO}.git", "ref": KNOWN_OLD_COMMIT}],
         )
-        result1 = _run_apm(apm_command, ["install"], temp_project)
+        result1 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial pinned install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
         )
@@ -619,7 +609,7 @@ class TestBranchRefDriftRegression:
 
         # -- Step 5: plain ``apm install``. Self-heal must fire AND the
         # supply-chain hard-block must NOT abort the install. --
-        result2 = _run_apm(apm_command, ["install"], temp_project)
+        result2 = _run_apm(apm_binary_path, ["install"], temp_project)
         assert result2.returncode == 0, (
             "Self-heal aborted -- likely tripped the supply-chain hard-block "
             f"because expected_hash_change_deps plumbing is missing.\n"

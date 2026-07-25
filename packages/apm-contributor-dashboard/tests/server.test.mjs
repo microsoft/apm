@@ -395,6 +395,154 @@ describe("POST /merge-when-ready", () => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/triage
+// ---------------------------------------------------------------------------
+
+function makeTriageGqlResponse(issues) {
+    return JSON.stringify({
+        data: {
+            repository: {
+                issues: {
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                    nodes: issues,
+                },
+            },
+        },
+    });
+}
+
+const TRIAGE_DECISION_BLOCK = `\`\`\`json triage-decision
+{
+  "decision": "accept",
+  "theme": "theme/governance",
+  "areas": ["area/audit"],
+  "type": "type/bug",
+  "status": "status/accepted",
+  "priority": "priority/high",
+  "milestone": "0.9.x",
+  "next_action": "Fix the bug",
+  "comment_markdown": "## Analysis\\nAccepted."
+}
+\`\`\``;
+
+describe("GET /api/triage", () => {
+    before(async () => {
+        await setupServer({
+            ghExec: async (args) => {
+                if (args[0] === "api" && args[1] === "graphql") {
+                    return makeTriageGqlResponse([
+                        {
+                            number: 100,
+                            title: "Triaged bug",
+                            url: "https://github.com/test/issues/100",
+                            body: "Issue description",
+                            labels: { nodes: [{ name: "bug" }] },
+                            comments: {
+                                nodes: [
+                                    {
+                                        body: TRIAGE_DECISION_BLOCK,
+                                        createdAt: "2025-01-01T10:00:00Z",
+                                        author: { login: "triage-bot", avatarUrl: "" },
+                                        isMinimized: false,
+                                    },
+                                    {
+                                        body: "Human follow-up comment",
+                                        createdAt: "2025-01-02T10:00:00Z",
+                                        author: { login: "alice", avatarUrl: "" },
+                                        isMinimized: false,
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            // Issue without a triage comment -- must be excluded
+                            number: 101,
+                            title: "Untriaged issue",
+                            url: "https://github.com/test/issues/101",
+                            body: "",
+                            labels: { nodes: [] },
+                            comments: { nodes: [] },
+                        },
+                    ]);
+                }
+                throw new Error("unexpected gh call");
+            },
+        });
+    });
+    after(teardownServer);
+
+    it("returns only issues that have a triage-decision block", async () => {
+        const { json } = await getJSON("/api/triage");
+        assert.equal(json.items.length, 1, "untriaged issues must be excluded");
+        assert.equal(json.total, 1);
+    });
+
+    it("parses triage-decision fields correctly", async () => {
+        const { json } = await getJSON("/api/triage");
+        const item = json.items[0];
+        assert.equal(item.number, 100);
+        assert.equal(item.title, "Triaged bug");
+        assert.equal(item.decision, "accept");
+        assert.equal(item.priority, "priority/high");
+        assert.equal(item.milestone, "0.9.x");
+        assert.equal(item.nextAction, "Fix the bug");
+        assert.equal(item.type, "type/bug");
+        assert.deepEqual(item.labels, ["bug"]);
+    });
+
+    it("enriches items with hasSession from startedSessions", async () => {
+        mockState.startedSessions.add(100);
+        // Invalidate cache so fresh response is returned
+        const handler = createHandler(mockState.deps);
+        const s = createServer(handler);
+        await new Promise(r => s.listen(0, "127.0.0.1", r));
+        const url = `http://127.0.0.1:${s.address().port}`;
+        const res = await fetch(`${url}/api/triage`);
+        const json = await res.json();
+        assert.equal(json.items[0].hasSession, true);
+        await new Promise(r => s.close(r));
+    });
+
+    it("collects non-triage comments into nonTriageComments", async () => {
+        const { json } = await getJSON("/api/triage");
+        const item = json.items[0];
+        assert.equal(item.nonTriageComments.length, 1);
+        assert.equal(item.nonTriageComments[0].author, "alice");
+        assert.equal(item.nonTriageComments[0].body, "Human follow-up comment");
+    });
+
+    it("returns cached response on second call within TTL", async () => {
+        const ghCalls = [];
+        const deps = createMockDeps({
+            ghExec: async (args) => {
+                ghCalls.push(args);
+                if (args[0] === "api" && args[1] === "graphql") {
+                    return makeTriageGqlResponse([]);
+                }
+                throw new Error("unexpected");
+            },
+        });
+        const handler = createHandler(deps.deps);
+        const s = createServer(handler);
+        await new Promise(r => s.listen(0, "127.0.0.1", r));
+        const url = `http://127.0.0.1:${s.address().port}`;
+
+        // First call -- populates cache
+        await fetch(`${url}/api/triage`);
+        const callsAfterFirst = ghCalls.length;
+
+        // Second call -- must be served from cache, no new gh api call
+        await fetch(`${url}/api/triage`);
+        assert.equal(
+            ghCalls.length,
+            callsAfterFirst,
+            "second /api/triage call within TTL must be served from cache",
+        );
+        await new Promise(r => s.close(r));
+    });
+});
+
 describe("Static file serving", () => {
     before(() => setupServer());
     after(teardownServer);

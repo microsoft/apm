@@ -81,7 +81,86 @@ def test_compose_emits_local_source_as_string(
     assert plugin["description"] == "A locally vendored tool."
     assert plugin["version"] == "0.1.0"
     assert plugin["homepage"] == "https://example.com/local-tool"
-    assert "category" not in plugin
+    assert plugin["category"] == "Productivity"
+
+
+def test_compose_claude_emits_category_for_local_and_remote_when_set(tmp_path: Path) -> None:
+    """``category`` is a supported Anthropic marketplace field -- the Claude
+    output must carry it for both local and remote packages when set, mirroring
+    ``tags``/``author``/``license``/``repository``.
+    """
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: catdemo
+        description: A project.
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          packages:
+            - name: local-tool
+              source: ./packages/local-tool
+              version: 0.1.0
+              category: retrieval
+            - name: remote-tool
+              source: acme/remote-tool
+              ref: v1.0.0
+              category: developer-tools
+        """,
+    )
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    remote_entry = next(p for p in config.packages if p.name == "remote-tool")
+    resolved = [
+        builder._resolve_entry(local_entry),
+        # Construct the remote resolved shape directly; this test is about
+        # category composition, not git ref resolution.
+        ResolvedPackage(
+            name=remote_entry.name,
+            source_repo=remote_entry.source,
+            subdir=remote_entry.subdir,
+            ref="v1.0.0",
+            sha="a" * 40,
+            requested_version=None,
+            tags=(),
+            is_prerelease=False,
+        ),
+    ]
+    doc = builder.compose_marketplace_json(resolved)
+
+    plugins = {p["name"]: p for p in doc["plugins"]}
+    assert plugins["local-tool"]["category"] == "retrieval"
+    assert plugins["remote-tool"]["category"] == "developer-tools"
+
+
+def test_compose_claude_omits_category_when_unset(tmp_path: Path) -> None:
+    """``category`` stays optional -- when a package omits it the Claude output
+    emits no ``category`` key.
+    """
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: catdemo
+        description: A project.
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          packages:
+            - name: local-tool
+              source: ./packages/local-tool
+              version: 0.1.0
+        """,
+    )
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = [builder._resolve_entry(local_entry)]
+    doc = builder.compose_marketplace_json(resolved)
+
+    assert "category" not in doc["plugins"][0]
 
 
 def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: Path) -> None:

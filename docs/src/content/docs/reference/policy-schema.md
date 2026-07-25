@@ -9,7 +9,7 @@ sidebar:
 
 The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, `apm audit --ci`, `apm policy status`, and the install preflight before any package is written to disk.
 
-For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../enterprise/governance-guide/).
+For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](../cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../../enterprise/governance-guide/).
 
 ## What apm-policy.yml governs
 
@@ -67,7 +67,10 @@ The `<ref>` accepts:
 | `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
 
-Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
+Unknown top-level keys produce a warning, never an error -- so newer policy
+files load on older clients. `apm policy status --json` returns these in the
+`warnings` array. Known fields with the wrong native YAML type are rejected
+instead of being silently replaced by defaults.
 
 ## Enforcement modes
 
@@ -265,6 +268,8 @@ turned them on.
 - `https://...` -- a direct URL.
 
 For supply-chain safety, `extends:` references are pinned to the **leaf policy's host** -- a policy fetched from `github.com` cannot extend one on `evil.example.com`.
+If any parent is unreachable, the chain is incomplete and enforcement fails
+closed. APM never applies the weaker subset that happened to resolve.
 
 ### Merge rules
 
@@ -280,6 +285,7 @@ inherited list (see the tri-state table below).
 | `*.allow` lists             | Set intersection. `null` is transparent (no opinion).                            |
 | `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
+| `manifest.require_explicit_includes` | Logical OR; once enabled, descendants cannot relax it.                 |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
 | `dependencies.require_pinned_constraint` | Logical OR -- once a parent enables it, child cannot relax.            |
 | `mcp.self_defined`          | Stricter wins (`deny` > `warn` > `allow`).                                       |
@@ -436,8 +442,8 @@ first-match-wins ladder (org deny > user deny > project deny > project allow >
 user allow > org recommend > default-deny). Each locked dependency records the
 resolved state in the `exec_status` field of `apm.lock.yaml` (one of
 `deployed`, `gated_pending_approval`, `denied`, `absent`). For the consumer-side
-commands that write project and personal trust, see [apm approve / apm
-deny](./cli/approve/).
+commands that write project and personal trust, see
+[`apm approve`](../cli/approve/) and [`apm deny`](../cli/deny/).
 
 There is no `enforce` mandate runtime, no cryptographic signing, and no
 content-hash binding in this release: an `executables.enforce` rung is accepted
@@ -458,7 +464,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 
 **Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
 
-**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
+**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -486,7 +492,7 @@ No. apm-policy.yml controls what gets installed; your harness controls what runs
 
 ## See also
 
-- [apm policy](./cli/policy/) -- the `apm policy status` command.
-- [Govern with apm-policy.yml](../enterprise/apm-policy/) -- end-to-end rollout guide.
-- [Enforce in CI](../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
-- [Governance deep-dive](../enterprise/governance-guide/) -- the full enterprise control surface.
+- [apm policy](../cli/policy/) -- the `apm policy status` command.
+- [Govern with apm-policy.yml](../../enterprise/apm-policy/) -- end-to-end rollout guide.
+- [Enforce in CI](../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
+- [Governance deep-dive](../../enterprise/governance-guide/) -- the full enterprise control surface.

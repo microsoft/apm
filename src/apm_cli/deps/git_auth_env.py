@@ -80,6 +80,20 @@ class GitAuthEnvBuilder:
     # -- noninteractive (fallback) env ----------------------------------
 
     @staticmethod
+    def _apply_credential_suppression_fence(env: dict[str, str]) -> None:
+        """Remove inherited Git auth overrides and install an empty helper."""
+        env.pop("GIT_CONFIG_PARAMETERS", None)
+        env.pop("GIT_HTTP_EXTRAHEADER", None)
+        env.pop("GIT_CONFIG_COUNT", None)
+        for key in tuple(env):
+            if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+                env.pop(key, None)
+        env["GIT_ASKPASS"] = "echo"
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "credential.helper"
+        env["GIT_CONFIG_VALUE_0"] = ""
+
+    @staticmethod
     def noninteractive_env(
         base_git_env: dict[str, str],
         *,
@@ -97,9 +111,9 @@ class GitAuthEnvBuilder:
            Windows credential manager, SSH agent) to resolve naturally.
         2. Then re-set the full credential-helper *suppression* fence ONLY
            when ``suppress_credential_helpers=True`` (HTTP transport). This
-           blocks all four credential channels: ``GIT_ASKPASS``,
-           ``GIT_TERMINAL_PROMPT``, ``GIT_CONFIG_NOSYSTEM``, and
-           ``credential.helper=`` (via ``GIT_CONFIG_COUNT/KEY/VALUE``).
+           blocks askpass, terminal prompts, system/global config, inherited
+           ``GIT_CONFIG_PARAMETERS`` / extra headers, and indexed
+           ``credential.helper`` overrides.
 
         Do NOT invert or flatten this pop-then-conditionally-restore pattern
         without re-auditing every caller: removing step 1 would leak
@@ -119,10 +133,7 @@ class GitAuthEnvBuilder:
             env.pop("GIT_CONFIG_NOSYSTEM", None)
 
         if suppress_credential_helpers:
-            env["GIT_ASKPASS"] = "echo"
-            env["GIT_CONFIG_COUNT"] = "1"
-            env["GIT_CONFIG_KEY_0"] = "credential.helper"
-            env["GIT_CONFIG_VALUE_0"] = ""
+            GitAuthEnvBuilder._apply_credential_suppression_fence(env)
         else:
             env.pop("GIT_CONFIG_COUNT", None)
             env.pop("GIT_CONFIG_KEY_0", None)

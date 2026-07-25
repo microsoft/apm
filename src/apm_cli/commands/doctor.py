@@ -17,8 +17,8 @@ from .marketplace.doctor import run_doctor
 
 @click.command(
     help=(
-        "Run environment diagnostics (git, network, auth, gh CLI, "
-        "marketplace config). Reports a pass/fail table and exits non-zero "
+        "Run environment diagnostics (git, network, auth, marketplace "
+        "config). Reports a pass/fail table and exits non-zero "
         "if a critical check fails."
     )
 )

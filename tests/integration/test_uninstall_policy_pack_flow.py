@@ -525,18 +525,16 @@ class TestCleanupTransitiveOrphansEdgeCases:
         # Create lockfile where owner/orphan is resolved by owner/repo.
         # repo_url on DependencyReference.parse("owner/repo") is "owner/repo",
         # so resolved_by must also be "owner/repo" for the children_index to match.
-        child_dep = MagicMock()
-        child_dep.resolved_by = "owner/repo"
-        child_dep.repo_url = "owner/orphan"
-        child_dep.get_unique_key.return_value = "owner/orphan"
+        from apm_cli.deps.lockfile import LockedDependency
 
-        # The orphan_dep returned by lockfile.get_dependency
-        orphan_dep_full = MagicMock()
-        orphan_dep_full.get_unique_key.return_value = "owner/orphan"
+        child_dep = LockedDependency(
+            repo_url="owner/orphan",
+            resolved_by="owner/repo",
+        )
 
         lockfile = MagicMock()
         lockfile.get_package_dependencies.return_value = [child_dep]
-        lockfile.get_dependency.return_value = orphan_dep_full
+        lockfile.get_dependency.return_value = child_dep
 
         logger = MagicMock()
 

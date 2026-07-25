@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
 import pytest
 
@@ -549,3 +550,75 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     assert call["dep_target_subset"] == ["claude"], (
         f"dep_target_subset should be ['claude'], got {call['dep_target_subset']}"
     )
+
+
+def test_run_replay_threads_locked_skill_subset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Replay must preserve the locked skill subset through dependency reconstruction."""
+    from apm_cli.install.drift import run_replay
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "apm.yml").write_text(
+        "name: test-project\ntarget: copilot\n",
+        encoding="utf-8",
+    )
+
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="./skill-bundle",
+            source="local",
+            local_path="./skill-bundle",
+            resolved_commit=None,
+            skill_subset=[
+                "productivity/grill-me",
+                "productivity/grilling",
+            ],
+        )
+    )
+    (project_root / "skill-bundle").mkdir()
+    lockfile_path = project_root / "apm.lock.yaml"
+    lock.write(lockfile_path)
+
+    captured: list[dict[str, object]] = []
+
+    def _spy_integrate(*args: object, **kwargs: object) -> dict[str, list[str]]:
+        package_info = args[0]
+        captured.append(
+            {
+                "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
+                "skill_subset": kwargs.get("skill_subset"),
+            }
+        )
+        return {"deployed_files": []}
+
+    monkeypatch.setattr(
+        "apm_cli.install.services.integrate_package_primitives",
+        _spy_integrate,
+    )
+
+    run_replay(
+        ReplayConfig(
+            project_root=project_root,
+            lockfile_path=lockfile_path,
+            targets=None,
+            cache_only=True,
+        ),
+        CheckLogger(verbose=False),
+    )
+
+    assert captured == [
+        {
+            "dependency_ref_skill_subset": [
+                "productivity/grill-me",
+                "productivity/grilling",
+            ],
+            "skill_subset": (
+                "productivity/grill-me",
+                "productivity/grilling",
+            ),
+        }
+    ]

@@ -238,7 +238,6 @@ _REJECTED_FLAGS: list[tuple[str, str | None]] = [
     ("--parallel-downloads", "8"),
     ("--allow-insecure", None),
     ("--allow-insecure-host", "example.com"),
-    ("--no-policy", None),
 ]
 
 
@@ -289,6 +288,7 @@ _ALLOWED_FLAGS: list[tuple[str, ...]] = [
     ("--force",),
     ("--dry-run",),
     ("--verbose",),
+    ("--no-policy",),
     ("--as", "my-alias"),
 ]
 

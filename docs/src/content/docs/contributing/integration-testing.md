@@ -33,6 +33,29 @@ APM uses a tiered approach to integration testing:
 - **Duration**: ~10-15 minutes per platform (with 20-minute timeout)  
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
+### 3. **Lifecycle Smoke** (PR-time required check)
+- **Location**: selected declaratively via `lifecycle_smoke and not lifecycle_merge_group`. The original 14 nodes plus six real-subprocess state-machine nodes form the bounded required set. Three unique prune-ledger/throttle regressions carry both markers and remain in the full merge-group integration suite.
+- **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
+- **Scope**: the existing family contains one static authority guard plus in-process/mocked content-hash, policy, hook, virtual-skill, and virtual-package rows. The six added rows invoke the uv-installed `apm` console script through real subprocesses and local Git. This is not frozen PyInstaller coverage.
+- **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so the six subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
+- **Duration**: the 20-node required expression must remain inside its hard 3-minute job timeout; hosted duration is authoritative.
+- **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
+- **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. The full `lifecycle_smoke` family has 23 nodes; `lifecycle_merge_group` has exactly three named nodes; the difference is the required 20.
+- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs `pytest tests/integration/`, so all 23 lifecycle nodes remain exercised.
+- **Drift guard**: `tests/quality/test_ci_topology.py` pins the 23/3/20 partition, exact merge-group membership, required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
+- **Run it locally** (the exact command CI runs):
+  ```bash
+  APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+    -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+  ```
+
+### 4. **Live Guardrailing Hero** (scheduled/manual)
+- **Location**: `tests/integration/test_guardrailing_hero_e2e.py`
+- **Purpose**: Preserve the real remote, token-gated packaged CLI hero without multiplying it across the default packaged platform matrix
+- **Scope**: project initialization, two GitHub-backed installs, compile/deploy, and prompt startup through the built Linux x64 binary
+- **Trigger**: one `ci-runtime.yml` invocation on schedule or manual dispatch that fails the workflow on error (`continue-on-error` is not set); never pull requests or the generic integration script
+- **Selection mechanism**: the explicit test node with `-m live`; collection gates remain owned by `tests/integration/conftest.py`
+
 ## Running Tests Locally
 
 Integration tests live under `tests/integration/` and run via `pytest`
@@ -48,6 +71,7 @@ what the test family you want actually requires.
 | --- | --- | --- |
 | `requires_e2e_mode` | Opt-in for the heavyweight golden-scenario suite | `export APM_E2E_TESTS=1` |
 | `requires_network_integration` | Opt-in for tests that hit live registries | `export APM_RUN_INTEGRATION_TESTS=1` |
+| `requires_windows` | A Windows-only process or filesystem boundary | Run on Windows |
 | `requires_inference` | Opt-in for tests that call inference APIs | `export APM_RUN_INFERENCE_TESTS=1` |
 | `requires_github_token` | A token usable against `github.com` / GitHub Models | `export GITHUB_APM_PAT=...` (or `GITHUB_TOKEN`) |
 | `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
@@ -63,6 +87,66 @@ invocation is silent rather than red: every test is collected and
 reported as `SKIPPED` with a one-line reason, so you can see exactly
 what is missing and why.
 
+### Three marker axes
+
+Pytest markers compose across independent axes:
+
+| Axis | Question | Markers |
+| --- | --- | --- |
+| Behavioral | What boundary does the test cross? | `unit`, `component`, `e2e` |
+| Scheduling | When is the test selected? | `integration`, `slow`, `benchmark`, `live` |
+| Prerequisite | What environment must exist? | `requires_*` |
+| CI-selection | Is this test part of a named required CI gate? | `lifecycle_smoke` |
+
+`live` is both an opt-in scheduling marker and an external-service
+prerequisite. Behavioral markers do not replace prerequisite markers.
+`lifecycle_smoke` is orthogonal to all three: it does not describe a
+test's boundary, scheduling, or precondition, only that
+`ci.yml`'s required `lifecycle-smoke` job selects it via
+`-m lifecycle_smoke` (see Tier 3 above for the full rationale).
+
+The behavioral definitions are:
+
+| Marker | Definition |
+| --- | --- |
+| `unit` | Pure logic with no filesystem and no CLI |
+| `component` | In-process behavior that touches a filesystem or one command boundary |
+| `e2e` | A real installed CLI crossing at least one command boundary |
+
+`pyproject.toml` owns these definitions, while
+`tests/quality/critical_suite.toml` owns the finite classified module set.
+Directory names and `_e2e.py` suffixes are not proof of behavior.
+`test_policy_pinned_constraint_e2e.py` is `component` because it uses Click
+in-process; `test_core_smoke.py` is `e2e` because it invokes an installed
+binary through subprocess boundaries.
+
+To extend the manifest:
+
+1. Confirm the whole module has one behavioral boundary.
+2. Add its literal path and marker to `critical_suite.toml`.
+3. Add the module-level behavioral `pytestmark`, preserving any scheduling and
+   prerequisite markers.
+4. Document why behavior wins if the filename suggests another boundary.
+5. Run the contracts:
+
+```bash
+uv run --extra dev pytest -p no:cacheprovider -q tests/quality
+uv run --frozen python scripts/check_test_assertions.py
+uv run --frozen python scripts/check_exact_test_duplicates.py
+```
+
+The assertion and exact-duplicate baseline updaters only accept reductions.
+
+```bash
+uv run --frozen python scripts/check_test_assertions.py --update-baseline
+uv run --frozen python scripts/check_exact_test_duplicates.py --update-baseline
+```
+
+Provisional mode is CI-only and allowed only on draft pull requests.
+Contributor commands, ready pull requests, merge queue runs, and final
+validation are strict. Do not pass the internal provisional flag manually;
+remove `provisional` metadata after remeasurement and review.
+
 ### Common invocations
 
 ```bash
@@ -75,6 +159,102 @@ uv run pytest tests/integration/test_golden_scenario_e2e.py -v
 # Run only a marker family
 uv run pytest tests/integration -m requires_github_token -v
 ```
+
+### Hermetic lifecycle fixtures
+
+`tests/integration/test_hermetic_lifecycle_foundation.py` is the cross-module
+contract. Complete the [development setup](../development-guide/) first.
+
+| Utility | Owns | Contract test |
+| --- | --- | --- |
+| `isolated_apm_environment.py` | Child roots, environment, Python socket tripwire | `test_isolated_apm_environment_contract.py` |
+| `local_git_repository.py` | Deterministic local Git origins | `test_local_git_repository_factory_contract.py` |
+| `local_package.py` | Source-only package inputs | `test_local_package_factory_contract.py` |
+| `apm_lifecycle_runner.py` | Bounded process execution and evidence | `test_apm_lifecycle_runner_contract.py` |
+| `lifecycle_state.py` | Exact bytes and semantic durable-state receipts | `test_lifecycle_state_snapshot_contract.py` |
+| `artifact_snapshot.py` | Read-only filesystem observations | `test_artifact_snapshot_contract.py` |
+| `scenario_rows.py` | Immutable scenario data | `test_scenario_rows_contract.py` |
+
+Source fixtures author only source inputs; the real APM CLI creates lockfiles,
+deployed trees, compiled output, bundles, hashes, cache state, and audit
+reports.
+
+`IsolatedApmEnvironment` builds deterministic child environments for APM and
+its Git/GitHub/ADO/GitLab/SSH flows, then installs a best-effort Python socket
+tripwire. The environment contract is deliberately bounded: it isolates the
+APM, Git, GH, Azure, home, cache, and temporary roots used by these tests. It
+does not scan arbitrary variables or act as a general credential scrubber.
+
+It is also not an OS/native-code sandbox: executables found through `PATH`
+remain trusted, reflective access to CPython internals or native extensions can
+bypass Python monkey-patches, `file://` access is not confined by the OS, and
+hostile post-creation filesystem races are outside the contract.
+`GIT_ALLOW_PROTOCOL=file` and local `url.*.insteadOf` rewriting separately
+restrict Git transport in reviewed scenarios.
+
+Keep modules flat. Inside a pytest test with `tmp_path` and
+`apm_binary_path`, compose them directly:
+
+```python
+import os
+
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.artifact_snapshot import ArtifactSnapshot
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.local_package import LocalPackageFactory
+
+isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=os.environ)
+environment = isolated.subprocess_env()
+sources = LocalPackageFactory(isolated.package_root)
+project = sources.create("consumer", targets=("copilot",))
+sources.add_skill(
+    project,
+    "example",
+    "---\nname: example\ndescription: Fixture\n---\n# Example\n",
+)
+result = ApmLifecycleRunner((str(apm_binary_path),)).run(
+    ("install", "--target", "copilot"),
+    cwd=project.root,
+    env=environment,
+)
+snapshot = ArtifactSnapshot.capture(project.root)
+assert result.returncode == 0
+assert "apm.lock.yaml" in snapshot.paths
+```
+
+For auth-bearing remote-package scenarios, create a local origin with
+`LocalGitRepositoryFactory` and pass the complete environment returned by
+`url_rewrite_subprocess_env()` to `ApmLifecycleRunner`. That process-scoped Git
+rewrite survives the production auth environment builder; do not hand-merge
+`GIT_CONFIG_*` slots or rely on the older global-config-only rewrite.
+`ApmLifecycleRunner((str(apm_binary_path),))` invokes the fixture-selected
+console script. Packaged-binary tests belong to the separate platform lane.
+
+`test_packaged_virtual_file_lifecycle_e2e.py`,
+`test_deployed_files_e2e.py`, and
+`test_silent_adopt_existing_files_e2e.py` are narrow hermetic packaged
+counterparts to the live hero. They run the real binary against a local bare
+Git origin through process-scoped URL rewriting, then check package
+installation, deployment lifecycle, and exact lock provenance without
+credentials or live HTTP.
+
+```bash
+# The three hermetic packaged counterparts (real binary, local file:// origin, no creds):
+uv run pytest tests/integration/test_packaged_virtual_file_lifecycle_e2e.py -v
+uv run pytest tests/integration/test_deployed_files_e2e.py -v
+uv run pytest tests/integration/test_silent_adopt_existing_files_e2e.py -v
+
+# Supporting hermetic foundation + contract suites:
+uv run pytest tests/integration/test_local_package_factory_contract.py -v
+uv run pytest tests/integration/test_hermetic_lifecycle_foundation.py -v
+uv run pytest -n auto tests/integration/test_hermetic_lifecycle_foundation.py -v
+```
+
+These suites need no PAT and make no live HTTP calls: the packaged binary reaches
+the dependency through a process-scoped `file://` URL rewrite. If one fails with a
+network or authentication error, the rewrite did not apply -- confirm the test uses
+the `hermetic_packaged_sample` fixture (which sets `GIT_CONFIG_COUNT` and
+`GIT_ALLOW_PROTOCOL=file`) rather than invoking `apm` against the raw GitHub URL.
 
 ### Apm binary resolution
 
@@ -121,7 +301,7 @@ environment end-to-end; for local iteration prefer the direct
 ### GitHub Actions Workflow
 
 **On PR and merge queue:**
-1. PR-time unit checks run first; merge queue adds Linux smoke, integration, and release-validation gates.
+1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
 **On version tag releases:**
 1. Unit tests + Smoke tests
@@ -129,7 +309,6 @@ environment end-to-end; for local iteration prefer the direct
 3. **E2E golden scenario tests** (using built binaries)
 4. Create GitHub Release
 5. Publish to PyPI 
-6. Update Homebrew Formula
 
 **Manual workflow dispatch:**
 - Test builds (uploads as workflow artifacts)
@@ -159,9 +338,10 @@ The workflow ensures quality gates at each step:
 3. **release-validation** job - Final shipped-binary validation
 4. **create-release** job - GitHub release creation
 5. **publish-pypi** job - PyPI package publication
-6. **update-homebrew** job - Homebrew formula update
 
 Each stage must succeed before proceeding to the next, ensuring only fully validated releases reach users.
+
+The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap updates independently: it polls the latest APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
 
 ### Test Matrix
 
@@ -196,7 +376,16 @@ Promotion integration tests run on:
 - ✅ Parameter substitution works correctly
 - ✅ MCP integration functions (GitHub tools)
 - ✅ Binary artifacts work across platforms
-- ✅ Release pipeline integrity (GitHub Release → PyPI → Homebrew)
+- ✅ Release pipeline integrity (GitHub Release → PyPI)
+
+### Lifecycle Smoke Verifies:
+- Install content-hash roundtrip (Consume contract)
+- Virtual-skill lock convergence (Produce contract, adjacent to the #2226 ADO lock-coordinate fix)
+- Policy pinned-constraint enforcement (Govern contract)
+- The virtual/manifestless lifecycle matrix: install, lock, frozen-install, update, and audit stay consistent (the direct #2240 regression)
+- The ADO lock-coordinate single-owner guard (the direct #2226 regression)
+- Prune's merged-hook and ownership-sidecar reconciliation for the `claude` target (the direct #2249 regression -- an orphaned package's merged hook entries and sidecar markers must be cleaned up, not left pointing at deleted scripts)
+- No network, no credentials, no built binary required for any of the above
 
 ## Benefits
 
@@ -219,7 +408,6 @@ Promotion integration tests run on:
 - Guarantees shipped releases work end-to-end
 - Users can trust the README golden scenario
 - Cross-platform binary verification
-- Automatic Homebrew formula updates
 
 ## Debugging Test Failures
 
@@ -235,6 +423,11 @@ Promotion integration tests run on:
 - Check GitHub Models API availability
 - Review actual vs expected output
 - Test locally with same environment
+
+### Lifecycle Smoke Failures
+- These tests are hermetic -- no credentials, no built binary, no network (a real socket attempt raises `OSError`, it does not hang or retry). A failure is a genuine regression, not an environment issue.
+- Run the exact CI command from the "Run it locally" block under Tier 3 above to reproduce.
+- If the failure is about the CI job's shape (marker not registered, wrong `-m`/`--strict-markers` invocation, unbounded root, timeout, empty marker family, or required-check wiring) rather than test logic, check `tests/quality/test_ci_topology.py` -- that guard pins the job's contract and its own failure message will point at what drifted.
 - For hanging issues: Check command transformation in script runner (codex expects prompt content, not file paths)
 
 ## Adding New Tests
@@ -258,7 +451,3 @@ Promotion integration tests run on:
    so contributors without those credentials still get a clean
    `SKIPPED` rather than a hard failure.
 3. Keep tests focused and fast.
-
----
-
-This testing strategy ensures we ship with confidence while maintaining fast development cycles.

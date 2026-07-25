@@ -58,11 +58,24 @@ class CleanupResult:
 
     skipped_unmanaged: list[str] = field(default_factory=list)
     """Paths refused by the safety gates (validation failure, directory
-    entry, etc.). Not retained in ``deployed_files``."""
+    entry, etc.). Callers retain the prior ownership row when it exists."""
 
     deleted_targets: list[Path] = field(default_factory=list)
     """Absolute paths of deleted entries -- input to
     :meth:`BaseIntegrator.cleanup_empty_parents`."""
+
+    @property
+    def retained(self) -> list[str]:
+        """Return unique paths that were deliberately left on disk."""
+        return list(
+            dict.fromkeys(
+                [
+                    *self.failed,
+                    *self.skipped_user_edit,
+                    *self.skipped_unmanaged,
+                ]
+            )
+        )
 
 
 def _is_skill_directory_entry(rel_path: str) -> bool:

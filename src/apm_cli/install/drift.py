@@ -494,6 +494,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                 package_info = _build_package_info(lock_dep, install_path)
                 if lock_dep.local_path == _SELF_KEY:
                     package_info.root_local_project_root = project_root
+                    package_info.deployment_package_root = scratch_root
+                else:
+                    package_info.deployment_package_root = (
+                        lock_dep.to_dependency_ref().get_install_path(scratch_root / "apm_modules")
+                    )
                 dep_key = lock_dep.get_unique_key()
 
                 integrate_package_primitives(
@@ -514,7 +519,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     package_name=dep_key,
                     logger=None,
                     scope=None,
-                    skill_subset=None,
+                    skill_subset=tuple(package_info.dependency_ref.skill_subset or ()) or None,
                     ctx=None,
                     scratch_root=scratch_root,
                     # Honor per-dependency 'targets:' narrowing from apm.yml so the
@@ -661,6 +666,26 @@ def diff_scratch_against_project(
     scratch_files = _walk_managed(scratch_root, governed)
     project_files = _walk_managed(project_root, governed)
     tracked = _collect_tracked_files(lockfile)
+
+    # Imperative local bundles have no authored source tree for replay. Their
+    # deployed bytes are already bound by local_deployed_file_hashes and the
+    # policy/ci_checks.py::_check_content_integrity check, so comparing them to
+    # an empty scratch projection would misclassify every clean bundle file as
+    # orphaned.
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    local_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+    if local_bundle_paths:
+        scratch_files = {
+            relative_path: path
+            for relative_path, path in scratch_files.items()
+            if relative_path not in local_bundle_paths
+        }
+        project_files = {
+            relative_path: path
+            for relative_path, path in project_files.items()
+            if relative_path not in local_bundle_paths
+        }
 
     # Canvas extensions are executable bundles that the drift replay does
     # not re-integrate (their integrator is intentionally omitted from the

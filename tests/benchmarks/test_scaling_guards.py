@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
 from typing import Dict, List, Optional  # noqa: F401, UP035
+from unittest.mock import patch
 
 import pytest
 
@@ -294,7 +295,46 @@ class TestSemanticEquivalenceScaling:
 
 
 # ---------------------------------------------------------------------------
-# 6. should_exclude scaling with ** patterns
+# 6. Deployment manifest reconciliation scaling
+# ---------------------------------------------------------------------------
+
+
+def _reconcile_manifest_size(n: int) -> None:
+    from apm_cli.install.manifest_reconcile import union_preserving
+
+    current = [f"custom/current-{i}.json" for i in range(n // 2)]
+    prior = [*current, *(f"custom/prior-{i}.json" for i in range(n // 2))]
+    hashes = {path: f"sha256:{'ab' * 32}" for path in prior}
+    with patch("apm_cli.integration.targets.KNOWN_TARGETS", {}):
+        union_preserving(
+            current,
+            {path: hashes[path] for path in current},
+            prior,
+            hashes,
+            targets=[],
+        )
+
+
+class TestDeploymentManifestReconcileScaling:
+    """Manifest union must stay linear in the number of deployed paths."""
+
+    def test_scaling_ratio(self):
+        t_small = _median_time(lambda: _reconcile_manifest_size(1000), repeats=3)
+        t_large = _median_time(lambda: _reconcile_manifest_size(10000), repeats=3)
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 25, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7. should_exclude scaling with ** patterns
 # ---------------------------------------------------------------------------
 
 

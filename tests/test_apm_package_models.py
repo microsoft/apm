@@ -34,6 +34,39 @@ class TestDependencyReference:
         assert dep.reference is None
         assert dep.alias is None
 
+    def test_github_owner_repo_casing_has_one_identity(self):
+        """GitHub owner/repo casing must not create distinct package identities."""
+        mixed = DependencyReference.parse("Owner/Example-Package#v1.0.0")
+        lower = DependencyReference.parse("owner/example-package#v1.0.0")
+
+        assert mixed.repo_url == "owner/example-package"
+        assert mixed.get_identity() == lower.get_identity()
+        assert mixed.to_canonical() == lower.to_canonical()
+
+    def test_github_owner_repo_casing_has_one_dedup_key(self):
+        """GitHub owner/repo casing must not create distinct lock/dedup keys."""
+        mixed = DependencyReference.parse("https://github.com/Owner/Example-Package.git")
+        lower = DependencyReference.parse("owner/example-package")
+
+        assert mixed.get_unique_key() == lower.get_unique_key() == "owner/example-package"
+
+    def test_github_owner_repo_casing_has_one_install_path(self):
+        """GitHub owner/repo casing must not create distinct install directories."""
+        mixed = DependencyReference.parse("Owner/Example-Package")
+        lower = DependencyReference.parse("owner/example-package")
+        modules = Path("apm_modules")
+
+        assert mixed.get_install_path(modules) == lower.get_install_path(modules)
+        assert mixed.get_install_path(modules) == modules / "owner" / "example-package"
+
+    def test_generic_git_host_preserves_case_sensitive_repo_path(self):
+        """Unknown git hosts retain path casing because their semantics are unknown."""
+        mixed = DependencyReference.parse("https://git.example.com/Owner/Example-Package.git")
+        lower = DependencyReference.parse("https://git.example.com/owner/example-package.git")
+
+        assert mixed.repo_url == "Owner/Example-Package"
+        assert mixed.get_identity() != lower.get_identity()
+
     def test_parse_with_branch(self):
         """Test parsing with branch reference."""
         dep = DependencyReference.parse("user/repo#main")
@@ -583,6 +616,24 @@ class TestAPMPackage:
                 APMPackage.from_apm_yml(Path(f.name))
 
         Path(f.name).unlink()
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("name", "", "'name' must be a non-empty string"),
+            ("name", ["a", "b"], "'name' must be a non-empty string"),
+            ("version", 123, "'version' must be a non-empty string"),
+        ],
+    )
+    def test_from_apm_yml_rejects_invalid_identity(self, tmp_path, field, value, message):
+        """Manifest identity fields reject empty and wrong-typed native values."""
+        apm_yml = tmp_path / "apm.yml"
+        manifest = {"name": "valid-pkg", "version": "1.0.0"}
+        manifest[field] = value
+        apm_yml.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+        with pytest.raises(ValueError, match=message):
+            APMPackage.from_apm_yml(apm_yml)
 
     def test_from_apm_yml_invalid_yaml(self):
         """Test loading invalid YAML."""

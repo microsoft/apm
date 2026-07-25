@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from apm_cli.core.deployment_state import MaterializationStatus
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,  # noqa: F401
     HookIntegrator,
@@ -280,6 +281,33 @@ class TestVSCodeIntegration:
         assert (scripts_dir / "posttooluse.py").exists()
         assert (scripts_dir / "stop.py").exists()
         assert (scripts_dir / "userpromptsubmit.py").exists()
+
+    def test_copilot_version_emitted_on_fresh_install(self, temp_project):
+        """Fresh Copilot hook JSON must contain top-level "version": 1."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        integrator.integrate_package_hooks(pkg_info, temp_project)
+
+        hooks_path = temp_project / ".github" / "hooks" / "hookify-hooks.json"
+        config = json.loads(hooks_path.read_text())
+        assert config["version"] == 1
+
+    def test_copilot_unsupported_source_version_writes_nothing(self, temp_project):
+        """An unsupported native payload must fail before mutation."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        source_path = pkg_info.install_path / "hooks" / "hooks.json"
+        source_config = json.loads(source_path.read_text())
+        source_config["version"] = 3
+        source_path.write_text(json.dumps(source_config))
+
+        integrator = HookIntegrator()
+        result = integrator.integrate_package_hooks(pkg_info, temp_project)
+
+        hooks_path = temp_project / ".github" / "hooks" / "hookify-hooks.json"
+        assert not hooks_path.exists()
+        assert result.files_integrated == 0
+        assert result.materializations[0].status is MaterializationStatus.FAILED
 
     def test_integrate_learning_output_style_vscode(self, temp_project):
         """Test VSCode integration of learning-output-style plugin (different script dir)."""
@@ -1269,8 +1297,10 @@ class TestCursorIntegration:
         assert "Stop" in config["hooks"]
         assert "UserPromptSubmit" in config["hooks"]
 
-        # Check APM source marker for cleanup
-        assert config["hooks"]["PreToolUse"][0]["_apm_source"] == "hookify"
+        # Ownership stays in the external APM sidecar, not the native schema.
+        assert "_apm_source" not in config["hooks"]["PreToolUse"][0]
+        sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
+        assert sidecar["PreToolUse"][0]["_apm_source"] == "hookify"
 
         # Verify rewritten paths point to .cursor/hooks/ (normalize separators)
         cmd = config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -1314,7 +1344,9 @@ class TestCursorIntegration:
         assert config["hooks"]["afterFileEdit"][0]["command"] == "echo user-hook"
         # New hook added
         assert "Stop" in config["hooks"]
-        assert config["hooks"]["Stop"][0]["_apm_source"] == "pkg"
+        assert "_apm_source" not in config["hooks"]["Stop"][0]
+        sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
+        assert sidecar["Stop"][0]["_apm_source"] == "pkg"
 
     def test_additive_merge_same_event(self, temp_project):
         """Test that multiple packages can add hooks to the same event."""
@@ -1350,8 +1382,12 @@ class TestCursorIntegration:
         config = json.loads((temp_project / ".cursor" / "hooks.json").read_text())
         # Both entries present under Stop
         assert len(config["hooks"]["Stop"]) == 2
-        assert config["hooks"]["Stop"][0]["_apm_source"] == "ralph-loop"
-        assert config["hooks"]["Stop"][1]["_apm_source"] == "other-pkg"
+        assert all("_apm_source" not in entry for entry in config["hooks"]["Stop"])
+        sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
+        assert [entry["_apm_source"] for entry in sidecar["Stop"]] == [
+            "ralph-loop",
+            "other-pkg",
+        ]
 
     def test_scripts_copied_to_cursor_hooks_dir(self, temp_project):
         """Test that scripts are copied to .cursor/hooks/<pkg>/."""
@@ -2524,7 +2560,7 @@ class TestCodexHookIntegration:
         return pi
 
     def test_codex_hooks_merge_into_hooks_json(self):
-        """Hooks are merged into .codex/hooks.json with _apm_source markers."""
+        """Hooks use native Codex fields while ownership stays in a sidecar."""
         pi = self._make_package_info()
         integrator = HookIntegrator()
         result = integrator.integrate_package_hooks_codex(pi, self.root)
@@ -2535,7 +2571,9 @@ class TestCodexHookIntegration:
         data = json.loads(hooks_json.read_text())
         assert "SessionStart" in data["hooks"]
         entries = data["hooks"]["SessionStart"]
-        assert any(e.get("_apm_source") == "test-pkg" for e in entries)
+        assert all("_apm_source" not in entry for entry in entries)
+        sidecar = json.loads((self.root / ".codex" / "apm-hooks.json").read_text())
+        assert sidecar["SessionStart"][0]["_apm_source"] == "test-pkg"
 
     def test_codex_hooks_preserve_user_hooks(self):
         """Existing user hooks in .codex/hooks.json are preserved."""
@@ -2640,7 +2678,9 @@ class TestGeminiHookIntegration:
         # "Stop" is mapped to "SessionEnd" for Gemini
         assert "SessionEnd" in settings["hooks"]
         assert "Stop" not in settings["hooks"]
-        assert settings["hooks"]["SessionEnd"][0]["_apm_source"] == "ralph-loop"
+        assert "_apm_source" not in settings["hooks"]["SessionEnd"][0]
+        sidecar = json.loads((temp_project / ".gemini" / "apm-hooks.json").read_text())
+        assert sidecar["SessionEnd"][0]["_apm_source"] == "ralph-loop"
 
     def test_skips_when_no_gemini_dir(self, temp_project):
         """Gemini hooks are not deployed when .gemini/ does not exist."""
@@ -2970,14 +3010,14 @@ class TestScopeResolvedHookDeployment:
         assert result.files_integrated > 0
         assert (self.root / ".codex" / "hooks.json").exists()
 
-    def test_script_paths_rewritten_with_scope_root(self):
+    def test_script_paths_rewritten_with_scope_root(self, monkeypatch):
         """Script paths in hook commands use the scope-resolved root_dir."""
         # Create a hook with a script reference
         hooks_dir = self.pkg_dir / ".apm" / "hooks"
         script = hooks_dir / "run.sh"
         script.write_text("#!/bin/bash\necho test", encoding="utf-8")
         hooks_dir.joinpath("hooks.json").write_text(
-            json.dumps({"hooks": {"SessionStart": [{"type": "command", "command": "./run.sh"}]}}),
+            json.dumps({"hooks": {"sessionStart": [{"bash": "./run.sh"}]}}),
             encoding="utf-8",
         )
 
@@ -2995,6 +3035,49 @@ class TestScopeResolvedHookDeployment:
         scripts_dir = self.root / ".copilot" / "hooks" / "scripts" / "scope-pkg"
         assert scripts_dir.exists()
         assert (scripts_dir / "run.sh").exists()
+        hooks_config = json.loads(
+            (self.root / ".copilot" / "hooks" / "scope-pkg-hooks.json").read_text(encoding="utf-8")
+        )
+        cmd = hooks_config["hooks"]["sessionStart"][0]["bash"]
+        assert cmd == ".copilot/hooks/scripts/scope-pkg/run.sh", (
+            f"Project-scope Copilot command must be repo-relative; got {cmd!r}"
+        )
+        assert not Path(cmd).is_absolute(), (
+            f"Project-scope Copilot command must not be absolute; got {cmd!r}"
+        )
+        monkeypatch.chdir(self.root)
+        assert Path(cmd).resolve() == (scripts_dir / "run.sh").resolve()
+
+    def test_copilot_user_scope_writes_absolute_hook_paths(self, monkeypatch):
+        """Copilot user-scope hook commands must resolve from any cwd."""
+        hooks_dir = self.pkg_dir / ".apm" / "hooks"
+        script = hooks_dir / "run.sh"
+        script.write_text("#!/bin/bash\necho test", encoding="utf-8")
+        hooks_dir.joinpath("hooks.json").write_text(
+            json.dumps({"hooks": {"sessionStart": [{"bash": "./run.sh"}]}}),
+            encoding="utf-8",
+        )
+
+        copilot_target = self._make_target("copilot", ".copilot")
+        pi = _make_package_info(self.pkg_dir, "scope-pkg")
+        integrator = HookIntegrator()
+
+        integrator.integrate_hooks_for_target(
+            copilot_target,
+            pi,
+            self.root,
+            user_scope=True,
+        )
+
+        hooks_config = json.loads(
+            (self.root / ".copilot" / "hooks" / "scope-pkg-hooks.json").read_text(encoding="utf-8")
+        )
+        cmd = hooks_config["hooks"]["sessionStart"][0]["bash"]
+        assert Path(cmd).is_absolute(), f"User-scope Copilot command must be absolute; got {cmd!r}"
+        expected = (self.root / ".copilot" / "hooks" / "scripts" / "scope-pkg" / "run.sh").resolve()
+        assert cmd == str(expected)
+        monkeypatch.chdir(self.pkg_dir)
+        assert Path(cmd).resolve() == expected
 
     def test_sync_with_copilot_scope_prefix(self):
         """sync_integration removes .copilot/hooks/ files when target is present."""
@@ -3957,7 +4040,9 @@ class TestIssue1007Fixes:
 
         entries = self._read_codex_hooks(temp_project)["hooks"]["PreToolUse"]
         assert len(entries) == 1
-        assert entries[0]["_apm_source"] == "_local/sample-project"
+        assert "_apm_source" not in entries[0]
+        sidecar = json.loads((temp_project / ".codex" / "apm-hooks.json").read_text())
+        assert sidecar["PreToolUse"][0]["_apm_source"] == "_local/sample-project"
 
     def test_root_local_healer_preserves_dependency_source_entries(
         self,

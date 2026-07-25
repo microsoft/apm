@@ -15,7 +15,7 @@ APM resolves tokens per `(host, port, org)` pair. For each dependency, it walks 
 3. **Generic hosts** (other FQDNs such as Bitbucket): host-specific **git credential helper** or unauthenticated/public access -- **no** GitHub or GitLab platform env vars.
 
 Azure DevOps uses its own chain (`ADO_APM_PAT` -> Azure CLI bearer). See [Azure DevOps](#azure-devops).
-If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency).
+If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an unauthenticated attempt, APM removes inherited Git token and authorization-header environment settings.
 
 Results are cached per-process for each `(host, port, org)` key. All token-bearing requests use HTTPS.
 
@@ -53,7 +53,7 @@ For Artifactory registry proxies, use `PROXY_REGISTRY_TOKEN`. See [Registry prox
 
 For dedicated APM registries (`registries:` block in `apm.yml`), use `APM_REGISTRY_TOKEN_{NAME}`. See [Registry tokens](#registry-tokens) below.
 
-For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentication (consumer ramp)](../consumer/authentication/).
+For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentication (consumer ramp)](../../consumer/authentication/).
 
 ### Configuration variables
 
@@ -223,6 +223,10 @@ apm install dev.azure.com/myorg/myproject/myrepo
 2. AAD bearer via `az account get-access-token` if `az` is installed and signed in
 3. Otherwise: auth-failed error with guidance for both paths
 
+`apm marketplace check` uses this same chain for an ADO `marketplace.sourceBase`.
+Azure CLI credentials are passed to `git ls-remote` as a bearer Authorization
+header, never embedded in the repository URL.
+
 **Stale-PAT fallback:** if `ADO_APM_PAT` is set but rejected (HTTP 401), APM silently retries with the `az` bearer and emits:
 
 ```
@@ -230,7 +234,10 @@ apm install dev.azure.com/myorg/myproject/myrepo
 [!]     Consider unsetting the stale variable.
 ```
 
-This fallback applies to all ADO operations including `apm install --update`. If you have a stale `ADO_APM_PAT` but an active `az login` session, `apm install --update` will succeed transparently via the bearer retry.
+This fallback applies to all ADO operations, including semver tag enumeration,
+marketplace version resolution, and `apm install --update`. If you have a stale
+`ADO_APM_PAT` but an active `az login` session, the ref lookup succeeds
+transparently via the bearer retry.
 
 If both `ADO_APM_PAT` and the `az` bearer fail, APM emits:
 
@@ -247,7 +254,7 @@ This confirms both paths were attempted and neither succeeded, so the fix is eit
 [i] dev.azure.com -- token from ADO_APM_PAT
 ```
 
-Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../enterprise/security/#token-handling) for the full posture.
+Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../../enterprise/security/#token-handling) for the full posture.
 
 ### Auth-failure diagnostics
 
@@ -263,7 +270,7 @@ APM must classify a host as GitLab to use **GitLab REST v4** (for example `marke
 |--------|---------|
 | `GITLAB_HOST` | Environment variable for one self-managed GitLab FQDN (e.g. `git.company.com`) |
 | `APM_GITLAB_HOSTS` | Environment variable for several self-managed GitLab FQDNs, comma-separated |
-| `type: gitlab` | Manifest object-form hint for one bespoke GitLab host |
+| `type: gitlab` | Backend/API routing hint for one dependency; does not authorize global GitLab tokens |
 
 `gitlab.com` is detected automatically. For a single dependency on a bespoke
 hostname, use object form instead of a hostname convention:
@@ -273,7 +280,7 @@ hostname, use object form instead of a hostname convention:
   type: gitlab
 ```
 
-For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
+For `gitlab.com` and hosts explicitly trusted through `GITLAB_HOST` or `APM_GITLAB_HOSTS`, credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). `type: gitlab` selects backend/API routing only; other hinted hosts use host-scoped `git credential fill` or anonymous access and do not receive global GitLab tokens. GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
 
 ### REST headers (GitLab vs GitHub)
 
@@ -357,7 +364,7 @@ Package registries are experimental. Run `apm experimental enable registries` be
 `{NAME}` is the registry name, uppercased, with `-` and `.` mapped to `_` (e.g. `jf-skills` -> `JF_SKILLS`). When both forms are set, Bearer wins. When neither is set, APM tries the request anonymously and surfaces a remediation message on `401`/`403`.
 
 :::caution[Silent auth failures]
-A misspelled env var is indistinguishable from a missing token — APM attempts anonymous access and only reports auth failure from the server. Names `corp-main` and `corp.main` map to the same `APM_REGISTRY_TOKEN_CORP_MAIN`; do not register both. See [Registries guide — pitfalls](../guides/registries/#pitfalls).
+A misspelled env var is indistinguishable from a missing token — APM attempts anonymous access and only reports auth failure from the server. Names `corp-main` and `corp.main` map to the same `APM_REGISTRY_TOKEN_CORP_MAIN`; do not register both. See [Registries guide — pitfalls](../../guides/registries/#pitfalls).
 :::
 
 Token precedence (highest wins): `APM_REGISTRY_TOKEN_{NAME}` env var → `registry.<name>.token` in `~/.apm/config.json`.
@@ -369,7 +376,7 @@ apm config set registry.jf-skills.token eyJ...
 apm install
 ```
 
-For the full registry workflow — declaring registries, scoping dependencies, and lockfile semantics — see the [Registries guide](../guides/registries/).
+For the full registry workflow — declaring registries, scoping dependencies, and lockfile semantics — see the [Registries guide](../../guides/registries/).
 
 ## Troubleshooting
 
@@ -502,7 +509,7 @@ apm config set prefer-ssh false   # explicit: never prefer SSH for shorthand dep
 # export APM_GIT_PROTOCOL=https   # process-scoped; add to shell profile for persistence
 ```
 
-See [apm config](../reference/cli/config/) for the full transport-preference config surface.
+See [apm config](../../reference/cli/config/) for the full transport-preference config surface.
 
 ## Choosing transport (SSH vs HTTPS)
 
@@ -519,7 +526,7 @@ URL scheme honored exactly; shorthand uses HTTPS unless
 `git config url.<base>.insteadOf` rewrites it to SSH). For the full
 selection matrix, the `--ssh` / `--https` flags, the `APM_GIT_PROTOCOL`
 env var, and the `--allow-protocol-fallback` escape hatch, see
-[Manage dependencies: Transport selection](../consumer/manage-dependencies/).
+[Manage dependencies: Transport selection](../../consumer/manage-dependencies/).
 
 :::caution[Custom ports and cross-protocol fallback]
 When `--allow-protocol-fallback` is in effect, APM reuses the

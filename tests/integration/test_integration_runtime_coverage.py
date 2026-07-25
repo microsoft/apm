@@ -75,163 +75,140 @@ class TestSafeHookSlug:
         assert _safe_hook_slug("pre-tool.use") == "pre-tool.use"
 
 
-class TestKiroPatternsFromMatcher:
-    """Tests for _kiro_patterns_from_matcher()."""
+class TestKiroMatcher:
+    """Tests for neutral-IR to Kiro matcher rendering."""
 
     def test_string_patterns(self) -> None:
-        """Single string pattern is returned as a list."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_patterns_from_matcher
+        """Single string pattern is preserved."""
+        from apm_cli.integration.hook_ir import HookBinding
+        from apm_cli.integration.kiro_hook_integrator import _kiro_matcher
 
-        result = _kiro_patterns_from_matcher({"patterns": "**/*.py"})
-        assert result == ["**/*.py"]
+        binding = HookBinding(event="PreToolUse", handlers=(), metadata={"patterns": "**/*.py"})
+        assert _kiro_matcher(binding) == "**/*.py"
 
     def test_list_patterns(self) -> None:
-        """List of patterns is returned correctly."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_patterns_from_matcher
+        """Multiple legacy patterns become one Kiro matcher expression."""
+        from apm_cli.integration.hook_ir import HookBinding
+        from apm_cli.integration.kiro_hook_integrator import _kiro_matcher
 
-        result = _kiro_patterns_from_matcher({"patterns": ["*.ts", "*.js"]})
-        assert result == ["*.ts", "*.js"]
+        binding = HookBinding(
+            event="PreToolUse",
+            handlers=(),
+            metadata={"patterns": ["*.ts", "*.js"]},
+        )
+        assert _kiro_matcher(binding) == "*.ts|*.js"
 
     def test_list_patterns_filters_empty(self) -> None:
         """Empty strings in list patterns are filtered out."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_patterns_from_matcher
+        from apm_cli.integration.hook_ir import HookBinding
+        from apm_cli.integration.kiro_hook_integrator import _kiro_matcher
 
-        result = _kiro_patterns_from_matcher({"patterns": ["*.ts", "", "*.js"]})
-        assert result == ["*.ts", "*.js"]
-
-    def test_matcher_key_fallback(self) -> None:
-        """Falls back to 'matcher' key when 'patterns' is absent."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_patterns_from_matcher
-
-        result = _kiro_patterns_from_matcher({"matcher": "src/**"})
-        assert result == ["src/**"]
-
-    def test_no_patterns_returns_empty(self) -> None:
-        """Empty matcher dict returns empty list."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_patterns_from_matcher
-
-        result = _kiro_patterns_from_matcher({})
-        assert result == []
-
-    def test_empty_string_patterns_returns_empty(self) -> None:
-        """Empty-string pattern field returns empty list."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_patterns_from_matcher
-
-        result = _kiro_patterns_from_matcher({"patterns": "   "})
-        assert result == []
-
-
-class TestKiroThenFromAction:
-    """Tests for _kiro_then_from_action()."""
-
-    def test_ask_agent_type(self) -> None:
-        """type=askAgent returns askAgent then object with prompt."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_then_from_action
-
-        result = _kiro_then_from_action(
-            {"type": "askAgent", "prompt": "Do something"},
-            command_keys=("bash", "command"),
+        binding = HookBinding(
+            event="PreToolUse",
+            handlers=(),
+            metadata={"patterns": ["*.ts", "", "*.js"]},
         )
-        assert result == {"type": "askAgent", "prompt": "Do something"}
+        assert _kiro_matcher(binding) == "*.ts|*.js"
 
-    def test_prompt_string_shorthand(self) -> None:
-        """Dict with 'prompt' key (no type) maps to askAgent."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_then_from_action
+    def test_neutral_matcher_takes_precedence(self) -> None:
+        """The neutral matcher field is rendered directly."""
+        from apm_cli.integration.hook_ir import HookBinding
+        from apm_cli.integration.kiro_hook_integrator import _kiro_matcher
 
-        result = _kiro_then_from_action(
-            {"prompt": "Run tests"},
-            command_keys=("bash", "command"),
+        binding = HookBinding(event="PreToolUse", handlers=(), matcher="src/**")
+        assert _kiro_matcher(binding) == "src/**"
+
+    def test_no_patterns_returns_none(self) -> None:
+        """An unscoped binding omits the native matcher."""
+        from apm_cli.integration.hook_ir import HookBinding
+        from apm_cli.integration.kiro_hook_integrator import _kiro_matcher
+
+        assert _kiro_matcher(HookBinding(event="Stop", handlers=())) is None
+
+    def test_empty_string_patterns_returns_none(self) -> None:
+        """An empty legacy pattern does not create a native matcher."""
+        from apm_cli.integration.hook_ir import HookBinding
+        from apm_cli.integration.kiro_hook_integrator import _kiro_matcher
+
+        binding = HookBinding(event="Stop", handlers=(), metadata={"patterns": "   "})
+        assert _kiro_matcher(binding) is None
+
+
+class TestKiroAction:
+    """Tests for neutral-IR to Kiro v1 action rendering."""
+
+    def test_prompt_handler(self) -> None:
+        """Portable prompt metadata becomes a Kiro agent action."""
+        from apm_cli.integration.hook_ir import HookHandler
+        from apm_cli.integration.kiro_hook_integrator import _kiro_action
+
+        result = _kiro_action(
+            HookHandler(command=None, metadata={"type": "askAgent", "prompt": "Do something"})
         )
-        assert result == {"type": "askAgent", "prompt": "Run tests"}
+        assert result == {"type": "agent", "prompt": "Do something"}
 
-    def test_bash_command_key(self) -> None:
-        """Dict with 'bash' key maps to runCommand."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_then_from_action
+    def test_command_handler(self) -> None:
+        """Portable command intent becomes a Kiro command action."""
+        from apm_cli.integration.hook_ir import HookHandler
+        from apm_cli.integration.kiro_hook_integrator import _kiro_action
 
-        result = _kiro_then_from_action(
-            {"bash": "npm test"},
-            command_keys=("bash", "command"),
-        )
-        assert result == {"type": "runCommand", "command": "npm test"}
-
-    def test_command_key(self) -> None:
-        """Dict with 'command' key maps to runCommand."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_then_from_action
-
-        result = _kiro_then_from_action(
-            {"command": "make lint"},
-            command_keys=("bash", "command"),
-        )
-        assert result == {"type": "runCommand", "command": "make lint"}
+        result = _kiro_action(HookHandler(command="npm test", timeout_seconds=5))
+        assert result == {"type": "command", "command": "npm test", "timeout": 5}
 
     def test_empty_prompt_returns_none(self) -> None:
-        """askAgent with blank prompt returns None."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_then_from_action
+        """A blank prompt cannot produce a Kiro action."""
+        from apm_cli.integration.hook_ir import HookHandler
+        from apm_cli.integration.kiro_hook_integrator import _kiro_action
 
-        result = _kiro_then_from_action(
-            {"type": "askAgent", "prompt": "   "},
-            command_keys=("bash",),
+        result = _kiro_action(
+            HookHandler(command=None, metadata={"type": "askAgent", "prompt": "   "})
         )
         assert result is None
 
-    def test_no_matching_key_returns_none(self) -> None:
-        """Dict with no matching command key returns None."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_then_from_action
+    def test_empty_handler_returns_none(self) -> None:
+        """A handler without command or prompt has no Kiro action."""
+        from apm_cli.integration.hook_ir import HookHandler
+        from apm_cli.integration.kiro_hook_integrator import _kiro_action
 
-        result = _kiro_then_from_action(
-            {"unknown_key": "something"},
-            command_keys=("bash", "command"),
-        )
-        assert result is None
+        assert _kiro_action(HookHandler(command=None)) is None
 
 
 class TestKiroHookDocument:
     """Tests for _kiro_hook_document()."""
 
-    def test_builds_document_with_patterns(self) -> None:
-        """Document includes patterns in 'when' when provided."""
+    def test_builds_v1_document_with_matcher(self) -> None:
+        """Document uses the current Kiro v1 hook container."""
         from apm_cli.integration.kiro_hook_integrator import _kiro_hook_document
 
         doc = _kiro_hook_document(
-            name="my-pkg preToolUse 1",
-            description="A description",
-            event_name="preToolUse",
-            patterns=["**/*.py"],
-            then={"type": "runCommand", "command": "echo hi"},
+            name="my-pkg PreToolUse 1",
+            event_name="PreToolUse",
+            matcher="**/*.py",
+            action={"type": "command", "command": "echo hi"},
         )
-        assert doc["name"] == "my-pkg preToolUse 1"
-        assert doc["version"] == "1.0.0"
-        assert doc["when"]["type"] == "preToolUse"
-        assert doc["when"]["patterns"] == ["**/*.py"]
-        assert doc["then"] == {"type": "runCommand", "command": "echo hi"}
-        assert doc["description"] == "A description"
+        assert doc == {
+            "version": "v1",
+            "hooks": [
+                {
+                    "name": "my-pkg PreToolUse 1",
+                    "trigger": "PreToolUse",
+                    "matcher": "**/*.py",
+                    "action": {"type": "command", "command": "echo hi"},
+                }
+            ],
+        }
 
-    def test_builds_document_without_patterns(self) -> None:
-        """Document omits 'patterns' from 'when' when list is empty."""
+    def test_builds_document_without_matcher(self) -> None:
+        """Document omits matcher when the neutral binding is unscoped."""
         from apm_cli.integration.kiro_hook_integrator import _kiro_hook_document
 
         doc = _kiro_hook_document(
             name="pkg hook 1",
-            description=None,
-            event_name="postToolUse",
-            patterns=[],
-            then={"type": "askAgent", "prompt": "Check"},
+            event_name="Stop",
+            matcher=None,
+            action={"type": "agent", "prompt": "Check"},
         )
-        assert "patterns" not in doc["when"]
-        assert "description" not in doc
-
-    def test_no_description_omitted(self) -> None:
-        """None description is omitted from the document."""
-        from apm_cli.integration.kiro_hook_integrator import _kiro_hook_document
-
-        doc = _kiro_hook_document(
-            name="x",
-            description=None,
-            event_name="ev",
-            patterns=[],
-            then={"type": "runCommand", "command": "ls"},
-        )
-        assert "description" not in doc
+        assert "matcher" not in doc["hooks"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +293,7 @@ class TestIntegrateKiroHooksFlow:
         json_files = list(hooks_dir.glob("*.json"))
         assert len(json_files) == 1
         doc = json.loads(json_files[0].read_text(encoding="utf-8"))
-        assert doc["then"]["type"] == "runCommand"
+        assert doc["hooks"][0]["action"]["type"] == "command"
 
     def test_adopts_identical_existing_file(self, tmp_path: Path) -> None:
         """When file already has identical content, it is adopted not re-written."""
@@ -347,15 +324,14 @@ class TestIntegrateKiroHooksFlow:
         from apm_cli.integration.kiro_hook_integrator import _kiro_hook_document, _safe_hook_slug
 
         doc = _kiro_hook_document(
-            name="my-pkg preToolUse 1",
-            description=None,
-            event_name="preToolUse",
-            patterns=[],
-            then={"type": "runCommand", "command": "make test"},
+            name="my-pkg PreToolUse 1",
+            event_name="PreToolUse",
+            matcher=None,
+            action={"type": "command", "command": "make test"},
         )
         expected_filename = (
             f"{_safe_hook_slug('my-pkg')}-{_safe_hook_slug('hooks')}-"
-            f"{_safe_hook_slug('preToolUse')}-1.json"
+            f"{_safe_hook_slug('PreToolUse')}-1.json"
         )
         target = hooks_dir / expected_filename
         target.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")

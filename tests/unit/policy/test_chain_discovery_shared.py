@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -142,6 +142,28 @@ class TestChainResolution:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
+    def test_fully_permissive_chain_reports_empty_outcome(
+        self,
+        mock_discover: MagicMock,
+        mock_write_cache: MagicMock,
+    ) -> None:
+        leaf = _make_policy(extends="parent/.github")
+        leaf_fetch = _make_fetch(policy=leaf, source="org:child/.github", cached=False)
+        parent_fetch = _make_fetch(
+            policy=_make_policy(),
+            source="org:parent/.github",
+            cached=False,
+        )
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+
+        result = discover_policy_with_chain(Path("/fake"))
+
+        assert result.outcome == "empty"
+        assert result.policy is not None
+        mock_write_cache.assert_called_once()
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
     def test_no_extends_no_chain_resolution(self, mock_discover, mock_write_cache):
         """Without extends:, no chain resolution or re-caching happens."""
         policy = _make_policy(enforcement="warn")
@@ -164,6 +186,43 @@ class TestChainResolution:
         mock_write_cache.assert_not_called()
         # discover_policy called only once (no parent fetch)
         assert mock_discover.call_count == 1
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_no_cache_reaches_every_parent(
+        self, mock_discover: MagicMock, mock_write_cache: MagicMock
+    ) -> None:
+        leaf = _make_policy(extends="parent/.github", deny=("child/deny",))
+        leaf_fetch = _make_fetch(policy=leaf, source="org:child/.github", cached=False)
+        parent = _make_policy(enforcement="block", deny=("parent/deny",))
+        parent_fetch = _make_fetch(policy=parent, source="org:parent/.github", cached=False)
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+        discover_policy_with_chain(Path("/fake"), no_cache=True)
+        assert mock_discover.call_args_list == [
+            call(
+                Path("/fake"),
+                policy_override=None,
+                no_cache=True,
+                expected_hash=None,
+            ),
+            call(Path("/fake"), policy_override="parent/.github", no_cache=True),
+        ]
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_merged_cache_retains_leaf_raw_bytes_hash(
+        self, mock_discover: MagicMock, mock_write_cache: MagicMock
+    ) -> None:
+        leaf = _make_policy(extends="parent/.github", deny=("child/deny",))
+        leaf_fetch = _make_fetch(policy=leaf, source="org:child/.github", cached=False)
+        leaf_fetch.raw_bytes_hash = "sha256:" + ("a" * 64)
+        parent_fetch = _make_fetch(
+            policy=_make_policy(enforcement="block"),
+            source="org:parent/.github",
+        )
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+        discover_policy_with_chain(Path("/fake"))
+        assert mock_write_cache.call_args.kwargs["raw_bytes_hash"] == "sha256:" + ("a" * 64)
 
 
 # ======================================================================
@@ -362,19 +421,10 @@ class TestMultiLevelExtendsChain:
             discover_policy_with_chain(Path("/fake"))
         assert str(MAX_CHAIN_DEPTH) in str(exc_info.value)
 
-    @patch("apm_cli.policy.discovery._rich_warning", create=True)
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_partial_chain_emits_warning_and_uses_resolved_policies(
-        self, mock_discover, mock_write_cache, _mock_warn_unused
-    ):
-        """leaf -> mid -> root(404): partial chain (leaf+mid) is used and warning emitted.
-
-        Design choice: when a parent fetch fails midway, we merge the chain
-        we managed to resolve and emit `_rich_warning` so the operator
-        learns that an upstream policy was unreachable.
-        """
-        from apm_cli.utils import console as _console
+    def test_partial_chain_fails_closed(self, mock_discover, mock_write_cache):
+        """leaf -> mid -> root(404) yields no enforceable partial policy."""
 
         leaf = _make_policy(enforcement="warn", extends="org-mid/.github")
         mid = _make_policy(enforcement="warn", extends="enterprise-root/.github")
@@ -391,23 +441,13 @@ class TestMultiLevelExtendsChain:
 
         mock_discover.side_effect = [leaf_fetch, mid_fetch, root_fetch]
 
-        with patch.object(_console, "_rich_warning") as mock_warn:
-            result = discover_policy_with_chain(Path("/fake"))
+        result = discover_policy_with_chain(Path("/fake"))
 
-        # We still got a merged policy (leaf + mid).
-        assert result.policy is not None
-
-        # Cache write happened with the partial 2-level chain_refs.
-        kw = mock_write_cache.call_args
-        chain_refs = kw.kwargs.get("chain_refs") or kw[1].get("chain_refs")
-        assert len(chain_refs) == 2
-
-        # Warning was emitted with the unreachable ref + count.
-        assert mock_warn.called
-        warn_msg = mock_warn.call_args[0][0]
-        assert "incomplete" in warn_msg.lower()
-        assert "enterprise-root/.github" in warn_msg
-        assert "2 of 3" in warn_msg
+        assert result.policy is None
+        assert result.outcome == "incomplete_chain"
+        assert "enterprise-root/.github" in (result.error or "")
+        assert "2 of 3" in (result.error or "")
+        mock_write_cache.assert_not_called()
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)

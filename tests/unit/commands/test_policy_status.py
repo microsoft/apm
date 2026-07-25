@@ -276,26 +276,23 @@ class TestStatusJsonOutput:
 
 
 class TestStatusNoCache:
-    def test_no_cache_triggers_fresh_fetch(self, runner):
-        result_obj = PolicyFetchResult(
-            source="org:contoso/.github",
-            outcome="absent",
-        )
+    def test_no_cache_routes_through_chain_aware_discovery(self, runner):
+        result_obj = PolicyFetchResult(source="org:contoso/.github", outcome="absent")
         with (
             patch(
                 "apm_cli.commands.policy.discover_policy",
+                side_effect=AssertionError("lower-level discovery bypass"),
+                create=True,
+            ),
+            patch(
+                "apm_cli.commands.policy.discover_policy_with_chain",
                 return_value=result_obj,
-            ) as mock_disc,
-            patch("apm_cli.commands.policy.discover_policy_with_chain") as mock_chain,
+            ) as mock_chain,
         ):
             result = runner.invoke(policy_group, ["status", "--no-cache"])
         assert result.exit_code == 0, result.output
-        # --no-cache must bypass the chain helper and call discover_policy
-        # with no_cache=True so the cache layer is skipped.
-        mock_chain.assert_not_called()
-        mock_disc.assert_called_once()
-        _, kwargs = mock_disc.call_args
-        assert kwargs.get("no_cache") is True
+        mock_chain.assert_called_once()
+        assert mock_chain.call_args.kwargs["no_cache"] is True
 
 
 class TestStatusPolicySourceOverride:
@@ -316,7 +313,42 @@ class TestStatusPolicySourceOverride:
         assert data["source"].startswith("file:")
         assert str(policy_file) in data["source"]
 
-    def test_policy_source_routes_through_discover_policy(self, runner):
+    def test_json_surfaces_unknown_top_level_key_warning(self, runner, tmp_path):
+        policy_file = tmp_path / "apm-policy.yml"
+        policy_file.write_text(
+            ("version: '1.0'\nenforcment: true\ndependencies:\n  deny: [blocked/package]\n"),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            policy_group,
+            ["status", "--check", "--policy-source", str(policy_file), "--json"],
+        )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["warnings"] == ["Unknown top-level policy key: 'enforcment'"]
+
+    def test_json_preserves_warning_when_policy_has_schema_errors(self, runner, tmp_path):
+        policy_file = tmp_path / "apm-policy.yml"
+        policy_file.write_text(
+            ("version: '1.0'\nenforcment: true\ncache: []\ndependencies:\n  allow: ''\n"),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            policy_group,
+            ["status", "--check", "--policy-source", str(policy_file), "--json"],
+        )
+
+        assert result.exit_code == 1, result.output
+        data = json.loads(result.output)
+        assert data["error"] is not None
+        assert "cache must be a YAML mapping" in data["error"]
+        assert "dependencies.allow must be a YAML list" in data["error"]
+        assert data["warnings"] == ["Unknown top-level policy key: 'enforcment'"]
+
+    def test_policy_source_routes_through_chain_aware_discovery(self, runner):
         result_obj = PolicyFetchResult(
             policy=_rich_policy(),
             source="url:https://example.com/p.yml",
@@ -325,19 +357,21 @@ class TestStatusPolicySourceOverride:
         with (
             patch(
                 "apm_cli.commands.policy.discover_policy",
+                side_effect=AssertionError("lower-level discovery bypass"),
+                create=True,
+            ),
+            patch(
+                "apm_cli.commands.policy.discover_policy_with_chain",
                 return_value=result_obj,
-            ) as mock_disc,
-            patch("apm_cli.commands.policy.discover_policy_with_chain") as mock_chain,
+            ) as mock_chain,
         ):
             result = runner.invoke(
                 policy_group,
                 ["status", "--policy-source", "https://example.com/p.yml"],
             )
         assert result.exit_code == 0, result.output
-        mock_chain.assert_not_called()
-        mock_disc.assert_called_once()
-        _, kwargs = mock_disc.call_args
-        assert kwargs.get("policy_override") == "https://example.com/p.yml"
+        mock_chain.assert_called_once()
+        assert mock_chain.call_args.kwargs["policy_override"] == "https://example.com/p.yml"
 
 
 class TestStatusExitCodes:

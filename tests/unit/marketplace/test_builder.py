@@ -1291,7 +1291,30 @@ class TestGetResolverForHostTokenIsolation:
         resolver = builder._get_resolver_for_host("ghe.example.com")
         assert resolver._host == "ghe.example.com"
         assert resolver._token == "ghs_ghe_specific_token"
+        assert resolver._auth_scheme == "basic"
         fake_auth.resolve.assert_called_once_with("ghe.example.com")
+
+    def test_ado_bearer_auth_scheme_reaches_resolver(self, tmp_path: Path) -> None:
+        """ADO bearer contexts retain their scheme for header injection."""
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=False))
+        fake_auth = MagicMock()
+        fake_auth.resolve.return_value = SimpleNamespace(
+            token="ado_bearer_token",
+            source="AAD_BEARER_AZ_CLI",
+            auth_scheme="bearer",
+        )
+        builder._auth_resolver = fake_auth
+
+        resolver = builder._get_resolver_for_host("dev.azure.com", org="contoso")
+
+        assert resolver._host == "dev.azure.com"
+        assert resolver._token == "ado_bearer_token"
+        assert resolver._auth_scheme == "bearer"
+        fake_auth.resolve.assert_called_once_with("dev.azure.com", org="contoso")
 
     def test_per_host_resolver_is_cached(self, tmp_path: Path) -> None:
         """Repeated lookups for the same host return the same instance."""

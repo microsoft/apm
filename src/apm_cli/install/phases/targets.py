@@ -113,6 +113,46 @@ def _read_yaml_targets(ctx) -> list[str] | None:
     return result if result else None
 
 
+def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
+    """Return the scope-applied target profiles whose lockfile entries are legitimate.
+
+    Reads ``targets:``/``target:`` from the consumer's ``apm.yml``, maps the
+    canonical names to :class:`~apm_cli.integration.targets.TargetProfile`
+    instances scoped the same way ``ctx.targets`` is, and augments them with the
+    non-canonical gated/dynamic targets (see below). Returns ``None`` when the
+    manifest declares no targets (auto-detect or ``--target``-only consumers) --
+    the signal for lockfile reconciliation to fall back to legacy preserve-all.
+
+    Motivation (issue #2059): ``union_preserving`` must distinguish a target the
+    consumer legitimately uses but did not install in THIS run (e.g. a
+    ``--target``-narrowed sibling target -- preserve) from a target the consumer
+    NEVER declares (e.g. a dependency's package-declared ``windsurf`` paths the
+    consumer has not activated). The latter are inactive-target *ghosts*: they
+    can never be written on disk, yet a plain target-scoped union re-preserves
+    them on every install, so ``apm audit --ci`` fails ``deployed-files-present``
+    permanently on fresh checkouts. Knowing the declared universe lets the union
+    drop those ghosts while still honouring the #1716 multi-target contract.
+    """
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.manifest_reconcile import (
+        declared_target_profiles as profiles_for_project,
+    )
+
+    try:
+        names = _read_yaml_targets(ctx)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        # Any resolution error (missing apm_package, conflicting keys already
+        # surfaced by the targets phase) -> unknown universe, preserve-all.
+        return None
+    if not names:
+        return None
+    is_user = getattr(ctx, "scope", None) is InstallScope.USER
+    package_path = getattr(ctx.apm_package, "package_path", None)
+    if package_path is None:
+        return None
+    return profiles_for_project(Path(package_path), user_scope=is_user)
+
+
 def _create_target_dirs(
     targets: Iterable[TargetProfile],
     project_root: Path,
@@ -375,6 +415,13 @@ def _resolve_targets_by_scope(
             parts = [t.strip() for t in raw_override.split(",") if t.strip()]
         else:
             parts = list(raw_override)
+        from apm_cli.core.target_catalog import expand_all
+
+        parts = [
+            expanded
+            for part in parts
+            for expanded in (expand_all("install") if part == "all" else (part,))
+        ]
         # Multi-token CLI parsing returns runtime aliases; convert them before filtering.
         parts = _normalize_runtime_target_aliases(parts)
         parts = [p for p in parts if p in _CANONICAL]
@@ -481,6 +528,10 @@ def run(ctx: InstallContext) -> None:
     # Resolve effective explicit target: CLI --target wins, then apm.yml,
     # then user-scoped config default target.
     _explicit = ctx.target_override or config_target or None
+    if _explicit == "all":
+        from apm_cli.core.target_catalog import expand_all
+
+        _explicit = list(expand_all("install"))
 
     # ------------------------------------------------------------------
     # Deprecation warning for legacy '--target agents' alias (cli-review §1)
@@ -526,8 +577,8 @@ def run(ctx: InstallContext) -> None:
     # the pre-refactor mega-function.
     detect_target(
         project_root=ctx.project_root,
-        explicit_target=_explicit,
-        config_target=config_target,
+        explicit_target=_explicit if isinstance(_explicit, str) else None,
+        config_target=config_target if isinstance(config_target, str) else None,
     )
 
     # ------------------------------------------------------------------

@@ -32,6 +32,16 @@ class TestLockedDependency:
         dep = LockedDependency(repo_url="owner/repo", host="github.com")
         assert dep.get_unique_key() == "owner/repo"
 
+    def test_github_owner_repo_casing_migrates_to_one_lock_key(self):
+        mixed = LockedDependency.from_dict(
+            {"repo_url": "Owner/Example-Package", "host": "github.com"}
+        )
+        lower = LockedDependency(repo_url="owner/example-package", host="github.com")
+
+        assert mixed.repo_url == "owner/example-package"
+        assert mixed.get_unique_key() == lower.get_unique_key()
+        assert mixed.to_dict()["repo_url"] == "owner/example-package"
+
     def test_get_unique_key_includes_non_default_host(self):
         dep = LockedDependency(repo_url="team/skills", host="gitea.myorg.com")
         assert dep.get_unique_key() == "gitea.myorg.com/team/skills"
@@ -497,6 +507,11 @@ class TestLockFileSemanticEquivalence:
     def test_changed_mcp_configs_not_equivalent(self):
         a = self._make_lock(mcp_configs={"s": {"cmd": "a"}})
         b = self._make_lock(mcp_configs={"s": {"cmd": "b"}})
+        assert not a.is_semantically_equivalent(b)
+
+    def test_changed_mcp_config_provenance_not_equivalent(self):
+        a = self._make_lock(mcp_config_provenance={"s": "package-a"})
+        b = self._make_lock(mcp_config_provenance={"s": "package-b"})
         assert not a.is_semantically_equivalent(b)
 
     def test_changed_lsp_servers_not_equivalent(self):

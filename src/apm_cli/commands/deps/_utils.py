@@ -5,13 +5,16 @@ from typing import Any
 
 from ...constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage
+from ...utils.yaml_io import load_yaml
 
 
 def _scan_installed_packages(apm_modules_dir: Path) -> list:
     """Scan *apm_modules_dir* for installed package paths.
 
-    Walks the tree to find directories containing ``apm.yml`` or ``.apm``,
-    supporting GitHub (2-level), ADO (3-level), and subdirectory packages.
+    Walks the tree to find top-level directories containing ``apm.yml`` or
+    ``.apm``, supporting GitHub (2-level), ADO (3-level), and subdirectory
+    packages. Package manifests nested below another package are part of that
+    parent package and are excluded.
 
     Returns:
         List of ``"owner/repo"`` or ``"org/project/repo"`` path keys.
@@ -24,6 +27,8 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
             continue
         if not ((candidate / APM_YML_FILENAME).exists() or (candidate / APM_DIR).exists()):
             continue
+        if _is_nested_under_package(candidate, apm_modules_dir):
+            continue
         rel_parts = candidate.relative_to(apm_modules_dir).parts
         if len(rel_parts) >= 2:
             installed.append("/".join(rel_parts))
@@ -33,16 +38,16 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
 def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     """Check if *candidate* is a sub-directory of another installed package.
 
-    When a plugin ships ``skills/*/SKILL.md`` at its root (outside ``.apm/``),
-    the ``rglob`` scan would otherwise treat each skill sub-directory as an
-    independent package.  This helper walks up from *candidate* towards
-    *apm_modules_path* and returns ``True`` if any intermediate parent already
-    contains ``apm.yml``  -- meaning the candidate is a deployment artifact, not
-    a standalone package.
+    When a package ships nested package or skill manifests, the ``rglob`` scan
+    would otherwise treat each sub-directory as an independent package. This
+    helper walks up from *candidate* towards *apm_modules_path* and returns
+    ``True`` if any intermediate parent already contains ``apm.yml`` or
+    ``.apm`` -- meaning the candidate is a deployment artifact, not a standalone
+    package.
     """
     parent = candidate.parent
     while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714
-        if (parent / APM_YML_FILENAME).exists():
+        if (parent / APM_YML_FILENAME).exists() or (parent / APM_DIR).exists():
             return True
         parent = parent.parent
     return False
@@ -154,6 +159,35 @@ def _get_detailed_context_counts(package_path: Path) -> dict[str, int]:
     return counts
 
 
+def _tolerant_identity(package_path: Path, apm_yml_path: Path) -> dict[str, str] | None:
+    """Best-effort name/version read for the tolerant ``deps`` display paths.
+
+    ``APMPackage.from_apm_yml`` is the strict identity authority: it rejects
+    empty/non-string ``name`` and ``version`` so ``audit`` and ``policy``
+    surfaces fail schema-invalid manifests. The ``deps list`` / ``deps info``
+    display commands are a different surface -- they must stay tolerant so a
+    manifest that merely omits or empties ``version`` still renders as
+    ``@unknown`` rather than an alarming ``@error`` that masks the package.
+
+    Returns a ``{"name", "version"}`` dict on a best-effort read, or ``None``
+    only when the apm.yml cannot be parsed at all (genuinely malformed YAML),
+    which the callers surface as ``error``.
+    """
+    try:
+        data = load_yaml(apm_yml_path)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw_name = data.get("name")
+    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else package_path.name
+    raw_version = data.get("version")
+    version = (
+        raw_version.strip() if isinstance(raw_version, str) and raw_version.strip() else "unknown"
+    )
+    return {"name": name, "version": version}
+
+
 def _get_package_display_info(package_path: Path) -> dict[str, str]:
     """Get package display information."""
     try:
@@ -173,10 +207,17 @@ def _get_package_display_info(package_path: Path) -> dict[str, str]:
                 "version": "unknown",
             }
     except Exception:
+        identity = _tolerant_identity(package_path, package_path / APM_YML_FILENAME)
+        if identity is None:
+            return {
+                "display_name": f"{package_path.name}@error",
+                "name": package_path.name,
+                "version": "error",
+            }
         return {
-            "display_name": f"{package_path.name}@error",
-            "name": package_path.name,
-            "version": "error",
+            "display_name": f"{identity['name']}@{identity['version']}",
+            "name": identity["name"],
+            "version": identity["version"],
         }
 
 
@@ -228,6 +269,22 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
                 "hooks": primitives.get("hooks", 0),
             }
     except Exception as e:
+        identity = _tolerant_identity(package_path, package_path / APM_YML_FILENAME)
+        if identity is not None:
+            # Tolerant display: a readable manifest with incomplete identity
+            # (e.g. empty/missing version) renders gracefully -- symmetric with
+            # `deps list` -- instead of masking the package behind an error.
+            return {
+                "name": identity["name"],
+                "version": identity["version"],
+                "description": "apm.yml identity incomplete",
+                "author": "Unknown",
+                "source": "local",
+                "install_path": str(package_path.resolve()),
+                "context_files": _get_detailed_context_counts(package_path),
+                "workflows": 0,
+                "hooks": 0,
+            }
         return {
             "name": package_path.name,
             "version": "error",

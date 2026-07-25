@@ -796,6 +796,28 @@ class TestReplayFrameTranslation:
         assert "tmp" not in result
         assert "real_repo/MANIFESTO.md" not in result
 
+    def test_dependency_replay_uses_deployment_package_root(self, tmp_path):
+        """Dependency replay must retain its canonical scratch install path."""
+        source_root = tmp_path / "source_package"
+        source_dir = source_root / ".apm" / "skills" / "demo"
+        source_dir.mkdir(parents=True)
+        (source_root / "MANIFESTO.md").write_text("# Manifesto", encoding="utf-8")
+        source_file = source_dir / "SKILL.md"
+        source_file.write_text("placeholder", encoding="utf-8")
+
+        scratch_root = tmp_path / "scratch"
+        target_file = scratch_root / ".claude" / "skills" / "demo" / "SKILL.md"
+        target_file.parent.mkdir(parents=True)
+
+        resolver = UnifiedLinkResolver(scratch_root)
+        resolver.package_root = source_root
+        resolver.deployment_package_root = scratch_root / "apm_modules" / "_local" / "package"
+
+        content = "See [the manifesto](../../../MANIFESTO.md)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+
+        assert "[the manifesto](../../../apm_modules/_local/package/MANIFESTO.md)" in result
+
     def test_normal_install_self_package_unchanged(self, tmp_path):
         """Sanity: normal install (base_dir == package_root parent) still
         rewrites correctly and the replay-frame branch does not regress it.

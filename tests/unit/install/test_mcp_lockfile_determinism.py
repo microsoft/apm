@@ -12,6 +12,7 @@ from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.install.context import InstallContext
 from apm_cli.install.phases import post_deps_local
 from apm_cli.install.phases.lockfile import LockfileBuilder
+from apm_cli.integration.lsp_integrator import LSPIntegrator
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage, DependencyReference, clear_apm_yml_cache
 
@@ -65,6 +66,45 @@ dependencies:
     return APMPackage.from_apm_yml(project_root / "apm.yml")
 
 
+def _write_manifest_with_lsp(
+    project_root: Path,
+    *,
+    server_name: str = "pyright",
+    command: str = "pyright-langserver",
+) -> APMPackage:
+    (project_root / "packages" / "dep" / ".apm" / "instructions").mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    (project_root / "packages" / "dep" / "apm.yml").write_text(
+        'name: dep\nversion: "1.0.0"\n',
+        encoding="utf-8",
+    )
+    deployed_file = project_root / ".github" / "instructions" / "dep.instructions.md"
+    deployed_file.parent.mkdir(parents=True, exist_ok=True)
+    deployed_file.write_text(
+        '---\napplyTo: "**"\n---\n# Dep\n',
+        encoding="utf-8",
+    )
+    (project_root / "apm.yml").write_text(
+        f"""
+name: repro
+version: "1.0.0"
+dependencies:
+  apm:
+    - ./packages/dep
+  lsp:
+    - name: {server_name}
+      command: {command}
+      extensionToLanguage:
+        .py: python
+""".lstrip(),
+        encoding="utf-8",
+    )
+    clear_apm_yml_cache()
+    return APMPackage.from_apm_yml(project_root / "apm.yml")
+
+
 def _run_lockfile_phase_and_mcp_persist(
     project_root: Path,
     package: APMPackage,
@@ -98,6 +138,39 @@ def _run_lockfile_phase_and_mcp_persist(
             MCPIntegrator.get_server_names(mcp_deps),
             lock_path,
             mcp_configs=MCPIntegrator.get_server_configs(mcp_deps),
+        )
+
+
+def _run_lockfile_phase_and_lsp_persist(
+    project_root: Path,
+    package: APMPackage,
+    instant: datetime,
+) -> None:
+    lock_path = get_lockfile_path(project_root)
+    dep_ref = package.get_apm_dependencies()[0]
+    ctx = InstallContext(
+        project_root=project_root,
+        apm_dir=project_root,
+        apm_package=package,
+        existing_lockfile=LockFile.read(lock_path),
+        logger=MagicMock(),
+        diagnostics=MagicMock(),
+    )
+    ctx.installed_packages = [
+        InstalledPackage(dep_ref=dep_ref, resolved_commit=None, depth=1, resolved_by=None)
+    ]
+    dep_key = dep_ref.get_unique_key()
+    ctx.package_deployed_files = {dep_key: [".github/instructions/dep.instructions.md"]}
+    ctx.package_types = {dep_key: "apm_package"}
+
+    _FixedDatetime.instant = instant
+    with patch("apm_cli.deps.lockfile.datetime", _FixedDatetime):
+        LockfileBuilder(ctx).build_and_save()
+        lsp_deps = package.get_lsp_dependencies()
+        LSPIntegrator.update_lockfile(
+            LSPIntegrator.get_server_names(lsp_deps),
+            lock_path,
+            lsp_configs=LSPIntegrator.get_server_configs(lsp_deps),
         )
 
 
@@ -226,3 +299,27 @@ def test_changed_mcp_dependencies_update_lockfile(tmp_path: Path) -> None:
         }
     }
     assert second_bytes != first_bytes
+
+
+def test_unchanged_lsp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> None:
+    """The real lockfile phase stays byte-stable when LSP inputs are unchanged."""
+    package = _write_manifest_with_lsp(tmp_path)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+
+    _run_lockfile_phase_and_lsp_persist(tmp_path, package, first_instant)
+    lock_path = get_lockfile_path(tmp_path)
+    first_bytes = lock_path.read_bytes()
+    first_lock = LockFile.read(lock_path)
+    assert first_lock is not None
+    assert first_lock.generated_at == first_instant.isoformat()
+
+    _run_lockfile_phase_and_lsp_persist(tmp_path, package, second_instant)
+    second_bytes = lock_path.read_bytes()
+    second_lock = LockFile.read(lock_path)
+    assert second_lock is not None
+
+    assert second_lock.generated_at == first_lock.generated_at
+    assert second_lock.lsp_servers == first_lock.lsp_servers
+    assert second_lock.lsp_configs == first_lock.lsp_configs
+    assert second_bytes == first_bytes

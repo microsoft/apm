@@ -43,15 +43,20 @@ def _scan_files_in_dir(
 def scan_lockfile_packages(
     project_root: Path,
     package_filter: str | None = None,
+    lockfile: LockFile | None = None,
 ) -> tuple[dict[str, list[ScanFinding]], int]:
     """Scan deployed files tracked in apm.lock.yaml.
+
+    Args:
+        lockfile: An already-parsed lockfile for ``project_root``. When
+            provided, the on-disk lockfile is not re-read (callers such as
+            ``apm audit`` that already loaded it avoid a duplicate parse).
 
     Returns:
         (findings_by_file, files_scanned) -- findings grouped by file path
         and total number of files scanned.
     """
-    lockfile_path = get_lockfile_path(project_root)
-    lock = LockFile.read(lockfile_path)
+    lock = lockfile if lockfile is not None else LockFile.read(get_lockfile_path(project_root))
     if lock is None:
         return {}, 0
 

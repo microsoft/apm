@@ -79,7 +79,9 @@ Three fields matter day one:
 - `scripts` -- optional named shell commands you run with the
   experimental `apm run` (see [Run scripts](/apm/consumer/run-scripts/)).
 
-`includes: auto` ships any local `.apm/` content you author. The
+`includes: auto` ships local content from the authoritative source layout:
+`.apm/` when that directory exists, or supported plugin-native directories at
+the project root otherwise. The
 `targets:` block is commented out so APM auto-detects the harnesses
 present in your repo (`.github/`, `.claude/`, `.cursor/`, etc.). For the
 full schema, see [Package anatomy](/apm/concepts/package-anatomy/).

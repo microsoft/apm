@@ -13,13 +13,13 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 
 | Phase                  | Commands                                                                         |
 |------------------------|----------------------------------------------------------------------------------|
-| Project setup          | [`init`](./cli/init/), [`install`](./cli/install/), [`update`](./cli/update/), [`uninstall`](./cli/uninstall/) |
-| Inspect and audit      | [`view`](./cli/view/), [`deps`](./cli/deps/), [`outdated`](./cli/outdated/), [`list`](./cli/list/), [`audit`](./cli/audit/) |
+| Project setup          | [`init`](./cli/init/), [`install`](./cli/install/), [`lock`](./cli/lock/), [`update`](./cli/update/), [`uninstall`](./cli/uninstall/) |
+| Inspect and audit      | [`view`](./cli/view/), [`deps`](./cli/deps/), [`outdated`](./cli/outdated/), [`list`](./cli/list/), [`find`](./cli/find/), [`audit`](./cli/audit/), [`doctor`](./cli/doctor/) |
 | Compile and integrate  | [`compile`](./cli/compile/), [`prune`](./cli/prune/), [`targets`](./cli/targets/), [`runtime`](./cli/runtime/) |
 | Cache and config       | [`cache`](./cli/cache/), [`config`](./cli/config/)                               |
 | Run scripts            | [`run`](./cli/run/)                                                              |
-| Author and distribute  | [`pack`](./cli/pack/), [`unpack`](./cli/unpack/), [`preview`](./cli/preview/), [`marketplace`](./cli/marketplace/), [`search`](./cli/search/) |
-| Governance             | [`policy`](./cli/policy/), [`mcp`](./cli/mcp/)                                   |
+| Author and distribute  | [`pack`](./cli/pack/), [`unpack`](./cli/unpack/), [`preview`](./cli/preview/), [`plugin`](./cli/plugin/), [`publish`](./cli/publish/), [`lifecycle`](./cli/lifecycle/), [`marketplace`](./cli/marketplace/), [`search`](./cli/search/), [`self-update`](./cli/self-update/) |
+| Governance             | [`approve`](./cli/approve/), [`deny`](./cli/deny/), [`policy`](./cli/policy/), [`mcp`](./cli/mcp/) |
 | Experimental           | [`experimental`](./cli/experimental/)                                            |
 
 ## Schemas and specifications

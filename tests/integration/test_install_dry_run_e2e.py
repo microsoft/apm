@@ -9,26 +9,12 @@ Uses the real `microsoft/apm-sample-package` from GitHub. Requires
 GITHUB_APM_PAT or GITHUB_TOKEN for API access.
 """
 
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
 
 pytestmark = pytest.mark.requires_github_token
-
-
-@pytest.fixture
-def apm_command():
-    """Path to the APM CLI executable (PATH first, then venv fallback)."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 @pytest.fixture
@@ -42,9 +28,9 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=180):
+def _run_apm(apm_binary_path, args, cwd, timeout=180):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -80,12 +66,12 @@ class TestInstallDryRunE2E:
     """End-to-end coverage for `apm install --dry-run`."""
 
     def test_install_dry_run_lists_apm_dependencies_without_changes(
-        self, temp_project, apm_command
+        self, temp_project, apm_binary_path
     ):
         """Dry-run prints the preview banner, lists the APM dep, and writes nothing."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
-        result = _run_apm(apm_command, ["install", "--dry-run"], temp_project)
+        result = _run_apm(apm_binary_path, ["install", "--dry-run"], temp_project)
         assert result.returncode == 0, (
             f"Dry-run failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )
@@ -100,7 +86,7 @@ class TestInstallDryRunE2E:
 
         _assert_no_install_artifacts(temp_project)
 
-    def test_install_dry_run_with_only_packages_filter(self, temp_project, apm_command):
+    def test_install_dry_run_with_only_packages_filter(self, temp_project, apm_binary_path):
         """`--only=apm` suppresses MCP-dependency listing in the dry-run preview."""
         _write_apm_yml(
             temp_project,
@@ -108,7 +94,7 @@ class TestInstallDryRunE2E:
             mcp_packages=["io.github.github/github-mcp-server"],
         )
 
-        result = _run_apm(apm_command, ["install", "--dry-run", "--only=apm"], temp_project)
+        result = _run_apm(apm_binary_path, ["install", "--dry-run", "--only=apm"], temp_project)
         assert result.returncode == 0, (
             f"Filtered dry-run failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )
@@ -124,11 +110,11 @@ class TestInstallDryRunE2E:
 
         _assert_no_install_artifacts(temp_project)
 
-    def test_install_dry_run_previews_orphan_removals(self, temp_project, apm_command):
+    def test_install_dry_run_previews_orphan_removals(self, temp_project, apm_binary_path):
         """After a real install, removing the dep + dry-run reports orphan files
         and keeps them on disk (the orphan-preview NameError regression test)."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
-        real = _run_apm(apm_command, ["install"], temp_project)
+        real = _run_apm(apm_binary_path, ["install"], temp_project)
         assert real.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {real.stdout}\nSTDERR: {real.stderr}"
         )
@@ -150,7 +136,7 @@ class TestInstallDryRunE2E:
 
         _write_apm_yml(temp_project, [])
 
-        result = _run_apm(apm_command, ["install", "--dry-run"], temp_project)
+        result = _run_apm(apm_binary_path, ["install", "--dry-run"], temp_project)
         assert result.returncode == 0, (
             f"Orphan dry-run failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )

@@ -19,13 +19,18 @@ on:
   release:
     types: [published]
   pull_request:
-    paths: ['docs/**']
+    paths:
+      - 'docs/**'
+      - 'src/apm_cli/cli.py'
+      - 'src/apm_cli/commands/**'
+      - 'scripts/check_cli_docs.py'
+      - 'tests/unit/test_cli_docs_contract.py'
+      - 'tests/integration/test_cli_docs_contract.py'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages-${{ github.ref }}"
@@ -45,13 +50,40 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'docs/package-lock.json'
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python test dependencies
+        run: uv sync --frozen --extra dev
+
       - name: Install dependencies
         working-directory: ./docs
         run: npm ci
 
+      - name: Test generated-link checker
+        working-directory: ./docs
+        run: npm run test:links
+
+      - name: Test CLI registry contract
+        run: >-
+          uv run --frozen pytest
+          tests/unit/test_cli_docs_contract.py
+          tests/integration/test_cli_docs_contract.py
+          -q
+
       - name: Build documentation
         working-directory: ./docs
         run: npm run build
+
+      - name: Check CLI registry against rendered pages
+        run: uv run --frozen python scripts/check_cli_docs.py docs/dist
 
       - name: Verify schema $id reachability
         # Asserts every JSON Schema's declared $id URL resolves to a

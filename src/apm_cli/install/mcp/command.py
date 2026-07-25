@@ -35,7 +35,7 @@ except ImportError:
     pass
 
 
-def run_mcp_install(
+def run_mcp_install(  # noqa: PLR0913
     *,
     mcp_name: str,
     transport: str | None,
@@ -51,6 +51,7 @@ def run_mcp_install(
     logger,
     apm_dir: Path,
     scope: str | None,
+    target: str | list[str] | None = None,
     registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
@@ -114,20 +115,26 @@ def run_mcp_install(
     # MCPServerOperations() (constructed deep inside MCPIntegrator.install)
     # picks up the override; prior env restored on exit.
     if APM_DEPS_AVAILABLE:
-        if registry_url and logger and verbose:
+        if registry_url and logger:
             logger.verbose_detail(f"Registry: {registry_url}")
+        if target is not None and logger:
+            rendered_target = target if isinstance(target, str) else ", ".join(target)
+            logger.verbose_detail(f"Target: {rendered_target}")
         with registry_env_override(registry_url):
             try:
                 _mcp_lock_path = get_lockfile_path(apm_dir)
                 _existing_lock = LockFile.read(_mcp_lock_path)
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
+                # A scalar target selects the runtime directly; explicit_target
+                # also preserves the flag for downstream active-target gating.
                 MCPIntegrator.install(
                     [dep],
-                    runtime,
+                    target if isinstance(target, str) else runtime,
                     exclude,
                     verbose,
                     stored_mcp_configs=old_configs,
+                    explicit_target=target,
                     scope=scope,
                 )
                 new_names = MCPIntegrator.get_server_names([dep])

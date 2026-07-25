@@ -15,6 +15,12 @@ if TYPE_CHECKING:
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...core.target_catalog import (
+    TARGET_CAPABILITIES,
+    expand_all,
+    get_target_capability,
+    target_help_fragment,
+)
 from ...core.target_detection import TargetParamType
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
@@ -169,7 +175,9 @@ def _get_validation_suggestion(error_msg):
         return "Check primitive structure and frontmatter"
 
 
-def _resolve_compile_target(target):
+def _resolve_compile_target(
+    target: str | list[str] | None,
+) -> CompileTargetType | None:
     """Map CLI target input to a compiler-understood target.
 
     The compiler understands single-string targets (``"vscode"``,
@@ -183,10 +191,9 @@ def _resolve_compile_target(target):
     collapsing to ``"all"`` (which would incorrectly generate files
     for every family).
 
-    Family resolution reads ``TargetProfile.compile_family`` from
-    ``KNOWN_TARGETS`` so adding a new compile-eligible target only
-    requires populating that field.  The CLI alias ``"vscode"`` is
-    treated as ``"copilot"`` for this purpose.
+    Family resolution reads ``TargetCapability.compile_family`` from
+    ``TARGET_CAPABILITIES`` so adding a new compile-eligible target only
+    requires populating that field.
 
     Args:
         target: A single target string, a list of target strings, or ``None``.
@@ -194,86 +201,104 @@ def _resolve_compile_target(target):
     Returns:
         A single string, a ``frozenset`` of compiler families, or ``None``.
     """
-    from ...integration.targets import KNOWN_TARGETS
-
     if target is None:
         return None  # will trigger detect_target() auto-detection
-    if isinstance(target, list):
-        target_set = set(target)
-        # Strip targets with no compile output (compile_family is None);
-        # they would silently fall through the family resolution otherwise.
-        # ``vscode`` is a CLI alias for ``copilot`` and shares its profile.
-        skip = {name for name, profile in KNOWN_TARGETS.items() if profile.compile_family is None}
-        target_set -= skip
-        if not target_set:
-            # Solo agent-skills (or another no-compile target) in a list --
-            # pass through as a string so the compiler's no-op path fires.
-            for sentinel in target:
-                if sentinel in skip:
-                    return sentinel
-            return None
+    requested_targets = [target] if isinstance(target, str) else target
+    if len(requested_targets) > 1:
+        deployment_all = {get_target_capability(name).name for name in expand_all("install")}
+        requested_canonical = {
+            get_target_capability(name).name for name in requested_targets if name != "all"
+        }
+        if "all" in requested_targets or deployment_all <= requested_canonical:
+            explicit_targets = [
+                name
+                for name in requested_targets
+                if name != "all" and get_target_capability(name).name not in deployment_all
+            ]
+            requested_targets = [*expand_all("compile"), *explicit_targets]
 
-        # The "vscode" family handles copilot AND emits AGENTS.md as a
-        # bonus; the "agents" family emits AGENTS.md only.  When both
-        # appear in a multi-target compile we still need both family
-        # tokens so the agents compiler routes correctly.
-        def _family_of(name: str) -> str | None:
-            if name == "vscode":
+    target_set: set[str] = set()
+    for requested in requested_targets:
+        if requested == "all":
+            target_set.add(requested)
+            continue
+        capability = get_target_capability(requested)
+        if "compile" not in capability.commands:
+            raise click.UsageError(
+                f"Target '{requested}' is not a compile target.\n\n"
+                "Fix with one of:\n\n"
+                "  apm compile --target copilot\n"
+                "  apm compile --dry-run"
+            )
+        target_set.add(capability.name)
+
+    if target_set == {"all"}:
+        return "all"
+
+    # The "vscode" family handles copilot AND emits AGENTS.md as a
+    # bonus; the "agents" family emits AGENTS.md only.  When both
+    # appear in a multi-target compile we still need both family
+    # tokens so the agents compiler routes correctly.
+    def _family_of(name: str) -> str | None:
+        return get_target_capability(name).compile_family
+
+    families: set[str] = set()
+    for name in target_set:
+        family = _family_of(name)
+        if family is None:
+            continue
+        families.add(family)
+        if family == "vscode":
+            # copilot also emits AGENTS.md; mirror legacy behavior.
+            families.add("agents")
+
+    if len(families) >= 2:
+        # Collapse {"vscode","agents"} to bare "vscode" ONLY when the
+        # original target list contains no non-Copilot agents-family
+        # targets (e.g. codex, opencode, windsurf).  When mixed targets
+        # like [copilot, codex] are requested, keep the frozenset so
+        # downstream dedup logic knows non-Copilot targets also consume
+        # AGENTS.md (issue #1678).
+        if families == {"vscode", "agents"}:
+            has_non_vscode_agents = any(
+                name in target_set
+                for name, capability in TARGET_CAPABILITIES.items()
+                if capability.compile_family == "agents" and capability.primitive_profile == name
+            )
+            if not has_non_vscode_agents:
                 return "vscode"
-            profile = KNOWN_TARGETS.get(name)
-            return profile.compile_family if profile else None
-
-        families: set[str] = set()
-        for name in target_set:
-            family = _family_of(name)
-            if family is None:
-                continue
-            families.add(family)
-            if family == "vscode":
-                # copilot also emits AGENTS.md; mirror legacy behavior.
-                families.add("agents")
-
-        if len(families) >= 2:
-            # Collapse {"vscode","agents"} to bare "vscode" ONLY when the
-            # original target list contains no non-Copilot agents-family
-            # targets (e.g. codex, opencode, windsurf).  When mixed targets
-            # like [copilot, codex] are requested, keep the frozenset so
-            # downstream dedup logic knows non-Copilot targets also consume
-            # AGENTS.md (issue #1678).
-            if families == {"vscode", "agents"}:
-                _vscode_names = {"copilot", "vscode", "agents"}
-                has_non_vscode_agents = any(
-                    name in target_set
-                    for name, profile in KNOWN_TARGETS.items()
-                    if profile.compile_family == "agents" and name not in _vscode_names
-                )
-                if not has_non_vscode_agents:
-                    return "vscode"
-            return frozenset(families)
-        if families == {"agents"} and "antigravity" in target_set and len(target_set) > 1:
-            # Mixed Antigravity + AGENTS.md-only consumers share AGENTS.md but
-            # do not all read .agents/rules/. Preserve mixed-target context so
-            # downstream dedup stays disabled for AGENTS.md-only consumers.
-            return frozenset({"agents"})
-        if "claude" in families:
-            return "claude"
-        if "gemini" in families:
-            return "gemini"
-        if "vscode" in families:
-            return "vscode"
-        # Bare agents-family target: preserve the original target name so
-        # single-element list routing matches single-string semantics
-        # (-t cursor and -t [cursor] both end up as "cursor").  Iterate
-        # KNOWN_TARGETS in insertion order so priority ties (e.g.
-        # ["opencode","codex"]) resolve deterministically to the
-        # earliest-registered target.  Adding a new agents-family
-        # target (e.g. zed, cline) costs zero edits here -- it inherits
-        # whatever priority position it occupies in the registry.
-        for name, profile in KNOWN_TARGETS.items():
-            if profile.compile_family == "agents" and name in target_set:
-                return name
-        return "vscode"  # defensive fallback (unreachable)
-    return target  # single string pass-through
+        return frozenset(families)
+    if families == {"agents"} and "antigravity" in target_set and len(target_set) > 1:
+        # Mixed Antigravity + AGENTS.md-only consumers share AGENTS.md but
+        # do not all read .agents/rules/. Preserve mixed-target context so
+        # downstream dedup stays disabled for AGENTS.md-only consumers.
+        return frozenset({"agents"})
+    if "claude" in families:
+        return "claude"
+    if "gemini" in families:
+        return "gemini"
+    if "vscode" in families:
+        return "vscode"
+    # Bare agents-family target: preserve the original target name so
+    # single-element list routing matches single-string semantics. Iterate
+    # TARGET_CAPABILITIES in insertion order so priority ties resolve
+    # deterministically to the earliest-registered target.
+    for name, capability in TARGET_CAPABILITIES.items():
+        if (
+            capability.compile_family == "agents"
+            and capability.primitive_profile == name
+            and name in target_set
+        ):
+            return name
+    if families == {"agents"}:
+        return frozenset(families)
+    for requested in requested_targets:
+        if requested == "all":
+            continue
+        capability = get_target_capability(requested)
+        if capability.compile_family is None:
+            return capability.name
+    raise click.UsageError("No compile-capable target was selected.")
 
 
 def _resolve_effective_target(
@@ -431,12 +456,20 @@ def _display_user_path(path: Path) -> str:
     return f"~/{rel.as_posix()}"
 
 
-def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -> None:
+def _validate_project(
+    logger: CommandLogger,
+    dry_run: bool,
+    source_root: Path,
+    *,
+    allow_empty: bool = False,
+) -> None:
     """Check APM project exists and has content.
 
     Calls ``sys.exit(1)`` on fatal errors.  In dry-run mode the function
     emits diagnostic messages but does *not* exit so callers can test the
-    full compile path even without real content.
+    full compile path even without real content.  ``allow_empty`` lets
+    ``compile --clean`` reach the compiler's APM-owned orphan cleanup;
+    callers must keep validation and watch modes on the content-required path.
     """
     from ...compilation.constitution import find_constitution
 
@@ -458,6 +491,9 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
 
     # If no primitive sources exist, check deeper to provide better feedback
     if not apm_modules_exists and not local_apm_has_content and not constitution_exists:
+        if allow_empty:
+            return
+
         # Check if .apm directories exist but are empty
         has_empty_apm = (
             apm_dir.exists()
@@ -744,6 +780,9 @@ def _run_compilation(
                         "Compilation completed successfully!",
                         symbol="check",
                     )
+                elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
+                    # The compiler already reported the expected cleanup outcome.
+                    pass
                 else:
                     # Zero-output compile is the silent-success failure
                     # mode #820 guards against.  Don't claim success;
@@ -880,6 +919,17 @@ def _run_compilation(
         perf_stats.render_summary(logger, project_root=str(_src))
         sys.exit(1)
 
+    if result.success and not dry_run:
+        from ...install.manifest_reconcile import reconcile_project_deployed_state
+
+        reconcile_project_deployed_state(
+            Path(_src).resolve(),
+            explicit_target=target,
+            deploy_root=Path(".").resolve(),
+            lock_root=Path(".").resolve(),
+            verbose=verbose,
+        )
+
     perf_stats.render_summary(logger, project_root=str(_src))
 
 
@@ -895,7 +945,10 @@ def _run_compilation(
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them.",
+    help=f"Target platform (comma-separated). {target_help_fragment('compile')} "
+    "'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. "
+    "'all' excludes antigravity and experimental targets; "
+    "combine explicit-only targets when needed.",
 )
 @click.option(
     "--dry-run",
@@ -1127,7 +1180,12 @@ def compile(  # noqa: PLR0913 -- Click handler
         # from. Equals $PWD unless --root redirects writes elsewhere.
         source_root = get_source_root(InstallScope.PROJECT)
 
-        _validate_project(logger, dry_run, source_root)
+        _validate_project(
+            logger,
+            dry_run,
+            source_root,
+            allow_empty=clean and not validate and not watch,
+        )
 
         if validate:
             _run_validation_mode(logger, verbose, source_root)
@@ -1167,6 +1225,8 @@ def compile(  # noqa: PLR0913 -- Click handler
         logger.error(f"Compilation module not available: {e}")
         logger.progress("This might be a development environment issue.")
         sys.exit(1)
+    except click.ClickException:
+        raise
     except Exception as e:
         logger.error(f"Error during compilation: {e}")
         sys.exit(1)

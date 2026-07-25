@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "lockfile-exists": "apm.lock.yaml",
     "ref-consistency": "apm.lock.yaml",
+    "deployment-ledger-owners": "apm.lock.yaml",
     "deployed-files-present": "apm.lock.yaml",
     "no-orphaned-packages": "apm.lock.yaml",
     "config-consistency": "apm.lock.yaml",

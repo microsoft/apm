@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence  # noqa: UP035
 
+from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
@@ -53,7 +54,7 @@ def _check_lockfile_exists(
             message="No apm.yml found -- nothing to check",
         )
 
-    has_deps = manifest.has_apm_dependencies() or bool(manifest.get_mcp_dependencies())
+    has_deps = manifest.has_any_apm_dependencies() or bool(manifest.get_all_mcp_dependencies())
     lockfile_path = get_lockfile_path(project_root)
 
     # Local-only repos may declare no remote/MCP deps but still have a
@@ -94,15 +95,27 @@ def _check_ref_consistency(
     manifest: APMPackage,
     lock: LockFile,
 ) -> CheckResult:
-    """Verify every dependency's manifest ref matches lockfile resolved_ref."""
+    """Verify manifest refs match the lockfile's resolved ref and commit."""
+    from ..deps.revision_pins import is_full_revision_pin
     from ..drift import detect_ref_change
 
     mismatches: list[str] = []
-    for dep_ref in manifest.get_apm_dependencies():
+    requires_update = False
+    for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
         locked_dep = lock.get_dependency(key)
         if locked_dep is None:
             mismatches.append(f"{key}: not found in lockfile")
+            requires_update = requires_update or bool(lock.dependencies)
+            continue
+        if is_full_revision_pin(dep_ref.reference) and (
+            locked_dep.resolved_commit != dep_ref.reference
+        ):
+            mismatches.append(
+                f"{key}: manifest commit '{dep_ref.reference}' != "
+                f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
+            )
+            requires_update = True
             continue
         if detect_ref_change(dep_ref, locked_dep):
             manifest_ref = dep_ref.reference or "(default branch)"
@@ -117,10 +130,13 @@ def _check_ref_consistency(
             passed=True,
             message="All dependency refs match lockfile",
         )
+    repair_command = "apm install --update" if requires_update else "apm install"
     return CheckResult(
         name="ref-consistency",
         passed=False,
-        message=f"{len(mismatches)} ref mismatch(es) -- run 'apm install' to update lockfile",
+        message=(
+            f"{len(mismatches)} ref mismatch(es) -- run '{repair_command}' to update lockfile"
+        ),
         details=mismatches,
     )
 
@@ -156,6 +172,38 @@ def _check_deployed_files_present(
     )
 
 
+def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
+    """Require every canonical deployment owner to resolve in the lockfile."""
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+
+    violations = DeploymentLedgerCodec.owner_reference_violations(lock)
+    if not violations:
+        return CheckResult(
+            name="deployment-ledger-owners",
+            passed=True,
+            message="All deployment ledger owners are valid",
+        )
+
+    details = []
+    for violation in violations:
+        invalid = ", ".join(violation.invalid_owners)
+        active = (
+            f"; invalid active owner {violation.invalid_active_owner}"
+            if violation.invalid_active_owner is not None
+            else ""
+        )
+        details.append(f"{violation.locator.key}: invalid owner(s) {invalid}{active}")
+    return CheckResult(
+        name="deployment-ledger-owners",
+        passed=False,
+        message=(
+            f"{len(violations)} invalid deployment ownership record(s) -- "
+            f"{DEPLOYMENT_OWNER_REMEDIATION}"
+        ),
+        details=details,
+    )
+
+
 def _check_no_orphans(
     manifest: APMPackage,
     lock: LockFile,
@@ -165,9 +213,9 @@ def _check_no_orphans(
     Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
     candidates for orphan detection. Transitive deps belong to a
     sub-package's manifest, not the root manifest, so the root manifest
-    cannot make them go away by editing its ``dependencies.apm`` list.
+    cannot make them go away by editing its dependency lists.
     """
-    manifest_keys = {dep.get_unique_key() for dep in manifest.get_apm_dependencies()}
+    manifest_keys = {dep.get_unique_key() for dep in manifest.get_all_apm_dependencies()}
     orphaned = [
         dep_key
         for dep_key, locked_dep in lock.dependencies.items()
@@ -195,7 +243,7 @@ def _check_skill_subset_consistency(
 ) -> CheckResult:
     """Verify lockfile skill_subset matches manifest skills: for each entry."""
     mismatches: list[str] = []
-    for dep_ref in manifest.get_apm_dependencies():
+    for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
         locked_dep = lock.get_dependency(key)
         if locked_dep is None:
@@ -231,37 +279,42 @@ def _check_config_consistency(
     lock: LockFile,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
-    from ..drift import detect_config_drift
-    from ..integration.mcp_integrator import MCPIntegrator
+    from ..constants import APM_MODULES_DIR
+    from ..integration.mcp_config_view import CurrentMcpConfigView
 
-    mcp_deps = manifest.get_mcp_dependencies()
-    current_configs = MCPIntegrator.get_server_configs(mcp_deps)
+    project_root = manifest.package_path or Path.cwd()
+    view = CurrentMcpConfigView.derive(
+        manifest,
+        lock,
+        project_root / APM_MODULES_DIR,
+        trust_transitive_self_defined=True,
+    )
     stored_configs = lock.mcp_configs or {}
+    diff = view.diff(stored_configs)
 
     # No MCP deps at all -- nothing to check
-    if not current_configs and not stored_configs:
+    if not view.configs and not stored_configs and not view.problems:
         return CheckResult(
             name="config-consistency",
             passed=True,
             message="No MCP configs to check",
         )
 
-    details: list[str] = []
+    details = [f"{problem.package_key}: {problem.message}" for problem in view.problems]
 
-    # Detect drift on servers that exist in both sets
-    drifted = detect_config_drift(current_configs, stored_configs)
-    for name in sorted(drifted):
+    # Preserve the established diagnostics while sourcing every partition from
+    # the canonical symmetric diff.
+    for name in sorted(diff.changed):
         details.append(f"{name}: config differs from lockfile baseline")
 
-    # Servers in lockfile but not in manifest (orphaned MCP)
-    for name in sorted(stored_configs):
-        if name not in current_configs:
-            details.append(f"{name}: in lockfile but not in manifest")
+    provenance = lock.mcp_config_provenance or {}
+    for name in sorted(diff.lock_only):
+        owner = provenance.get(name)
+        suffix = f" (declared by {owner})" if owner else ""
+        details.append(f"{name}: in lockfile but not in manifest{suffix}")
 
-    # Servers in manifest but not in lockfile (new, not installed)
-    for name in sorted(current_configs):
-        if name not in stored_configs:
-            details.append(f"{name}: in manifest but not in lockfile")
+    for name in sorted(diff.source_only):
+        details.append(f"{name}: in manifest but not in lockfile")
 
     if not details:
         return CheckResult(
@@ -286,8 +339,9 @@ def _check_content_integrity(
     Two signals are evaluated:
       * Critical hidden Unicode (steganographic markers) via the file
         scanner.
-      * SHA-256 drift between the on-disk content and the hash recorded
-        in ``deployed_file_hashes`` at install time.
+      * SHA-256 drift between the on-disk content and the canonical deployment
+        ledger hash recorded at install time.
+      * Missing canonical ownership metadata for a legacy deployed-file hash.
 
     Missing files are deliberately skipped here -- ``_check_deployed_files_present``
     already reports those, and double-reporting muddies the audit output.
@@ -306,37 +360,63 @@ def _check_content_integrity(
         if any(f.severity == "critical" for f in findings):
             critical_files.append(rel_path)
 
-    # Per-file hash verification across all dependencies (the synthesized
-    # self-entry is included in ``lock.dependencies`` so local content is
-    # covered through the same iteration).
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.deployment_state import LocatorKind
+    from ..integration.targets import KNOWN_TARGETS
+
+    ledger = DeploymentLedgerCodec.from_lockfile(lock)
+    ledger_values = {
+        record.locator.value
+        for record in ledger.records.values()
+        if record.owners and record.active_owner
+    }
+    legacy_hash_paths = set(lock.local_deployed_file_hashes)
+    for dependency in lock.dependencies.values():
+        legacy_hash_paths.update(dependency.deployed_file_hashes)
+    missing_ownership = sorted(legacy_hash_paths.difference(ledger_values))
+
+    # Per-file hash verification across canonical deployment records.
     hash_mismatches: list[tuple] = []  # (dep_key, rel_path, expected, actual)
     # Local import: matches the scoping pattern used in
     # _check_deployed_files_present (line 131); avoids cycles.
     from ..integration.base_integrator import BaseIntegrator as _BaseIntegrator
 
-    for dep_key, dep in lock.dependencies.items():
-        if not dep.deployed_file_hashes:
+    for record in ledger.records.values():
+        expected_hash = record.content_hash
+        if expected_hash is None:
             continue
-        for rel_path, expected_hash in dep.deployed_file_hashes.items():
-            # Path safety: silently skip any rel_path that escapes
-            # project_root or targets a non-allowlisted prefix.  Mirrors
-            # the guard in _check_deployed_files_present so a forged
-            # lockfile cannot induce reads outside managed locations.
-            safe_rel = rel_path.rstrip("/")
+        locator = record.locator
+        if locator.kind == LocatorKind.URI:
+            continue
+        if locator.kind == LocatorKind.PROJECT_RELATIVE:
+            safe_rel = locator.value.rstrip("/")
             if not _BaseIntegrator.validate_deploy_path(safe_rel, project_root):
                 continue
             file_path = project_root / safe_rel
-            if not file_path.exists():
-                continue  # _check_deployed_files_present owns this signal
-            if file_path.is_symlink():
+        else:
+            target = KNOWN_TARGETS.get(locator.target)
+            if target is None:
                 continue
-            if not file_path.is_file():
+            try:
+                resolved = DeploymentLedgerCodec.resolve_locator(
+                    locator,
+                    project_root=project_root,
+                    target=target,
+                )
+            except (OSError, RuntimeError, ValueError):
                 continue
-            actual_hash = compute_file_hash(file_path)
-            if actual_hash != expected_hash:
-                hash_mismatches.append((dep_key, rel_path, expected_hash, actual_hash))
+            if isinstance(resolved, str):
+                continue
+            file_path = resolved
+        if not file_path.exists():
+            continue  # _check_deployed_files_present owns this signal
+        if file_path.is_symlink() or not file_path.is_file():
+            continue
+        actual_hash = compute_file_hash(file_path)
+        if actual_hash != expected_hash:
+            hash_mismatches.append((record.active_owner, locator.value, expected_hash, actual_hash))
 
-    if not critical_files and not hash_mismatches:
+    if not critical_files and not hash_mismatches and not missing_ownership:
         return CheckResult(
             name="content-integrity",
             passed=True,
@@ -346,6 +426,8 @@ def _check_content_integrity(
     details: list[str] = []
     for rel_path in critical_files:
         details.append(f"unicode: {rel_path}")
+    for rel_path in missing_ownership:
+        details.append(f"missing-ownership: {rel_path}")
     for dep_key, rel_path, expected, actual in hash_mismatches:
         # Truncate hashes for terminal width; full hashes available via JSON output.
         exp_short = expected.split(":", 1)[-1][:12] if ":" in expected else expected[:12]
@@ -365,6 +447,9 @@ def _check_content_integrity(
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
         remedies.append("'apm install' to restore drifted files")
+    if missing_ownership:
+        parts.append(f"{len(missing_ownership)} file(s) without deployment ownership")
+        remedies.append("'apm install' to repair ownership metadata")
     summary = "; ".join(parts)
     remedy = " and ".join(remedies)
     return CheckResult(
@@ -595,31 +680,47 @@ def run_baseline_checks(
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # Check 2: Ref consistency
+    # Check 2: Ref consistency (external manifest <-> lockfile identity)
+    #
+    # External-boundary identity checks MUST surface before internal
+    # reconciliation checks (Check 3, deployment-ledger-owners) because the
+    # latter's remedy assumes the lockfile's identity claims are legitimate.
+    # A source-identity tamper (attacker rewrites a dependency's host/repo_url)
+    # trips both: ref-consistency ("not found in lockfile" -> re-resolve from the
+    # trusted manifest via 'apm install --update') and deployment-ledger-owners
+    # (stale owner -> 'apm prune'). Under fail-fast the first failing check wins,
+    # and 'apm prune' on a tampered lockfile would reconcile ownership toward the
+    # attacker source, so ref-consistency -- the safe, manifest-driven remedy --
+    # must be evaluated first. The ledger-owner check still owns the genuine
+    # departed-owner case (req-pl-016), where ref-consistency passes.
     if _run(_check_ref_consistency(manifest, lock)):
         return result
 
-    # Check 3: Deployed files present
+    # Check 3: Canonical deployment owner references
+    if _run(_check_deployment_ledger_owners(lock)):
+        return result
+
+    # Check 4: Deployed files present
     if _run(_check_deployed_files_present(project_root, lock)):
         return result
 
-    # Check 4: No orphaned packages
+    # Check 5: No orphaned packages
     if _run(_check_no_orphans(manifest, lock)):
         return result
 
-    # Check 4.5: Skill subset consistency (manifest vs lockfile)
+    # Check 6: Skill subset consistency (manifest vs lockfile)
     if _run(_check_skill_subset_consistency(manifest, lock)):
         return result
 
-    # Check 5: Config consistency (MCP)
+    # Check 7: Config consistency (MCP)
     if _run(_check_config_consistency(manifest, lock)):
         return result
 
-    # Check 6: Content integrity
+    # Check 8: Content integrity
     if _run(_check_content_integrity(project_root, lock)):
         return result
 
-    # Check 7: Includes consent (advisory; never hard-fails)
+    # Check 9: Includes consent (advisory; never hard-fails)
     _run(_check_includes_consent(manifest, lock))
 
     return result

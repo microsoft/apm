@@ -49,6 +49,12 @@ def _setup_clean_project(project: Path) -> None:
     """)
     (project / "apm.yml").write_text(apm_yml, encoding="utf-8")
     (project / "apm.lock.yaml").write_text(lockfile, encoding="utf-8")
+    package = project / "apm_modules" / "owner" / "repo"
+    package.mkdir(parents=True)
+    (package / "apm.yml").write_text(
+        "name: repo\nversion: 1.0.0\n",
+        encoding="utf-8",
+    )
     prompts_dir = project / ".github" / "prompts"
     prompts_dir.mkdir(parents=True)
     (prompts_dir / "test.md").write_text("Clean content\n", encoding="utf-8")
@@ -74,6 +80,12 @@ def _setup_failing_project(project: Path) -> None:
     """)
     (project / "apm.yml").write_text(apm_yml, encoding="utf-8")
     (project / "apm.lock.yaml").write_text(lockfile, encoding="utf-8")
+    package = project / "apm_modules" / "owner" / "repo"
+    package.mkdir(parents=True)
+    (package / "apm.yml").write_text(
+        "name: repo\nversion: 1.0.0\n",
+        encoding="utf-8",
+    )
     prompts_dir = project / ".github" / "prompts"
     prompts_dir.mkdir(parents=True)
     (prompts_dir / "test.md").write_text("content\n", encoding="utf-8")

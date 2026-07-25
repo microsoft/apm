@@ -46,6 +46,7 @@ from apm_cli.deps.github_downloader_validation import (
     _ssh_attempt_allowed,
     validate_virtual_package_exists,
 )
+from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference
 
 # ---------------------------------------------------------------------------
@@ -157,6 +158,18 @@ class TestValidateVirtualFile:
             result = validate_virtual_package_exists(dl, dep)
 
         assert result is False
+
+    def test_virtual_file_probe_propagates_confirmed_throttle(self) -> None:
+        """A typed throttle is indeterminate, not a virtual-path false negative."""
+        dl = _make_downloader()
+        dep = _make_github_dep(is_file=True)
+        throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+        with patch.object(dl, "download_raw_file", side_effect=throttle):
+            with pytest.raises(GitHubThrottleError) as exc_info:
+                validate_virtual_package_exists(dl, dep)
+
+        assert exc_info.value is throttle
 
     def test_empty_vpath_rejected_before_probe(self) -> None:
         dl = _make_downloader()

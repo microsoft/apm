@@ -167,6 +167,8 @@ class TestRunInstallPipelinePlanCallback:
         mock_ctx.deps_to_install = [dep]
         mock_ctx.root_has_local_primitives = False
         mock_ctx.tui = MagicMock()
+        mock_ctx.only_packages = ["selected"]
+        mock_ctx.update_plan_complete_dep_keys = {"selected", "unselected"}
 
         plan_callback = MagicMock(return_value=False)  # user says "no"
 
@@ -184,7 +186,7 @@ class TestRunInstallPipelinePlanCallback:
             patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
             patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
             patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
-            patch("apm_cli.install.plan.build_update_plan", return_value=MagicMock()),
+            patch("apm_cli.install.plan.build_update_plan", return_value=MagicMock()) as build_plan,
             patch("apm_cli.install.phases.resolve", mock_resolve),
         ):
             mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
@@ -195,6 +197,11 @@ class TestRunInstallPipelinePlanCallback:
 
         assert isinstance(result, InstallResult)
         plan_callback.assert_called_once()
+        build_plan.assert_called_once_with(
+            None,
+            [dep],
+            complete_resolved_dep_keys={"selected", "unselected"},
+        )
 
     def test_plan_callback_true_continues(self, tmp_path):
         import contextlib
@@ -207,6 +214,7 @@ class TestRunInstallPipelinePlanCallback:
         mock_ctx.deps_to_install = [dep]
         mock_ctx.root_has_local_primitives = False
         mock_ctx.tui = MagicMock()
+        mock_ctx.only_packages = None
         mock_ctx.transitive_failures = []
         mock_ctx.existing_lockfile = None
         mock_ctx.verbose = False

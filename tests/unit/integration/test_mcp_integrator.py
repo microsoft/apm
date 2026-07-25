@@ -185,6 +185,45 @@ class TestGetServerConfigs:
         configs = MCPIntegrator.get_server_configs(deps)
         assert set(configs.keys()) == {"a", "b"}
 
+    def test_resolved_by_not_leaked_into_config(self):
+        # Provenance is transient install-time metadata; it must never appear
+        # in the serialized config (else it pollutes drift comparisons) (#2081).
+        dep = _make_dep("svc", transport="stdio")
+        dep.resolved_by = "@qado/agent-config"
+        configs = MCPIntegrator.get_server_configs([dep])
+        assert "resolved_by" not in configs["svc"]
+
+
+# ===========================================================================
+# MCPIntegrator.get_server_provenance
+# ===========================================================================
+
+
+class TestGetServerProvenance:
+    def test_empty(self):
+        assert MCPIntegrator.get_server_provenance([]) == {}
+
+    def test_direct_dep_has_no_provenance(self):
+        # resolved_by defaults to None for root-declared servers -> omitted.
+        assert MCPIntegrator.get_server_provenance([_make_dep("svc")]) == {}
+
+    def test_transitive_dep_recorded(self):
+        dep = _make_dep("shadcn")
+        dep.resolved_by = "@qado/agent-config"
+        assert MCPIntegrator.get_server_provenance([dep]) == {"shadcn": "@qado/agent-config"}
+
+    def test_root_wins_over_transitive_after_dedup(self):
+        # deduplicate() lists the root (resolved_by=None) entry first and drops
+        # the transitive duplicate, so the surviving 'svc' is treated as direct.
+        root = _make_dep("svc")
+        transitive = _make_dep("svc")
+        transitive.resolved_by = "@qado/agent-config"
+        deduped = MCPIntegrator.deduplicate([root, transitive])
+        assert MCPIntegrator.get_server_provenance(deduped) == {}
+
+    def test_string_deps_ignored(self):
+        assert MCPIntegrator.get_server_provenance(["plain-server"]) == {}
+
 
 # ===========================================================================
 # MCPIntegrator._append_drifted_to_install_list
@@ -564,6 +603,48 @@ class TestUpdateLockfile:
 
         lf = LockFile.read(lock_path)
         assert lf.mcp_servers == []
+
+    def test_updates_provenance_when_provided(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        self._write_minimal_lockfile(lock_path)
+        configs = {"shadcn": {"name": "shadcn"}}
+        prov = {"shadcn": "@qado/agent-config"}
+
+        MCPIntegrator.update_lockfile(
+            {"shadcn"}, lock_path=lock_path, mcp_configs=configs, mcp_config_provenance=prov
+        )
+
+        from apm_cli.deps.lockfile import LockFile
+
+        lf = LockFile.read(lock_path)
+        assert lf.mcp_config_provenance == prov
+
+    def test_prunes_dangling_provenance_when_config_removed(self, tmp_path):
+        # Seed a lockfile that carries provenance for 'shadcn'. A later update
+        # rewrites mcp_configs WITHOUT 'shadcn' and without an explicit
+        # provenance arg (the single-add path). The dangling 'shadcn'
+        # provenance must be pruned so it cannot exempt an orphan (#2081).
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\n"
+            "generated_at: '2026-01-01'\n"
+            "dependencies: []\n"
+            "mcp_configs:\n"
+            "  shadcn:\n"
+            "    name: shadcn\n"
+            "mcp_config_provenance:\n"
+            "  shadcn: '@qado/agent-config'\n",
+            encoding="utf-8",
+        )
+
+        MCPIntegrator.update_lockfile(
+            {"other"}, lock_path=lock_path, mcp_configs={"other": {"name": "other"}}
+        )
+
+        from apm_cli.deps.lockfile import LockFile
+
+        lf = LockFile.read(lock_path)
+        assert lf.mcp_config_provenance == {}
 
 
 # ===========================================================================

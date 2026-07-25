@@ -306,7 +306,7 @@ class TestUninstallEngineHelpers:
     def test_parse_dependency_entry_dict(self) -> None:
         from apm_cli.commands.uninstall.engine import _parse_dependency_entry
 
-        ref = _parse_dependency_entry({"git": "https://github.com/owner/repo", "version": ">=1.0"})
+        ref = _parse_dependency_entry({"git": "https://github.com/owner/repo", "ref": "v1.0"})
         assert ref is not None
 
     def test_parse_dependency_entry_dep_ref(self) -> None:

@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
-req-tg-001..005, req-cf-001..002.
+Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
+req-tg-001..007, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -11,9 +11,21 @@ or (c) a real apm_cli loader call where the surface exists.
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import jsonschema
 import pytest
 
+from apm_cli.install.phases.finalize import _hint_project_compile_needed
+from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.utils.diagnostics import (
+    CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_WARNING,
+    DiagnosticCollector,
+)
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     load_schema,
@@ -211,6 +223,51 @@ def test_producer_workspaces_must_not_use_in_v0_1():
     assert_spec_contains("workspaces", "v0.1")
 
 
+@pytest.mark.req("req-mf-022")
+def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
+    """A stale persisted skill subset must identify the mismatch."""
+    skills_dir = tmp_path / "skills"
+    available_dir = skills_dir / "available"
+    available_dir.mkdir(parents=True)
+    (available_dir / "SKILL.md").write_text("# Available", encoding="utf-8")
+    diagnostics = DiagnosticCollector()
+
+    SkillIntegrator._warn_no_skill_filter_match(
+        SkillIntegrator._skill_names_in_directory(skills_dir),
+        ("missing",),
+        "owner/bundle",
+        diagnostics=diagnostics,
+    )
+
+    warnings = diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].package == "owner/bundle"
+    assert "Requested: missing" in warnings[0].message
+    assert "Available: available" in warnings[0].message
+
+    empty_diagnostics = DiagnosticCollector()
+    SkillIntegrator._warn_no_skill_filter_match(
+        frozenset(),
+        ("missing",),
+        "owner/empty-bundle",
+        diagnostics=empty_diagnostics,
+    )
+    empty_warnings = empty_diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(empty_warnings) == 1
+    assert empty_warnings[0].package == "owner/empty-bundle"
+    assert "Available: (none)" in empty_warnings[0].message
+
+    assert_spec_contains(
+        "a non-empty `skills:` subset",
+        "a dependency that exposes selectable",
+        "container currently yields zero or more entries",
+        "Skill-subset selection for dependencies that expose selectable skills",
+        "Selected skill names for dependencies that expose selectable skills",
+        "MUST emit a default-visible diagnostic",
+        "requested skill names, and the available skill names",
+    )
+
+
 # --- req-ext-001..002 --------------------------------------------------
 
 
@@ -380,12 +437,112 @@ def test_consumer_routes_vendor_target_identifiers_to_handlers():
 
 @pytest.mark.req("req-tg-005")
 def test_consumer_deploys_antigravity_rules_with_expected_dedup():
+    # Needles updated for the v0.1.11 spec-guardian fold on req-tg-005:
+    # the anchor was reworded to (a) lowercase the `antigravity`
+    # identifier, (b) pin a canonical `globs` scalar-vs-sequence
+    # representation for hash reproducibility, and (c) redefine the
+    # deduplication scope to filenames derived from the resolved
+    # instruction primitives (fail-closed non-suppression). See
+    # Appendix D revision 0.1.11.
     assert_spec_contains(
-        "For the Antigravity target, instruction rules MUST be written under",
+        "For the `antigravity` target, instruction rules MUST be written under",
         "`.agents/rules/<name>.md`",
         "`trigger: glob` plus a `globs` field",
-        "either a scalar\nglob or a YAML sequence of glob strings",
-        "unrelated `.md` files under `.agents/rules/` MUST NOT\nsuppress",
+        "emitted as a YAML scalar when `applyTo` resolves to exactly one glob",
+        "as a YAML block sequence when it resolves to two or more",
+        "names derive from the currently-resolved",
+        "MUST NOT be treated as a deployed rule and MUST NOT",
+    )
+
+
+@pytest.mark.req("req-tg-006")
+def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
+    source = tmp_path / "scoped.agent.md"
+    source.write_text(
+        "---\nname: scoped\ntools: [read]\n---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "scoped.toml"
+    diagnostics = DiagnosticCollector()
+
+    AgentIntegrator._write_codex_agent(
+        source,
+        target,
+        diagnostics=diagnostics,
+        package_name="spec-fixture",
+    )
+
+    losses = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert len(losses) == 1
+    assert "scoped.agent.md" in losses[0].message
+    assert "field 'tools' was dropped" in losses[0].message
+    assert "may inherit all project/session MCP servers" in losses[0].message
+    assert losses[0].detail.startswith("Fix:")
+    diagnostics.render_summary()
+    output = capsys.readouterr().out
+    assert "[!]" in output
+    assert "scoped.agent.md" in output
+    assert "Fix:" in output
+
+    non_mapping = tmp_path / "non-mapping.agent.md"
+    non_mapping.write_text(
+        "---\n- tools: [read]\n---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    unverified = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        non_mapping,
+        tmp_path / "non-mapping.toml",
+        diagnostics=unverified,
+        package_name="spec-fixture",
+    )
+    warnings = unverified.by_category().get(CATEGORY_WARNING, [])
+    assert len(warnings) == 1
+    assert "could not be verified" in warnings[0].message
+
+    assert_spec_contains(
+        "same\neffective capability ceiling",
+        "source agent and each discarded field",
+        "may have broader capability access",
+        # Spec-guardian fold standardized the visibility term while retaining
+        # the parenthetical definition in the normative requirement.
+        "default-visible",
+        "MUST be rendered before\nthe overall operation returns",
+        "does not mandate a nonzero\nexit status",
+    )
+
+
+@pytest.mark.req("req-tg-007")
+def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp_path):
+    apm_modules = tmp_path / "apm_modules"
+    instruction_dir = apm_modules / "example" / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (instruction_dir / "example.instructions.md").write_text(
+        "Apply this instruction.\n",
+        encoding="ascii",
+    )
+    target = SimpleNamespace(name="Gemini CLI", compile_family="gemini")
+    target.for_scope = MagicMock(return_value=target)
+    logger = MagicMock()
+    ctx = SimpleNamespace(
+        apm_modules_dir=apm_modules,
+        dry_run=False,
+        installed_count=1,
+        logger=logger,
+        project_root=tmp_path,
+        targets=[target],
+    )
+
+    _hint_project_compile_needed(ctx)
+
+    logger.info.assert_called_once_with(
+        "Instructions installed for Gemini CLI. Run 'apm compile' to update AGENTS.md / GEMINI.md.",
+        symbol="info",
+    )
+    assert_spec_contains(
+        "default-visible, actionable\ndiagnostic",
+        "follow-up compilation operation",
+        "MUST NOT emit this diagnostic for a dry run",
     )
 
 

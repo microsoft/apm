@@ -15,7 +15,7 @@ Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](./installation/).
+- APM installed -- see [Installation](../installation/).
 - A GitHub account and an empty repo for publishing (step 5).
 - A runtime where you can try the result: GitHub Copilot, Claude Code, Kiro,
   or Cursor.
@@ -29,6 +29,15 @@ cd team-skills
 
 `apm init` creates exactly one file -- the manifest. The `.apm/` source tree
 is yours to author.
+
+:::tip[Already have a Claude plugin?]
+If `skills/`, `agents/`, or `commands/` already exists at the project root,
+`apm init` leaves that layout in place. It writes `includes: auto` without
+creating `.apm/`, and those plugin-native directories remain sources for
+`apm pack`. Create `.apm/` later when you want `apm pack` to source from that
+directory instead of the project root. See [source layout and install-time
+discovery](../../producer/pack-a-bundle/#source-layout-and-install-time-discovery).
+:::
 
 ```
 team-skills/
@@ -52,11 +61,11 @@ includes: auto
 scripts: {}
 ```
 
-`includes: auto` is the field that makes step 4 work: with no remote
-dependencies declared, `apm install` walks your local `.apm/` tree
-and deploys what it finds. Set `includes: []` (or omit the field) and
-local content stops deploying. Override with an explicit list of
-paths to gate exactly what ships.
+`includes: auto` records explicit consent to deploy or pack local content.
+Omitting the field preserves legacy implicit consent and produces an audit
+advisory. Use an explicit list of paths when you need an exhaustive publication
+boundary. Source layout is independent: `.apm/` is authoritative when present;
+otherwise supported plugin-native root directories remain pack sources.
 
 ## 2. Add a skill
 
@@ -222,10 +231,14 @@ in the current directory. To target explicitly, see the
 
 > **What about `apm compile`?** Compile is a different concern: it
 > generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools
-> that read a top-level context document for instructions (Codex, Gemini,
-> plain `agents`-protocol hosts). Gemini also receives commands, skills,
-> hooks, and MCP via `apm install`. Copilot, Claude Code, and Cursor read
-> the per-skill directories directly -- no compile step needed.
+> that read a top-level context document for instructions. Targets listed under
+> [post-install instruction compilation](../../reference/targets-matrix/#post-install-instruction-compilation)
+> print a hint after `apm install` when dependency instructions need
+> `apm compile`.
+> Gemini and Claude also receive commands, skills, hooks, and MCP via
+> `apm install`. Claude instructions deploy directly to `.claude/rules/`, while
+> Copilot and Cursor read their native instruction directories -- none of those
+> instruction paths needs a compile step.
 > If your project commits those generated files, set `targets:` in `apm.yml`
 > to keep the committed set consistent across machines. See
 > [Pin committed output with targets:](/apm/reference/cli/compile/#pin-committed-output-with-targets).
@@ -315,7 +328,7 @@ APM recognizes three layouts. Pick the one that matches what you are shipping:
   it directly without restructuring.
 
 For the full comparison and metadata precedence rules, see
-[Package Types](../reference/package-types/).
+[Package Types](../../reference/package-types/).
 
 ## Next steps
 

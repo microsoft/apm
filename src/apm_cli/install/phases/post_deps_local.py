@@ -27,7 +27,6 @@ behavior).
 
 from __future__ import annotations
 
-import builtins
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -56,50 +55,16 @@ def run(ctx: InstallContext) -> None:
     diagnostics = ctx.diagnostics
     logger = ctx.logger
 
-    # ------------------------------------------------------------------
-    # Stale cleanup: remove files deployed by previous local integration
-    # that are no longer produced.  Only run when integration completed
-    # without errors to avoid deleting files that failed to re-deploy.
-    # ------------------------------------------------------------------
     _local_had_errors = (
         diagnostics is not None and diagnostics.error_count > ctx.local_content_errors_before
     )
 
-    if ctx.old_local_deployed and not _local_had_errors:
-        from apm_cli.integration.base_integrator import BaseIntegrator
-        from apm_cli.integration.cleanup import remove_stale_deployed_files
-
-        _stale = builtins.set(ctx.old_local_deployed) - builtins.set(ctx.local_deployed_files)
-        if _stale:
-            # Get recorded hashes from the pre-install lockfile for
-            # content-hash provenance verification.
-            _prev_hashes: dict = {}
-            if ctx.existing_lockfile:
-                _prev_hashes = dict(ctx.existing_lockfile.local_deployed_file_hashes)
-
-            _cleanup_result = remove_stale_deployed_files(
-                _stale,
-                ctx.project_root,
-                dep_key="<local .apm/>",
-                targets=ctx.targets,
-                diagnostics=diagnostics,
-                recorded_hashes=_prev_hashes,
-            )
-            # Failed paths stay in lockfile so we retry next time.
-            ctx.local_deployed_files.extend(_cleanup_result.failed)
-            if _cleanup_result.deleted_targets:
-                BaseIntegrator.cleanup_empty_parents(
-                    _cleanup_result.deleted_targets, ctx.project_root
-                )
-            for _skipped in _cleanup_result.skipped_user_edit:
-                if logger:
-                    logger.cleanup_skipped_user_edit(_skipped, "<local .apm/>")
-            if logger:
-                logger.stale_cleanup("<local .apm/>", len(_cleanup_result.deleted))
-
     # ------------------------------------------------------------------
-    # Lockfile persistence: read-modify-write the lockfile to add
-    # local_deployed_files and per-file content hashes.
+    # Reconciliation and persistence: route stale local content through the
+    # same target-contraction owner that already repaired the dependency and
+    # local compatibility views in the lockfile phase. A separate cleanup pass
+    # using only the active targets can reject an inactive target's valid path
+    # as unmanaged and reintroduce the ghost that the canonical owner removed.
     # ------------------------------------------------------------------
     from apm_cli.deps.lockfile import LockFile as _LF
     from apm_cli.deps.lockfile import get_lockfile_path as _get_lfp
@@ -107,24 +72,62 @@ def run(ctx: InstallContext) -> None:
 
     _lock_path = _get_lfp(ctx.apm_dir)
     _persist_lock = _LF.read(_lock_path) or _LF()
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    _prior_ledger = DeploymentLedgerCodec.from_lockfile(_persist_lock)
     # Target-scoped union: preserve project-root files deployed by OTHER
     # targets (a prior install) rather than clobbering them. Symmetric with
     # the per-dependency reconciliation in phases/lockfile.py and with
     # on-disk stale cleanup, so a multi-target deploy keeps content-integrity
     # coverage for every committed deploy target (issue #1716).
-    from apm_cli.install.manifest_reconcile import union_preserving as _union
+    from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+    from apm_cli.install.phases.targets import declared_target_profiles
 
     _current_files = sorted(ctx.local_deployed_files)
-    _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
-    _files, _hashes = _union(
-        _current_files,
-        _current_hashes,
-        list(_persist_lock.local_deployed_files),
-        dict(_persist_lock.local_deployed_file_hashes),
-        ctx.targets,
+    _current_hashes = _hash_deployed(
+        ctx.local_deployed_files,
+        ctx.project_root,
     )
-    _persist_lock.local_deployed_files = sorted(_files)
-    _persist_lock.local_deployed_file_hashes = _hashes
+    _ghost_count = 0
+
+    def _log_local_ghost_drop(path: str) -> None:
+        nonlocal _ghost_count
+        _ghost_count += 1
+        if logger:
+            logger.verbose_detail(
+                f"Removed stale local lockfile path {path} (target not declared in apm.yml)"
+            )
+
+    from apm_cli.integration.cleanup import CleanupResult
+
+    def _surface_local_cleanup(cleanup: CleanupResult) -> None:
+        if logger is None:
+            return
+        for skipped in cleanup.skipped_user_edit:
+            logger.cleanup_skipped_user_edit(skipped, "<local .apm/>")
+        logger.stale_cleanup("<local .apm/>", len(cleanup.deleted))
+
+    _files, _hashes = reconcile_deployed_block(
+        project_root=ctx.project_root,
+        dep_key="<local .apm/>",
+        current_files=_current_files,
+        current_hashes=_current_hashes,
+        prior_files=list(_persist_lock.local_deployed_files),
+        prior_hashes=dict(_persist_lock.local_deployed_file_hashes),
+        active_targets=ctx.targets,
+        declared_targets=declared_target_profiles(ctx),
+        diagnostics=ctx.diagnostics,
+        on_ghost_drop=_log_local_ghost_drop,
+        on_cleanup=_surface_local_cleanup,
+        prior_ledger=_prior_ledger,
+        current_run_trusted=not _local_had_errors,
+    )
+
+    DeploymentLedgerCodec.replace_context_local_files(ctx, sorted(_files))
+    DeploymentLedgerCodec.replace_legacy_owner(_persist_lock, ".", sorted(_files), _hashes)
+    if logger and _ghost_count:
+        noun = "entry" if _ghost_count == 1 else "entries"
+        logger.info(f"Repaired {_ghost_count} inactive-target local lockfile {noun}")
     # Only write if changed.
     _existing_for_cmp = _LF.read(_lock_path)
     if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):

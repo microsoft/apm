@@ -599,3 +599,27 @@ class TestExtraReservedKeyDenylist:
         assert "env" not in config
         assert "http_headers" not in config
         assert config["oauth"] == {"clientId": "abc"}
+
+
+class TestResolvedByKeyReserved:
+    """resolved_by is install-time provenance, never a manifest-settable key.
+
+    Reserving it keeps the "provenance never leaks into mcp_configs" invariant
+    airtight: a manifest key named resolved_by is ignored, not passed through
+    ``extra`` into the serialized config (#2081).
+    """
+
+    def test_manifest_resolved_by_not_serialized(self):
+        with patch(_WARN_PATH):
+            dep = MCPDependency.from_dict({"name": "svc", "resolved_by": "@evil/pkg"})
+        # Not constructed from user input ...
+        assert dep.resolved_by is None
+        # ... and not smuggled back out through to_dict / extra.
+        serialized = dep.to_dict()
+        assert "resolved_by" not in serialized
+        assert not (dep.extra or {}).get("resolved_by")
+
+    def test_reserved_in_explicit_extra_block(self):
+        with patch(_WARN_PATH):
+            dep = MCPDependency.from_dict({"name": "svc", "extra": {"resolved_by": "@evil/pkg"}})
+        assert "resolved_by" not in dep.to_dict()

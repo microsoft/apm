@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING
 import click
 
 from ...core.command_logger import CommandLogger
-from ...marketplace.auth_helpers import resolve_token_for_host
+from ...marketplace.auth_helpers import resolve_auth_for_host
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
 from ...marketplace.ref_resolver import RefResolver
 from ...marketplace.semver import satisfies_range
 from ...marketplace.yml_schema import PackageEntry, split_source_base
+from ...utils.github_host import is_azure_devops_hostname
 from . import (
     _CheckResult,
     _extract_tag_versions,
@@ -92,13 +93,18 @@ def check(offline, verbose):
                     from ...core.auth import AuthResolver
 
                     auth_resolver = AuthResolver()
-                token = resolve_token_for_host(
+                auth = resolve_auth_for_host(
                     host,
                     offline=offline,
                     org=org,
                     auth_resolver=auth_resolver,
                 )
-                resolvers[key] = RefResolver(offline=offline, host=host, token=token)
+                resolvers[key] = RefResolver(
+                    offline=offline,
+                    host=host,
+                    token=auth.token if auth else None,
+                    auth_scheme=auth.auth_scheme if auth else "basic",
+                )
         return resolvers[key]
 
     results = []
@@ -122,7 +128,10 @@ def check(offline, verbose):
             try:
                 # Resolve each entry against its effective host + composed path.
                 host, owner_repo, org = _entry_coordinates(entry, source_base)
-                remote_label = f"https://{host}/{owner_repo}.git" if host else owner_repo
+                if host and is_azure_devops_hostname(host):
+                    remote_label = f"https://{host}/{owner_repo}"
+                else:
+                    remote_label = f"https://{host}/{owner_repo}.git" if host else owner_repo
                 logger.verbose_detail(
                     f"Resolving {entry.name} via {host or 'default host'}: {remote_label}"
                 )

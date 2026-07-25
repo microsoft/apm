@@ -210,6 +210,19 @@ class MCPClientAdapter(ABC):
             return self._project_root
         return Path(os.getcwd())
 
+    def render_server_config(self, server_info: dict) -> dict:
+        """Render one native server entry for exact baseline comparisons."""
+        rendered = self._format_server_config(
+            server_info,
+            env_overrides={},
+            runtime_vars={},
+        )
+        if isinstance(rendered, tuple):
+            rendered = rendered[0]
+        if not isinstance(rendered, dict):
+            raise ValueError("Adapter did not produce a native MCP server mapping")
+        return rendered
+
     @abstractmethod
     def get_config_path(self):
         """Get the path to the MCP configuration file."""

@@ -120,6 +120,25 @@ class SecurityGate:
         return SecurityGate._build_verdict(findings_by_file, 1, policy, force=False)
 
     @staticmethod
+    def scan_texts(
+        contents: dict[str, str],
+        *,
+        policy: ScanPolicy = BLOCK_POLICY,
+    ) -> ScanVerdict:
+        """Scan a complete in-memory output batch with one policy decision."""
+        findings_by_file: dict[str, list[ScanFinding]] = {}
+        for filename, content in contents.items():
+            file_findings = ContentScanner.scan_text(content, filename=filename)
+            if file_findings:
+                findings_by_file[filename] = file_findings
+        return SecurityGate._build_verdict(
+            findings_by_file,
+            len(contents),
+            policy,
+            force=False,
+        )
+
+    @staticmethod
     def report(
         verdict: ScanVerdict,
         diagnostics,

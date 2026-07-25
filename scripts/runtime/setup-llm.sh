@@ -49,6 +49,20 @@ setup_llm() {
     log_info "Installing LLM library..."
     "$llm_venv/bin/pip" install --upgrade pip
     "$llm_venv/bin/pip" install llm
+
+    # Install truststore so the llm venv verifies HTTPS against the OS trust
+    # store (corporate CA / TLS-proxy support). APM drops a self-contained .pth
+    # bootstrap into this venv's site-packages after setup; that bootstrap
+    # depends only on truststore, which must be present here.
+    log_info "Installing truststore for OS-trust HTTPS verification..."
+    if ! "$llm_venv/bin/pip" install "truststore>=0.10.0"; then
+        if ! "$llm_venv/bin/python" -c "import sys; raise SystemExit(sys.version_info < (3, 10))"; then
+            version=$("$llm_venv/bin/python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+            log_warning "truststore install failed: Python 3.10+ is required (found $version); recreate the llm runtime with a supported Python. See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+        else
+            log_warning "truststore install failed: if pip is behind a TLS proxy, set PIP_CERT=/path/to/org-ca-bundle.pem and re-run setup; the llm runtime will otherwise use bundled CAs. See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+        fi
+    fi
     
     # Install GitHub Models plugin in non-vanilla mode
     if [[ "$VANILLA_MODE" == "false" ]]; then

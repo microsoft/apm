@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.install.helpers.ref_reuse import RefResolverCacheKey
     from apm_cli.security.executables import ExecTrustContext
 
 
@@ -56,7 +57,7 @@ class InstallContext:
     marketplace_provenance: dict[str, Any] | None = None
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
-    target_override: str | None = None  # effective --target value (CLI or config default)
+    target_override: str | list[str] | None = None  # effective --target value
     # Provenance label for ``target_override`` when it did NOT come from the CLI.
     # None means an explicit CLI ``--target`` selector. When the value is
     # populated from the configured default (``apm config target``), this is
@@ -64,6 +65,7 @@ class InstallContext:
     target_override_source: str | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
+    transaction: Any = None  # InstallTransaction
 
     dry_run: bool = False
     lockfile_only: bool = False
@@ -87,6 +89,7 @@ class InstallContext:
     all_apm_deps: list[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: list[Any] = field(default_factory=list)  # resolve
+    update_plan_complete_dep_keys: set[str] = field(default_factory=set)  # resolve
     dependency_graph: Any = None  # resolve
     existing_lockfile: Any = None  # resolve
     lockfile_path: Path | None = None  # resolve
@@ -125,7 +128,7 @@ class InstallContext:
     # so semver deps sharing an upstream repo reuse one ``git ls-remote`` tag
     # listing (RefResolver memoizes per instance) instead of one per dep.
     # Populated lazily in _maybe_resolve_git_semver during the resolve phase.
-    ref_resolver_cache: dict[tuple[str | None, str | None], Any] = field(default_factory=dict)
+    ref_resolver_cache: dict[RefResolverCacheKey, Any] = field(default_factory=dict)
     managed_files: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------
@@ -133,6 +136,10 @@ class InstallContext:
     # ------------------------------------------------------------------
     intended_dep_keys: set[str] = field(default_factory=set)
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
+    # Cleanup refusals retain the original lockfile hash, not a hash of
+    # user-edited bytes. Lockfile assembly consumes this after cleanup.
+    package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
     # Declared-license provenance (issue #1777, U6): maps dep_key -> the SPDX

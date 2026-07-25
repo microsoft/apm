@@ -11,8 +11,8 @@ pull request itself. That is defence in depth: a developer can pass
 `--no-policy`, `--force`, or `APM_POLICY_DISABLE=1` locally; CI cannot.
 
 This page is the recipe set. For the full schema and the rollout
-playbook, see [Governance deep-dive](./governance-guide/) and
-[apm-policy getting started](./apm-policy/).
+playbook, see [Governance deep-dive](../governance-guide/) and
+[apm-policy getting started](../apm-policy/).
 
 ## The gate
 
@@ -20,12 +20,12 @@ playbook, see [Governance deep-dive](./governance-guide/) and
 apm audit --ci
 ```
 
-One command. It runs the eight baseline lockfile checks
-(`lockfile-exists`, `ref-consistency`, `deployed-files-present`,
-`no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`,
-`content-integrity`, `includes-consent`), the install-replay drift
-check, and -- if an `apm-policy.yml` is discovered -- the org policy
-checks. Exit code is `0` clean, `1` on any violation.
+One command. It runs the nine baseline lockfile checks
+(`lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`,
+`deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`,
+`config-consistency`, `content-integrity`, `includes-consent`), the
+install-replay drift check, and -- if an `apm-policy.yml` is discovered --
+the org policy checks. Exit code is `0` clean, `1` on any violation.
 
 Useful flags:
 
@@ -75,7 +75,7 @@ jobs:
 `microsoft/apm-action@v1` runs `apm install` by default, so by the time
 `apm audit --ci` runs, the lockfile and deployed files are present.
 Make this job a required status check via
-[GitHub Rulesets](./github-rulesets/) and a violating PR cannot merge.
+[GitHub Rulesets](../github-rulesets/) and a violating PR cannot merge.
 
 ## Audit-only CI pattern
 
@@ -123,7 +123,7 @@ The two patterns serve different goals:
 | Full install then audit | Catching developers who skipped `apm install` after editing `apm.yml`; ensuring deployed files are present on a fresh runner |
 | Audit-only (`setup-only: true`) | Detecting modification of deployed files after install; committed files and lockfile are the ground truth |
 
-Both patterns enforce policy and the eight baseline lockfile checks. The
+Both patterns enforce policy and the nine baseline lockfile checks. The
 difference is only in whether content-integrity can see tampered bytes.
 
 ## Recipe: SARIF for GitHub Code Scanning
@@ -183,7 +183,7 @@ jobs:
 ```
 
 `--no-fail-fast` lets the sweep report every finding rather than the
-first one. See [drift detection](./drift-detection/) for what the
+first one. See [drift detection](../drift-detection/) for what the
 replay actually checks and how to debug a finding locally.
 
 ## When the gate blocks a PR
@@ -194,6 +194,12 @@ The fix path depends on which check failed.
   The author skipped `apm install` after editing `apm.yml`. They run
   `apm install`, commit `apm.lock.yaml` and the integrated files, and
   push.
+- **`deployment-ledger-owners`.** A canonical deployment row references
+  an owner no longer in the lockfile (typically a dependency removed
+  without running `apm prune`). Run `apm prune`, then rerun `apm audit`.
+  Prune repairs the stale ownership record; it never deletes a file on the
+  strength of a ghost row alone -- untrusted bytes it cannot verify are
+  preserved for manual review.
 - **`content-integrity` or a hidden-Unicode finding.** A primitive was
   hand-edited. The author runs `apm audit --strip` to clean it (or
   reverts the edit), then `apm install` to refresh the lockfile.
@@ -216,12 +222,12 @@ must be visible in the policy file's history.
 
 ## Next steps
 
-- [drift detection](./drift-detection/) -- what the replay actually
+- [drift detection](../drift-detection/) -- what the replay actually
   catches and how to read its output.
-- [security model](./security/) -- the
+- [security model](../security/) -- the
   built-in install-time scan that complements the CI gate.
-- [github rulesets](./github-rulesets/) -- make the audit job a
+- [github rulesets](../github-rulesets/) -- make the audit job a
   required status check across an org.
-- [APM in CI/CD](../integrations/ci-cd/) -- deeper patterns for
+- [APM in CI/CD](../../integrations/ci-cd/) -- deeper patterns for
   Azure Pipelines, GitLab, Jenkins, air-gapped runners, and bundle
   caching across jobs.
