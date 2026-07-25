@@ -914,6 +914,7 @@ class TestResolveMarketplacePluginGitLabMonorepo:
             "pkg",
             "catalog/remote-mkt",
             "1.0.0",
+            tag_pattern="{name}--v{version}",
             host="git.example.invalid",
             token=None,
             auth_scheme="basic",

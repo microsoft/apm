@@ -259,6 +259,8 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                     source_obj["ref"] = pkg.ref
                 if pkg.sha:
                     source_obj["sha"] = pkg.sha
+                if pkg.effective_tag_pattern:
+                    source_obj["tag_pattern"] = pkg.effective_tag_pattern
                 plugin["source"] = source_obj
 
             plugins.append(plugin)

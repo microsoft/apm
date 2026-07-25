@@ -174,3 +174,44 @@ class TestResolveVersionConstraint(unittest.TestCase):
 
         tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "2.1.0")
         assert tag == "secrets-vault--v2.1.0"
+
+    def test_custom_slash_tag_pattern_resolves(self, MockResolver):
+        """Marketplace tagPattern '{name}/{version}' (slash, no v-prefix) is honoured."""
+        refs = [
+            _make_tag_ref("apm-skill-creator/0.1.3", sha="a" * 40),
+            _make_tag_ref("apm-skill-creator/0.1.4", sha="b" * 40),
+        ]
+        MockResolver.return_value.list_remote_refs.return_value = refs
+
+        tag, _sha = resolve_version_constraint(
+            "apm-skill-creator",
+            "lsp-infra/hub",
+            "^0.1.0",
+            tag_pattern="{name}/{version}",
+        )
+        assert tag == "apm-skill-creator/0.1.4"
+
+    def test_custom_slash_pattern_caret_picks_highest(self, MockResolver):
+        refs = [
+            _make_tag_ref("my-pkg/0.1.0", sha="a" * 40),
+            _make_tag_ref("my-pkg/0.1.5", sha="b" * 40),
+            _make_tag_ref("my-pkg/0.2.0", sha="c" * 40),
+        ]
+        MockResolver.return_value.list_remote_refs.return_value = refs
+
+        # ^0.1.0 is >=0.1.0 <0.2.0 for 0.x.y ranges -- should pick 0.1.5
+        tag, _sha = resolve_version_constraint(
+            "my-pkg",
+            "org/repo",
+            "^0.1.0",
+            tag_pattern="{name}/{version}",
+        )
+        assert tag == "my-pkg/0.1.5"
+
+    def test_default_pattern_unaffected_by_fix(self, MockResolver):
+        """Original {name}--v{version} pattern still works when no custom pattern given."""
+        refs = _make_refs("1.0.0", "1.1.0", "1.2.3")
+        MockResolver.return_value.list_remote_refs.return_value = refs
+
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "^1.0.0")
+        assert tag == "secrets-vault--v1.2.3"

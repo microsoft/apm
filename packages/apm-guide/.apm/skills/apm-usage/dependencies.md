@@ -229,16 +229,17 @@ that at most one declaration remains.
 |-------|----------|-------------|
 | `name` | REQUIRED | Plugin identifier within the marketplace (`^[a-zA-Z0-9._-]+$`). |
 | `marketplace` | REQUIRED | Registered marketplace name (`^[a-zA-Z0-9._-]+$`). |
-| `version` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`). Resolved against `{name}--v{version}` git tags on the marketplace repo. |
+| `version` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`). Resolved against git tags whose pattern is declared by the marketplace (defaults to `{name}--v{version}`). |
 
 During resolution, marketplace entries are looked up in the marketplace's
 `marketplace.json` and replaced with concrete git coordinates. When `version`
 is a semver range or bare version number, the resolver lists git tags
-matching `{name}--v{version}`, filters by the constraint, and picks the
-highest matching tag. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
-resolution and override the source ref directly. The lockfile records the
-resolved ref, not the marketplace placeholder. Unknown keys in a marketplace
-entry are rejected.
+using the pattern declared in the marketplace's `tag_pattern` field (populated
+by `apm pack` from the producer's `build.tagPattern`). APM filters by the
+constraint and picks the highest matching tag. Raw git refs (e.g. `v2.0.0`,
+`main`) bypass tag resolution and override the source ref directly. The
+lockfile records the resolved ref, not the marketplace placeholder. Unknown
+keys in a marketplace entry are rejected.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.

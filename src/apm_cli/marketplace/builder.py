@@ -116,6 +116,7 @@ class ResolvedPackage:
     is_prerelease: bool  # True if the resolved ref was a prerelease semver
     host: str | None = None  # non-default git host parsed from apm.yml source
     source_url: str | None = None  # canonical URL for sourceBase-composed entries
+    effective_tag_pattern: str = ""  # tag pattern used to resolve this package
 
 
 @dataclass(frozen=True)
@@ -629,6 +630,7 @@ class MarketplaceBuilder:
                 owner_repo,
                 source_host=source_host,
                 source_url=source_url,
+                effective_tag_pattern=entry.tag_pattern or yml.build.tag_pattern,
             )
         # version range resolution
         return self._resolve_version_range(
@@ -648,6 +650,7 @@ class MarketplaceBuilder:
         *,
         source_host: str | None = None,
         source_url: str | None = None,
+        effective_tag_pattern: str = "",
     ) -> ResolvedPackage:
         """Resolve an entry with an explicit ``ref:`` field."""
         ref_text = entry.ref
@@ -667,6 +670,7 @@ class MarketplaceBuilder:
                 is_prerelease=sv.is_prerelease if sv else False,
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
             )
 
         refs = resolver.list_remote_refs(owner_repo)
@@ -700,6 +704,7 @@ class MarketplaceBuilder:
                 is_prerelease=sv.is_prerelease if sv else False,
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
             )
 
         # Try as full refname
@@ -721,6 +726,7 @@ class MarketplaceBuilder:
                 is_prerelease=sv.is_prerelease if sv else False,
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
             )
 
         # Try as branch name
@@ -739,6 +745,7 @@ class MarketplaceBuilder:
                 is_prerelease=False,
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
             )
 
         # HEAD special case
@@ -802,6 +809,7 @@ class MarketplaceBuilder:
             is_prerelease=best_sv.is_prerelease,
             host=self._resolved_output_host(source_host=source_host, source_url=source_url),
             source_url=source_url,
+            effective_tag_pattern=pattern,
         )
 
     # -- concurrent resolution ----------------------------------------------

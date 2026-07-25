@@ -431,7 +431,6 @@ class TestFieldStripping:
         for plugin in data["plugins"]:
             src = plugin["source"]
             assert "subdir" not in src
-            assert "tag_pattern" not in src
             assert "include_prerelease" not in src
 
 

@@ -23,7 +23,8 @@
         "source": "github",
         "repo": "acme/code-reviewer",
         "ref": "v2.1.0",
-        "sha": "abcd234567890abcdef1234567890abcdef12345"
+        "sha": "abcd234567890abcdef1234567890abcdef12345",
+        "tag_pattern": "v{version}"
       }
     },
     {
@@ -36,7 +37,8 @@
         "url": "acme/test-generator",
         "path": "src/plugin",
         "ref": "v1.0.3",
-        "sha": "def4567890abcdef1234567890abcdef12345678"
+        "sha": "def4567890abcdef1234567890abcdef12345678",
+        "tag_pattern": "v{version}"
       }
     }
   ]
