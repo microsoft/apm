@@ -99,7 +99,8 @@ class TestSetupEnvironment:
         with patch.dict(os.environ, {"GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}, clear=False):
             env = GitAuthEnvBuilder(tm).setup_environment()
         # User-set BatchMode preserved; ConnectTimeout appended; no duplicate BatchMode.
-        assert env["GIT_SSH_COMMAND"].count("BatchMode") == 1
+        # Use case-insensitive count to match the production idempotency contract.
+        assert env["GIT_SSH_COMMAND"].lower().count("batchmode") == 1
         assert "ConnectTimeout=30" in env["GIT_SSH_COMMAND"]
 
     def test_existing_ssh_command_appends_connecttimeout(self):
