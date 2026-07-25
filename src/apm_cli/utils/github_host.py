@@ -21,6 +21,17 @@ def _get_gitlab_hosts_list() -> list[str]:
     return [part.strip().lower().split("/")[0] for part in raw.split(",") if part.strip()]
 
 
+def _get_ado_single_host() -> str:
+    """Return the normalised ADO_HOST env value."""
+    return os.environ.get("ADO_HOST", "").strip().lower().split("/")[0]
+
+
+def _get_ado_hosts_list() -> list[str]:
+    """Return normalised APM_ADO_HOSTS entries."""
+    raw = os.environ.get("APM_ADO_HOSTS", "")
+    return [part.strip().lower().split("/")[0] for part in raw.split(",") if part.strip()]
+
+
 def default_host() -> str:
     """Return the default Git host (can be overridden via GITHUB_HOST env var)."""
     return os.environ.get("GITHUB_HOST", "github.com")
@@ -31,17 +42,32 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
 
     Accepts:
     - dev.azure.com (Azure DevOps Services)
+    - ssh.dev.azure.com (Azure DevOps Services SSH)
     - *.visualstudio.com (legacy Azure DevOps URLs)
-    - Custom Azure DevOps Server hostnames are supported via GITHUB_HOST env var
+    - ADO_HOST -- single on-prem Azure DevOps Server hostname
+    - APM_ADO_HOSTS -- comma-separated list of on-prem Azure DevOps Server hostnames
+
+    To configure an on-prem Azure DevOps Server, set ADO_HOST (or APM_ADO_HOSTS
+    for multiple servers):
+
+      export ADO_HOST=ado.corp.example.com
+      export APM_ADO_HOSTS=ado1.corp.example.com,ado2.corp.example.com
+
+    Note: GITHUB_HOST does NOT configure ADO Server hostnames; use ADO_HOST.
     """
     if not hostname:
         return False
-    h = hostname.lower()
+    h = hostname.strip().lower().split("/")[0]
     if h == "dev.azure.com":
         return True
     if h == "ssh.dev.azure.com":
         return True
-    return bool(h.endswith(".visualstudio.com"))
+    if h.endswith(".visualstudio.com"):
+        return True
+    ado_single = _get_ado_single_host()
+    if ado_single and ado_single == h and is_valid_fqdn(h):
+        return True
+    return any(entry and entry == h and is_valid_fqdn(entry) for entry in _get_ado_hosts_list())
 
 
 def is_visualstudio_legacy_hostname(hostname: str | None) -> bool:
@@ -268,8 +294,9 @@ def unsupported_host_error(hostname: str, context: str | None = None) -> str:
         msg += f"But you're trying to use: '{hostname}'\n"
         msg += "\n"
 
-    msg += f"To use '{hostname}', set the GITHUB_HOST environment variable:\n"
+    msg += f"To use '{hostname}', set the appropriate environment variable:\n"
     msg += "\n"
+    msg += "  For GitHub Enterprise Server:\n"
     msg += "  # Linux/macOS:\n"
     msg += f"  export GITHUB_HOST={hostname}\n"
     msg += "\n"
@@ -278,6 +305,16 @@ def unsupported_host_error(hostname: str, context: str | None = None) -> str:
     msg += "\n"
     msg += "  # Windows (Command Prompt):\n"
     msg += f"  set GITHUB_HOST={hostname}\n"
+    msg += "\n"
+    msg += "  For on-prem Azure DevOps Server:\n"
+    msg += "  # Linux/macOS:\n"
+    msg += f"  export ADO_HOST={hostname}\n"
+    msg += "\n"
+    msg += "  # Windows (PowerShell):\n"
+    msg += f'  $env:ADO_HOST = "{hostname}"\n'
+    msg += "\n"
+    msg += "  # Windows (Command Prompt):\n"
+    msg += f"  set ADO_HOST={hostname}\n"
 
     return msg
 
