@@ -485,6 +485,7 @@ def outdated(global_, verbose, parallel_checks):
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=_git_cache,
+            update_refs=True,
         )
         if _tiered is not None:
             downloader._tiered_resolver = _tiered
