@@ -35,8 +35,10 @@ def _github_api(_host: str) -> str:
     return "https://api.github.com"
 
 
-def _ado_api(_host: str) -> str:
-    return "https://dev.azure.com"
+def _ado_api(host: str) -> str:
+    if host in {"dev.azure.com", "ssh.dev.azure.com"} or host.endswith(".visualstudio.com"):
+        return "https://dev.azure.com"
+    return f"https://{host}"
 
 
 def _api_v3(host: str) -> str:
@@ -66,6 +68,7 @@ def _matches_ghes(host: str) -> bool:
         and configured == host
         and configured not in {"github.com", "gitlab.com"}
         and not configured.endswith(".ghe.com")
+        and not is_azure_devops_hostname(configured)
         and is_valid_fqdn(configured)
     )
 

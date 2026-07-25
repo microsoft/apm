@@ -121,6 +121,30 @@ When auth fails entirely, APM prints a targeted diagnostic (not a generic "not a
 message). For `--update` operations, a pre-flight auth check runs before any files are
 modified -- on failure you see `No files were modified`.
 
+### On-prem Azure DevOps Server
+
+For self-hosted Azure DevOps Server installations (not Azure DevOps Services at
+`dev.azure.com`), tell APM which hostname to treat as ADO:
+
+```bash
+# Single server
+export ADO_HOST=ado.corp.example.com
+export ADO_APM_PAT=your_ado_pat
+apm install ado.corp.example.com/org/project/_git/repo
+
+# Multiple servers
+export APM_ADO_HOSTS=ado1.corp.example.com,ado2.corp.example.com
+```
+
+`ADO_HOST` registers a single on-prem host; `APM_ADO_HOSTS` accepts a comma-separated
+list for environments with multiple ADO Server instances. Both mirror the `GITLAB_HOST`
+/ `APM_GITLAB_HOSTS` pattern. The `az` bearer fallback works for on-prem servers when
+the server is joined to Entra ID (Azure AD).
+
+**Do not use `GITHUB_HOST` for ADO Server.** `GITHUB_HOST` configures GitHub Enterprise
+Server hosts; setting it to an ADO hostname routes GitHub credentials to the ADO server
+instead of ADO credentials, causing silent auth failures.
+
 ### ADO auth troubleshooting
 
 | Symptom | Cause | Fix |
@@ -129,6 +153,7 @@ modified -- on failure you see `No files were modified`.
 | `az CLI is installed but no active session was found` | `az account show` fails | Run `az login --tenant <tenant>` against the tenant that owns the org |
 | `az CLI returned a token but the org does not accept it (likely a tenant mismatch)` | Wrong tenant | Run `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT` |
 | `ADO_APM_PAT was rejected (HTTP 401) and no az cli fallback was available` | Stale PAT, no `az` | Rotate the PAT, or install `az` and run `az login --tenant <tenant>` |
+| On-prem host classified as GHES / GitHub credentials sent | `GITHUB_HOST` set instead of `ADO_HOST` | Replace `GITHUB_HOST` with `ADO_HOST=your-ado-server.example.com` |
 
 ## GitHub Enterprise Server (GHES)
 
