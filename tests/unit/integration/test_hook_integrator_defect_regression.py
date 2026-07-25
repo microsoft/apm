@@ -410,3 +410,134 @@ def test_hook_bundle_stale_sibling_removed_from_target_paths(tmp_path: Path) -> 
 
     assert sync_result["files_removed"] >= 4
     assert not stale_sibling.exists()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for issue #2321
+# .cursor/hooks.json must not receive Claude-formatted hooks from a package
+# that declares target: claude in its own apm.yml.
+# ---------------------------------------------------------------------------
+
+
+def _make_target(name: str):
+    """Return a minimal mock TargetProfile for the given target name."""
+    from unittest.mock import MagicMock
+
+    t = MagicMock()
+    t.name = name
+    t.root_dir = f".{name}"
+    t.supports = lambda prim: prim == "hooks"
+    mapping = MagicMock()
+    mapping.deploy_root = None
+    t.primitives = {"hooks": mapping}
+    return t
+
+
+def _write_generic_hook(pkg_dir: Path) -> None:
+    """Write a generic hooks.json under .apm/hooks/."""
+    hooks_dir = pkg_dir / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "hooks": {
+            "Stop": [
+                {
+                    "matcher": ".*",
+                    "hooks": [{"type": "command", "command": "echo stop"}],
+                }
+            ]
+        }
+    }
+    (hooks_dir / "hooks.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+class TestIssue2321Fixes:
+    """Regression tests for issue #2321.
+
+    A package that declares ``target: claude`` in its own apm.yml must NOT
+    have its hook files deployed to the cursor (or any other non-claude) target,
+    even when the hook file uses a generic name (hooks.json) that the
+    filename-based router treats as universal.
+    """
+
+    @pytest.fixture
+    def project(self, tmp_path: Path) -> Path:
+        """Project root with both .claude/ and .cursor/ pre-created."""
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".cursor").mkdir()
+        (tmp_path / ".codex").mkdir()
+        return tmp_path
+
+    def _pkg(self, project: Path, name: str, **apm_kwargs) -> PackageInfo:
+        """Create a package directory with a generic hooks.json and given APMPackage kwargs."""
+        pkg_dir = project / "apm_modules" / name
+        _write_generic_hook(pkg_dir)
+        return PackageInfo(
+            package=APMPackage(name=name, version="1.0.0", source=f"owner/{name}", **apm_kwargs),
+            install_path=pkg_dir,
+        )
+
+    def test_claude_declared_package_does_not_write_to_cursor(self, project: Path) -> None:
+        """Package with target:claude must not deploy hooks to .cursor/hooks.json."""
+        pkg = self._pkg(project, "claude-only-pkg", target="claude")
+        cursor_target = _make_target("cursor")
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(cursor_target, pkg, project)
+
+        assert result.files_integrated == 0
+        assert not (project / ".cursor" / "hooks.json").exists()
+
+    def test_claude_declared_package_deploys_to_claude(self, project: Path) -> None:
+        """Package with target:claude must still deploy hooks to .claude/settings.json."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg = self._pkg(project, "claude-only-pkg", target="claude")
+        claude_target = KNOWN_TARGETS["claude"]
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(claude_target, pkg, project)
+
+        assert result.files_integrated == 1
+        settings = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        assert "hooks" in settings
+
+    def test_undeclared_package_deploys_to_all_active_targets(self, project: Path) -> None:
+        """A package with no target: declaration is universal and must reach every target."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg = self._pkg(project, "universal-pkg")  # no target kwarg
+        integrator = HookIntegrator()
+
+        claude_result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["claude"], pkg, project)
+        cursor_result = integrator.integrate_hooks_for_target(_make_target("cursor"), pkg, project)
+
+        assert claude_result.files_integrated == 1
+        assert cursor_result.files_integrated == 1
+
+    def test_multi_target_package_deploys_to_declared_targets_only(self, project: Path) -> None:
+        """Package with targets:[claude,cursor] must deploy to both but not codex."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg = self._pkg(project, "dual-target-pkg", targets=["claude", "cursor"])
+        integrator = HookIntegrator()
+
+        claude_result = integrator.integrate_hooks_for_target(KNOWN_TARGETS["claude"], pkg, project)
+        cursor_result = integrator.integrate_hooks_for_target(_make_target("cursor"), pkg, project)
+        codex_result = integrator.integrate_hooks_for_target(_make_target("codex"), pkg, project)
+
+        assert claude_result.files_integrated == 1
+        assert cursor_result.files_integrated == 1
+        assert codex_result.files_integrated == 0
+
+    def test_cursor_declared_package_does_not_write_to_claude(self, project: Path) -> None:
+        """Package with target:cursor must not deploy hooks to .claude/settings.json."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg = self._pkg(project, "cursor-only-pkg", target="cursor")
+        claude_target = KNOWN_TARGETS["claude"]
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(claude_target, pkg, project)
+
+        assert result.files_integrated == 0
+        assert not (project / ".claude" / "settings.json").exists()
