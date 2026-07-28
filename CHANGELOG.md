@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --frozen` no longer writes `apm.lock.yaml`, which req-lk-006
+  requires it to leave untouched. It previously deployed files and rewrote the
+  lockfile to claim them, so a committed lockfile that under-recorded the
+  deployed set was silently repaired in CI instead of being reported -- and the
+  files it omitted stayed outside `content-integrity`'s hash and hidden-Unicode
+  scanners. Frozen installs now fail and name the unrecorded paths. The check is
+  one-directional -- claims the install would drop (a `--target` filter,
+  `--only`, a removed dependency) are tolerated, as removed deps already were --
+  and `generated_at` / `apm_version` are excluded, so a newer CLI reading an
+  older lockfile is not treated as a rewrite. (#2379)
+  If CI starts failing on `--frozen` after upgrading, run `apm install`
+  locally and commit the updated `apm.lock.yaml`.
 - Partial dependency updates preserve concrete deployment targets for refreshed and untouched packages, including skills under `.agents/skills/`, instead of demoting them to `legacy`. (#2924)
 - Transient resolution-staging paths are shorter, so `apm install` no longer fails with `[WinError 206] The filename or extension is too long.` from a deep Windows checkout. The staging root drops from a full `uuid4().hex` to 12 hex characters and each per-destination slot from a full SHA-256 digest to 16, freeing 68 characters on every staged path. This is not a guarantee of arbitrary long-path support. Orphaned staging roots left by earlier versions are still cleaned up. (#2896)
 

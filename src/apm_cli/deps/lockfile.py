@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +41,41 @@ class _ExistingLockfileUnset:
 
 
 _EXISTING_LOCKFILE_UNSET = _ExistingLockfileUnset()
+
+# req-lk-006 requires a frozen-install mode "in which the lockfile is never
+# written or rewritten".  An install reaches ``LockFile.write`` from eight
+# call sites (dependency lockfile build, local bundles, target-contraction
+# reconciliation, local-content persist, MCP and LSP integration, ...), so
+# the suppression lives at the one chokepoint they all funnel through
+# instead of as a flag threaded to each -- a new write site then inherits
+# the guarantee rather than needing to remember it.
+#
+# Suppressed writes are *recorded*, not merely dropped: the caller compares
+# them against the committed lockfile to decide whether the frozen install
+# can honestly report success (see ``InstallService``).
+#
+# A ContextVar rather than a module global so the mode cannot leak across
+# concurrent installs in one process (tests, programmatic callers).
+_suppressed_writes: ContextVar[list[str] | None] = ContextVar(
+    "apm_suppressed_lockfile_writes", default=None
+)
+
+
+@contextmanager
+def suppress_lockfile_writes() -> Iterator[list[str]]:
+    """Record and discard every :meth:`LockFile.write` in this context.
+
+    Yields the list of serialised lockfiles that *would* have been written,
+    in call order.  Serialised rather than held by reference so that later
+    mutation of the same in-memory :class:`LockFile` cannot rewrite
+    history: each entry is exactly the content that ``write`` withheld.
+    """
+    attempts: list[str] = []
+    token = _suppressed_writes.set(attempts)
+    try:
+        yield attempts
+    finally:
+        _suppressed_writes.reset(token)
 
 
 def installed_apm_version() -> str:
@@ -983,6 +1021,10 @@ class LockFile:
     ) -> None:
         """Write lock file to disk, preserving legacy timestamp behavior.
 
+        Inside :func:`suppress_lockfile_writes` (``apm install --frozen``,
+        req-lk-006) the serialised content is recorded for the caller and
+        the file on disk is left byte-for-byte untouched.
+
         New lockfiles omit ``generated_at``.  When the on-disk lockfile already
         carries the field, keep it stable for semantic no-ops and refresh it for
         substantive writes. This behavior should be changed to remove the legacy
@@ -992,6 +1034,10 @@ class LockFile:
         Callers that already loaded the destination can pass ``existing_lockfile``
         to avoid parsing the same bytes again.
         """
+        suppressed = _suppressed_writes.get()
+        if suppressed is not None:
+            suppressed.append(self.to_yaml())
+            return
         from ..utils.atomic_io import atomic_write_text
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
