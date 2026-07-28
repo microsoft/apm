@@ -11,7 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` reports the original resolution error for a dependency whose git ref cannot be resolved, instead of failing later while annotating the update plan. (#3142)
 - Repeat `apm install` runs keep existing MCP servers from custom (`registry:`) registries instead of reconfiguring them, preserving their authored headers. (#3142)
-
+- `apm install --frozen` no longer writes `apm.lock.yaml`, which req-lk-006
+  requires it to leave untouched. It previously deployed files and rewrote the
+  lockfile to claim them, so a committed lockfile that under-recorded the
+  deployed set was silently repaired in CI instead of being reported -- and the
+  files it omitted stayed outside `content-integrity`'s hash and hidden-Unicode
+  scanners. Frozen installs now fail and name the unrecorded paths. The check is
+  one-directional -- claims the install would drop (a `--target` filter,
+  `--only`, a removed dependency) are tolerated, as removed deps already were --
+  and `generated_at` / `apm_version` are excluded, so a newer CLI reading an
+  older lockfile is not treated as a rewrite. (#2379)
+  If CI starts failing on `--frozen` after upgrading, run `apm install`
+  locally and commit the updated `apm.lock.yaml`.
 - `apm audit` discovers tracked and untracked target-native prompts without treating executable commands as prompt text; unreadable or unsupported recognized formats now fail with incomplete coverage, and shared/user configuration cannot be auto-stripped. Review named incomplete or protected locations manually before re-auditing. Proposed `specs/openapm-v0.1.md` audit contract remains subject to specification adoption. -- by @lkshrk (#2962)
 - Cursor MCP configuration now preserves native runtime environment references and authored static values, normalizes scalar environment values, and omits null entries. (by @icecold009, #3070)
 - Global skill installs work through `HOME`/`APM_HOME` directory aliases without relaxing package or destination safety; frozen installs reject ref, pin, provider and transport drift, and unseeded mutable refs resolve upstream. After an intentional declaration change, review it and run `apm install --update`. (by @DaveMeadAdjust, #2876)
