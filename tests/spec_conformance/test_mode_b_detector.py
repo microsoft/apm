@@ -91,6 +91,33 @@ def test_detector_short_circuits_on_spec_concurrent_edit(tmp_path):
     assert "spec-concurrent edit detected" in out.stdout, out.stdout
 
 
+def test_detector_short_circuits_on_new_top_level_req_marker(tmp_path):
+    """A new column-0 ``@pytest.mark.req`` marker MUST short-circuit (exit 0).
+
+    Citing an EXISTING requirement with a new marker is a first-class way to
+    satisfy Mode B -- the detector's own message lists it, and orphan_check
+    then owns correctness. Every test in this suite declares its marker at
+    module level, so this is the common shape; when it fails to register, a
+    legitimately-cited PR is pushed toward an unnecessary spec amendment or a
+    waiver that would misrepresent a behaviour change as a refactor.
+    """
+    repo = _make_repo(tmp_path)
+    (repo / "src" / "apm_cli" / "deps" / "new.py").write_text(
+        "\n".join(f"x = {i}" for i in range(40)) + "\n"
+    )
+    (repo / "tests" / "spec_conformance" / "test_new_citation.py").write_text(
+        'import pytest\n\n\n@pytest.mark.req("req-lk-012")\ndef test_cited():\n    assert True\n'
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "feature + citation via new req marker")
+    out = _run_detector(repo)
+    assert out.returncode == 0, (
+        f"a new top-level req marker MUST short-circuit; got exit "
+        f"{out.returncode}\nstdout: {out.stdout}\nstderr: {out.stderr}"
+    )
+    assert "spec-concurrent edit detected" in out.stdout, out.stdout
+
+
 def test_detector_passes_on_out_of_scope_only(tmp_path):
     """A PR that touches nothing under critical paths MUST exit 0."""
     repo = _make_repo(tmp_path)

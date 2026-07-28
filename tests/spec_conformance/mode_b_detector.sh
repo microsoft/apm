@@ -73,8 +73,14 @@ fi
 # body or the requirements manifest, or adds a new pytest req marker,
 # orphan_check.py owns correctness. Pass.
 SPEC_TOUCHED="$(git diff --name-only "$MB"...HEAD -- "$SPEC_BODY" "$SPEC_MANIFEST" || true)"
+# `[^+]*` (not `[^+].*`): every marker in this suite sits at column 0, so the
+# added line is `+@pytest.mark.req(...)`. With `[^+].` the `@` is consumed as
+# the not-a-plus character and the pattern then demands a SECOND
+# `@pytest.mark.req(` later on the same line, which never appears -- only
+# indented markers matched, and this short-circuit never fired for the common
+# case. `[^+]*` still excludes the `+++ b/...` diff header.
 NEW_MARKERS="$(git diff "$MB"...HEAD -- 'tests/spec_conformance/**' \
-  | grep -E '^\+[^+].*@pytest\.mark\.req\(' || true)"
+  | grep -E '^\+[^+]*@pytest\.mark\.req\(' || true)"
 if [ -n "$SPEC_TOUCHED" ] || [ -n "$NEW_MARKERS" ]; then
   echo "[+] mode_b: spec-concurrent edit detected; orphan_check owns this PR"
   exit 0
