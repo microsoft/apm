@@ -3,7 +3,7 @@
 Covers:
 * Normalization helpers (build-id strip, line endings, BOM).
 * Public dataclass immutability contracts.
-* Diff engine kinds (modified, unintegrated, orphaned, ignored).
+* Diff engine kinds (modified, unintegrated, orphaned, unrecorded, ignored).
 * Inline-diff size cap.
 * SARIF rule ID prefix.
 * CheckLogger phase markers go to stderr.
@@ -21,12 +21,14 @@ from apm_cli.install.drift import (
     CheckLogger,
     DriftFinding,
     ReplayConfig,
+    _claimed_prefixes,
     _governed_root_dirs,
     _normalize_line_endings,
     _strip_bom,
     _strip_build_id,
     diff_scratch_against_project,
     render_drift_sarif,
+    render_drift_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -118,7 +120,10 @@ def test_diff_engine_modified_ignored_after_normalization(tmp_path):
         b"\xef\xbb\xbf<!-- Build ID: deadbeef -->\r\nline1\r\nline2\r\n",
     )
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    # Tracked: this test is about normalization, so the file must be recorded
+    # or the (separate) unrecorded membership finding fires instead.
+    lock = _lockfile_with_tracked([".apm/skills/x.md"])
+    findings = diff_scratch_against_project(scratch, project, lock, targets=[])
     assert findings == []
 
 
@@ -217,6 +222,94 @@ def test_diff_engine_ignores_untracked_governed_file(tmp_path):
     assert findings == []
 
 
+def test_diff_engine_unrecorded_kind(tmp_path):
+    """A file the replay deploys but the lockfile does not record is reported.
+
+    Regression for issue #2379: the manifest defines what
+    ``content-integrity`` hashes and Unicode-scans, so an unrecorded deployed
+    file is permanently exempt from both while it stays unrecorded.
+    """
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    same = b"deployed by apm, absent from the lockfile\n"
+    _write(scratch / ".apm" / "skills" / "beta.md", same)
+    _write(project / ".apm" / "skills" / "beta.md", same)
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert len(findings) == 1
+    assert findings[0].kind == "unrecorded"
+    assert findings[0].path == ".apm/skills/beta.md"
+
+
+def test_diff_engine_unrecorded_not_reported_when_claimed_by_directory_entry(tmp_path):
+    """A tracked DIRECTORY entry claims the files beneath it.
+
+    ``deployed_files`` may name a directory instead of each file under it
+    (``scan_lockfile_packages`` recurses into exactly that shape), so files it
+    covers are recorded and must not surface as unrecorded.
+    """
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    same = b"claimed via its parent directory\n"
+    _write(scratch / ".apm" / "skills" / "demo" / "SKILL.md", same)
+    _write(project / ".apm" / "skills" / "demo" / "SKILL.md", same)
+
+    lock = _lockfile_with_tracked([".apm/skills/demo"])
+    assert diff_scratch_against_project(scratch, project, lock, targets=[]) == []
+
+
+def test_claimed_prefixes_only_derived_from_directory_entries(tmp_path):
+    """A tracked FILE must not act as a directory prefix.
+
+    Otherwise a tracked ``a.md`` would claim everything under a directory
+    named ``a.md``, letting a deployed file escape the membership check on the
+    strength of its path alone.
+    """
+    tracked = {".apm/skills/a.md": "pkg", ".apm/skills/demo": "pkg"}
+    project_files = {".apm/skills/a.md": tmp_path / "a.md"}
+
+    assert _claimed_prefixes(tracked, project_files) == (".apm/skills/demo/",)
+
+
+def test_diff_engine_unrecorded_exempts_hook_merge_targets(tmp_path):
+    """Hook config files APM merges into are never claimed, so never unrecorded.
+
+    ``.claude/settings.json`` and its ``apm-hooks.json`` sidecar are shared
+    with the user: hook integration injects entries but the lockfile records
+    no ownership. Their content is still compared by the replay, so tampering
+    surfaces as ``modified``.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    same = b'{"hooks": {}}\n'
+    for rel in (".claude/settings.json", ".claude/apm-hooks.json"):
+        _write(scratch / rel, same)
+        _write(project / rel, same)
+
+    targets = [KNOWN_TARGETS["claude"]]
+    assert diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets) == []
+
+
+def test_diff_engine_unrecorded_yields_to_modified(tmp_path):
+    """Differing bytes report ``modified`` only -- never both kinds for one file."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    _write(scratch / ".apm" / "skills" / "beta.md", b"from source\n")
+    _write(project / ".apm" / "skills" / "beta.md", b"hand-edited\n")
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert [f.kind for f in findings] == ["modified"]
+
+
+def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
+    out = render_drift_text([DriftFinding(path=".claude/skills/x/SKILL.md", kind="unrecorded")])
+    assert "unrecorded (1):" in out
+    assert ".claude/skills/x/SKILL.md" in out
+    assert "apm.lock.yaml committed" in out
+
+
 def test_diff_engine_100kb_inline_cap(tmp_path):
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"
@@ -290,7 +383,9 @@ def test_diff_engine_skill_deploy_root_clean_when_identical(tmp_path):
     _write(project / rel, same)
     targets = [_target_with_skill_deploy_root()]
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets)
+    findings = diff_scratch_against_project(
+        scratch, project, _lockfile_with_tracked([rel]), targets=targets
+    )
     assert findings == []
 
 
