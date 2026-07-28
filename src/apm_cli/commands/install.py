@@ -1572,7 +1572,7 @@ def install(  # noqa: PLR0913
         logger.error(str(e))
         for reason in e.reasons:
             logger.error_detail(reason)
-        logger.info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
+        logger.info(e.tip)
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1827,7 +1827,7 @@ def _install_apm_packages(ctx, outcome):
             logger.error(str(e))
             for reason in e.reasons:
                 logger.error_detail(reason)
-            logger.info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
+            logger.info(e.tip)
             raise InstallFailureAlreadyRendered(str(e)) from e
         except InstallFailureAlreadyRendered:
             raise

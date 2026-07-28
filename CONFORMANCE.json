@@ -115,8 +115,9 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::TestFrozenInstallNeverWritesLockfile::test_frozen_install_withholds_the_write_and_fails_instead",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote"
       ]
     },

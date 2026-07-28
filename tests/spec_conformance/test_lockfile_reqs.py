@@ -7,6 +7,8 @@ fixture pair under `integrity/`.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import jsonschema
 import pytest
 
@@ -549,3 +551,62 @@ def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
         "target while its ownership record remains",
         "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
     )
+
+
+class TestFrozenInstallNeverWritesLockfile:
+    """req-lk-006's first clause, at the write chokepoint.
+
+    req-lk-006 is one sentence carrying two obligations: a frozen mode "in
+    which the lockfile is never written or rewritten" AND a failure "on any
+    direct dependency for which the lockfile has no pin".  Only the second
+    had behavioural coverage -- ``lockfile_satisfies_manifest`` -- so a
+    frozen install deployed files and rewrote the lockfile to claim them,
+    which is how a committed lockfile that under-records survives CI
+    (issue #2379).  The existing req-lk-006 test asserts a fixture's
+    ``resolved_hash`` field, not frozen behaviour.
+    """
+
+    @pytest.mark.req("req-lk-006")
+    def test_frozen_install_withholds_the_write_and_fails_instead(self, tmp_path):
+        """A frozen install MUST leave apm.lock.yaml byte-identical, and MUST
+        NOT report success when the lockfile it withheld claims deployed
+        files the committed one does not."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, suppress_lockfile_writes
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.service import InstallService
+
+        def _lock(deployed):
+            lock = LockFile(lockfile_version="1", apm_version="0.0.0-test")
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="https://github.com/o/r",
+                    resolved_ref="main",
+                    resolved_commit="a" * 40,
+                    depth=1,
+                    deployed_files=list(deployed),
+                )
+            )
+            return lock
+
+        lockfile_path = tmp_path / "apm.lock.yaml"
+        (tmp_path / "apm.yml").write_text("name: t\nversion: 1.0.0\n")
+        _lock([".claude/skills/recorded/SKILL.md"]).write(lockfile_path)
+        committed_bytes = lockfile_path.read_bytes()
+
+        request = MagicMock()
+        request.apm_package.package_path = tmp_path / "apm.yml"
+
+        # What the install would deploy: the recorded skill plus one the
+        # committed lockfile never claims.
+        produced = _lock([".claude/skills/recorded/SKILL.md", ".claude/skills/unclaimed/SKILL.md"])
+        with suppress_lockfile_writes() as withheld:
+            produced.write(lockfile_path)
+
+        assert lockfile_path.read_bytes() == committed_bytes, "MUST never be rewritten"
+
+        with pytest.raises(FrozenInstallError) as exc:
+            InstallService._enforce_frozen_no_rewrite(request, withheld)
+        assert ".claude/skills/unclaimed/SKILL.md" in " ".join(exc.value.reasons)
+        assert lockfile_path.read_bytes() == committed_bytes
+
+        assert_spec_contains("the lockfile is never written\nor rewritten")
