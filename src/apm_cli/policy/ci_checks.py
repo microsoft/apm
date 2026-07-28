@@ -368,7 +368,10 @@ def _check_content_integrity(
     from ..security.file_scanner import scan_deployed_trees, scan_lockfile_packages
     from ..utils.content_hash import compute_file_hash
 
-    findings_by_file, _files_scanned = scan_lockfile_packages(project_root)
+    # Pass the already-parsed lock: re-reading it here would be a redundant
+    # parse, and could disagree with the in-memory lockfile this check was
+    # handed.
+    findings_by_file, _files_scanned = scan_lockfile_packages(project_root, lockfile=lock)
     # Unicode findings are NOT limited to the recorded set: a deployed file the
     # lockfile omits has no hash to verify, but its characters are dangerous
     # regardless, and it would otherwise be exempt from this check for as long
