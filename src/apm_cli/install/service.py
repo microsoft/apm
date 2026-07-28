@@ -82,14 +82,23 @@ class InstallService:
 
             with suppress_lockfile_writes() as withheld:
                 result = self._run_pipeline(request)
-            self._enforce_frozen_no_rewrite(request, withheld)
         else:
+            withheld = None
             result = self._run_pipeline(request)
 
-        if result.disposition in {
+        install_worked = result.disposition in {
             InstallDisposition.SUCCESS,
             InstallDisposition.PARTIAL_SUCCESS,
-        }:
+        }
+
+        # Only judge the withheld lockfile against an install that got far
+        # enough to be meaningful.  A failed pipeline has its own
+        # diagnostics and an unreliable ledger, so raising here would
+        # replace the real cause with a confusing lockfile complaint.
+        if withheld is not None and install_worked:
+            self._enforce_frozen_no_rewrite(request, withheld)
+
+        if install_worked:
             post_event = self._build_event("post-install", request)
             runner.fire("post-install", post_event)
 
@@ -228,7 +237,13 @@ class InstallService:
 
     @staticmethod
     def _enforce_frozen_no_rewrite(request: InstallRequest, withheld: list[str]) -> None:
-        """Raise when a withheld write claims deployed files disk does not.
+        """Raise when a withheld write claims paths the committed lockfile omits.
+
+        Compares each lockfile the frozen install *would* have written
+        against the committed ``apm.lock.yaml`` on disk.  It reads that one
+        file and does not otherwise inspect the filesystem: the deployed set
+        is taken from the withheld lockfiles, which is what install recorded
+        for the files it just deployed.
 
         Withholding the write satisfies req-lk-006 on its own, but silently:
         a committed lockfile that under-records the deployed set would stay

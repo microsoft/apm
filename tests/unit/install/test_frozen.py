@@ -7,7 +7,7 @@ The no-rewrite half (req-lk-006) is issue #2379.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -251,6 +251,86 @@ class TestEnforceFrozenNoRewrite:
         ).to_yaml()
 
         InstallService._enforce_frozen_no_rewrite(req, [extra_dep])
+
+
+class TestFrozenRunEndToEnd:
+    """``run()`` wiring: withhold the write, then judge it -- but only when
+    the pipeline got far enough for the verdict to mean anything."""
+
+    def _project(self, tmp_path: Path) -> InstallRequest:
+        _write_apm_yml(tmp_path)
+        _write_lockfile(tmp_path, [_locked([".claude/skills/a", ".claude/skills/a/SKILL.md"])])
+        return _make_request(project_dir=tmp_path, manifest_deps=[])
+
+    def _under_recording_pipeline(self, tmp_path: Path, disposition):
+        """A pipeline that deploys an unclaimed file, then reports *disposition*."""
+        from apm_cli.models.results import InstallResult
+
+        def _fake_pipeline(_pkg, **_kwargs):
+            _build_lockfile(
+                [_locked([".claude/skills/a", ".claude/skills/a/SKILL.md", ".claude/skills/b"])]
+            ).write(tmp_path / "apm.lock.yaml")
+            return InstallResult(disposition=disposition, exit_code=0)
+
+        return _fake_pipeline
+
+    def test_failed_pipeline_keeps_its_own_diagnostics(self, tmp_path: Path):
+        """A failed install must not be re-reported as a lockfile complaint.
+
+        Its diagnostics are the real cause and its ledger is unreliable, so
+        the frozen verdict is skipped entirely.
+        """
+        from apm_cli.models.results import InstallDisposition
+
+        request = self._project(tmp_path)
+        committed = (tmp_path / "apm.lock.yaml").read_bytes()
+
+        with patch(
+            "apm_cli.install.pipeline.run_install_pipeline",
+            new=self._under_recording_pipeline(tmp_path, InstallDisposition.FAILED),
+        ):
+            result = InstallService().run(request)
+
+        assert result.disposition is InstallDisposition.FAILED
+        assert (tmp_path / "apm.lock.yaml").read_bytes() == committed
+
+    def test_successful_pipeline_is_judged_and_lockfile_untouched(self, tmp_path: Path):
+        from apm_cli.models.results import InstallDisposition
+
+        request = self._project(tmp_path)
+        committed = (tmp_path / "apm.lock.yaml").read_bytes()
+
+        with (
+            patch(
+                "apm_cli.install.pipeline.run_install_pipeline",
+                new=self._under_recording_pipeline(tmp_path, InstallDisposition.SUCCESS),
+            ),
+            pytest.raises(FrozenInstallError, match="does not record everything"),
+        ):
+            InstallService().run(request)
+
+        assert (tmp_path / "apm.lock.yaml").read_bytes() == committed
+
+    def test_non_frozen_install_writes_normally(self, tmp_path: Path):
+        """Suppression must be scoped to --frozen, not global."""
+        from apm_cli.models.results import InstallDisposition
+
+        _write_apm_yml(tmp_path)
+        _write_lockfile(tmp_path, [_locked([".claude/skills/a"])])
+        pkg = MagicMock()
+        pkg.package_path = tmp_path / "apm.yml"
+        pkg.get_apm_dependencies.return_value = []
+        pkg.get_dev_apm_dependencies.return_value = []
+        request = InstallRequest(apm_package=pkg, frozen=False)
+        committed = (tmp_path / "apm.lock.yaml").read_bytes()
+
+        with patch(
+            "apm_cli.install.pipeline.run_install_pipeline",
+            new=self._under_recording_pipeline(tmp_path, InstallDisposition.SUCCESS),
+        ):
+            InstallService().run(request)
+
+        assert (tmp_path / "apm.lock.yaml").read_bytes() != committed
 
 
 class TestOutermost:
