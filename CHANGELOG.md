@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale. The matching `openapm-v0.1.md` frozen-install requirement now covers
   MCP state and all durable writes. (by @edenfunf, #2390; fixes #2373)
 
+- `apm audit` now scans for hidden Unicode across every file under the deploy
+  trees the project's targets govern, instead of only the files
+  `apm.lock.yaml` records. Hash verification needs a recorded baseline and
+  stays lockfile-scoped, but a bidi override needs none -- so a deployed file
+  the lockfile omits (for example a target committed without the regenerated
+  lockfile) was exempt from scanning for as long as it stayed unrecorded, in
+  `--ci` and `--no-drift` runs alike. `apm audit --strip` cleans those files
+  too; `--package <name>` stays lockfile-scoped. (by @salpers, #2379)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

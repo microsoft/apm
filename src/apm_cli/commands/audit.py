@@ -25,7 +25,7 @@ from ..core.deployment_ledger import (
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
-from ..security.file_scanner import scan_lockfile_packages
+from ..security.file_scanner import scan_deployed_trees, scan_lockfile_packages
 from ..utils.console import (
     STATUS_SYMBOLS,
     _get_console,
@@ -936,6 +936,16 @@ def _audit_content_scan(
                     package_filter=package,
                     lockfile=lockfile,
                 )
+                if package is None:
+                    # Whole-project scan: also cover deployed files the
+                    # lockfile does not record, which are otherwise invisible
+                    # to this scan and to --strip (#2379). Skipped under
+                    # --package, which is inherently a per-package query and
+                    # cannot attribute an unrecorded file to a package.
+                    tree_findings, tree_scanned = scan_deployed_trees(project_root)
+                    for rel_path, tree_file_findings in tree_findings.items():
+                        findings_by_file.setdefault(rel_path, tree_file_findings)
+                    files_scanned += tree_scanned
             except LockfileFormatError as exc:
                 logger.error(f"Cannot audit invalid apm.lock.yaml: {exc}")
                 sys.exit(1)

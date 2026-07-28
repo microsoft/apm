@@ -191,9 +191,11 @@ The `--file` flag is useful for inspecting files obtained outside APM — downlo
 `apm audit --ci` also checks membership completeness. If install replay
 produces a governed file whose normalized bytes match the project but no
 `deployed_files` entry claims it, audit reports `unrecorded` drift and fails.
-This prevents the lock-backed hidden-Unicode scan scope from shrinking
-silently. Shared merge-hook targets and sidecars remain exempt because APM
-merges into user-owned files rather than claiming them.
+This prevents lockfile membership from shrinking silently. Shared merge-hook
+targets and sidecars remain exempt because APM merges into user-owned files
+rather than claiming them.
+
+A whole-project scan covers **every file under the deploy trees your targets govern**, not only the files `apm.lock.yaml` records. Hash verification needs a recorded baseline and so stays lockfile-scoped, but hidden Unicode does not: a deployed file missing from the lockfile -- for example a target committed without the regenerated lockfile -- would otherwise be exempt from scanning for as long as it stayed unrecorded. `apm audit --strip` cleans those same files. Positional `PACKAGE` scans remain lockfile-scoped.
 
 For CI pipelines, `apm audit` supports SARIF, JSON, and Markdown output:
 
