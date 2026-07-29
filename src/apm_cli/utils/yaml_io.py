@@ -69,6 +69,8 @@ class _BoundedSafeLoader(yaml.SafeLoader):
     _MAX_MERGE_ENTRIES = 100_000
     _MAX_FLATTEN_DEPTH = 200
     _MAX_EXPANSION_WEIGHT = 5_000_000
+    _MAX_LITERAL_WEIGHT = 50_000_000
+    _LITERAL_WEIGHT_PER_SOURCE_CHAR = 4
     _EXPANSION_INPROGRESS = -1
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -76,17 +78,55 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         self._merge_entries = 0
         self._flatten_depth = 0
 
-    def _raise_expansion(self, node: Any) -> None:
+    def _raise_expansion(self, node: Any, *, literal: bool = False) -> NoReturn:
+        if literal:
+            problem = (
+                "YAML document exceeded the safe literal-size budget "
+                "(possible resource-exhaustion input)"
+            )
+        else:
+            problem = (
+                "YAML alias/anchor expansion exceeded the safe budget "
+                "(possible billion-laughs expansion bomb)"
+            )
         raise yaml.constructor.ConstructorError(
             "while constructing a node",
             getattr(node, "start_mark", None),
-            "YAML alias/anchor expansion exceeded the safe budget "
-            "(possible billion-laughs expansion bomb)",
+            problem,
             getattr(node, "start_mark", None),
         )
 
+    @staticmethod
+    def _has_shared_nodes(root: Any) -> bool:
+        """Return whether aliases or cycles share a node in the composed graph."""
+        seen: set[int] = set()
+        pending = [root]
+        while pending:
+            node = pending.pop()
+            node_id = id(node)
+            if node_id in seen:
+                return True
+            seen.add(node_id)
+            if isinstance(node, yaml.nodes.MappingNode):
+                for key_node, value_node in node.value:
+                    pending.extend((key_node, value_node))
+            elif isinstance(node, yaml.nodes.SequenceNode):
+                pending.extend(node.value)
+        return False
+
+    @classmethod
+    def _literal_budget(cls, root: Any) -> int:
+        """Bound anchor-free documents from their source size, with a hard cap."""
+        start = getattr(getattr(root, "start_mark", None), "index", 0)
+        end = getattr(getattr(root, "end_mark", None), "index", start)
+        source_chars = max(1, end - start)
+        return min(
+            cls._MAX_LITERAL_WEIGHT,
+            max(cls._MAX_EXPANSION_WEIGHT, source_chars * cls._LITERAL_WEIGHT_PER_SOURCE_CHAR),
+        )
+
     def _guard_expansion(self, root: Any) -> None:
-        # Bound the LOGICAL (alias-expanded) size of the composed node graph
+        # Bound the LOGICAL (alias-expanded) size of shared composed graphs
         # BEFORE construction. PyYAML shares one node object across every
         # ``*alias`` reference, so a pure-alias billion-laughs graph
         # (``lN: &lN [*l(N-1), *l(N-1)]``) is only O(N) objects yet expands
@@ -100,8 +140,9 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         # closed as a ``yaml.YAMLError`` the instant the running total crosses
         # the budget. A self-referential anchor (``a: &a [*a]``) is a cycle in
         # the node graph; the in-progress sentinel detects it and fails closed
-        # rather than recursing forever. The budget is orders of magnitude
-        # above any legitimate config, so real anchors/aliases still resolve.
+        # rather than recursing forever. Anchor-free documents use a separate
+        # source-proportional literal budget so large generated lockfiles do
+        # not look like alias bombs, while shared graphs keep the strict limit.
         #
         # Leaf weight is BYTE-AWARE, not a flat 1: PyYAML's representer reports
         # ``ignore_aliases() == True`` for ``str`` / ``int`` / ``float`` /
@@ -116,6 +157,8 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         # real dump-amplification cost, so the bomb fails closed at parse while
         # a single large scalar (referenced a handful of times) still resolves.
         weights: dict[int, int] = {}
+        has_shared_nodes = self._has_shared_nodes(root)
+        budget = self._MAX_EXPANSION_WEIGHT if has_shared_nodes else self._literal_budget(root)
 
         def weight(node: Any) -> int:
             nid = id(node)
@@ -129,18 +172,18 @@ class _BoundedSafeLoader(yaml.SafeLoader):
                 total = 1
                 for key_node, value_node in node.value:
                     total += weight(key_node) + weight(value_node)
-                    if total > self._MAX_EXPANSION_WEIGHT:
-                        self._raise_expansion(node)
+                    if total > budget:
+                        self._raise_expansion(node, literal=not has_shared_nodes)
             elif isinstance(node, yaml.nodes.SequenceNode):
                 total = 1
                 for child in node.value:
                     total += weight(child)
-                    if total > self._MAX_EXPANSION_WEIGHT:
-                        self._raise_expansion(node)
+                    if total > budget:
+                        self._raise_expansion(node, literal=not has_shared_nodes)
             else:
                 total = self._leaf_byte_cost(node)
-                if total > self._MAX_EXPANSION_WEIGHT:
-                    self._raise_expansion(node)
+                if total > budget:
+                    self._raise_expansion(node, literal=not has_shared_nodes)
             weights[nid] = total
             return total
 

@@ -213,6 +213,14 @@ class TestLoadYamlStr:
         assert data["use1"] == {"x": 1}
         assert data["use2"] == {"x": 1}
 
+    def test_large_anchor_free_document_uses_literal_budget(self):
+        """Large generated literals are not mistaken for alias expansion bombs."""
+        text = "value: " + ("x" * 5_000_001) + "\n"
+
+        data = load_yaml_str(text)
+
+        assert data["value"] == "x" * 5_000_001
+
 
 class TestLoadYamlRoundtrip:
     """Tests for comment-preserving YAML round-trip helpers."""
