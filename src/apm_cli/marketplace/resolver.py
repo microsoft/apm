@@ -976,12 +976,11 @@ def resolve_marketplace_plugin(
     # (for plain tags/branches/SHAs like v2.0.0). The tag lookup uses the
     # marketplace catalog host; structured package fetches still use dep_ref.host.
     if version_spec:
-        from .version_resolver import is_semver_range, is_version_constraint
+        from .version_resolver import is_version_constraint
 
         base = canonical.split("#", 1)[0]
         resolved_override = version_spec
         if is_version_constraint(version_spec):
-            from .errors import NoMatchingVersionError
             from .version_resolver import DEFAULT_TAG_PATTERN, resolve_version_constraint
 
             owner_repo = f"{source.owner}/{source.repo}"
@@ -1001,32 +1000,31 @@ def resolve_marketplace_plugin(
                 version_auth["git_env"] = git_env
             if source.port is not None:
                 version_auth["port"] = source.port
-            try:
-                tag_name, _sha = resolve_version_constraint(
-                    plugin_name,
-                    owner_repo,
-                    version_spec,
-                    tag_pattern=plugin.tag_pattern or DEFAULT_TAG_PATTERN,
-                    **version_auth,
-                )
-                resolved_override = tag_name
+            effective_tag_pattern = plugin.tag_pattern
+            if effective_tag_pattern is None:
                 logger.debug(
-                    "Version constraint '%s' for %s@%s resolved to tag '%s'",
-                    version_spec,
+                    "Plugin '%s' in marketplace '%s' has no tag_pattern; using legacy default '%s'",
                     plugin_name,
                     marketplace_name,
-                    tag_name,
+                    DEFAULT_TAG_PATTERN,
                 )
-            except NoMatchingVersionError:
-                if is_semver_range(version_spec):
-                    raise
-                logger.debug(
-                    "No '%s--v*' tags matched '%s' on %s@%s, falling back to raw git ref",
-                    plugin_name,
-                    version_spec,
-                    plugin_name,
-                    marketplace_name,
-                )
+                effective_tag_pattern = DEFAULT_TAG_PATTERN
+            tag_name, _sha = resolve_version_constraint(
+                plugin_name,
+                owner_repo,
+                version_spec,
+                tag_pattern=effective_tag_pattern,
+                **version_auth,
+            )
+            resolved_override = tag_name
+            logger.debug(
+                "Version constraint '%s' for %s@%s resolved with pattern '%s' to tag '%s'",
+                version_spec,
+                plugin_name,
+                marketplace_name,
+                effective_tag_pattern,
+                tag_name,
+            )
         else:
             logger.debug(
                 "Using raw git ref '%s' for %s@%s",

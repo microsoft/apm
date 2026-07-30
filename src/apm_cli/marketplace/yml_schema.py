@@ -554,12 +554,13 @@ def parse_source_base(raw: Any) -> str | None:
 
 
 def _validate_tag_pattern(pattern: str, *, context: str) -> None:
-    """Ensure *pattern* contains at least one recognised placeholder."""
-    if not any(ph in pattern for ph in _TAG_PLACEHOLDERS):
-        raise MarketplaceYmlError(
-            f"'{context}' must contain at least one of "
-            f"{', '.join(_TAG_PLACEHOLDERS)}, got '{pattern}'"
-        )
+    """Route producer tag-pattern validation through its canonical owner."""
+    from .tag_pattern import TagPatternError, validate_tag_pattern
+
+    try:
+        validate_tag_pattern(pattern, context=context)
+    except TagPatternError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
 
 
 def _check_unknown_keys(

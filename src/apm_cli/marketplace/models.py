@@ -459,8 +459,13 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
     tag_pattern: str | None = None
     if isinstance(source, dict):
         raw_tp = source.get("tag_pattern")
-        if isinstance(raw_tp, str) and raw_tp.strip():
-            tag_pattern = raw_tp.strip()
+        if raw_tp is not None:
+            from .tag_pattern import validate_tag_pattern
+
+            tag_pattern = validate_tag_pattern(
+                raw_tp,
+                context=f"Plugin {name!r} source.tag_pattern",
+            )
 
     return MarketplacePlugin(
         name=name,

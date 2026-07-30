@@ -771,7 +771,9 @@ The compiler:
 
 1. Emits `plugins:` verbatim (Anthropic's key name).
 2. Copies `metadata:` byte-for-byte.
-3. Strips `build:`, per-plugin `version`, `tag_pattern`, `include_prerelease`.
+3. Strips authoring-only `build:`, per-plugin `version`, and
+   `include_prerelease`; emits the effective package-over-build tag convention
+   as remote `source.tag_pattern`.
 4. Omits empty `tags:` and inherited top-level `description`/`version`
    from the output (matches Anthropic's canonical hand-authored shape,
    e.g. microsoft/azure-skills).

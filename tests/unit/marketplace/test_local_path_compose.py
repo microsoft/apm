@@ -126,6 +126,7 @@ def test_compose_claude_emits_category_for_local_and_remote_when_set(tmp_path: P
             requested_version=None,
             tags=(),
             is_prerelease=False,
+            effective_tag_pattern="release/{name}/{version}",
         ),
     ]
     doc = builder.compose_marketplace_json(resolved)
@@ -208,6 +209,7 @@ def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: P
             requested_version=None,
             tags=(),
             is_prerelease=False,
+            effective_tag_pattern="release/{name}/{version}",
         ),
         ResolvedPackage(
             name=remote_subdir_entry.name,
@@ -218,6 +220,7 @@ def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: P
             requested_version=None,
             tags=(),
             is_prerelease=False,
+            effective_tag_pattern="release/{name}/{version}",
         ),
     ]
 
@@ -240,6 +243,7 @@ def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: P
                     "url": "acme/remote-tool",
                     "ref": "v1.0.0",
                     "sha": "a" * 40,
+                    "tag_pattern": "release/{name}/{version}",
                 },
                 "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
                 "category": "Developer Tools",
@@ -252,6 +256,7 @@ def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: P
                     "path": "plugins/remote-subdir-tool",
                     "ref": "v2.0.0",
                     "sha": "b" * 40,
+                    "tag_pattern": "release/{name}/{version}",
                 },
                 "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
                 "category": "Coding",

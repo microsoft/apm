@@ -497,7 +497,17 @@ Marketplace dependency (resolved at install time):
 
 The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
 
-When `version` is specified and is a semver range or bare version number (e.g. `~2.1.0`, `^2.0`, `2.1.0`), the resolver lists git tags on the marketplace repository matching the `{name}--v{version}` convention, filters to those satisfying the constraint, and resolves to the highest matching tag. If no tag satisfies an explicit semver range, resolution fails with a `NoMatchingVersionError`. A bare version with no matching tag falls back to using the value as a raw git ref. Pre-release versions (e.g. `2.0.0-beta.1`) are excluded from semver-range resolution; target them explicitly as raw git refs. When `version` is a raw git ref (e.g. `v2.0.0`, `main`, or a commit SHA), it is used as a direct ref override without tag resolution.
+When `version` is a semver range or bare version number (for example
+`~2.1.0`, `^2.0`, or `2.1.0`), the resolver uses the plugin source's
+`tag_pattern`. `apm pack` emits that effective pattern from the package's
+`tag_pattern` override, then `marketplace.build.tagPattern`. Marketplace files
+created before this field existed fall back to the legacy
+`{name}--v{version}` consumer convention. A pattern must contain exactly one
+`{version}` placeholder; `{name}` is optional. Unsupported or malformed
+patterns, and ranges with no matching tags, fail without falling back to a raw
+ref. Pre-release versions are excluded from range resolution; target them
+explicitly as raw git refs. Raw refs such as `v2.0.0`, `main`, or a commit SHA
+bypass tag resolution.
 
 Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
 
@@ -883,7 +893,7 @@ marketplace:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `tagPattern` | `string` | `v{version}` | Pattern used to construct git tags for packages. MUST contain at least one of `{version}` or `{name}`. Per-package overrides live on `packages[].tag_pattern`. |
+| `tagPattern` | `string` | `v{version}` | Pattern used to construct git tags for packages. MUST contain exactly one `{version}`; `{name}` is optional. Per-package overrides live on `packages[].tag_pattern`. |
 
 ### 7.5. `marketplace.packages`
 

@@ -63,7 +63,7 @@ parser. The supported forms:
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
 | Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name>, type: gitlab }` | Aliases, nested groups, monorepo subpaths, bespoke GitLab hosts, or anything string forms cannot express. |
-| Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). Resolved to a concrete git ref at install time using the tag naming pattern declared by the marketplace. |
+| Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). The publisher controls the tag naming convention. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
 | Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
 
@@ -254,10 +254,17 @@ override the marketplace entry's default `source.ref`:
 apm install plugin@marketplace#v2.0.0
 ```
 
-In `apm.yml`, use the `version` field in the marketplace object form.
-Semver ranges and bare versions (e.g. `~2.1.0`, `^2.0`, `2.1.0`) are
-resolved against git tags matching `{name}--v{version}` on the
-marketplace repository. The highest matching tag is used.
+In `apm.yml`, use the `version` field in the marketplace object form. Semver
+ranges and bare versions (for example `~2.1.0`, `^2.0`, or `2.1.0`) resolve
+against the publisher's effective tag pattern: the package override first,
+then the marketplace build default. Old marketplace metadata without a
+`tag_pattern` field keeps the legacy `{name}--v{version}` convention.
+Malformed patterns and ranges with no match fail instead of becoming raw refs.
+
+`apm install` resolves and locks the highest matching tag. A repeated install
+replays the lock without changing durable state. After the publisher adds tags
+and republishes the marketplace metadata, `apm outdated` reports the new
+resolved ref and `apm update --yes` applies it.
 
 ### Pin a semver range
 

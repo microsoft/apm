@@ -936,14 +936,7 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         ),
         ids=("url", "git-subdir"),
     )
-    @pytest.mark.parametrize(
-        ("version_spec", "expected_ref"),
-        (
-            ("1.0.0", "1.0.0"),
-            ("~9.9.9", None),
-        ),
-        ids=("bare-fallback", "range-reraise"),
-    )
+    @pytest.mark.parametrize("version_spec", ("1.0.0", "~9.9.9"), ids=("bare", "range"))
     @patch("apm_cli.marketplace.version_resolver.resolve_version_constraint")
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -953,10 +946,9 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         mock_fetch,
         mock_resolve_version,
         version_spec,
-        expected_ref,
         source,
     ):
-        """Bare no-match falls back to a ref while range no-match stays fatal."""
+        """Bare and range constraints both fail closed when no tag matches."""
         from apm_cli.marketplace.errors import NoMatchingVersionError
 
         marketplace_source = MarketplaceSource(
@@ -974,24 +966,12 @@ class TestResolveMarketplacePluginGitLabMonorepo:
             version_spec,
         )
 
-        if expected_ref is None:
-            with pytest.raises(NoMatchingVersionError):
-                resolve_marketplace_plugin(
-                    "pkg",
-                    "remote-mkt",
-                    version_spec=version_spec,
-                )
-            return
-
-        result = resolve_marketplace_plugin(
-            "pkg",
-            "remote-mkt",
-            version_spec=version_spec,
-        )
-        dep = result.dependency_reference
-        assert dep is not None
-        assert dep.reference == expected_ref
-        assert result.canonical.endswith(f"#{expected_ref}")
+        with pytest.raises(NoMatchingVersionError):
+            resolve_marketplace_plugin(
+                "pkg",
+                "remote-mkt",
+                version_spec=version_spec,
+            )
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")

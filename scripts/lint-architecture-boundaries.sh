@@ -1271,7 +1271,6 @@ if ! grep -q '_clear_platform_token_env(env)' src/apm_cli/core/auth.py \
     [ -n "$ado_transport_direct_hits" ] && echo "$ado_transport_direct_hits"
     violations=$((violations + 1))
 fi
-
 echo "[*] AC28: JetBrains Copilot MCP config-path authority"
 intellij_path_owner="src/apm_cli/adapters/client/intellij.py"
 intellij_path_owner_count=$(grep -Ec '^def _intellij_config_dir\(' "$intellij_path_owner" || true)
@@ -1291,6 +1290,31 @@ if [ "$intellij_path_owner_count" -ne 1 ] \
     || [ -n "$intellij_path_duplicate_hits" ]; then
     echo "[x] JetBrains Copilot MCP paths must come from the IntelliJ adapter"
     [ -n "$intellij_path_duplicate_hits" ] && echo "$intellij_path_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC27: marketplace tag-pattern authority"
+tag_pattern_owner="src/apm_cli/marketplace/tag_pattern.py"
+tag_pattern_parallel_hits=$(
+    grep -rEn --include='*.py' \
+        '["'\'']\{version\}["'\''][[:space:]]+(not[[:space:]]+)?in[[:space:]]+(pattern|tag_pattern)|\.(count)\(["'\'']\{version\}["'\'']\)' \
+        src/apm_cli/marketplace \
+        | grep -v "^${tag_pattern_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^def validate_tag_pattern(' "$tag_pattern_owner" \
+    || ! grep -A8 '^def _validate_tag_pattern(' \
+        src/apm_cli/marketplace/yml_schema.py \
+        | grep -q 'validate_tag_pattern(pattern, context=context)' \
+    || ! grep -A12 'raw_tp = source.get("tag_pattern")' \
+        src/apm_cli/marketplace/models.py \
+        | grep -q 'tag_pattern = validate_tag_pattern(' \
+    || ! grep -q 'tag_pattern = validate_tag_pattern(tag_pattern)' \
+        src/apm_cli/marketplace/version_resolver.py \
+    || [ -n "$tag_pattern_parallel_hits" ]; then
+    echo "[x] Marketplace tag patterns must route through marketplace/tag_pattern.py"
+    [ -n "$tag_pattern_parallel_hits" ] && echo "$tag_pattern_parallel_hits"
     violations=$((violations + 1))
 fi
 

@@ -361,6 +361,8 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
             source_obj["ref"] = pkg.ref
         if pkg.sha:
             source_obj["sha"] = pkg.sha
+        if pkg.effective_tag_pattern:
+            source_obj["tag_pattern"] = pkg.effective_tag_pattern
         return source_obj
 
     source_obj = OrderedDict()
@@ -370,6 +372,8 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
         source_obj["ref"] = pkg.ref
     if pkg.sha:
         source_obj["sha"] = pkg.sha
+    if pkg.effective_tag_pattern:
+        source_obj["tag_pattern"] = pkg.effective_tag_pattern
     return source_obj
 
 

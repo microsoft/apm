@@ -339,6 +339,30 @@ class TestTagPatternClosure:
         )
         assert source.get("ref") == "apm-skill-creator/0.1.4"
 
+    def test_package_pattern_overrides_build_pattern(self, tmp_path: Path):
+        """A package override is emitted instead of the build-level default."""
+        yml = _SLASH_PATTERN_YML.replace(
+            '    version: "^0.1.0"\n',
+            '    version: "^0.1.0"\n    tag_pattern: "release-{name}-v{version}"\n',
+        )
+        refs = [
+            RemoteRef(
+                name="refs/tags/release-apm-skill-creator-v0.1.5",
+                sha="d" * 40,
+            )
+        ]
+        _write_yml(tmp_path, yml)
+
+        with patch(
+            "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+            return_value=refs,
+        ):
+            MarketplaceBuilder(tmp_path / "marketplace.yml").build()
+
+        source = _read_json(tmp_path)["plugins"][0]["source"]
+        assert source["tag_pattern"] == "release-{name}-v{version}"
+        assert source["ref"] == "release-apm-skill-creator-v0.1.5"
+
     def test_consumer_parses_tag_pattern_from_marketplace_json(self, tmp_path: Path):
         """parse_marketplace_json populates MarketplacePlugin.tag_pattern."""
         _write_yml(tmp_path, _SLASH_PATTERN_YML)
