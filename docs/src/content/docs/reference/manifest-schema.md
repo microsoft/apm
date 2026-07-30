@@ -509,6 +509,11 @@ falling back to a raw ref. Pre-release versions are excluded from range resoluti
 explicitly as raw git refs. Raw refs such as `v2.0.0`, `main`, or a commit SHA
 bypass tag resolution.
 
+`source.tag_pattern` is validated while the catalog is loaded. One malformed
+pattern makes `apm marketplace add` or `apm marketplace update` reject the
+entire marketplace, so consumers never resolve against a partially accepted
+catalog.
+
 Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
 
 Registry dependency (whole package or virtual sub-path):
