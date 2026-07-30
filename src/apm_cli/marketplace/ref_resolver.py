@@ -25,14 +25,14 @@ import urllib.parse
 from dataclasses import dataclass
 
 from ..utils.github_host import (
-    build_ado_bearer_git_env,
     build_ado_ssh_url,
-    build_authorization_header_git_env,
     build_https_clone_url,
     build_ssh_url,
     default_host,
     is_ado_auth_failure_signal,
     is_azure_devops_hostname,
+    set_ado_bearer_git_env,
+    set_authorization_header_git_env,
 )
 from ._git_utils import redact_token as _redact_token
 from .errors import GitLsRemoteError, OfflineMissError
@@ -341,10 +341,10 @@ class RefResolver:
             env["GIT_ASKPASS"] = "echo"
         if bearer and self._token:
             env.pop("GIT_TOKEN", None)
-            env.update(build_ado_bearer_git_env(self._token))
+            set_ado_bearer_git_env(env, self._token)
         elif ado_host and url_token:
             credential = base64.b64encode(f":{url_token}".encode()).decode()
-            env.update(build_authorization_header_git_env("Basic", credential))
+            set_authorization_header_git_env(env, "Basic", credential)
         return url, env
 
     def list_remote_refs(
@@ -472,7 +472,7 @@ class RefResolver:
                 dict(self._git_env) if self._git_env is not None else AuthResolver._build_git_env()
             )
             AuthResolver._clear_git_auth_env(bearer_env)
-            bearer_env.update(build_ado_bearer_git_env(bearer))
+            set_ado_bearer_git_env(bearer_env, bearer)
             bearer_env["GIT_TERMINAL_PROMPT"] = "0"
             bearer_env["GIT_ASKPASS"] = "echo"
             resolver = RefResolver(

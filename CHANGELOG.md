@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now excludes the synthesized lockfile self-entry, matching the real install
   which never removes them. (by @mia106dev, #2069)
 
+### Security
+
+- Corporate git security settings -- SSL CA pins (`http.sslCAInfo`), bare-repo
+  protection (`safe.bareRepository=explicit`), and other inherited `GIT_CONFIG_*`
+  hardening -- are no longer silently dropped when apm injects an
+  `Authorization` header for a clone, download, or marketplace `ls-remote`.
+  The header overlay previously hardcoded `GIT_CONFIG_COUNT=1`, so merging it
+  onto an already-configured environment reset the count and clobbered index
+  0. (by @edenfunf, #2368)
+
 ## [0.26.0] - 2026-07-18
 
 ### Added

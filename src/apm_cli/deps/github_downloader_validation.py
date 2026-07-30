@@ -24,7 +24,7 @@ Security gates (round-2 panel findings)
   shallow-fetch + ``ls-tree`` to confirm ``vpath`` resolves at that ref
   before returning ``True``.
 * For Azure DevOps, credentials (PAT or AAD bearer) are injected via
-  ``http.extraheader`` (see ``build_authorization_header_git_env``) and
+  ``http.extraheader`` (see ``set_authorization_header_git_env``) and
   never embedded in the clone URL.  This keeps tokens out of the OS
   process table, git's own logs, and any downstream debug output.
 """
@@ -45,9 +45,9 @@ from git.exc import GitCommandError
 
 from ..config import get_apm_temp_dir
 from ..utils.github_host import (
-    build_authorization_header_git_env,
     default_host,
     is_github_hostname,
+    set_authorization_header_git_env,
 )
 from ..utils.path_security import (
     PathTraversalError,
@@ -363,22 +363,23 @@ def _build_validation_attempts(
             # ADO PAT requires HTTP Basic with base64(":PAT"). A raw
             # Bearer header would 401 every ADO PAT user.
             encoded = base64.b64encode(f":{dep_token}".encode()).decode("ascii")
-            auth_env = build_authorization_header_git_env("Basic", encoded)
+            auth_header = ("Basic", encoded)
             label = "ADO authenticated HTTPS (basic header)"
         elif is_ado:  # bearer (AAD JWT)
-            auth_env = build_authorization_header_git_env("Bearer", dep_token)
+            auth_header = ("Bearer", dep_token)
             label = "ADO authenticated HTTPS (bearer header)"
         elif is_gitlab:
             encoded = base64.b64encode(f"oauth2:{dep_token}".encode()).decode("ascii")
-            auth_env = build_authorization_header_git_env("Basic", encoded)
+            auth_header = ("Basic", encoded)
             label = "GitLab authenticated HTTPS (basic header)"
         else:
             # Non-ADO: header injection rather than URL embedding so the
             # token never appears in argv or temp .git/config.
-            auth_env = build_authorization_header_git_env("Bearer", dep_token)
+            auth_header = ("Bearer", dep_token)
             label = "authenticated HTTPS (header)"
 
-        token_env = {**downloader.git_env, **auth_env}
+        token_env = dict(downloader.git_env)
+        set_authorization_header_git_env(token_env, *auth_header)
         token_url = downloader._build_repo_url(
             dep_ref.repo_url,
             use_ssh=False,

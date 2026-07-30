@@ -28,12 +28,12 @@ from ..utils.archive import ArchiveError, safe_extract_zip
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
-    build_authorization_header_git_env,
     build_https_clone_url,
     build_raw_content_url,
     build_ssh_url,
     default_host,
     is_github_hostname,
+    set_authorization_header_git_env,
 )
 from ..utils.path_security import PathTraversalError
 from .git_file_transport import (
@@ -751,10 +751,8 @@ class DownloadDelegate:
             # AuthResolver owns credential resolution. Convert its resolved
             # GitHub credential into Git's header channel so the token remains
             # out of the remote URL and is actually consumed by git.
-            git_env = {
-                **auth_ctx.git_env,
-                **build_authorization_header_git_env("Bearer", auth_ctx.token),
-            }
+            git_env = dict(auth_ctx.git_env)
+            set_authorization_header_git_env(git_env, "Bearer", auth_ctx.token)
             git_env.pop("GIT_TOKEN", None)
             auth_scheme = "basic"
         else:

@@ -50,9 +50,14 @@ marketplace:
         assert parsed.path == "/contoso/platform/_git/my-package"
         assert parsed.username is None
         env = kwargs["env"]
-        assert env["GIT_CONFIG_COUNT"] == "1"
-        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
-        assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {bearer}"
+        # Header index is not fixed (#2368: appended after retained entries),
+        # so locate it instead of assuming slot 0.
+        headers = [
+            (env[f"GIT_CONFIG_KEY_{i}"], v)
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+            if "Authorization" in (v := env[f"GIT_CONFIG_VALUE_{i}"])
+        ]
+        assert headers == [("http.extraheader", f"Authorization: Bearer {bearer}")]
         return subprocess.CompletedProcess(
             command,
             0,

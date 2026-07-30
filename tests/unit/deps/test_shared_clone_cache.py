@@ -1250,10 +1250,6 @@ class TestAdoBareBearerRetry:
                 "apm_cli.core.azure_cli.get_bearer_provider",
                 return_value=bearer_provider,
             ),
-            patch(
-                "apm_cli.utils.github_host.build_ado_bearer_git_env",
-                return_value={"GIT_CONFIG_COUNT": "1"},
-            ),
         ):
             d._bare_clone_with_fallback(
                 "https://pat-url/o/r",

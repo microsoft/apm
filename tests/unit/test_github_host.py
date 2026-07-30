@@ -437,6 +437,146 @@ def test_build_ado_bearer_git_env_does_not_url_encode():
     assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {token}"
 
 
+def test_set_authorization_header_preserves_existing_git_config_entries():
+    """#2368: setting the header must not reset GIT_CONFIG_COUNT or clobber index 0."""
+    env = {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+        "GIT_CONFIG_KEY_1": "credential.interactive",
+        "GIT_CONFIG_VALUE_1": "never",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "tok")
+    assert env["GIT_CONFIG_COUNT"] == "3"
+    assert env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert env["GIT_CONFIG_VALUE_0"] == "explicit"
+    assert env["GIT_CONFIG_KEY_1"] == "credential.interactive"
+    assert env["GIT_CONFIG_VALUE_1"] == "never"
+    assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_2"] == "Authorization: Bearer tok"
+
+
+def test_set_authorization_header_on_empty_base_matches_build_helper():
+    """Without prior entries, the in-place set degenerates to the build overlay."""
+    env = {"OTHER": "1"}
+    github_host.set_authorization_header_git_env(env, "Basic", "dXNlcjpwYXNz")
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Basic dXNlcjpwYXNz"
+    assert env["OTHER"] == "1"
+
+
+def test_set_authorization_header_tolerates_blank_or_invalid_count():
+    """Empty or non-numeric GIT_CONFIG_COUNT is treated as zero entries."""
+    for bad_count in ("", "not-a-number", "-3"):
+        env = {"GIT_CONFIG_COUNT": bad_count}
+        github_host.set_authorization_header_git_env(env, "Bearer", "tok")
+        assert env["GIT_CONFIG_COUNT"] == "1"
+        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+
+
+def test_set_authorization_header_replaces_inherited_auth_header():
+    """An inherited Authorization entry is replaced, never duplicated.
+
+    Sending two Authorization headers (stale + fresh) breaks auth; the
+    helper applies the same auth-channel policy as _clear_git_auth_env.
+    """
+    env = {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_VALUE_0": "Authorization: Bearer stale",
+        "GIT_CONFIG_KEY_1": "http.sslCAInfo",
+        "GIT_CONFIG_VALUE_1": "/corporate/ca.pem",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "fresh")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+    assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer fresh"
+    assert not any("stale" in v for v in env.values())
+
+
+def test_set_authorization_header_is_idempotent_under_layering():
+    """Two layered calls (e.g. _build_git_env then a retry wrapper) keep one header."""
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "jwt")
+    github_host.set_authorization_header_git_env(env, "Bearer", "jwt")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+    assert "GIT_CONFIG_KEY_2" not in env
+
+
+def test_set_authorization_header_drops_orphaned_indexed_entries():
+    """Stale KEY_/VALUE_ orphans beyond the count must not linger in the env."""
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+        "GIT_CONFIG_KEY_5": "http.extraheader",
+        "GIT_CONFIG_VALUE_5": "Authorization: Bearer orphaned-secret",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "fresh")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert "GIT_CONFIG_KEY_5" not in env
+    assert "GIT_CONFIG_VALUE_5" not in env
+    assert not any("orphaned-secret" in v for v in env.values())
+
+
+def test_set_ado_bearer_git_env_delegates_with_bearer_scheme():
+    """ADO in-place wrapper mirrors build_ado_bearer_git_env semantics."""
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+    }
+    github_host.set_ado_bearer_git_env(env, "aad-jwt")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer aad-jwt"
+
+
+@pytest.mark.parametrize(
+    ("scheme", "credential"),
+    [
+        ("Bearer", "tok\r\nGIT_CONFIG_KEY_9: injected"),
+        ("Bearer\r\nEvil", "tok"),
+        ("Bearer", "tok\ninjected"),
+    ],
+)
+def test_set_authorization_header_rejects_crlf_in_scheme_or_credential(scheme, credential):
+    """Defense-in-depth: a CR/LF in scheme or credential could smuggle a second
+    git-config entry into the appended value; reject it before it is written.
+    """
+    env = {"GIT_CONFIG_COUNT": "0"}
+    with pytest.raises(ValueError, match="CR or LF"):
+        github_host.set_authorization_header_git_env(env, scheme, credential)
+    # Reject-before-mutate: no partial write on the rejected call.
+    assert env == {"GIT_CONFIG_COUNT": "0"}
+
+
+def test_set_authorization_header_does_not_false_positive_on_substring_authorization():
+    """A retained non-auth value that merely CONTAINS 'authorization' as a
+    substring (not an actual Authorization: header) must survive the filter.
+    """
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.proxy",
+        "GIT_CONFIG_VALUE_0": "http://authorization-proxy.corp.example:3128",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "tok")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "http.proxy"
+    assert env["GIT_CONFIG_VALUE_0"] == "http://authorization-proxy.corp.example:3128"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+
+
 def test_unsupported_host_error_with_context():
     """Test that context message is included when provided."""
     error_msg = github_host.unsupported_host_error(
