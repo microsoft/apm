@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The new drift finding closes a gap where `content-integrity` silently skipped
   such files. Run `apm install` and commit the regenerated lockfile; shared
   hook merge targets remain exempt. (by @salpers, #2380)
+- Run `apm install` and commit the regenerated lockfile to resolve new
+  `unrecorded` failures that `apm audit --ci` may surface on upgrade when
+  deployed files were committed without an `apm.lock.yaml` claim. This closes
+  a gap where `content-integrity` silently skipped such files; shared hook
+  merge targets remain exempt. (by @salpers, #2380)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

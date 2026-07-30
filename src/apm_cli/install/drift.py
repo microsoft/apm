@@ -974,9 +974,10 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
         lines.append("")
 
     if by_kind.get("unrecorded"):
+        lines.append(f"  {STATUS_SYMBOLS['info']} 1. Run 'apm install' to re-sync deployed files.")
         lines.append(
-            f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files, "
-            "then commit the regenerated apm.lock.yaml to restore content-integrity coverage."
+            f"  {STATUS_SYMBOLS['info']} 2. Commit the regenerated apm.lock.yaml "
+            "to restore content-integrity coverage."
         )
     else:
         lines.append(

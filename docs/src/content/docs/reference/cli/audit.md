@@ -170,7 +170,23 @@ For the full workflow, see [Enforce in CI](../../../enterprise/enforce-in-ci/).
 
 ### Drift detection
 
-The default audit replays the install pipeline into a scratch tree and diffs the result against the working tree. It catches hand-edits to deployed files, missing integrations from a skipped `apm install`, and orphaned files. Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it. Use `--no-drift` to opt out (not recommended outside performance-constrained CI loops). In bare `apm audit`, drift findings are advisory: they render but do not change the exit code (see [Exit codes](#exit-codes)).
+The default audit replays the install pipeline into a scratch tree and diffs
+the result against the working tree. It catches hand-edits, missing
+integrations, orphaned files, and `unrecorded` files. `unrecorded` applies when
+replay produced the same normalized bytes as the project but no exact or
+directory `deployed_files` claim covers the path. Shared merge-hook targets
+are exempt and differing bytes report `modified`. `unrecorded` findings fail
+`--ci`; run `apm install`, then commit the regenerated `apm.lock.yaml`.
+
+Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.
+Use `--no-drift` to opt out with reduced coverage. In bare `apm audit`, drift
+findings are advisory and do not change the exit code (see
+[Exit codes](#exit-codes)).
+
+Bare `apm audit` keeps replay cache-only, so a cache miss produces an
+informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
+scratch replay through `install/audit_replay.py`; materialization failures
+fail closed without mutating the checkout.
 
 ### Deployment-owner integrity
 
