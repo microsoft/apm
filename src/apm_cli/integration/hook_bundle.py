@@ -107,17 +107,18 @@ def copy_deployed_hook_bundle(
     diagnostics=None,
     target_paths: list[Path],
     hook_descriptor_files: set[Path] | None = None,
-    skip_package_json_sidecar: bool = False,
+    exclude_json_files: bool = False,
 ) -> HookBundleCopyResult:
     """Copy each referenced script's whole hooks root and module type.
 
-    When skip_package_json_sidecar is True, the package.json sidecar that
-    communicates the Node.js module type is not written.  Use this for
-    targets whose hook loader recursively scans the deployment directory for
-    JSON hook descriptors (e.g. Copilot/VSCode), where a bare
-    {"type": "..."} file would be mistaken for a hook descriptor and trigger
-    a schema validation error.  Hook packages that need ES module support
-    on such targets should use the .mjs file extension instead.
+    When exclude_json_files is True, source JSON assets and the generated
+    package.json sidecar are not written. Use this for targets whose hook
+    loader recursively scans the deployment directory for JSON hook
+    descriptors (e.g. Copilot/VS Code), where package metadata or a nested
+    configuration file would be mistaken for a hook descriptor. Hook packages
+    that need ES module support on such targets should use the .mjs file
+    extension instead; without the sidecar, Node.js treats bare .js files as
+    CommonJS.
     """
     result = HookBundleCopyResult()
     source_target_roots: dict[tuple[Path, Path], str] = {}
@@ -146,6 +147,7 @@ def copy_deployed_hook_bundle(
                 source_file.is_symlink()
                 or not source_file.is_file()
                 or source_file.name in {"package.json", MARKER_FILENAME}
+                or (exclude_json_files and source_file.suffix.lower() == ".json")
                 or _is_root_hook_descriptor(source_file, source_root, descriptor_files)
             ):
                 continue
@@ -176,7 +178,7 @@ def copy_deployed_hook_bundle(
             result.scripts_copied += 1
         target_paths.append(target_file)
 
-    if skip_package_json_sidecar:
+    if exclude_json_files:
         return result
 
     for (_source_root, target_root), module_type in source_target_roots.items():

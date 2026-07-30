@@ -292,6 +292,7 @@ class LockfileBuilder:
                 owner=dep_key,
                 include_ledger=True,
                 apply_disk_deletion=not lockfile_only,
+                user_scope=getattr(getattr(self.ctx, "scope", None), "value", None) == "user",
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;

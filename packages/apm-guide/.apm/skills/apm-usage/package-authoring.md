@@ -147,9 +147,11 @@ deployed. JavaScript and TypeScript hook bundles get a minimal
 `package.json` sidecar with the source package's Node `type` (defaulting
 to `commonjs`); shell-only bundles do not get a sidecar. **Exception --
 Copilot and VS Code:** APM omits the sidecar for these targets because
-Copilot's hook loader scans `.github/hooks/` recursively and rejects JSON
-files that lack a `hooks` key. Use the `.mjs` extension for ES module
-scripts targeting Copilot or VS Code.
+Copilot's hook loader scans project `.github/hooks/` and user
+`~/.copilot/hooks/` recursively and rejects JSON files that lack a
+`hooks` key. APM also omits nested JSON bundle assets for these targets;
+use a non-JSON format for hook runtime configuration. Use the `.mjs`
+extension for ES module scripts targeting Copilot or VS Code.
 
 ### Hook command paths: project-scope stays repo-relative
 

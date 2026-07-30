@@ -121,6 +121,7 @@ def run(ctx: InstallContext) -> None:
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
         current_run_trusted=not _local_had_errors,
+        user_scope=getattr(getattr(ctx, "scope", None), "value", None) == "user",
     )
 
     DeploymentLedgerCodec.replace_context_local_files(ctx, sorted(_files))

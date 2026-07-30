@@ -114,6 +114,7 @@ def run(ctx: InstallContext) -> None:
                 diagnostics=diagnostics,
                 recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
                 failed_path_retained=False,
+                user_scope=getattr(getattr(ctx, "scope", None), "value", None) == "user",
             )
             _orphan_total_deleted += len(_orphan_result.deleted)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
@@ -185,6 +186,7 @@ def run(ctx: InstallContext) -> None:
                 targets=_targets or None,
                 diagnostics=diagnostics,
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
+                user_scope=getattr(getattr(ctx, "scope", None), "value", None) == "user",
             )
             # Re-insert every non-deletion so the lockfile retains the
             # prior ownership claim for retry or user review.

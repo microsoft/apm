@@ -677,6 +677,18 @@ if [ "$deployment_owner_status" -ne 0 ]; then
     echo "$deployment_owner_output"
     violations=$((violations + 1))
 fi
+if ! grep -q '^_LEGACY_USER_TARGET_PREFIXES = {' src/apm_cli/core/deployment_ledger.py \
+    || ! grep -q '".copilot/": "copilot"' src/apm_cli/core/deployment_ledger.py \
+    || ! grep -q '^    def legacy_scope(' src/apm_cli/core/deployment_ledger.py \
+    || ! grep -q \
+        'scope=DeploymentLedgerCodec.legacy_scope(path)' \
+        src/apm_cli/install/manifest_reconcile.py \
+    || ! grep -q \
+        'if targets is None and user_scope and t.user_root_dir is not None:' \
+        src/apm_cli/integration/targets.py; then
+    echo "[x] Legacy user deployment scope must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC19: git-subprocess auth-header injection authority"
 # #2368: build_authorization_header_git_env / build_ado_bearer_git_env return

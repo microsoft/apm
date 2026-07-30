@@ -199,6 +199,10 @@ def _setup_commonjs_hook_package(
         "module.exports = { message: 'nested' };\n",
         encoding="utf-8",
     )
+    (hooks_dir / "lib" / "config.json").write_text(
+        json.dumps({"message": "configuration"}),
+        encoding="utf-8",
+    )
     (hooks_dir / target_manifest).write_text(
         json.dumps(_session_start_hook("${CLAUDE_PLUGIN_ROOT}/hooks/ponytail.js session-start")),
         encoding="utf-8",
@@ -221,10 +225,12 @@ def test_claude_deploys_hook_directory_siblings_and_package_module_type(
     assert deployed_script.exists()
     assert (deployed_script.parent / "ponytail-config.js").exists()
     assert (deployed_script.parent / "lib" / "helper.js").exists()
+    assert (deployed_script.parent / "lib" / "config.json").exists()
     assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
     assert deployed_script in result.target_paths
     assert (deployed_script.parent / "ponytail-config.js") in result.target_paths
     assert (deployed_script.parent / "lib" / "helper.js") in result.target_paths
+    assert (deployed_script.parent / "lib" / "config.json") in result.target_paths
     assert deployed_package_json in result.target_paths
 
 
@@ -252,6 +258,7 @@ def test_copilot_deploys_hook_directory_siblings_without_package_json_sidecar(
     assert deployed_script.exists()
     assert (deployed_script.parent / "ponytail-config.js").exists()
     assert (deployed_script.parent / "lib" / "helper.js").exists()
+    assert not (deployed_script.parent / "lib" / "config.json").exists()
     assert not deployed_package_json.exists(), (
         "package.json must not be deployed to Copilot hooks scripts dir -- "
         "Copilot scans .github/hooks/ recursively and rejects non-hook JSON files"
@@ -259,6 +266,7 @@ def test_copilot_deploys_hook_directory_siblings_without_package_json_sidecar(
     assert deployed_script in result.target_paths
     assert (deployed_script.parent / "ponytail-config.js") in result.target_paths
     assert (deployed_script.parent / "lib" / "helper.js") in result.target_paths
+    assert (deployed_script.parent / "lib" / "config.json") not in result.target_paths
     assert deployed_package_json not in result.target_paths
 
 

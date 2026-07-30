@@ -24,6 +24,15 @@
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
+For JavaScript hook bundles, `apm install --target copilot` and its
+`--target vscode` alias omit the generated `package.json` sidecar from
+project `.github/hooks/` and user `~/.copilot/hooks/` because Copilot
+recursively treats JSON there as hook configuration. Use `.mjs` for ES
+module hooks and keep runtime configuration in a non-JSON format on these
+targets. Other targets keep JSON bundle assets and the Node module-type
+sidecar when their runtime requires it; see
+[Package authoring](package-authoring.md#hook-files).
+
 `apm publish --package OWNER/REPO` normalizes the owner and repository to
 lowercase before constructing the package-registry path.
 

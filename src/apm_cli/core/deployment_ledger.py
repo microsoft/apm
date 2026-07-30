@@ -37,6 +37,9 @@ _LEGACY_TARGET_PREFIXES = {
     ".opencode/": "opencode",
     ".agents/": "agents",
 }
+_LEGACY_USER_TARGET_PREFIXES = {
+    ".copilot/": "copilot",
+}
 _LOCAL_BUNDLE_OWNER = "local-bundle"
 DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
 _SHA256_PREFIX = "sha256:"
@@ -617,6 +620,7 @@ class DeploymentLedgerCodec:
 
     @staticmethod
     def _legacy_locator(value: str) -> DeploymentLocator:
+        scope = DeploymentLedgerCodec.legacy_scope(value)
         if "://" in value:
             target = value.split("://", 1)[0].removesuffix("-db")
             kind = LocatorKind.URI
@@ -624,19 +628,35 @@ class DeploymentLedgerCodec:
             target = next(
                 (
                     name
-                    for prefix, name in _LEGACY_TARGET_PREFIXES.items()
+                    for prefix, name in _LEGACY_USER_TARGET_PREFIXES.items()
                     if value.startswith(prefix)
                 ),
-                "legacy",
+                None,
             )
+            if target is None:
+                target = next(
+                    (
+                        name
+                        for prefix, name in _LEGACY_TARGET_PREFIXES.items()
+                        if value.startswith(prefix)
+                    ),
+                    "legacy",
+                )
             kind = LocatorKind.PROJECT_RELATIVE
         return DeploymentLocator(
             kind=kind,
             target=target,
             value=value,
             runtime=None,
-            scope="project",
+            scope=scope,
         )
+
+    @staticmethod
+    def legacy_scope(value: str) -> str:
+        """Return the install scope encoded by a legacy deployed-file path."""
+        if any(value.startswith(prefix) for prefix in _LEGACY_USER_TARGET_PREFIXES):
+            return "user"
+        return "project"
 
     @staticmethod
     def legacy_value(locator: DeploymentLocator) -> str:

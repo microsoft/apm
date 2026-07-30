@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Copilot hook packages with JavaScript scripts no longer fail with "hooks: hooks must be an object"; APM no longer writes a `package.json` sidecar into `.github/hooks/scripts/` where Copilot's recursive hook-loader scan would reject it as an invalid descriptor; use `.mjs` for ES module scripts targeting Copilot or VS Code. (#2322)
+- Copilot hook packages with JavaScript scripts no longer fail with "hooks: hooks must be an object"; APM keeps generated `package.json` and nested JSON bundle assets out of project `.github/hooks/scripts/` and user `~/.copilot/hooks/scripts/`, where Copilot's recursive hook-loader scan would reject them as descriptors; use `.mjs` for ES module scripts targeting Copilot or VS Code. (#2322)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

@@ -425,13 +425,14 @@ jobs:
   # marked `lifecycle_merge_group`; ci-integration.yml's full integration
   # shards still execute those nodes from the unfiltered tests/integration root.
   #
-  # Why these 20 required nodes, Consume/Produce/Govern coverage
+  # Why these 27 required nodes, Consume/Produce/Govern coverage
   # ------------------------------------------------------------
-  # Fourteen original nodes retain the exact assurance promoted by #2247:
+  # Fourteen in-process nodes retain the exact assurance promoted by #2247:
   # one static authority guard plus in-process policy, content-hash, hook,
-  # virtual-skill, and virtual-package lifecycle contracts. Six additional
-  # nodes in test_required_lifecycle_state_machine.py drive the uv-installed
-  # `apm` console script through real subprocess boundaries and local Git:
+  # virtual-skill, and virtual-package lifecycle contracts. Thirteen additional
+  # nodes drive the uv-installed `apm` console script through real subprocess
+  # boundaries and local Git. These include the state-machine contracts plus
+  # the Copilot/VS Code JavaScript hook sidecar lifecycle:
   # pack/install/compile/audit closure, target widen/narrow, reinstall
   # idempotency, prune/uninstall cascade, tamper/repair, and mixed primitives.
   # This is installed-console-script coverage, not frozen PyInstaller parity;
@@ -445,7 +446,7 @@ jobs:
   #
   # Why this stays hermetic, network-free, and credential-free
   # ------------------------------------------------------------
-  # The six subprocess nodes carry requires_apm_binary and requires_e2e_mode.
+  # The thirteen subprocess nodes carry requires_apm_binary and requires_e2e_mode.
   # `uv sync --extra dev` puts the installed console script on PATH, while the
   # pytest step's APM_E2E_TESTS=1 enables only the declarative E2E prerequisite.
   # APM_RUN_INTEGRATION_TESTS remains unset: no live network integration is
@@ -459,12 +460,12 @@ jobs:
   #
   # Why timeout-minutes: 3
   # ------------------------
-  # Two idle final runs of the current 23-node selection measured 65.93s and
-  # 41.74s pytest time (67.89s and 43.27s command wall). The 3-minute job cap includes
-  # checkout/setup/sync and still fails fast on accidental network retries or
-  # unreviewed marker growth. Hosted job duration is the release authority.
+  # The current 27-node selection measured 106.15s locally after the JavaScript
+  # hook lifecycle was added. The 3-minute job cap still leaves bounded setup
+  # headroom while failing fast on accidental network retries or unreviewed
+  # marker growth. Hosted job duration is the release authority.
   #
-  # tests/quality/test_ci_topology.py guards the 23/3/20 marker partition, this
+  # tests/quality/test_ci_topology.py guards the 30/3/27 marker partition, this
   # exact expression, the full merge-group integration path, --strict-markers,
   # required-check membership, E2E opt-in placement, and credential/network
   # prohibitions.
@@ -482,6 +483,11 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
 
     - name: Install uv
       uses: astral-sh/setup-uv@v6
