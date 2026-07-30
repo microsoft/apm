@@ -1,8 +1,8 @@
 """Semver-aware version constraint resolution for marketplace dependencies.
 
 Resolves a semver range (e.g. ``~2.1.0``, ``^2.0``, ``>=1.4``) against
-git tags on a marketplace repository using the ``{name}--v{version}``
-naming convention from the Claude Code plugin dependency spec.
+git tags on a marketplace repository using the supplied ``tag_pattern``.
+Metadata created before pattern propagation uses ``{name}--v{version}``.
 
 Reuses the existing infrastructure:
 
@@ -119,7 +119,8 @@ def resolve_version_constraint(
             version_range,
             detail=(
                 f"pattern='{tag_pattern}', remote='{owner_repo}'. "
-                "Verify the published tags or install an explicit tag ref"
+                "Verify the published tags or set version to an explicit tag "
+                "such as 'v1.0.0'"
             ),
         )
 

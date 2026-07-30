@@ -140,6 +140,9 @@ for the full validation and override rules.
 The generated source object is also a producer-to-consumer contract.
 `apm pack` emits `source: url` for a remote repository and
 `source: git-subdir` when `subdir` is set.
+It also emits the effective `source.tag_pattern`: a package override takes
+precedence over `marketplace.build.tagPattern`. Repack and publish the generated
+metadata after changing either value so consumers receive the new convention.
 `apm install <package>@<marketplace>` accepts both forms, derives the package host from
 the generated entry rather than from the marketplace host, and preserves
 the generated path and ref.

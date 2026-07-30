@@ -114,6 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (by @ryodocx, closes #2345)
 
 - Marketplace semver range resolution now honours the `tagPattern` declared by the producer; `version: "~2.1.0"` entries no longer silently fall back to the hardcoded `{name}--v{version}` tag pattern. Existing marketplace files without `tag_pattern` keep the legacy convention. (#2366)
+- Marketplace semver range resolution now honours the `tagPattern` declared by the producer; `version: "~2.1.0"` entries no longer silently fall back to the hardcoded `{name}--v{version}` tag pattern. Existing marketplace files without `tag_pattern` keep the legacy convention. Bare versions also fail closed when no tag matches; use an explicit tag ref instead. (#2366)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

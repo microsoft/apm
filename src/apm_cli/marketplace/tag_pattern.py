@@ -62,7 +62,7 @@ def validate_tag_pattern(pattern: object, *, context: str = "tag_pattern") -> st
     because the pattern engine treats no other tokens as substitutions.
     """
     if not isinstance(pattern, str) or not pattern.strip():
-        raise TagPatternError(f"'{context}' must be a non-empty string")
+        raise TagPatternError(f"'{context}' must be a non-empty string, got {pattern!r}")
     normalized = pattern.strip()
     placeholders = _PLACEHOLDER_RE.findall(normalized)
     unsupported = sorted(set(placeholders) - _SUPPORTED_PLACEHOLDERS)
@@ -73,7 +73,8 @@ def validate_tag_pattern(pattern: object, *, context: str = "tag_pattern") -> st
     version_count = normalized.count(_PLACEHOLDER_VERSION)
     if version_count != 1:
         raise TagPatternError(
-            f"'{context}' must contain exactly one {_PLACEHOLDER_VERSION} placeholder"
+            f"'{context}' must contain exactly one {_PLACEHOLDER_VERSION} placeholder, "
+            f"got {normalized!r}"
         )
     return normalized
 

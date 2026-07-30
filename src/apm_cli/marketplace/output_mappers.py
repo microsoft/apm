@@ -259,8 +259,7 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                     source_obj["ref"] = pkg.ref
                 if pkg.sha:
                     source_obj["sha"] = pkg.sha
-                if pkg.effective_tag_pattern:
-                    source_obj["tag_pattern"] = pkg.effective_tag_pattern
+                _set_effective_tag_pattern(source_obj, pkg)
                 plugin["source"] = source_obj
 
             plugins.append(plugin)
@@ -335,6 +334,15 @@ MARKETPLACE_OUTPUT_MAPPERS: dict[str, MarketplaceOutputMapper] = {
 }
 
 
+def _set_effective_tag_pattern(
+    source_obj: dict[str, Any],
+    pkg: ResolvedPackage,
+) -> None:
+    """Add producer tag metadata when it applies to the remote source."""
+    if pkg.effective_tag_pattern:
+        source_obj["tag_pattern"] = pkg.effective_tag_pattern
+
+
 def _remote_source_url(pkg: ResolvedPackage) -> str | None:
     """Return the canonical URL for remote packages that cannot use github shorthand."""
     if pkg.source_url:
@@ -361,8 +369,7 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
             source_obj["ref"] = pkg.ref
         if pkg.sha:
             source_obj["sha"] = pkg.sha
-        if pkg.effective_tag_pattern:
-            source_obj["tag_pattern"] = pkg.effective_tag_pattern
+        _set_effective_tag_pattern(source_obj, pkg)
         return source_obj
 
     source_obj = OrderedDict()
@@ -372,8 +379,7 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
         source_obj["ref"] = pkg.ref
     if pkg.sha:
         source_obj["sha"] = pkg.sha
-    if pkg.effective_tag_pattern:
-        source_obj["tag_pattern"] = pkg.effective_tag_pattern
+    _set_effective_tag_pattern(source_obj, pkg)
     return source_obj
 
 

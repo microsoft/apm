@@ -148,7 +148,12 @@ class APMDependencyResolver:
         self._download_lock = threading.Lock()
         self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
-        self.marketplace_provenance: dict[str, dict[str, str]] = {}
+        self._marketplace_provenance: dict[str, dict[str, str]] = {}
+
+    @property
+    def marketplace_provenance(self) -> dict[str, dict[str, str]]:
+        """Return marketplace provenance captured while resolving the graph."""
+        return dict(self._marketplace_provenance)
 
     @staticmethod
     def _resolve_max_parallel(explicit: int | None) -> int:
@@ -504,7 +509,7 @@ class APMDependencyResolver:
             if resolution.dependency_reference is not None
             else DependencyReference.parse(resolution.canonical)
         )
-        self.marketplace_provenance[resolved.get_unique_key()] = resolution.provenance(
+        self._marketplace_provenance[resolved.get_unique_key()] = resolution.provenance(
             dep_ref.marketplace_name,
             dep_ref.marketplace_plugin_name,
         )
