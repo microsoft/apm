@@ -537,3 +537,48 @@ def test_dependency_dev_mcp_is_excluded_from_consumer(tmp_path: Path) -> None:
     names = [dep.name for dep in view.dependencies]
     assert "prod-server" in names, "prod MCP from dependency must be included"
     assert "dev-server" not in names, "dev MCP from dependency must NOT be included"
+
+
+def test_unlocked_compat_excludes_dep_dev_mcp(tmp_path: Path) -> None:
+    """Regression #2340: no-lock compat path also excludes dependency dev MCP.
+
+    _collect_unlocked_compat is the legacy path when no lockfile exists;
+    it must enforce the same prod-only rule as _collect_locked_dependencies.
+    """
+    from apm_cli.integration.mcp_config_view import _collect_transitive_compat
+
+    modules_root = tmp_path / "apm_modules"
+    dep_dir = modules_root / "dep-pkg"
+    _write_manifest(
+        dep_dir,
+        name="dep-pkg",
+        mcp=[
+            {
+                "name": "prod-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/prod",
+            }
+        ],
+        dev_mcp=[
+            {
+                "name": "dev-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/dev",
+            }
+        ],
+    )
+
+    # No lock_path -- forces the _collect_unlocked_compat branch.
+    result = _collect_transitive_compat(
+        modules_root,
+        lock_path=None,
+        trust_private=True,
+        logger=None,
+        diagnostics=None,
+    )
+
+    names = [dep.name for dep in result]
+    assert "prod-server" in names, "prod MCP must be collected by no-lock compat path"
+    assert "dev-server" not in names, "dev MCP must NOT be collected by no-lock compat path"
