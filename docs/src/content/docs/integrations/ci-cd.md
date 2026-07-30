@@ -231,6 +231,7 @@ See the [Pack a bundle guide](../../producer/pack-a-bundle/) for the full workfl
 
 - **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.22.0`
 - **Commit `apm.lock.yaml`** so CI resolves the same dependency versions as local development
+- **Install with `apm install --frozen` in CI** to verify the committed lockfile is actually current. It never writes `apm.lock.yaml` and exits `1`, naming the paths, if the install deploys files the lockfile does not record. A file the lockfile omits carries no recorded hash, which puts it outside the `content-integrity` check below -- so this is the gate that keeps that check's scope honest, and it replaces a hand-rolled `git diff --exit-code apm.lock.yaml` step.
 - **Commit `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
 - **If using `apm compile`** (for Codex, Gemini instructions), run it in CI and fail the build if the output differs from what's committed
 - **Use `GITHUB_APM_PAT`** for private dependencies; never use the default `GITHUB_TOKEN` for cross-repo access

@@ -69,24 +69,41 @@ class AuthenticationError(RuntimeError):
 class FrozenInstallError(RuntimeError):
     """Raised when ``apm install --frozen`` cannot proceed.
 
-    Two trigger conditions:
+    Three trigger conditions:
 
     * Lockfile (``apm.lock.yaml``) is missing entirely.
     * Lockfile is structurally out of sync with ``apm.yml`` -- a direct
       dependency declared in the manifest has no entry in the lockfile.
       In that case ``reasons`` carries one human-readable line per
       missing dep so the renderer can list them.
+    * The install deploys files the committed lockfile does not record, so
+      honouring req-lk-006's "never written or rewritten" would have left
+      the project claiming less than it deploys -- and unclaimed files are
+      outside the audit's content checks.  ``reasons`` names those paths.
 
-    The check is intentionally narrow: it flags the cases where running
-    install without ``--frozen`` would mutate the lockfile.  Drift in
+    The first two are structural and run before the pipeline.  Drift in
     transitive deps or removed deps is allowed, mirroring how ``uv``
     treats ``--frozen`` and how ``npm ci`` only enforces direct-deps
-    presence.
+    presence; the third follows the same rule and ignores claims the
+    install would *drop*.
+
+    ``tip`` is the remediation line the CLI prints, carried on the error
+    because the two conditions have different remedies and both Click
+    handlers render this exception the same way.
     """
 
-    def __init__(self, message: str, *, reasons: list[str] | None = None):
+    DEFAULT_TIP = "Tip: run 'apm outdated' to see what changed, then 'apm update'."
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reasons: list[str] | None = None,
+        tip: str = DEFAULT_TIP,
+    ):
         super().__init__(message)
         self.reasons = list(reasons or [])
+        self.tip = tip
 
 
 class PolicyViolationError(RuntimeError):
