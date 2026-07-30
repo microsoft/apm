@@ -27,8 +27,8 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GITLAB_HOST` | Single self-managed GitLab hostname (e.g. `gitlab.example.com`). | unset | Recognised as GitLab-class for transport / auth. |
 | `APM_GITLAB_HOSTS` | Comma-separated list of additional GitLab hostnames to classify as GitLab-class. | unset | Use when you operate multiple GitLab instances. |
 | `ADO_APM_PAT` | Azure DevOps PAT for `ado_modules`. | unset | Azure DevOps Services falls back to AAD bearer via `az`; Azure DevOps Server is PAT-only. |
-| `ADO_HOST` | Single on-prem Azure DevOps Server FQDN. | unset | Hostname only: no scheme, port, or path. ADO classification takes precedence over an overlapping `GITHUB_HOST`. |
-| `APM_ADO_HOSTS` | Comma-separated list of on-prem Azure DevOps Server FQDNs. | unset | Entries are trimmed and matched case-insensitively; use for multiple Server instances. |
+| `ADO_HOST` | Single on-prem Azure DevOps Server FQDN (e.g. `ado.company.com`). Registers the host as ADO-class for auth and API routing. | unset | Hostname only: no scheme, port, or path. Takes precedence over an overlapping `GITHUB_HOST`. |
+| `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, all classified as ADO-class. | unset | Entries are trimmed and matched case-insensitively; use for multiple Server instances. |
 | `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Also used by the registry-proxy resolver. |
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
