@@ -13,14 +13,19 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from tests.integration.test_required_lifecycle_state_machine import _assert_same_state
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-from tests.utils.local_git_repository import LocalGitRepositoryFactory
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
+    pytest.mark.requires_e2e_mode,
 ]
 
 _GIT_SOURCE = "git@gitlab.example.invalid:group/virtual-skills.git"
@@ -40,16 +45,63 @@ _AUDIT_ARGS = (
 class _VirtualSkillLifecycle:
     """Installed virtual-skill project and its isolated command boundary."""
 
+    isolated: IsolatedApmEnvironment
+    repositories: LocalGitRepositoryFactory
+    repository: LocalGitRepository
+    skill_root: Path
     project_root: Path
     module_root: Path
     environment: dict[str, str]
     runner: ApmLifecycleRunner
 
 
+def _audit_payload(result: CommandResult) -> dict[str, object]:
+    """Return the parsed public audit payload."""
+    return json.loads(result.stdout)
+
+
 def _config_check(result: CommandResult) -> dict[str, object]:
     """Return the public audit payload's config-consistency check."""
-    payload = json.loads(result.stdout)
+    payload = _audit_payload(result)
     return next(check for check in payload["checks"] if check["name"] == "config-consistency")
+
+
+def _drift_check(result: CommandResult) -> dict[str, object]:
+    """Return the public audit payload's drift check."""
+    payload = _audit_payload(result)
+    return next(check for check in payload["checks"] if check["name"] == "drift")
+
+
+def _capture_state(lifecycle: _VirtualSkillLifecycle) -> LifecycleStateSnapshot:
+    """Capture exact and semantic state for the copilot target."""
+    return LifecycleStateSnapshot.capture(
+        lifecycle.project_root,
+        targets=("copilot",),
+    )
+
+
+def _evict_live_modules_and_cache(lifecycle: _VirtualSkillLifecycle) -> None:
+    """Delete live modules plus the isolated APM cache to mimic setup-only CI."""
+    modules_root = lifecycle.project_root / "apm_modules"
+    if modules_root.exists():
+        shutil.rmtree(modules_root)
+    if lifecycle.isolated.cache_root.exists():
+        shutil.rmtree(lifecycle.isolated.cache_root)
+    lifecycle.isolated.cache_root.mkdir(parents=True, exist_ok=True)
+
+
+def _rewrite_dependency_commit(project_root: Path, new_sha: str) -> None:
+    """Point the manifest and lockfile at a new locked commit."""
+    manifest_path = project_root / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["apm"][0]["ref"] = new_sha
+    dump_yaml(manifest, manifest_path)
+
+    lock_path = project_root / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    lock["dependencies"][0]["resolved_commit"] = new_sha
+    lock["dependencies"][0]["resolved_ref"] = new_sha
+    dump_yaml(lock, lock_path)
 
 
 def _run_audit(
@@ -178,6 +230,10 @@ def _install_virtual_skill_lifecycle(
         assert not (module_root / "apm.yml").exists()
 
     return _VirtualSkillLifecycle(
+        isolated=isolated,
+        repositories=repositories,
+        repository=repository,
+        skill_root=skill_root,
         project_root=project.root,
         module_root=module_root,
         environment=environment,
@@ -212,7 +268,8 @@ def test_valid_manifestless_virtual_skill_audits_clean_from_cold_cache(
         apm_binary_path,
         rewarm_live_modules=False,
     )
-    lock_before = (virtual_skill_lifecycle.project_root / "apm.lock.yaml").read_bytes()
+    _evict_live_modules_and_cache(virtual_skill_lifecycle)
+    before = _capture_state(virtual_skill_lifecycle)
 
     audit = _run_audit(
         virtual_skill_lifecycle,
@@ -220,11 +277,17 @@ def test_valid_manifestless_virtual_skill_audits_clean_from_cold_cache(
         scenario_id="cold-cache-valid-virtual-skill-audit",
     )
 
+    payload = _audit_payload(audit)
     config_check = _config_check(audit)
+    drift_check = _drift_check(audit)
+    after = _capture_state(virtual_skill_lifecycle)
     assert config_check["passed"] is True
     assert config_check["message"] == "No MCP configs to check"
+    assert drift_check["passed"] is True
+    assert "skipped" not in drift_check["message"].lower()
+    assert payload["drift"]["drift"] == []
     assert not virtual_skill_lifecycle.module_root.exists()
-    assert (virtual_skill_lifecycle.project_root / "apm.lock.yaml").read_bytes() == lock_before
+    _assert_same_state(before, after)
 
 
 def test_non_virtual_manifestless_package_still_fails_audit(
@@ -263,6 +326,8 @@ def test_non_virtual_manifestless_package_still_fails_audit_from_cold_cache(
     lock = load_yaml(lock_path)
     lock["dependencies"][0]["is_virtual"] = False
     dump_yaml(lock, lock_path)
+    _evict_live_modules_and_cache(virtual_skill_lifecycle)
+    before = _capture_state(virtual_skill_lifecycle)
 
     audit = _run_audit(
         virtual_skill_lifecycle,
@@ -270,9 +335,14 @@ def test_non_virtual_manifestless_package_still_fails_audit_from_cold_cache(
         scenario_id="cold-cache-non-virtual-manifestless-audit",
     )
 
+    after = _capture_state(virtual_skill_lifecycle)
     config_check = _config_check(audit)
+    drift_check = _drift_check(audit)
     assert config_check["passed"] is False
     assert config_check["details"]
+    assert "skipped" not in drift_check["message"].lower()
+    assert not virtual_skill_lifecycle.module_root.exists()
+    _assert_same_state(before, after)
 
 
 def test_malformed_virtual_package_still_fails_audit(
@@ -308,6 +378,8 @@ def test_wrong_virtual_package_type_still_fails_audit_from_cold_cache(
     lock = load_yaml(lock_path)
     lock["dependencies"][0]["package_type"] = "not-a-real-package-type"
     dump_yaml(lock, lock_path)
+    _evict_live_modules_and_cache(virtual_skill_lifecycle)
+    before = _capture_state(virtual_skill_lifecycle)
 
     audit = _run_audit(
         virtual_skill_lifecycle,
@@ -315,9 +387,52 @@ def test_wrong_virtual_package_type_still_fails_audit_from_cold_cache(
         scenario_id="cold-cache-wrong-package-type-audit",
     )
 
+    after = _capture_state(virtual_skill_lifecycle)
     config_check = _config_check(audit)
+    drift_check = _drift_check(audit)
     assert config_check["passed"] is False
-    assert any("package manifest not found" in detail for detail in config_check["details"])
+    assert config_check["details"]
+    assert "skipped" not in drift_check["message"].lower()
+    assert not virtual_skill_lifecycle.module_root.exists()
+    _assert_same_state(before, after)
+
+
+def test_cold_cache_malformed_virtual_skill_bytes_fail_closed(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Cold-cache self-hydration must reject malformed bytes fetched from a locked commit."""
+    virtual_skill_lifecycle = _install_virtual_skill_lifecycle(
+        tmp_path,
+        apm_binary_path,
+        rewarm_live_modules=False,
+    )
+    (virtual_skill_lifecycle.repository.worktree / _VIRTUAL_PATH / "SKILL.md").unlink()
+    malformed_commit = virtual_skill_lifecycle.repositories.commit(
+        virtual_skill_lifecycle.repository,
+        message="remove skill marker",
+    )
+    _rewrite_dependency_commit(
+        virtual_skill_lifecycle.project_root,
+        malformed_commit.sha,
+    )
+    _evict_live_modules_and_cache(virtual_skill_lifecycle)
+    before = _capture_state(virtual_skill_lifecycle)
+
+    audit = _run_audit(
+        virtual_skill_lifecycle,
+        expected_returncode=1,
+        scenario_id="cold-cache-malformed-virtual-skill-audit",
+    )
+
+    after = _capture_state(virtual_skill_lifecycle)
+    config_check = _config_check(audit)
+    drift_check = _drift_check(audit)
+    assert config_check["passed"] is False
+    assert config_check["details"]
+    assert "skipped" not in drift_check["message"].lower()
+    assert not virtual_skill_lifecycle.module_root.exists()
+    _assert_same_state(before, after)
 
 
 def test_virtual_skill_exemption_does_not_hide_mcp_config_drift(
