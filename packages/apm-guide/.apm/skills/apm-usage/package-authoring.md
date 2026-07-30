@@ -92,6 +92,15 @@ Per-primitive scan paths for `apm install`:
 every primitive. This is the only layout that is symmetric between
 `apm pack` and `apm install`.
 
+## Development MCP scope
+
+Put consumer-facing MCP servers in `dependencies.mcp`. Put local mocks,
+debug bridges, and other author-only servers in
+`devDependencies.mcp`. The root package receives both sections in its
+authoring environment; consumers of that package receive only
+`dependencies.mcp`, including when the package is nested transitively.
+See [MCP dependency formats](dependencies.md#mcp-dependency-formats).
+
 ## Hook files
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON

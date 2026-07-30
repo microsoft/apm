@@ -7,7 +7,11 @@ from pathlib import Path
 import yaml
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.integration.mcp_config_view import CurrentMcpConfigView, McpConfigDiff
+from apm_cli.integration.mcp_config_view import (
+    CurrentMcpConfigView,
+    McpConfigDiff,
+    _collect_transitive_compat,
+)
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -57,6 +61,17 @@ def _derive(
         modules_root,
         trust_transitive_self_defined=True,
     )
+
+
+class _RecordingLogger:
+    """Capture compatibility-path verbose diagnostics."""
+
+    def __init__(self) -> None:
+        self.details: list[str] = []
+
+    def verbose_detail(self, message: str) -> None:
+        """Record one verbose diagnostic."""
+        self.details.append(message)
 
 
 def test_root_dev_mcp_included_dep_dev_mcp_excluded(tmp_path: Path) -> None:
@@ -492,6 +507,49 @@ def test_transitive_self_defined_trust_matches_install_behavior(tmp_path: Path) 
     assert [dep.name for dep in trusted.dependencies] == ["direct-server", "deep-server"]
 
 
+def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
+    tmp_path: Path,
+) -> None:
+    """A no-op update preserves prior trust without trusting changed code."""
+    root = _write_manifest(tmp_path, name="root")
+    deep_dir = tmp_path / "packages" / "deep"
+    package = _write_manifest(
+        deep_dir,
+        name="deep",
+        mcp=[_self_defined("deep-server", "trusted-command")],
+    )
+    deep = LockedDependency(
+        repo_url="_local/deep",
+        source="local",
+        local_path="./packages/deep",
+        depth=2,
+    )
+    stored_config = package.get_mcp_dependencies()[0].to_dict()
+
+    preserved = CurrentMcpConfigView.derive(
+        root,
+        _lock(deep),
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=False,
+        trusted_transitive_configs={"deep-server": stored_config},
+    )
+    changed = CurrentMcpConfigView.derive(
+        root,
+        _lock(deep),
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=False,
+        trusted_transitive_configs={
+            "deep-server": {
+                **stored_config,
+                "command": "different-command",
+            }
+        },
+    )
+
+    assert [dependency.name for dependency in preserved.dependencies] == ["deep-server"]
+    assert changed.dependencies == ()
+
+
 def test_view_dependencies_are_mcp_dependency_objects(tmp_path: Path) -> None:
     """The public dependencies tuple remains strongly typed."""
     root = _write_manifest(tmp_path, name="root", mcp=["server"])
@@ -545,8 +603,6 @@ def test_unlocked_compat_excludes_dep_dev_mcp(tmp_path: Path) -> None:
     _collect_unlocked_compat is the legacy path when no lockfile exists;
     it must enforce the same prod-only rule as _collect_locked_dependencies.
     """
-    from apm_cli.integration.mcp_config_view import _collect_transitive_compat
-
     modules_root = tmp_path / "apm_modules"
     dep_dir = modules_root / "dep-pkg"
     _write_manifest(
@@ -569,16 +625,22 @@ def test_unlocked_compat_excludes_dep_dev_mcp(tmp_path: Path) -> None:
             }
         ],
     )
+    logger = _RecordingLogger()
 
     # No lock_path -- forces the _collect_unlocked_compat branch.
     result = _collect_transitive_compat(
         modules_root,
         lock_path=None,
         trust_private=True,
-        logger=None,
+        logger=logger,
         diagnostics=None,
     )
 
-    names = [dep.name for dep in result]
-    assert "prod-server" in names, "prod MCP must be collected by no-lock compat path"
-    assert "dev-server" not in names, "dev MCP must NOT be collected by no-lock compat path"
+    assert [(dependency.name, dependency.resolved_by) for dependency in result] == [
+        ("prod-server", "dep-pkg")
+    ]
+    assert logger.details == [
+        "Skipping 1 development MCP dependency(ies) from 'dep-pkg'; "
+        "dependency devDependencies.mcp do not propagate"
+    ]
+    assert all("dev-server" not in detail for detail in logger.details)

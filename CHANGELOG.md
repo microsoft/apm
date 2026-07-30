@@ -49,11 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matching how `devDependencies.apm` is already handled and the documented
   dev/prod contract. Root-project `devDependencies.mcp` behavior is
 - Consuming projects no longer inherit a dependency author's development-only
-  MCP servers: `devDependencies.mcp` from direct and transitive dependency
-  packages is now excluded from the consumer's MCP config and provenance, just
-  as `devDependencies.apm` already is. Only `dependencies.mcp` from packages
-  propagates downstream. Root-project `devDependencies.mcp` behavior is
-  unchanged. (#2340)
+  MCP servers. Only `dependencies.mcp` from direct and transitive packages
+  propagates; the root project's `dependencies.mcp` and `devDependencies.mcp`
+  remain active for its authoring environment.
+  (by @sergio-sisternes-epam, #2340)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

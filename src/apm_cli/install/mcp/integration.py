@@ -35,6 +35,7 @@ def run_mcp_integration(  # noqa: PLR0913
     verbose: bool = False,
     explicit_target: str | list[str] | None = None,
     scope=None,
+    trusted_transitive_configs: builtins.dict | None = None,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -69,6 +70,8 @@ def run_mcp_integration(  # noqa: PLR0913
         no_policy: Skip policy enforcement for the merged MCP set.
         verbose: Show detailed installation information.
         explicit_target: Explicit target selected by CLI or manifest.
+        trusted_transitive_configs: Exact previously trusted self-defined
+            transitive configs that a no-op update may preserve.
         scope: Optional InstallScope for user/project filtering.
 
     Returns:
@@ -96,6 +99,8 @@ def run_mcp_integration(  # noqa: PLR0913
             apm_modules_path,
             trust_transitive_self_defined=trust_transitive_mcp,
             diagnostics=diagnostics,
+            logger=logger,
+            trusted_transitive_configs=trusted_transitive_configs,
         )
         root_count = len(apm_package.get_all_mcp_dependencies())
         transitive_count = max(0, len(current_view.dependencies) - root_count)

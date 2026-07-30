@@ -358,6 +358,7 @@ APM separates production and development dependencies:
 
 - **Production dependencies** (`dependencies.apm`) are included in plugin bundles and shared packages.
 - **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output (both plugin format -- the default -- and `--format apm`).
+- **Development MCP servers** in the root project's `devDependencies.mcp` are active for authoring, but the same section in a direct or transitive dependency package never propagates into the consumer's target config or provenance.
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
 
