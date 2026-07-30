@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
 from apm_cli.integration._shared import deduplicate_deps
@@ -21,6 +21,19 @@ from apm_cli.models.validation import PackageType, detect_package_type
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+class _McpViewLogger(Protocol):
+    """Output methods used while deriving the current MCP view."""
+
+    def progress(self, message: str) -> None:
+        """Report an install-time trust decision."""
+
+    def warning(self, message: str) -> None:
+        """Report a trust decision that needs user attention."""
+
+    def verbose_detail(self, message: str) -> None:
+        """Report a non-actionable derivation detail in verbose mode."""
 
 
 @dataclass(frozen=True)
@@ -50,8 +63,8 @@ class CurrentMcpConfigView:
         *,
         trust_transitive_self_defined: bool,
         diagnostics: DiagnosticCollector | None = None,
-        logger: Any | None = None,
-        trusted_transitive_configs: Mapping[str, Mapping[str, Any]] | None = None,
+        logger: _McpViewLogger | None = None,
+        trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
     ) -> CurrentMcpConfigView:
         """Derive current MCP truth without mutating manifests or the lockfile."""
         project_root = root.package_path or Path.cwd()
@@ -140,26 +153,30 @@ def _get_server_provenance(dependencies: list[Any] | tuple[Any, ...]) -> dict[st
 def _log_skipped_dev_mcp(
     package: APMPackage,
     declarer: str,
-    logger: Any | None,
+    logger: _McpViewLogger | None,
 ) -> None:
     """Explain a dependency-scope exclusion without logging server names."""
     skipped_count = len(package.get_dev_mcp_dependencies())
     if skipped_count and logger is not None:
         logger.verbose_detail(
-            f"Skipping {skipped_count} development MCP dependency(ies) from "
-            f"'{declarer}'; dependency devDependencies.mcp do not propagate"
+            f"Skipping {skipped_count} author-only MCP server(s) from "
+            f"'{declarer}'; transitive devDependencies.mcp do not propagate"
         )
 
 
 def _matches_trusted_transitive_config(
     dependency: MCPDependency,
-    trusted_configs: Mapping[str, Mapping[str, Any]] | None,
+    declarer: str,
+    trusted_configs: Mapping[str, tuple[str, Mapping[str, Any]]] | None,
 ) -> bool:
-    """Return whether an unchanged self-defined config was trusted before."""
+    """Return whether this package's unchanged config was trusted before."""
     if trusted_configs is None:
         return False
-    stored = trusted_configs.get(dependency.name)
-    return stored is not None and dependency.to_dict() == stored
+    trusted = trusted_configs.get(dependency.name)
+    if trusted is None:
+        return False
+    stored_declarer, stored_config = trusted
+    return stored_declarer == declarer and dependency.to_dict() == stored_config
 
 
 def _fallback_manifest_path(
@@ -226,8 +243,8 @@ def _collect_locked_dependencies(
     *,
     trust_transitive_self_defined: bool,
     diagnostics: DiagnosticCollector | None,
-    logger: Any | None = None,
-    trusted_transitive_configs: Mapping[str, Mapping[str, Any]] | None = None,
+    logger: _McpViewLogger | None = None,
+    trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
 ) -> tuple[list[MCPDependency], list[McpSourceProblem]]:
     """Collect MCP declarations from only package manifests named by the lockfile."""
     if lockfile is None:
@@ -318,6 +335,7 @@ def _collect_locked_dependencies(
                         )
                 elif _matches_trusted_transitive_config(
                     mcp_dependency,
+                    declarer,
                     trusted_transitive_configs,
                 ):
                     if logger is not None:
@@ -345,7 +363,7 @@ def _collect_unlocked_compat(
     *,
     trust_transitive_self_defined: bool,
     diagnostics: DiagnosticCollector | None,
-    logger: Any | None,
+    logger: _McpViewLogger | None,
 ) -> list[MCPDependency]:
     """Preserve the legacy no-lock fallback for the compatibility wrapper only."""
     collected: list[MCPDependency] = []
@@ -379,7 +397,7 @@ def _collect_transitive_compat(
     lock_path: Path | None,
     trust_private: bool,
     *,
-    logger: Any | None,
+    logger: _McpViewLogger | None,
     diagnostics: DiagnosticCollector | None,
 ) -> list[MCPDependency]:
     """Implement the legacy MCPIntegrator traversal through this owner."""

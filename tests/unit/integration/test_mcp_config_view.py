@@ -531,7 +531,7 @@ def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
         _lock(deep),
         tmp_path / "apm_modules",
         trust_transitive_self_defined=False,
-        trusted_transitive_configs={"deep-server": stored_config},
+        trusted_transitive_configs={"deep-server": ("deep", stored_config)},
     )
     changed = CurrentMcpConfigView.derive(
         root,
@@ -539,15 +539,26 @@ def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
         tmp_path / "apm_modules",
         trust_transitive_self_defined=False,
         trusted_transitive_configs={
-            "deep-server": {
-                **stored_config,
-                "command": "different-command",
-            }
+            "deep-server": (
+                "deep",
+                {
+                    **stored_config,
+                    "command": "different-command",
+                },
+            )
         },
+    )
+    wrong_declarer = CurrentMcpConfigView.derive(
+        root,
+        _lock(deep),
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=False,
+        trusted_transitive_configs={"deep-server": ("other-package", stored_config)},
     )
 
     assert [dependency.name for dependency in preserved.dependencies] == ["deep-server"]
     assert changed.dependencies == ()
+    assert wrong_declarer.dependencies == ()
 
 
 def test_view_dependencies_are_mcp_dependency_objects(tmp_path: Path) -> None:
@@ -640,7 +651,7 @@ def test_unlocked_compat_excludes_dep_dev_mcp(tmp_path: Path) -> None:
         ("prod-server", "dep-pkg")
     ]
     assert logger.details == [
-        "Skipping 1 development MCP dependency(ies) from 'dep-pkg'; "
-        "dependency devDependencies.mcp do not propagate"
+        "Skipping 1 author-only MCP server(s) from 'dep-pkg'; "
+        "transitive devDependencies.mcp do not propagate"
     ]
     assert all("dev-server" not in detail for detail in logger.details)

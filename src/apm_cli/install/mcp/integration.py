@@ -5,8 +5,9 @@ with runtime-neutral target selection.
 """
 
 import builtins
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.models.apm_package import APMPackage
@@ -35,7 +36,7 @@ def run_mcp_integration(  # noqa: PLR0913
     verbose: bool = False,
     explicit_target: str | list[str] | None = None,
     scope=None,
-    trusted_transitive_configs: builtins.dict | None = None,
+    trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -70,8 +71,8 @@ def run_mcp_integration(  # noqa: PLR0913
         no_policy: Skip policy enforcement for the merged MCP set.
         verbose: Show detailed installation information.
         explicit_target: Explicit target selected by CLI or manifest.
-        trusted_transitive_configs: Exact previously trusted self-defined
-            transitive configs that a no-op update may preserve.
+        trusted_transitive_configs: Exact declaring-package/config pairs for
+            previously trusted self-defined servers that a no-op update may preserve.
         scope: Optional InstallScope for user/project filtering.
 
     Returns:

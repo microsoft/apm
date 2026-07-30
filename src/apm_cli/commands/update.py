@@ -252,7 +252,7 @@ def _run_mcp_lsp_integration(
         old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
         old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
     trusted_transitive_configs = {
-        name: config
+        name: (old_mcp_provenance[name], config)
         for name, config in old_mcp_configs.items()
         if name in old_mcp_provenance and config.get("registry") is False
     }
