@@ -469,6 +469,24 @@ def test_invalid_or_unmatched_patterns_fail_without_consumer_writes(
     assert "releases/{name}-v{version}" in no_match_output
     _assert_same_state(before_no_match, _snapshot(no_match_consumer))
 
+    bare_consumer = scenario.consumers.create(
+        "bare-no-match-consumer",
+        targets=("copilot",),
+    )
+    _register_marketplace(scenario, bare_consumer)
+    _declare_range(scenario, bare_consumer, "2.0.0")
+    before_bare = _snapshot(bare_consumer)
+    bare_no_match = _run_install(
+        scenario,
+        bare_consumer,
+        scenario_id="tag-pattern-bare-no-match",
+        expected_returncode=1,
+    )
+    bare_output = bare_no_match.stdout + bare_no_match.stderr
+    assert "No tag matching version '2.0.0'" in bare_output
+    assert "releases/{name}-v{version}" in bare_output
+    _assert_same_state(before_bare, _snapshot(bare_consumer))
+
     marketplace_path = (
         scenario.marketplace_repository.worktree / ".claude-plugin" / "marketplace.json"
     )

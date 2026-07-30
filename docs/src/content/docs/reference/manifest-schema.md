@@ -504,8 +504,8 @@ When `version` is a semver range or bare version number (for example
 created before this field existed fall back to the legacy
 `{name}--v{version}` consumer convention. A pattern must contain exactly one
 `{version}` placeholder; `{name}` is optional. Unsupported or malformed
-patterns, and ranges with no matching tags, fail without falling back to a raw
-ref. Pre-release versions are excluded from range resolution; target them
+patterns, and ranges or bare versions with no matching tags, fail without
+falling back to a raw ref. Pre-release versions are excluded from range resolution; target them
 explicitly as raw git refs. Raw refs such as `v2.0.0`, `main`, or a commit SHA
 bypass tag resolution.
 

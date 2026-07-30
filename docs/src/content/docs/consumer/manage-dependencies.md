@@ -261,10 +261,11 @@ then the marketplace build default. Old marketplace metadata without a
 `tag_pattern` field keeps the legacy `{name}--v{version}` convention.
 Malformed patterns and ranges with no match fail instead of becoming raw refs.
 
-`apm install` resolves and locks the highest matching tag. A repeated install
-replays the lock without changing durable state. After the publisher adds tags
-and republishes the marketplace metadata, `apm outdated` reports the new
-resolved ref and `apm update --yes` applies it.
+`apm install` resolves and locks the highest matching tag. Re-running it
+replays the locked version without changes. After the producer adds tags and
+republishes the marketplace metadata, run `apm marketplace update <name>`;
+`apm outdated` then reports the new resolved ref and `apm update --yes`
+applies it.
 
 ### Pin a semver range
 
