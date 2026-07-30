@@ -142,3 +142,22 @@ def test_shallow_alias_doc_still_parses_under_budget(tmp_path: Path, levels: int
     assert finished, f"depth={levels}: load did not finish"
     assert exc is None, f"depth={levels}: shallow doc wrongly rejected: {exc!r}"
     assert isinstance(result, dict)
+
+
+def test_large_anchor_free_scalar_is_not_treated_as_an_alias_bomb(tmp_path: Path):
+    """A literal document above the expansion budget remains loadable.
+
+    The expansion budget defends against shared alias nodes whose logical size
+    can grow exponentially. A single unaliased scalar is linear in the input
+    size, so rejecting it as an alias bomb prevents APM from reading its own
+    large generated lockfiles without adding protection.
+    """
+    from apm_cli.utils.yaml_io import _BoundedSafeLoader, load_yaml
+
+    literal = "x" * (_BoundedSafeLoader._MAX_EXPANSION_WEIGHT + 1)
+    doc = tmp_path / "apm.lock.yaml"
+    doc.write_text(f"payload: {literal}\n", encoding="utf-8")
+
+    result = load_yaml(doc)
+
+    assert result == {"payload": literal}

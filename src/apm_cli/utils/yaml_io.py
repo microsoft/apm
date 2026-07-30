@@ -115,6 +115,32 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         # scalar occurrence its emitted byte length makes the budget model the
         # real dump-amplification cost, so the bomb fails closed at parse while
         # a single large scalar (referenced a handful of times) still resolves.
+        # A composed YAML document without aliases is a tree: its logical
+        # expansion is exactly its input structure, so a fixed expansion cap
+        # would only reject legitimate large lockfiles. Aliases are the only
+        # way the composed graph gains shared nodes (or cycles), and therefore
+        # the only way its logical materialization can exceed its source size.
+        # Detect sharing first without recursively revisiting a seen node; this
+        # stays linear in the composed graph even for an exponential alias bomb.
+        seen: set[int] = set()
+
+        def has_shared_node(node: Any) -> bool:
+            nid = id(node)
+            if nid in seen:
+                return True
+            seen.add(nid)
+            if isinstance(node, yaml.nodes.MappingNode):
+                return any(
+                    has_shared_node(key_node) or has_shared_node(value_node)
+                    for key_node, value_node in node.value
+                )
+            if isinstance(node, yaml.nodes.SequenceNode):
+                return any(has_shared_node(child) for child in node.value)
+            return False
+
+        if not has_shared_node(root):
+            return
+
         weights: dict[int, int] = {}
 
         def weight(node: Any) -> int:
