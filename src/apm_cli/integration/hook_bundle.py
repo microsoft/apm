@@ -1,6 +1,7 @@
 """Helpers for deploying hook script bundles."""
 
 import json
+import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -143,11 +145,16 @@ def copy_deployed_hook_bundle(
     copy_plan: dict[str, Path] = {}
     for source_root, target_root in source_target_roots:
         for source_file in sorted(source_root.rglob("*")):
+            if exclude_json_files and source_file.suffix.lower() == ".json":
+                _log.debug(
+                    "Skipping JSON hook bundle asset %s for recursive-scanner target",
+                    source_file,
+                )
+                continue
             if (
                 source_file.is_symlink()
                 or not source_file.is_file()
                 or source_file.name in {"package.json", MARKER_FILENAME}
-                or (exclude_json_files and source_file.suffix.lower() == ".json")
                 or _is_root_hook_descriptor(source_file, source_root, descriptor_files)
             ):
                 continue

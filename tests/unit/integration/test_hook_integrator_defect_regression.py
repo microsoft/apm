@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -236,6 +237,7 @@ def test_claude_deploys_hook_directory_siblings_and_package_module_type(
 
 def test_copilot_deploys_hook_directory_siblings_without_package_json_sidecar(
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Copilot deployment must NOT write a package.json sidecar.
 
@@ -248,6 +250,7 @@ def test_copilot_deploys_hook_directory_siblings_without_package_json_sidecar(
     project.mkdir()
     (project / "package.json").write_text(json.dumps({"type": "module"}), encoding="utf-8")
     pkg_info = _setup_commonjs_hook_package(tmp_path, "hooks-copilot.json")
+    caplog.set_level(logging.DEBUG, logger="apm_cli.integration.hook_bundle")
 
     result = HookIntegrator().integrate_package_hooks(pkg_info, project)
 
@@ -268,6 +271,8 @@ def test_copilot_deploys_hook_directory_siblings_without_package_json_sidecar(
     assert (deployed_script.parent / "lib" / "helper.js") in result.target_paths
     assert (deployed_script.parent / "lib" / "config.json") not in result.target_paths
     assert deployed_package_json not in result.target_paths
+    assert "Skipping JSON hook bundle asset" in caplog.text
+    assert "config.json" in caplog.text
 
 
 def test_copilot_does_not_deploy_package_json_sidecar_into_scanned_hooks_dir(
