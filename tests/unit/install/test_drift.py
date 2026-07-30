@@ -276,7 +276,7 @@ def test_claimed_prefixes_only_derived_from_directory_entries(tmp_path):
     named ``a.md``, letting a deployed file escape the membership check on the
     strength of its path alone.
     """
-    tracked = {".apm/skills/a.md": "pkg", ".apm/skills/demo": "pkg"}
+    tracked = {"": "malformed", ".apm/skills/a.md": "pkg", ".apm/skills/demo": "pkg"}
     project_files = {".apm/skills/a.md": tmp_path / "a.md"}
 
     assert _claimed_prefixes(tracked, {".apm/skills/a.md"}, project_files) == (".apm/skills/demo/",)
@@ -353,7 +353,8 @@ def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
     assert "[!] Drift detected: 1 file(s)" in out
     assert "unrecorded (1):" in out
     assert ".claude/skills/x/SKILL.md" in out
-    assert "Run 'apm install', then commit the regenerated apm.lock.yaml" in out
+    assert "Run 'apm install' to re-sync deployed files" in out
+    assert "commit the regenerated apm.lock.yaml" in out
 
 
 def test_diff_engine_100kb_inline_cap(tmp_path):

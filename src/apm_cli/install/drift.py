@@ -755,7 +755,9 @@ def _claimed_prefixes(
     return tuple(
         normalized + "/"
         for path in tracked
-        if (normalized := path.rstrip("/")) not in hashed_files and normalized not in project_files
+        if (normalized := path.rstrip("/"))
+        and normalized not in hashed_files
+        and normalized not in project_files
     )
 
 
@@ -983,8 +985,8 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
 
     if by_kind.get("unrecorded"):
         lines.append(
-            f"  {STATUS_SYMBOLS['info']} Run 'apm install', then commit the regenerated "
-            "apm.lock.yaml to restore content-integrity coverage."
+            f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files, "
+            "then commit the regenerated apm.lock.yaml to restore content-integrity coverage."
         )
     else:
         lines.append(

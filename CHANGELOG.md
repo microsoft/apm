@@ -24,13 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `unrecorded` drift. Such a file carried no recorded hash, so
 - `apm audit --ci` may surface new `unrecorded` failures on upgrade when
   deployed files were committed without the regenerated `apm.lock.yaml`.
-  Such a file carried no recorded hash, so
-  `content-integrity` neither hashed nor hidden-Unicode-scanned it and nothing
-  reported that its scope had narrowed to whatever the lockfile happened to
-  list; req-sc-001 requires a recorded hash for every deployed file. Hook
-  merge targets (`.claude/settings.json`, `.cursor/hooks.json` and their
-  `apm-hooks.json` sidecars) are exempt, since APM shares those with the user
-  and never claims them. (by @salpers, #2380)
+  The new drift finding closes a gap where `content-integrity` silently skipped
+  such files. Run `apm install` and commit the regenerated lockfile; shared
+  hook merge targets remain exempt. (by @salpers, #2380)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
