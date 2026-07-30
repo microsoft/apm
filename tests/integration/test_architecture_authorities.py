@@ -395,8 +395,8 @@ def test_drift_deployment_membership_has_single_owner() -> None:
         maxsplit=1,
     )[0]
 
-    assert "DeploymentLedgerCodec.from_lockfile(lockfile)" in tracked_body
-    assert "DeploymentLedgerCodec.from_lockfile(lockfile)" in hashed_body
+    assert "DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)" in tracked_body
+    assert "DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile)" in hashed_body
     for legacy_view in (
         "lockfile.dependencies",
         "local_deployed_files",
@@ -405,6 +405,38 @@ def test_drift_deployment_membership_has_single_owner() -> None:
         assert legacy_view not in tracked_body
         assert legacy_view not in hashed_body
     assert "Drift deployment membership must route through DeploymentLedgerCodec" in guard
+
+
+def test_hidden_unicode_membership_uses_deployment_ledger_codec() -> None:
+    """The scanner and drift classifier must consume one membership view."""
+    root = Path(__file__).parents[2]
+    scanner = (root / "src/apm_cli/security/file_scanner.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    body = scanner.split("def scan_lockfile_packages(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+
+    assert "DeploymentLedgerCodec.legacy_deployed_file_claims(lock)" in body
+    assert "lock.dependencies" not in body
+    assert "dep.deployed_files" not in body
+    assert "Hidden-Unicode membership must route through DeploymentLedgerCodec" in guard
+
+
+def test_deployment_ledger_codec_owns_legacy_membership_projection() -> None:
+    """The compatibility claim set must stay distinct from canonical rows."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/deployment_ledger.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    body = owner.split("def legacy_deployed_file_claims(", maxsplit=1)[1].split(
+        "\n    def ",
+        maxsplit=1,
+    )[0]
+
+    assert "dependency.deployed_files" in body
+    assert "lockfile.local_deployed_files" in body
+    assert "from_lockfile" not in body
+    assert "Legacy deployed-file membership projection belongs to DeploymentLedgerCodec" in guard
 
 
 def test_ac13_git_ref_transport_selection_has_single_owner() -> None:

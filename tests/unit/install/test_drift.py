@@ -350,7 +350,7 @@ def test_diff_engine_unrecorded_yields_to_modified(tmp_path):
 
 def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
     out = render_drift_text([DriftFinding(path=".claude/skills/x/SKILL.md", kind="unrecorded")])
-    assert "[!] Drift detected: 1 file(s)" in out
+    assert "[x] Drift detected: 1 file(s)" in out
     assert "unrecorded (1):" in out
     assert ".claude/skills/x/SKILL.md" in out
     assert "Run 'apm install' to re-sync deployed files" in out

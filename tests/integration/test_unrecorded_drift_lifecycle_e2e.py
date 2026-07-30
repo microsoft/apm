@@ -482,10 +482,13 @@ def test_unrecorded_claim_fails_without_writes_and_install_repairs_idempotently(
     _remove_legacy_claim_only(scenario.project.root, _SAFE_SKILL)
     _, canonical_claim_payload = _audit(
         scenario,
-        expected_returncode=0,
+        expected_returncode=1,
         scenario_id="unrecorded-audit-canonical-ledger-claim",
     )
-    assert _drift_entries(canonical_claim_payload) == []
+    assert any(
+        entry["path"] == _SAFE_SKILL and entry["kind"] == "unrecorded"
+        for entry in _drift_entries(canonical_claim_payload)
+    )
     _run(
         scenario,
         _INSTALL_ARGS,

@@ -718,20 +718,10 @@ def _walk_managed(root: Path, governed_roots: set[str]) -> dict[str, Path]:
 
 
 def _collect_tracked_files(lockfile: LockFile) -> dict[str, str]:
-    """Return canonical deployment claims as ``{path: active_owner}``."""
+    """Return scanner membership claims as ``{path: package_owner}``."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-    from apm_cli.core.deployment_state import LocatorKind
 
-    tracked: dict[str, str] = {}
-    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
-    for record in ledger.records.values():
-        if record.locator.kind is LocatorKind.URI:
-            continue
-        tracked.setdefault(
-            DeploymentLedgerCodec.legacy_value(record.locator),
-            record.active_owner,
-        )
-    return tracked
+    return DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)
 
 
 def _claimed_prefixes(
@@ -764,13 +754,8 @@ def _claimed_prefixes(
 def _collect_hashed_files(lockfile: LockFile) -> set[str]:
     """Return every deployed path whose lock claim is explicitly file-shaped."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-    from apm_cli.core.deployment_state import LocatorKind
 
-    return {
-        DeploymentLedgerCodec.legacy_value(record.locator)
-        for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values()
-        if record.locator.kind is not LocatorKind.URI and record.content_hash is not None
-    }
+    return set(DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile))
 
 
 def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
@@ -963,8 +948,13 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
     if not findings:
         return f"{STATUS_SYMBOLS['check']} No drift detected"
 
+    status = (
+        "error"
+        if any(finding.kind in {"modified", "unrecorded"} for finding in findings)
+        else "warning"
+    )
     lines: list[str] = [
-        f"{STATUS_SYMBOLS['warning']} Drift detected: {len(findings)} file(s)",
+        f"{STATUS_SYMBOLS[status]} Drift detected: {len(findings)} file(s)",
         "",
     ]
     by_kind: dict[str, list[DriftFinding]] = {}

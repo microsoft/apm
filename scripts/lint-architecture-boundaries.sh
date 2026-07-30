@@ -407,11 +407,36 @@ drift_hash_shape_body=$(awk '
     flag && /^def / && !/^def _collect_hashed_files\(/ {exit}
     flag {print}
 ' src/apm_cli/install/drift.py)
-if ! printf '%s\n' "$drift_membership_body" | grep -q 'DeploymentLedgerCodec.from_lockfile' \
-    || ! printf '%s\n' "$drift_hash_shape_body" | grep -q 'DeploymentLedgerCodec.from_lockfile' \
+if ! printf '%s\n' "$drift_membership_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_claims' \
+    || ! printf '%s\n' "$drift_hash_shape_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_hash_paths' \
     || printf '%s\n%s\n' "$drift_membership_body" "$drift_hash_shape_body" \
         | grep -Eq 'lockfile\.dependencies|local_deployed_files|deployed_file_hashes'; then
     echo "[x] Drift deployment membership must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
+scanner_membership_body=$(awk '
+    /^def scan_lockfile_packages\(/ {flag=1}
+    flag && /^def / && !/^def scan_lockfile_packages\(/ {exit}
+    flag {print}
+' src/apm_cli/security/file_scanner.py)
+if ! printf '%s\n' "$scanner_membership_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_claims' \
+    || printf '%s\n' "$scanner_membership_body" \
+        | grep -Eq 'lock\.dependencies|dep\.deployed_files'; then
+    echo "[x] Hidden-Unicode membership must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
+membership_owner_body=$(awk '
+    /^    def legacy_deployed_file_claims\(/ {flag=1}
+    flag && /^    def / && !/legacy_deployed_file_claims/ {exit}
+    flag {print}
+' src/apm_cli/core/deployment_ledger.py)
+if ! printf '%s\n' "$membership_owner_body" | grep -q 'dependency\.deployed_files' \
+    || ! printf '%s\n' "$membership_owner_body" | grep -q 'lockfile\.local_deployed_files' \
+    || printf '%s\n' "$membership_owner_body" | grep -q 'from_lockfile'; then
+    echo "[x] Legacy deployed-file membership projection belongs to DeploymentLedgerCodec"
     violations=$((violations + 1))
 fi
 update_plan_ref_body=$(awk '
