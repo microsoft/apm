@@ -385,6 +385,23 @@ if ! grep -q 'DeploymentLedgerCodec.record_local_bundle_files' \
     [ -n "$local_bundle_marker_hits" ] && echo "$local_bundle_marker_hits"
     violations=$((violations + 1))
 fi
+drift_membership_body=$(awk '
+    /^def _collect_tracked_files\(/ {flag=1}
+    flag && /^def / && !/^def _collect_tracked_files\(/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+drift_hash_shape_body=$(awk '
+    /^def _collect_hashed_files\(/ {flag=1}
+    flag && /^def / && !/^def _collect_hashed_files\(/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+if ! printf '%s\n' "$drift_membership_body" | grep -q 'DeploymentLedgerCodec.from_lockfile' \
+    || ! printf '%s\n' "$drift_hash_shape_body" | grep -q 'DeploymentLedgerCodec.from_lockfile' \
+    || printf '%s\n%s\n' "$drift_membership_body" "$drift_hash_shape_body" \
+        | grep -Eq 'lockfile\.dependencies|local_deployed_files|deployed_file_hashes'; then
+    echo "[x] Drift deployment membership must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
 update_plan_ref_body=$(awk '
     /^def annotate_update_plan_refs\(/ {flag=1}
     flag && /^def / && !/annotate_update_plan_refs/ {exit}

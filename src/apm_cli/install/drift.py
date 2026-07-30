@@ -718,17 +718,27 @@ def _walk_managed(root: Path, governed_roots: set[str]) -> dict[str, Path]:
 
 
 def _collect_tracked_files(lockfile: LockFile) -> dict[str, str]:
-    """Return ``{deployed_path: package_name}`` aggregating all sources."""
+    """Return canonical deployment claims as ``{path: active_owner}``."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import LocatorKind
+
     tracked: dict[str, str] = {}
-    for key, dep in lockfile.dependencies.items():
-        for path in dep.deployed_files or []:
-            tracked.setdefault(path, key)
-    for path in lockfile.local_deployed_files or []:
-        tracked.setdefault(path, ".")
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    for record in ledger.records.values():
+        if record.locator.kind is LocatorKind.URI:
+            continue
+        tracked.setdefault(
+            DeploymentLedgerCodec.legacy_value(record.locator),
+            record.active_owner,
+        )
     return tracked
 
 
-def _claimed_prefixes(tracked: dict[str, str], project_files: dict[str, Path]) -> tuple[str, ...]:
+def _claimed_prefixes(
+    tracked: dict[str, str],
+    hashed_files: set[str],
+    project_files: dict[str, Path],
+) -> tuple[str, ...]:
     """Return ``dir/`` prefixes for the tracked entries that name directories.
 
     A manifest entry may name a directory rather than each file beneath it
@@ -736,15 +746,29 @@ def _claimed_prefixes(tracked: dict[str, str], project_files: dict[str, Path]) -
     accept that shape), so a file is claimed when a tracked *directory*
     covers it.
 
-    Entries present in *project_files* are excluded: that walk yields files
-    only, so such an entry is a file and must not act as a prefix. Otherwise a
-    tracked ``a/b.md`` would claim anything under a directory named ``a/b.md``,
-    letting a deployed file dodge this check by its path alone. Deriving it
-    from the walk keeps the narrowing free of extra stat calls.
+    Entries with a recorded hash are files even if the current project path was
+    replaced by a directory. Entries present in *project_files* are also files,
+    which preserves the same rule for legacy hashless lockfiles. A file claim
+    must never act as a prefix: otherwise replacing tracked ``a.md`` with an
+    ``a.md/`` directory would let every descendant dodge the membership check.
     """
     return tuple(
-        path.rstrip("/") + "/" for path in tracked if path.rstrip("/") not in project_files
+        normalized + "/"
+        for path in tracked
+        if (normalized := path.rstrip("/")) not in hashed_files and normalized not in project_files
     )
+
+
+def _collect_hashed_files(lockfile: LockFile) -> set[str]:
+    """Return every deployed path whose lock claim is explicitly file-shaped."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import LocatorKind
+
+    return {
+        DeploymentLedgerCodec.legacy_value(record.locator)
+        for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values()
+        if record.locator.kind is not LocatorKind.URI and record.content_hash is not None
+    }
 
 
 def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
@@ -819,7 +843,11 @@ def diff_scratch_against_project(
     scratch_files = _walk_managed(scratch_root, governed)
     project_files = _walk_managed(project_root, governed)
     tracked = _collect_tracked_files(lockfile)
-    claimed_prefixes = _claimed_prefixes(tracked, project_files)
+    claimed_prefixes = _claimed_prefixes(
+        tracked,
+        _collect_hashed_files(lockfile),
+        project_files,
+    )
     # Hook merge targets (.claude/settings.json, .cursor/hooks.json, and their
     # apm-hooks.json sidecars) are shared with the user and never claimed in
     # deployed_files, so they can never be "unrecorded".
@@ -953,16 +981,15 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
                 lines.append(f"      {item.inline_diff}")
         lines.append("")
 
-    lines.append(
-        f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files with the lockfile."
-    )
     if by_kind.get("unrecorded"):
-        # The deployed bytes are already correct for these; what is missing is
-        # the manifest entry, so the fix is only complete once the regenerated
-        # lockfile is committed alongside them.
         lines.append(
-            f"  {STATUS_SYMBOLS['info']} unrecorded files need the regenerated "
-            "apm.lock.yaml committed -- until then they stay outside content-integrity."
+            f"  {STATUS_SYMBOLS['info']} Run 'apm install', then commit the regenerated "
+            "apm.lock.yaml to restore content-integrity coverage."
+        )
+    else:
+        lines.append(
+            f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
+            "with the lockfile."
         )
 
     return "\n".join(lines).rstrip() + "\n"
@@ -990,7 +1017,7 @@ def render_drift_sarif(findings: list[DriftFinding]) -> list[dict]:
         results.append(
             {
                 "ruleId": f"apm/drift/{f.kind}",
-                "level": "warning" if f.kind != "modified" else "error",
+                "level": "error" if f.kind in {"modified", "unrecorded"} else "warning",
                 "message": {"text": f"drift ({f.kind}): {f.path}"},
                 "locations": [
                     {

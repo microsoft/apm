@@ -93,6 +93,17 @@ def _lockfile_with_tracked(paths: list[str]) -> LockFile:
     return lock
 
 
+def _lockfile_with_hashed_file(path: str) -> LockFile:
+    lock = LockFile()
+    dep = LockedDependency(
+        repo_url="example/pkg",
+        deployed_files=[path],
+        deployed_file_hashes={path: "0" * 64},
+    )
+    lock.add_dependency(dep)
+    return lock
+
+
 def _write(path, content: bytes = b"hello\n"):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -268,7 +279,21 @@ def test_claimed_prefixes_only_derived_from_directory_entries(tmp_path):
     tracked = {".apm/skills/a.md": "pkg", ".apm/skills/demo": "pkg"}
     project_files = {".apm/skills/a.md": tmp_path / "a.md"}
 
-    assert _claimed_prefixes(tracked, project_files) == (".apm/skills/demo/",)
+    assert _claimed_prefixes(tracked, {".apm/skills/a.md"}, project_files) == (".apm/skills/demo/",)
+
+
+def test_diff_engine_hashed_file_claim_never_covers_descendants(tmp_path):
+    """A recorded file cannot become a directory prefix after replacement."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".apm/skills/a.md/hidden.md"
+    _write(scratch / rel)
+    _write(project / rel)
+
+    lock = _lockfile_with_hashed_file(".apm/skills/a.md")
+    findings = diff_scratch_against_project(scratch, project, lock, targets=[])
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("unrecorded", rel)]
 
 
 def test_diff_engine_unrecorded_exempts_hook_merge_targets(tmp_path):
@@ -292,6 +317,26 @@ def test_diff_engine_unrecorded_exempts_hook_merge_targets(tmp_path):
     assert diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets) == []
 
 
+def test_diff_engine_hook_merge_target_tampering_is_modified(tmp_path):
+    """Membership exemption cannot suppress the existing byte comparison."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/settings.json"
+    _write(scratch / rel, b'{"hooks": {}}\n')
+    _write(project / rel, b'{"hooks": {"changed": true}}\n')
+
+    findings = diff_scratch_against_project(
+        scratch,
+        project,
+        _empty_lockfile(),
+        targets=[KNOWN_TARGETS["claude"]],
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
+
+
 def test_diff_engine_unrecorded_yields_to_modified(tmp_path):
     """Differing bytes report ``modified`` only -- never both kinds for one file."""
     scratch = tmp_path / "scratch"
@@ -305,9 +350,10 @@ def test_diff_engine_unrecorded_yields_to_modified(tmp_path):
 
 def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
     out = render_drift_text([DriftFinding(path=".claude/skills/x/SKILL.md", kind="unrecorded")])
+    assert "[!] Drift detected: 1 file(s)" in out
     assert "unrecorded (1):" in out
     assert ".claude/skills/x/SKILL.md" in out
-    assert "apm.lock.yaml committed" in out
+    assert "Run 'apm install', then commit the regenerated apm.lock.yaml" in out
 
 
 def test_diff_engine_100kb_inline_cap(tmp_path):
@@ -398,10 +444,13 @@ def test_render_sarif_rule_id_prefix():
     findings = [
         DriftFinding(path="a.md", kind="modified", package="pkg-a"),
         DriftFinding(path="b.md", kind="orphaned", package="pkg-b"),
+        DriftFinding(path="c.md", kind="unrecorded", package="pkg-c"),
     ]
     results = render_drift_sarif(findings)
     assert results[0]["ruleId"] == "apm/drift/modified"
     assert results[1]["ruleId"] == "apm/drift/orphaned"
+    assert results[2]["ruleId"] == "apm/drift/unrecorded"
+    assert results[2]["level"] == "error"
     assert results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "a.md"
     assert results[1]["properties"]["package"] == "pkg-b"
 

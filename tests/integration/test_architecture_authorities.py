@@ -363,6 +363,32 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
 
 
+def test_drift_deployment_membership_has_single_owner() -> None:
+    """Drift membership and file shape must consume the deployment ledger."""
+    root = Path(__file__).parents[2]
+    drift = (root / "src/apm_cli/install/drift.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    tracked_body = drift.split("def _collect_tracked_files(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+    hashed_body = drift.split("def _collect_hashed_files(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+
+    assert "DeploymentLedgerCodec.from_lockfile(lockfile)" in tracked_body
+    assert "DeploymentLedgerCodec.from_lockfile(lockfile)" in hashed_body
+    for legacy_view in (
+        "lockfile.dependencies",
+        "local_deployed_files",
+        "deployed_file_hashes",
+    ):
+        assert legacy_view not in tracked_body
+        assert legacy_view not in hashed_body
+    assert "Drift deployment membership must route through DeploymentLedgerCodec" in guard
+
+
 def test_ac13_git_ref_transport_selection_has_single_owner() -> None:
     """AC13 makes Git ref enumeration consume canonical transport selection."""
     root = Path(__file__).parents[2]
