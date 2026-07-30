@@ -365,21 +365,17 @@ def _check_content_integrity(
     and lockfile entries without a recorded hash (e.g. directories) are
     skipped silently.
     """
-    from ..security.file_scanner import scan_deployed_trees, scan_lockfile_packages
+    from ..security.file_scanner import scan_project_files
     from ..utils.content_hash import compute_file_hash
 
-    # Pass the already-parsed lock: re-reading it here would be a redundant
-    # parse, and could disagree with the in-memory lockfile this check was
-    # handed.
-    findings_by_file, _files_scanned = scan_lockfile_packages(project_root, lockfile=lock)
-    # Unicode findings are NOT limited to the recorded set: a deployed file the
-    # lockfile omits has no hash to verify, but its characters are dangerous
-    # regardless, and it would otherwise be exempt from this check for as long
-    # as it stays unrecorded (#2379). Union, so a lockfile entry outside the
-    # currently-resolved targets keeps its coverage too.
-    tree_findings, _tree_scanned = scan_deployed_trees(project_root)
-    for rel_path, tree_file_findings in tree_findings.items():
-        findings_by_file.setdefault(rel_path, tree_file_findings)
+    # Reuse the already-parsed lock and union its recorded paths with the
+    # independently governed deploy-tree scope. The scanner owns exact path
+    # accounting and preserves lockfile findings outside resolved targets.
+    findings_by_file, _files_scanned = scan_project_files(
+        project_root,
+        lockfile=lock,
+        include_deployed_trees=True,
+    )
 
     # Only critical findings fail this check
     critical_files: list[str] = []

@@ -195,7 +195,14 @@ This prevents lockfile membership from shrinking silently. Shared merge-hook
 targets and sidecars remain exempt because APM merges into user-owned files
 rather than claiming them.
 
-A whole-project scan covers **every file under the deploy trees your targets govern**, not only the files `apm.lock.yaml` records. Hash verification needs a recorded baseline and so stays lockfile-scoped, but hidden Unicode does not: a deployed file missing from the lockfile -- for example a target committed without the regenerated lockfile -- would otherwise be exempt from scanning for as long as it stayed unrecorded. `apm audit --strip` cleans those same files. Positional `PACKAGE` scans remain lockfile-scoped.
+A whole-project scan checks **every regular file under the deploy trees your targets govern** for hidden Unicode, not only files recorded in `apm.lock.yaml`. Hash verification and positional `PACKAGE` scans remain lockfile-scoped because they need recorded ownership. Source content under `.apm/` is not added by the deploy-tree walk; install-time scanning owns that surface, while any `.apm/` path already recorded in the lockfile remains covered.
+
+CI and remediation are separate commands because `--ci` and `--strip` are mutually exclusive:
+
+```bash
+apm audit --strip                 # Remove dangerous characters
+apm audit --ci --no-drift         # Verify the remediated deploy tree
+```
 
 For CI pipelines, `apm audit` supports SARIF, JSON, and Markdown output:
 

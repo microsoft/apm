@@ -45,6 +45,7 @@ class TestScanFiles:
         assert not v.has_critical
         assert not v.should_block
         assert v.files_scanned == 2
+        assert v.scanned_files == frozenset({"a.md", "b.md"})
 
     def test_critical_blocks(self, tmp_path):
         _write_file(tmp_path / "evil.md", f"payload {CRITICAL_CHAR} here")

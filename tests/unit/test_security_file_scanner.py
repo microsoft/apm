@@ -8,9 +8,11 @@ from unittest.mock import MagicMock, patch
 from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.file_scanner import (
     _is_safe_lockfile_path,
+    _minimal_governed_prefixes,
     _scan_files_in_dir,
     scan_deployed_trees,
     scan_lockfile_packages,
+    scan_project_files,
 )
 
 # ---------------------------------------------------------------------------
@@ -51,6 +53,7 @@ class TestScanFilesInDir:
             "rel/file.md": [MagicMock()],
         }
         mock_verdict.files_scanned = 1
+        mock_verdict.scanned_files = frozenset({"rel/file.md"})
 
         with patch(
             "apm_cli.security.gate.SecurityGate.scan_files",
@@ -65,6 +68,7 @@ class TestScanFilesInDir:
         mock_verdict = MagicMock()
         mock_verdict.findings_by_file = {}
         mock_verdict.files_scanned = 3
+        mock_verdict.scanned_files = frozenset({"one.md", "two.md", "three.md"})
 
         with patch(
             "apm_cli.security.gate.SecurityGate.scan_files",
@@ -79,6 +83,7 @@ class TestScanFilesInDir:
         mock_verdict = MagicMock()
         mock_verdict.findings_by_file = {}
         mock_verdict.files_scanned = 0
+        mock_verdict.scanned_files = frozenset()
 
         with patch(
             "apm_cli.security.gate.SecurityGate.scan_files",
@@ -178,6 +183,7 @@ class TestScanLockfilePackages:
         mock_verdict = MagicMock()
         mock_verdict.findings_by_file = mock_findings
         mock_verdict.files_scanned = 2
+        mock_verdict.scanned_files = frozenset({"inner.md", "clean.md"})
 
         dep = _make_dep([".github/skills/pkg/"])
         lock = _make_lockfile({"pkg": dep})
@@ -290,3 +296,81 @@ class TestScanDeployedTrees:
 
     def test_no_deploy_tree_scans_nothing(self, tmp_path: Path) -> None:
         assert scan_deployed_trees(tmp_path) == ({}, 0)
+
+
+class TestProjectFileScan:
+    """Contracts for combining recorded and governed scan scopes."""
+
+    def test_overlap_is_scanned_once(self, tmp_path: Path) -> None:
+        rel = ".claude/skills/alpha/SKILL.md"
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True)
+        path.write_text("---\nname: alpha\n---\nAlpha.\n", encoding="utf-8")
+        lock = _make_lockfile({"pkg": _make_dep([rel])})
+
+        findings, scanned = scan_project_files(
+            tmp_path,
+            lockfile=lock,
+            include_deployed_trees=True,
+        )
+
+        assert findings == {}
+        assert scanned == 1
+
+    def test_nested_governance_roots_are_minimized(self) -> None:
+        assert _minimal_governed_prefixes({".agents/", ".agents/skills/", ".claude/skills/"}) == (
+            ".agents",
+            ".claude/skills",
+        )
+
+    def test_symlinked_deploy_root_cannot_escape(self, tmp_path: Path) -> None:
+        outside = tmp_path.parent / f"{tmp_path.name}-outside"
+        outside.mkdir()
+        payload = outside / "skills/beta/SKILL.md"
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(b"safe prefix\n\xe2\x80\xaepayload\xe2\x80\xac\n")
+        (tmp_path / ".claude").symlink_to(outside, target_is_directory=True)
+
+        assert scan_deployed_trees(tmp_path) == ({}, 0)
+        assert b"\xe2\x80\xae" in payload.read_bytes()
+
+    def test_recorded_path_outside_resolved_trees_keeps_coverage(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / ".claude").mkdir()
+        rel = ".agents/skills/legacy/SKILL.md"
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"safe prefix\n\xe2\x80\xaepayload\xe2\x80\xac\n")
+        lock = _make_lockfile({"legacy": _make_dep([rel])})
+
+        tree_findings, _ = scan_deployed_trees(tmp_path)
+        combined_findings, scanned = scan_project_files(
+            tmp_path,
+            lockfile=lock,
+            include_deployed_trees=True,
+        )
+
+        assert rel not in tree_findings
+        assert rel in combined_findings
+        assert scanned == 1
+
+    def test_package_mode_remains_lockfile_scoped(self, tmp_path: Path) -> None:
+        recorded = ".claude/skills/alpha/SKILL.md"
+        unrecorded = ".claude/skills/beta/SKILL.md"
+        (tmp_path / recorded).parent.mkdir(parents=True)
+        (tmp_path / recorded).write_text("Alpha.\n", encoding="utf-8")
+        (tmp_path / unrecorded).parent.mkdir(parents=True)
+        (tmp_path / unrecorded).write_bytes(b"\xe2\x80\xaepayload\xe2\x80\xac\n")
+        lock = _make_lockfile({"pkg": _make_dep([recorded])})
+
+        findings, scanned = scan_project_files(
+            tmp_path,
+            package_filter="pkg",
+            lockfile=lock,
+            include_deployed_trees=False,
+        )
+
+        assert findings == {}
+        assert scanned == 1

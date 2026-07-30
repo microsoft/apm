@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lockfile) was exempt from scanning for as long as it stayed unrecorded, in
   `--ci` and `--no-drift` runs alike. `apm audit --strip` cleans those files
   too; `--package <name>` stays lockfile-scoped. (by @salpers, #2379)
+- `apm audit` now scans every governed deploy tree for hidden Unicode, including
+  files absent from `apm.lock.yaml`; hash checks and positional `PACKAGE` scans
+  remain lockfile-scoped, and `apm audit --strip` cleans the widened scope.
+  (by @salpers, #2379)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
