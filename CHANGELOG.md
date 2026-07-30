@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   @fallintoplace, #2026)
 - `apm audit` now reports a deployed file that no `apm.lock.yaml` entry claims
   as `unrecorded` drift. Such a file carried no recorded hash, so
+- `apm audit --ci` may surface new `unrecorded` failures on upgrade when
+  deployed files were committed without the regenerated `apm.lock.yaml`.
+  Such a file carried no recorded hash, so
   `content-integrity` neither hashed nor hidden-Unicode-scanned it and nothing
   reported that its scope had narrowed to whatever the lockfile happened to
   list; req-sc-001 requires a recorded hash for every deployed file. Hook

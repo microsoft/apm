@@ -312,6 +312,24 @@ def test_shared_target_contraction_has_single_reconciler_owner() -> None:
     assert "Shared target contraction must use DeploymentReconciler" in guard
 
 
+def test_drift_hook_membership_exemptions_use_canonical_registries() -> None:
+    """Drift exemptions must derive hook paths instead of copying filenames."""
+    root = Path(__file__).parents[2]
+    consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    body = consumer.split("def merge_hook_config_paths(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+
+    assert "_MERGE_HOOK_TARGETS" in body
+    assert "_APM_HOOKS_SIDECAR" in body
+    assert "settings.json" not in body
+    assert "hooks.json" not in body
+    assert "apm-hooks.json" not in body
+    assert "Drift hook membership exemptions must derive from HookIntegrator registries" in guard
+
+
 def test_shared_target_contraction_guard_rejects_missing_reconciler_delegation(
     tmp_path: Path,
 ) -> None:
