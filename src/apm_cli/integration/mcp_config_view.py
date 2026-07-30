@@ -180,7 +180,10 @@ def _allows_missing_manifest(
         return dependency.package_type == PackageType.CLAUDE_SKILL.value
 
     package_type, _ = detect_package_type(package_dir)
-    return package_type is PackageType.CLAUDE_SKILL
+    return (
+        package_type is PackageType.CLAUDE_SKILL
+        and dependency.package_type == PackageType.CLAUDE_SKILL.value
+    )
 
 
 def _collect_locked_dependencies(

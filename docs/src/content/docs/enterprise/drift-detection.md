@@ -29,23 +29,24 @@ happens; see [security model](../security/).
 
 ### `apm audit --ci`
 
-The lockfile-consistency gate. Runs eight baseline checks in order and
+The lockfile-consistency gate. Runs nine baseline checks in order and
 exits non-zero on the first failure (or on any failure with
 `--no-fail-fast`):
 
 ```
-lockfile-exists -> ref-consistency -> deployed-files-present
--> no-orphaned-packages -> skill-subset-consistency
--> config-consistency -> content-integrity -> includes-consent
+lockfile-exists -> ref-consistency -> deployment-ledger-owners
+-> deployed-files-present -> no-orphaned-packages
+-> skill-subset-consistency -> config-consistency
+-> content-integrity -> includes-consent
 ```
 
 After the baseline passes, it replays the install in a scratch directory
-from the cache and diffs against the working tree to surface
-`unintegrated`, `modified`, and `orphaned` files. Pass `--no-drift` to
-skip the replay. When the install cache has not been warmed yet (fresh
-checkout before the first `apm install`), the drift check is skipped
-with an informational message rather than failing; run `apm install` to
-warm the cache and enable the check on the next run. With `--policy
+and diffs against the working tree to surface `unintegrated`, `modified`,
+and `orphaned` files. Pass `--no-drift` to skip the replay. In bare
+`apm audit`, the replay remains cache-only and a fresh checkout without a
+warm cache yields an informational skip. In `apm audit --ci`, a cold cache
+instead triggers a lock-pinned scratch self-hydration path; if that replay
+cannot be materialized, the drift check fails closed. With `--policy
 <source>` it also evaluates the discovered policy against the lockfile.
 Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 
@@ -109,24 +110,24 @@ disk after the last install -- for example a hand-edit to
 The `content-integrity` check then compares the restored file against a
 matching hash and reports no finding.
 
-To detect post-install modification, use `setup-only: true` on the action
-so it only provides the CLI without running `apm install`, then audit with
-`--no-drift`:
+For repos that commit their deployed files, use `setup-only: true` on the
+action so it only provides the CLI without running `apm install`, then run
+the full CI gate:
 
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
     setup-only: true
-- run: apm audit --ci --no-drift
+- run: apm audit --ci
 ```
 
-`--no-drift` skips the install-replay (which requires a warm cache that
-`setup-only` does not populate). The `content-integrity` check verifies
-SHA-256 hashes of every deployed file against `deployed_file_hashes` in
-`apm.lock.yaml` without needing to replay the install. Any content
-change to a deployed file since the last install is caught by this check
-(line-ending-only differences are normalized away per req-lk-012, so a
-CRLF/LF flip alone is not flagged).
+In setup-only CI, `apm audit --ci` now self-hydrates a lock-pinned scratch
+install when `apm_modules/` is absent, so drift and `config-consistency`
+still run without rewriting the checkout. The `content-integrity` check still
+verifies SHA-256 hashes of every deployed file against `deployed_file_hashes`
+in `apm.lock.yaml`. Repos that gitignore deployed outputs still need those
+files present on disk for `deployed-files-present`, so keep the full-install
+CI pattern for that case.
 
 See [Enforce in CI](../enforce-in-ci/#audit-only-ci-pattern) for the full
 recipe and a comparison table of the two patterns.

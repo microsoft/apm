@@ -71,6 +71,8 @@ def _run_audit(
 def _install_virtual_skill_lifecycle(
     tmp_path: Path,
     apm_binary_path: Path,
+    *,
+    rewarm_live_modules: bool = True,
 ) -> _VirtualSkillLifecycle:
     """Install and frozen-replay a real manifestless virtual Claude skill."""
     isolated = IsolatedApmEnvironment.create(
@@ -163,16 +165,17 @@ def _install_virtual_skill_lifecycle(
     assert not (module_root / "apm.yml").exists()
 
     shutil.rmtree(project.root / "apm_modules")
-    frozen_replay = runner.run_sequence(
-        (("install", "--target", "copilot", "--no-policy", "--frozen"),),
-        expected_returncodes=(0,),
-        scenario_id="virtual-skill-frozen-replay",
-        cwd=project.root,
-        env=environment,
-    )[0]
-    assert frozen_replay.stdout
-    assert (module_root / "SKILL.md").is_file()
-    assert not (module_root / "apm.yml").exists()
+    if rewarm_live_modules:
+        frozen_replay = runner.run_sequence(
+            (("install", "--target", "copilot", "--no-policy", "--frozen"),),
+            expected_returncodes=(0,),
+            scenario_id="virtual-skill-frozen-replay",
+            cwd=project.root,
+            env=environment,
+        )[0]
+        assert frozen_replay.stdout
+        assert (module_root / "SKILL.md").is_file()
+        assert not (module_root / "apm.yml").exists()
 
     return _VirtualSkillLifecycle(
         project_root=project.root,
@@ -199,6 +202,31 @@ def test_valid_manifestless_virtual_skill_audits_clean(
     assert config_check["message"] == "No MCP configs to check"
 
 
+def test_valid_manifestless_virtual_skill_audits_clean_from_cold_cache(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """`apm audit --ci` self-hydrates a cold cache without mutating the checkout."""
+    virtual_skill_lifecycle = _install_virtual_skill_lifecycle(
+        tmp_path,
+        apm_binary_path,
+        rewarm_live_modules=False,
+    )
+    lock_before = (virtual_skill_lifecycle.project_root / "apm.lock.yaml").read_bytes()
+
+    audit = _run_audit(
+        virtual_skill_lifecycle,
+        expected_returncode=0,
+        scenario_id="cold-cache-valid-virtual-skill-audit",
+    )
+
+    config_check = _config_check(audit)
+    assert config_check["passed"] is True
+    assert config_check["message"] == "No MCP configs to check"
+    assert not virtual_skill_lifecycle.module_root.exists()
+    assert (virtual_skill_lifecycle.project_root / "apm.lock.yaml").read_bytes() == lock_before
+
+
 def test_non_virtual_manifestless_package_still_fails_audit(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -218,7 +246,33 @@ def test_non_virtual_manifestless_package_still_fails_audit(
 
     config_check = _config_check(audit)
     assert config_check["passed"] is False
-    assert any("package manifest not found" in detail for detail in config_check["details"])
+    assert config_check["details"]
+
+
+def test_non_virtual_manifestless_package_still_fails_audit_from_cold_cache(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Cold-cache self-hydration must not trust a non-virtual lock row."""
+    virtual_skill_lifecycle = _install_virtual_skill_lifecycle(
+        tmp_path,
+        apm_binary_path,
+        rewarm_live_modules=False,
+    )
+    lock_path = virtual_skill_lifecycle.project_root / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    lock["dependencies"][0]["is_virtual"] = False
+    dump_yaml(lock, lock_path)
+
+    audit = _run_audit(
+        virtual_skill_lifecycle,
+        expected_returncode=1,
+        scenario_id="cold-cache-non-virtual-manifestless-audit",
+    )
+
+    config_check = _config_check(audit)
+    assert config_check["passed"] is False
+    assert config_check["details"]
 
 
 def test_malformed_virtual_package_still_fails_audit(
@@ -233,6 +287,32 @@ def test_malformed_virtual_package_still_fails_audit(
         virtual_skill_lifecycle,
         expected_returncode=1,
         scenario_id="malformed-virtual-skill-audit",
+    )
+
+    config_check = _config_check(audit)
+    assert config_check["passed"] is False
+    assert any("package manifest not found" in detail for detail in config_check["details"])
+
+
+def test_wrong_virtual_package_type_still_fails_audit_from_cold_cache(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Cold-cache self-hydration must not trust malformed lock package_type rows."""
+    virtual_skill_lifecycle = _install_virtual_skill_lifecycle(
+        tmp_path,
+        apm_binary_path,
+        rewarm_live_modules=False,
+    )
+    lock_path = virtual_skill_lifecycle.project_root / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    lock["dependencies"][0]["package_type"] = "not-a-real-package-type"
+    dump_yaml(lock, lock_path)
+
+    audit = _run_audit(
+        virtual_skill_lifecycle,
+        expected_returncode=1,
+        scenario_id="cold-cache-wrong-package-type-audit",
     )
 
     config_check = _config_check(audit)

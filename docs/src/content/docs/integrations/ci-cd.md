@@ -68,34 +68,38 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
         run: apm audit --ci
 ```
 
-This single command runs the eight baseline lockfile checks PLUS integration
+This single command runs the nine baseline lockfile checks PLUS integration
 drift detection (default-on) AND replays
 the install pipeline into a scratch tree to detect missed `apm install`
 runs, hand-edited deployed files, and orphaned files. See the
 [Drift Detection guide](../../enterprise/drift-detection/) for details and
 opt-out (`--no-drift`).
 
-For tamper detection -- catching deployed files modified after the last
-install -- use the audit-only pattern instead. `apm install` overwrites
-managed files before audit runs, which erases any tampered bytes before
-`content-integrity` can see them. Pass `setup-only: true` to the action so
-it only provides the CLI, then audit with `--no-drift`:
+For repos that commit their deployed files, use the audit-only pattern to
+catch tampering or stale committed outputs without letting `apm install`
+rewrite the checkout first. `apm install` overwrites managed files before
+audit runs, which erases any tampered bytes before `content-integrity` or
+drift can see them. Pass `setup-only: true` to the action so it only
+provides the CLI, then run the full CI gate:
 
 ```yaml
       - uses: microsoft/apm-action@v1
         with:
           setup-only: true
-      - name: Audit (audit-only, tamper detection)
-        run: apm audit --ci --no-drift
+      - name: Audit (audit-only, committed-output gate)
+        run: apm audit --ci
 ```
 
-`content-integrity` verifies the SHA-256 hash of every deployed file
-against `deployed_file_hashes` in `apm.lock.yaml` without replaying the
-install. See [Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
+In setup-only CI, `apm audit --ci` now self-hydrates a lock-pinned scratch
+install when `apm_modules/` is absent, so drift and `config-consistency`
+still run without mutating the checkout. Repos that gitignore deployed
+outputs still need those files on disk for `deployed-files-present`, so keep
+the full-install pattern for that case. See
+[Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
 for the full recipe and when to use each approach.
 
 :::tip[We dogfood this]
-APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation of the audit-only CI pattern: `setup-only: true` keeps deployed files untouched so `content-integrity` can detect tampered bytes, and `--no-drift` skips the replay that requires a warm cache. Use it as a practical example when wiring the audit-only check into your own workflow.
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation of the audit-only CI pattern: `setup-only: true` keeps deployed files untouched, while `apm audit --ci` self-hydrates its scratch replay from the lockfile so drift and `content-integrity` can both inspect the checked-out bytes. Use it as a practical example when wiring the audit-only check into your own workflow.
 :::
 
 ## Azure Pipelines
