@@ -22,6 +22,7 @@ from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
+    from ..install.audit_replay import PreparedCiAuditReplay
     from ..install.drift import DriftFinding
 
 _logger = logging.getLogger(__name__)
@@ -278,7 +279,7 @@ def _check_config_consistency(
     manifest: APMPackage,
     lock: LockFile,
     *,
-    prepared_replay=None,
+    prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
@@ -522,7 +523,7 @@ def _check_drift(
     targets: Sequence[str] | None = None,
     cache_only: bool = True,
     verbose: bool = False,
-    prepared_replay=None,
+    prepared_replay: PreparedCiAuditReplay | None = None,
 ) -> tuple[CheckResult, list[DriftFinding]]:
     """Replay the install in a scratch dir and diff against the project.
 
@@ -643,7 +644,7 @@ def run_baseline_checks(
     *,
     fail_fast: bool = True,
     ci_mode: bool = False,
-    prepared_replay=None,
+    prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.

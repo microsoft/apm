@@ -763,7 +763,7 @@ def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
 def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
     """Cold-cache CI audit replay must route through install/drift.py."""
     root = Path(__file__).parents[2]
-    drift = (root / "src/apm_cli/install/drift.py").read_text(encoding="utf-8")
+    replay = (root / "src/apm_cli/install/audit_replay.py").read_text(encoding="utf-8")
     audit = (root / "src/apm_cli/commands/audit.py").read_text(encoding="utf-8")
     ci_checks = (root / "src/apm_cli/policy/ci_checks.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
@@ -771,12 +771,12 @@ def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
         encoding="utf-8"
     )
 
-    assert "def prepare_ci_audit_replay(" in drift
+    assert "def prepare_ci_audit_replay(" in replay
     assert "prepare_ci_audit_replay(" in audit
     assert "prepared_replay.modules_root" in ci_checks
-    assert "CI audit scratch materialization must route through install/drift.py" in guard
+    assert "CI audit scratch materialization must route through install/audit_replay.py" in guard
     assert "CI audit scratch materialization" in architecture_doc
-    assert "src/apm_cli/install/drift.py" in architecture_doc
+    assert "src/apm_cli/install/audit_replay.py" in architecture_doc
 
 
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:

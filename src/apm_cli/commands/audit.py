@@ -557,7 +557,7 @@ def _audit_ci_gate(
     prepared_replay_error = None
     if (cfg.project_root / "apm.yml").exists() and not (cfg.project_root / "apm_modules").exists():
         from ..deps.lockfile import get_lockfile_path
-        from ..install.drift import CiAuditReplayError, prepare_ci_audit_replay
+        from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
 
         if get_lockfile_path(cfg.project_root).exists():
             try:

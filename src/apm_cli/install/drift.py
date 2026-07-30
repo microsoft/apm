@@ -26,11 +26,8 @@ Design constraints (see ``WIP/drift/06-final-plan.md``):
 from __future__ import annotations
 
 import atexit
-import contextlib
-import io
 import json
 import shutil
-import subprocess
 import tempfile
 import tracemalloc
 from dataclasses import dataclass
@@ -82,17 +79,6 @@ class DriftFinding:
     inline_diff: str = ""
 
 
-@dataclass(frozen=True)
-class PreparedCiAuditReplay:
-    """Scratch replay prepared once for ``apm audit --ci`` consumers."""
-
-    scratch_root: Path
-    modules_root: Path
-    lockfile_path: Path
-    tracked_files: frozenset[str] | None
-    targets: tuple[TargetProfile, ...]
-
-
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
@@ -100,10 +86,6 @@ class PreparedCiAuditReplay:
 
 class CacheMissError(RuntimeError):
     """Raised when ``cache_only=True`` but a package is not in the cache."""
-
-
-class CiAuditReplayError(RuntimeError):
-    """Raised when ``apm audit --ci`` cannot materialize its scratch replay."""
 
 
 # ---------------------------------------------------------------------------
@@ -179,24 +161,6 @@ def _copy_install_tree(source: Path, target: Path) -> None:
     _clear_path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target, symlinks=True)
-
-
-def _git_tracked_files(project_root: Path) -> frozenset[str] | None:
-    """Return tracked repository paths, or ``None`` outside a git worktree."""
-    try:
-        completed = subprocess.run(
-            ("git", "-C", str(project_root), "ls-files", "-z", "--full-name"),
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        return None
-    if completed.returncode != 0:
-        return None
-    try:
-        return frozenset(path for path in completed.stdout.decode("utf-8").split("\0") if path)
-    except UnicodeDecodeError:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -691,60 +655,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     logger.replay_complete(replayed_count)
     return scratch_root
-
-
-def prepare_ci_audit_replay(
-    project_root: Path,
-    *,
-    verbose: bool = False,
-) -> PreparedCiAuditReplay:
-    """Prepare one lock-pinned scratch replay for ``apm audit --ci`` consumers."""
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-    from apm_cli.install.plan import lockfile_satisfies_manifest
-    from apm_cli.integration.targets import resolve_targets
-    from apm_cli.models.apm_package import APMPackage
-
-    project_root = project_root.resolve()
-    lockfile_path = get_lockfile_path(project_root)
-    if not lockfile_path.exists():
-        raise CiAuditReplayError(
-            f"lockfile not found at {lockfile_path}; run 'apm install' to generate it"
-        )
-    manifest = APMPackage.from_apm_yml(project_root / "apm.yml")
-    lockfile = LockFile.read(lockfile_path)
-    if lockfile is None:
-        raise CiAuditReplayError(f"lockfile at {lockfile_path} is empty or unreadable")
-    manifest_deps = list(manifest.get_apm_dependencies())
-    manifest_deps.extend(manifest.get_dev_apm_dependencies())
-    satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
-    if not satisfied:
-        raise CiAuditReplayError(
-            "--frozen: apm.lock.yaml is out of sync with apm.yml. " + " ".join(reasons)
-        )
-
-    scratch_root = _make_scratch_root(project_root)
-    modules_root = scratch_root / "apm_modules"
-    config = ReplayConfig(
-        project_root=project_root,
-        lockfile_path=lockfile_path,
-        cache_only=False,
-        scratch_root=scratch_root,
-        modules_root=modules_root,
-    )
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            run_replay(config, CheckLogger(verbose=verbose))
-    except Exception as exc:
-        raise CiAuditReplayError(str(exc)) from exc
-
-    explicit_target = _read_apm_yml_target(project_root)
-    return PreparedCiAuditReplay(
-        scratch_root=scratch_root,
-        modules_root=modules_root,
-        lockfile_path=lockfile_path,
-        tracked_files=_git_tracked_files(project_root),
-        targets=tuple(resolve_targets(scratch_root, explicit_target=explicit_target)),
-    )
 
 
 # ---------------------------------------------------------------------------
