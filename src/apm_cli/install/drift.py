@@ -521,6 +521,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         if config.scratch_root is not None
         else _make_scratch_root(project_root)
     )
+    _assert_scratch_bound(project_root, scratch_root)
     logger.scratch_root(scratch_root)
     apm_modules_dir = (
         config.modules_root.resolve()

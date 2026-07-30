@@ -132,7 +132,7 @@ The two patterns serve different goals:
 | Pattern | Use when |
 |---|---|
 | Full install then audit | Catching developers who skipped `apm install` after editing `apm.yml`; ensuring gitignored deployed files are present on a fresh runner |
-| Audit-only (`setup-only: true`) | Repos that commit deployed files and want CI to compare the commit against a lock-pinned scratch replay without rewriting the checkout |
+| Audit-only (`setup-only: true`) | Zero-install CI gate for repos that commit deployed files: compare the checked-out commit against a lock-pinned scratch replay without rewriting the checkout |
 
 Both patterns enforce policy and the nine baseline lockfile checks. The
 difference is only in whether content-integrity can see tampered bytes.

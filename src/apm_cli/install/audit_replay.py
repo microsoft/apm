@@ -82,9 +82,7 @@ def prepare_ci_audit_replay(
     manifest_deps.extend(manifest.get_dev_apm_dependencies())
     satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
     if not satisfied:
-        raise CiAuditReplayError(
-            "--frozen: apm.lock.yaml is out of sync with apm.yml. " + " ".join(reasons)
-        )
+        raise CiAuditReplayError("apm.lock.yaml is out of sync with apm.yml. " + " ".join(reasons))
 
     scratch_root = _make_scratch_root(project_root)
     modules_root = scratch_root / "apm_modules"
@@ -95,8 +93,11 @@ def prepare_ci_audit_replay(
         scratch_root=scratch_root,
         modules_root=modules_root,
     )
+    stderr_context = (
+        contextlib.nullcontext() if verbose else contextlib.redirect_stderr(io.StringIO())
+    )
     try:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()), stderr_context:
             run_replay(config, CheckLogger(verbose=verbose))
     except Exception as exc:
         raise CiAuditReplayError(str(exc)) from exc
