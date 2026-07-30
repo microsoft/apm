@@ -145,7 +145,11 @@ Antigravity, and Windsurf), Copilot, and Kiro receive the same bundle.
 Root hook JSON descriptors, symlinks, and `.apm-pin` markers are not
 deployed. JavaScript and TypeScript hook bundles get a minimal
 `package.json` sidecar with the source package's Node `type` (defaulting
-to `commonjs`); shell-only bundles do not get a sidecar.
+to `commonjs`); shell-only bundles do not get a sidecar. **Exception --
+Copilot and VS Code:** APM omits the sidecar for these targets because
+Copilot's hook loader scans `.github/hooks/` recursively and rejects JSON
+files that lack a `hooks` key. Use the `.mjs` extension for ES module
+scripts targeting Copilot or VS Code.
 
 ### Hook command paths: project-scope stays repo-relative
 
