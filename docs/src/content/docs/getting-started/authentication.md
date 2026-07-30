@@ -215,18 +215,29 @@ If you have an on-prem Azure DevOps Server (not `dev.azure.com`), register its h
 # Single on-prem host
 export ADO_HOST=ado.company.com
 export ADO_APM_PAT=your_ado_server_pat
-apm install ado.company.com/org/project/repo
+apm install ado.company.com/DefaultCollection/MyProject/_git/MyRepo
 
 # Multiple on-prem hosts
 export APM_ADO_HOSTS=ado1.company.com,ado2.company.com
-apm install ado1.company.com/org/project/repo
+apm install ado1.company.com/DefaultCollection/MyProject/_git/MyRepo
+
+# Explicit port (e.g. IIS with non-standard port)
+apm install https://ado.company.com:8080/DefaultCollection/MyProject/_git/MyRepo
 ```
 
 Both `ADO_HOST` and `APM_ADO_HOSTS` require a valid FQDN (bare hostnames like `localhost` are rejected). If you also have `GITHUB_HOST` set to the same hostname, `ADO_HOST`/`APM_ADO_HOSTS` takes precedence and the host is classified as ADO, not GHES.
 
-### Authenticating with Microsoft Entra ID (AAD) bearer tokens
+**Supported URL shape:** `https://{host}/{collection}/{project}/_git/{repo}`. The collection name maps to the `org` slot in the ADO API. **Not supported:** legacy `/tfs/` base-path installs (e.g. `https://server/tfs/DefaultCollection/...`); use the root-hosted collection form instead.
 
-When your org has disabled PAT creation (managed-identity-only orgs, locked-down enterprise tenants), APM can use an AAD bearer token issued by the Azure CLI instead. No env var is required: APM picks up the token from your active `az` session on demand.
+**Authentication:** `ADO_APM_PAT` is the only reliable auth method for on-prem ADO Server. The `az` CLI bearer fallback (described in the next section) targets the `dev.azure.com` Entra ID resource and only works if your on-prem Server instance is joined to Azure AD/Entra ID -- most standalone on-prem installs are not.
+
+Create your PAT at `https://{ado-host}/_usersSettings/tokens` with **Code (Read)** permission.
+
+### Authenticating with Microsoft Entra ID (AAD) bearer tokens (Azure DevOps Services)
+
+When your org has disabled PAT creation (managed-identity-only orgs, locked-down enterprise tenants), APM can use an AAD bearer token issued by the Azure CLI instead. This applies to **Azure DevOps Services** (`dev.azure.com`, `*.visualstudio.com`). For on-prem ADO Server, see the note in the section above.
+
+No env var is required: APM picks up the token from your active `az` session on demand.
 
 **Prerequisite:** install the [Azure CLI](https://aka.ms/installazurecli) and sign in against the tenant that owns the org:
 
