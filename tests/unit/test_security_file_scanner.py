@@ -334,6 +334,36 @@ class TestProjectFileScan:
         assert scan_deployed_trees(tmp_path) == ({}, 0)
         assert b"\xe2\x80\xae" in payload.read_bytes()
 
+    def test_symlinked_deploy_root_inside_project_is_not_followed(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        contained = tmp_path / "contained"
+        payload = contained / "skills/beta/SKILL.md"
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(b"safe prefix\n\xe2\x80\xaepayload\xe2\x80\xac\n")
+        (tmp_path / ".claude").symlink_to(contained, target_is_directory=True)
+
+        assert scan_deployed_trees(tmp_path) == ({}, 0)
+        assert b"\xe2\x80\xae" in payload.read_bytes()
+
+    def test_lockless_project_still_scans_governed_deployed_files(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        rel = ".claude/skills/beta/SKILL.md"
+        payload = tmp_path / rel
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(b"safe prefix\n\xe2\x80\xaepayload\xe2\x80\xac\n")
+
+        findings, scanned = scan_project_files(
+            tmp_path,
+            include_deployed_trees=True,
+        )
+
+        assert rel in findings
+        assert scanned == 1
+
     def test_recorded_path_outside_resolved_trees_keeps_coverage(
         self,
         tmp_path: Path,

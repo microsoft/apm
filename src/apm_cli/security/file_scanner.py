@@ -32,7 +32,7 @@ class _FileScanResult:
     scanned_files: frozenset[str]
 
     def merged(self, other: _FileScanResult) -> _FileScanResult:
-        """Union two scopes without overwriting the first scope's findings."""
+        """Union scopes, treating ``self`` as the authoritative first scope."""
         findings = dict(self.findings_by_file)
         for rel_path, file_findings in other.findings_by_file.items():
             findings.setdefault(rel_path, file_findings)
@@ -119,8 +119,11 @@ def _scan_deployed_trees(project_root: Path) -> _FileScanResult:
         # prefixes ARE that list). Containment is the property worth asserting,
         # via the sanctioned guard. Symlinked roots resolve outward and are
         # skipped; SecurityGate.scan_files likewise never follows links.
+        candidate = project_root / rel_path
+        if candidate.is_symlink():
+            continue
         try:
-            deploy_path = ensure_path_within(project_root / rel_path, project_root)
+            deploy_path = ensure_path_within(candidate, project_root)
         except PathTraversalError:
             continue
         if deploy_path == project_root.resolve():

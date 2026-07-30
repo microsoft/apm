@@ -920,7 +920,7 @@ def _audit_content_scan(
                 if package:
                     logger.progress(f"Scanning package: {package}")
                 else:
-                    logger.start("Scanning installed packages and deploy trees...")
+                    logger.start("Scanning installed packages and deployed files...")
 
             from apm_cli.deps.lockfile import LockfileFormatError
 
@@ -947,7 +947,7 @@ def _audit_content_scan(
                         f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
                     )
                 else:
-                    logger.progress("No deployed files found in apm.lock.yaml")
+                    logger.progress("No deployed files found")
                 sys.exit(0)
         if not lockfile_path.exists():
             owner_violations = ()

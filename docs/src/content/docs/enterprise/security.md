@@ -180,7 +180,7 @@ Content scanning extends beyond install:
 `apm audit` scans deployed files or any arbitrary file, independent of the install flow:
 
 ```bash
-apm audit                        # Scan all installed packages
+apm audit                        # Scan installed packages and deployed files
 apm audit --file .cursorrules    # Scan any file
 apm audit --strip                # Remove hidden characters (preserves emoji)
 apm audit --strip --dry-run      # Preview what --strip would remove
