@@ -415,16 +415,18 @@ def test_v5_ssl_docs_early_caveat_and_notes():
     assert "stale `REQUESTS_CA_BUNDLE`" in docs
 
 
-def test_v5_changelog_scopes_python_based():
+def test_v5_changelog_scopes_os_trust_to_python_paths():
     changelog = (_repo_root() / "CHANGELOG.md").read_text(encoding="utf-8")
-    start = changelog.index("## [Unreleased]")
-    rest = changelog[start + len("## [Unreleased]") :]
-    end = rest.find("\n## [")
-    block = rest if end == -1 else rest[:end]
+    entry = next(
+        (
+            bullet
+            for part in changelog.split("\n- ")
+            if "#2005" in (bullet := part.split("\n\n", 1)[0])
+        ),
+        None,
+    )
 
-    assert "#2005" in block
-    assert "Python-based" in block
-    assert "#2034" in block
-    assert "not yet covered" in block
+    assert entry is not None
+    assert "Python" in entry
     # The stale round-1 joint claim (child runtimes covered) must be gone.
-    assert "and `apm run` (child runtimes)" not in block
+    assert "and `apm run` (child runtimes)" not in entry

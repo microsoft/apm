@@ -224,10 +224,19 @@ def detect_orphans(
         are no longer in the manifest.  The caller is responsible for actually
         removing the files.
     """
+    from apm_cli.deps.lockfile import _SELF_KEY
+
     orphaned: builtins.set = builtins.set()
     if only_packages or not existing_lockfile:
         return orphaned
     for dep_key, dep in existing_lockfile.dependencies.items():
+        # The synthesized self-entry (key ".") holds the project's own
+        # includes:auto content, which the real install always re-deploys
+        # (never removes). It can never appear in the manifest-derived
+        # intended set, so skip it to avoid over-counting self-includes as
+        # removals in the dry-run preview.
+        if dep_key == _SELF_KEY:
+            continue
         if dep_key not in intended_dep_keys:
             orphaned.update(dep.deployed_files)
     return orphaned

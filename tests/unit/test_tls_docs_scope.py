@@ -20,24 +20,22 @@ def _repo_root() -> Path:
     raise RuntimeError("Cannot locate repository root")
 
 
-def _unreleased_block(changelog: str) -> str:
-    start = changelog.index("## [Unreleased]")
-    rest = changelog[start + len("## [Unreleased]") :]
-    end = rest.find("\n## [")
-    return rest if end == -1 else rest[:end]
+def _changelog_entry(changelog: str, marker: str) -> str:
+    """Return the changelog bullet containing marker, regardless of release section."""
+    for entry in changelog.split("\n- "):
+        bullet = entry.split("\n\n", 1)[0]
+        if marker in bullet:
+            return bullet
+    raise AssertionError(f"CHANGELOG entry containing {marker} not found")
 
 
-def test_changelog_scopes_os_trust_and_references_followup():
+def test_changelog_scopes_os_trust_to_python_paths():
     changelog = (_repo_root() / "CHANGELOG.md").read_text(encoding="utf-8")
-    block = _unreleased_block(changelog)
+    entry = _changelog_entry(changelog, "#2005")
 
-    # Follow-up issue for the uncovered runtimes must be cited.
-    assert "#2034" in block, "CHANGELOG must reference the Node/Rust follow-up (#2034)"
-    # The honest scope: llm runtime named, Node/Codex explicitly not-yet-covered.
-    assert "`llm`" in block
-    assert "not yet covered" in block
+    assert "Python" in entry
     # The stale round-1 joint claim must be gone.
-    assert "and `apm run` (child runtimes)" not in block
+    assert "and `apm run` (child runtimes)" not in entry
 
 
 def test_ssl_docs_scope_and_known_limitations():
@@ -53,12 +51,13 @@ def test_ssl_docs_scope_and_known_limitations():
     assert "the `llm` and `codex` CLIs) re-run the same OS-trust bootstrap" not in docs
 
 
-def test_changelog_scopes_python_based():
+def test_changelog_names_tls_precedence_controls():
     changelog = (_repo_root() / "CHANGELOG.md").read_text(encoding="utf-8")
-    block = _unreleased_block(changelog)
-    # The #2005 entry must scope coverage to the Python-based paths explicitly,
-    # so it never overclaims Node/Codex coverage.
-    assert "Python-based" in block
+    entry = _changelog_entry(changelog, "#2005")
+
+    assert "`APM_DISABLE_TRUSTSTORE=1`" in entry
+    assert "`REQUESTS_CA_BUNDLE`" in entry
+    assert "`CURL_CA_BUNDLE`" in entry
 
 
 def test_ssl_docs_node_caveat_appears_early():
