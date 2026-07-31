@@ -666,6 +666,7 @@ def _sync_integrations_after_uninstall(
     re-read it from disk.
     """
     from ...install.services import _deployed_path_entry, _skill_bundle_file_entries
+    from ...install.target_filter import resolve_effective_package_targets
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
@@ -691,6 +692,31 @@ def _sync_integrations_after_uninstall(
     _resolved_targets = resolve_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    survivor_plan = []
+    for dep_ref in surviving_dependency_refs_for_reintegration(
+        apm_package,
+        project_root,
+        lockfile=lockfile,
+    ):
+        install_path = dep_ref.get_install_path(project_root / APM_MODULES_DIR)
+        pkg_info = build_installed_package_info(
+            dep_ref,
+            project_root / APM_MODULES_DIR,
+        )
+        if pkg_info is None:
+            if install_path.exists():
+                raise ValueError(
+                    f"Cannot validate surviving package before hook rebuild: {dep_ref.get_identity()}"
+                )
+            continue
+        target_selection = resolve_effective_package_targets(
+            _resolved_targets,
+            dep_ref.target_subset,
+            pkg_info,
+            None,
+            dep_ref.get_identity(),
+        )
+        survivor_plan.append((dep_ref, pkg_info, target_selection))
 
     sync_managed = all_deployed_files if all_deployed_files else None
     if sync_managed is not None:
@@ -845,20 +871,13 @@ def _sync_integrations_after_uninstall(
     clear_discovery_cache()
     _targets = _resolved_targets
 
-    # Lockfile survivors include transitive packages still required by a
-    # remaining direct dep (#2254). Pass the in-memory post-removal
-    # lockfile when the caller has one -- disk is still stale here.
-    for dep_ref in surviving_dependency_refs_for_reintegration(
-        apm_package, project_root, lockfile=lockfile
-    ):
-        pkg_info = build_installed_package_info(dep_ref, Path(APM_MODULES_DIR))
-        if pkg_info is None:
-            continue
+    # The complete survivor plan was validated before Phase 1 mutated disk.
+    for dep_ref, pkg_info, target_selection in survivor_plan:
         dep_key = dep_ref.get_unique_key()
         deployed_files = package_deployed_files.setdefault(dep_key, [])
 
         try:
-            for _target in _targets:
+            for _target in target_selection.targets:
                 for _prim_name in _target.primitives:
                     _entry = _dispatch.get(_prim_name)
                     if not _entry or _entry.multi_target:
@@ -875,7 +894,7 @@ def _sync_integrations_after_uninstall(
             skill_result = _integrators["skills"].integrate_package_skill(
                 pkg_info,
                 project_root,
-                targets=_targets,
+                targets=target_selection.targets,
             )
             for path in skill_result.target_paths:
                 deployed_files.append(_deployed_path_entry(path, project_root, _targets))

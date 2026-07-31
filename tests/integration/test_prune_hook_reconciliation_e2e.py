@@ -262,7 +262,7 @@ def test_prune_removes_merged_hook_entries_and_sidecar(
     assert package_dir.is_dir(), "precondition: package installed"
     settings_path = project / settings_rel
     sidecar_path = project / sidecar_rel
-    assert "pkg-a" in _sidecar_sources(sidecar_path), (
+    assert "acme/pkg-a" in _sidecar_sources(sidecar_path), (
         f"precondition: pkg-a hook entry merged into {sidecar_rel}"
     )
 
@@ -271,7 +271,7 @@ def test_prune_removes_merged_hook_entries_and_sidecar(
     assert prune_result.exit_code == 0, prune_result.output
 
     assert not package_dir.exists(), "orphaned package directory must be removed"
-    assert "pkg-a" not in _sidecar_sources(sidecar_path), (
+    assert "acme/pkg-a" not in _sidecar_sources(sidecar_path), (
         f"pkg-a's merged hook entry must be reconciled out of {sidecar_rel}"
     )
     assert "./scripts/pkg-a-hook.sh" not in _pre_tool_use_commands(settings_path), (
@@ -302,7 +302,7 @@ def test_prune_preserves_sibling_hooks_and_manual_entries(
 
     settings_path = project / ".claude" / "settings.json"
     sidecar_path = project / ".claude" / "apm-hooks.json"
-    assert {"pkg-a", "pkg-b"} <= _sidecar_sources(sidecar_path)
+    assert {"acme/pkg-a", "acme/pkg-b"} <= _sidecar_sources(sidecar_path)
 
     # Inject a manual, user-owned entry directly into the native file --
     # never in the sidecar, so it carries no _apm_source marker.
@@ -325,8 +325,8 @@ def test_prune_preserves_sibling_hooks_and_manual_entries(
     )
 
     remaining_sources = _sidecar_sources(sidecar_path)
-    assert "pkg-a" not in remaining_sources, "pruned package's hook entry must be gone"
-    assert "pkg-b" in remaining_sources, (
+    assert "acme/pkg-a" not in remaining_sources, "pruned package's hook entry must be gone"
+    assert "acme/pkg-b" in remaining_sources, (
         "sibling package's hook entry must survive scoped reconciliation"
     )
     commands = _pre_tool_use_commands(settings_path)
@@ -364,7 +364,7 @@ def test_prune_preserves_transitive_dependency_hooks(
     assert transitive_dir.is_dir(), "precondition: transitive package installed"
     settings_path = project / ".claude" / "settings.json"
     sidecar_path = project / ".claude" / "apm-hooks.json"
-    assert "transitive-hooks" in _sidecar_sources(sidecar_path), (
+    assert "acme/transitive-hooks" in _sidecar_sources(sidecar_path), (
         "precondition: transitive package's hooks merged"
     )
     assert "./scripts/transitive-hook.sh" in _pre_tool_use_commands(settings_path)
@@ -375,8 +375,8 @@ def test_prune_preserves_transitive_dependency_hooks(
 
     assert not (project / "apm_modules" / "acme" / "to-prune").exists()
     assert transitive_dir.is_dir(), "transitive package must survive via keeper"
-    assert "to-prune" not in _sidecar_sources(sidecar_path)
-    assert "transitive-hooks" in _sidecar_sources(sidecar_path), (
+    assert "acme/to-prune" not in _sidecar_sources(sidecar_path)
+    assert "acme/transitive-hooks" in _sidecar_sources(sidecar_path), (
         "transitive dependency's hook ownership must be rebuilt after prune wipe"
     )
     commands = _pre_tool_use_commands(settings_path)
@@ -414,7 +414,7 @@ def test_uninstall_preserves_transitive_dependency_hooks(
     assert transitive_dir.is_dir(), "precondition: transitive package installed"
     settings_path = project / ".claude" / "settings.json"
     sidecar_path = project / ".claude" / "apm-hooks.json"
-    assert {"transitive-hooks", "to-uninstall"} <= _sidecar_sources(sidecar_path)
+    assert {"acme/transitive-hooks", "acme/to-uninstall"} <= _sidecar_sources(sidecar_path)
 
     uninstall_result = _run_uninstall(project, monkeypatch, "acme/to-uninstall")
     assert uninstall_result.exit_code == 0, uninstall_result.output
@@ -422,8 +422,8 @@ def test_uninstall_preserves_transitive_dependency_hooks(
     assert not (project / "apm_modules" / "acme" / "to-uninstall").exists()
     assert transitive_dir.is_dir(), "transitive package must survive via keeper"
     remaining_sources = _sidecar_sources(sidecar_path)
-    assert "to-uninstall" not in remaining_sources
-    assert "transitive-hooks" in remaining_sources, (
+    assert "acme/to-uninstall" not in remaining_sources
+    assert "acme/transitive-hooks" in remaining_sources, (
         "uninstall must rebuild transitive dependency hook ownership from "
         "the in-memory survivor lockfile"
     )
@@ -536,7 +536,7 @@ def test_prune_orchestration_call_is_load_bearing(
     assert install_result.exit_code == 0, install_result.output
 
     sidecar_path = project / ".claude" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(sidecar_path)
+    assert "acme/pkg-a" in _sidecar_sources(sidecar_path)
 
     _remove_dependency(project, "acme/pkg-a")
     with patch(
@@ -548,7 +548,7 @@ def test_prune_orchestration_call_is_load_bearing(
             "prune must still call the reconcile owner even when neutered"
         )
     assert prune_result.exit_code == 0, prune_result.output
-    assert "pkg-a" in _sidecar_sources(sidecar_path), (
+    assert "acme/pkg-a" in _sidecar_sources(sidecar_path), (
         "with the reconcile call neutered (simulating its removal), the "
         "stale hook entry must still be present -- proving the real call "
         "is what actually cleans it in "

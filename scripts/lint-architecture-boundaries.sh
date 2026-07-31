@@ -650,6 +650,15 @@ if [ "$target_instruction_contraction_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC15b: effective package target authorization authority"
+package_target_output=$(python3 scripts/check_package_target_authority.py --root "$ROOT" 2>&1)
+package_target_status=$?
+if [ "$package_target_status" -ne 0 ]; then
+    echo "[x] Effective package target authorization must route through install/target_filter.py"
+    echo "$package_target_output"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC16: post-uninstall reachability owner authority"
 if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
     src/apm_cli/commands/uninstall/engine.py; then

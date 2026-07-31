@@ -245,7 +245,7 @@ def test_narrow_then_install_removes_dropped_target_hook_state(
 
     codex_settings = project / ".codex" / "hooks.json"
     codex_sidecar = project / ".codex" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(codex_sidecar), "precondition: codex hook merged"
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar), "precondition: codex hook merged"
 
     _narrow_targets(project, ["claude"])
     install_result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
@@ -254,7 +254,7 @@ def test_narrow_then_install_removes_dropped_target_hook_state(
     prune_result = _run_cli(project, monkeypatch, ["prune"])
     assert prune_result.exit_code == 0, prune_result.output
 
-    assert "pkg-a" not in _sidecar_sources(codex_sidecar), (
+    assert "acme/pkg-a" not in _sidecar_sources(codex_sidecar), (
         "dropped target's hook entry must be reconciled after narrow+install"
     )
     assert not codex_sidecar.exists(), (
@@ -279,7 +279,7 @@ def test_narrow_then_install_preserves_retained_target_state(
     result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
     assert result.exit_code == 0, result.output
 
-    assert "pkg-a" in _sidecar_sources(claude_sidecar), (
+    assert "acme/pkg-a" in _sidecar_sources(claude_sidecar), (
         "retained target's hook entry must survive the narrowing install"
     )
     assert "./scripts/pkg-a-hook.sh" in _pre_tool_use_commands(claude_settings)
@@ -307,7 +307,7 @@ def test_narrow_then_install_preserves_user_owned_codex_entries(
     assert "echo manual-codex-hook" in _pre_tool_use_commands(codex_settings), (
         "user-owned codex entry must survive dropped-target reconciliation"
     )
-    assert "pkg-a" not in _sidecar_sources(project / ".codex" / "apm-hooks.json")
+    assert "acme/pkg-a" not in _sidecar_sources(project / ".codex" / "apm-hooks.json")
 
 
 def test_no_target_change_install_is_a_noop_for_hook_state(
@@ -368,12 +368,12 @@ def test_final_uninstall_after_narrow_still_removes_remaining_target_state(
     assert install_result.exit_code == 0, install_result.output
 
     claude_sidecar = project / ".claude" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(claude_sidecar), "precondition: claude still owns pkg-a"
+    assert "acme/pkg-a" in _sidecar_sources(claude_sidecar), "precondition: claude still owns pkg-a"
 
     uninstall_result = _run_cli(project, monkeypatch, ["uninstall", "acme/pkg-a"])
     assert uninstall_result.exit_code == 0, uninstall_result.output
 
-    assert "pkg-a" not in _sidecar_sources(claude_sidecar), (
+    assert "acme/pkg-a" not in _sidecar_sources(claude_sidecar), (
         "final uninstall must still clean the retained target's hook state"
     )
 
@@ -389,13 +389,13 @@ def test_prune_alone_still_does_not_clean_dropped_target_state(
     _install_claude_codex_pkg(project, monkeypatch)
 
     codex_sidecar = project / ".codex" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(codex_sidecar)
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar)
 
     _narrow_targets(project, ["claude"])
     prune_result = _run_cli(project, monkeypatch, ["prune"])
     assert prune_result.exit_code == 0, prune_result.output
 
-    assert "pkg-a" in _sidecar_sources(codex_sidecar), (
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar), (
         "prune alone (no install) must not clean dropped-target hook state"
     )
 
@@ -430,7 +430,7 @@ def test_widen_then_narrow_removes_dropped_cursor_hook_state(
 
     cursor_settings = project / ".cursor" / "hooks.json"
     cursor_sidecar = project / ".cursor" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(cursor_sidecar), (
+    assert "acme/pkg-a" in _sidecar_sources(cursor_sidecar), (
         "precondition: cursor hook merged after widen"
     )
     assert "./scripts/pkg-a-hook.sh" in _pre_tool_use_commands(cursor_settings), (
@@ -444,7 +444,7 @@ def test_widen_then_narrow_removes_dropped_cursor_hook_state(
     prune_result = _run_cli(project, monkeypatch, ["prune"])
     assert prune_result.exit_code == 0, prune_result.output
 
-    assert "pkg-a" not in _sidecar_sources(cursor_sidecar), (
+    assert "acme/pkg-a" not in _sidecar_sources(cursor_sidecar), (
         "dropped cursor target's hook entry must be reconciled after narrow+install, "
         "asserted directly against the sidecar, not via audit"
     )
@@ -487,7 +487,7 @@ def test_widen_then_narrow_preserves_user_owned_cursor_entries(
     assert "echo manual-cursor-hook" in _pre_tool_use_commands(cursor_settings), (
         "user-owned cursor entry must survive dropped-target reconciliation"
     )
-    assert "pkg-a" not in _sidecar_sources(project / ".cursor" / "apm-hooks.json")
+    assert "acme/pkg-a" not in _sidecar_sources(project / ".cursor" / "apm-hooks.json")
 
 
 def test_dry_run_install_does_not_reconcile_dropped_target_state(
@@ -499,7 +499,7 @@ def test_dry_run_install_does_not_reconcile_dropped_target_state(
     _install_claude_codex_pkg(project, monkeypatch)
 
     codex_sidecar = project / ".codex" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(codex_sidecar)
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar)
 
     _narrow_targets(project, ["claude"])
     result = _run_install(
@@ -510,7 +510,7 @@ def test_dry_run_install_does_not_reconcile_dropped_target_state(
     )
     assert result.exit_code == 0, result.output
 
-    assert "pkg-a" in _sidecar_sources(codex_sidecar), (
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar), (
         "--dry-run must never reconcile dropped-target hook state"
     )
 
@@ -526,13 +526,13 @@ def test_compile_reconciles_dropped_target_hook_state(
     _install_claude_codex_pkg(project, monkeypatch)
 
     codex_sidecar = project / ".codex" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(codex_sidecar)
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar)
 
     _narrow_targets(project, ["claude"])
     result = _run_cli(project, monkeypatch, ["compile", "--target", "claude"])
     assert result.exit_code == 0, result.output
 
-    assert "pkg-a" not in _sidecar_sources(codex_sidecar), (
+    assert "acme/pkg-a" not in _sidecar_sources(codex_sidecar), (
         "apm compile must reconcile dropped-target hook state via the shared "
         "reconcile_deployed_state path"
     )
@@ -551,7 +551,7 @@ def test_narrow_and_remove_last_dependency_in_one_install_still_cleans_hook_stat
     _install_claude_codex_pkg(project, monkeypatch)
 
     codex_sidecar = project / ".codex" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(codex_sidecar)
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar)
 
     manifest_path = project / "apm.yml"
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
@@ -563,7 +563,7 @@ def test_narrow_and_remove_last_dependency_in_one_install_still_cleans_hook_stat
     result = _run_install(project, monkeypatch, {})
     assert result.exit_code == 0, result.output
 
-    assert "pkg-a" not in _sidecar_sources(codex_sidecar), (
+    assert "acme/pkg-a" not in _sidecar_sources(codex_sidecar), (
         "hook-target reconciliation must fire even when installed_packages ends up empty"
     )
 
@@ -577,7 +577,7 @@ def test_explicit_transient_target_does_not_clean_other_declared_target(
     _install_claude_codex_pkg(project, monkeypatch)
 
     codex_sidecar = project / ".codex" / "apm-hooks.json"
-    assert "pkg-a" in _sidecar_sources(codex_sidecar)
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar)
 
     result = _run_install(
         project,
@@ -587,7 +587,7 @@ def test_explicit_transient_target_does_not_clean_other_declared_target(
     )
     assert result.exit_code == 0, result.output
 
-    assert "pkg-a" in _sidecar_sources(codex_sidecar), (
+    assert "acme/pkg-a" in _sidecar_sources(codex_sidecar), (
         "a transient --target override must not clean a still-declared sibling target"
     )
 

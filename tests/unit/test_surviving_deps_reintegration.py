@@ -33,11 +33,21 @@ def _clear_package_cache() -> None:
     clear_apm_yml_cache()
 
 
-def _write_hooked_package(modules: Path, owner: str, name: str, command: str) -> Path:
+def _write_hooked_package(
+    modules: Path,
+    owner: str,
+    name: str,
+    command: str,
+    *,
+    targets: list[str] | None = None,
+) -> Path:
     pkg_path = modules / owner / name
     pkg_path.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, object] = {"name": name, "version": "1.0.0"}
+    if targets is not None:
+        manifest["targets"] = targets
     (pkg_path / "apm.yml").write_text(
-        yaml.safe_dump({"name": name, "version": "1.0.0"}, sort_keys=False),
+        yaml.safe_dump(manifest, sort_keys=False),
         encoding="utf-8",
     )
     hooks_dir = pkg_path / ".apm" / "hooks"
@@ -209,7 +219,7 @@ def test_reconcile_after_removal_rebuilds_transitive_hooks(
             for entry in entries:
                 if isinstance(entry, dict) and entry.get("_apm_source"):
                     sources.add(entry["_apm_source"])
-    assert "transitive-hooks" in sources
+    assert sources == {"acme/transitive-hooks"}
 
     settings_data = json.loads(settings.read_text(encoding="utf-8"))
     commands = []
@@ -229,7 +239,14 @@ def test_uninstall_phase2_reintegrates_transitive_hooks(
     keeper_path = modules / "acme" / "keeper"
     keeper_path.mkdir(parents=True, exist_ok=True)
     (keeper_path / "apm.yml").write_text(
-        yaml.safe_dump({"name": "keeper", "version": "1.0.0"}, sort_keys=False),
+        yaml.safe_dump(
+            {
+                "name": "keeper",
+                "version": "1.0.0",
+                "dependencies": {"apm": ["acme/transitive-hooks"]},
+            },
+            sort_keys=False,
+        ),
         encoding="utf-8",
     )
     transitive_path = _write_hooked_package(
@@ -279,6 +296,99 @@ def test_uninstall_phase2_reintegrates_transitive_hooks(
             for entry in entries:
                 if isinstance(entry, dict) and entry.get("_apm_source"):
                     sources.add(entry["_apm_source"])
-    assert "transitive-hooks" in sources, (
+    assert sources == {"acme/transitive-hooks"}, (
         "uninstall Phase 2 must rebuild hooks from transitive lockfile survivors"
     )
+
+
+def test_uninstall_survivor_rebuild_honors_package_target_restriction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Claude-only survivor cannot reappear in Cursor during sibling removal."""
+    monkeypatch.chdir(tmp_path)
+    modules = tmp_path / "apm_modules"
+    _write_hooked_package(
+        modules,
+        "acme",
+        "claude-hooks",
+        "echo claude-only",
+        targets=["claude"],
+    )
+    (tmp_path / ".cursor").mkdir()
+    (tmp_path / "apm.yml").write_text(
+        "name: root\n"
+        "version: 0.0.0\n"
+        "targets:\n"
+        "  - claude\n"
+        "  - cursor\n"
+        "dependencies:\n"
+        "  apm:\n"
+        "    - acme/claude-hooks\n",
+        encoding="utf-8",
+    )
+    survivors = LockFile()
+    survivors.add_dependency(LockedDependency(repo_url="acme/claude-hooks"))
+    apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+
+    _sync_integrations_after_uninstall(
+        apm_package,
+        tmp_path,
+        set(),
+        MagicMock(),
+        lockfile=survivors,
+    )
+
+    claude_sidecar = json.loads((tmp_path / ".claude/apm-hooks.json").read_text(encoding="utf-8"))
+    assert {entry["_apm_source"] for entries in claude_sidecar.values() for entry in entries} == {
+        "acme/claude-hooks"
+    }
+    assert not (tmp_path / ".cursor/apm-hooks.json").exists()
+    assert not (tmp_path / ".cursor/hooks.json").exists()
+
+
+def test_uninstall_rejects_invalid_survivor_before_wiping_hooks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed installed survivor leaves existing native state untouched."""
+    monkeypatch.chdir(tmp_path)
+    survivor = tmp_path / "apm_modules" / "acme" / "survivor"
+    survivor.mkdir(parents=True)
+    (survivor / "apm.yml").write_text(
+        "name: survivor\nversion: 1.0.0\ntarget: null\ntargets:\n  - claude\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "apm.yml").write_text(
+        "name: root\n"
+        "version: 0.0.0\n"
+        "targets:\n"
+        "  - claude\n"
+        "dependencies:\n"
+        "  apm:\n"
+        "    - acme/survivor\n",
+        encoding="utf-8",
+    )
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    config = claude / "settings.json"
+    sidecar = claude / "apm-hooks.json"
+    config_bytes = b'{"hooks": {"Stop": [{"hooks": []}]}}\n'
+    sidecar_bytes = b'{"Stop": [{"hooks": [], "_apm_source": "acme/survivor"}]}\n'
+    config.write_bytes(config_bytes)
+    sidecar.write_bytes(sidecar_bytes)
+    survivors = LockFile()
+    survivors.add_dependency(LockedDependency(repo_url="acme/survivor"))
+    apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+
+    with pytest.raises(ValueError, match="Cannot validate surviving package"):
+        _sync_integrations_after_uninstall(
+            apm_package,
+            tmp_path,
+            set(),
+            MagicMock(),
+            lockfile=survivors,
+        )
+
+    assert config.read_bytes() == config_bytes
+    assert sidecar.read_bytes() == sidecar_bytes
