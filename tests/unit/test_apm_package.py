@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from apm_cli.core.errors import ConflictingTargetsError
 from apm_cli.models.apm_package import (
     APMPackage,
     DependencyReference,
@@ -292,21 +291,6 @@ class TestTargetField:
         pkg = APMPackage.from_apm_yml(yml)
 
         assert pkg.target is None
-
-    def test_conflicting_target_fields_fail_during_manifest_parse(self, tmp_path):
-        """Both target spellings fail before any install consumer sees the package."""
-        yml = _write_apm_yml(
-            tmp_path,
-            {
-                "name": "test-pkg",
-                "version": "1.0.0",
-                "target": "codex",
-                "targets": ["copilot"],
-            },
-        )
-
-        with pytest.raises(ConflictingTargetsError, match="Cannot use both"):
-            APMPackage.from_apm_yml(yml)
 
     def test_target_single_item_list(self, tmp_path):
         """A single-element list (``target: [copilot]``) collapses to a

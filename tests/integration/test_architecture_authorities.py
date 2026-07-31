@@ -575,10 +575,13 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     ]
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     package_source = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
-    target_parse_branch = package_source.split(
-        'if "targets" in data:',
+    target_projection = package_source.split(
+        "def canonical_package_target_config(package: object) -> dict[str, object]:",
         maxsplit=1,
-    )[1].split("        else:", maxsplit=1)[0]
+    )[1].split("def package_target_selection(", maxsplit=1)[0]
+    integration_source = (root / "src/apm_cli/install/mcp/integration.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "parse_targets_field" in adapter_calls
     assert local_string_collections == []
@@ -586,7 +589,10 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     assert len(discovery_calls) == 1
     assert manifest_selection_calls[0].lineno < discovery_calls[0].lineno
     assert all(node.func.id != "parse_targets_field" for node in resolver_calls)
-    assert "parse_targets_field(data)" in target_parse_branch
+    assert 'return {"target": singular, "targets": list(plural)}' in target_projection
+    assert integration_source.index("parse_targets_field(mcp_apm_config)") < (
+        integration_source.index("MCPIntegrator.install(")
+    )
     assert (
         "MCP target precedence must route through the canonical manifest adapter before discovery"
         in guard

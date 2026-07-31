@@ -782,10 +782,28 @@ mcp_discovery_line=$(
         | head -1 \
         | cut -d: -f1
 )
-mcp_package_conflict_parser=$(
+mcp_integration_validation=$(
     awk '
-        /if "targets" in data:/ { capture = 1 }
-        capture && /^        else:/ { capture = 0 }
+        /^def run_mcp_integration\(/ { capture = 1 }
+        capture { print }
+    ' src/apm_cli/install/mcp/integration.py
+)
+mcp_validation_line=$(
+    grep -n 'parse_targets_field(mcp_apm_config)' \
+        <<<"$mcp_integration_validation" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_install_line=$(
+    grep -n 'MCPIntegrator.install(' \
+        <<<"$mcp_integration_validation" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_target_projection=$(
+    awk '
+        /^def canonical_package_target_config\(/ { capture = 1 }
+        /^def package_target_selection\(/ { capture = 0 }
         capture { print }
     ' src/apm_cli/models/apm_package.py
 )
@@ -797,7 +815,11 @@ if ! grep -q 'parse_targets_field(apm_config)' <<<"$mcp_manifest_adapter" \
     || [ -z "$mcp_discovery_line" ] \
     || [ "$mcp_manifest_selection_line" -ge "$mcp_discovery_line" ] \
     || grep -q 'parse_targets_field(' <<<"$mcp_target_resolver" \
-    || ! grep -q 'parse_targets_field(data)' <<<"$mcp_package_conflict_parser"; then
+    || [ -z "$mcp_validation_line" ] \
+    || [ -z "$mcp_install_line" ] \
+    || [ "$mcp_validation_line" -ge "$mcp_install_line" ] \
+    || ! grep -q 'return {"target": singular, "targets": list(plural)}' \
+        <<<"$mcp_target_projection"; then
     echo "[x] MCP target precedence must route through the canonical manifest adapter before discovery"
     violations=$((violations + 1))
 fi
