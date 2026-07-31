@@ -137,7 +137,7 @@ class TestRunInstallPipelineShortCircuit:
             mock_ctx.tui.__exit__ = MagicMock(return_value=False)
             mock_ctx.tui.start_phase = MagicMock()
 
-            result = run_install_pipeline(pkg, logger=logger)
+            result = run_install_pipeline(pkg, logger=logger, target="claude")
 
         assert isinstance(result, InstallResult)
         logger.nothing_to_install.assert_called_once()
@@ -193,7 +193,7 @@ class TestRunInstallPipelinePlanCallback:
             mock_ctx.tui.__exit__ = MagicMock(return_value=False)
             mock_ctx.tui.start_phase = MagicMock()
 
-            result = run_install_pipeline(pkg, plan_callback=plan_callback)
+            result = run_install_pipeline(pkg, plan_callback=plan_callback, target="claude")
 
         assert isinstance(result, InstallResult)
         plan_callback.assert_called_once()
@@ -270,7 +270,7 @@ class TestRunInstallPipelinePlanCallback:
             import contextlib as _cl
 
             with _cl.suppress(Exception):  # sub-phases may raise; callback should still fire
-                run_install_pipeline(pkg, plan_callback=plan_callback)
+                run_install_pipeline(pkg, plan_callback=plan_callback, target="claude")
 
         plan_callback.assert_called_once()
 
@@ -319,7 +319,7 @@ class TestRunInstallPipelineExceptionHandling:
             mock_ctx.tui.start_phase = MagicMock()
 
             with pytest.raises((RuntimeError, ValueError)):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
     def test_policy_violation_propagates(self, tmp_path):
         from apm_cli.install.errors import PolicyViolationError
@@ -352,7 +352,7 @@ class TestRunInstallPipelineExceptionHandling:
             mock_ctx.tui.start_phase = MagicMock()
 
             with pytest.raises(PolicyViolationError):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
 
 # ---------------------------------------------------------------------------

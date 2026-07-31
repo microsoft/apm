@@ -394,7 +394,7 @@ class TestRunInstallPipelineExceptionContracts:
             mock_phase.side_effect = _phase_side
 
             with pytest.raises(AuthenticationError):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
     def test_generic_exception_wrapped_in_runtime_error(self) -> None:
         """Unexpected exceptions must be wrapped in RuntimeError."""
@@ -425,4 +425,4 @@ class TestRunInstallPipelineExceptionContracts:
             mock_phase.side_effect = _phase_side
 
             with pytest.raises(RuntimeError, match="Failed to resolve APM dependencies"):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")

@@ -297,6 +297,8 @@ class TestInstallMcpNoPolicy:
                     "test-server",
                     "--url",
                     "https://example.com/mcp",
+                    "--target",
+                    "claude",
                     "--no-policy",
                 ],
             )
@@ -315,7 +317,15 @@ class TestInstallMcpNoPolicy:
 
             self.runner.invoke(
                 cli,
-                ["install", "--mcp", "test-server", "--url", "https://example.com/mcp"],
+                [
+                    "install",
+                    "--mcp",
+                    "test-server",
+                    "--url",
+                    "https://example.com/mcp",
+                    "--target",
+                    "claude",
+                ],
             )
 
             mock_preflight.assert_called_once()
