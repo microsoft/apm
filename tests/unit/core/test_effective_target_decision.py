@@ -73,6 +73,7 @@ def test_deprecated_agents_alias_projects_to_vscode_runtime(_saved, tmp_path: Pa
 
     assert decision.canonical_targets == ("copilot",)
     assert decision.runtime_targets == ("vscode",)
+    assert decision.runtime_equivalents == ("agents", "copilot", "vscode")
 
 
 @patch("apm_cli.config.get_install_target", return_value=None)

@@ -613,7 +613,9 @@ def _resolve_target_runtimes(
         try:
             from apm_cli.core.target_detection import EffectiveTargetDecision
 
-            exclusions.update(EffectiveTargetDecision(exclude, "--exclude").runtime_targets or ())
+            exclusions.update(
+                EffectiveTargetDecision(exclude, "--exclude").runtime_equivalents or ()
+            )
         except KeyError:
             pass
         target_runtimes = [

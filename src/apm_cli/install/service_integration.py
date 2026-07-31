@@ -47,7 +47,7 @@ def run_service_integrations(
     existing_lock: LockFile | None,
     old_mcp_servers: set[str],
     old_mcp_configs: dict[str, Any],
-    old_mcp_provenance: dict[str, str],
+    old_mcp_provenance: dict[str, str | list[str]],
     old_mcp_target_servers: dict[str, list[str]],
     old_mcp_target_servers_present: bool,
     diagnostics: Any,
