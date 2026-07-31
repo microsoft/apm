@@ -171,7 +171,7 @@ Need a marker that does not exist yet? Register it in
 `pyproject.toml` AND add a row to the docs registry table in the
 same PR. Both must stay in sync.
 
-### Behavioral classification for the critical suite
+### Behavioral classification authority
 
 | Marker | Definition |
 |---|---|
@@ -180,20 +180,30 @@ same PR. Both must stay in sync.
 | `e2e` | A real installed CLI crossing at least one command boundary |
 
 `pyproject.toml` owns these definitions.
-`tests/quality/critical_suite.toml` owns the finite classified module set.
+Module-level `pytestmark` is the sole behavioral classification authority.
+Every classified module declares exactly one of these markers, and every
+collected node in that module must inherit the same classification. Function-
+and class-level behavioral markers are rejected because they would create a
+second, mixed authority inside the module.
+
+There is deliberately no central module whitelist or exact classified-module
+count. New modules opt in by adding one module-level marker. This trades the
+old closed-set/count ratchet for distributed ownership and removes a central
+merge hotspot; repository-wide collection still rejects empty, mixed, or
+multiple classifications deterministically.
+
 Directory names and filename suffixes are not behavioral evidence. For
 example, `test_policy_pinned_constraint_e2e.py` is `component` because it uses
 Click in-process; `test_core_smoke.py` is `e2e` because it invokes an installed
 binary through subprocess boundaries.
 
-To extend the finite manifest:
+To classify a module:
 
 1. Confirm every test in the module crosses the same behavioral boundary.
-2. Add the literal module path and marker to `critical_suite.toml`.
-3. Add the module-level behavioral `pytestmark`; preserve independent
+2. Add exactly one module-level behavioral `pytestmark`; preserve independent
    scheduling and prerequisite markers.
-4. If the filename suggests a different boundary, document why behavior wins.
-5. Run the taxonomy and quality contracts:
+3. If the filename suggests a different boundary, document why behavior wins.
+4. Run the taxonomy and quality contracts:
 
 ```bash
 uv run --extra dev pytest -p no:cacheprovider -q tests/quality

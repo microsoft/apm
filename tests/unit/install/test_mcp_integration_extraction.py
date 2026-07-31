@@ -165,6 +165,32 @@ class TestRunMcpIntegrationInstallBranch:
         assert apm_config == {"scripts": {}, "target": "claude"}
         assert "targets" not in apm_config
 
+    @patch(_PATCH_TARGET)
+    def test_conflicting_target_fields_exit_before_mcp_writes(
+        self,
+        mock_mcp,
+        tmp_path: Path,
+    ) -> None:
+        """MCP-only installs retain the target-phase fail-closed contract."""
+        dep = MCPDependency(name="io.github.acme/server", transport="stdio")
+        pkg = _make_apm_package(
+            target="codex",
+            targets=["copilot"],
+            mcp_deps=[dep],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_mcp_integration(
+                **_base_kwargs(
+                    apm_package=pkg,
+                    mcp_deps=[dep],
+                    project_root=tmp_path,
+                )
+            )
+
+        assert exc_info.value.code == 2
+        mock_mcp.install.assert_not_called()
+
 
 class TestRunMcpIntegrationEmptyDepsBranch:
     """``should_install=True`` and ``mcp_deps`` empty."""

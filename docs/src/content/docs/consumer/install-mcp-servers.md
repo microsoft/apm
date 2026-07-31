@@ -1,6 +1,6 @@
 ---
 title: "Install MCP servers"
-description: "Declare MCP servers in apm.yml and let apm install wire them into every detected harness."
+description: "Keep MCP target ownership portable across your team's machines with declarations in apm.yml."
 ---
 
 `apm install` is the same driver for two artifact kinds: APM packages
@@ -14,8 +14,9 @@ each runtime, and how tokens get injected.
 apm install --mcp io.github.github/github-mcp-server
 ```
 
-This adds one entry under `dependencies.mcp:` in `apm.yml` and writes
-a runtime-specific MCP config file for every detected harness.
+This adds one entry under `dependencies.mcp:` in `apm.yml`. APM then attempts
+runtime-specific MCP config writes for targets that pass selection, scope, and
+adapter prerequisites.
 
 ## The `mcp:` section in apm.yml
 
@@ -88,9 +89,9 @@ for discovery -- see the [CLI reference](../../reference/cli/install/).
 
 ## What `apm install` writes to disk
 
-For every harness APM detects in your environment, `apm install`
-writes a runtime-specific MCP config file. The schemas differ; the
-`apm.yml` source of truth does not.
+For every selected target that passes its scope and adapter prerequisites,
+`apm install` writes a runtime-specific MCP config file. The schemas differ;
+the `apm.yml` source of truth does not.
 
 Registry-declared environment variables honor the registry's
 `required` flag. Servers with optional auth install without token
@@ -114,11 +115,23 @@ for the full required-vs-optional runtime config rule.
 
 ## How `targets:` gates which configs get written
 
-MCP install honors the same target resolution chain as `apm install`
-for any other dependency: see
-[Where files land](../install-packages/#where-files-land).
-In short: `--target` wins, then `apm.yml`'s `targets:`, then
-auto-detect from harness directories.
+MCP install resolves targets in this order:
+
+1. Explicit CLI selection: `--runtime` (legacy, one runtime) or `--target`
+   (one or more targets).
+2. Canonical `targets:` / `target:` values declared in `apm.yml`.
+3. Machine discovery, only when the manifest does not restrict targets.
+
+`--exclude` narrows whichever set wins. Progress output names that
+post-exclusion selection; project, scope, and adapter gates can still skip a
+write.
+
+**Portability boundary:** A committed target list makes lockfile MCP ownership
+deterministic across machines with different installed harnesses. If `targets:`
+is omitted (or a legacy `all` declaration is folded to omission), machine
+discovery is intentional and ownership can follow each machine's installed
+harnesses. Declare targets when teammates or CI must produce the same MCP
+ownership.
 
 When a runtime is outside the active target set, APM does NOT write
 its MCP config -- and announces the drop on stdout so you can confirm
@@ -141,13 +154,12 @@ This single rule replaces two older ones that used to coexist:
   without telling you.
 
 A malformed `targets:` field (both `target:` and `targets:` set,
-`targets: []`, or an unknown target name) fails closed: no MCP files
-are written and an `[x]` error names the field to fix. A greenfield
-project with no `targets:`, no `--target` flag, AND no detected
-signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also
-fails closed with the same `[x]` voice -- consistent with how
-`apm install` treats the same input. Pin a target with `--target` or
-declare one in `apm.yml`. (#1335)
+`targets: []`, or an unknown target name) fails closed before machine discovery:
+no MCP files are written and an `[x]` error names the field to fix. A
+greenfield project with no `targets:`, no `--target` flag, AND no detected
+signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also fails closed
+with the same `[x]` voice -- consistent with how `apm install` treats the same
+input. Pin a target with `--target` or declare one in `apm.yml`. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to

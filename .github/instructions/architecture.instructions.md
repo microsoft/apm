@@ -37,6 +37,8 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Decision / fact | Canonical owner | Owner path selectors |
 |---|---|---|
 | Accepted target vocabulary | core/target_catalog.py | `src/apm_cli/core/target_catalog.py` |
+| MCP target-selection precedence | integration/mcp_integrator_install.py (_resolve_target_runtimes) | `src/apm_cli/integration/mcp_integrator_install.py` |
+| Behavioral test taxonomy classification | module-level pytestmark (taxonomy inventory verifies) | `tests/quality/taxonomy_inventory_plugin.py`; `tests/quality/test_test_taxonomy.py` |
 | Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
 | Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
 | User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |

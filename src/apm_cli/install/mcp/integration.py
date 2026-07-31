@@ -130,9 +130,20 @@ def run_mcp_integration(  # noqa: PLR0913
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
     mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
+    from apm_cli.core.apm_yml import (
+        ConflictingTargetsError,
+        EmptyTargetsListError,
+        UnknownTargetError,
+        parse_targets_field,
+    )
     from apm_cli.models.apm_package import canonical_package_target_config
 
     mcp_apm_config.update(canonical_package_target_config(apm_package))
+    try:
+        parse_targets_field(mcp_apm_config)
+    except (ConflictingTargetsError, EmptyTargetsListError, UnknownTargetError) as exc:
+        logger.error(str(exc), symbol="")
+        raise SystemExit(2) from exc
 
     if should_install and mcp_deps:
         old_mcp_target_servers = old_mcp_target_servers or {}

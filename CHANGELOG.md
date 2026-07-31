@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
   which never removes them. (by @mia106dev, #2069)
+- Teammates with different harnesses installed no longer rewrite each other's
+  `mcp_target_servers`; lockfile ownership now follows declared `apm.yml`
+  `targets:` before local runtime detection. (by @rrazvd, closes #2298, #2307)
 
 ### Security
 

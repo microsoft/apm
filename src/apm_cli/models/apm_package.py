@@ -701,16 +701,22 @@ def canonical_package_targets(package: object) -> tuple[str, ...]:
 
 
 def canonical_package_target_config(package: object) -> dict[str, object]:
-    """Project canonical targets into the compatibility config shape."""
+    """Project canonical targets into the compatibility config shape.
+
+    Conflicting singular and plural fields remain present so the canonical
+    parser can reject the authoring error before any MCP write.
+    """
+    plural = getattr(package, "targets", None)
+    singular = getattr(package, "target", None)
+    if isinstance(plural, list) and isinstance(singular, (str, list)):
+        return {"target": singular, "targets": list(plural)}
     canonical = canonical_package_targets(package)
     if not canonical:
         return {}
     if isinstance(package, APMPackage):
         return {"targets": list(canonical)}
-    plural = getattr(package, "targets", None)
     if isinstance(plural, list):
         return {"targets": list(canonical)}
-    singular = getattr(package, "target", None)
     if isinstance(singular, str) and len(canonical) == 1:
         return {"target": singular}
     return {"targets": list(canonical)}
