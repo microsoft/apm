@@ -235,7 +235,8 @@ type"), the definition section is cross-linked.
 | **Drift** | A divergence between the lockfile and either the manifest (declaration drift) or the deployed files on disk (integrity drift). |
 | **Self-entry** | The synthesized lockfile entry that accounts for primitives the project itself contributes. Defined in [Section 5.3](#53-self-entry-semantics). |
 | **Frozen install** | An install operation that refuses to write or rewrite the lockfile, fails on any missing package pin or MCP declaration mismatch, and gates validation before any lockfile, target-configuration, deployment, or cache write. Defined in [Section 5.5](#55-drift-and-integrity-model). |
-| **Host class** | The equivalence set of network hosts that share a single credential scope (see [Section 10.3](#103-token-leakage-across-hosts)). Two hosts are in the same class **iff** their registrable domain (the eTLD+1 per the Public Suffix List) is identical, OR they are explicitly aliased via `registries.<name>.aliases:` (see [Section 4.2.3](#423-registries)). For example, `github.contoso.com` shares a host class with `contoso.com`, not with `github.com`. |
+| **Host class** | The equivalence set of network hosts that share a single credential scope (see [Section 10.3](#103-token-leakage-across-hosts)). Two hosts are in the same class **iff** their registrable domain (the eTLD+1 per the Public Suffix List) is identical, OR they are explicitly aliased via `registries.<name>.aliases:` (see [Section 4.2.3](#423-registries)). For example, `github.contoso.com` shares a host class with `contoso.com`, not with `github.com`. Implementation-specific operator overrides to this default assignment are governed by [req-sc-013](#req-sc-013). |
+| **Configuration signal** | Any manifest declaration or implementation-specific operator setting that binds a hostname to a host class. Defined in [req-sc-013](#req-sc-013). |
 | **Implementation-default host** | The host an implementation uses when the manifest omits `default_host:`. The choice is implementation-defined; see [Section 1.4](#14-terminology-preliminaries). |
 | **Wire-format host** | The host literal as it appears in a dependency identifier or lockfile entry after canonical normalisation. |
 | **Hash envelope** | A digest serialised as `<algo>:<hex>` (for example `sha256:abcd...`). See [req-lk-016](#req-lk-016). |
@@ -2461,28 +2462,31 @@ host class MAY be re-resolved per this requirement.
 <a id="req-sc-013"></a>
 **[req-sc-013]** A conforming **consumer** implementation that permits
 operator configuration to assign a literal authority hostname to a host
-class MUST select exactly one effective host class before credential
+class: (a) it MUST select exactly one effective host class before credential
 resolution. For this requirement, a **configuration signal** is any
 manifest declaration or implementation-specific operator setting that
-binds a hostname to a host class. If two or more configuration signals
+binds a hostname to a host class. (b) If two or more configuration signals
 claim the same literal authority hostname, the precedence MUST be
 deterministic and documented in the consumer's
 [conformance statement](#112-how-to-claim-conformance).
 
 For each request and transport child process spawned to fetch or validate
 the dependency (for example a git client or credential helper), the
-consumer MUST resolve, attach, and expose only credential material
-belonging to the selected host class. Credential material belonging to an
-unselected class MUST NOT be resolved, attached, or inherited by that child
-process. Literal credential values MUST NOT appear in logs or diagnostics
-per [req-sc-007](#req-sc-007); source descriptors MAY appear in the
-diagnostic surface required by [req-sc-003](#req-sc-003).
+consumer: (c) it MUST resolve, attach, and expose only credential material
+belonging to the selected host class; and (d) credential material belonging
+to an unselected class MUST NOT be resolved, attached, or inherited by that
+child process. The consumer MUST actively suppress ambient credential
+material (for example environment variables) that the child process would
+otherwise inherit from a parent scope. Literal credential values remain
+subject to the redaction obligation of [req-sc-007](#req-sc-007); source
+descriptors MAY appear in the diagnostic surface required by
+[req-sc-003](#req-sc-003).
 
-An explicit non-default port (using the protocol-default equivalences in
-[req-rs-016](#req-rs-016) clause 2) in the dependency reference MUST remain
-part of both the transport endpoint and credential scope. The port narrows
-credential lookup within the already-selected host class; it does not
-create a distinct host class.
+(e) An explicit non-default port (using the protocol-default equivalences
+in [req-rs-016](#req-rs-016) item (2)) in the dependency reference MUST
+remain part of both the transport endpoint and credential scope. The port
+narrows credential lookup within the already-selected host class; it does
+not create a distinct host class.
 
 <a id="req-sc-005"></a>
 **[req-sc-005]** A conforming **consumer** implementation that
@@ -3300,7 +3304,7 @@ renumbering of conformance classes.
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
 | 0.1.20  | 2026-07-30 | Defensive amendment of [req-lk-006] (no new normative statement; count remains 104 (99 MUST, 5 SHOULD)): frozen validation now covers direct MCP server names and configurations as well as package pins, runs before lockfile, target-config, deployment, or cache mutation, and rejects manifest dependency mutation. |
-| 0.1.21  | 2026-07-31 | Spec-citation fold for deterministic configured-host credential isolation (closes #2338). Added [req-sc-013] (Section 10.3, consumer MUST): a consumer selects one effective host class before credential resolution, applies documented deterministic precedence when configuration signals overlap, exposes only credentials belonging to the selected class to requests and child processes, and preserves an explicit non-default port in both transport and credential scope. Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
+| 0.1.21  | 2026-07-31 | Spec-citation fold for deterministic configured-host credential isolation (closes #2338). Added [req-sc-013] (Section 10.3, consumer MUST): a consumer selects one effective host class before credential resolution, applies documented deterministic precedence when configuration signals overlap, exposes only credentials belonging to the selected class to requests and child processes, and preserves an explicit non-default port in both transport and credential scope. Section 1.3, Section 10.11, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
