@@ -57,6 +57,11 @@ def _get_ado_hosts_list() -> list[str]:
     return [host for part in raw.split(",") if (host := _normalize_configured_host(part))]
 
 
+def _is_valid_ado_server_fqdn(hostname: str) -> bool:
+    """Return whether an ADO Server setting is a DNS name, not an IP literal."""
+    return is_valid_fqdn(hostname) and not all(label.isdigit() for label in hostname.split("."))
+
+
 def default_host() -> str:
     """Return the default Git host (can be overridden via GITHUB_HOST env var)."""
     return os.environ.get("GITHUB_HOST", "github.com")
@@ -92,9 +97,11 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
     if h.endswith(".visualstudio.com"):
         return True
     ado_single = _get_ado_single_host()
-    if ado_single and ado_single == h and is_valid_fqdn(h):
+    if ado_single and ado_single == h and _is_valid_ado_server_fqdn(h):
         return True
-    return any(entry and entry == h and is_valid_fqdn(entry) for entry in _get_ado_hosts_list())
+    return any(
+        entry and entry == h and _is_valid_ado_server_fqdn(entry) for entry in _get_ado_hosts_list()
+    )
 
 
 def is_visualstudio_legacy_hostname(hostname: str | None) -> bool:
@@ -1078,14 +1085,11 @@ def is_valid_fqdn(hostname: str) -> bool:
     - Labels must contain only alphanumeric chars and hyphens
     - Labels must not start or end with hyphens
     - Have at least one dot
-    - Not be an IP address literal
     """
     if not hostname:
         return False
 
     hostname = hostname.split("/")[0]  # Remove any path components
-    if all(label.isdigit() for label in hostname.split(".")):
-        return False
 
     # Single regex to validate all FQDN rules:
     # - Starts with alphanumeric
