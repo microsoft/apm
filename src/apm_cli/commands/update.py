@@ -251,6 +251,11 @@ def _run_mcp_lsp_integration(
         old_mcp_configs = dict(existing_lock.mcp_configs)
         old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
         old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
+    trusted_transitive_configs = {
+        name: (old_mcp_provenance[name], config)
+        for name, config in old_mcp_configs.items()
+        if name in old_mcp_provenance and config.get("registry") is False
+    }
 
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
@@ -265,6 +270,7 @@ def _run_mcp_lsp_integration(
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
             old_mcp_target_servers=old_mcp_target_servers,
+            trusted_transitive_configs=trusted_transitive_configs,
             project_root=project_root,
             user_scope=user_scope,
             should_install=True,
@@ -730,6 +736,7 @@ def _run_dep_update(
                 _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
                 sys.exit(1)
 
+    if plan_state.proceeded or reconcile_noop:
         try:
             _run_mcp_lsp_integration(
                 scope=scope,
@@ -747,6 +754,7 @@ def _run_dep_update(
                 _rich_info("Run with --verbose for detailed diagnostics.")
             sys.exit(1)
 
+    if plan_state.proceeded:
         # Report the number of dependencies that actually changed (per the
         # plan), not the total tree re-materialized (result.installed_count).
         # The latter counts unchanged deps that were re-integrated, which

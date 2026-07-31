@@ -59,6 +59,7 @@ class LocalPackageFactory:
         version: str = "0.1.0",
         dependencies: Sequence[DependencyInput] = (),
         mcp_dependencies: Sequence[DependencyInput] = (),
+        dev_mcp_dependencies: Sequence[DependencyInput] = (),
         lsp_dependencies: Sequence[DependencyInput] = (),
         targets: Sequence[str] = (),
     ) -> LocalPackage:
@@ -70,6 +71,10 @@ class LocalPackageFactory:
         validated_dependencies = self._validate_dependencies(dependencies)
         validated_mcp = self._validate_config_dependencies(
             mcp_dependencies,
+            kind="MCP",
+        )
+        validated_dev_mcp = self._validate_config_dependencies(
+            dev_mcp_dependencies,
             kind="MCP",
         )
         validated_lsp = self._validate_config_dependencies(
@@ -98,6 +103,8 @@ class LocalPackageFactory:
             dependency_block["lsp"] = validated_lsp
         if dependency_block:
             manifest["dependencies"] = dependency_block
+        if validated_dev_mcp:
+            manifest["devDependencies"] = {"mcp": validated_dev_mcp}
         if validated_targets:
             manifest["targets"] = validated_targets
         dump_yaml(manifest, manifest_path)

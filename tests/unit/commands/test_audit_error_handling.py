@@ -447,7 +447,7 @@ class TestAuditContentScanBranches:
         with pytest.raises(SystemExit) as exc_info:
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = tmp_path / "apm.lock.yaml"
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 3)
                     _audit_content_scan(cfg, None, None, strip=True, dry_run=False)
         assert exc_info.value.code == 0
@@ -487,7 +487,7 @@ class TestAuditContentScanBranches:
         with pytest.raises(SystemExit) as exc_info:
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = lock_file
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 1)
                     with patch(
                         "apm_cli.commands.audit._has_actionable_findings", return_value=False
@@ -512,7 +512,7 @@ class TestAuditContentScanBranches:
         with pytest.raises(SystemExit) as exc_info:
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = lock_file
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 0)
                     _audit_content_scan(cfg, "owner/repo", None, strip=False, dry_run=False)
         assert exc_info.value.code == 0
@@ -534,7 +534,7 @@ class TestAuditContentScanBranches:
         with pytest.raises(SystemExit):
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = lock_file
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 1)
                     with patch(
                         "apm_cli.commands.audit._has_actionable_findings", return_value=False

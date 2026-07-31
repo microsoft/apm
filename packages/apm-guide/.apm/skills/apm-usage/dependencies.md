@@ -392,7 +392,7 @@ lives in `docs/src/content/docs/reference/manifest-schema.md` section
 
 ## MCP dependency formats
 
-See also: [MCP Servers guide](../../../../../docs/src/content/docs/guides/mcp-servers.md) for the CLI-first `apm install --mcp` workflow.
+See also: [MCP Servers guide](../../../../../docs/src/content/docs/consumer/install-mcp-servers.md) for the CLI-first `apm install --mcp` workflow.
 
 ```yaml
 dependencies:
@@ -452,6 +452,26 @@ dependencies:
         clientId: "<pre-registered-client-id>"
         callbackPort: 3118
 ```
+
+### Development MCP scope
+
+Use `dependencies.mcp` for servers that a consuming project should
+receive. Use `devDependencies.mcp` for author-only servers such as local
+mocks or debug bridges:
+
+```yaml
+devDependencies:
+  mcp:
+    - name: author-debug
+      registry: false
+      transport: stdio
+      command: ./scripts/author-debug
+```
+
+The root project activates both sections during `apm install`. Direct
+and transitive dependency packages contribute only `dependencies.mcp`;
+their development MCP entries do not enter the consumer's target config
+or `mcp_config_provenance`.
 
 At user scope, Claude MCP entries are written to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a

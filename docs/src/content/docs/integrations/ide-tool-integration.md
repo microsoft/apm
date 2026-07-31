@@ -100,7 +100,10 @@ apm install --target agent-skills
 
 ## MCP server integration
 
-MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies.mcp:`) are wired into each target's MCP config on install:
+MCP servers declared by the root project under `dependencies.mcp:` or
+`devDependencies.mcp:` are wired into each target's MCP config on install.
+Dependency packages contribute only `dependencies.mcp`; their
+`devDependencies.mcp` entries stay in the package author's environment.
 
 - `.mcp.json` at the repo root when `.claude/` exists (Claude Code project scope)
 - `.cursor/mcp.json` (Cursor)

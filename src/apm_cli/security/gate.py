@@ -55,6 +55,7 @@ class ScanVerdict:
     critical_count: int = 0
     warning_count: int = 0
     files_scanned: int = 0
+    scanned_files: frozenset[str] = frozenset()
 
     @property
     def has_findings(self) -> bool:
@@ -87,23 +88,29 @@ class SecurityGate:
         All files are scanned to produce a complete findings report.
         """
         findings_by_file: dict[str, list[ScanFinding]] = {}
-        files_scanned = 0
+        scanned_files: set[str] = set()
 
         for dirpath, _dirs, filenames in os.walk(root, followlinks=False):
             for fname in filenames:
                 fpath = Path(dirpath) / fname
                 if fpath.is_symlink():
                     continue
-                files_scanned += 1
+                rel = portable_relpath(fpath, root)
+                scanned_files.add(rel)
                 try:
                     file_findings = ContentScanner.scan_file(fpath)
                 except OSError:
                     continue
                 if file_findings:
-                    rel = portable_relpath(fpath, root)
                     findings_by_file[rel] = file_findings
 
-        return SecurityGate._build_verdict(findings_by_file, files_scanned, policy, force)
+        return SecurityGate._build_verdict(
+            findings_by_file,
+            len(scanned_files),
+            policy,
+            force,
+            scanned_files=frozenset(scanned_files),
+        )
 
     @staticmethod
     def scan_text(
@@ -117,7 +124,13 @@ class SecurityGate:
         findings_by_file: dict[str, list[ScanFinding]] = {}
         if file_findings:
             findings_by_file[filename] = file_findings
-        return SecurityGate._build_verdict(findings_by_file, 1, policy, force=False)
+        return SecurityGate._build_verdict(
+            findings_by_file,
+            1,
+            policy,
+            force=False,
+            scanned_files=frozenset({filename}),
+        )
 
     @staticmethod
     def scan_texts(
@@ -136,6 +149,7 @@ class SecurityGate:
             len(contents),
             policy,
             force=False,
+            scanned_files=frozenset(contents),
         )
 
     @staticmethod
@@ -203,9 +217,10 @@ class SecurityGate:
         files_scanned: int,
         policy: ScanPolicy,
         force: bool,
+        scanned_files: frozenset[str] = frozenset(),
     ) -> ScanVerdict:
         if not findings_by_file:
-            return ScanVerdict(files_scanned=files_scanned)
+            return ScanVerdict(files_scanned=files_scanned, scanned_files=scanned_files)
 
         flat = [f for ff in findings_by_file.values() for f in ff]
         has_critical, counts = ContentScanner.classify(flat)
@@ -218,6 +233,7 @@ class SecurityGate:
             critical_count=counts.get("critical", 0),
             warning_count=counts.get("warning", 0),
             files_scanned=files_scanned,
+            scanned_files=scanned_files,
         )
 
 
