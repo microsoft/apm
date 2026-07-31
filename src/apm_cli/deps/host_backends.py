@@ -309,15 +309,17 @@ class ADOBackend:
                 dep_ref.ado_repo,
                 token=None,
                 host=host,
+                port=getattr(dep_ref, "port", None),
             )
-        # Empty-string token => caller wants explicit "no credential in URL".
-        embed_token = token if token else None
+        # ADO PATs and bearer tokens are injected through AuthContext.git_env;
+        # never place either credential in argv or persisted remote URLs.
         return build_ado_https_clone_url(
             dep_ref.ado_organization,
             dep_ref.ado_project,
             dep_ref.ado_repo,
-            token=embed_token,
+            token=None,
             host=host,
+            port=getattr(dep_ref, "port", None),
         )
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
@@ -572,7 +574,7 @@ def backend_for(
             host=host,
             kind=provider.kind,
             has_public_repos=provider.has_public_repos,
-            api_base=provider.api_base(host.lower()),
+            api_base=provider.build_api_base(host.lower(), port),
             port=port,
             credential_purpose=provider.credential_purpose,
         )

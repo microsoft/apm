@@ -304,7 +304,16 @@ class GitHubPackageDownloader:
         ):
             return self.auth_resolver.build_public_github_anonymous_git_env()
 
-        git_env = GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
+        auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
+        base_env = (
+            self.auth_resolver.git_env_for_context(
+                auth_ctx,
+                base_env=self.git_env,
+            )
+            if auth_ctx is not None
+            else self.git_env
+        )
+        git_env = GitAuthEnvBuilder.subprocess_env_dict(base_env)
         if dep_ref.is_insecure:
             git_env = GitAuthEnvBuilder.noninteractive_env(
                 git_env,
@@ -1204,9 +1213,12 @@ class GitHubPackageDownloader:
             dep_token = dep_auth_ctx.token if dep_auth_ctx else self.github_token
             dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
-            # For ADO bearer, use the AuthContext git_env with header injection
-            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                env = {**os.environ, **(dep_auth_ctx.git_env or {})}
+            # Use the per-dependency AuthContext env for every classified host.
+            if dep_auth_ctx is not None:
+                env = self.auth_resolver.git_env_for_context(
+                    dep_auth_ctx,
+                    base_env=self.git_env,
+                )
             else:
                 env = {**os.environ, **(self.git_env or {})}
             auth_url = self._build_repo_url(

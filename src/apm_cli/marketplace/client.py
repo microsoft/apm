@@ -576,8 +576,12 @@ def _fetch_git(
     from ..cache.paths import get_cache_root
 
     org = source.owner or None
-    auth_ctx = auth_resolver.resolve(host_info.host, org)
-    git_env = auth_ctx.git_env
+    auth_ctx = (
+        auth_resolver.resolve(host_info.host, org, port=source.port)
+        if source.port is not None
+        else auth_resolver.resolve(host_info.host, org)
+    )
+    git_env = auth_resolver.hardened_git_env_for_context(auth_ctx)
 
     cache = GitCache(get_cache_root(), refresh=False)
     try:
@@ -670,6 +674,7 @@ def _fetch_ado_rest(
     project: str,
     repo: str,
     host: str,
+    port: int | None,
     auth_resolver,
 ) -> dict | None:
     """Read a single metadata file from Azure DevOps via the REST items API.
@@ -683,7 +688,15 @@ def _fetch_ado_rest(
     """
     from ..utils.github_host import build_ado_api_url
 
-    url = build_ado_api_url(org, project, repo, file_path, source.ref, host)
+    url = build_ado_api_url(
+        org,
+        project,
+        repo,
+        file_path,
+        source.ref,
+        host,
+        port,
+    )
 
     def _do_fetch(token, git_env):
         headers = {"User-Agent": "apm-cli"}
@@ -716,12 +729,17 @@ def _fetch_ado_rest(
             if callable(close):
                 close()
 
+    fallback_kwargs = {
+        "org": org,
+        "path": f"{org}/{project}/{repo}",
+        "unauth_first": False,
+    }
+    if port is not None:
+        fallback_kwargs["port"] = port
     return auth_resolver.try_with_fallback(
         host,
         _do_fetch,
-        org=org,
-        path=f"{org}/{project}/{repo}",
-        unauth_first=False,
+        **fallback_kwargs,
     )
 
 
@@ -762,6 +780,7 @@ def _fetch_ado(
             project=project,
             repo=repo,
             host=host,
+            port=source.port,
             auth_resolver=auth_resolver,
         )
     except _AdoItemNotFound:
@@ -1059,7 +1078,7 @@ def _fetch_file(
         # For ADO and generic git, classify the host extracted from the URL so
         # each gets a correctly-typed auth context (ADO PAT/bearer routing).
         host = _host_from_url(source.url)
-        host_info = AuthResolver.classify_host(host) if host else None
+        host_info = AuthResolver.classify_host(host, port=source.port) if host else None
 
     return fetcher(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 

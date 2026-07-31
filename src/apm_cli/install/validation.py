@@ -382,7 +382,6 @@ def _validate_ado_git_package(
     Returns True when the repo is reachable, False otherwise.
     Raises ``AuthenticationError`` for auth failures on non-generic managed hosts.
     """
-    import os
     import subprocess
 
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
@@ -476,11 +475,14 @@ def _validate_ado_git_package(
             suppress_credential_helpers=is_insecure,
         )
     else:
-        # #1015: merge _dep_ctx.git_env (bearer-aware GIT_CONFIG_*
-        # overrides) into the subprocess env so `git ls-remote`
-        # actually sends the Authorization header for AAD tokens.
-        _ctx_git_env = getattr(_dep_ctx, "git_env", {}) if _dep_ctx else {}
-        validate_env = {**os.environ, **ado_downloader.git_env, **_ctx_git_env}
+        validate_env = (
+            auth_resolver.git_env_for_context(
+                _dep_ctx,
+                base_env=ado_downloader.git_env,
+            )
+            if _dep_ctx is not None
+            else dict(ado_downloader.git_env)
+        )
 
     # Build the probe order. Non-generic hosts (GHES/ADO) always probe
     # a single authenticated URL. Generic hosts:
@@ -567,6 +569,7 @@ def _validate_ado_git_package(
         result is not None
         and result.returncode != 0
         and dep_ref.is_azure_devops()
+        and auth_resolver._supports_ado_bearer(dep_ref.host or "")
         and _url_token is not None  # we had a PAT
         and is_ado_auth_failure_signal(result.stderr or "")
     ):
@@ -593,7 +596,10 @@ def _validate_ado_git_package(
                     # explicitly skips GIT_TOKEN for scheme="bearer" and emits
                     # only the bearer-specific GIT_CONFIG_* injection.
                     bearer_env = auth_resolver._build_git_env(
-                        bearer, scheme="bearer", host_kind="ado"
+                        bearer,
+                        scheme="bearer",
+                        host_kind="ado",
+                        base_env=ado_downloader.git_env,
                     )
                     cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
                     bearer_result = subprocess.run(

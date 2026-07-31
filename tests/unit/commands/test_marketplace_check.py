@@ -552,7 +552,11 @@ class TestCheckRefHeadsPrefix:
 class TestCheckPerHostResolution:
     @patch(
         "apm_cli.commands.marketplace.check.resolve_auth_for_host",
-        return_value=SimpleNamespace(token="glpat-xyz", auth_scheme="basic"),
+        return_value=SimpleNamespace(
+            token="glpat-xyz",
+            auth_scheme="basic",
+            host_info=SimpleNamespace(kind="gitlab"),
+        ),
     )
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.check._load_config_or_exit")
@@ -596,13 +600,20 @@ class TestCheckPerHostResolution:
             host="gitlab.example.com",
             token="glpat-xyz",
             auth_scheme="basic",
+            git_env=ANY,
+            auth_resolver=ANY,
+            auth_target="gitlab.example.com",
         )
         # ls-remote runs against the composed nested path
         mock_inst.list_remote_refs.assert_called_once_with("group/sub/team/project/my-package")
 
     @patch(
         "apm_cli.commands.marketplace.check.resolve_auth_for_host",
-        return_value=SimpleNamespace(token="ghp-tok", auth_scheme="basic"),
+        return_value=SimpleNamespace(
+            token="ghp-tok",
+            auth_scheme="basic",
+            host_info=SimpleNamespace(kind="github"),
+        ),
     )
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.check._load_config_or_exit")
@@ -640,7 +651,13 @@ class TestCheckPerHostResolution:
         # matching the builder's _remote_source_coordinates
         mock_token.assert_called_once_with("github.com", offline=False, org=None, auth_resolver=ANY)
         MockResolver.assert_called_once_with(
-            offline=False, host="github.com", token="ghp-tok", auth_scheme="basic"
+            offline=False,
+            host="github.com",
+            token="ghp-tok",
+            auth_scheme="basic",
+            git_env=ANY,
+            auth_resolver=ANY,
+            auth_target="github.com",
         )
         mock_inst.list_remote_refs.assert_called_once_with("owner/repo")
 

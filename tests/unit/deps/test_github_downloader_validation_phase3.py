@@ -33,6 +33,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps import github_downloader_validation as gdv
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_downloader_validation import (
@@ -63,6 +64,11 @@ def _make_downloader(token: str = "tok", host: str = "github.com") -> GitHubPack
     dep_ctx.token = token
     dep_ctx.auth_scheme = "basic"
     resolver.resolve_for_dep.return_value = dep_ctx
+    resolver.git_env_for_context.side_effect = lambda auth_ctx, *, base_env: {
+        **base_env,
+        **auth_ctx.git_env,
+    }
+    resolver._build_git_env.side_effect = AuthResolver._build_git_env
     resolver.classify_host.return_value = MagicMock(
         kind="github", api_base="https://api.github.com"
     )
