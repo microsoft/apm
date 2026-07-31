@@ -64,9 +64,15 @@ priority:
 2. `targets:` in `apm.yml`.
 3. Auto-detection from filesystem signals (table below).
 
-If none of the above produce a target, the command falls back to
-`copilot`. Use [`apm targets`](../cli/targets/) to preview the resolved
-list before `compile` or `install`.
+For MCP installation, the equivalent explicit legacy `--runtime` flag also
+has highest priority. MCP machine discovery runs only when `targets:` is
+omitted (or legacy `all` is treated as omission). Declared targets therefore produce portable MCP ownership in `apm.lock.yaml`;
+omitted targets intentionally make that ownership machine-dependent.
+
+`apm install` fails closed when no target can be detected. `apm compile`
+retains its documented unsignalled fallback because install writes
+runtime-specific configuration while compile only generates project output. Use
+[`apm targets`](../cli/targets/) to preview the resolved list.
 
 ### Detection signal whitelist
 
