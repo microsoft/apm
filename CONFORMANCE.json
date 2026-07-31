@@ -1186,7 +1186,7 @@
       "conformance_class": "consumer",
       "id": "req-tg-008",
       "keyword": "MUST",
-      "section": "8.5",
+      "section": "8.5.3",
       "status": "active",
       "test_count": 1,
       "tests": [

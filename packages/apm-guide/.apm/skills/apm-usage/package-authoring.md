@@ -106,7 +106,8 @@ restrictive)`
 
 Package declarations never activate targets or expand consumer authorization.
 Omitting package `target:` / `targets:`, or using legacy `all`, adds no package
-restriction.
+restriction; `all` remains a no-restriction sentinel and is not expanded into
+an additional target set at this gate.
 
 ```yaml
 name: claude-hooks
@@ -185,7 +186,11 @@ Two keys control which output runtimes a package compiles and installs to:
 - **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
 - **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
 
-Setting both keys in the same `apm.yml` is a parse error (`ConflictingTargetsError`); pick one. An empty `targets: []` is also a parse error -- omit the line if you mean auto-detect.
+Setting both keys in the same `apm.yml` is a parse error
+(`ConflictingTargetsError`), even when either value is null. A null or empty
+`targets:` value is also a parse error. Under singular `target:`, null is
+treated as omission for legacy compatibility; an empty string or list is a
+parse error.
 
 Both manifest keys validate against the target catalog, with one compatibility
 difference: `target:` accepts aliases such as `vscode` and normalizes them to
@@ -203,7 +208,9 @@ through to auto-detect.
 | `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
 | `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
-| `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
+| `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |
+| `target: null` | Legacy omission spelling; adds no package restriction |
+| `target: []` or `target: ""` | **Parse error** -- remove the line if you meant auto-detect |
 | `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |

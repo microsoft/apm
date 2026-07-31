@@ -576,10 +576,48 @@ def test_dependency_package_targets_are_restriction_only() -> None:
 
     assert disjoint.targets == ()
     assert tuple(target.name for target in universal.targets) == ("cursor",)
+    schema = load_schema("manifest-v0.1.schema.json")
+    jsonschema.Draft202012Validator.check_schema(schema)
+    validate_against(
+        "manifest-v0.1.schema.json",
+        {"name": "claude-hooks", "version": "1.0.0", "targets": ["claude"]},
+    )
+    validate_against(
+        "manifest-v0.1.schema.json",
+        {"name": "legacy-null", "version": "1.0.0", "target": None},
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "manifest-v0.1.schema.json",
+            {
+                "name": "conflicting-hooks",
+                "version": "1.0.0",
+                "target": "claude",
+                "targets": ["cursor"],
+            },
+        )
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "manifest-v0.1.schema.json",
+            {"name": "blank-target", "version": "1.0.0", "targets": [""]},
+        )
+    for invalid_fields in (
+        {"target": ""},
+        {"target": []},
+        {"targets": None},
+        {"targets": []},
+    ):
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against(
+                "manifest-v0.1.schema.json",
+                {"name": "invalid-target", "version": "1.0.0", **invalid_fields},
+            )
     assert_spec_contains(
         "MUST integrate target-scoped primitives only into the",
         "mechanism for (b) is implementation-defined",
         "restriction-only: it MUST NOT activate a target",
+        "literal no-restriction sentinel",
+        "auto-detectable target set during this intersection",
         "MUST be rejected before target-scoped",
         "under [req-lk-021]",
     )

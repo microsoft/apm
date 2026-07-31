@@ -107,7 +107,8 @@ restrictive)`
 Every selector is a filter. A package declaration only narrows the
 consumer-authorized active set; it never activates a target or expands
 dependency reach. Omitting package `target:` / `targets:`, or using the
-legacy `all` value, adds no package restriction.
+legacy `all` value, adds no package restriction; `all` is not expanded
+into an additional target set at this gate.
 
 For example, this package can write hooks only to Claude:
 
@@ -120,8 +121,10 @@ target: claude
 `target:` accepts scalar, CSV, and list spellings, including aliases such
 as `vscode` (normalized to `copilot`). `targets:` accepts a scalar or list
 of canonical names. Unknown names, both keys together, and an empty
-`targets: []` fail validation. Consumers can narrow one dependency further
-with object-form `targets:`.
+or null `targets:` value fail validation. A null singular `target:` is
+treated as omission for legacy compatibility; an empty string or list fails
+validation. Both keys conflict even when either value is null. Consumers
+can narrow one dependency further with object-form `targets:`.
 
 If the same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
 integrates the `.apm/hooks/` copy once per target.
