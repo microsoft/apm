@@ -363,6 +363,8 @@ def test_host_class_collapse_constrained_to_psl_or_aliases():
         "Public Suffix List",
         "explicit `aliases:` entry",
         "MUST NOT collapse two",
+        "configuration signal exercised",
+        "under [req-sc-013](#req-sc-013) is not subject to this prohibition",
     )
 
 
@@ -480,10 +482,17 @@ def test_configured_host_class_precedence_is_credential_isolated(monkeypatch):
     assert scheme == "Basic"
     assert base64.b64decode(encoded).decode() == f":{ado_pat}"
     assert_spec_contains(
-        "select exactly one effective host class",
+        "(a) it MUST select exactly one effective host class",
+        "(b) If two or more configuration signals",
+        "(c) it MUST resolve, attach, and expose",
+        "(d) credential material belonging",
+        "(e) An explicit non-default port",
         "MUST NOT be resolved, attached, or inherited",
-        "source descriptors MAY appear",
-        "explicit non-default port",
+        "MUST actively suppress ambient credential",
+        "redaction obligation of [req-sc-007]",
+        "descriptors MAY appear in the diagnostic surface",
+        "| **Configuration signal** |",
+        "operator overrides to this default assignment",
     )
 
 
