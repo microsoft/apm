@@ -186,6 +186,30 @@ def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger
         )
 
 
+def _warn_target_reconcile_failure(
+    diagnostics: DiagnosticCollector,
+    package_name: str,
+    reconcile_stats: dict,
+) -> None:
+    """Record actionable target and config details after hook contraction fails."""
+    if not reconcile_stats.get("errors", 0):
+        return
+    failed_targets = reconcile_stats.get("failed_targets")
+    failed_paths = reconcile_stats.get("failed_paths")
+    if not isinstance(failed_targets, list) or not failed_targets:
+        failed_targets = ["unknown"]
+    if not isinstance(failed_paths, list) or not failed_paths:
+        failed_paths = ["unknown"]
+    diagnostics.warn(
+        "Could not fully reconcile hooks excluded by target restrictions",
+        package=package_name,
+        detail=(
+            f"targets: [{', '.join(failed_targets)}]; "
+            f"configs: [{', '.join(failed_paths)}]; run apm install again"
+        ),
+    )
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -289,12 +313,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             project_root,
             target_selection.excluded_targets,
         )
-        if reconcile_stats.get("errors", 0):
-            diagnostics.warn(
-                "Could not fully reconcile hooks excluded by target restrictions",
-                package=package_name,
-                detail="inspect target hook configs and run apm install again",
-            )
+        _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
     if not targets:
         return result
 
