@@ -739,7 +739,100 @@ if ! grep -q '^    def uses_public_github_anonymous_first(' "$public_github_auth
 fi
 
 
-echo "[*] AC21: host-classification authority"
+echo "[*] AC21: MCP manifest target precedence authority"
+mcp_manifest_adapter=$(
+    awk '
+        /^def _declared_manifest_target_runtimes\(/ { capture = 1 }
+        /^def _resolve_target_runtimes\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/integration/mcp_integrator_install.py
+)
+mcp_target_resolver=$(
+    awk '
+        /^def _resolve_target_runtimes\(/ { capture = 1 }
+        /^def _install_self_defined_deps\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/integration/mcp_integrator_install.py
+)
+mcp_manifest_selection_line=$(
+    grep -n '_declared_manifest_target_runtimes(apm_config)' \
+        <<<"$mcp_target_resolver" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_discovery_line=$(
+    grep -n '_discover_installed_runtimes(' \
+        <<<"$mcp_target_resolver" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_integration_validation=$(
+    awk '
+        /^def run_mcp_integration\(/ { capture = 1 }
+        capture { print }
+    ' src/apm_cli/install/mcp/integration.py
+)
+mcp_validation_line=$(
+    grep -n 'parse_targets_field(mcp_apm_config)' \
+        <<<"$mcp_integration_validation" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_install_line=$(
+    grep -n 'MCPIntegrator.install(' \
+        <<<"$mcp_integration_validation" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_target_projection=$(
+    awk '
+        /^def canonical_package_target_config\(/ { capture = 1 }
+        /^def package_target_selection\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/models/apm_package.py
+)
+if ! grep -q 'parse_targets_field(apm_config)' <<<"$mcp_manifest_adapter" \
+    || grep -Eq \
+        'TARGET_CAPABILITIES|CANONICAL_TARGETS|KNOWN_TARGETS|\[[^]]*(copilot|claude|cursor|codex|gemini|opencode|windsurf|kiro)' \
+        <<<"$mcp_manifest_adapter" \
+    || [ -z "$mcp_manifest_selection_line" ] \
+    || [ -z "$mcp_discovery_line" ] \
+    || [ "$mcp_manifest_selection_line" -ge "$mcp_discovery_line" ] \
+    || grep -q 'parse_targets_field(' <<<"$mcp_target_resolver" \
+    || [ -z "$mcp_validation_line" ] \
+    || [ -z "$mcp_install_line" ] \
+    || [ "$mcp_validation_line" -ge "$mcp_install_line" ] \
+    || ! grep -q 'return {"target": singular, "targets": list(plural)}' \
+        <<<"$mcp_target_projection"; then
+    echo "[x] MCP target precedence must route through the canonical manifest adapter before discovery"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC22: module-level behavioral test taxonomy authority"
+taxonomy_plugin="tests/quality/taxonomy_inventory_plugin.py"
+taxonomy_contract="tests/quality/test_test_taxonomy.py"
+taxonomy_parallel_hits=$(
+    grep -En \
+        '(^|[^A-Za-z_])(MANIFEST|_manifest_modules|tracked_python_inventory)|behavioral markers outside critical manifest|len\(modules\)[[:space:]]*==' \
+        "$taxonomy_contract" \
+        || true
+)
+if ! grep -q 'getattr(module, "pytestmark"' "$taxonomy_plugin" \
+    || ! grep -q '"modules": modules' "$taxonomy_plugin" \
+    || ! grep -q '"nodes": nodes' "$taxonomy_plugin" \
+    || ! grep -q '^def _assert_marker_only_taxonomy(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm003_multiple_node_classifications_fail(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm003_mixed_module_classifications_fail(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm004_new_module_classification_needs_no_whitelist(' \
+        "$taxonomy_contract" \
+    || [ -n "$taxonomy_parallel_hits" ]; then
+    echo "[x] Behavioral test taxonomy must stay owned by module-level pytestmark"
+    [ -n "$taxonomy_parallel_hits" ] && echo "$taxonomy_parallel_hits"
+    violations=$((violations + 1))
+fi
+
+
+echo "[*] AC23: host-classification authority"
 identity_owner="src/apm_cli/models/dependency/identity.py"
 if ! grep -q 'if is_github_hostname(effective_host):' "$identity_owner" \
     || grep -Eq 'effective_host.*==.*default_host|configured_default_host' "$identity_owner"; then
@@ -747,7 +840,7 @@ if ! grep -q 'if is_github_hostname(effective_host):' "$identity_owner" \
     violations=$((violations + 1))
 fi
 
-echo "[*] AC22: ADO transport credential authority"
+echo "[*] AC24: ADO transport credential authority"
 ado_transport_direct_hits=$(
     grep -En '(\._host|host)\.ado_token' \
         src/apm_cli/deps/download_strategies.py \
@@ -784,6 +877,7 @@ if ! grep -q '_clear_platform_token_env(env)' src/apm_cli/core/auth.py \
     [ -n "$ado_transport_direct_hits" ] && echo "$ado_transport_direct_hits"
     violations=$((violations + 1))
 fi
+
 
 
 if [ "$violations" -gt 0 ]; then

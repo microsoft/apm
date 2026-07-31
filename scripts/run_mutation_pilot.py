@@ -178,18 +178,7 @@ OWNERS = (
             "_normalize_lockfile_host_type",
             "_normalize_exec_status",
         ),
-        # Built via runtime concatenation, not a single string literal:
-        # PR #2246 also listed this same path in critical_suite.toml's
-        # module manifest, and tests/quality/test_test_taxonomy.py's
-        # TM002 guard fails closed on any *other* Python file containing
-        # a critical-manifest path as an exact AST string constant (it
-        # exists to catch a second file quietly re-declaring the critical
-        # module list, which would let the two drift apart). This
-        # reference is an unrelated concept -- a mutation-pilot test seam,
-        # not a competing manifest -- so splitting the literal avoids the
-        # false-positive collision without changing the resulting string
-        # or any runtime behavior.
-        test_seams=("tests/unit/deps/" + "test_lockfile_field_properties.py",),
+        test_seams=("tests/unit/deps/test_lockfile_field_properties.py",),
     ),
 )
 

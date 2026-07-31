@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import shutil
 import subprocess
@@ -531,6 +532,108 @@ def test_target_catalog_matches_native_profiles() -> None:
         if capability.primitive_profile is not None and not capability.mcp_only
     }
     assert set(KNOWN_TARGETS) == expected
+
+
+def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> None:
+    """MCP precedence may adapt canonical targets but must not fork vocabulary."""
+    root = Path(__file__).parents[2]
+    source_path = root / "src/apm_cli/integration/mcp_integrator_install.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    adapter = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_declared_manifest_target_runtimes"
+    )
+    resolver = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_resolve_target_runtimes"
+    )
+    adapter_calls = {
+        node.func.id
+        for node in ast.walk(adapter)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    resolver_calls = [
+        node
+        for node in ast.walk(resolver)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    manifest_selection_calls = [
+        node for node in resolver_calls if node.func.id == "_declared_manifest_target_runtimes"
+    ]
+    discovery_calls = [
+        node for node in resolver_calls if node.func.id == "_discover_installed_runtimes"
+    ]
+    local_string_collections = [
+        node
+        for node in ast.walk(adapter)
+        if isinstance(node, (ast.List, ast.Set, ast.Tuple))
+        and any(
+            isinstance(item, ast.Constant) and isinstance(item.value, str) for item in node.elts
+        )
+    ]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    package_source = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
+    target_projection = package_source.split(
+        "def canonical_package_target_config(package: object) -> dict[str, object]:",
+        maxsplit=1,
+    )[1].split("def package_target_selection(", maxsplit=1)[0]
+    integration_source = (root / "src/apm_cli/install/mcp/integration.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "parse_targets_field" in adapter_calls
+    assert local_string_collections == []
+    assert len(manifest_selection_calls) == 1
+    assert len(discovery_calls) == 1
+    assert manifest_selection_calls[0].lineno < discovery_calls[0].lineno
+    assert all(node.func.id != "parse_targets_field" for node in resolver_calls)
+    assert 'return {"target": singular, "targets": list(plural)}' in target_projection
+    assert integration_source.index("parse_targets_field(mcp_apm_config)") < (
+        integration_source.index("MCPIntegrator.install(")
+    )
+    assert "AC21: MCP manifest target precedence authority" in guard
+    assert (
+        "MCP target precedence must route through the canonical manifest adapter before discovery"
+        in guard
+    )
+
+
+def test_behavioral_taxonomy_is_owned_by_module_pytestmark() -> None:
+    """Distributed module markers must not regress to a central file list."""
+    root = Path(__file__).parents[2]
+    quality_root = root / "tests" / "quality"
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    plugin = (quality_root / "taxonomy_inventory_plugin.py").read_text(encoding="utf-8")
+    contract = (quality_root / "test_test_taxonomy.py").read_text(encoding="utf-8")
+    source = root / ".apm/instructions/architecture.instructions.md"
+    deployed = root / ".github/instructions/architecture.instructions.md"
+
+    assert list(quality_root.glob("*suite*.toml")) == []
+    assert source.read_bytes() == deployed.read_bytes()
+    assert (
+        "| Behavioral test taxonomy classification | module-level pytestmark "
+        "(taxonomy inventory verifies) |" in source.read_text(encoding="utf-8")
+    )
+    assert "AC22: module-level behavioral test taxonomy authority" in guard
+    assert "Behavioral test taxonomy must stay owned by module-level pytestmark" in guard
+    assert 'getattr(module, "pytestmark"' in plugin
+    assert '"modules": modules' in plugin
+    assert "def _assert_marker_only_taxonomy(" in contract
+    assert "def test_tm003_multiple_node_classifications_fail(" in contract
+    assert "def test_tm003_mixed_module_classifications_fail(" in contract
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    lockfile = LockFile.load_or_create(root / "apm.lock.yaml")
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    tests_instruction = root / ".github/instructions/tests.instructions.md"
+    record = ledger.records.get("copilot||project|.github/instructions/tests.instructions.md")
+    assert record is not None
+    assert record.content_hash == compute_file_hash(tests_instruction)
 
 
 @pytest.mark.parametrize(

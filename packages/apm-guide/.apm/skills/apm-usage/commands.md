@@ -47,6 +47,14 @@ config directory (`github-copilot/intellij/`). That machine-global signal can
 select IntelliJ for MCP configuration in every project, but it never
 auto-selects a file-primitive target.
 
+For MCP, explicit `--runtime` (legacy) or `--target` selection wins over
+canonical manifest targets. The configured file-primitive default is not an MCP
+restriction: machine discovery is reached only when the manifest is
+unrestricted, and `--exclude` narrows the selected set. Declare `targets:`
+when committed lockfile ownership must stay deterministic across developer and
+CI machines. Omitting targets deliberately allows `mcp_target_servers` and
+deployment runtime rows to follow local harness availability.
+
 `apm install` prints a one-line provenance summary before any mutation:
 
 ```
