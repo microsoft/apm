@@ -594,7 +594,9 @@ def test_unrecorded_hidden_unicode_payload_cannot_pass_ci_audit(
     after_audit = _capture(scenario.project.root)
 
     _assert_same_state(before_audit, after_audit)
-    assert _check(payload, "content-integrity")["passed"] is True
+    content_integrity = _check(payload, "content-integrity")
+    assert content_integrity["passed"] is False
+    assert f"unicode: {_HIDDEN_SKILL}" in content_integrity["details"]
     assert _check(payload, "drift")["passed"] is False
     assert _drift_entries(payload) == [
         {

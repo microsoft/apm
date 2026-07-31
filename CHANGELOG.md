@@ -19,9 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public `github.com` dependencies now try anonymous HTTPS before resolving
   credentials, so all-public installs no longer open repeated credential or
   Git Credential Manager prompts. Reported by @RuiRomano. (#2406, closes #2400)
-- `apm self-update` now downloads the installer script from the exact selected
-  release tag and passes that same normalized version to the installer, avoiding
-  drift between installer bytes and stable or prerelease selection. (by
 - `apm self-update` now downloads GitHub and GHES installer scripts from the
   exact selected release tag and passes that same normalized version to the
   installer, while configured installer mirrors remain authoritative. (by
@@ -49,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale. The matching `openapm-v0.1.md` frozen-install requirement now covers
   MCP state and all durable writes. (by @edenfunf, #2390; fixes #2373)
 
+- Consuming projects no longer inherit a dependency author's development-only
+  MCP servers. Only `dependencies.mcp` from direct and transitive packages
+  propagates; the root project's `dependencies.mcp` and `devDependencies.mcp`
+  remain active for its authoring environment.
+  (by @sergio-sisternes-epam, #2340)
+- `apm audit` now scans for hidden Unicode across every file under the deploy
+  trees the project's targets govern, instead of only the files
+  `apm.lock.yaml` records. Hash verification needs a recorded baseline and
+  stays lockfile-scoped, but a bidi override needs none -- so a deployed file
+  the lockfile omits (for example a target committed without the regenerated
+  lockfile) was exempt from scanning for as long as it stayed unrecorded, in
+  `--ci` and `--no-drift` runs alike. `apm audit --strip` cleans those files
+  too; `--package <name>` stays lockfile-scoped. (by @salpers, #2379)
 - Repeated `apm install` runs with unchanged self-defined MCP dependencies and
   explicit target mappings now preserve `generated_at`, deployment ownership,
   and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of

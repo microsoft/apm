@@ -20,6 +20,13 @@ adapter prerequisites.
 
 ## The `mcp:` section in apm.yml
 
+The two sections have different propagation rules. In the root project,
+`apm install` activates both sections for the author's environment. A
+direct or transitive dependency package contributes only
+`dependencies.mcp`; its `devDependencies.mcp` entries never enter the
+consumer's target config, lockfile provenance, or audit baseline.
+This keeps package-author debug servers out of consumer tool lists.
+
 MCP servers live under `dependencies.mcp:` (or
 `devDependencies.mcp:`). Three forms are valid -- pick the one that
 matches the source you have:
