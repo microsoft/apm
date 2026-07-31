@@ -546,6 +546,31 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
     )
 
 
+@pytest.mark.req("req-tg-008")
+def test_package_declared_target_restricts_hook_integration():
+    """Package target: field is a restriction-only filter on hook integration.
+
+    A consumer MUST NOT deliver a package's hooks to any active integration
+    target not in the package's declared target set (when non-empty and not
+    containing 'all'). The filter composes by intersection with consumer-side
+    per-dependency targets: it can only narrow, never expand.
+    """
+    import inspect
+
+    from apm_cli.install.target_filter import resolve_effective_package_targets
+
+    assert_spec_contains(
+        "restriction-only filter",
+        "MUST NOT deliver that package",
+        "composes by intersection",
+        "can only narrow",
+    )
+    src = inspect.getsource(resolve_effective_package_targets)
+    assert "package_restriction_active" in src, (
+        "req-tg-008: resolve_effective_package_targets must apply package target restriction"
+    )
+
+
 # --- req-cf-001..002 --------------------------------------------------
 
 
