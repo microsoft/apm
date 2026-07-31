@@ -332,6 +332,7 @@ class TestIntelliJClientAdapter(unittest.TestCase):
                     "servers": {
                         "managed": {"command": "apm"},
                         "collision": {"command": "old-apm"},
+                        "server": {"command": "user-short-name"},
                         "legacy-user": {"command": "user"},
                     },
                 }
@@ -343,7 +344,9 @@ class TestIntelliJClientAdapter(unittest.TestCase):
             patch.object(self.adapter, "get_config_path", return_value=str(canonical)),
             patch.object(self.adapter, "get_legacy_config_path", return_value=str(legacy)),
         ):
-            migrated = self.adapter.migrate_legacy_managed_servers({"managed", "collision"})
+            migrated = self.adapter.migrate_legacy_managed_servers(
+                {"managed", "collision", "org/server"}
+            )
 
         assert migrated == {"managed", "collision"}
         canonical_data = json.loads(canonical.read_text(encoding="utf-8"))
@@ -358,7 +361,10 @@ class TestIntelliJClientAdapter(unittest.TestCase):
         }
         assert legacy_data == {
             "legacySetting": True,
-            "servers": {"legacy-user": {"command": "user"}},
+            "servers": {
+                "server": {"command": "user-short-name"},
+                "legacy-user": {"command": "user"},
+            },
         }
 
     def test_migration_without_ownership_preserves_legacy_file_exactly(self):
@@ -599,6 +605,25 @@ def test_config_path_rejects_suffix_symlink_escape(tmp_path: Path) -> None:
         IntelliJClientAdapter().get_config_path()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation is not reliable on Windows CI")
+def test_config_path_rejects_file_symlink_escape(tmp_path: Path) -> None:
+    """The final mcp.json path may not resolve outside its XDG root."""
+    root = tmp_path / "config"
+    config_dir = root / "github-copilot" / "intellij"
+    config_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"servers": {}}\n', encoding="utf-8")
+    (config_dir / "mcp.json").symlink_to(outside)
+
+    with (
+        patch.object(sys, "platform", "linux"),
+        patch.dict("os.environ", {"XDG_CONFIG_HOME": str(root)}, clear=False),
+        pytest.raises(PathTraversalError),
+    ):
+        IntelliJClientAdapter().get_config_path()
+    assert outside.read_text(encoding="utf-8") == '{"servers": {}}\n'
+
+
 def test_cli_atomic_write_failure_is_nonzero_without_partial_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -649,8 +674,10 @@ def test_cli_atomic_write_failure_is_nonzero_without_partial_config(
         )
 
     assert result.exit_code == 1
-    assert "MCP integration failed" in result.output
+    assert "MCP configuration failed for selected runtime(s)" in result.output
     assert "Cannot write JetBrains Copilot MCP config" in result.output
     assert "Check permissions and free space" in result.output
+    assert "MCP server written to apm.yml" not in result.output
+    assert "Run with --verbose" not in result.output
     assert config_path.read_bytes() == original
     assert not tuple(config_path.parent.glob("apm-atomic-*"))

@@ -147,7 +147,7 @@ def test_direct_install_uses_config_state_for_full_lifecycle(
             cwd=project,
             env=environment,
         )
-        assert "Migrated 1 IntelliJ MCP server to" in (
+        assert "[+] Migrated 1 IntelliJ MCP server to" in (
             migration_results[0].stdout + migration_results[0].stderr
         )
         assert canonical.read_bytes() == expected
@@ -388,9 +388,11 @@ def test_malformed_installed_destination_fails_without_rewrite(
     )
 
     assert result.returncode == 1
-    assert "MCP integration failed" in result.stderr + result.stdout
+    assert "MCP configuration failed for selected runtime(s)" in result.stderr + result.stdout
     assert "is malformed JSON" in result.stderr + result.stdout
     assert "Fix the file, then rerun apm install" in result.stderr + result.stdout
+    assert "MCP server written to apm.yml" not in result.stderr + result.stdout
+    assert "Run with --verbose" not in result.stderr + result.stdout
     assert canonical.read_bytes() == original
     assert not data_path.exists()
     if legacy is not None:

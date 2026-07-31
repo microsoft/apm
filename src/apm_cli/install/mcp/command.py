@@ -15,6 +15,7 @@ from pathlib import Path
 
 import click
 
+from ..errors import InstallFailureAlreadyRendered
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
 from .registry import registry_env_override
@@ -201,6 +202,8 @@ def run_mcp_install(  # noqa: PLR0913
                     mcp_config_provenance=merged_provenance,
                     logger=logger,
                 )
+            except InstallFailureAlreadyRendered:
+                raise
             except Exception as exc:
                 # Keep the raw exception (which may contain internal paths,
                 # credentials, or stack-trace fragments) at verbose level

@@ -220,7 +220,7 @@ class TestRemoveStaleIntelliJ:
         logger.verbose = False
         with (
             patch(
-                "apm_cli.adapters.client.intellij._intellij_config_dir",
+                "apm_cli.adapters.client.intellij._intellij_config_root",
                 side_effect=PathTraversalError("LOCALAPPDATA unset"),
             ),
             pytest.raises(PathTraversalError, match="LOCALAPPDATA"),
@@ -230,6 +230,34 @@ class TestRemoveStaleIntelliJ:
                 runtime="intellij",
                 logger=logger,
             )
+
+    def test_remove_stale_intellij_fails_on_malformed_json(self, tmp_path):
+        """Malformed user config fails closed instead of being overwritten."""
+        from apm_cli.adapters.client.intellij import IntelliJConfigError
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        config_path = tmp_path / "config" / "mcp.json"
+        config_path.parent.mkdir(parents=True)
+        original = b"{invalid\n"
+        config_path.write_bytes(original)
+        with (
+            patch(
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_config_path",
+                return_value=str(config_path),
+            ),
+            patch(
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_legacy_config_path",
+                return_value=None,
+            ),
+            pytest.raises(IntelliJConfigError, match="malformed JSON"),
+        ):
+            MCPIntegrator.remove_stale(
+                stale_names={"stale-server"},
+                runtime="intellij",
+                logger=MagicMock(),
+            )
+
+        assert config_path.read_bytes() == original
 
     def test_remove_stale_intellij_resolves_output_path_once(self):
         """Multiple removal messages reuse one validated config path."""

@@ -91,12 +91,6 @@ def _legacy_intellij_config_dir() -> Path | None:
     return root.joinpath(*_CONFIG_SUFFIX)
 
 
-def _expanded_server_names(names: set[str]) -> set[str]:
-    expanded = set(names)
-    expanded.update(name.rsplit("/", 1)[-1] for name in names if "/" in name)
-    return expanded
-
-
 def _config_without_servers(
     config: dict,
     names: set[str],
@@ -127,20 +121,23 @@ class IntelliJClientAdapter(CopilotClientAdapter):
     def get_config_path(self) -> str:
         """Return the canonical JetBrains Copilot ``mcp.json`` path."""
         root = _intellij_config_root()
-        config_dir = _intellij_config_dir()
+        config_dir = root.joinpath(*_CONFIG_SUFFIX)
         # XDG roots may live outside HOME. This containment check guards the
         # fixed suffix against symlink escapes from the selected platform root.
         ensure_path_within(config_dir, root)
-        return str(config_dir / "mcp.json")
+        config_path = config_dir / "mcp.json"
+        ensure_path_within(config_path, root)
+        return str(config_path)
 
     def get_legacy_config_path(self) -> str | None:
         """Return the obsolete APM path used before the config-state fix."""
         root = _legacy_intellij_config_root()
-        config_dir = _legacy_intellij_config_dir()
-        if root is None or config_dir is None:
+        if root is None:
             return None
+        config_dir = root.joinpath(*_CONFIG_SUFFIX)
         ensure_path_within(config_dir, root)
         legacy_path = config_dir / "mcp.json"
+        ensure_path_within(legacy_path, root)
         if legacy_path.resolve() == Path(self.get_config_path()).resolve():
             return None
         return str(legacy_path)
@@ -235,7 +232,7 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         legacy = self._read_config(legacy_path)
         legacy_servers = dict(legacy.get(self.mcp_servers_key) or {})
         migrated = set(legacy_servers)
-        migrated.intersection_update(_expanded_server_names(owned_names))
+        migrated.intersection_update(owned_names)
         if not migrated:
             return set()
 
@@ -259,7 +256,7 @@ class IntelliJClientAdapter(CopilotClientAdapter):
 
     def remove_managed_servers(self, owned_names: set[str]) -> set[str]:
         """Remove only provenance-owned names from canonical and obsolete config."""
-        names = _expanded_server_names(owned_names)
+        names = set(owned_names)
         canonical_path = Path(self.get_config_path())
         legacy_path_value = self.get_legacy_config_path()
         legacy_path = Path(legacy_path_value) if legacy_path_value is not None else None

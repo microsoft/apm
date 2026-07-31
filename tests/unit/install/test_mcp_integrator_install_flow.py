@@ -136,7 +136,8 @@ def test_self_defined_partial_runtime_failure_is_explicit() -> None:
     assert install_runtime.call_count == 2
     assert managed == {"claude": {"managed-server"}}
     logger.error.assert_any_call(
-        "MCP configuration failed for selected runtime(s): managed-server (intellij)"
+        "MCP configuration failed for selected runtime(s): managed-server (intellij). "
+        "Fix the IntelliJ MCP config and rerun apm install."
     )
 
 
@@ -182,7 +183,8 @@ def test_registry_group_partial_runtime_failure_is_explicit() -> None:
     assert install_runtime.call_count == 2
     assert managed == {"claude": {"managed-server"}}
     logger.error.assert_any_call(
-        "MCP configuration failed for selected runtime(s): managed-server (intellij)"
+        "MCP configuration failed for selected runtime(s): managed-server (intellij). "
+        "Fix the IntelliJ MCP config and rerun apm install."
     )
 
 

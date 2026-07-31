@@ -21,6 +21,7 @@ from apm_cli.core.apm_yml import (
 )
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.target_catalog import accepted_target_values
+from apm_cli.install.errors import InstallFailureAlreadyRendered
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.yaml_io import load_yaml
@@ -242,12 +243,16 @@ def _raise_strict_config_failures(
     """Render one failure footer, then fail without a success summary."""
     if not failed_installations:
         return
-    message = "MCP configuration failed for selected runtime(s): " + ", ".join(failed_installations)
+    message = (
+        "MCP configuration failed for selected runtime(s): "
+        + ", ".join(failed_installations)
+        + ". Fix the IntelliJ MCP config and rerun apm install."
+    )
     if console:
         console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
     else:
         logger.error(message)
-    raise RuntimeError(message)
+    raise InstallFailureAlreadyRendered(message)
 
 
 def _migrate_intellij_managed_config(
@@ -279,9 +284,10 @@ def _migrate_intellij_managed_config(
         raise
     if migrated:
         count = len(migrated)
-        logger.progress(
+        logger.success(
             f"Migrated {count} IntelliJ MCP server{'s' if count != 1 else ''} "
-            f"to {client.get_config_path()}"
+            f"to {client.get_config_path()}",
+            symbol="check",
         )
 
 
