@@ -15,6 +15,7 @@ import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
+from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -55,6 +56,10 @@ class _FakeLockfile:
 def _ctx(*, resolver, lockfile, update_refs=False, refresh=False):
     return types.SimpleNamespace(
         ref_resolver=resolver,
+        ref_freshness_policy=RefFreshnessPolicy.for_install_intent(
+            update_refs=update_refs,
+            refresh=refresh,
+        ),
         existing_lockfile=lockfile,
         update_refs=update_refs,
         refresh=refresh,

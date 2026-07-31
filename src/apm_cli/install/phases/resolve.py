@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.deps.tiered_ref_resolver import ref_freshness_policy_for_install
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -235,11 +236,11 @@ def _setup_downloader(ctx: InstallContext) -> None:
     try:
         from apm_cli.deps.tiered_ref_resolver import build_tiered_ref_resolver
 
-        _update_refs = ctx.update_refs or ctx.refresh
+        ctx.ref_freshness_policy = ref_freshness_policy_for_install(ctx)
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=getattr(downloader, "persistent_git_cache", None),
-            update_refs=_update_refs,
+            freshness_policy=ctx.ref_freshness_policy,
         )
         if _tiered is not None:
             downloader._tiered_resolver = _tiered
@@ -349,7 +350,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
     # --refresh implies re-resolution of all refs (but does NOT discard
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
-    update_refs = ctx.update_refs or ctx.refresh
+    update_refs = ref_freshness_policy_for_install(ctx).requires_remote
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: re-resolving all refs")
     logger = ctx.logger
