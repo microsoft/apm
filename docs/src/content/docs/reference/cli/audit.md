@@ -16,7 +16,7 @@ apm audit [PACKAGE] [OPTIONS]
 `apm audit` is the explicit security and integrity tool. It runs in two modes:
 
 - **Content scan mode** (default). Scans deployed prompt, instruction, skill, and rules files for hidden Unicode that can embed invisible instructions in agent context, and replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate findings with `--strip` or scan an arbitrary file with `--file`.
-- **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
+- **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. When `apm_modules/` is absent but `apm.lock.yaml` is present, CI mode self-hydrates a lock-pinned scratch install for `config-consistency` and drift without mutating the checkout. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
 Both modes also enforce the lockfile's canonical deployment ownership; see
 [Deployment-owner integrity](#deployment-owner-integrity).
@@ -189,7 +189,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 
 ### CI checks (`--ci`)
 
-`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity (Unicode plus per-file SHA-256 hash drift on every deployed file, including local `.apm/` content via the synthesized self-entry), and an advisory `includes` consent check. Drift detection runs alongside and contributes to the exit code unless `--no-drift` is set. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
+`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity (Unicode plus per-file SHA-256 hash drift on every deployed file, including local `.apm/` content via the synthesized self-entry), and an advisory `includes` consent check. Drift detection runs alongside and contributes to the exit code unless `--no-drift` is set. On a cold cache, CI mode self-hydrates a scratch install from the lockfile pins instead of reporting a green skip, so setup-only CI can still catch stale committed deployed files without rewriting the checkout. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so the full-install CI pattern remains the right default there. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
 
 ### Mutual exclusions
 

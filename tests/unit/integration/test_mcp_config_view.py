@@ -355,6 +355,34 @@ def test_manifestless_virtual_package_is_skipped(tmp_path: Path) -> None:
     assert view.problems == ()
 
 
+def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
+    tmp_path: Path,
+) -> None:
+    """`apm audit --ci` without a prior `apm install` leaves apm_modules empty.
+
+    A setup-only CI job installs the CLI then audits, so the package directory
+    never exists on disk and the on-disk shape cannot be probed. The frozen
+    lockfile classification (`claude_skill`) must waive the missing manifest
+    rather than hard-fail, matching the drift check's cold-cache tolerance.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="angular/skills",
+        virtual_path="angular-developer",
+        is_virtual=True,
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not skill_dir.exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
 def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) -> None:
     """A Claude-skill filesystem shape does not waive non-virtual manifests."""
     root = _write_manifest(tmp_path, name="root")
@@ -389,6 +417,29 @@ def test_manifestless_virtual_package_without_skill_shape_records_problem(
         depth=1,
     )
     locked.to_dependency_ref().get_install_path(modules_root).mkdir(parents=True)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_virtual_package_with_wrong_lock_type_records_problem(
+    tmp_path: Path,
+) -> None:
+    """The manifestless virtual-skill waiver requires matching lock metadata."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="angular/skills",
+        virtual_path="angular-developer",
+        is_virtual=True,
+        package_type="apm_package",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Angular Developer\n", encoding="utf-8")
 
     view = _derive(root, _lock(locked), modules_root)
 

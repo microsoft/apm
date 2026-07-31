@@ -351,6 +351,23 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
     echo "[x] Audit replay must preserve locked skill subset intent"
     violations=$((violations + 1))
 fi
+audit_ci_gate_body=$(awk '
+    /^def _audit_ci_gate\(/ {flag=1}
+    flag && /^def / && !/^def _audit_ci_gate\(/ {exit}
+    flag {print}
+' src/apm_cli/commands/audit.py)
+config_consistency_body=$(awk '
+    /^def _check_config_consistency\(/ {flag=1}
+    flag && /^def / && !/^def _check_config_consistency\(/ {exit}
+    flag {print}
+' src/apm_cli/policy/ci_checks.py)
+if ! grep -q '^def prepare_ci_audit_replay(' src/apm_cli/install/audit_replay.py \
+    || ! printf '%s\n' "$audit_ci_gate_body" | grep -q 'prepare_ci_audit_replay' \
+    || printf '%s\n' "$audit_ci_gate_body" | grep -q 'run_replay(' \
+    || ! printf '%s\n' "$config_consistency_body" | grep -q 'prepared_replay\.modules_root'; then
+    echo "[x] CI audit scratch materialization must route through install/audit_replay.py"
+    violations=$((violations + 1))
+fi
 local_bundle_marker_hits=$(
     grep -rEn --include='*.py' \
         "_LOCAL_BUNDLE_OWNER|active_owner.*[\"']local-bundle[\"']|[\"']local-bundle[\"'].*active_owner|owners.*[\"']local-bundle[\"']" \

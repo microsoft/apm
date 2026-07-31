@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
@@ -140,6 +141,39 @@ class TestCIExitCodes:
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
             result = runner.invoke(audit, ["--ci", "--no-drift"])
         assert result.exit_code == 1
+
+    def test_cold_cache_manifest_lock_mismatch_fails_without_writes(self, runner, tmp_path):
+        _setup_failing_project(tmp_path)
+        shutil.rmtree(tmp_path / "apm_modules")
+        before = {
+            "manifest": (tmp_path / "apm.yml").read_bytes(),
+            "lockfile": (tmp_path / "apm.lock.yaml").read_bytes(),
+            "deployed": (tmp_path / ".github" / "prompts" / "test.md").read_bytes(),
+        }
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-policy", "-f", "json"])
+        assert result.exit_code == 1
+        assert (tmp_path / "apm.yml").read_bytes() == before["manifest"]
+        assert (tmp_path / "apm.lock.yaml").read_bytes() == before["lockfile"]
+        assert (tmp_path / ".github" / "prompts" / "test.md").read_bytes() == before["deployed"]
+        assert not (tmp_path / "apm_modules").exists()
+
+    def test_missing_lockfile_fails_without_creating_artifacts(self, runner, tmp_path):
+        apm_yml = textwrap.dedent("""\
+            name: test-project
+            version: '1.0.0'
+            dependencies:
+              apm:
+                - owner/repo#v1.0.0
+        """)
+        (tmp_path / "apm.yml").write_text(apm_yml, encoding="utf-8")
+        before_manifest = (tmp_path / "apm.yml").read_bytes()
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-policy", "-f", "json"])
+        assert result.exit_code == 1
+        assert (tmp_path / "apm.yml").read_bytes() == before_manifest
+        assert not (tmp_path / "apm.lock.yaml").exists()
+        assert not (tmp_path / "apm_modules").exists()
 
 
 class TestCIOutputFormats:
