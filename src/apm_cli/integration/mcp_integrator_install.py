@@ -62,7 +62,7 @@ def _install_registry_group(
     console: Any,
     logger: Any,
     managed_target_servers: dict[str, set[str]] | None,
-    fail_on_write_error: bool,
+    fail_on_write_error: bool = False,
 ) -> int:
     """Process one group of registry deps through a single ``MCPServerOperations`` instance.
 
@@ -737,7 +737,7 @@ def _install_self_defined_deps(
     console,
     logger,
     managed_target_servers: dict[str, set[str]] | None,
-    fail_on_write_error: bool,
+    fail_on_write_error: bool = False,
 ) -> int:
     """Install self-defined (``registry: false``) MCP deps for all target runtimes.
 
