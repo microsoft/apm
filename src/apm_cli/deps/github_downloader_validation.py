@@ -541,6 +541,7 @@ def _ref_exists_via_ls_remote(
                 org=org,
                 port=dep_ref.port,
                 path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
                 unauth_first=True,
             )
             if is_sha:

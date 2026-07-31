@@ -480,6 +480,33 @@ class TestRound3NonAdoTokenNotInProcessArgv:
         assert _git_config_value(attempts[0].env, "credential.helper") == ""
 
 
+def test_public_ref_probe_threads_host_type_to_fallback() -> None:
+    """Virtual ref validation keeps the manifest host hint in the auth owner."""
+    downloader = GitHubPackageDownloader()
+    dep_ref = _make_subdir_dep(host="github.com", ref="main")
+    dep_ref.host_type = "gitlab"
+    auth_resolver = MagicMock()
+    auth_resolver.uses_public_github_anonymous_first.return_value = True
+    winning = gdv.AttemptSpec(
+        "anonymous GitHub HTTPS",
+        "https://github.com/owner/repo.git",
+        {},
+    )
+    auth_resolver.try_with_fallback.return_value = (
+        f"{'a' * 40}\trefs/heads/main\n",
+        winning,
+    )
+    downloader.auth_resolver = auth_resolver
+
+    assert gdv._ref_exists_via_ls_remote(
+        downloader,
+        dep_ref,
+        "main",
+        lambda _message: None,
+    ) == (True, winning)
+    assert auth_resolver.try_with_fallback.call_args.kwargs["host_type"] == "gitlab"
+
+
 class TestRound3SafeRmtreeNotRobustRmtreeDirect:
     """Round-3: cleanup MUST go through safe_rmtree (containment gate)."""
 

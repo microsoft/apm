@@ -318,6 +318,8 @@ class TestListRemoteRefs:
         )
         host.auth_resolver.is_public_github_auth_failure.return_value = False
         host._build_repo_url.return_value = "https://github.com/owner/repo.git"
+        dep = _dep(host="github.com")
+        dep.host_type = "gitlab"
         with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
             MockGit.return_value.ls_remote.side_effect = GitCommandError(
                 "ls-remote",
@@ -329,9 +331,10 @@ class TestListRemoteRefs:
                 RuntimeError,
                 match="network error, not an auth failure",
             ):
-                resolver.list_remote_refs(_dep(host="github.com"))
+                resolver.list_remote_refs(dep)
 
         host.auth_resolver.build_error_context.assert_not_called()
+        assert host.auth_resolver.try_with_fallback.call_args.kwargs["host_type"] == "gitlab"
 
     def test_ado_basic_with_token_uses_bearer_fallback(self):
         host = _ctx(token="ado_pat", auth_scheme="basic")
