@@ -154,11 +154,35 @@ class CloneEngine:
         is_github = is_github_hostname(dep_host) if dep_host else True
         is_generic = not is_ado and not is_github
 
-        dep_token = host._resolve_dep_token(dep_ref)
-        has_token = dep_token is not None
+        anonymous_plan = self._transport_selector.select(
+            dep_ref=dep_ref,
+            cli_pref=self._protocol_pref,
+            allow_fallback=self._allow_fallback,
+            has_token=False,
+        )
+        public_github_https_first = bool(
+            dep_ref is not None
+            and not dep_ref.is_insecure
+            and anonymous_plan.attempts
+            and anonymous_plan.attempts[0].scheme == "https"
+            and host.auth_resolver.uses_public_github_anonymous_first(
+                dep_host or default_host(),
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            is True
+        )
 
-        dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
-        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
+        if public_github_https_first:
+            dep_token = None
+            has_token = False
+            dep_auth_ctx = None
+            dep_auth_scheme = "basic"
+        else:
+            dep_token = host._resolve_dep_token(dep_ref)
+            has_token = dep_token is not None
+            dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
+            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
         _debug(
             f"_clone_with_fallback: repo={repo_url_base}, is_ado={is_ado}, "
@@ -180,11 +204,15 @@ class CloneEngine:
                 )
             return host._build_noninteractive_git_env()
 
-        plan: TransportPlan = self._transport_selector.select(
-            dep_ref=dep_ref,
-            cli_pref=self._protocol_pref,
-            allow_fallback=self._allow_fallback,
-            has_token=has_token,
+        plan: TransportPlan = (
+            anonymous_plan
+            if public_github_https_first
+            else self._transport_selector.select(
+                dep_ref=dep_ref,
+                cli_pref=self._protocol_pref,
+                allow_fallback=self._allow_fallback,
+                has_token=has_token,
+            )
         )
         _debug(
             "transport plan: "
@@ -229,24 +257,67 @@ class CloneEngine:
                     symbol="warning",
                 )
 
+        def _run_public_github_attempt() -> tuple[str, bool]:
+            if dep_ref is None:
+                raise RuntimeError("Public GitHub attempt requires a dependency reference")
+            winning_url = ""
+            winning_token = False
+
+            def _clone_public_github(
+                token: str | None,
+                git_env: dict[str, str],
+            ) -> None:
+                nonlocal winning_token, winning_url
+                winning_token = token is not None
+                winning_url = host._build_repo_url(
+                    repo_url_base,
+                    use_ssh=False,
+                    dep_ref=dep_ref,
+                    token=token or "",
+                    auth_scheme="basic",
+                )
+                clone_action(winning_url, git_env, target_path)
+
+            org = repo_url_base.split("/", 1)[0] if "/" in repo_url_base else None
+            host.auth_resolver.try_with_fallback(
+                dep_host or default_host(),
+                _clone_public_github,
+                org=org,
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
+                unauth_first=True,
+                verbose_callback=verbose_callback,
+            )
+            return winning_url, winning_token
+
         prev_label: str | None = None
         prev_scheme: str | None = None
+        authenticated_fallback_used = False
         for attempt in plan.attempts:
             if attempt.use_token and not has_token:
                 continue
 
             use_ssh = attempt.scheme == "ssh"
-            try:
-                url = host._build_repo_url(
-                    repo_url_base,
-                    use_ssh=use_ssh,
-                    dep_ref=dep_ref,
-                    token=dep_token if attempt.use_token else "",
-                    auth_scheme=dep_auth_scheme if attempt.use_token else "basic",
-                )
-            except Exception as e:
-                last_error = e
-                continue
+            lazy_public_attempt = (
+                public_github_https_first
+                and attempt.scheme == "https"
+                and not attempt.use_token
+                and dep_ref is not None
+            )
+            url = ""
+            if not lazy_public_attempt:
+                try:
+                    url = host._build_repo_url(
+                        repo_url_base,
+                        use_ssh=use_ssh,
+                        dep_ref=dep_ref,
+                        token=dep_token if attempt.use_token else "",
+                        auth_scheme=dep_auth_scheme if attempt.use_token else "basic",
+                    )
+                except Exception as e:
+                    last_error = e
+                    continue
 
             if not plan.strict and prev_label and prev_scheme and prev_scheme != attempt.scheme:
                 _rich_warning(
@@ -257,9 +328,16 @@ class CloneEngine:
 
             try:
                 _debug(f"Attempting clone with {attempt.label} (URL sanitized)")
-                clone_action(url, _env_for(attempt), target_path)
+                if lazy_public_attempt:
+                    url, authenticated_fallback_used = _run_public_github_attempt()
+                else:
+                    clone_action(url, _env_for(attempt), target_path)
                 if verbose_callback:
-                    display = host._sanitize_git_error(url) if attempt.use_token else url
+                    display = (
+                        host._sanitize_git_error(url)
+                        if attempt.use_token or authenticated_fallback_used
+                        else url
+                    )
                     verbose_callback(f"Cloned from: {display}")
                 return
             except (GitCommandError, subprocess.CalledProcessError) as e:
@@ -329,13 +407,18 @@ class CloneEngine:
             is_ado=bool(is_ado),
             is_generic=is_generic,
             has_ado_token=host.has_ado_token,
-            has_token=has_token,
+            has_token=has_token or authenticated_fallback_used,
             auth_resolver=host.auth_resolver,
             configured_github_host=os.environ.get("GITHUB_HOST", ""),
             default_host_fn=default_host,
             last_error=last_error,
             last_attempt_scheme=prev_scheme,
             sanitize_git_error=host._sanitize_git_error,
+            public_github_non_auth_failure=bool(
+                public_github_https_first
+                and last_error is not None
+                and not host.auth_resolver.is_public_github_auth_failure(last_error)
+            ),
         )
 
         raise RuntimeError(error_msg)

@@ -69,7 +69,12 @@ def _run_probe(
         patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=False),
     ):
         if probe_path == "primary":
-            dep_ref = SimpleNamespace(host="github.com", port=None, repo_url="owner/repo")
+            dep_ref = SimpleNamespace(
+                host="github.com",
+                port=None,
+                repo_url="owner/repo",
+                host_type=None,
+            )
             result = validation._validate_github_package(
                 dep_ref,
                 resolver,

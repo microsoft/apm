@@ -62,6 +62,13 @@ class GitAuthEnvBuilder:
         else:
             env["GIT_SSH_COMMAND"] = f"ssh {ssh_timeout}"
 
+        env["GIT_CONFIG_GLOBAL"] = self.isolated_global_config_path()
+
+        return env
+
+    @staticmethod
+    def isolated_global_config_path() -> str:
+        """Return a cross-platform empty Git config path."""
         if sys.platform == "win32":
             import tempfile
 
@@ -69,13 +76,10 @@ class GitAuthEnvBuilder:
 
             temp_base = get_apm_temp_dir() or tempfile.gettempdir()
             empty_cfg = os.path.join(temp_base, ".apm_empty_gitconfig")
-            with open(empty_cfg, "w") as f:  # noqa: F841
+            with open(empty_cfg, "w", encoding="ascii"):
                 pass
-            env["GIT_CONFIG_GLOBAL"] = empty_cfg
-        else:
-            env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-
-        return env
+            return empty_cfg
+        return os.devnull
 
     # -- noninteractive (fallback) env ----------------------------------
 

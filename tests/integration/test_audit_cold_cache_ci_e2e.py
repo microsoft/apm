@@ -134,29 +134,14 @@ def _seed_consumer(
     dependency_repo = repositories.create("remote-dependency", source_tree=dependency.root)
     dependency_commit = repositories.commit(dependency_repo, message="seed dependency")
     remote_url = "https://github.com/test/remote-dependency.git"
-    git_sources = (
-        "git@github.com:test/remote-dependency.git",
+    environment = repositories.url_rewrite_subprocess_env(
+        dependency_repo,
         remote_url,
     )
-    user_git_environment = dict(environment)
-    user_git_environment.pop("GIT_CONFIG_GLOBAL", None)
-    for git_environment in (environment, user_git_environment):
-        for source in git_sources:
-            subprocess.run(
-                (
-                    "git",
-                    "config",
-                    "--global",
-                    "--add",
-                    f"url.{dependency_repo.file_url}.insteadOf",
-                    source,
-                ),
-                env=git_environment,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            )
+    rewrite_index = int(environment["GIT_CONFIG_COUNT"])
+    environment["GIT_CONFIG_COUNT"] = str(rewrite_index + 1)
+    environment[f"GIT_CONFIG_KEY_{rewrite_index}"] = f"url.{dependency_repo.file_url}/.insteadOf"
+    environment[f"GIT_CONFIG_VALUE_{rewrite_index}"] = "git@github.com:test/remote-dependency.git"
 
     consumer = packages.create(
         "consumer",

@@ -42,6 +42,7 @@ from ..utils.github_host import (
     is_ado_auth_failure_signal,
     is_github_hostname,
 )
+from .github_rate_limit import raise_for_github_throttle
 
 if TYPE_CHECKING:
     import requests
@@ -139,21 +140,47 @@ class GitReferenceResolver:
             return []
 
         is_ado = dep_ref.is_azure_devops()
-        dep_token = host._resolve_dep_token(dep_ref)
-        dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
-        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
-
         repo_url_base = dep_ref.repo_url
-        transport_plan = host._transport_selector.select(
+        anonymous_plan = host._transport_selector.select(
             dep_ref=dep_ref,
             cli_pref=host._protocol_pref,
             allow_fallback=False,
-            has_token=bool(dep_token),
+            has_token=False,
         )
+        dep_host = dep_ref.host or default_host()
+        public_github_https_first = bool(
+            not dep_ref.is_insecure
+            and anonymous_plan.attempts
+            and anonymous_plan.attempts[0].scheme == "https"
+            and host.auth_resolver.uses_public_github_anonymous_first(
+                dep_host,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            is True
+        )
+        if public_github_https_first:
+            dep_token = None
+            dep_auth_ctx = None
+            dep_auth_scheme = "basic"
+            transport_plan = anonymous_plan
+        else:
+            dep_token = host._resolve_dep_token(dep_ref)
+            dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
+            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
+            transport_plan = host._transport_selector.select(
+                dep_ref=dep_ref,
+                cli_pref=host._protocol_pref,
+                allow_fallback=False,
+                has_token=bool(dep_token),
+            )
         transport_attempt = transport_plan.attempts[0]
         use_ssh = transport_attempt.scheme == "ssh"
 
-        if use_ssh:
+        if public_github_https_first:
+            ls_env: dict[str, str] = {}
+            remote_url = ""
+        elif use_ssh:
             ls_env = host._build_noninteractive_git_env()
             from ..core.auth import AuthResolver
 
@@ -170,13 +197,14 @@ class GitReferenceResolver:
                 suppress_credential_helpers=bool(getattr(dep_ref, "is_insecure", False)),
             )
 
-        remote_url = host._build_repo_url(
-            repo_url_base,
-            use_ssh=use_ssh,
-            dep_ref=dep_ref,
-            token=None if use_ssh else (dep_token if transport_attempt.use_token else None),
-            auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
-        )
+        if not public_github_https_first:
+            remote_url = host._build_repo_url(
+                repo_url_base,
+                use_ssh=use_ssh,
+                dep_ref=dep_ref,
+                token=None if use_ssh else (dep_token if transport_attempt.use_token else None),
+                auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
+            )
 
         # Route through the github_downloader module so that test patches
         # of ``apm_cli.deps.github_downloader.git.cmd.Git`` intercept here.
@@ -222,7 +250,36 @@ class GitReferenceResolver:
             and dep_token is not None
         )
 
-        if ado_eligible:
+        if public_github_https_first:
+
+            def _public_github_op(
+                token: str | None,
+                git_env: dict[str, str],
+            ) -> tuple[str, str]:
+                public_url = host._build_repo_url(
+                    repo_url_base,
+                    use_ssh=False,
+                    dep_ref=dep_ref,
+                    token=token or "",
+                    auth_scheme="basic",
+                )
+                return ("ok", g.ls_remote(*ls_args, public_url, env=git_env))
+
+            org = repo_url_base.split("/", 1)[0] if "/" in repo_url_base else None
+            try:
+                outcome = host.auth_resolver.try_with_fallback(
+                    dep_host,
+                    _public_github_op,
+                    org=org,
+                    port=dep_ref.port,
+                    path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
+                    unauth_first=True,
+                )
+            except (GitCommandError, OSError) as exc:
+                outcome = ("err", exc)
+            ado_bearer_also_failed = False
+        elif ado_eligible:
             fb = host.auth_resolver.execute_with_bearer_fallback(
                 dep_ref, _primary_op, _bearer_op, _is_auth_failure
             )
@@ -243,7 +300,14 @@ class GitReferenceResolver:
 
         ref_kind = "remote refs" if include_heads else "remote tags"
         error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
-        if is_generic:
+        if public_github_https_first and not host.auth_resolver.is_public_github_auth_failure(e):
+            error_msg += (
+                f"Could not connect to {dep_host or default_host()} "
+                "(network error, not an auth failure). "
+                "Check your internet connection and proxy settings. "
+                "Run with --verbose for details."
+            )
+        elif is_generic:
             if dep_host:
                 host_info = host.auth_resolver.classify_host(dep_host, port=dep_ref.port)
                 host_name = host_info.display_name
@@ -308,25 +372,50 @@ class GitReferenceResolver:
         parts = dep_ref.repo_url.split("/")
         if parts:
             org = parts[0]
-        try:
-            file_ctx = host.auth_resolver.resolve(target_host, org, port=dep_ref.port)
-            token = file_ctx.token
-        except Exception:
-            token = None
 
-        headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
-        if token:
-            headers["Authorization"] = f"token {token}"
-
-        try:
-            # L2/L3 own fallback, so this optional metadata tier gets one total attempt.
-            response = host._resilient_get(api_url, headers=headers, timeout=10, max_retries=1)
+        def _request(token: str | None, _git_env: dict[str, str]) -> str | None:
+            headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
+            if token:
+                headers["Authorization"] = f"token {token}"
+            response = host._resilient_get(
+                api_url,
+                headers=headers,
+                timeout=10,
+                max_retries=1,
+            )
             if response.status_code != 200:
-                return None
+                raise_for_github_throttle(response, target_host)
+                error = RuntimeError(f"GitHub commits API returned HTTP {response.status_code}")
+                error.status_code = response.status_code
+                raise error
             body = (response.text or "").strip()
-            if re.match(r"^[a-f0-9]{40}$", body.lower()):
-                return body.lower()
-            return None
+            return body.lower() if re.match(r"^[a-f0-9]{40}$", body.lower()) else None
+
+        try:
+            if (
+                host.auth_resolver.uses_public_github_anonymous_first(
+                    target_host,
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+                is True
+            ):
+                return host.auth_resolver.try_with_fallback(
+                    target_host,
+                    _request,
+                    org=org,
+                    port=dep_ref.port,
+                    path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
+                    unauth_first=True,
+                )
+            file_ctx = host.auth_resolver.resolve(
+                target_host,
+                org,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            return _request(file_ctx.token, file_ctx.git_env)
         except Exception:
             return None
 
