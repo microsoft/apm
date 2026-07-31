@@ -761,6 +761,15 @@ if ! grep -q '^_LEGACY_USER_TARGET_PREFIXES = {' src/apm_cli/core/deployment_led
     violations=$((violations + 1))
 fi
 
+deployment_state_output=$(python3 scripts/check_deployment_state_mutations.py \
+    src/apm_cli 2>&1)
+deployment_state_status=$?
+if [ "$deployment_state_status" -ne 0 ]; then
+    echo "[x] Deployment compatibility state must mutate only through canonical owners"
+    echo "$deployment_state_output"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC19: git-subprocess auth-header injection authority"
 # #2368: build_authorization_header_git_env / build_ado_bearer_git_env return
 # an overlay with a hardcoded GIT_CONFIG_COUNT="1". Dict-merging that overlay

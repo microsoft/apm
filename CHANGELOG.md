@@ -49,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale. The matching `openapm-v0.1.md` frozen-install requirement now covers
   MCP state and all durable writes. (by @edenfunf, #2390; fixes #2373)
 
+- Repeated `apm install` runs with unchanged self-defined MCP dependencies and
+  explicit target mappings now preserve `generated_at`, deployment ownership,
+  and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of
+  rewriting it. (#2306)
+- Repeated `apm install` runs with unchanged MCP dependencies no longer create
+  spurious lockfile diffs. `apm.lock.yaml` stays byte-identical, preserving
+  `generated_at`, deployment records, and `mcp_target_servers`. (#2306)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

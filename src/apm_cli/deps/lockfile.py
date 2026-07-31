@@ -89,9 +89,23 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         if not isinstance(dependency, dict):
             raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
     for target, servers in (data.get("mcp_target_servers") or {}).items():
-        if not isinstance(target, str) or not isinstance(servers, list):
+        if not isinstance(target, str) or not target or not isinstance(servers, list):
             raise LockfileFormatError(
                 "Lockfile mcp_target_servers values must be string-to-list mappings"
+            )
+        if not all(isinstance(server, str) and bool(server) for server in servers):
+            raise LockfileFormatError("Lockfile mcp_target_servers entries must be strings")
+    for server, provenance in (data.get("mcp_config_provenance") or {}).items():
+        if not isinstance(server, str) or not (
+            (isinstance(provenance, str) and bool(provenance))
+            or (
+                isinstance(provenance, list)
+                and bool(provenance)
+                and all(isinstance(owner, str) and bool(owner) for owner in provenance)
+            )
+        ):
+            raise LockfileFormatError(
+                "Lockfile mcp_config_provenance values must be strings or string lists"
             )
     if "deployments" in data:
         from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -101,6 +115,16 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         except ValueError as exc:
             raise LockfileFormatError(str(exc)) from exc
     return data
+
+
+def _normalized_mcp_provenance(
+    provenance: dict[str, str | list[str]],
+) -> dict[str, str | list[str]]:
+    """Return deterministic MCP provenance with list-valued owners sorted."""
+    return {
+        server: sorted(owners) if isinstance(owners, list) else owners
+        for server, owners in sorted(provenance.items())
+    }
 
 
 def _normalize_lockfile_host_type(raw: Any) -> str | None:
@@ -652,7 +676,7 @@ class LockFile:
     # ``resolved_by is None`` convention). Kept OUT of ``mcp_configs`` values so
     # it never pollutes config comparisons. Consistency diagnostics use this as
     # ownership context only; provenance never exempts a lock-only server.
-    mcp_config_provenance: dict[str, str] = field(default_factory=dict)
+    mcp_config_provenance: dict[str, str | list[str]] = field(default_factory=dict)
     lsp_servers: list[str] = field(default_factory=list)
     lsp_configs: dict[str, dict] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
@@ -760,7 +784,9 @@ class LockFile:
                     for target, servers in sorted(self.mcp_target_servers.items())
                 }
             if self.mcp_config_provenance:
-                data["mcp_config_provenance"] = dict(sorted(self.mcp_config_provenance.items()))
+                data["mcp_config_provenance"] = _normalized_mcp_provenance(
+                    self.mcp_config_provenance
+                )
             if self.lsp_servers:
                 data["lsp_servers"] = sorted(self.lsp_servers)
             if self.lsp_configs:
@@ -975,7 +1001,9 @@ class LockFile:
             self.deployment_ledger.records
         ) != dict(other.deployment_ledger.records):
             return False
-        if self.mcp_config_provenance != other.mcp_config_provenance:
+        if _normalized_mcp_provenance(self.mcp_config_provenance) != _normalized_mcp_provenance(
+            other.mcp_config_provenance
+        ):
             return False
         if sorted(self.lsp_servers) != sorted(other.lsp_servers):
             return False
