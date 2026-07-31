@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.integration import hook_integrator as hook_integrator_module
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.hook_ownership import dependency_hook_source_marker
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -540,6 +541,7 @@ def test_transitive_local_hook_markers_include_anchored_parent_identity(
 
 def test_root_healing_preserves_canonical_dependency_marker_without_lock(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """First-install fallback discovery recognizes canonical dependency owners."""
     project = tmp_path / "project"
@@ -580,6 +582,20 @@ def test_root_healing_preserves_canonical_dependency_marker_without_lock(
     root_info.root_local_project_root = project
     integrator = HookIntegrator()
 
+    original_dependency_sources = hook_integrator_module.dependency_hook_sources
+    source_scans = 0
+
+    def _count_dependency_sources(project_root: Path) -> set[str]:
+        nonlocal source_scans
+        source_scans += 1
+        return original_dependency_sources(project_root)
+
+    monkeypatch.setattr(
+        hook_integrator_module,
+        "dependency_hook_sources",
+        _count_dependency_sources,
+    )
+
     integrator.integrate_hooks_for_target(
         KNOWN_TARGETS["claude"],
         dependency_info,
@@ -600,6 +616,7 @@ def test_root_healing_preserves_canonical_dependency_marker_without_lock(
         "echo shared",
         "echo shared",
     ]
+    assert source_scans == 1
 
 
 def test_unambiguous_legacy_leaf_marker_migrates_to_canonical_owner(
