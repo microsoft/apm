@@ -156,6 +156,8 @@ def test_unknown_event_warns_and_is_not_renamed(
     warning = capsys.readouterr().out
     assert "UnsupportedEvent" in warning
     assert "may not be recognized" in warning
+    assert "Rename events" in warning
+    assert "then reinstall" in warning
     target = project / ".github" / "hooks" / "native-event-kit-events.json"
     hooks = json.loads(target.read_text(encoding="utf-8"))["hooks"]
     assert list(hooks) == ["UnsupportedEvent"]

@@ -142,6 +142,7 @@ def test_native_hook_event_map_has_single_owner() -> None:
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert owner.count("_HOOK_EVENT_MAP:") == 1
+    assert "\n_HOOK_EVENT_MAP =" not in owner
     assert "from apm_cli.integration.hook_integrator import" in kiro
     assert "_HOOK_EVENT_MAP," in kiro
     assert '_KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]' in kiro

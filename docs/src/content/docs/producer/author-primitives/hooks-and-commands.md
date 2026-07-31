@@ -42,17 +42,16 @@ Each file is a JSON document keyed by lifecycle event. APM accepts the
 Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 `postToolUse`) shapes; events are renamed per target during merge.
 
-For Copilot and Claude session lifecycle events:
+### Session lifecycle event aliases
 
 | Source aliases | Copilot native key | Claude native key |
 |----------------|---------------------|-------------------|
 | `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
 
-Event names absent from this table are preserved unchanged. The existing
-diagnostic warns only when an unmapped camelCase or PascalCase name conflicts
-with the target convention. All-lowercase names such as `stop` have no
-detectable casing and pass through without a warning.
+Event names absent from this table are preserved unchanged. Only an unmapped
+camelCase or PascalCase name that conflicts with the target convention emits
+an install warning; all-lowercase names such as `stop` pass through silently.
 
 ```json
 {
