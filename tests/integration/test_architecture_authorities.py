@@ -666,6 +666,74 @@ def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
     assert "require_hashes enforcement must route through install/integrity.py" in guard
 
 
+def test_uninstall_selection_has_single_dependency_reference_owner() -> None:
+    """Manifest selection must consume the canonical dependency parser."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/models/dependency/selection.py").read_text()
+    consumer = (root / "src/apm_cli/commands/uninstall/engine.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("def select_manifest_dependency(") == 1
+    assert "dependency = parse_dependency_entry(entry)" in owner
+    assert (
+        consumer.count(
+            "selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)"
+        )
+        == 1
+    )
+    assert "for dep_entry in current_deps" not in consumer
+    assert "scripts/check_uninstall_selection_owner.py" in guard
+    assert "Uninstall selection must route through dependency/selection.py" in guard
+
+
+def test_uninstall_selection_guard_rejects_parser_bypass(tmp_path: Path) -> None:
+    """The boundary lint rejects uninstall selection outside its owner."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer_path = sandbox / "src/apm_cli/commands/uninstall/engine.py"
+    source = consumer_path.read_text(encoding="utf-8")
+    canonical_call = (
+        "        selection = select_manifest_dependency("
+        "canonical_for_match, current_deps, lockfile)\n"
+    )
+    duplicate_selection = (
+        "        for duplicate_entry in current_deps:\n"
+        "            duplicate_ref = _parse_dependency_entry(duplicate_entry)\n"
+        "            if duplicate_ref.get_identity() == canonical_for_match:\n"
+        "                break\n"
+    )
+    assert source.count(canonical_call) == 1
+    consumer_path.write_text(
+        source.replace(canonical_call, duplicate_selection + canonical_call, 1),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Uninstall selection must route through dependency/selection.py" in result.stdout
+
+
 def test_hook_file_routing_dep_targets_gate_has_static_guard() -> None:
     """Per-file hook routing must compose with dependency target filtering."""
     root = Path(__file__).parents[2]

@@ -99,7 +99,7 @@ class TestValidateUninstallPackages:
         to_remove, not_found = _validate_uninstall_packages(["org/missing"], ["org/other"], logger)
         assert to_remove == []
         assert "org/missing" in not_found
-        logger.warning.assert_called_once()
+        logger.error.assert_called_once()
 
     def test_invalid_format_no_slash_logs_error(self):
         """Package without slash is rejected with an error message and tracked in not_found."""
@@ -166,10 +166,10 @@ class TestValidateUninstallPackages:
         # mistake the path for a malformed marketplace ref.
         to_remove, not_found = _validate_uninstall_packages([win_path, rel_win], [], logger)
         assert to_remove == []
-        # Both arguments are reported "not found in apm.yml" (warning) rather
-        # than "Invalid package format" (error). The latter would leave the
-        # copilot-app integration cleanup with nothing to clean.
-        logger.error.assert_not_called()
+        # Both arguments reach the ordinary not-found path instead of the
+        # invalid package-format branch.
+        assert logger.error.call_count == 2
+        assert all("not found in apm.yml" in call.args[0] for call in logger.error.call_args_list)
         assert win_path in not_found
         assert rel_win in not_found
 
@@ -815,7 +815,7 @@ class TestValidateUninstallPackagesMarketplace:
 
         assert to_remove == []
         assert "my-plugin@official" in not_found
-        warning_msg = logger.warning.call_args[0][0]
+        warning_msg = logger.error.call_args[0][0]
         # Marketplace-specific not-found wording contains both ref and canonical
         assert "my-plugin@official" in warning_msg
         assert "acme/my-plugin" in warning_msg

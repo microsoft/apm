@@ -38,6 +38,12 @@ installed package's source tree are parent-owned content, not separate
 dependencies. Real lockfile-resolved dependencies install at their own package
 roots and remain visible regardless of graph depth.
 
+Local dependencies are shown as portable `_local/<name>` keys rather than
+machine-specific absolute paths. Copy that key directly into `apm uninstall`
+(with `-g` for user scope). If more than one declared local path has the same
+name, `apm uninstall` reports an ambiguity and changes nothing; use one exact
+path already declared in `apm.yml`.
+
 ```bash
 apm deps list [OPTIONS]
 ```
@@ -150,6 +156,7 @@ Sample output:
  Package             Version  Source  Prompts  Instructions  Agents  Skills
  compliance-rules    1.0.0    github  2        1             -       1
  design-guidelines   1.0.0    github  -        1             1       -
+ _local/review-kit   0.4.0    local   1        2             -       -
 ```
 
 Show only insecure (HTTP-locked) dependencies and their origin:

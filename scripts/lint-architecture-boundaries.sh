@@ -321,6 +321,31 @@ if ! grep -A12 'if source == "local"' src/apm_cli/models/dependency/identity.py 
     echo "[x] Local identity must use its anchor and persist declaring-parent provenance"
     violations=$((violations + 1))
 fi
+uninstall_selection_owner="src/apm_cli/models/dependency/selection.py"
+uninstall_selection_consumer="src/apm_cli/commands/uninstall/engine.py"
+uninstall_selection_owner_count=$(grep -Ec \
+    '^def select_manifest_dependency\(' "$uninstall_selection_owner" || true)
+uninstall_selection_consumer_count=$(grep -Ec \
+    '^[[:space:]]*selection = select_manifest_dependency\(' \
+    "$uninstall_selection_consumer" || true)
+uninstall_selection_parallel_hits=$(grep -En \
+    'for dep_entry in current_deps|dep_ref\.get_identity\(\) == pkg_identity' \
+    "$uninstall_selection_consumer" || true)
+uninstall_selection_ast_output=$(python3 scripts/check_uninstall_selection_owner.py 2>&1)
+uninstall_selection_ast_status=$?
+if [ "$uninstall_selection_owner_count" -ne 1 ] \
+    || [ "$uninstall_selection_consumer_count" -ne 1 ] \
+    || ! grep -q 'dependency = parse_dependency_entry(entry)' \
+        "$uninstall_selection_owner" \
+    || [ -n "$uninstall_selection_parallel_hits" ] \
+    || [ "$uninstall_selection_ast_status" -ne 0 ]; then
+    echo "[x] Uninstall selection must route through dependency/selection.py"
+    [ -n "$uninstall_selection_parallel_hits" ] \
+        && echo "$uninstall_selection_parallel_hits"
+    [ "$uninstall_selection_ast_status" -ne 0 ] \
+        && echo "$uninstall_selection_ast_output"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "MCP commands must pass the resolved URL into RegistryIntegration" \
     'RegistryIntegration\(\)' \

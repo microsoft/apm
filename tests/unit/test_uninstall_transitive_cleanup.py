@@ -21,13 +21,20 @@ from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency import DependencyReference
 
 
-def _write_apm_yml(path: Path, deps: list[str]):
+def _write_apm_yml(
+    path: Path,
+    deps: list[str],
+    *,
+    dev_deps: list[str] | None = None,
+):
     """Write a minimal apm.yml with given APM dependencies."""
     data = {
         "name": "test-project",
         "version": "1.0.0",
         "dependencies": {"apm": deps},
     }
+    if dev_deps is not None:
+        data["devDependencies"] = {"apm": dev_deps}
     path.write_text(yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
 
 
@@ -531,6 +538,58 @@ class TestUninstallTransitiveDependencyCleanup:
                 os.chdir(
                     os.path.dirname(os.path.abspath(__file__))
                 )  # restore CWD before TemporaryDirectory cleanup
+
+    def test_uninstall_keeps_transitive_dep_reached_by_surviving_dev_dependency(self):
+        """A surviving dev dependency seeds the same reachability walk as prod."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                root = Path(tmp_dir)
+                _write_apm_yml(
+                    root / "apm.yml",
+                    ["acme/pkg-a"],
+                    dev_deps=["acme/pkg-c"],
+                )
+                _make_apm_modules_dir(root, "acme/pkg-a")
+                _make_apm_modules_dir(
+                    root,
+                    "acme/pkg-c",
+                    deps=["acme/shared-lib"],
+                )
+                _make_apm_modules_dir(root, "acme/shared-lib")
+                _write_lockfile(
+                    root / "apm.lock.yaml",
+                    [
+                        LockedDependency(
+                            repo_url="acme/pkg-a",
+                            depth=1,
+                            resolved_commit="aaa",
+                        ),
+                        LockedDependency(
+                            repo_url="acme/pkg-c",
+                            depth=1,
+                            resolved_commit="ccc",
+                            is_dev=True,
+                        ),
+                        LockedDependency(
+                            repo_url="acme/shared-lib",
+                            depth=2,
+                            resolved_by="acme/pkg-a",
+                            resolved_commit="sss",
+                        ),
+                    ],
+                )
+
+                result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
+
+                assert result.exit_code == 0, result.output
+                assert (root / "apm_modules/acme/shared-lib").is_dir()
+                updated_lock = LockFile.read(root / "apm.lock.yaml")
+                assert updated_lock is not None
+                assert updated_lock.has_dependency("acme/shared-lib")
+                assert updated_lock.get_dependency("acme/shared-lib").resolved_by == "acme/pkg-c"
+            finally:
+                os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     def test_uninstall_preserves_candidates_when_remote_install_path_escapes(self):
         """Fail-closed: a remote child dep whose real install location is a

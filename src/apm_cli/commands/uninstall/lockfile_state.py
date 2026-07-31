@@ -11,6 +11,7 @@ def reconcile_uninstall_deployment_state(
     deploy_root: Path,
     all_deployed_files: set[str],
     surviving_deployed_files: dict[str, set[str]],
+    fully_refreshed_dependency_keys: set[str] | None = None,
 ) -> bool:
     """Reconcile survivor ownership and hashes without persisting."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -62,9 +63,22 @@ def reconcile_uninstall_deployment_state(
             authoritative_targets=False,
         ),
     )
-    if reconciled.changed:
+    changed = reconciled.changed
+    if changed:
         DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
-    return reconciled.changed
+    for dep_key in sorted(fully_refreshed_dependency_keys or set()):
+        if dep_key not in lockfile.dependencies:
+            continue
+        deployed_files = sorted(surviving_deployed_files.get(dep_key, set()))
+        hashes = compute_deployed_hashes(deployed_files, deploy_root)
+        DeploymentLedgerCodec.replace_legacy_owner(
+            lockfile,
+            dep_key,
+            deployed_files,
+            hashes,
+        )
+        changed = True
+    return changed
 
 
 def lockfile_has_persisted_state(lockfile) -> bool:

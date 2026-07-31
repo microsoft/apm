@@ -3,7 +3,7 @@
 import re
 import urllib.parse
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
@@ -1895,7 +1895,7 @@ class DependencyReference(ProviderCoordinateMixin):
         # --- Local path detection (must run before URL/host parsing) ---
         if cls.is_local_path(dependency_str):
             local = dependency_str.strip()
-            pkg_name = Path(local).name
+            pkg_name = (PureWindowsPath(local) if "\\" in local else Path(local)).name
             if not pkg_name or pkg_name in (".", ".."):
                 raise ValueError(
                     f"Local path '{local}' does not resolve to a named directory. "
