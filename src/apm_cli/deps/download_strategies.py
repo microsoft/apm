@@ -802,6 +802,7 @@ class DownloadDelegate:
                 org=dep_ref.repo_url.split("/", 1)[0],
                 port=dep_ref.port,
                 path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
                 unauth_first=True,
             )
 
@@ -1062,6 +1063,7 @@ class DownloadDelegate:
                 org=owner,
                 port=dep_ref.port,
                 path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
                 unauth_first=True,
                 verbose_callback=verbose_callback,
             )

@@ -1185,6 +1185,7 @@ class GitHubPackageDownloader:
                     org=org,
                     port=dep_ref.port,
                     path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
                     unauth_first=True,
                 )
                 checkout_result = subprocess.run(

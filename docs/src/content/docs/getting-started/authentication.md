@@ -12,7 +12,7 @@ Public `github.com` packages need no token configuration. APM tries HTTPS reposi
 
 The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
 
-APM resolves tokens per `(host, port, org)` pair. For private `github.com` fallback and other hosts, it walks a **host-class-specific** chain until it finds a token:
+APM resolves ordinary tokens per `(host, port, org)` scope. When a private `github.com` fallback asks the credential helper for a repository path, that path also scopes the cache entry. APM then walks a **host-class-specific** chain until it finds a token:
 
 1. **GitHub-class hosts** (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`): **Per-org env var** `GITHUB_APM_PAT_{ORG}` (when an org slug applies), then **global** `GITHUB_APM_PAT` -> `GITHUB_TOKEN` -> `GH_TOKEN`, then **GitHub CLI active account** (`gh auth token --hostname <host>`, silently skipped if `gh` is not installed or not logged in for the host), then host-specific **git credential helper**.
 2. **GitLab-class hosts** (`gitlab.com`, or FQDNs listed via `GITLAB_HOST` / `APM_GITLAB_HOSTS`): **only** `GITLAB_APM_PAT` -> `GITLAB_TOKEN`, then host-specific **git credential helper**. GitHub token env vars are **not** used for GitLab (including `GITHUB_APM_PAT`, `GITHUB_TOKEN`, and `GH_TOKEN`, and `GITHUB_APM_PAT_{ORG}` for group/namespace paths).
@@ -21,7 +21,7 @@ APM resolves tokens per `(host, port, org)` pair. For private `github.com` fallb
 Azure DevOps uses its own chain (`ADO_APM_PAT` -> Azure CLI bearer). See [Azure DevOps](#azure-devops).
 If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an anonymous `github.com` attempt, APM also disables credential helpers and global/system Git config while preserving non-auth process-scoped Git settings such as CA paths, URL rewrites, and `credential.interactive=never`.
 
-Results are cached per-process for each `(host, port, org)` key, so validation and later fetch phases reuse one private-repository fallback instead of prompting repeatedly. All token-bearing requests use HTTPS.
+Results are cached per-process. Validation and later fetch phases for the same private repository reuse one path-scoped fallback instead of prompting repeatedly, while another repository can resolve its own credential. All token-bearing requests use HTTPS.
 
 ## Token lookup
 ### GitHub-class hosts (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`)

@@ -344,6 +344,7 @@ def _validate_virtual_package(
         org,
         port=dep_ref.port,
         host_type=dep_ref.host_type,
+        path=dep_ref.repo_url,
     )
     if not result and verbose_log and (public_github is not True or auth_was_resolved):
         try:
@@ -727,6 +728,7 @@ def _validate_github_package(
             # DependencyReference invariant); forwarded as path= so GCM
             # multi-account users get per-URL credential matching.
             path=dep_ref.repo_url,
+            host_type=dep_ref.host_type,
             unauth_first=True,
             verbose_callback=verbose_log,
         )

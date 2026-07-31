@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 from urllib.parse import urlparse
 
 import pytest
@@ -181,6 +181,7 @@ def test_public_github_auth_status_resolves_once_then_retries(status_code: int) 
         "github.com",
         "acme",
         port=None,
+        host_type=None,
         path="acme/private",
     )
 
@@ -417,6 +418,76 @@ def test_private_github_clone_resolves_one_path_scoped_fallback() -> None:
         port=None,
         path="acme/private",
     )
+
+
+def test_path_scoped_resolution_caches_per_repository() -> None:
+    """The same repo reuses auth while another repo gets its own credential."""
+    manager = MagicMock(spec=GitHubTokenManager)
+    manager.get_token_for_purpose.return_value = None
+    manager.resolve_credential_from_gh_cli.return_value = None
+    manager.resolve_credential_from_git.side_effect = lambda _host, *, port, path: (
+        f"token-for-{path}"
+    )
+    resolver = AuthResolver(token_manager=manager)
+
+    first = resolver.resolve(
+        "github.com",
+        "acme",
+        path="acme/private-a",
+    )
+    repeated = resolver.resolve(
+        "github.com",
+        "acme",
+        path="acme/private-a",
+    )
+    second = resolver.resolve(
+        "github.com",
+        "acme",
+        path="acme/private-b",
+    )
+
+    assert repeated is first
+    assert first.token == "token-for-acme/private-a"
+    assert second.token == "token-for-acme/private-b"
+    assert manager.resolve_credential_from_git.call_args_list == [
+        call("github.com", port=None, path="acme/private-a"),
+        call("github.com", port=None, path="acme/private-b"),
+    ]
+    assert resolver.has_cached_resolution(
+        "github.com",
+        "acme",
+        path="acme/private-a",
+    )
+    assert resolver.has_cached_resolution(
+        "github.com",
+        "acme",
+        path="acme/private-b",
+    )
+    assert not resolver.has_cached_resolution(
+        "github.com",
+        "acme",
+        path="acme/private-c",
+    )
+    assert not resolver.has_cached_resolution("github.com", "acme")
+
+
+def test_try_with_fallback_preserves_host_type_conflict_checks() -> None:
+    """The inner owner sees the same manifest host hint as its caller."""
+    resolver = AuthResolver()
+    operation = MagicMock()
+
+    with pytest.raises(
+        ValueError,
+        match="conflicts with recognized 'github' host",
+    ):
+        resolver.try_with_fallback(
+            "github.com",
+            operation,
+            host_type="gitlab",
+            unauth_first=True,
+        )
+
+    operation.assert_not_called()
 
 
 def _response(status_code: int, content: bytes = b"") -> requests.Response:

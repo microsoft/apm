@@ -199,13 +199,15 @@ class AuthCacheKey(NamedTuple):
     port: int | None
     host_type: str  # Empty string represents an absent or canonical host_type.
     org: str
+    path: str  # Empty unless credential resolution is repository-scoped.
 
 
 class AuthResolver:
     """Single source of truth for auth resolution.
 
     Every APM operation that touches a remote host MUST use this class.
-    Resolution is per-(host, org) pair, thread-safe, cached per-process.
+    Resolution is per-(host, port, host_type, org, optional path), thread-safe,
+    and cached per-process.
     """
 
     def __init__(
@@ -252,6 +254,7 @@ class AuthResolver:
         *,
         port: int | None = None,
         host_type: str | None = None,
+        path: str | None = None,
     ) -> bool:
         """Return whether credential resolution already ran for this scope."""
         key = AuthCacheKey(
@@ -259,6 +262,7 @@ class AuthResolver:
             port,
             self._cache_host_type(host, host_type),
             org.lower() if org else "",
+            path or "",
         )
         with self._lock:
             return key in self._cache
@@ -363,7 +367,7 @@ class AuthResolver:
         host_type: str | None = None,
         path: str | None = None,
     ) -> AuthContext:
-        """Resolve auth for *(host, port, org)*.  Cached & thread-safe.
+        """Resolve auth for a host/org and optional repository path.
 
         ``port`` discriminates the cache key so that the same hostname on
         different ports (e.g. Bitbucket Datacenter with SSH on 7999 and a
@@ -376,6 +380,7 @@ class AuthResolver:
             port,
             self._cache_host_type(host, host_type),
             org.lower() if org else "",
+            path or "",
         )
         with self._lock:
             cached = self._cache.get(key)
@@ -384,7 +389,7 @@ class AuthResolver:
 
             # Hold lock during entire credential resolution to prevent duplicate
             # credential-helper popups when parallel downloads resolve the same
-            # (host, port, org) concurrently.  The first caller fills the cache;
+            # (host, port, org, path) concurrently. The first caller fills the cache;
             # all subsequent callers for the same key become O(1) cache hits.
             # Bounded by APM_GIT_CREDENTIAL_TIMEOUT (default 60s). No deadlock
             # risk: single lock, never nested.
@@ -531,6 +536,7 @@ class AuthResolver:
         org: str | None = None,
         port: int | None = None,
         path: str | None = None,
+        host_type: str | None = None,
         unauth_first: bool = False,
         verbose_callback: Callable[[str], None] | None = None,
     ) -> T:
@@ -552,6 +558,9 @@ class AuthResolver:
             Primary auth-first resolution stays host-scoped; the path is
             applied when public github.com anonymous-first fallback proves
             credentials may be required.
+        host_type:
+            Optional manifest provider hint. Forwarded through classification
+            and credential resolution so the inner owner matches its caller.
         unauth_first:
             If *True*, try unauthenticated first (saves rate limits, EMU-safe).
         verbose_callback:
@@ -562,14 +571,24 @@ class AuthResolver:
         retries with ``gh auth token`` and then ``git credential fill``
         before giving up.
         """
-        host_info = self.classify_host(host, port=port)
+        host_info = self.classify_host(
+            host,
+            port=port,
+            host_type=host_type,
+        )
         lazy_public_github = unauth_first and self.uses_public_github_anonymous_first(
             host,
             port=port,
+            host_type=host_type,
         )
         auth_ctx: AuthContext | None = None
         if not lazy_public_github:
-            auth_ctx = self.resolve(host, org, port=port)
+            auth_ctx = self.resolve(
+                host,
+                org,
+                port=port,
+                host_type=host_type,
+            )
             host_info = auth_ctx.host_info
         unauth_env = (
             self.build_public_github_anonymous_git_env()
@@ -584,6 +603,7 @@ class AuthResolver:
                     host,
                     org,
                     port=port,
+                    host_type=host_type,
                     path=path if lazy_public_github else None,
                 )
             return auth_ctx
@@ -802,7 +822,8 @@ class AuthResolver:
         context. Callers MUST only set this when the bearer attempt
         actually ran (see :class:`BearerFallbackOutcome.bearer_attempted`).
         """
-        auth_ctx = self.resolve(host, org, port=port)
+        path = dep_url if self.uses_public_github_anonymous_first(host, port=port) is True else None
+        auth_ctx = self.resolve(host, org, port=port, path=path)
         host_info = auth_ctx.host_info
         display = host_info.display_name
 

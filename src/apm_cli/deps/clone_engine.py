@@ -285,6 +285,7 @@ class CloneEngine:
                 org=org,
                 port=dep_ref.port,
                 path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
                 unauth_first=True,
                 verbose_callback=verbose_callback,
             )

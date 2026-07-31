@@ -305,6 +305,7 @@ def _directory_exists_at_ref(
                 org=owner,
                 port=dep_ref.port,
                 path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
                 unauth_first=True,
             )
         auth_ctx = downloader.auth_resolver.resolve_for_dep(dep_ref)

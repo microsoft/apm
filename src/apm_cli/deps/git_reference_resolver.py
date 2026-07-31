@@ -273,6 +273,7 @@ class GitReferenceResolver:
                     org=org,
                     port=dep_ref.port,
                     path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
                     unauth_first=True,
                 )
             except (GitCommandError, OSError) as exc:
@@ -405,6 +406,7 @@ class GitReferenceResolver:
                     org=org,
                     port=dep_ref.port,
                     path=dep_ref.repo_url,
+                    host_type=dep_ref.host_type,
                     unauth_first=True,
                 )
             file_ctx = host.auth_resolver.resolve(
