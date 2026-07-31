@@ -833,7 +833,8 @@ class MCPIntegrator:
             lockfile.save(lock_path)
         except Exception:
             _log.debug(
-                "MCP lockfile persistence failed",
+                "MCP lockfile persistence failed at %s",
+                lock_path,
                 exc_info=True,
             )
             if creating:

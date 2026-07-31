@@ -89,11 +89,11 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         if not isinstance(dependency, dict):
             raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
     for target, servers in (data.get("mcp_target_servers") or {}).items():
-        if not isinstance(target, str) or not isinstance(servers, list):
+        if not isinstance(target, str) or not target or not isinstance(servers, list):
             raise LockfileFormatError(
                 "Lockfile mcp_target_servers values must be string-to-list mappings"
             )
-        if not all(isinstance(server, str) for server in servers):
+        if not all(isinstance(server, str) and bool(server) for server in servers):
             raise LockfileFormatError("Lockfile mcp_target_servers entries must be strings")
     for server, provenance in (data.get("mcp_config_provenance") or {}).items():
         if not isinstance(server, str) or not (

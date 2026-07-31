@@ -548,6 +548,18 @@ def test_mcp_persistence_write_failure_is_not_hidden(tmp_path: Path) -> None:
             "lockfile_version": "1",
             "generated_at": "2026-01-01T00:00:00+00:00",
             "dependencies": [],
+            "mcp_target_servers": {"": ["atlassian"]},
+        },
+        {
+            "lockfile_version": "1",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "dependencies": [],
+            "mcp_target_servers": {"codex": [""]},
+        },
+        {
+            "lockfile_version": "1",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "dependencies": [],
             "mcp_config_provenance": {"atlassian": {"owner": "package"}},
         },
         {
