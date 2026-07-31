@@ -674,9 +674,10 @@ class MCPIntegrator:
                 user_scope=True,
             )
             removed = intellij_client.remove_managed_servers(expanded_stale)
+            config_path = intellij_client.get_config_path()
             for name in sorted(removed):
                 _rich_success(
-                    f"Removed stale MCP server '{name}' from {intellij_client.get_config_path()}",
+                    f"Removed stale MCP server '{name}' from {config_path}",
                     symbol="check",
                 )
 

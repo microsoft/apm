@@ -230,3 +230,22 @@ class TestRemoveStaleIntelliJ:
                 runtime="intellij",
                 logger=logger,
             )
+
+    def test_remove_stale_intellij_resolves_output_path_once(self):
+        """Multiple removal messages reuse one validated config path."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        client = MagicMock()
+        client.remove_managed_servers.return_value = {"first", "second"}
+        client.get_config_path.return_value = "/home/user/.config/github-copilot/intellij/mcp.json"
+        with (
+            patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
+            patch("apm_cli.integration.mcp_integrator._rich_success"),
+        ):
+            MCPIntegrator.remove_stale(
+                stale_names={"first", "second"},
+                runtime="intellij",
+                logger=MagicMock(),
+            )
+
+        client.get_config_path.assert_called_once_with()
