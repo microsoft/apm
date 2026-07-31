@@ -4,6 +4,12 @@ import os
 import re
 import urllib.parse
 
+_ADO_SERVER_BASE_PATH_ERROR = (
+    "Azure DevOps Server URLs mounted below '/tfs/' are not currently "
+    "supported. Use a root-hosted collection URL such as "
+    "'https://server/DefaultCollection/project/_git/repo'."
+)
+
 
 def _get_ghes_host() -> str:
     """Return the normalised GITHUB_HOST env value."""
@@ -131,11 +137,7 @@ def reject_unsupported_ado_server_base_path(dependency_str: str) -> None:
         return
     git_index = segments.index("_git")
     if segments[0].lower() == "tfs" and git_index >= 3:
-        raise ValueError(
-            "Azure DevOps Server URLs mounted below '/tfs/' are not "
-            "currently supported. Use a root-hosted collection URL such as "
-            "'https://server/DefaultCollection/project/_git/repo'."
-        )
+        raise ValueError(_ADO_SERVER_BASE_PATH_ERROR)
 
 
 def is_gitlab_hostname(hostname: str | None) -> bool:
@@ -874,10 +876,7 @@ def parse_ado_repo_url(url: str | None) -> tuple[str, str, str] | None:
         and segments[0].lower() == "tfs"
         and git_idx >= 3
     ):
-        raise ValueError(
-            "Azure DevOps Server URLs mounted below '/tfs/' are not "
-            "currently supported. Use a root-hosted collection URL."
-        )
+        raise ValueError(_ADO_SERVER_BASE_PATH_ERROR)
     # repo is the segment immediately after the ``_git`` marker.
     if git_idx + 1 >= len(segments):
         return None
@@ -1079,11 +1078,14 @@ def is_valid_fqdn(hostname: str) -> bool:
     - Labels must contain only alphanumeric chars and hyphens
     - Labels must not start or end with hyphens
     - Have at least one dot
+    - Not be an IP address literal
     """
     if not hostname:
         return False
 
     hostname = hostname.split("/")[0]  # Remove any path components
+    if all(label.isdigit() for label in hostname.split(".")):
+        return False
 
     # Single regex to validate all FQDN rules:
     # - Starts with alphanumeric
