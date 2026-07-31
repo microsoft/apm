@@ -130,7 +130,7 @@ pages:
       cli: []
       flags: []
 
-  - path: docs/src/content/docs/consumer/install.md
+  - path: docs/src/content/docs/consumer/install-packages.md
     title: "Install primitives"
     persona: consumer
     promise: 1
@@ -258,7 +258,7 @@ pages:
 # structural verdict.
 symbol_index:
   cli:
-    "apm install": [docs/src/content/docs/consumer/install.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
+    "apm install": [docs/src/content/docs/consumer/install-packages.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
     "apm compile": [docs/src/content/docs/producer/compile.md]
     "apm pack": [docs/src/content/docs/producer/pack-a-bundle.md, docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
     "apm plugin init": [docs/src/content/docs/producer/repo-shapes.md, docs/src/content/docs/reference/cli/plugin.md]
@@ -274,8 +274,8 @@ symbol_index:
     "--external": [docs/src/content/docs/integrations/external-scanners.md, docs/src/content/docs/reference/cli/audit.md]
     "--external-sarif": [docs/src/content/docs/integrations/external-scanners.md, docs/src/content/docs/reference/cli/audit.md]
   schemas:
-    "apm.yml": [docs/src/content/docs/consumer/install.md]
-    "apm.lock.yaml": [docs/src/content/docs/consumer/install.md]
+    "apm.yml": [docs/src/content/docs/consumer/install-packages.md]
+    "apm.lock.yaml": [docs/src/content/docs/consumer/install-packages.md]
     "apm.yml.marketplace": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
     "apm.yml.marketplace.versioning": [docs/src/content/docs/producer/versioning-strategies.md]
     "marketplace.json": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
