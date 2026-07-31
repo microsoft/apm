@@ -39,7 +39,7 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
     return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]
 
 
-@click.command(help="Remove APM packages, their integrated files, and apm.yml entries")
+@click.command(help="Remove packages using manifest entries or keys from 'apm deps list'")
 @click.argument("packages", nargs=-1, required=True)
 @click.option("--dry-run", is_flag=True, help="Show what would be removed without removing")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed removal information")
@@ -78,6 +78,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
     manifest_path = get_manifest_path(scope)
     apm_dir = get_apm_dir(scope)
     deploy_root = get_deploy_root(scope)
+    modules_dir = get_modules_dir(scope)
     manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
 
     logger = CommandLogger("uninstall", verbose=verbose, dry_run=dry_run)
@@ -192,7 +193,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         surviving_deps = list(current_deps)
         for package in packages_to_remove:
             surviving_deps.remove(package)
-        modules_dir = get_modules_dir(scope)
         if not dry_run:
             staged_local_refreshes = _stage_shared_local_survivors(
                 packages_to_remove,
@@ -249,8 +249,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             packages_to_remove,
             modules_dir,
             logger,
-            surviving_dependencies=surviving_deps,
-            project_root=manifest_path.parent,
             staged_refreshes=staged_local_refreshes,
             refreshed_survivor_keys=refreshed_survivor_keys,
         )
@@ -397,9 +395,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             summary_lines.append(f"Removed {removed_from_modules} package(s) from apm_modules/")
         logger.success("Uninstall complete: " + ", ".join(summary_lines))
 
-        if packages_not_found:
-            logger.warning(f"Note: {len(packages_not_found)} package(s) were not found in apm.yml")
-
         # Fire post-uninstall lifecycle scripts
         _fire_uninstall_scripts(
             "post-uninstall",
@@ -415,7 +410,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.error(f"Error uninstalling packages: {e}")
         sys.exit(1)
     finally:
-        _cleanup_staged_local_refreshes(staged_local_refreshes)
+        _cleanup_staged_local_refreshes(staged_local_refreshes, modules_dir)
 
 
 def _fire_uninstall_scripts(

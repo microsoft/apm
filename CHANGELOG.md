@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Package-declared targets now restrict dependency primitive deployment without expanding project or consumer authorization, preventing Claude-only hooks from leaking into Cursor and repairing stale owned entries on update; the contract is cited in `docs/src/content/docs/specs/openapm-v0.1.md`. By @sergio-sisternes-epam (#2362)
 - Copilot hook packages with JavaScript scripts no longer fail with "hooks: hooks must be an object"; APM keeps generated `package.json` and nested JSON bundle assets out of project `.github/hooks/scripts/` and user `~/.copilot/hooks/scripts/`, where Copilot's recursive hook-loader scan would reject them as descriptors; use `.mjs` for ES module scripts targeting Copilot or VS Code. (#2322)
+- `apm uninstall` now accepts the portable `_local/<name>` key printed by
+  `apm deps list` and rejects missing or ambiguous batches with a nonzero status
+  before APM writes. Reported by @sproott. (#2412, closes #2351)
 - Public `github.com` dependencies now try anonymous HTTPS before resolving
   credentials, so all-public installs no longer open repeated credential or
   Git Credential Manager prompts. Reported by @RuiRomano. (#2406, closes #2400)

@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.uninstall.cli import uninstall
+from apm_cli.commands.uninstall.engine import (
+    LocalSlotRefresh,
+    _activate_staged_local_refresh,
+    _recover_local_refresh_backups,
+)
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
@@ -24,6 +30,14 @@ def _write_manifest(project: Path, dependencies: Sequence[object]) -> None:
         },
         project / "apm.yml",
     )
+
+
+def test_uninstall_help_points_to_actionable_dependency_keys() -> None:
+    """The terminal discovery surface names the inventory source."""
+    result = CliRunner().invoke(uninstall, ["--help"])
+
+    assert result.exit_code == 0
+    assert "keys from 'apm deps list'" in result.output
 
 
 def test_missing_identifier_exits_nonzero_without_scripts_or_writes(
@@ -124,6 +138,24 @@ def test_ambiguous_alias_exits_nonzero_without_leaking_paths_or_writes(
     assert str(tmp_path) not in result.output
     assert_unchanged(before, ArtifactSnapshot.capture(project))
     fire_scripts.assert_not_called()
+
+
+def test_windows_exact_ambiguity_reports_only_portable_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duplicate exact Windows declaration is named without host path leakage."""
+    project = tmp_path / "project"
+    project.mkdir()
+    declared_path = r"C:\Users\runner\Shared Package"
+    _write_manifest(project, [declared_path, declared_path])
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(uninstall, [declared_path])
+
+    assert result.exit_code != 0
+    assert "_local/Shared Package" in result.output
+    assert declared_path not in result.output
 
 
 @pytest.mark.parametrize(
@@ -303,3 +335,42 @@ def test_pre_uninstall_manifest_edits_are_reloaded_and_preserved(
 
     assert result.exit_code == 0, result.output
     assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == ["owner/added-by-hook"]
+
+
+def test_interrupted_local_refresh_backup_is_recovered(
+    tmp_path: Path,
+) -> None:
+    """A deterministic backup restores the package slot on the next run."""
+    modules_dir = tmp_path / "apm_modules"
+    local_root = modules_dir / "_local"
+    backup = local_root / ".Shared Package.apm-uninstall-backup"
+    backup.mkdir(parents=True)
+    (backup / "apm.yml").write_text(
+        "name: shared\nversion: 1.0.0\n",
+        encoding="ascii",
+    )
+    logger = MagicMock()
+
+    _recover_local_refresh_backups(modules_dir, logger)
+
+    restored = local_root / "Shared Package"
+    assert restored.is_dir()
+    assert not backup.exists()
+    logger.progress.assert_called_once()
+
+
+def test_local_refresh_activation_rejects_outside_install_path(
+    tmp_path: Path,
+) -> None:
+    """Rename activation reasserts containment at its own boundary."""
+    modules_dir = tmp_path / "apm_modules"
+    staged = modules_dir / "_local" / ".apm-uninstall-refresh-test"
+    staged.mkdir(parents=True)
+    refresh = LocalSlotRefresh(
+        install_path=tmp_path.parent / "outside",
+        staged_path=staged,
+        survivor_keys=("survivor",),
+    )
+
+    with pytest.raises(PathTraversalError):
+        _activate_staged_local_refresh(refresh, modules_dir)

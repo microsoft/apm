@@ -17,7 +17,7 @@ from ...models.dependency.selection import (
 from ...models.dependency.selection import (
     parse_dependency_entry as _parse_dependency_entry,
 )
-from ...utils.path_security import PathTraversalError, safe_rmtree
+from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
 
 
@@ -113,15 +113,43 @@ class LocalSlotRefresh:
     survivor_keys: tuple[str, ...]
 
 
-def _cleanup_staged_local_refreshes(refreshes: dict[Path, LocalSlotRefresh]) -> None:
+_LOCAL_REFRESH_BACKUP_SUFFIX = ".apm-uninstall-backup"
+
+
+def _cleanup_staged_local_refreshes(
+    refreshes: dict[Path, LocalSlotRefresh],
+    apm_modules_dir: Path,
+) -> None:
     """Best-effort cleanup for hidden local refresh staging directories."""
     for refresh in refreshes.values():
         if not refresh.staged_path.exists():
             continue
         try:
-            safe_rmtree(refresh.staged_path, refresh.install_path.parent.parent)
+            safe_rmtree(refresh.staged_path, apm_modules_dir)
         except OSError:
             continue
+
+
+def _recover_local_refresh_backups(
+    apm_modules_dir: Path,
+    logger: CommandLogger,
+) -> None:
+    """Recover or remove deterministic backups left by interrupted activation."""
+    local_root = apm_modules_dir / "_local"
+    if not local_root.is_dir():
+        return
+    for backup_path in local_root.glob(f".*{_LOCAL_REFRESH_BACKUP_SUFFIX}"):
+        target_name = backup_path.name[1 : -len(_LOCAL_REFRESH_BACKUP_SUFFIX)]
+        if not target_name:
+            continue
+        install_path = local_root / target_name
+        ensure_path_within(backup_path, apm_modules_dir)
+        ensure_path_within(install_path, apm_modules_dir)
+        if install_path.exists():
+            safe_rmtree(backup_path, apm_modules_dir)
+            continue
+        backup_path.rename(install_path)
+        logger.progress(f"Recovered interrupted local materialization for _local/{target_name}")
 
 
 def _stage_shared_local_survivors(
@@ -134,6 +162,7 @@ def _stage_shared_local_survivors(
     """Validate and stage every surviving shared-slot local package."""
     from ...install.phases.local_content import _copy_local_package
 
+    _recover_local_refresh_backups(apm_modules_dir, logger)
     refreshes: dict[Path, LocalSlotRefresh] = {}
     for package in packages_to_remove:
         try:
@@ -156,7 +185,7 @@ def _stage_shared_local_survivors(
                 "Use exact paths from apm.yml in one uninstall command so at most "
                 "one declaration remains."
             )
-            _cleanup_staged_local_refreshes(refreshes)
+            _cleanup_staged_local_refreshes(refreshes, apm_modules_dir)
             raise LocalSurvivorRefreshError(
                 "Multiple local declarations would remain in one shared install slot. "
                 "No manifest changes were made."
@@ -193,9 +222,10 @@ def _stage_shared_local_survivors(
         except Exception as exc:
             if staged_path.exists():
                 safe_rmtree(staged_path, apm_modules_dir)
-            _cleanup_staged_local_refreshes(refreshes)
+            _cleanup_staged_local_refreshes(refreshes, apm_modules_dir)
             if isinstance(exc, LocalSurvivorRefreshError):
                 raise
+            logger.verbose_detail(f"    Local refresh staging error type: {type(exc).__name__}")
             refresh_logger.error("local refresh staging failed")
             raise LocalSurvivorRefreshError(
                 "A surviving local dependency could not be staged. No manifest changes were made."
@@ -215,7 +245,14 @@ def _activate_staged_local_refresh(
 ) -> None:
     """Replace one materialization with staged survivor content or restore it."""
     install_path = refresh.install_path
-    backup_path = install_path.parent / f".apm-uninstall-backup-{uuid4().hex}"
+    ensure_path_within(install_path, apm_modules_dir)
+    ensure_path_within(refresh.staged_path, apm_modules_dir)
+    backup_path = install_path.parent / (f".{install_path.name}{_LOCAL_REFRESH_BACKUP_SUFFIX}")
+    ensure_path_within(backup_path, apm_modules_dir)
+    if backup_path.exists():
+        raise LocalSurvivorRefreshError(
+            "A stale local refresh backup must be recovered before activation."
+        )
     if install_path.exists():
         install_path.rename(backup_path)
     try:
@@ -615,8 +652,9 @@ def _validate_uninstall_packages(
         elif selection.status is DependencySelectionStatus.AMBIGUOUS:
             packages_not_found.append(package)
             if is_local:
+                safe_label = _dependency_public_label(package)
                 logger.error(
-                    f"The requested local dependency is ambiguous: it matches "
+                    f"Local dependency '{safe_label}' is ambiguous: it matches "
                     f"{selection.match_count} declarations. Use one exact path from "
                     "apm.yml to uninstall a single dependency."
                 )
@@ -745,8 +783,6 @@ def _remove_packages_from_disk(
     apm_modules_dir,
     logger,
     *,
-    surviving_dependencies=None,
-    project_root=None,
     staged_refreshes=None,
     refreshed_survivor_keys=None,
 ):
@@ -773,26 +809,17 @@ def _remove_packages_from_disk(
             else:
                 package_path = apm_modules_dir / package_str
 
-        shared_survivors = _surviving_local_refs_at_install_path(
-            package,
-            surviving_dependencies or [],
-            apm_modules_dir,
-        )
-        if shared_survivors:
+        refresh = (staged_refreshes or {}).get(package_path)
+        if refresh is not None:
             if package_path in activated_refresh_paths:
                 continue
-            refresh = (staged_refreshes or {}).get(package_path)
-            if refresh is None:
-                raise LocalSurvivorRefreshError(
-                    "Shared local dependency content was not staged before uninstall."
-                )
             _activate_staged_local_refresh(refresh, apm_modules_dir)
             activated_refresh_paths.add(package_path)
             if refreshed_survivor_keys is not None:
                 refreshed_survivor_keys.update(refresh.survivor_keys)
             logger.progress(
                 f"Refreshed {package_label} in apm_modules/ for "
-                f"{len(shared_survivors)} surviving declaration(s)"
+                f"{len(refresh.survivor_keys)} surviving declaration(s)"
             )
             continue
 
