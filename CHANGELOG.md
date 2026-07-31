@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale. The matching `openapm-v0.1.md` frozen-install requirement now covers
   MCP state and all durable writes. (by @edenfunf, #2390; fixes #2373)
 
+- Repeated `apm install` runs with unchanged self-defined MCP dependencies and
+  explicit target mappings now preserve `generated_at`, deployment ownership,
+  and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of
+  rewriting it. (#2306)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
@@ -106,11 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   @sergio-sisternes-epam. (#2294)
 - Narrowing active targets now removes shared-root skill copies owned only by a
   dropped target while preserving user edits and surviving ownership. (#2299)
-- Repeated `apm install` runs with unchanged self-defined MCP dependencies and
-  explicit target mappings now preserve `generated_at`, deployment ownership,
-  and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of
-  rewriting it. One bounded hermetic regression joins the PR-time lifecycle
-  gate. (#2306)
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

@@ -155,9 +155,11 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            # Restore local compatibility state first so the canonical ledger is
+            # complete when MCP target rows are projected into it.
+            self._preserve_existing_local_state(lockfile)
             self._preserve_existing_mcp_state(lockfile)
             self._preserve_existing_lsp_state(lockfile)
-            self._preserve_existing_local_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
 
             # Only write when the semantic content has actually changed
@@ -437,27 +439,26 @@ class LockfileBuilder:
             lockfile.mcp_config_provenance = copy.deepcopy(
                 self.ctx.existing_lockfile.mcp_config_provenance
             )
-            # Also carry forward mcp_target_servers (and its ledger rows) via
-            # the same codec path MCPIntegrator itself uses. Without this, the
-            # freshly-built lockfile always starts with mcp_target_servers={},
-            # which reads as a real change against the on-disk file and forces
-            # an extra write here -- MCPIntegrator then has to correct it
-            # with a second write of its own, churning generated_at twice per
-            # install even when nothing changed (issue #2297).
-            if self.ctx.existing_lockfile.mcp_target_servers:
+            target_servers = self.ctx.existing_lockfile.mcp_target_servers
+            # The codec rebuild is linear in deployment rows and also marks the
+            # compatibility view present, so skip it when there is no target
+            # state to preserve.
+            if target_servers:
                 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
                 DeploymentLedgerCodec.replace_mcp_target_servers(
                     lockfile,
-                    copy.deepcopy(self.ctx.existing_lockfile.mcp_target_servers),
+                    copy.deepcopy(target_servers),
                 )
             if self.ctx.logger:
-                self.ctx.logger.verbose_detail(
+                detail = (
                     "MCP state unchanged -- carrying forward "
                     f"{len(lockfile.mcp_servers)} server(s), "
-                    f"{len(lockfile.mcp_configs)} config(s), "
-                    f"{len(lockfile.mcp_target_servers)} target mapping(s)"
+                    f"{len(lockfile.mcp_configs)} config(s)"
                 )
+                if target_servers:
+                    detail += f", {len(target_servers)} target mapping(s)"
+                self.ctx.logger.verbose_detail(detail)
 
     def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:
         """Keep LSP fields until LSP integration reconciles them later in install."""
