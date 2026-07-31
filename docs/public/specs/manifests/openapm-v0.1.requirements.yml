@@ -438,6 +438,11 @@ requirements:
     keyword: MUST
     section: "10.14"
     conformance_class: consumer
+  - id: req-sc-013
+    keyword: MUST
+    section: "10.3"
+    conformance_class: consumer
+    notes: "configured authority overlap selects one documented host class before credential resolution; only that class's credentials reach requests and child processes; explicit non-default ports remain scoped"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

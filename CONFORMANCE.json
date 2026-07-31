@@ -1109,6 +1109,17 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-013",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_configured_host_class_precedence_is_credential_isolated"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
