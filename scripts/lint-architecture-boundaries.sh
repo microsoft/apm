@@ -1317,7 +1317,6 @@ if ! grep -q '^def validate_tag_pattern(' "$tag_pattern_owner" \
     [ -n "$tag_pattern_parallel_hits" ] && echo "$tag_pattern_parallel_hits"
     violations=$((violations + 1))
 fi
-
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

@@ -990,16 +990,6 @@ def resolve_marketplace_plugin(
                 org=source.owner,
                 port=source.port,
             )
-            version_auth = {
-                "host": source.host,
-                "token": token,
-                "auth_scheme": auth_scheme,
-                "auth_resolver": auth_resolver,
-            }
-            if git_env is not None:
-                version_auth["git_env"] = git_env
-            if source.port is not None:
-                version_auth["port"] = source.port
             effective_tag_pattern = plugin.tag_pattern
             if effective_tag_pattern is None:
                 logger.debug(
@@ -1009,11 +999,21 @@ def resolve_marketplace_plugin(
                     DEFAULT_TAG_PATTERN,
                 )
                 effective_tag_pattern = DEFAULT_TAG_PATTERN
+            version_auth = {
+                "host": source.host,
+                "token": token,
+                "auth_scheme": auth_scheme,
+                "auth_resolver": auth_resolver,
+                "tag_pattern": effective_tag_pattern,
+            }
+            if git_env is not None:
+                version_auth["git_env"] = git_env
+            if source.port is not None:
+                version_auth["port"] = source.port
             tag_name, _sha = resolve_version_constraint(
                 plugin_name,
                 owner_repo,
                 version_spec,
-                tag_pattern=effective_tag_pattern,
                 **version_auth,
             )
             resolved_override = tag_name
