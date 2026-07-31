@@ -16,10 +16,12 @@ APM resolves ordinary tokens per `(host, port, org)` scope. When a private `gith
 
 1. **GitHub-class hosts** (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`): **Per-org env var** `GITHUB_APM_PAT_{ORG}` (when an org slug applies), then **global** `GITHUB_APM_PAT` -> `GITHUB_TOKEN` -> `GH_TOKEN`, then **GitHub CLI active account** (`gh auth token --hostname <host>`, silently skipped if `gh` is not installed or not logged in for the host), then host-specific **git credential helper**.
 2. **GitLab-class hosts** (`gitlab.com`, or FQDNs listed via `GITLAB_HOST` / `APM_GITLAB_HOSTS`): **only** `GITLAB_APM_PAT` -> `GITLAB_TOKEN`, then host-specific **git credential helper**. GitHub token env vars are **not** used for GitLab (including `GITHUB_APM_PAT`, `GITHUB_TOKEN`, and `GH_TOKEN`, and `GITHUB_APM_PAT_{ORG}` for group/namespace paths).
-3. **ADO-class hosts** (`dev.azure.com`, `*.visualstudio.com`, or FQDNs listed via `ADO_HOST` / `APM_ADO_HOSTS`): **only** `ADO_APM_PAT` -> AAD bearer via `az`. GitHub and GitLab token env vars are **not** used for ADO-class hosts.
+3. **ADO-class hosts**: Azure DevOps Services (`dev.azure.com`, `*.visualstudio.com`) uses **only** `ADO_APM_PAT` -> AAD bearer via `az`; Azure DevOps Server hosts listed via `ADO_HOST` / `APM_ADO_HOSTS` use **only** `ADO_APM_PAT`. GitHub and GitLab token env vars are **not** used for ADO-class hosts.
 4. **Generic hosts** (other FQDNs such as Bitbucket): host-specific **git credential helper** or unauthenticated/public access -- **no** GitHub, GitLab, or ADO platform env vars.
 
-Azure DevOps uses its own chain (`ADO_APM_PAT` -> Azure CLI bearer). See [Azure DevOps](#azure-devops).
+Azure DevOps uses its own chain. Azure DevOps Services checks
+`ADO_APM_PAT` -> Azure CLI bearer. Azure DevOps Server checks `ADO_APM_PAT`
+only. See [Azure DevOps](#azure-devops).
 If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an anonymous `github.com` attempt, APM also disables credential helpers and global/system Git config while preserving non-auth process-scoped Git settings such as CA paths, URL rewrites, and `credential.interactive=never`.
 
 Results are cached per-process. Validation and later fetch phases for the same private repository reuse one path-scoped fallback instead of prompting repeatedly, while another repository can resolve its own credential. All token-bearing requests use HTTPS.
@@ -52,7 +54,9 @@ Results are cached per-process. Validation and later fetch phases for the same p
 |----------|--------|-------|
 | 1 | `git credential fill` | Configure credentials for that host in git |
 
-For Azure DevOps, APM resolves `ADO_APM_PAT`, then an Entra ID (AAD) bearer token from Azure CLI (`az`). See [Azure DevOps](#azure-devops).
+For Azure DevOps Services, APM resolves `ADO_APM_PAT`, then an Entra ID
+(AAD) bearer token from Azure CLI (`az`). Azure DevOps Server uses
+`ADO_APM_PAT` only. See [Azure DevOps](#azure-devops).
 
 For Artifactory registry proxies, use `PROXY_REGISTRY_TOKEN`. See [Registry proxy (Artifactory)](#registry-proxy-artifactory).
 
@@ -66,8 +70,8 @@ For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentic
 |----------|---------|
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Timeout in seconds for `git credential fill` (default: 60, max: 180) |
 | `GITHUB_HOST` | Default host for bare package names (e.g., GHES hostname) |
-| `ADO_HOST` | One on-prem Azure DevOps Server FQDN (e.g., `ado.company.com`) |
-| `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs |
+| `ADO_HOST` | One on-prem Azure DevOps Server FQDN, without a port or path (e.g., `ado.company.com`) |
+| `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, without ports or paths |
 
 ## Multi-org setup
 
@@ -213,24 +217,51 @@ Create the PAT at `https://dev.azure.com/{org}/_usersSettings/tokens` with **Cod
 
 ### On-prem Azure DevOps Server
 
-If you have an on-prem Azure DevOps Server (not `dev.azure.com`), register its hostname so APM routes it through the ADO credential chain instead of the generic or GHES chain:
+If you have an on-prem Azure DevOps Server (not `dev.azure.com`),
+register its hostname so APM routes it through the ADO PAT chain instead of
+the generic or GHES chain. No manual host-type flag is needed:
 
 ```bash
 # Single on-prem host
 export ADO_HOST=ado.company.com
 export ADO_APM_PAT=your_ado_server_pat
-apm install ado.company.com/org/project/repo
+apm install ado.company.com/DefaultCollection/MyProject/_git/MyRepo
 
 # Multiple on-prem hosts
 export APM_ADO_HOSTS=ado1.company.com,ado2.company.com
-apm install ado1.company.com/org/project/repo
+apm install ado1.company.com/DefaultCollection/MyProject/_git/MyRepo
+
+# Explicit port (e.g. IIS with non-standard port)
+apm install https://ado.company.com:8080/DefaultCollection/MyProject/_git/MyRepo
 ```
 
-Both `ADO_HOST` and `APM_ADO_HOSTS` require a valid FQDN (bare hostnames like `localhost` are rejected). If you also have `GITHUB_HOST` set to the same hostname, `ADO_HOST`/`APM_ADO_HOSTS` takes precedence and the host is classified as ADO, not GHES.
+Both variables accept hostnames only: no scheme, port, or path. Entries are
+trimmed, matched case-insensitively, and must be valid FQDNs (bare hostnames
+like `localhost` are rejected). Put an explicit HTTPS port in the dependency
+URL, as shown above. The first path segment is the Azure DevOps Server
+collection; root-hosted collection URLs are supported. A server mounted below
+a path prefix such as `/tfs/` is not currently supported.
 
-### Authenticating with Microsoft Entra ID (AAD) bearer tokens
+If `GITHUB_HOST` names the same hostname, `ADO_HOST` or `APM_ADO_HOSTS`
+takes precedence and the host is classified as ADO, not GHES. Adding the ADO
+configuration is sufficient; `GITHUB_HOST` does not have to be unset.
 
-When your org has disabled PAT creation (managed-identity-only orgs, locked-down enterprise tenants), APM can use an AAD bearer token issued by the Azure CLI instead. No env var is required: APM picks up the token from your active `az` session on demand.
+Azure DevOps Server authentication is PAT-only in APM:
+
+```bash
+export ADO_APM_PAT=your_ado_server_pat
+```
+
+The Azure CLI bearer fallback described below applies to Azure DevOps
+Services (`dev.azure.com` and `*.visualstudio.com`), not Azure DevOps Server.
+
+Create your PAT at `https://{ado-host}/_usersSettings/tokens` with **Code (Read)** permission.
+
+### Authenticating with Microsoft Entra ID (AAD) bearer tokens (Azure DevOps Services)
+
+When your org has disabled PAT creation (managed-identity-only orgs, locked-down enterprise tenants), APM can use an AAD bearer token issued by the Azure CLI instead. This applies to **Azure DevOps Services** (`dev.azure.com`, `*.visualstudio.com`). For on-prem ADO Server, see the note in the section above.
+
+No env var is required: APM picks up the token from your active `az` session on demand.
 
 **Prerequisite:** install the [Azure CLI](https://aka.ms/installazurecli) and sign in against the tenant that owns the org:
 
@@ -241,7 +272,8 @@ apm install dev.azure.com/myorg/myproject/myrepo
 
 **Finding your tenant ID:** if you are unsure which tenant owns the ADO org, visit `https://dev.azure.com/{org}/_settings/organizationAad` in a browser, or ask your admin. You can also run `az login` without `--tenant` and inspect `az account show --query tenantId -o tsv`.
 
-**Resolution precedence for ADO hosts** (`dev.azure.com`, `*.visualstudio.com`, and hosts in `ADO_HOST` / `APM_ADO_HOSTS`):
+**Resolution precedence for Azure DevOps Services** (`dev.azure.com` and
+`*.visualstudio.com`):
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer via `az account get-access-token` if `az` is installed and signed in
@@ -254,7 +286,7 @@ header, never embedded in the repository URL.
 **Stale-PAT fallback:** if `ADO_APM_PAT` is set but rejected (HTTP 401), APM silently retries with the `az` bearer and emits:
 
 ```
-[!] ADO_APM_PAT was rejected for dev.azure.com (HTTP 401); fell back to az cli bearer.
+[!] ADO_APM_PAT was rejected for dev.azure.com; fell back to az cli bearer.
 [!]     Consider unsetting the stale variable.
 ```
 
@@ -263,10 +295,10 @@ marketplace version resolution, and `apm install --update`. If you have a stale
 `ADO_APM_PAT` but an active `az login` session, the ref lookup succeeds
 transparently via the bearer retry.
 
-If both `ADO_APM_PAT` and the `az` bearer fail, APM emits:
+If both `ADO_APM_PAT` and the `az` bearer fail, the diagnostic starts with:
 
 ```
-[x] AAD bearer fallback also failed for dev.azure.com.
+ADO_APM_PAT was rejected; az cli bearer was also rejected.
 ```
 
 This confirms both paths were attempted and neither succeeded, so the fix is either to refresh your PAT or run `az login`.
@@ -314,13 +346,13 @@ For GitHub and GHES, APM sends repository API requests with `Authorization: toke
 
 | Package source | Host | Auth behavior | Fallback |
 |---|---|---|---|
-| `org/repo` (bare) | `default_host()` | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| Bare shorthand | `default_host()` | Host-class-specific chain above | Depends on classified host |
 | `github.com/org/repo` | github.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
 | `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars -> `gh auth token` -> credential fill | Auth-only (no public repos) |
 | GHES via `GITHUB_HOST` | ghes.company.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
 | GitLab (`gitlab.com` or host listed in `GITLAB_HOST` / `APM_GITLAB_HOSTS`) | gitlab.com or self-managed | `GITLAB_APM_PAT` -> `GITLAB_TOKEN` -> credential helper; REST uses `PRIVATE-TOKEN`; GitHub env vars excluded | Unauth where the instance allows it |
 | `dev.azure.com/org/proj/repo` | ADO (cloud) | `ADO_APM_PAT` -> AAD bearer via `az` | Auth-only |
-| ADO Server via `ADO_HOST` / `APM_ADO_HOSTS` | on-prem ADO | `ADO_APM_PAT` -> AAD bearer via `az` | Auth-only |
+| ADO Server via `ADO_HOST` / `APM_ADO_HOSTS` | on-prem ADO | `ADO_APM_PAT` only | Auth-only |
 | Artifactory registry proxy | custom FQDN | `PROXY_REGISTRY_TOKEN` | Error if `PROXY_REGISTRY_ONLY=1` |
 
 ## Registry proxy (Artifactory)
@@ -457,6 +489,24 @@ flowchart TD
     HC -->|GitLab| GL{GitLab env var?}
     GL -->|GITLAB_APM_PAT / GITLAB_TOKEN| E
     GL -->|Not set| F
+
+    HC -->|ADO Services| ADOPAT{ADO_APM_PAT set?}
+    ADOPAT -->|Yes| ADOCRED[Use ADO PAT]
+    ADOPAT -->|No| AZ{az bearer available?}
+    AZ -->|Yes| ADOBEARER[Use az bearer]
+    AZ -->|No| P
+    ADOCRED --> ADOREQ{ADO request works?}
+    ADOBEARER --> ADOREQ
+    ADOREQ -->|Yes| L
+    ADOREQ -->|PAT rejected and az available| ADOBEARER
+    ADOREQ -->|No fallback| P
+
+    HC -->|ADO Server| SERVERPAT{ADO_APM_PAT set?}
+    SERVERPAT -->|Yes| SERVERCRED[Use Server PAT]
+    SERVERPAT -->|No| P
+    SERVERCRED --> SERVERREQ{Server request works?}
+    SERVERREQ -->|Yes| L
+    SERVERREQ -->|No| P
 
     HC -->|Generic FQDN| F
 
