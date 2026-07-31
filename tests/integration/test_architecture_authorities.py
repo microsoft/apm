@@ -342,6 +342,35 @@ def test_legacy_user_deployment_scope_has_single_owner() -> None:
     assert DeploymentLedgerCodec.legacy_scope(".github/hooks/demo.json") == "project"
 
 
+def test_deployment_compatibility_state_has_single_owner() -> None:
+    """Legacy deployment views must mutate only inside canonical owners."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    checker = _load_deployment_state_mutation_checker(root)
+
+    assert checker.analyze_tree(root / "src/apm_cli") == []
+    assert "scripts/check_deployment_state_mutations.py" in guard
+    assert "Deployment compatibility state must mutate only through canonical owners" in guard
+
+
+def test_deployment_state_guard_rejects_direct_mcp_target_assignment() -> None:
+    """A consumer cannot bypass DeploymentLedgerCodec for target mappings."""
+    root = Path(__file__).parents[2]
+    checker = _load_deployment_state_mutation_checker(root)
+    source = (root / "src/apm_cli/install/phases/lockfile.py").read_text(encoding="utf-8")
+    mutated = source.replace(
+        "DeploymentLedgerCodec.replace_mcp_target_servers(\n"
+        "                    lockfile,\n"
+        "                    copy.deepcopy(target_servers),\n"
+        "                )",
+        "lockfile.mcp_target_servers = copy.deepcopy(target_servers)",
+        1,
+    )
+    assert mutated != source
+    assert checker.mutation_lines(mutated)
+    assert checker.mutation_lines(mutated)
+
+
 def test_shared_target_contraction_has_single_reconciler_owner() -> None:
     """Generic shared-root supersession must remain inside DeploymentReconciler."""
     root = Path(__file__).parents[2]
@@ -603,6 +632,19 @@ def _load_cleanup_claim_owner_checker(root: Path) -> ModuleType:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_deployment_state_mutation_checker(root: Path) -> ModuleType:
+    path = root / "scripts/check_deployment_state_mutations.py"
+    spec = importlib.util.spec_from_file_location(
+        "check_deployment_state_mutations",
+        path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

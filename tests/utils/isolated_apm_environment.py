@@ -11,6 +11,7 @@ _NETWORK_GUARD = """\
 import _socket
 import builtins
 import importlib
+import os
 import socket
 import sys
 
@@ -19,6 +20,28 @@ _REAL_SOCKET = socket.socket
 _REAL_RAW_SOCKET = _socket.socket
 _REAL_IMPORT = builtins.__import__
 _REAL_IMPORT_MODULE = importlib.import_module
+_REAL_CREATE_CONNECTION = socket.create_connection
+_REAL_GETADDRINFO = _socket.getaddrinfo
+_ALLOWED_LOOPBACK_PORTS = {
+    int(value)
+    for value in os.environ.get("APM_TEST_LOOPBACK_PORTS", "").split(",")
+    if value.isdigit()
+}
+
+
+def _normalized_port(port):
+    if isinstance(port, int):
+        return port
+    if isinstance(port, str) and port.isdigit():
+        return int(port)
+    return None
+
+
+def _is_allowed_loopback(address):
+    if not isinstance(address, tuple) or len(address) < 2:
+        return False
+    host, port = address[:2]
+    return host in ("127.0.0.1", "::1") and _normalized_port(port) in _ALLOWED_LOOPBACK_PORTS
 
 
 class _GuardedSocketOperations:
@@ -33,12 +56,12 @@ class _GuardedSocketOperations:
         return super().bind(address)
 
     def connect(self, address):
-        if self.family in (socket.AF_INET, socket.AF_INET6):
+        if self.family in (socket.AF_INET, socket.AF_INET6) and not _is_allowed_loopback(address):
             raise OSError(_MESSAGE)
         return super().connect(address)
 
     def connect_ex(self, address):
-        if self.family in (socket.AF_INET, socket.AF_INET6):
+        if self.family in (socket.AF_INET, socket.AF_INET6) and not _is_allowed_loopback(address):
             raise OSError(_MESSAGE)
         return super().connect_ex(address)
 
@@ -73,10 +96,25 @@ def _deny_network(*args, **kwargs):
     raise OSError(_MESSAGE)
 
 
+def _guarded_getaddrinfo(host, port, *args, **kwargs):
+    if (
+        host not in ("127.0.0.1", "::1")
+        or _normalized_port(port) not in _ALLOWED_LOOPBACK_PORTS
+    ):
+        raise OSError(_MESSAGE)
+    return _REAL_GETADDRINFO(host, port, *args, **kwargs)
+
+
+def _guarded_create_connection(address, *args, **kwargs):
+    if not _is_allowed_loopback(address):
+        raise OSError(_MESSAGE)
+    return _REAL_CREATE_CONNECTION(address, *args, **kwargs)
+
+
 def _guard_raw_socket_module(module):
     module.socket = _GuardedRawSocket
     module.SocketType = _GuardedRawSocket
-    module.getaddrinfo = _deny_network
+    module.getaddrinfo = _guarded_getaddrinfo
     module.gethostbyaddr = _deny_network
     module.gethostbyname = _deny_network
     module.gethostbyname_ex = _deny_network
@@ -102,14 +140,26 @@ def _guarded_import_module(name, package=None):
 socket.socket = _GuardedSocket
 socket.SocketType = _GuardedSocket
 _guard_raw_socket_module(_socket)
-socket.create_connection = _deny_network
-socket.getaddrinfo = _deny_network
+socket.create_connection = _guarded_create_connection
+socket.getaddrinfo = _guarded_getaddrinfo
 socket.gethostbyaddr = _deny_network
 socket.gethostbyname = _deny_network
 socket.gethostbyname_ex = _deny_network
 socket.getnameinfo = _deny_network
 builtins.__import__ = _guarded_import
 importlib.import_module = _guarded_import_module
+
+if os.environ.get("APM_TEST_FAIL_LOCK_REPLACE") == "1":
+    import apm_cli.utils.atomic_io as _atomic_io
+
+    _real_replace = _atomic_io.os.replace
+
+    def _fail_lock_replace(source, destination):
+        if os.path.basename(os.fspath(destination)) == "apm.lock.yaml":
+            raise OSError("lockfile replace blocked by test")
+        return _real_replace(source, destination)
+
+    _atomic_io.os.replace = _fail_lock_replace
 """
 
 _APM_AUTH_ENV_NAMES = frozenset(
@@ -154,6 +204,8 @@ _APM_REMOTE_CONTROL_ENV_NAMES = frozenset(
         "APM_GITLAB_HOSTS",
         "APM_NO_CACHE",
         "APM_POLICY_DISABLE",
+        "APM_TEST_FAIL_LOCK_REPLACE",
+        "APM_TEST_LOOPBACK_PORTS",
         "GITHUB_HOST",
         "GITHUB_URL",
         "GITLAB_HOST",

@@ -2860,10 +2860,7 @@ conformance statement identifying:
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
 [req-tg-008](#req-tg-008),
-<<<<<<< HEAD
 [req-sc-001](#req-sc-001),
-=======
->>>>>>> origin/sergio-sisternes-epam-fix-cursor-hooks-json-format
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
