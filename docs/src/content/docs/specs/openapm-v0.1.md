@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **104 normative statements** indexed in
+- OpenAPM v0.1 carries **105 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2442,6 +2442,32 @@ credential material attached for the originating host class) before
 issuing the redirected request. Credentials for the destination
 host class MAY be re-resolved per this requirement.
 
+<a id="req-sc-013"></a>
+**[req-sc-013]** A conforming **consumer** implementation that permits
+operator configuration to assign a literal authority hostname to a host
+class MUST select exactly one effective host class before credential
+resolution. For this requirement, a **configuration signal** is any
+manifest declaration or implementation-specific operator setting that
+binds a hostname to a host class. If two or more configuration signals
+claim the same literal authority hostname, the precedence MUST be
+deterministic and documented in the consumer's
+[conformance statement](#112-how-to-claim-conformance).
+
+For each request and transport child process spawned to fetch or validate
+the dependency (for example a git client or credential helper), the
+consumer MUST resolve, attach, and expose only credential material
+belonging to the selected host class. Credential material belonging to an
+unselected class MUST NOT be resolved, attached, or inherited by that child
+process. Literal credential values MUST NOT appear in logs or diagnostics
+per [req-sc-007](#req-sc-007); source descriptors MAY appear in the
+diagnostic surface required by [req-sc-003](#req-sc-003).
+
+An explicit non-default port (using the protocol-default equivalences in
+[req-rs-016](#req-rs-016) clause 2) in the dependency reference MUST remain
+part of both the transport endpoint and credential scope. The port narrows
+credential lookup within the already-selected host class; it does not
+create a distinct host class.
+
 <a id="req-sc-005"></a>
 **[req-sc-005]** A conforming **consumer** implementation that
 classifies two distinct hostnames as the same host class for the
@@ -2602,7 +2628,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 |---|---------------------------------------------|--------------------------------------------------------------------|-------------------|
 | 1 | Dependency confusion                        | [req-pl-005](#req-pl-005), [req-pl-006](#req-pl-006), [req-pl-007](#req-pl-007) | Governance-only   |
 | 2 | Typosquatting                               | [req-mf-009](#req-mf-009), [req-pl-005](#req-pl-005), [req-pl-007](#req-pl-007) | Governance-only   |
-| 3 | Token leakage across hosts                  | [req-sc-003](#req-sc-003), [req-sc-005](#req-sc-005), [req-sc-007](#req-sc-007), [req-sc-008](#req-sc-008) | Consumer-default  |
+| 3 | Token leakage across hosts                  | [req-sc-003](#req-sc-003), [req-sc-005](#req-sc-005), [req-sc-007](#req-sc-007), [req-sc-008](#req-sc-008), [req-sc-013](#req-sc-013) | Consumer-default  |
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
@@ -2798,7 +2824,8 @@ conformance statement identifying:
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
 [req-sc-008](#req-sc-008) (SHOULD), [req-sc-009](#req-sc-009),
 [req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011),
-[req-sc-012](#req-sc-012), [req-cf-001](#req-cf-001),
+[req-sc-012](#req-sc-012), [req-sc-013](#req-sc-013),
+[req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
 #### 11.3.3 Registry
@@ -3222,11 +3249,12 @@ renumbering of conformance classes.
 | [req-sc-010](#req-sc-010)                | MUST    | 10.13   | consumer    |
 | [req-sc-011](#req-sc-011)                | MUST    | 10.14   | consumer    |
 | [req-sc-012](#req-sc-012)                | MUST    | 10.14   | consumer    |
+| [req-sc-013](#req-sc-013)                | MUST    | 10.3    | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 104** (99 MUST, 5 SHOULD).
+**Total normative statements: 105** (100 MUST, 5 SHOULD).
 
 ---
 
@@ -3255,6 +3283,7 @@ renumbering of conformance classes.
 | 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
+| 0.1.20  | 2026-07-31 | Spec-citation fold for deterministic configured-host credential isolation (closes #2338). Added [req-sc-013] (Section 10.3, consumer MUST): a consumer selects one effective host class before credential resolution, applies documented deterministic precedence when configuration signals overlap, exposes only credentials belonging to the selected class to requests and child processes, and preserves an explicit non-default port in both transport and credential scope. Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
