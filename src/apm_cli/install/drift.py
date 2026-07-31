@@ -2,12 +2,15 @@
 
 Reproduces the integration step from the lockfile in an isolated scratch
 directory, then diffs the resulting tree against the working project to
-surface three kinds of divergence:
+surface four kinds of divergence:
 
 * ``modified``     -- a tracked deployed file's content differs.
 * ``unintegrated`` -- a tracked deployed file is missing from the project.
 * ``orphaned``     -- a managed-directory file exists in the project but
   is not present in the scratch replay AND not tracked in the lockfile.
+* ``unrecorded``   -- the replay deploys the file and the project has it,
+  but no lockfile entry claims it, which exempts it from every
+  membership-driven check (issue #2379).
 
 Bare ``apm audit`` keeps the original **cache-only** contract: cached package
 contents under ``apm_modules/`` are the source of truth and a miss is reported
@@ -26,7 +29,6 @@ Design constraints (see ``WIP/drift/06-final-plan.md``):
 from __future__ import annotations
 
 import atexit
-import json
 import shutil
 import tempfile
 import tracemalloc
@@ -38,6 +40,18 @@ import click
 
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.deps.path_anchoring import resolve_local_dep_dir
+from apm_cli.install.drift_render import (
+    render_drift as render_drift,
+)
+from apm_cli.install.drift_render import (
+    render_drift_json as render_drift_json,
+)
+from apm_cli.install.drift_render import (
+    render_drift_sarif as render_drift_sarif,
+)
+from apm_cli.install.drift_render import (
+    render_drift_text as render_drift_text,
+)
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
@@ -74,7 +88,7 @@ class DriftFinding:
     """A single divergence between the replay scratch tree and the project."""
 
     path: str
-    kind: str  # one of "modified" | "unintegrated" | "orphaned"
+    kind: str  # one of "modified" | "unintegrated" | "orphaned" | "unrecorded"
     package: str = ""
     inline_diff: str = ""
 
@@ -715,14 +729,44 @@ def _walk_managed(root: Path, governed_roots: set[str]) -> dict[str, Path]:
 
 
 def _collect_tracked_files(lockfile: LockFile) -> dict[str, str]:
-    """Return ``{deployed_path: package_name}`` aggregating all sources."""
-    tracked: dict[str, str] = {}
-    for key, dep in lockfile.dependencies.items():
-        for path in dep.deployed_files or []:
-            tracked.setdefault(path, key)
-    for path in lockfile.local_deployed_files or []:
-        tracked.setdefault(path, ".")
-    return tracked
+    """Return scanner membership claims as ``{path: package_owner}``."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    return DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)
+
+
+def _claimed_prefixes(
+    tracked: dict[str, str],
+    hashed_files: set[str],
+    project_files: dict[str, Path],
+) -> tuple[str, ...]:
+    """Return ``dir/`` prefixes for the tracked entries that name directories.
+
+    A manifest entry may name a directory rather than each file beneath it
+    (``scan_lockfile_packages`` and ``_check_deployed_files_present`` both
+    accept that shape), so a file is claimed when a tracked *directory*
+    covers it.
+
+    Entries with a recorded hash are files even if the current project path was
+    replaced by a directory. Entries present in *project_files* are also files,
+    which preserves the same rule for legacy hashless lockfiles. A file claim
+    must never act as a prefix: otherwise replacing tracked ``a.md`` with an
+    ``a.md/`` directory would let every descendant dodge the membership check.
+    """
+    return tuple(
+        normalized + "/"
+        for path in tracked
+        if (normalized := path.rstrip("/"))
+        and normalized not in hashed_files
+        and normalized not in project_files
+    )
+
+
+def _collect_hashed_files(lockfile: LockFile) -> set[str]:
+    """Return every deployed path whose lock claim is explicitly file-shaped."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    return set(DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile))
 
 
 def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
@@ -766,16 +810,30 @@ def diff_scratch_against_project(
 ) -> list[DriftFinding]:
     """Compare the replay scratch tree against the project tree.
 
-    Three kinds of findings are emitted:
+    Four kinds of findings are emitted:
 
     * ``modified``     -- file exists in both, normalized content differs.
     * ``unintegrated`` -- file exists in scratch but not in project, and the
       path is part of the committed working tree when git tracking is known.
     * ``orphaned``     -- file exists in project + tracked in lockfile
       ``deployed_files`` but no longer in scratch.
+    * ``unrecorded``   -- the replay deploys the file and the project has it,
+      but no lockfile entry claims it: the committed manifest under-records.
 
-    Untracked extra files in governed directories are intentionally
-    ignored to avoid false positives from user-authored content.
+    ``unrecorded`` is the mirror image of ``orphaned``. Both are membership
+    findings, and between them they make manifest membership symmetric:
+    ``orphaned`` catches a claim with nothing behind it, ``unrecorded``
+    catches a deployed file with no claim in front of it. The latter matters
+    because manifest membership defines the scope of every downstream
+    lockfile-driven gate -- ``content-integrity`` hashes and Unicode-scans
+    exactly the recorded set, so a file missing from it is exempt from those
+    checks for as long as it stays missing (issue #2379).
+
+    Untracked extra files in governed directories that the replay does NOT
+    produce are still ignored -- those are user-authored content, and APM
+    deploying the file is what makes a missing claim a defect. Hook merge
+    targets are exempt for the same reason in reverse: APM writes into them
+    but shares them with the user, so it never claims them.
     """
     scratch_root = scratch_root.resolve()
     project_root = project_root.resolve()
@@ -783,6 +841,17 @@ def diff_scratch_against_project(
     scratch_files = _walk_managed(scratch_root, governed)
     project_files = _walk_managed(project_root, governed)
     tracked = _collect_tracked_files(lockfile)
+    claimed_prefixes = _claimed_prefixes(
+        tracked,
+        _collect_hashed_files(lockfile),
+        project_files,
+    )
+    # Hook merge targets (.claude/settings.json, .cursor/hooks.json, and their
+    # apm-hooks.json sidecars) are shared with the user and never claimed in
+    # deployed_files, so they can never be "unrecorded".
+    from apm_cli.install.manifest_reconcile import merge_hook_config_paths
+
+    merge_config_paths = merge_hook_config_paths(targets)
 
     # Imperative local bundles have no authored source tree for replay. Their
     # deployed bytes are already bound by local_deployed_file_hashes and the
@@ -856,6 +925,13 @@ def diff_scratch_against_project(
                     inline_diff=_inline_diff_for(scratch_path, project_path),
                 )
             )
+        elif not (rel in tracked or rel.startswith(claimed_prefixes) or rel in merge_config_paths):
+            # Content agrees, so nothing else in the audit will ever look at
+            # this file again: no manifest entry means no hash baseline and no
+            # Unicode scan. Reported only in the content-clean case -- when the
+            # bytes differ, ``modified`` already fails the check and 'apm
+            # install' is the same remedy for both.
+            findings.append(DriftFinding(path=rel, kind="unrecorded", package=""))
 
     for rel in sorted(project_files.keys()):
         if rel in scratch_files:
@@ -871,95 +947,3 @@ def diff_scratch_against_project(
         # else: untracked governed file -- ignore (user authored).
 
     return findings
-
-
-# ---------------------------------------------------------------------------
-# Renderers
-# ---------------------------------------------------------------------------
-
-
-def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> str:
-    """Human-readable text rendering grouped by kind."""
-    if not findings:
-        return f"{STATUS_SYMBOLS['check']} No drift detected"
-
-    lines: list[str] = [
-        f"{STATUS_SYMBOLS['warning']} Drift detected: {len(findings)} file(s)",
-        "",
-    ]
-    by_kind: dict[str, list[DriftFinding]] = {}
-    for f in findings:
-        by_kind.setdefault(f.kind, []).append(f)
-
-    for kind in ("modified", "unintegrated", "orphaned"):
-        items = by_kind.get(kind, [])
-        if not items:
-            continue
-        lines.append(f"  {kind} ({len(items)}):")
-        for item in items:
-            suffix = f"  [{item.package}]" if item.package else ""
-            lines.append(f"    - {item.path}{suffix}")
-            if verbose and item.inline_diff:
-                lines.append(f"      {item.inline_diff}")
-        lines.append("")
-
-    lines.append(
-        f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files with the lockfile."
-    )
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def render_drift_json(findings: list[DriftFinding]) -> dict:
-    """Machine-readable JSON shape: ``{\"drift\": [...]}``."""
-    return {
-        "drift": [
-            {
-                "path": f.path,
-                "kind": f.kind,
-                "package": f.package,
-                "inline_diff": f.inline_diff,
-            }
-            for f in findings
-        ]
-    }
-
-
-def render_drift_sarif(findings: list[DriftFinding]) -> list[dict]:
-    """SARIF ``results`` array; rule IDs use ``apm/drift/<kind>``."""
-    results: list[dict] = []
-    for f in findings:
-        results.append(
-            {
-                "ruleId": f"apm/drift/{f.kind}",
-                "level": "warning" if f.kind != "modified" else "error",
-                "message": {"text": f"drift ({f.kind}): {f.path}"},
-                "locations": [
-                    {
-                        "physicalLocation": {
-                            "artifactLocation": {"uri": f.path},
-                        }
-                    }
-                ],
-                "properties": {"package": f.package},
-            }
-        )
-    return results
-
-
-# ---------------------------------------------------------------------------
-# CLI helper -- intentionally minimal so commands/audit.py can re-use it.
-# ---------------------------------------------------------------------------
-
-
-def render_drift(
-    findings: list[DriftFinding],
-    fmt: str = "text",
-    verbose: bool = False,
-) -> str:
-    """Single rendering entrypoint for callers that pick a format string."""
-    if fmt == "json":
-        return json.dumps(render_drift_json(findings), indent=2)
-    if fmt == "sarif":
-        return json.dumps({"results": render_drift_sarif(findings)}, indent=2)
-    return render_drift_text(findings, verbose=verbose)

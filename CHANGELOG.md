@@ -26,6 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact selected release tag and passes that same normalized version to the
   installer, while configured installer mirrors remain authoritative. (by
   @fallintoplace, #2026)
+- `apm audit` now reports a deployed file that no `apm.lock.yaml` entry claims
+  as `unrecorded` drift. Such a file carried no recorded hash, so
+- `apm audit --ci` may surface new `unrecorded` failures on upgrade when
+  deployed files were committed without the regenerated `apm.lock.yaml`.
+  The new drift finding closes a gap where `content-integrity` silently skipped
+  such files. Run `apm install` and commit the regenerated lockfile; shared
+  hook merge targets remain exempt. (by @salpers, #2380)
+- Run `apm install` and commit the regenerated lockfile to resolve new
+  `unrecorded` failures that `apm audit --ci` may surface on upgrade when
+  deployed files were committed without an `apm.lock.yaml` claim. This closes
+  a gap where `content-integrity` silently skipped such files; shared hook
+  merge targets remain exempt. (by @salpers, #2380)
+- A project whose `apm.yml` declares only `dependencies.mcp` now gets an
+  `apm.lock.yaml`. Such a project never entered the install pipeline that
+  writes one, so `apm audit` failed with "Lockfile missing -- run 'apm
+  install'" immediately after a successful install, and the resolved MCP
+  servers went unpinned. (by @edenfunf, #2373)
+- Projects that declare only MCP servers now install and audit cleanly on the
+  first try. Normal install creates `apm.lock.yaml` with the resolved MCP
+  state; frozen install fails without writing when that state is missing or
+  stale. The matching `openapm-v0.1.md` frozen-install requirement now covers
+  MCP state and all durable writes. (by @edenfunf, #2390; fixes #2373)
+
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

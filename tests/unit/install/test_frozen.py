@@ -1,4 +1,4 @@
-"""Unit tests for ``InstallService._enforce_frozen``.
+"""Unit tests for ``InstallService.enforce_frozen``.
 
 Issue: https://github.com/microsoft/apm/issues/1203 (P0).
 """
@@ -6,7 +6,7 @@ Issue: https://github.com/microsoft/apm/issues/1203 (P0).
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -46,7 +46,7 @@ class TestEnforceFrozen:
         req = _make_request(project_dir=tmp_path, manifest_deps=[])
 
         with pytest.raises(FrozenInstallError, match=r"requires apm\.lock\.yaml"):
-            InstallService._enforce_frozen(req)
+            InstallService.enforce_frozen(req)
 
     def test_raises_when_manifest_dep_missing_from_lockfile(self, tmp_path: Path):
         _write_apm_yml(tmp_path)
@@ -55,7 +55,7 @@ class TestEnforceFrozen:
         req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
 
         with pytest.raises(FrozenInstallError, match="out of sync") as exc_info:
-            InstallService._enforce_frozen(req)
+            InstallService.enforce_frozen(req)
 
         assert any("declared/r" in r for r in exc_info.value.reasons)
 
@@ -75,7 +75,7 @@ class TestEnforceFrozen:
         dep = DependencyReference(repo_url="https://github.com/o/r")
         req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
 
-        InstallService._enforce_frozen(req)
+        InstallService.enforce_frozen(req)
 
     def test_orphan_lockfile_entries_dont_fail(self, tmp_path: Path):
         """Mirrors npm ci: extra lock entries are tolerated; only direct deps must be present."""
@@ -100,4 +100,38 @@ class TestEnforceFrozen:
         dep = DependencyReference(repo_url="https://github.com/o/r")
         req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
 
-        InstallService._enforce_frozen(req)
+        InstallService.enforce_frozen(req)
+
+    def test_mixed_project_rejects_stale_locked_mcp_state(self, tmp_path: Path):
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+        _write_apm_yml(tmp_path)
+        locked_dep = LockedDependency(
+            repo_url="https://github.com/o/r",
+            resolved_ref="main",
+            resolved_commit="a" * 40,
+            depth=1,
+        )
+        _write_lockfile(tmp_path, [locked_dep])
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock is not None
+        lock.mcp_servers = ["stale-mcp"]
+        lock.mcp_configs = {"stale-mcp": {"name": "stale-mcp"}}
+        lock.save(tmp_path / "apm.lock.yaml")
+        dep = DependencyReference(repo_url="https://github.com/o/r")
+        req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
+        req.apm_package.get_all_mcp_dependencies.return_value = []
+        current = CurrentMcpConfigView(
+            dependencies=(),
+            configs={},
+            provenance={},
+            problems=(),
+        )
+
+        with (
+            patch.object(CurrentMcpConfigView, "derive", return_value=current),
+            pytest.raises(FrozenInstallError, match="out of sync") as exc_info,
+        ):
+            InstallService.enforce_frozen(req)
+
+        assert any("stale-mcp" in reason for reason in exc_info.value.reasons)

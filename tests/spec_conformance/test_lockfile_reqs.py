@@ -101,10 +101,63 @@ def test_lockfile_dependency_carries_resolved_field():
     )
 
 
-@pytest.mark.req("req-lk-006")
+@pytest.mark.req("req-lk-013")
 def test_lockfile_dependency_carries_integrity_field_when_remote():
     doc = load_yaml_fixture(*TRUST_LOCKFILE)
     assert doc["dependencies"][0]["resolved_hash"].startswith("sha256:")
+
+
+@pytest.mark.req("req-lk-006")
+def test_frozen_mcp_validation_fails_before_durable_mutation(tmp_path):
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.errors import FrozenInstallError
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.models.apm_package import APMPackage
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+    manifest_path = tmp_path / "apm.yml"
+    manifest_path.write_text(
+        "name: frozen-mcp\n"
+        "version: 1.0.0\n"
+        "targets: [cursor]\n"
+        "dependencies:\n"
+        "  mcp:\n"
+        "    - name: fixture-mcp\n"
+        "      registry: false\n"
+        "      transport: stdio\n"
+        "      command: printf\n"
+        "      args: [current]\n",
+        encoding="ascii",
+    )
+    package = APMPackage.from_apm_yml(manifest_path)
+    view = CurrentMcpConfigView.derive(
+        package,
+        None,
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=False,
+    )
+    stale_configs = {name: dict(config) for name, config in view.configs.items()}
+    stale_configs["fixture-mcp"]["args"] = ["stale"]
+    lock = LockFile(apm_version="test")
+    lock.mcp_servers = ["fixture-mcp"]
+    lock.mcp_configs = stale_configs
+    lock.save(tmp_path / "apm.lock.yaml")
+    config_path = tmp_path / ".cursor" / "mcp.json"
+    config_path.parent.mkdir()
+    config_path.write_text('{"mcpServers":{"sentinel":{}}}\n', encoding="ascii")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    with pytest.raises(FrozenInstallError, match="out of sync"):
+        InstallService.enforce_frozen(
+            InstallRequest(
+                apm_package=package,
+                frozen=True,
+            )
+        )
+
+    assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
 
 
 @pytest.mark.req("req-lk-007")

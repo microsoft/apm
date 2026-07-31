@@ -2783,7 +2783,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:029ae5c18eba7596ab6828adc893664b10c9392e473a8782f3353131c754b5c1
+  content_hash: sha256:ff22fbee2c9194c14ef2de92cc67ff19cfcb092a109fae033022c0751acde5be
 - kind: project-relative
   target: copilot
   value: .github/instructions/changelog.instructions.md
@@ -2864,7 +2864,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:5219a5418b98d393bf0f14cd26b1ed553004fd8cddf5c3b184c9350485817917
+  content_hash: sha256:555f792adf02638f362891256f3f76f58dd89be30aaa40533e8fe2aadeb09eae
 local_deployed_files:
 - .agents/skills/apm-spec-guardian
 - .agents/skills/apm-spec-guardian/SKILL.md
@@ -3290,7 +3290,7 @@ local_deployed_file_hashes:
   .github/agents/spec-tag-architect.agent.md: sha256:82907265c5e7cf1ac61ad96866fa7c5683b69c8f09b7a4c5f3cc241acc9568ca
   .github/agents/supply-chain-security-expert.agent.md: sha256:8fb8cc426d6af17ba084a28b3f026c2b475b62e3ca63ed2f88b83bd823f877af
   .github/agents/test-coverage-expert.agent.md: sha256:48c2172d1f18a394fa83ef9dc2be0b9b921a4e51e976498165250fed66369711
-  .github/instructions/architecture.instructions.md: sha256:029ae5c18eba7596ab6828adc893664b10c9392e473a8782f3353131c754b5c1
+  .github/instructions/architecture.instructions.md: sha256:ff22fbee2c9194c14ef2de92cc67ff19cfcb092a109fae033022c0751acde5be
   .github/instructions/changelog.instructions.md: sha256:1e51ec4c74e847967962bd279dc4c6e582c5d3578490b3c28d5f3acd3e05f73e
   .github/instructions/cicd.instructions.md: sha256:08d87b7d635761cb41deb8fc71d5d83f54678de463db484afb16d2d4f8713ecb
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
@@ -3299,4 +3299,4 @@ local_deployed_file_hashes:
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:8d31137f18842570bef6c93f8396587ac691e5fc973988bd865b008b0983f90d
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:5219a5418b98d393bf0f14cd26b1ed553004fd8cddf5c3b184c9350485817917
+  .github/instructions/tests.instructions.md: sha256:555f792adf02638f362891256f3f76f58dd89be30aaa40533e8fe2aadeb09eae

@@ -129,7 +129,7 @@ Removes hidden characters from scanned files in place. Combine with
 
 `apm audit` also runs **install-replay drift detection** by default:
 it replays your install into a scratch tmpdir from the cache and
-diffs the result against your working tree. Three drift kinds get
+diffs the result against your working tree. Four drift kinds get
 reported:
 
 | Kind | Meaning |
@@ -137,6 +137,7 @@ reported:
 | `unintegrated` | A `.apm/` source exists, but its deployed counterpart is missing. Fix: `apm install`. |
 | `modified` | A deployed file's content differs from what install would produce. Fix: revert the hand-edit, or move it into source. |
 | `orphaned` | A deployed file exists with no current source. Fix: `apm install` (orphan cleanup runs automatically). |
+| `unrecorded` | Install replay produces the same normalized bytes as the project, but no exact or directory `deployed_files` claim covers the path. Shared merge-hook targets and sidecars are exempt; differing bytes report `modified`. Fix: `apm install`, then commit the regenerated `apm.lock.yaml`. |
 
 Bare `apm audit` keeps the replay cache-only: it does no network I/O and
 does not write to your project. If the cache is missing the entries the
@@ -157,6 +158,7 @@ For the full flag set, see [CLI audit](../../reference/cli/audit/).
 | `cache pin mismatch` from `apm audit` | The cache holds content from a different `resolved_commit` than the lockfile records | `apm install` to repopulate the cache, then re-audit |
 | `unintegrated` drift | Source committed without re-running install | `apm install`, then commit the regenerated `apm.lock.yaml` |
 | `modified` drift | Hand-edit to a generated file | Revert, or move the change into the corresponding `.apm/` source |
+| `unrecorded` drift | Deployed targets committed without the regenerated lockfile | `apm install`, then commit `apm.lock.yaml` in the same change |
 | Hidden-Unicode finding from `apm audit` | A primitive file contains invisible characters | `apm audit --strip` to remove them, then re-audit |
 
 None of these require disabling a check. The escape hatches

@@ -119,6 +119,36 @@ def is_governed_by_install(path: str, file_prefixes: set[str], uri_schemes: set[
     )
 
 
+def merge_hook_config_paths(targets: list[TargetProfile]) -> set[str]:
+    """Return project-relative paths that hook integration MERGES into.
+
+    These files are shared with the user: APM injects its own event entries
+    (and its ownership sidecar) but never claims the file, so they sit
+    deliberately outside ``deployed_files`` / ``local_deployed_files``
+    tracking -- the same state ``reconcile_dropped_merge_hook_targets`` below
+    exists to reconcile. A membership-driven check must therefore exempt them,
+    or it reports every hooks-using project as under-recording. Content
+    coverage is unaffected: the drift replay reproduces these files and
+    compares them byte-for-byte.
+
+    Lives here rather than beside ``_MERGE_HOOK_TARGETS`` because
+    ``hook_integrator.py`` is at its CI line-count budget, the same reason
+    ``integration/_hook_dropped_targets.py`` was split out; the registry stays
+    the single source of truth for the filenames.
+    """
+    from apm_cli.integration import hook_integrator as _hi
+
+    paths: set[str] = set()
+    for target in targets or []:
+        config = _hi._MERGE_HOOK_TARGETS.get(getattr(target, "name", ""))
+        root = str(getattr(target, "root_dir", "") or "").rstrip("/")
+        if config is None or not root:
+            continue
+        paths.add(f"{root}/{config.config_filename}")
+        paths.add(f"{root}/{_hi._APM_HOOKS_SIDECAR}")
+    return paths
+
+
 def union_preserving(
     current_files: list[str],
     current_hashes: dict[str, str],

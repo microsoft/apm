@@ -181,6 +181,7 @@ same PR. Both must stay in sync.
 
 `pyproject.toml` owns these definitions.
 Module-level `pytestmark` is the sole behavioral classification authority.
+This is a marker-only behavioral taxonomy.
 Every classified module declares exactly one of these markers, and every
 collected node in that module must inherit the same classification. Function-
 and class-level behavioral markers are rejected because they would create a

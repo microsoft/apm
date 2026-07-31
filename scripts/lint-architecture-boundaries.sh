@@ -270,6 +270,18 @@ if [ "$shared_target_status" -ne 0 ]; then
     echo "$shared_target_output"
     violations=$((violations + 1))
 fi
+merge_hook_membership_body=$(awk '
+    /^def merge_hook_config_paths\(/ {flag=1}
+    flag && /^def / && !/^def merge_hook_config_paths\(/ {exit}
+    flag {print}
+' src/apm_cli/install/manifest_reconcile.py)
+if ! printf '%s\n' "$merge_hook_membership_body" | grep -q '_MERGE_HOOK_TARGETS' \
+    || ! printf '%s\n' "$merge_hook_membership_body" | grep -q '_APM_HOOKS_SIDECAR' \
+    || printf '%s\n' "$merge_hook_membership_body" \
+        | grep -Eq 'settings\.json|hooks\.json|apm-hooks\.json'; then
+    echo "[x] Drift hook membership exemptions must derive from HookIntegrator registries"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
@@ -383,6 +395,48 @@ if ! grep -q 'DeploymentLedgerCodec.record_local_bundle_files' \
     || [ -n "$local_bundle_marker_hits" ]; then
     echo "[x] Local-bundle replay provenance must route through DeploymentLedgerCodec"
     [ -n "$local_bundle_marker_hits" ] && echo "$local_bundle_marker_hits"
+    violations=$((violations + 1))
+fi
+drift_membership_body=$(awk '
+    /^def _collect_tracked_files\(/ {flag=1}
+    flag && /^def / && !/^def _collect_tracked_files\(/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+drift_hash_shape_body=$(awk '
+    /^def _collect_hashed_files\(/ {flag=1}
+    flag && /^def / && !/^def _collect_hashed_files\(/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+if ! printf '%s\n' "$drift_membership_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_claims' \
+    || ! printf '%s\n' "$drift_hash_shape_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_hash_paths' \
+    || printf '%s\n%s\n' "$drift_membership_body" "$drift_hash_shape_body" \
+        | grep -Eq 'lockfile\.dependencies|local_deployed_files|deployed_file_hashes'; then
+    echo "[x] Drift deployment membership must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
+scanner_membership_body=$(awk '
+    /^def scan_lockfile_packages\(/ {flag=1}
+    flag && /^def / && !/^def scan_lockfile_packages\(/ {exit}
+    flag {print}
+' src/apm_cli/security/file_scanner.py)
+if ! printf '%s\n' "$scanner_membership_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_claims' \
+    || printf '%s\n' "$scanner_membership_body" \
+        | grep -Eq 'lock\.dependencies|dep\.deployed_files'; then
+    echo "[x] Hidden-Unicode membership must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
+membership_owner_body=$(awk '
+    /^    def legacy_deployed_file_claims\(/ {flag=1}
+    flag && /^    def / && !/legacy_deployed_file_claims/ {exit}
+    flag {print}
+' src/apm_cli/core/deployment_ledger.py)
+if ! printf '%s\n' "$membership_owner_body" | grep -q 'dependency\.deployed_files' \
+    || ! printf '%s\n' "$membership_owner_body" | grep -q 'lockfile\.local_deployed_files' \
+    || printf '%s\n' "$membership_owner_body" | grep -q 'from_lockfile'; then
+    echo "[x] Legacy deployed-file membership projection belongs to DeploymentLedgerCodec"
     violations=$((violations + 1))
 fi
 update_plan_ref_body=$(awk '
@@ -905,7 +959,25 @@ if ! grep -q '_clear_platform_token_env(env)' src/apm_cli/core/auth.py \
     violations=$((violations + 1))
 fi
 
-echo "[*] AC25: self-update release selection authority"
+echo "[*] AC25: lifecycle smoke partition authority"
+lifecycle_topology_contract="tests/quality/test_ci_topology.py"
+lifecycle_membership_hits=$(
+    grep -En \
+        'LIFECYCLE_SMOKE_(FULL_COUNT|MERGE_GROUP_COUNT|REQUIRED_COUNT|MERGE_GROUP_NODES)|expected_(full_count|merge_group_nodes|required_count)' \
+        "$lifecycle_topology_contract" \
+        || true
+)
+if ! grep -q '^def _validated_lifecycle_node_set(' "$lifecycle_topology_contract" \
+    || ! grep -q '^def _assert_lifecycle_partition_sets(' "$lifecycle_topology_contract" \
+    || ! grep -q 'merge_group < full' "$lifecycle_topology_contract" \
+    || ! grep -q 'required == full - merge_group' "$lifecycle_topology_contract" \
+    || [ -n "$lifecycle_membership_hits" ]; then
+    echo "[x] Lifecycle marker partitions must be collection-derived, never count/list pinned"
+    [ -n "$lifecycle_membership_hits" ] && echo "$lifecycle_membership_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC26: self-update release selection authority"
 self_update_owner="src/apm_cli/commands/self_update.py"
 self_update_owner_defs=$(grep -Ec \
     '^class _ResolvedSelfUpdateRelease:|^def _resolve_self_update_release\(' \
@@ -935,6 +1007,53 @@ if [ "$self_update_owner_defs" -ne 2 ] \
     [ -n "$self_update_duplicate_defs" ] && echo "$self_update_duplicate_defs"
     violations=$((violations + 1))
 fi
+
+echo "[*] AC27: frozen install decision authority"
+frozen_owner="src/apm_cli/install/service.py"
+frozen_adapter="src/apm_cli/commands/install.py"
+frozen_preflight_line=$(grep -n 'InstallService\.enforce_frozen(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_migration_line=$(grep -n 'migrate_lockfile_if_needed(ctx\.apm_dir)' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_add_guard_line=$(grep -n 'InstallService\.reject_frozen_mutation(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_root_guard_line=$(grep -n 'InstallService\.reject_missing_frozen_root(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+root_redirect_line=$(grep -n '_root_redirect = install_root_redirect(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+dedicated_mcp_line=$(grep -n '^[[:space:]]*_handle_mcp_install(' "$frozen_adapter" \
+    | tail -1 | cut -d: -f1)
+local_bundle_line=$(grep -n 'if len(packages) == 1 and not mcp_name' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_duplicate_hits=$(
+    grep -rEn --include='*.py' 'raise FrozenInstallError' src/apm_cli \
+        | grep -v "^${frozen_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^    def enforce_frozen(' "$frozen_owner" \
+    || ! grep -q '^    def reject_frozen_mutation(' "$frozen_owner" \
+    || ! grep -q '^    def reject_missing_frozen_root(' "$frozen_owner" \
+    || [ -z "$frozen_preflight_line" ] \
+    || [ -z "$frozen_migration_line" ] \
+    || [ "$frozen_preflight_line" -ge "$frozen_migration_line" ] \
+    || [ -z "$frozen_add_guard_line" ] \
+    || [ -z "$frozen_root_guard_line" ] \
+    || [ -z "$root_redirect_line" ] \
+    || [ "$frozen_root_guard_line" -ge "$root_redirect_line" ] \
+    || [ -z "$dedicated_mcp_line" ] \
+    || [ -z "$local_bundle_line" ] \
+    || [ "$frozen_add_guard_line" -ge "$dedicated_mcp_line" ] \
+    || [ "$frozen_add_guard_line" -ge "$local_bundle_line" ] \
+    || [ -n "$frozen_duplicate_hits" ]; then
+    echo "[x] Frozen install decisions must route through InstallService before mutation"
+    [ -n "$frozen_duplicate_hits" ] && echo "$frozen_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
+
+
+
 
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"

@@ -439,12 +439,12 @@ jobs:
   #
   # Deterministic release selection
   # -------------------------------
-  # The bounded required release expression excludes three unique contracts
+  # The bounded required release expression excludes contracts explicitly
   # marked `lifecycle_merge_group`; ci-integration.yml's full integration
-  # shards still execute those nodes from the unfiltered tests/integration root.
+  # shards still execute them from the unfiltered tests/integration root.
   #
-  # Why these 37 required nodes, Consume/Produce/Govern coverage
-  # ------------------------------------------------------------
+  # Why this required partition, Consume/Produce/Govern coverage
+  # -------------------------------------------------------------
   # The marker family retains one static authority guard plus policy,
   # content-hash, hook, virtual-package, audit, auth, and installed-console
   # lifecycle contracts. Real subprocess rows use the uv-installed `apm`
@@ -476,15 +476,16 @@ jobs:
   #
   # Why timeout-minutes: 3
   # ------------------------
-  # Recent hosted runs of the current 37-node required selection complete in
-  # about one minute. The 3-minute job cap includes checkout/setup/sync and
+  # Recent hosted runs of the current required selection complete in about one
+  # minute. The 3-minute job cap includes checkout/setup/sync and
   # still fails fast on accidental network retries or unreviewed marker growth.
   # Hosted job duration is the release authority.
   #
-  # tests/quality/test_ci_topology.py guards the 40/3/37 marker partition, this
-  # exact expression, the full merge-group integration path, --strict-markers,
-  # required-check membership, E2E opt-in placement, and credential/network
-  # prohibitions.
+  # tests/quality/test_ci_topology.py independently collects the full,
+  # merge-group-only, and required selections and guards their set partition,
+  # this exact expression, the unfiltered merge-group integration path,
+  # --strict-markers, required-check membership, E2E opt-in placement, and
+  # credential/network prohibitions.
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
     runs-on: ubuntu-24.04

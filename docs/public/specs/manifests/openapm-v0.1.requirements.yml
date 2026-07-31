@@ -144,6 +144,7 @@ requirements:
     keyword: MUST
     section: "5.5"
     conformance_class: consumer
+    notes: "frozen validation covers direct package pins and MCP state before durable mutation"
   - id: req-lk-007
     keyword: SHOULD
     section: "5.5"

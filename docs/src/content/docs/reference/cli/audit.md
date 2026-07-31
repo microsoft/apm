@@ -170,7 +170,23 @@ For the full workflow, see [Enforce in CI](../../../enterprise/enforce-in-ci/).
 
 ### Drift detection
 
-The default audit replays the install pipeline into a scratch tree and diffs the result against the working tree. It catches hand-edits to deployed files, missing integrations from a skipped `apm install`, and orphaned files. Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it. Use `--no-drift` to opt out (not recommended outside performance-constrained CI loops). In bare `apm audit`, drift findings are advisory: they render but do not change the exit code (see [Exit codes](#exit-codes)).
+The default audit replays the install pipeline into a scratch tree and diffs
+the result against the working tree. It catches hand-edits, missing
+integrations, orphaned files, and `unrecorded` files. `unrecorded` applies when
+replay produced the same normalized bytes as the project but no exact or
+directory `deployed_files` claim covers the path. Shared merge-hook targets
+are exempt and differing bytes report `modified`. `unrecorded` findings fail
+`--ci`; run `apm install`, then commit the regenerated `apm.lock.yaml`.
+
+Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.
+Use `--no-drift` to opt out with reduced coverage. In bare `apm audit`, drift
+findings are advisory and do not change the exit code (see
+[Exit codes](#exit-codes)).
+
+Bare `apm audit` keeps replay cache-only, so a cache miss produces an
+informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
+scratch replay through `install/audit_replay.py`; materialization failures
+fail closed without mutating the checkout.
 
 ### Deployment-owner integrity
 
@@ -189,7 +205,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 
 ### CI checks (`--ci`)
 
-`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity (Unicode plus per-file SHA-256 hash drift on every deployed file, including local `.apm/` content via the synthesized self-entry), and an advisory `includes` consent check. Drift detection runs alongside and contributes to the exit code unless `--no-drift` is set. On a cold cache, CI mode self-hydrates a scratch install from the lockfile pins instead of reporting a green skip, so setup-only CI can still catch stale committed deployed files without rewriting the checkout. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so the full-install CI pattern remains the right default there. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
+`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity (Unicode plus per-file SHA-256 hash drift on every deployed file, including local `.apm/` content via the synthesized self-entry), and an advisory `includes` consent check. A lockfile is required when `apm.yml` declares APM or MCP dependencies. For an MCP-only project, normal [`apm install`](../install/#behavior) creates or repairs the resolved MCP lock state; frozen install fails without writing when that state is missing or stale. Drift detection runs alongside and contributes to the exit code unless `--no-drift` is set. On a cold cache, CI mode self-hydrates a scratch install from the lockfile pins instead of reporting a green skip, so setup-only CI can still catch stale committed deployed files without rewriting the checkout. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so the full-install CI pattern remains the right default there. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
 
 ### Mutual exclusions
 

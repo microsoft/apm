@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 
@@ -54,7 +55,7 @@ REQUIRED_SHARD_ROOTS = (
 # check. See ci.yml's lifecycle-smoke job comment for full rationale.
 #
 # The full marker family stays merge-group covered while the required release
-# expression excludes three unique extended contracts to remain bounded.
+# expression excludes explicitly merge-group-only contracts to remain bounded.
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
@@ -67,17 +68,6 @@ LIFECYCLE_SMOKE_FULL_EXPRESSION = "lifecycle_smoke"
 LIFECYCLE_SMOKE_MERGE_GROUP_MARKER = "lifecycle_merge_group"
 LIFECYCLE_SMOKE_REQUIRED_EXPRESSION = (
     f"{LIFECYCLE_SMOKE_FULL_EXPRESSION} and not {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}"
-)
-LIFECYCLE_SMOKE_FULL_COUNT = 40
-LIFECYCLE_SMOKE_MERGE_GROUP_COUNT = 3
-LIFECYCLE_SMOKE_REQUIRED_COUNT = 37
-LIFECYCLE_SMOKE_MERGE_GROUP_NODES = (
-    "tests/integration/test_prune_deployment_ledger_e2e.py"
-    "::test_prune_cascades_dependency_state_and_audit_sees_no_ghost",
-    "tests/integration/test_prune_deployment_ledger_e2e.py"
-    "::test_audit_prune_audit_repairs_injected_ghost_without_deleting_bytes",
-    "tests/integration/test_virtual_package_lifecycle_matrix.py"
-    "::test_virtual_throttle_fallback_records_fetch_head_sha_and_content_hash",
 )
 MERGE_GROUP_INTEGRATION_WORKFLOW = REPO_ROOT / ".github/workflows/ci-integration.yml"
 MERGE_GROUP_INTEGRATION_JOB = "integration-tests-shard"
@@ -483,23 +473,23 @@ def _assert_lifecycle_smoke_marker_registered(markers: list[str]) -> None:
 def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     """The run step must select the complete lifecycle marker family."""
     step = workflow_step(job, LIFECYCLE_SMOKE_RUN_STEP)
-    for tokens in shell_commands(step):
-        if "pytest" not in tokens:
-            continue
-        assert "--strict-markers" in tokens, (
-            "lifecycle-smoke must pass --strict-markers so an unregistered "
-            "or typo'd marker name fails loudly instead of silently "
-            "selecting zero tests"
-        )
-        assert "-m" in tokens
-        marker_index = tokens.index("-m")
-        assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
-        targets = [token for token in tokens if token.startswith("tests/")]
-        assert targets == [LIFECYCLE_SMOKE_ROOT], (
-            f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
-        )
-        return
-    raise AssertionError("lifecycle-smoke run step contains no pytest invocation")
+    pytest_commands = [tokens for tokens in shell_commands(step) if "pytest" in tokens]
+    assert len(pytest_commands) == 1, (
+        "lifecycle-smoke run step must contain exactly one pytest invocation"
+    )
+    tokens = pytest_commands[0]
+    assert "--strict-markers" in tokens, (
+        "lifecycle-smoke must pass --strict-markers so an unregistered "
+        "or typo'd marker name fails loudly instead of silently "
+        "selecting zero tests"
+    )
+    assert "-m" in tokens
+    marker_index = tokens.index("-m")
+    assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
+    targets = [token for token in tokens if token.startswith("tests/")]
+    assert targets == [LIFECYCLE_SMOKE_ROOT], (
+        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
+    )
 
 
 def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
@@ -627,22 +617,42 @@ def _collect_lifecycle_nodes(expression: str) -> tuple[str, ...]:
     return tuple(line for line in result.stdout.splitlines() if line.startswith("tests/"))
 
 
-def _assert_lifecycle_marker_partition(
-    *,
-    expected_full_count: int = LIFECYCLE_SMOKE_FULL_COUNT,
-    expected_merge_group_nodes: tuple[str, ...] = LIFECYCLE_SMOKE_MERGE_GROUP_NODES,
-    expected_required_count: int = LIFECYCLE_SMOKE_REQUIRED_COUNT,
+def _validated_lifecycle_node_set(nodes: Sequence[str], label: str) -> set[str]:
+    """Return a non-empty node set, rejecting duplicate collection output."""
+    assert nodes, f"{label} lifecycle selection must not be empty"
+    node_set = set(nodes)
+    assert len(node_set) == len(nodes), f"{label} lifecycle selection contains duplicate node IDs"
+    return node_set
+
+
+def _assert_lifecycle_partition_sets(
+    full_nodes: Sequence[str],
+    merge_group_nodes: Sequence[str],
+    required_nodes: Sequence[str],
 ) -> None:
-    """Pin the full, merge-group-only, and required marker partition."""
-    full = _collect_lifecycle_nodes(LIFECYCLE_SMOKE_FULL_EXPRESSION)
-    merge_group = _collect_lifecycle_nodes(LIFECYCLE_SMOKE_MERGE_GROUP_MARKER)
-    required = _collect_lifecycle_nodes(LIFECYCLE_SMOKE_REQUIRED_EXPRESSION)
-    assert len(full) == expected_full_count
-    assert merge_group == expected_merge_group_nodes
-    assert len(merge_group) == LIFECYCLE_SMOKE_MERGE_GROUP_COUNT
-    assert len(required) == expected_required_count
-    assert set(required).isdisjoint(merge_group)
-    assert set(required) | set(merge_group) == set(full)
+    """Validate independently collected lifecycle marker set relationships."""
+    full = _validated_lifecycle_node_set(full_nodes, "full")
+    merge_group = _validated_lifecycle_node_set(merge_group_nodes, "merge-group")
+    required = _validated_lifecycle_node_set(required_nodes, "required")
+    assert merge_group < full, "merge-group lifecycle selection must be a strict subset of full"
+    assert required.isdisjoint(merge_group), (
+        "required lifecycle selection must be disjoint from merge-group"
+    )
+    assert required == full - merge_group, (
+        "required lifecycle selection must equal full minus merge-group"
+    )
+    assert full == required | merge_group, (
+        "full lifecycle selection must equal required union merge-group"
+    )
+
+
+def _assert_lifecycle_marker_partition() -> None:
+    """Validate three independently collected lifecycle marker selections."""
+    _assert_lifecycle_partition_sets(
+        _collect_lifecycle_nodes(LIFECYCLE_SMOKE_FULL_EXPRESSION),
+        _collect_lifecycle_nodes(LIFECYCLE_SMOKE_MERGE_GROUP_MARKER),
+        _collect_lifecycle_nodes(LIFECYCLE_SMOKE_REQUIRED_EXPRESSION),
+    )
 
 
 def _assert_merge_group_full_lifecycle_path() -> None:
@@ -799,18 +809,52 @@ def test_lifecycle_smoke_marker_family_empty_fails() -> None:
         _assert_marker_collection_non_empty("lifecycle_smoke_nonexistent_probe_marker")
 
 
-def test_lifecycle_smoke_membership_drift_fails() -> None:
-    with pytest.raises(AssertionError):
-        _assert_lifecycle_marker_partition(
-            expected_merge_group_nodes=LIFECYCLE_SMOKE_MERGE_GROUP_NODES[:-1],
-        )
+@pytest.mark.parametrize("empty_index", (0, 1, 2))
+def test_lifecycle_marker_partition_rejects_empty_selection(empty_index: int) -> None:
+    selections = [["a", "b"], ["b"], ["a"]]
+    selections[empty_index] = []
+
+    with pytest.raises(AssertionError, match="must not be empty"):
+        _assert_lifecycle_partition_sets(*selections)
 
 
-def test_lifecycle_smoke_selected_count_drift_fails() -> None:
-    with pytest.raises(AssertionError):
-        _assert_lifecycle_marker_partition(
-            expected_required_count=LIFECYCLE_SMOKE_REQUIRED_COUNT - 1,
-        )
+def test_lifecycle_marker_partition_rejects_merge_group_outside_full() -> None:
+    with pytest.raises(AssertionError, match="strict subset"):
+        _assert_lifecycle_partition_sets(["a", "b"], ["outside"], ["a", "b"])
+
+
+def test_lifecycle_marker_partition_rejects_required_merge_overlap() -> None:
+    with pytest.raises(AssertionError, match="must be disjoint"):
+        _assert_lifecycle_partition_sets(["a", "b"], ["b"], ["a", "b"])
+
+
+@pytest.mark.parametrize("required", (["a"], ["a", "outside"]))
+def test_lifecycle_marker_partition_rejects_missing_or_extra_required(
+    required: list[str],
+) -> None:
+    with pytest.raises(AssertionError, match="full minus merge-group"):
+        _assert_lifecycle_partition_sets(["a", "b", "c"], ["c"], required)
+
+
+@pytest.mark.parametrize("duplicate_index", (0, 1, 2))
+def test_lifecycle_marker_partition_rejects_duplicate_node_ids(
+    duplicate_index: int,
+) -> None:
+    selections = [["a", "b"], ["b"], ["a"]]
+    selections[duplicate_index].append(selections[duplicate_index][0])
+
+    with pytest.raises(AssertionError, match="duplicate node IDs"):
+        _assert_lifecycle_partition_sets(*selections)
+
+
+def test_lifecycle_smoke_duplicate_pytest_invocation_fails(
+    provisional_lifecycle_job: WorkflowNode,
+) -> None:
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["run"] = f"{step['run']}\n{step['run']}"
+
+    with pytest.raises(AssertionError, match="exactly one pytest invocation"):
+        _assert_lifecycle_smoke_command(provisional_lifecycle_job)
 
 
 def test_lifecycle_smoke_credential_env_fails(
