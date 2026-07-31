@@ -281,13 +281,26 @@ def _validate_virtual_package(
             )
         return True
 
-    ctx = auth_resolver.resolve_for_dep(dep_ref)
     host = dep_ref.host or default_host()
     org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url and "/" in dep_ref.repo_url else None
     if verbose_log:
-        verbose_log(
-            f"Auth resolved: host={host}, org={org}, source={ctx.source}, type={ctx.token_type}"
-        )
+        if (
+            auth_resolver.uses_public_github_anonymous_first(
+                host,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            is True
+        ):
+            verbose_log(
+                f"Auth deferred: host={host}, org={org} -- "
+                "anonymous probe before credential resolution"
+            )
+        else:
+            ctx = auth_resolver.resolve_for_dep(dep_ref)
+            verbose_log(
+                f"Auth resolved: host={host}, org={org}, source={ctx.source}, type={ctx.token_type}"
+            )
     virtual_downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
 
     def _warn(msg: str) -> None:
@@ -321,7 +334,19 @@ def _validate_virtual_package(
         verbose_callback=verbose_log,
         warn_callback=_warn,
     )
-    if not result and verbose_log:
+    public_github = auth_resolver.uses_public_github_anonymous_first(
+        host,
+        port=dep_ref.port,
+        host_type=dep_ref.host_type,
+    )
+    auth_was_resolved = auth_resolver.has_cached_resolution(
+        host,
+        org,
+        port=dep_ref.port,
+        host_type=dep_ref.host_type,
+        path=dep_ref.repo_url,
+    )
+    if not result and verbose_log and (public_github is not True or auth_was_resolved):
         try:
             err_ctx = auth_resolver.build_error_context(
                 host,
@@ -654,11 +679,17 @@ def _validate_github_package(
         return True
 
     if verbose_log:
-        ctx = auth_resolver.resolve(host, org=org, port=port)
-        verbose_log(
-            f"Auth resolved: host={host_info.display_name}, org={org}, "
-            f"source={ctx.source}, type={ctx.token_type}"
-        )
+        if auth_resolver.uses_public_github_anonymous_first(host, port=port) is True:
+            verbose_log(
+                f"Auth deferred: host={host_info.display_name}, org={org} -- "
+                "anonymous probe before credential resolution"
+            )
+        else:
+            ctx = auth_resolver.resolve(host, org=org, port=port)
+            verbose_log(
+                f"Auth resolved: host={host_info.display_name}, org={org}, "
+                f"source={ctx.source}, type={ctx.token_type}"
+            )
 
     def _check_repo(token, git_env) -> bool:
         """Check repo accessibility via GitHub API."""
@@ -697,6 +728,7 @@ def _validate_github_package(
             # DependencyReference invariant); forwarded as path= so GCM
             # multi-account users get per-URL credential matching.
             path=dep_ref.repo_url,
+            host_type=dep_ref.host_type,
             unauth_first=True,
             verbose_callback=verbose_log,
         )

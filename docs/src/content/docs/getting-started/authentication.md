@@ -8,16 +8,20 @@ APM works without tokens for public packages on github.com. Authentication is ne
 
 ## How APM resolves authentication
 
-APM resolves tokens per `(host, port, org)` pair. For each dependency, it walks a **host-class-specific** chain until it finds a token:
+Public `github.com` packages need no token configuration. APM tries HTTPS repository operations anonymously before resolving credentials.
+
+The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
+
+APM resolves ordinary tokens per `(host, port, org)` scope. When a private `github.com` fallback asks the credential helper for a repository path, that path also scopes the cache entry. APM then walks a **host-class-specific** chain until it finds a token:
 
 1. **GitHub-class hosts** (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`): **Per-org env var** `GITHUB_APM_PAT_{ORG}` (when an org slug applies), then **global** `GITHUB_APM_PAT` -> `GITHUB_TOKEN` -> `GH_TOKEN`, then **GitHub CLI active account** (`gh auth token --hostname <host>`, silently skipped if `gh` is not installed or not logged in for the host), then host-specific **git credential helper**.
 2. **GitLab-class hosts** (`gitlab.com`, or FQDNs listed via `GITLAB_HOST` / `APM_GITLAB_HOSTS`): **only** `GITLAB_APM_PAT` -> `GITLAB_TOKEN`, then host-specific **git credential helper**. GitHub token env vars are **not** used for GitLab (including `GITHUB_APM_PAT`, `GITHUB_TOKEN`, and `GH_TOKEN`, and `GITHUB_APM_PAT_{ORG}` for group/namespace paths).
 3. **Generic hosts** (other FQDNs such as Bitbucket): host-specific **git credential helper** or unauthenticated/public access -- **no** GitHub or GitLab platform env vars.
 
 Azure DevOps uses its own chain (`ADO_APM_PAT` -> Azure CLI bearer). See [Azure DevOps](#azure-devops).
-If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an unauthenticated attempt, APM removes inherited Git token and authorization-header environment settings.
+If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an anonymous `github.com` attempt, APM also disables credential helpers and global/system Git config while preserving non-auth process-scoped Git settings such as CA paths, URL rewrites, and `credential.interactive=never`.
 
-Results are cached per-process for each `(host, port, org)` key. All token-bearing requests use HTTPS.
+Results are cached per-process. Validation and later fetch phases for the same private repository reuse one path-scoped fallback instead of prompting repeatedly, while another repository can resolve its own credential. All token-bearing requests use HTTPS.
 
 ## Token lookup
 ### GitHub-class hosts (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`)
@@ -416,7 +420,12 @@ The full resolution and fallback flow (simplified):
 flowchart TD
     A[Dependency Reference] --> HC{Host class?}
 
-    HC -->|GitHub / GHE Cloud / GHES| B{Per-org env var?}
+    HC -->|github.com HTTPS| ANON[Anonymous attempt<br/>tokens and helpers fenced]
+    ANON -->|Success| L[Success]
+    ANON -->|401 / 403 / 404<br/>or Git auth failure| B{Per-org env var?}
+    ANON -->|DNS / TLS / timeout<br/>or rate limit| Q[Surface non-auth failure]
+
+    HC -->|GHE Cloud / GHES| B
     B -->|GITHUB_APM_PAT_ORG| C[Use per-org token]
     B -->|Not set| D{Global env var?}
     D -->|GITHUB_APM_PAT / GITHUB_TOKEN / GH_TOKEN| E[Use global token]
@@ -438,11 +447,12 @@ flowchart TD
     G --> I
     H --> I
 
-    I -->|Token works| L[Success]
+    I -->|Token works| L
     I -->|Token fails| M{Fallback credentials}
     M -->|gh or git credential found| L
     M -->|No credential| N{Host has public repos?}
-    N -->|Yes| O[Try unauthenticated]
+    N -->|Other public host| O[Try unauthenticated]
+    N -->|github.com already tried| P
     N -->|No| P[Auth error with actionable message]
 ```
 

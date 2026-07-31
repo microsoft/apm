@@ -550,11 +550,8 @@ class TestValidationFailureReasonMessages:
         ):
             result = _validate_package_exists("owner/repo/skills/my-skill", verbose=True)
             assert result is False
-            mock_resolve.assert_called_once()
-            mock_build_ctx.assert_called_once()
-            call_args = mock_build_ctx.call_args
-            assert call_args[0][0] == "github.com"  # host
-            assert "owner/repo/skills/my-skill" in call_args[0][1]  # operation
+            mock_resolve.assert_not_called()
+            mock_build_ctx.assert_not_called()
 
     def test_virtual_package_validation_reuses_auth_resolver(self):
         """Virtual package validation should pass its AuthResolver to the downloader."""
