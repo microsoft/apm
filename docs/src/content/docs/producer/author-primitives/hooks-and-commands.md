@@ -98,8 +98,24 @@ available at runtime:
   without an explicit `type` deploy as `commonjs`, and shell-only
   bundles do not get a sidecar.
 
-For multi-target packages, prefer simple hook filenames. To limit which
-targets receive hook integration, use either:
+For multi-target packages, prefer simple hook filenames. The effective set
+of targets that receive a package's hooks is determined by a three-way
+intersection:
+
+```
+effective hook targets =
+  project active targets
+  INTERSECT consumer per-dependency targets (when set)
+  INTERSECT package targets (when restrictive)
+```
+
+Package declarations only **narrow**. Omitting `target:`/`targets:` (or
+declaring `targets: [all]`) adds no package restriction -- the other two
+factors still apply. A package declaring `target: claude` (scalar form)
+or `targets: [claude]` (list form) will never write to `.cursor/hooks.json`,
+even if the consumer does not restrict the dependency.
+
+To limit which targets receive hook integration, use either:
 
 - **Package-side** (`target:` / `targets:` in the package's own `apm.yml`) --
   the hook integrator skips every active target whose name is not in the
@@ -107,9 +123,8 @@ targets receive hook integration, use either:
 - **Consumer-side** (per-dependency `targets:` in `dependencies.apm`) --
   the consumer restricts which targets the dependency is expanded for.
 
-Both gates are independent and are AND-combined: a package declaring
-`target: claude` will never write to `.cursor/hooks.json`, even if the
-consumer does not restrict the dependency.
+Both filters compose by restriction-only intersection: neither can add
+targets beyond those the project already has active.
 
 If the same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
 integrates the `.apm/hooks/` copy once per target.
@@ -128,8 +143,11 @@ hook manifest; consumers scope harness reach with the per-dependency
 window and warns at install time. If both are present, `targets:` narrows the
 active harness set and filename routing still applies within that set.
 
-Before: name the manifest `my-pkg-codex-hooks.json`. After: keep
-`hooks.json` generic and let the consumer set `targets: [codex]`.
+When renaming a target-specific hook file to generic `hooks.json`, preserve
+producer intent with an explicit package `target:` declaration -- consumers
+may narrow it further but cannot expand it. Example: a file previously named
+`my-pkg-codex-hooks.json` should migrate to `hooks.json` paired with
+`target: codex` in `apm.yml`, not just `hooks.json` alone.
 Combined deprecated stems such as `claude-codex-hooks.json` route to every
 named target token during the migration window.
 Stems with target tokens outside the trailing target suffix (for example

@@ -108,7 +108,11 @@ To limit which harnesses receive a package's hooks, use either:
 - **Consumer-side** (`targets:` inside a `dependencies.apm` entry):
   the consumer restricts which active targets the dependency is expanded for.
 
-Both gates are independent and AND-combined.
+The effective hook targets are determined by a restriction-only three-way
+intersection: project active targets, then consumer per-dependency targets
+(when set), then package targets (when restrictive). Neither gate can add
+targets beyond those already active. Omitting `target:`/`targets:` (or
+declaring `targets: [all]`) adds no package restriction.
 
 Package-level `targets:` (top-level) controls compile/install runtimes AND
 now also gates hook routing; per-dependency `targets:` (inside a
@@ -118,8 +122,9 @@ dependency's target-scoped primitives. They compose via intersection. See
 
 ### Migrating filename-routed hooks
 
-Keep hook filenames simple, then document the target set consumers
-should use:
+When renaming a target-specific hook file to generic `hooks.json`, preserve
+producer intent with an explicit package `target:` declaration -- consumers
+may narrow it further but cannot expand it:
 
 ```yaml
 dependencies:
@@ -129,7 +134,8 @@ dependencies:
 ```
 
 Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
-After: keep hook filenames generic and let the consumer set `targets: [codex]`.
+After: rename to `hooks.json` and add `target: codex` to the package's own
+`apm.yml`. The consumer can still narrow further with per-dependency `targets:`.
 Combined deprecated stems such as `claude-codex-hooks.json` route to every
 named target token during the migration window.
 Stems with target tokens outside the trailing target suffix (for example
