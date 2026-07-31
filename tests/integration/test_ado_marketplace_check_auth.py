@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import subprocess
-from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
-from apm_cli.core.auth import AuthResolver
+from apm_cli.core.auth import AuthContext, AuthResolver
 
 
 def test_marketplace_check_uses_ado_url_and_bearer_auth(monkeypatch, tmp_path) -> None:
@@ -36,9 +35,12 @@ marketplace:
     monkeypatch.setattr(
         AuthResolver,
         "resolve",
-        lambda _self, host, org=None: SimpleNamespace(
+        lambda _self, host, org=None: AuthContext(
             token=bearer,
             source="AAD_BEARER_AZ_CLI",
+            token_type="unknown",
+            host_info=AuthResolver.classify_host(host),
+            git_env={},
             auth_scheme="bearer",
         ),
     )
