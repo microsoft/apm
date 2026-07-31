@@ -222,7 +222,7 @@ def _run_mcp_lsp_integration(
     project_root: Path,
     existing_lock: LockFile | None,
     lock_path: Path,
-    target_decision: EffectiveTargetDecision,
+    target_decision: EffectiveTargetDecision | None,
     diagnostics: Any,
     logger: InstallLogger,
     verbose: bool,

@@ -1716,6 +1716,7 @@ def _install_apm_packages(ctx, outcome):
     dev_mcp_deps = apm_package.get_dev_mcp_dependencies()
     mcp_deps = apm_package.get_all_mcp_dependencies()
     if not isinstance(mcp_deps, builtins.list):
+        logger.verbose_detail("MCP dependencies were not a list; defaulting to empty")
         mcp_deps = []
 
     logger.verbose_detail(
@@ -1910,8 +1911,6 @@ def _install_apm_packages(ctx, outcome):
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
 
-    # When --update is used, package files on disk may have changed.
-    # Clear the parse cache so transitive MCP collection reads fresh data.
     if ctx.update:
         from apm_cli.models.apm_package import clear_apm_yml_cache
 
@@ -1925,6 +1924,7 @@ def _install_apm_packages(ctx, outcome):
     apm_modules_path = get_modules_dir(ctx.scope)
     lsp_deps = apm_package.get_lsp_dependencies()
     if not isinstance(lsp_deps, builtins.list):
+        logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
         lsp_deps = []
     old_lsp_servers = builtins.set(_existing_lock.lsp_servers) if _existing_lock else builtins.set()
     integration_work_required = should_install_mcp and bool(

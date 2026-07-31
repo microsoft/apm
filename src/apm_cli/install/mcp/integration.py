@@ -170,6 +170,7 @@ def run_mcp_integration(  # noqa: PLR0913
         parse_targets_field(mcp_apm_config)
     except (ConflictingTargetsError, EmptyTargetsListError, UnknownTargetError) as exc:
         logger.error(str(exc), symbol="")
+        logger.render_summary()
         raise SystemExit(2) from exc
 
     if should_install and mcp_deps:

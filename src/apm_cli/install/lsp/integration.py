@@ -68,6 +68,7 @@ def run_lsp_integration(  # noqa: PLR0913
 
     lsp_deps = apm_package.get_lsp_dependencies()
     if not isinstance(lsp_deps, list):
+        logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
         lsp_deps = []
 
     # Capture old LSP servers from lockfile
