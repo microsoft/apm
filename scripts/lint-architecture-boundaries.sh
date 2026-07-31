@@ -713,6 +713,18 @@ if [ "$package_target_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC15c: merged-hook ownership marker authority"
+hook_ownership_owner="src/apm_cli/integration/hook_ownership.py"
+hook_ownership_consumer="src/apm_cli/integration/hook_integrator.py"
+if ! grep -q '^def dependency_hook_source_marker(' "$hook_ownership_owner" \
+    || ! grep -q '^def dependency_hook_sources(' "$hook_ownership_owner" \
+    || ! grep -q 'from apm_cli.integration.hook_ownership import (' \
+        "$hook_ownership_consumer" \
+    || grep -q '^    def _dependency_hook_source' "$hook_ownership_consumer"; then
+    echo "[x] Merged-hook ownership markers must route through integration/hook_ownership.py"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC16: post-uninstall reachability owner authority"
 if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
     src/apm_cli/commands/uninstall/engine.py; then
