@@ -106,3 +106,7 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_required_lifecycle_state_machine.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_yaml_guard_lifecycle_e2e.py"
+marker = "e2e"
