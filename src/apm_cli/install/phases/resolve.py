@@ -233,17 +233,15 @@ def _setup_downloader(ctx: InstallContext) -> None:
     # Wired AFTER persistent_git_cache so L2 can reach it. Reused by
     # every code path that calls downloader.resolve_git_reference():
     # install, update, outdated, publish.
-    try:
-        from apm_cli.deps.tiered_ref_resolver import (
-            build_tiered_ref_resolver,
-            ref_freshness_policy_for_install,
-        )
+    from apm_cli.deps.tiered_ref_resolver import (
+        build_tiered_ref_resolver,
+        ref_freshness_policy_for_install,
+    )
 
-        ctx.ref_freshness_policy = ref_freshness_policy_for_install(ctx)
-        if ctx.ref_freshness_policy.requires_remote and ctx.logger:
-            ctx.logger.verbose_detail(
-                "[*] Requiring upstream ref resolution; local bare-ref cache disabled"
-            )
+    ctx.ref_freshness_policy = ref_freshness_policy_for_install(ctx)
+    if ctx.ref_freshness_policy.requires_remote and ctx.logger:
+        ctx.logger.verbose_detail("[*] Resolving refs from upstream; local cached refs bypassed")
+    try:
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=getattr(downloader, "persistent_git_cache", None),

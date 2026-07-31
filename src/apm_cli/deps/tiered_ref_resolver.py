@@ -575,6 +575,10 @@ def build_tiered_ref_resolver(
 ) -> TieredRefResolver | None:
     """Construct the production tier stack, or ``None`` if disabled.
 
+    The default is deliberately ``REPRODUCIBLE`` so ordinary installs retain
+    lockfile and local-cache behavior. Callers that report or change current
+    state must opt into ``CURRENT_REMOTE`` explicitly.
+
     Returns ``None`` when ``APM_TIERED_RESOLVER`` is disabled so callers
     can opt out by simply leaving ``downloader._tiered_resolver = None``;
     the downloader facade falls through to the legacy resolver in that

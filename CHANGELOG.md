@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the authenticated upstream instead of accepting
   outdated locally cached refs; normal installs retain lockfile and cache reuse. (by
   @sergio-sisternes-epam, closes #2342, #2364)
+- `apm update` and `apm update --force` now resolve mutable Git refs from
+  the authenticated remote even when the local cache is stale; normal installs
+  retain lockfile and cache reuse. (by @sergio-sisternes-epam, closes #2342,
+  #2364)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
