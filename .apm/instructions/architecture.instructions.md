@@ -38,6 +38,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 |---|---|---|
 | Accepted target vocabulary | core/target_catalog.py | `src/apm_cli/core/target_catalog.py` |
 | Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
+| Indexed Git auth-config retain/reindex policy | utils/git_env.py (strip_git_auth_config_entries) | `src/apm_cli/utils/git_env.py` |
 | Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
 | User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
 | Compiled-output writes (atomic) | CompiledOutputWriter | `src/apm_cli/compilation/output_writer.py` |

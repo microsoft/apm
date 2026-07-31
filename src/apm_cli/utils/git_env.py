@@ -50,6 +50,85 @@ _STRIP_GIT_VARS: frozenset[str] = frozenset(
 )
 
 
+def _is_git_auth_config_entry(key: str, value: str) -> bool:
+    """Return whether an indexed Git config entry carries an auth header."""
+    if "extraheader" in key.casefold():
+        return True
+
+    normalized_value = value.replace("\r\n", "\n").replace("\r", "\n")
+    for line in normalized_value.split("\n"):
+        field_name, separator, _field_value = line.lstrip(" \t").partition(":")
+        if separator and field_name.rstrip(" \t").casefold() == "authorization":
+            return True
+    return False
+
+
+def strip_git_auth_config_entries(env: dict[str, str]) -> int:
+    """Remove auth entries from the indexed Git config environment.
+
+    ``GIT_CONFIG_COUNT`` is untrusted process input. Blank, invalid, and
+    negative values are treated as zero. Only canonical ``KEY_N`` slots below
+    that count are considered, so work is bounded by the actual environment
+    size rather than by an arbitrarily large declared count.
+
+    Non-auth entries are preserved in their original index order and compacted
+    to contiguous indexes. Every indexed key/value slot, including malformed
+    and out-of-range orphans, is removed before the retained set is rebuilt.
+
+    Args:
+        env: The subprocess environment mapping to rewrite in place.
+
+    Returns:
+        The number of retained entries, which is also the next free index.
+    """
+    try:
+        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
+    except (TypeError, ValueError):
+        count = 0
+
+    present_indexes: list[int] = []
+    key_prefix = "GIT_CONFIG_KEY_"
+    value_prefix = "GIT_CONFIG_VALUE_"
+    for name in env:
+        if not name.startswith(key_prefix):
+            continue
+        suffix = name.removeprefix(key_prefix)
+        if not suffix or not suffix.isascii() or not suffix.isdigit():
+            continue
+        if suffix != "0" and suffix.startswith("0"):
+            continue
+        try:
+            index = int(suffix)
+        except ValueError:
+            continue
+        if index < count:
+            present_indexes.append(index)
+
+    retained: list[tuple[str, str]] = []
+    for index in sorted(present_indexes):
+        key = env[f"{key_prefix}{index}"]
+        value = env.get(f"{value_prefix}{index}", "")
+        if key and not _is_git_auth_config_entry(key, value):
+            retained.append((key, value))
+
+    rewritten = {
+        key: value
+        for key, value in env.items()
+        if key != "GIT_CONFIG_COUNT"
+        and not key.startswith(key_prefix)
+        and not key.startswith(value_prefix)
+    }
+    if retained:
+        rewritten["GIT_CONFIG_COUNT"] = str(len(retained))
+        for index, (key, value) in enumerate(retained):
+            rewritten[f"{key_prefix}{index}"] = key
+            rewritten[f"{value_prefix}{index}"] = value
+
+    env.clear()
+    env.update(rewritten)
+    return len(retained)
+
+
 def get_git_executable() -> str:
     """Return the path to the git executable (cached after a successful lookup).
 

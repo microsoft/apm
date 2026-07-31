@@ -702,6 +702,16 @@ if [ -n "$auth_header_dictmerge_hits" ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC20: indexed Git auth-config retain/reindex authority"
+git_auth_config_owner_output=$(python3 scripts/check_git_auth_config_owner.py \
+    --root "$ROOT" 2>&1)
+git_auth_config_owner_status=$?
+if [ "$git_auth_config_owner_status" -ne 0 ]; then
+    echo "[x] Indexed Git auth-config retain/reindex must route through utils/git_env.py"
+    echo "$git_auth_config_owner_output"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

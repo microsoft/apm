@@ -1412,3 +1412,82 @@ def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: 
         "Git-subprocess Authorization-header injection must use "
         "set_authorization_header_git_env / set_ado_bearer_git_env" in result.stdout
     )
+
+
+def test_indexed_git_auth_config_retain_reindex_has_single_owner() -> None:
+    """#2398: both consumers delegate indexed cleanup to utils/git_env.py."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/utils/git_env.py").read_text(encoding="utf-8")
+    core_consumer = (root / "src/apm_cli/core/auth.py").read_text(encoding="utf-8")
+    setter_consumer = (root / "src/apm_cli/utils/github_host.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    source_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+    deployed_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def strip_git_auth_config_entries(" in owner
+    assert core_consumer.count("strip_git_auth_config_entries(env)") == 1
+    assert setter_consumer.count("strip_git_auth_config_entries(env)") == 1
+    assert "AC20: indexed Git auth-config retain/reindex authority" in guard
+    assert "Indexed Git auth-config retain/reindex policy" in source_doc
+    assert "`src/apm_cli/utils/git_env.py`" in source_doc
+    assert deployed_doc == source_doc
+
+
+def test_git_auth_config_owner_guard_rejects_inline_predicate(tmp_path: Path) -> None:
+    """AC20 must reject a second indexed auth-entry classifier."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/core/auth.py"
+    original = consumer.read_text(encoding="utf-8")
+    inline_reimplementation = (
+        '        count = int(env.pop("GIT_CONFIG_COUNT", "0") or "0")\n'
+        "        retained = []\n"
+        "        for index in range(max(0, count)):\n"
+        '            key = env.pop(f"GIT_CONFIG_KEY_{index}", "")\n'
+        '            value = env.pop(f"GIT_CONFIG_VALUE_{index}", "")\n'
+        '            if key.lower().find("extraheader") >= 0 '
+        'or value.lower().find("authorization") >= 0:\n'
+        "                continue\n"
+        "            if key:\n"
+        "                retained.append((key, value))\n"
+        "        if retained:\n"
+        '            env["GIT_CONFIG_COUNT"] = str(len(retained))\n'
+    )
+    mutated = original.replace(
+        "        strip_git_auth_config_entries(env)\n",
+        inline_reimplementation,
+        1,
+    )
+    assert mutated != original
+    consumer.write_text(mutated, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Indexed Git auth-config retain/reindex must route through utils/git_env.py" in (
+        result.stdout
+    )

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Indexed Git authentication cleanup now strips actual `Authorization` headers, including multiline values, while preserving unrelated proxy, TLS, CA, and hardening entries — by @Pybsama (#2411)
 - Corporate git security settings -- SSL CA pins (`http.sslCAInfo`), bare-repo
   protection (`safe.bareRepository=explicit`), and other inherited `GIT_CONFIG_*`
   hardening -- are no longer silently dropped when apm injects an

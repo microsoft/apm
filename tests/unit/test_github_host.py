@@ -497,6 +497,24 @@ def test_set_authorization_header_replaces_inherited_auth_header():
     assert not any("stale" in v for v in env.values())
 
 
+def test_set_authorization_header_replaces_multiline_inherited_auth_header():
+    """An inherited header cannot hide behind an earlier non-header line."""
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "credential.helper",
+        "GIT_CONFIG_VALUE_0": "note\r\nAuthorization: Bearer stale-secret",
+    }
+
+    github_host.set_authorization_header_git_env(env, "Bearer", "fresh")
+
+    assert env == {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "Authorization: Bearer fresh",
+    }
+    assert not any("stale-secret" in value for value in env.values())
+
+
 def test_set_authorization_header_is_idempotent_under_layering():
     """Two layered calls (e.g. _build_git_env then a retry wrapper) keep one header."""
     env = {
