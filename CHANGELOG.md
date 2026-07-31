@@ -93,7 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of
   rewriting it. (#2306)
 - Marketplace semver range resolution now honours the `tagPattern` declared by the producer; `version: "~2.1.0"` entries no longer silently fall back to the hardcoded `{name}--v{version}` tag pattern. Existing marketplace files without `tag_pattern` keep the legacy convention. Bare versions also fail closed when no tag matches; use an explicit tag ref instead. (#2366)
-
 - On-prem Azure DevOps Server hosts configured with `ADO_HOST` or
   `APM_ADO_HOSTS` are no longer misclassified as GitHub Enterprise Server when
   `GITHUB_HOST` overlaps, keeping ADO credentials isolated end to end.
