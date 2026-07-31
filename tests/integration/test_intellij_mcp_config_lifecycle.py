@@ -397,3 +397,72 @@ def test_malformed_installed_destination_fails_without_rewrite(
     assert not data_path.exists()
     if legacy is not None:
         assert not legacy.exists()
+
+
+def test_uninstall_with_malformed_intellij_config_is_nonzero(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Uninstall fails explicitly without rewriting malformed IntelliJ JSON."""
+    isolated = _create_environment(tmp_path, "malformed-uninstall")
+    package = isolated.package_root / "agent-config"
+    package.mkdir()
+    dump_yaml(
+        {
+            "name": "agent-config",
+            "version": "1.0.0",
+            "dependencies": {
+                "mcp": [
+                    {
+                        "name": "managed-server",
+                        "registry": False,
+                        "transport": "http",
+                        "url": _SERVER_URL,
+                    }
+                ]
+            },
+        },
+        package / "apm.yml",
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    package_ref = "../../packages/agent-config"
+    dump_yaml(
+        {
+            "name": "intellij-malformed-uninstall",
+            "version": "1.0.0",
+            "dependencies": {"apm": [package_ref]},
+        },
+        project / "apm.yml",
+    )
+    environment = isolated.subprocess_env(overrides={"APM_NON_INTERACTIVE": "1"})
+    canonical, _legacy, _data_path = _intellij_paths(isolated)
+    install = _runner(apm_binary_path).run(
+        (
+            "install",
+            "--target",
+            "intellij",
+            "--trust-transitive-mcp",
+            "--no-policy",
+        ),
+        scenario_id="intellij-malformed-uninstall-setup",
+        cwd=project,
+        env=environment,
+    )
+    assert install.returncode == 0, install.stderr + install.stdout
+    original = b"{malformed\n"
+    canonical.write_bytes(original)
+
+    uninstall = _runner(apm_binary_path).run(
+        ("uninstall", package_ref),
+        scenario_id="intellij-malformed-uninstall",
+        cwd=project,
+        env=environment,
+    )
+
+    assert uninstall.returncode == 1
+    assert "malformed JSON" in uninstall.stderr + uninstall.stdout
+    assert "Uninstall incomplete" in uninstall.stderr + uninstall.stdout
+    assert "run 'apm install' to finish cleanup" in uninstall.stderr + uninstall.stdout
+    assert "Uninstall complete" not in uninstall.stderr + uninstall.stdout
+    assert canonical.read_bytes() == original

@@ -102,7 +102,7 @@ def run_mcp_install(  # noqa: PLR0913
     )
 
     if status == "skipped":
-        logger.progress(f"MCP server '{mcp_name}' unchanged")
+        logger.progress(f"apm.yml entry for MCP server '{mcp_name}' unchanged")
         # Fall through intentionally: unchanged entries still need legacy
         # IntelliJ migration and per-target ownership repair.
 

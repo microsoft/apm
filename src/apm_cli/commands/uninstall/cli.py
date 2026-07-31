@@ -366,6 +366,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger.verbose_detail(f"    Removed {count} deployed {label} file(s)")
 
         # Step 10: MCP cleanup
+        mcp_cleanup_error = None
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
             _cleanup_stale_mcp(
@@ -379,8 +380,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 scope=scope,
                 persist=False,
             )
-        except Exception:
-            logger.warning("MCP cleanup during uninstall failed")
+        except Exception as cleanup_error:
+            mcp_cleanup_error = cleanup_error
+            logger.error(
+                "Uninstall incomplete: package removal completed, but MCP cleanup failed: "
+                f"{cleanup_error}. Fix the MCP config, then run 'apm install' "
+                "to finish cleanup."
+            )
+            logger.verbose_detail(traceback.format_exc().rstrip())
 
         if lockfile and lockfile_updated and lockfile_ready:
             try:
@@ -399,7 +406,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]
         if removed_from_modules > 0:
             summary_lines.append(f"Removed {removed_from_modules} package(s) from apm_modules/")
-        logger.success("Uninstall complete: " + ", ".join(summary_lines))
+        if mcp_cleanup_error is None:
+            logger.success("Uninstall complete: " + ", ".join(summary_lines))
 
         # Fire post-uninstall lifecycle scripts
         _fire_uninstall_scripts(
@@ -411,6 +419,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             verbose=verbose,
             deploy_root=deploy_root,
         )
+        if mcp_cleanup_error is not None:
+            sys.exit(1)
 
     except Exception as e:
         logger.error(f"Error uninstalling packages: {e}")

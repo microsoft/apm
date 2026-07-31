@@ -246,7 +246,7 @@ def _raise_strict_config_failures(
     message = (
         "MCP configuration failed for selected runtime(s): "
         + ", ".join(failed_installations)
-        + ". Fix the IntelliJ MCP config and rerun apm install."
+        + ". Fix the failed runtime MCP config and rerun apm install."
     )
     if console:
         console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
@@ -281,7 +281,7 @@ def _migrate_intellij_managed_config(
         )
     except IntelliJConfigError as exc:
         logger.error(str(exc))
-        raise
+        raise InstallFailureAlreadyRendered(str(exc)) from exc
     if migrated:
         count = len(migrated)
         logger.success(

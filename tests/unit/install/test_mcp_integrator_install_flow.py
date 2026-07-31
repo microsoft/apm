@@ -137,7 +137,7 @@ def test_self_defined_partial_runtime_failure_is_explicit() -> None:
     assert managed == {"claude": {"managed-server"}}
     logger.error.assert_any_call(
         "MCP configuration failed for selected runtime(s): managed-server (intellij). "
-        "Fix the IntelliJ MCP config and rerun apm install."
+        "Fix the failed runtime MCP config and rerun apm install."
     )
 
 
@@ -184,8 +184,37 @@ def test_registry_group_partial_runtime_failure_is_explicit() -> None:
     assert managed == {"claude": {"managed-server"}}
     logger.error.assert_any_call(
         "MCP configuration failed for selected runtime(s): managed-server (intellij). "
-        "Fix the IntelliJ MCP config and rerun apm install."
+        "Fix the failed runtime MCP config and rerun apm install."
     )
+
+
+def test_intellij_migration_error_is_already_rendered() -> None:
+    """Migration errors preserve their actionable message without generic wrapping."""
+    from apm_cli.adapters.client.intellij import IntelliJConfigError
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+    from apm_cli.integration.mcp_integrator_install import _migrate_intellij_managed_config
+
+    client = MagicMock()
+    client.migrate_legacy_managed_servers.side_effect = IntelliJConfigError(
+        "Fix the legacy IntelliJ config, then rerun apm install."
+    )
+    logger = MagicMock()
+    with (
+        patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
+        pytest.raises(
+            InstallFailureAlreadyRendered,
+            match="Fix the legacy IntelliJ config",
+        ),
+    ):
+        _migrate_intellij_managed_config(
+            ["intellij"],
+            {"intellij": {"managed-server"}},
+            project_root=None,
+            user_scope=False,
+            logger=logger,
+        )
+
+    logger.error.assert_called_once_with("Fix the legacy IntelliJ config, then rerun apm install.")
 
 
 # ---------------------------------------------------------------------------
