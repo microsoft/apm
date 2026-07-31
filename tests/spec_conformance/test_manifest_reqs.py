@@ -19,8 +19,11 @@ import jsonschema
 import pytest
 
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
+from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_WARNING,
