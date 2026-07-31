@@ -184,7 +184,8 @@ def test_git_ref_freshness_policy_has_single_owner() -> None:
     assert "ctx.update_refs or ctx.refresh" not in resolve
     assert "ctx.update_refs or ctx.refresh" not in seed
     assert resolve.count("ref_freshness_policy_for_install(ctx)") == 1
-    assert 'cast("RefFreshnessPolicy", ctx.ref_freshness_policy).requires_remote' in resolve
+    assert "def _requires_remote_ref_resolution(" in resolve
+    assert "update_refs = _requires_remote_ref_resolution(ctx)" in resolve
     assert seed.count("ref_freshness_policy_for_install(ctx)") == 1
     assert "freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE" in outdated
     assert "Git ref freshness must route through RefFreshnessPolicy" in guard

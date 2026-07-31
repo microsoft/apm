@@ -118,9 +118,9 @@ followed by an `apm update`.
 `--frozen` is mutually exclusive with `--update`: one trusts the
 lockfile, the other rewrites it.
 
-Note that `apm install --force` does not refresh remote refs either.
-It only bypasses the security gate for an already-resolved set. If you
-want new commit SHAs, run `apm update`.
+`apm install --force` does not refresh remote refs. It overwrites local
+collisions and may deploy despite critical built-in scan findings; the scan
+still runs. If you want new commit SHAs, run `apm update`.
 
 ## Update the apm CLI binary
 

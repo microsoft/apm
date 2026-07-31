@@ -21,7 +21,7 @@ from __future__ import annotations
 import builtins
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
@@ -35,7 +35,6 @@ from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
-    from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
     from apm_cli.install.context import InstallContext
     from apm_cli.install.resolution_staging import ResolutionStagingSession
 
@@ -283,6 +282,14 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
+def _requires_remote_ref_resolution(ctx: InstallContext) -> bool:
+    """Return the configured policy decision or fail before resolution."""
+    policy = ctx.ref_freshness_policy
+    if policy is None:
+        raise RuntimeError("Ref freshness policy was not configured")
+    return policy.requires_remote
+
+
 def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagingSession) -> None:
     """Resolve dependencies and populate the resolution fields on ``ctx``."""
     import threading as _threading
@@ -355,9 +362,9 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
     # --refresh implies re-resolution of all refs (but does NOT discard
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
-    update_refs = cast("RefFreshnessPolicy", ctx.ref_freshness_policy).requires_remote
+    update_refs = _requires_remote_ref_resolution(ctx)
     if ctx.refresh and ctx.logger:
-        ctx.logger.verbose_detail("[*] --refresh: re-resolving all refs")
+        ctx.logger.verbose_detail("[*] --refresh: bypassing cached package content")
     logger = ctx.logger
     existing_lockfile = ctx.existing_lockfile
     downloader = ctx.downloader
