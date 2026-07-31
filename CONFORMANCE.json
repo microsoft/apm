@@ -1210,7 +1210,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 75,
+      "active": 76,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1234,5 +1234,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 105
+  "total_requirements": 106
 }

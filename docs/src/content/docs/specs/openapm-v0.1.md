@@ -2553,6 +2553,8 @@ explicit `aliases:` entry in the project's `apm.yml`
 [req-sc-006](#req-sc-006)). Implementations MUST NOT collapse two
 hostnames onto the same host class on any other basis (such as
 DNS CNAME chains, TLS SAN entries, or shared HTTP redirects).
+A host-class assignment produced by a configuration signal exercised
+under [req-sc-013](#req-sc-013) is not subject to this prohibition.
 
 <a id="req-sc-007"></a>
 **[req-sc-007]** A conforming **consumer** implementation MUST
