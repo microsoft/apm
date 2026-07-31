@@ -382,26 +382,6 @@ either: (a) a member of the canonical set or a recognised alias; OR
 `x-<vendor>-<name>` form). The diagnostic MUST name the offending
 token.
 
-<a id="req-mf-023"></a>
-**[req-mf-023]** For each dependency, a conforming **consumer**
-implementation MUST deploy target-scoped primitives only to the
-intersection of (a) the project's currently active targets, (b) the
-target subset authorized by the consumer for that dependency, and (c)
-the dependency package manifest's `target` set when that set is
-restrictive. The mechanism for (b) is implementation-defined; when the
-consumer has no explicit per-dependency authorization mechanism or
-subset, (b) adds no restriction. A dependency package's `target` set is
-restriction-only: it MUST NOT activate a target or expand either (a) or
-(b). An omitted `target` field or its universal `all` value adds no
-package-side restriction. Each package target token MUST satisfy
-[req-mf-005](#req-mf-005); a consumer encountering an invalid package
-target token MUST reject the dependency manifest before target-scoped
-deployment and emit a diagnostic naming that token. When an update
-narrows this intersection, consumer-owned merge-based hook entries and
-their ownership record MUST be reconciled under
-[req-lk-021](#req-lk-021), while entries without the consumer's own
-ownership attribution remain preserved.
-
 <a id="req-tg-004"></a>
 **[req-tg-004]** A conforming **consumer** implementation MUST accept
 target identifiers matching `x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*` at
@@ -770,7 +750,6 @@ This section's normative statements are:
   [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
-  [req-mf-023](#req-mf-023),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
@@ -966,7 +945,7 @@ implementation MUST apply the same preserve-or-remove decision defined
 by [req-lk-020](#req-lk-020) to that merge-based hook configuration.
 For an entry owned by a dependency, "current install targets" in clause
 (a) below means that dependency's effective intersection under
-[req-mf-023](#req-mf-023).
+[req-tg-008](#req-tg-008).
 It MUST remove only the consumer-owned entries -- and any ownership
 record left empty by that removal -- attributable to a target that is
 not attributable to (a) the current install targets, (b) another
@@ -2303,6 +2282,36 @@ NOT trigger the diagnostic by itself.
 > requirement does not prescribe a lockfile field for this check:
 > compile-only instruction sources are not necessarily deployed outputs.
 
+#### 8.5.3 Package-declared target restrictions
+
+<a id="req-tg-008"></a>
+**[req-tg-008]** For each dependency, a conforming **consumer**
+implementation MUST integrate target-scoped primitives only into the
+intersection of (a) the project's currently active targets, (b) the
+target subset authorized by the consumer for that dependency, and (c)
+the dependency package's declared `target:` or `targets:` set when that
+set is restrictive. The mechanism for (b) is implementation-defined;
+when the consumer has no explicit per-dependency authorization
+mechanism or subset, (b) adds no restriction.
+
+The package set is restriction-only: it MUST NOT activate a target or
+expand either (a) or (b). Omitting both package fields, or including the
+universal `all` value, adds no package-side restriction. Scalar and list
+spellings and aliases are normalized under
+[Section 4.2.1](#421-target) before intersection. A declaration with
+both fields, an empty `targets:` value, or a token that does not satisfy
+[req-mf-005](#req-mf-005) MUST be rejected before target-scoped
+deployment with a diagnostic naming the invalid declaration or token.
+
+When no explicit package field exists, a consumer MAY infer an
+additional legacy hook-only restriction from an unambiguous deprecated
+target suffix in a hook filename. Such inferred intent MUST only narrow
+the effective intersection; a generic filename infers no package
+restriction. When an update narrows the intersection, consumer-owned
+merge-based hook entries and their ownership record MUST be reconciled
+under [req-lk-021](#req-lk-021), while entries without the consumer's
+own ownership attribution remain preserved.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2316,7 +2325,8 @@ without a spec revision. The current matrix is in the companion
   [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
-  [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007).
+  [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
+  [req-tg-008](#req-tg-008).
 
 ---
 
@@ -2642,7 +2652,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
 | 15| Cross-repository cache substitution                  | [req-rs-016](#req-rs-016)                                         | Consumer-default  |
 | 16| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
-| 17| Cross-target primitive deployment                    | [req-mf-023](#req-mf-023), [req-lk-021](#req-lk-021)               | Consumer-default  |
+| 17| Cross-target primitive deployment                    | [req-tg-008](#req-tg-008), [req-lk-021](#req-lk-021)               | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2794,7 +2804,6 @@ conformance statement identifying:
 [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
-[req-mf-023](#req-mf-023),
 [req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -2820,6 +2829,7 @@ conformance statement identifying:
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
+[req-tg-008](#req-tg-008),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -3171,7 +3181,6 @@ renumbering of conformance classes.
 | [req-mf-020](#req-mf-020)                | MUST    | 4.1     | consumer    |
 | [req-mf-021](#req-mf-021)                | MUST    | 4.8     | producer    |
 | [req-mf-022](#req-mf-022)                | MUST    | 4.3.2   | consumer    |
-| [req-mf-023](#req-mf-023)                | MUST    | 4.2.1   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-lk-001](#req-lk-001)                | MUST    | 5.1     | consumer    |
@@ -3239,6 +3248,7 @@ renumbering of conformance classes.
 | [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
 | [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-tg-007](#req-tg-007)                | MUST    | 8.5     | consumer    |
+| [req-tg-008](#req-tg-008)                | MUST    | 8.5     | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3284,7 +3294,7 @@ renumbering of conformance classes.
 | 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
-| 0.1.20  | 2026-07-31 | Spec-citation fold for restriction-only dependency target authorization (closes #2321). Added [req-mf-023] (Section 4.2.1, consumer MUST): target-scoped primitive deployment is limited to the intersection of active project targets, any consumer-authorized dependency subset, and a restrictive dependency package `target` set; package intent never activates or expands targets, omission or `all` adds no package restriction, invalid target tokens fail closed before deployment, and narrowing reconciles owned merge-hook state under [req-lk-021] while preserving unowned and foreign entries. Section 4.9, Section 10.11, Section 11.3.2, Appendix C, and the requirements manifest updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
+| 0.1.20  | 2026-07-31 | Spec-citation fold for package-declared target restrictions (closes #2321 Mode-B silent-extension gate). Added [req-tg-008] (Section 8.5.3, consumer MUST): target-scoped primitive deployment is limited to the intersection of active project targets, any consumer-authorized dependency subset, and a restrictive dependency package target set; package intent never activates or expands targets, omission or `all` adds no package restriction, invalid declarations fail closed before deployment, and narrowing reconciles owned merge-hook state under [req-lk-021] while preserving unowned and foreign entries. Section 8.7, Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
