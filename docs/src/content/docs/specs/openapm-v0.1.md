@@ -234,7 +234,7 @@ type"), the definition section is cross-linked.
 | **Constraint** | The version selector recorded for a dependency (a semver range, a literal tag, a branch name, a commit SHA, or `None`). |
 | **Drift** | A divergence between the lockfile and either the manifest (declaration drift) or the deployed files on disk (integrity drift). |
 | **Self-entry** | The synthesized lockfile entry that accounts for primitives the project itself contributes. Defined in [Section 5.3](#53-self-entry-semantics). |
-| **Frozen install** | An install operation that refuses to mutate the lockfile and fails on any missing pin. Defined in [Section 5.5](#55-drift-and-integrity-model). |
+| **Frozen install** | An install operation that refuses to write or rewrite the lockfile, fails on any missing package pin or MCP declaration mismatch, and gates validation before any lockfile, target-configuration, deployment, or cache write. Defined in [Section 5.5](#55-drift-and-integrity-model). |
 | **Host class** | The equivalence set of network hosts that share a single credential scope (see [Section 10.3](#103-token-leakage-across-hosts)). Two hosts are in the same class **iff** their registrable domain (the eTLD+1 per the Public Suffix List) is identical, OR they are explicitly aliased via `registries.<name>.aliases:` (see [Section 4.2.3](#423-registries)). For example, `github.contoso.com` shares a host class with `contoso.com`, not with `github.com`. |
 | **Implementation-default host** | The host an implementation uses when the manifest omits `default_host:`. The choice is implementation-defined; see [Section 1.4](#14-terminology-preliminaries). |
 | **Wire-format host** | The host literal as it appears in a dependency identifier or lockfile entry after canonical normalisation. |
@@ -1084,11 +1084,27 @@ order so frozen-install diffs are stable across implementations.
 <a id="req-lk-006"></a>
 **[req-lk-006]** A conforming **consumer** implementation MUST
 support a frozen-install mode in which the lockfile is never written
-or rewritten and the install fails on any direct dependency for
-which the lockfile has no pin. The frozen-install operation is
-opt-in in v0.1 via `--frozen` (or equivalent); a future minor
-revision will flip the default to "frozen when a lockfile is
-present" (deferred to v0.x minor, see
+or rewritten. Before any lockfile, target configuration, deployment,
+or cache mutation (target configuration means on-disk state a
+target-deploy step may write per
+[Section 8.5](#85-deploy-directory-contract-normative); cache mutation
+means persistent resolver or materialiser state per
+[Section 7.2](#72-resolution-algorithm)), the install MUST fail when
+the lockfile is absent, when any direct package dependency has no pin,
+or when the manifest's direct MCP declarations differ from the
+lockfile's recorded MCP server names or configurations. Direct MCP
+declarations comprise entries under both `dependencies.mcp` and
+`devDependencies.mcp`. A mismatch exists when the set of declared MCP
+names differs from either the names in `mcp_servers` or the keys in
+`mcp_configs`, or when a shared name's derived configuration is not
+key-order-insensitive structurally equal to its `mcp_configs` value.
+Variable placeholders are compared as literal strings, not expanded.
+An operation whose effect would insert, remove, or modify a manifest
+dependency entry MUST be rejected in frozen mode before that
+modification takes effect. The frozen-install operation is opt-in in
+v0.1 via `--frozen` (or equivalent); a future minor revision will flip
+the default to "frozen when a lockfile is present" (deferred to v0.x
+minor, see
 [Section 9.2](#92-breaking-vs-non-breaking-change-definition)).
 
 <a id="req-lk-018"></a>
@@ -3309,6 +3325,7 @@ renumbering of conformance classes.
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
 | 0.1.20  | 2026-07-31 | Spec-citation fold for package-declared target restrictions (closes #2321 Mode-B silent-extension gate). Added [req-tg-008] (Section 8.5.3, consumer MUST): target-scoped primitive deployment is limited to the intersection of active project targets, any consumer-authorized dependency subset, and a restrictive dependency package target set; package intent never activates or expands targets, omission or `all` adds no package restriction, invalid declarations fail closed before deployment, and narrowing reconciles owned merge-hook state under [req-lk-021] while preserving unowned and foreign entries. Section 8.7, Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
+| 0.1.20a | 2026-07-30 | Defensive amendment of [req-lk-006] (no new normative statement; count remains 104 (99 MUST, 5 SHOULD)): frozen validation now covers direct MCP server names and configurations as well as package pins, runs before lockfile, target-config, deployment, or cache mutation, and rejects manifest dependency mutation. |
 
 Errata (none at publication).
 

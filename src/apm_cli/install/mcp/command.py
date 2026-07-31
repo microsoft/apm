@@ -27,7 +27,7 @@ from .writer import add_mcp_to_apm_yml
 # code paths (package install vs. MCP install).
 APM_DEPS_AVAILABLE = False
 try:
-    from ...deps.lockfile import LockFile, get_lockfile_path
+    from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
     from ...integration.mcp_integrator import MCPIntegrator
 
     APM_DEPS_AVAILABLE = True
@@ -122,6 +122,12 @@ def run_mcp_install(  # noqa: PLR0913
             logger.verbose_detail(f"Target: {rendered_target}")
         with registry_env_override(registry_url):
             try:
+                # Rename a legacy ``apm.lock`` before resolving the path, the
+                # way the main install path does. This call can now create
+                # ``apm.lock.yaml`` (#2373); without the migration first, that
+                # new file would make ``migrate_lockfile_if_needed`` skip the
+                # rename forever and strip the legacy file's pinned deps.
+                migrate_lockfile_if_needed(apm_dir)
                 _mcp_lock_path = get_lockfile_path(apm_dir)
                 _existing_lock = LockFile.read(_mcp_lock_path)
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
@@ -143,7 +149,10 @@ def run_mcp_install(  # noqa: PLR0913
                 merged_configs = dict(old_configs)
                 merged_configs.update(new_configs)
                 MCPIntegrator.update_lockfile(
-                    merged_names, _mcp_lock_path, mcp_configs=merged_configs
+                    merged_names,
+                    _mcp_lock_path,
+                    mcp_configs=merged_configs,
+                    logger=logger,
                 )
             except Exception as exc:
                 # Keep the raw exception (which may contain internal paths,

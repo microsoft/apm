@@ -117,7 +117,7 @@
       "status": "active",
       "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_mcp_validation_fails_before_durable_mutation"
       ]
     },
     {
@@ -192,8 +192,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed"
       ]
     },

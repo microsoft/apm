@@ -9,6 +9,8 @@ The existing adapters (client/, package_manager/) and registry operations
 (registry/operations.py) are *used* by this class, not modified.
 """
 
+from __future__ import annotations
+
 import builtins
 import copy
 import json
@@ -19,12 +21,13 @@ import warnings
 from collections.abc import MutableMapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
@@ -38,7 +41,11 @@ from apm_cli.utils.console import (
     _rich_error,
     _rich_info,
     _rich_success,
+    _rich_warning,
 )
+
+if TYPE_CHECKING:
+    from apm_cli.core.command_logger import CommandLogger
 
 _log = logging.getLogger(__name__)
 
@@ -113,7 +120,7 @@ def _clean_toml_mcp_config(
     config_path: Path,
     stale_names: builtins.set,
     label: str,
-    logger=None,
+    logger: CommandLogger | None = None,
     use_rich: bool = True,
 ) -> int:
     """Remove stale entries from a TOML-based MCP config file.
@@ -745,6 +752,7 @@ class MCPIntegrator:
         mcp_configs: builtins.dict | None = None,
         mcp_target_servers: builtins.dict | None = None,
         mcp_config_provenance: builtins.dict | None = None,
+        logger: CommandLogger | None = None,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
@@ -765,13 +773,26 @@ class MCPIntegrator:
         """
         if lock_path is None:
             lock_path = get_lockfile_path(Path.cwd())
-        if not lock_path.exists():
+        # A project whose apm.yml declares only MCP dependencies never enters
+        # the APM install pipeline, so nothing else creates apm.lock.yaml --
+        # yet `apm audit` counts MCP dependencies when deciding a lockfile is
+        # required, and failed with "run 'apm install'" right after a
+        # successful install (#2373). Establish the lockfile here when there
+        # is MCP state to record. Calls that clear the last server keep the
+        # early return: they must not conjure a lockfile for a project that
+        # never had one.
+        creating = not lock_path.exists()
+        if creating and not (mcp_server_names or mcp_configs):
             return
         try:
-            existing_lockfile = LockFile.read(lock_path)
-            if existing_lockfile is None:
+            existing_lockfile = None if creating else LockFile.read(lock_path)
+            if existing_lockfile is None and not creating:
                 return
-            lockfile = copy.deepcopy(existing_lockfile)
+            lockfile = (
+                LockFile(apm_version=installed_apm_version())
+                if existing_lockfile is None
+                else copy.deepcopy(existing_lockfile)
+            )
             lockfile.mcp_servers = sorted(mcp_server_names)
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
@@ -799,7 +820,9 @@ class MCPIntegrator:
                     for name, pkg in lockfile.mcp_config_provenance.items()
                     if name in lockfile.mcp_configs
                 }
-            if lockfile.is_semantically_equivalent(existing_lockfile):
+            if existing_lockfile is not None and lockfile.is_semantically_equivalent(
+                existing_lockfile
+            ):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return
             lockfile.generated_at = datetime.now(timezone.utc).isoformat()
@@ -810,6 +833,20 @@ class MCPIntegrator:
                 lock_path,
                 exc_info=True,
             )
+            if creating:
+                # Failing to UPDATE leaves a usable lockfile behind, but failing
+                # to CREATE one reproduces #2373 exactly -- install reports
+                # success and the next audit says "run 'apm install'". Debug
+                # level would hide the fix silently not applying.
+                message = (
+                    f"Could not write {lock_path.name}; 'apm audit' will report it as "
+                    "missing. Ensure the directory is writable and re-run 'apm install'."
+                )
+                if logger is not None:
+                    logger.warning(message)
+                else:
+                    _rich_warning(message, symbol="warning")
+                raise
 
     # ------------------------------------------------------------------
     # Runtime detection

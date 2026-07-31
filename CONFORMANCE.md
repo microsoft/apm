@@ -43,7 +43,7 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 | [req-lk-010](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-010) | MUST | 5.6 | consumer | active | 1 |
 | [req-lk-011](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-011) | MUST | 5.2 | consumer | active | 1 |
 | [req-lk-012](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-012) | MUST | 5.2 | consumer | active | 1 |
-| [req-lk-013](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-013) | MUST | 5.2 | consumer | active | 1 |
+| [req-lk-013](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-013) | MUST | 5.2 | consumer | active | 2 |
 | [req-lk-014](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-014) | MUST | 5.2 | consumer | active | 1 |
 | [req-lk-015](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-015) | MUST | 5.6.4 | consumer | active | 1 |
 | [req-lk-016](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-016) | MUST | 5.2 | consumer | active | 1 |

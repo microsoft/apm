@@ -34,15 +34,15 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ### 3. **Lifecycle Smoke** (PR-time required check)
-- **Location**: selected declaratively via `lifecycle_smoke and not lifecycle_merge_group`. The marker family has 35 nodes; three unique regressions carry `lifecycle_merge_group`, leaving 32 in the bounded required set.
+- **Location**: selected declaratively via `lifecycle_smoke and not lifecycle_merge_group`. Tests marked `lifecycle_merge_group` remain outside the bounded required set.
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
 - **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: the 32-node required expression must remain inside its hard 3-minute job timeout; hosted duration is authoritative.
+- **Duration**: the required expression must remain inside its hard 3-minute job timeout; hosted duration is authoritative.
 - **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
-- **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. The full `lifecycle_smoke` family has 35 nodes; `lifecycle_merge_group` has exactly three named nodes; the difference is the required 32.
-- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs `pytest tests/integration/`, so all 35 lifecycle nodes remain exercised.
-- **Drift guard**: `tests/quality/test_ci_topology.py` pins the 35/3/32 partition, exact merge-group membership, required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
+- **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
+- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
+- **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, and required selections; verifies their set partition; and preserves the required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
 - **Run it locally** (the exact command CI runs):
   ```bash
   APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
@@ -115,6 +115,7 @@ The behavioral definitions are:
 
 `pyproject.toml` owns these definitions.
 Module-level `pytestmark` is the sole behavioral classification authority.
+This is a marker-only behavioral taxonomy.
 Every classified module declares exactly one behavioral marker, and every
 collected node in that module must inherit the same classification. Function-
 or class-level behavioral markers are rejected because they would split the
