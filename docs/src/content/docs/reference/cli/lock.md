@@ -34,7 +34,7 @@ This mirrors the ergonomics of `cargo generate-lockfile` and `pnpm lock`.
 | --- | --- | --- |
 | `--verbose`, `-v` | off | Show per-dependency resolution details. |
 | `--global`, `-g` | off | Operate on `~/.apm/apm.yml` instead of the current project (mirrors `apm install -g`). |
-| `--update` | off | Re-resolve deps to their latest matching SHAs before writing the lockfile (like `apm install --update`). |
+| `--update` | off | Re-resolve deps to their latest matching SHAs from upstream before writing the lockfile. Stale local bare-repository refs are not accepted. |
 | `--no-policy` | off | Skip policy enforcement during resolution. |
 | `--target TARGET`, `-t TARGET` | none | Agent target for policy enforcement during resolution. No files are deployed or deleted regardless of this value. Accepts a single target (`claude`, `copilot`, etc.) or comma-separated list. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
@@ -68,6 +68,7 @@ apm lock --verbose
 ## Behavior
 
 - **Resolve and download.** Every dependency in `apm.yml` is resolved and, if not already cached, downloaded. Fresh downloads pin the commit SHA and compute a content hash.
+- **Freshness under `--update`.** Mutable Git refs must resolve from upstream. If that check fails, lock generation fails instead of substituting a stale local bare-repository ref.
 - **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. Fresh lock-only runs add no deployed files, and existing deployed-file rows, hashes, and deployment-ledger entries stay recorded while those bytes remain on disk.
 - **No files deployed or deleted.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.

@@ -33,7 +33,7 @@ needs.
 Plain and frozen installs can replay locked SHAs and reuse local bare
 repositories or per-SHA checkouts when upstream is unavailable. Commands that
 report or change current state -- `apm install --update`, `apm install
---refresh`, `apm update` (including `--force`), and `apm outdated` -- do not
+--refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm outdated` -- do not
 accept a persistent bare-repository ref as evidence of current upstream state.
 After establishing a fresh SHA, update may still reuse content cached for that
 SHA. `--refresh` is stronger: it also bypasses cached content.
