@@ -331,8 +331,8 @@ The manifest top-level fields are:
 | `author`        | no       | string                                                                                        |
 | `license`       | no       | string (SPDX identifier RECOMMENDED)                                                          |
 | `default_host`  | no       | string; see [Section 4.2.4](#424-default_host) and [req-mf-019](#req-mf-019)                  |
-| `target`        | no       | string or list of strings (see [Section 4.2.1](#421-target))                                  |
-| `targets`       | no       | string or non-empty list of strings; mutually exclusive with `target` (see [req-tg-008](#req-tg-008)) |
+| `target`        | no       | string, list of strings, or null; mutually exclusive with `targets` (see [req-tg-008](#req-tg-008)) |
+| `targets`       | no       | string or non-empty list of lowercase canonical identifiers or `all`; mutually exclusive with `target` (see [req-tg-008](#req-tg-008)) |
 | `type`          | no       | string (advisory, see [Section 4.2.2](#422-type-advisory))                                    |
 | `scripts`       | no       | mapping `string -> string`                                                                    |
 | `includes`      | no       | literal `auto` or list of paths                                                               |
@@ -2318,25 +2318,29 @@ The package set is restriction-only: it MUST NOT activate a target or
 expand either (a) or (b). Omitting both package fields, or including the
 universal `all` value, adds no package-side restriction. Scalar and list
 spellings under `target:` accept the aliases defined in
-[Section 4.2.1](#421-target); `targets:` accepts canonical names only.
+[Section 4.2.1](#421-target); `targets:` accepts lowercase identifiers
+from the canonical set in Section 4.2.1 and the literal `all` sentinel.
 The `all` token remains a literal no-restriction sentinel and MUST NOT
 be expanded to the auto-detectable target set during this intersection.
 A null value under singular `target:` is treated as field omission for
-legacy compatibility; an empty string or list is invalid. A declaration
-with both fields (even when either value is null), a null or empty
-`targets:` value, a `targets:` token that is neither canonical nor
-`all`, or a `target:` token that does not satisfy
+legacy compatibility; a consumer MUST reject an empty string or empty
+list. A declaration with both fields (even when either value is null),
+a null or empty `targets:` value, a `targets:` token that is neither
+canonical nor `all`, or a `target:` token that does not satisfy
 [req-mf-005](#req-mf-005) MUST be rejected before target-scoped
 deployment with a diagnostic naming the invalid declaration or token.
 
 When no explicit package field exists, a consumer MAY infer an
-additional legacy hook-only restriction when the filename stem is
-`hooks-<target>` or ends in one or more contiguous recognized target
-tokens immediately before `-hooks`. A recognized token is a canonical
-target, a recognized alias, or an implementation-registered extension
-target. This filename filter is applied after the effective
-intersection and MUST only narrow it. A consumer MUST NOT infer a
-package restriction from a generic or otherwise unmatched filename.
+additional legacy hook-only restriction from the final path component.
+The consumer strips the final extension, lowercases the ASCII stem, and
+matches either `hooks-<token>` or a contiguous rightmost sequence of
+hyphen-delimited tokens immediately before `-hooks`. It resolves that
+sequence from right to left against its registered filename-target token
+table; unmatched segments terminate the sequence. This filename filter
+is applied after the effective intersection and MUST only narrow it. A
+consumer MUST NOT infer a package restriction from a generic or otherwise
+unmatched filename. Producers SHOULD migrate to explicit `target:` or
+`targets:` declarations.
 When an update narrows the intersection, consumer-owned merge-based
 hook entries and their ownership record MUST be reconciled under
 [req-lk-021](#req-lk-021), while entries without the consumer's own
@@ -3324,8 +3328,8 @@ renumbering of conformance classes.
 | 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
-| 0.1.20  | 2026-07-31 | Spec-citation fold for package-declared target restrictions (closes #2321 Mode-B silent-extension gate). Added [req-tg-008] (Section 8.5.3, consumer MUST): target-scoped primitive deployment is limited to the intersection of active project targets, any consumer-authorized dependency subset, and a restrictive dependency package target set; package intent never activates or expands targets, omission or `all` adds no package restriction, invalid declarations fail closed before deployment, and narrowing reconciles owned merge-hook state under [req-lk-021] while preserving unowned and foreign entries. Section 8.7, Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
-| 0.1.20a | 2026-07-30 | Defensive amendment of [req-lk-006] (no new normative statement; count remains 104 (99 MUST, 5 SHOULD)): frozen validation now covers direct MCP server names and configurations as well as package pins, runs before lockfile, target-config, deployment, or cache mutation, and rejects manifest dependency mutation. |
+| 0.1.20  | 2026-07-30 | Defensive amendment of [req-lk-006] (no new normative statement; count remains 104 (99 MUST, 5 SHOULD)): frozen validation now covers direct MCP server names and configurations as well as package pins, runs before lockfile, target-config, deployment, or cache mutation, and rejects manifest dependency mutation. |
+| 0.1.21  | 2026-07-31 | Spec-citation fold for package-declared target restrictions (closes #2321 Mode-B silent-extension gate). Added [req-tg-008] (Section 8.5.3, consumer MUST): a consumer MUST treat a package's declared `target:`/`targets:` field as a restriction-only filter on all target-scoped primitive integration; if the field resolves to a non-empty set that does not contain `all`, the consumer MUST NOT deliver that package's primitives to any active integration target not in the declared set; the filter composes by intersection with the consumer-side per-dependency `targets:` filter and can only narrow, never expand. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
