@@ -5,10 +5,13 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
-import { createHandler } from "../.apm/extensions/issue-monitor/server-handler.mjs";
-import { basename, join, dirname } from "node:path";
-import { tmpdir } from "node:os";
+import { createServer, request as httpRequest } from "node:http";
+import {
+    createHandler,
+    isPathWithinRoot,
+    resolveStaticRequest,
+} from "../.apm/extensions/issue-monitor/server-handler.mjs";
+import { dirname, join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -92,6 +95,42 @@ async function postJSON(path, body) {
     });
     const json = await res.json();
     return { res, json };
+}
+
+function listen(localServer) {
+    return new Promise((resolve) => {
+        localServer.listen(0, "127.0.0.1", () => {
+            resolve(`http://127.0.0.1:${localServer.address().port}`);
+        });
+    });
+}
+
+function close(localServer) {
+    return new Promise((resolve) => localServer.close(resolve));
+}
+
+function rawHttpRequest(origin, path) {
+    const url = new URL(origin);
+    return new Promise((resolve, reject) => {
+        const req = httpRequest({
+            hostname: url.hostname,
+            port: url.port,
+            path,
+            method: "GET",
+        }, (res) => {
+            const chunks = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => {
+                resolve({
+                    statusCode: res.statusCode,
+                    headers: res.headers,
+                    body: Buffer.concat(chunks),
+                });
+            });
+        });
+        req.on("error", reject);
+        req.end();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -779,89 +818,167 @@ describe("POST body size limits", () => {
 // ---------------------------------------------------------------------------
 
 describe("Path traversal protection", () => {
-    before(() => setupServer());
-    after(teardownServer);
+    const SIBLING_SENTINEL = "outside-sibling-sentinel";
+    const LINK_SENTINEL = "outside-link-sentinel";
+    const SAFE_ASSET = Buffer.from("console.log('safe asset');\n", "utf8");
+    let workDir;
+    let distDir;
+    let assetServer;
+    let assetBaseUrl;
+    let linkSetupError;
 
-    it("rejects symlinked assets that resolve outside dist directory", async () => {
-        if (process.platform === "win32") {
+    before(async () => {
+        workDir = await mkdtemp(join(__dir, ".static-assets-"));
+        distDir = join(workDir, "dist");
+        const assetsDir = join(distDir, "assets");
+        const siblingDir = join(workDir, "dist-evil");
+        const outsideDir = join(workDir, "outside");
+
+        await mkdir(join(assetsDir, "nested"), { recursive: true });
+        await mkdir(join(assetsDir, "dist-evil"), { recursive: true });
+        await mkdir(siblingDir, { recursive: true });
+        await mkdir(outsideDir, { recursive: true });
+        await writeFile(join(assetsDir, "nested", "app..js"), SAFE_ASSET);
+        await writeFile(join(assetsDir, "dist-evil", "inside.txt"), "inside-prefix", "utf8");
+        await writeFile(join(siblingDir, "secret.txt"), SIBLING_SENTINEL, "utf8");
+        await writeFile(join(outsideDir, "secret.txt"), LINK_SENTINEL, "utf8");
+
+        try {
+            await symlink(
+                outsideDir,
+                join(assetsDir, "outside-link"),
+                process.platform === "win32" ? "junction" : "dir",
+            );
+        } catch (error) {
+            if (process.platform !== "win32" || !["EACCES", "EPERM"].includes(error.code)) {
+                throw error;
+            }
+            linkSetupError = error;
+        }
+
+        const state = createMockDeps({ distDir });
+        assetServer = createServer(createHandler(state.deps));
+        assetBaseUrl = await listen(assetServer);
+    });
+
+    after(async () => {
+        if (assetServer) await close(assetServer);
+        if (workDir) await rm(workDir, { recursive: true, force: true });
+    });
+
+    function assertRejected(response, expectedStatus, ...sentinels) {
+        const body = response.body.toString("utf8");
+        for (const sentinel of sentinels) {
+            assert.equal(body.includes(sentinel), false, `outside sentinel leaked: ${sentinel}`);
+        }
+        assert.equal(body.includes(workDir), false, "response leaked a filesystem path");
+        assert.equal(response.statusCode, expectedStatus);
+        assert.equal(body, expectedStatus === 400 ? "Bad request" : "Forbidden");
+    }
+
+    it("serves valid nested and prefix-sharing asset names exactly", async () => {
+        const nested = await rawHttpRequest(assetBaseUrl, "/assets/nested/app..js");
+        assert.equal(nested.statusCode, 200);
+        assert.deepEqual(nested.body, SAFE_ASSET);
+        assert.equal(nested.headers["content-type"], "text/javascript");
+        assert.equal(
+            nested.headers["cache-control"],
+            "public, max-age=31536000, immutable",
+        );
+
+        const prefix = await rawHttpRequest(assetBaseUrl, "/assets/dist-evil/inside.txt");
+        assert.equal(prefix.statusCode, 200);
+        assert.equal(prefix.body.toString("utf8"), "inside-prefix");
+        assert.equal(prefix.headers["content-type"], "application/octet-stream");
+    });
+
+    it("returns a stable 404 for nonexistent assets", async () => {
+        const response = await rawHttpRequest(assetBaseUrl, "/assets/nonexistent.js");
+        assert.equal(response.statusCode, 404);
+        assert.equal(response.body.toString("utf8"), "Not found");
+    });
+
+    it("blocks sibling prefix traversal before outside bytes are read", async () => {
+        const response = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/../../dist-evil/secret.txt",
+        );
+        assertRejected(response, 403, SIBLING_SENTINEL);
+    });
+
+    it("blocks encoded traversal before outside bytes are read", async () => {
+        const response = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/%2e%2e/%2e%2e/dist-evil/secret.txt",
+        );
+        assertRejected(response, 403, SIBLING_SENTINEL);
+    });
+
+    it("rejects malformed percent encodings and keeps serving requests", async () => {
+        for (const path of ["/assets/%", "/assets/%zz", "/assets/%E0%A4%A"]) {
+            const response = await rawHttpRequest(assetBaseUrl, path);
+            assertRejected(response, 400, SIBLING_SENTINEL, LINK_SENTINEL);
+        }
+
+        const healthy = await rawHttpRequest(assetBaseUrl, "/assets/nested/app..js");
+        assert.equal(healthy.statusCode, 200);
+        assert.deepEqual(healthy.body, SAFE_ASSET);
+    });
+
+    it("rejects mixed, NUL, absolute, drive, UNC, and repeated encodings", async () => {
+        const unsafePaths = [
+            "/assets/..\\..\\dist-evil\\secret.txt",
+            "/assets/..%5c..%5cdist-evil%5csecret.txt",
+            "/assets/%00secret.txt",
+            "/assets/%2fetc%2fpasswd",
+            "/assets/C:%5cWindows%5cwin.ini",
+            "/assets/%5c%5cserver%5cshare%5cfile.txt",
+            "/assets/%252e%252e/%252e%252e/dist-evil/secret.txt",
+        ];
+        for (const path of unsafePaths) {
+            const response = await rawHttpRequest(assetBaseUrl, path);
+            assertRejected(response, 403, SIBLING_SENTINEL, LINK_SENTINEL);
+        }
+    });
+
+    it("rejects symlinked or junction assets that resolve outside dist", async (t) => {
+        if (linkSetupError) {
+            t.diagnostic(`junction setup denied (${linkSetupError.code}); Windows seam still runs`);
+            assert.ok(["EACCES", "EPERM"].includes(linkSetupError.code));
             return;
         }
 
-        const workDir = await mkdtemp(join(tmpdir(), "apm-issue-monitor-test-"));
-        const distDir = join(workDir, "dist");
-        const evilRoot = join(workDir, "outside");
-        const evilFile = join(evilRoot, "secret.txt");
-        const evilRequestPath = `/assets/${basename(DIST_DIR)}-evil/secret.txt`;
-
-        await mkdir(distDir, { recursive: true });
-        await mkdir(evilRoot, { recursive: true });
-        await writeFile(evilFile, "top-secret", "utf8");
-        await symlink(evilRoot, join(distDir, `${basename(DIST_DIR)}-evil`), "dir");
-
-        const state = createMockDeps({ distDir });
-        const handler = createHandler(state.deps);
-        const symlinkServer = createServer(handler);
-
-        try {
-            await new Promise((resolve) => {
-                symlinkServer.listen(0, "127.0.0.1", resolve);
-            });
-            const url = new URL(`http://127.0.0.1:${symlinkServer.address().port}`);
-            const http = await import("node:http");
-            const res = await new Promise((resolve) => {
-                const req = http.request({
-                    hostname: url.hostname,
-                    port: url.port,
-                    path: evilRequestPath,
-                    method: "GET",
-                }, resolve);
-                req.end();
-            });
-
-            assert.equal(res.statusCode, 403);
-        } finally {
-            await new Promise((resolve) => symlinkServer.close(resolve));
-            await rm(workDir, { recursive: true, force: true });
-        }
+        const response = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/outside-link/secret.txt",
+        );
+        assertRejected(response, 403, LINK_SENTINEL);
     });
 
-    it("blocks path traversal attempts via encoded dots in /assets/", async () => {
-        // Use raw HTTP to send encoded path traversal that bypasses fetch URL normalization
-        const url = new URL(`${baseUrl}/assets/%2e%2e/package.json`);
-        const http = await import("node:http");
-        const res = await new Promise((resolve) => {
-            const req = http.request({
-                hostname: url.hostname,
-                port: url.port,
-                path: "/assets/%2e%2e/package.json",
-                method: "GET",
-            }, resolve);
-            req.end();
-        });
-        // The containment guard blocks paths that resolve outside dist/
-        assert.ok(res.statusCode === 403 || res.statusCode === 404,
-            `Expected 403 or 404, got ${res.statusCode}`);
-    });
+    it("applies canonical containment with Windows semantics on every platform", () => {
+        const root = "C:\\dashboard\\dist";
+        const candidate = win32.resolve(root, "assets", "outside-link", "secret.txt");
+        const canonicalPaths = new Map([
+            [win32.resolve(root), "C:\\dashboard\\dist"],
+            [candidate, "C:\\dashboard\\outside\\secret.txt"],
+        ]);
+        const result = resolveStaticRequest(
+            "/assets/outside-link/secret.txt",
+            root,
+            {
+                pathApi: win32,
+                realpathSync: (path) => canonicalPaths.get(path),
+            },
+        );
 
-    it("returns 404 for nonexistent assets", async () => {
-        const res = await fetch(`${baseUrl}/assets/nonexistent.js`);
-        assert.equal(res.status, 404);
-    });
-
-    it("blocks sibling prefix traversal to dist-evil paths", async () => {
-        const evilPath = `/assets/../../${basename(DIST_DIR)}-evil/secret.txt`;
-        const url = new URL(`${baseUrl}${evilPath}`);
-        const http = await import("node:http");
-        const res = await new Promise((resolve) => {
-            const req = http.request({
-                hostname: url.hostname,
-                port: url.port,
-                path: evilPath,
-                method: "GET",
-            }, resolve);
-            req.end();
-        });
-
-        assert.equal(res.statusCode, 403);
+        assert.equal(result.kind, "forbidden");
+        assert.equal(
+            isPathWithinRoot(root, "C:\\dashboard\\dist-evil\\secret.txt", win32),
+            false,
+        );
+        assert.equal(
+            isPathWithinRoot(root, "C:\\dashboard\\dist\\assets\\app..js", win32),
+            true,
+        );
     });
 });

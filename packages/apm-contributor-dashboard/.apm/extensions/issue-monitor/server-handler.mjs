@@ -7,7 +7,7 @@
 //   const server = createServer(handler);
 
 import { readFileSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parsePanelReview, extractFollowUpItems } from "./logic.mjs";
 
@@ -51,32 +51,78 @@ const MIME_TYPES = {
 
 const DEFAULT_POST_BODY_LIMIT_BYTES = 64 * 1024;
 const REFINED_COMMENT_BODY_LIMIT_BYTES = 1024 * 1024;
+const ASSET_ROUTE_PREFIX = "/assets/";
+const ENCODED_OCTET = /%[0-9a-f]{2}/i;
+const NATIVE_PATH_API = { isAbsolute, relative, resolve, sep };
 
-function isRelativePathUnsafe(relPath) {
-    return relPath === ".." || relPath.startsWith(`..${sep}`) || isAbsolute(relPath);
+export function isPathWithinRoot(root, candidatePath, pathApi = NATIVE_PATH_API) {
+    const relPath = pathApi.relative(root, candidatePath);
+    return relPath !== ".." &&
+        !relPath.startsWith(`..${pathApi.sep}`) &&
+        !pathApi.isAbsolute(relPath);
 }
 
-function isPathWithinDist(root, candidatePath) {
-    try {
-        const canonicalRoot = realpathSync(root);
-        try {
-            const canonicalCandidate = realpathSync(candidatePath);
-            return !isRelativePathUnsafe(relative(canonicalRoot, canonicalCandidate));
-        } catch (error) {
-            if (error.code !== "ENOENT" && error.code !== "ENOTDIR") {
-                return null;
-            }
-            try {
-                const parent = dirname(candidatePath);
-                const canonicalParent = realpathSync(parent);
-                return !isRelativePathUnsafe(relative(canonicalRoot, canonicalParent));
-            } catch {
-                return null;
-            }
-        }
-    } catch {
-        return null;
+function isMissingPathError(error) {
+    return error?.code === "ENOENT" || error?.code === "ENOTDIR";
+}
+
+function isUnsafeAssetPath(assetPath) {
+    if (!assetPath || assetPath.includes("\0") || assetPath.includes("\\")) {
+        return true;
     }
+    if (ENCODED_OCTET.test(assetPath) ||
+        isAbsolute(assetPath) ||
+        win32.isAbsolute(assetPath) ||
+        /^[a-z]:/i.test(assetPath)) {
+        return true;
+    }
+    return assetPath.split("/").some((segment) => segment === "." || segment === "..");
+}
+
+export function resolveStaticRequest(rawUrl, distDir, options = {}) {
+    const rawPath = typeof rawUrl === "string" ? rawUrl.split("?")[0] : "";
+    let urlPath;
+    try {
+        urlPath = decodeURIComponent(rawPath);
+    } catch {
+        return { kind: "malformed" };
+    }
+
+    if (!urlPath.startsWith(ASSET_ROUTE_PREFIX)) {
+        return { kind: "route", urlPath };
+    }
+
+    const assetPath = urlPath.slice(ASSET_ROUTE_PREFIX.length);
+    if (isUnsafeAssetPath(assetPath)) {
+        return { kind: "forbidden" };
+    }
+
+    const pathApi = options.pathApi || NATIVE_PATH_API;
+    const canonicalize = options.realpathSync || realpathSync;
+    const root = pathApi.resolve(distDir);
+    const candidatePath = pathApi.resolve(root, "assets", ...assetPath.split("/"));
+    if (!isPathWithinRoot(root, candidatePath, pathApi)) {
+        return { kind: "forbidden" };
+    }
+
+    let canonicalRoot;
+    let canonicalCandidate;
+    try {
+        canonicalRoot = canonicalize(root);
+        canonicalCandidate = canonicalize(candidatePath);
+    } catch (error) {
+        return { kind: isMissingPathError(error) ? "missing" : "forbidden" };
+    }
+
+    if (!isPathWithinRoot(canonicalRoot, canonicalCandidate, pathApi)) {
+        return { kind: "forbidden" };
+    }
+
+    return {
+        kind: "asset",
+        filePath: canonicalCandidate,
+        mimePath: candidatePath,
+    };
 }
 
 // Write endpoints that perform state-changing operations
@@ -86,18 +132,22 @@ const WRITE_ENDPOINTS = new Set([
     "/submit-comment", "/refine-comment", "/create-follow-up-issues",
 ]);
 
-function serveStatic(res, filePath) {
+function serveStatic(res, filePath, mimePath = filePath) {
     try {
         const data = readFileSync(filePath);
-        const ext = filePath.slice(filePath.lastIndexOf("."));
+        const ext = mimePath.slice(mimePath.lastIndexOf("."));
         const mime = MIME_TYPES[ext] || "application/octet-stream";
         const cache = ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable";
         res.writeHead(200, { "Content-Type": mime, "Cache-Control": cache });
         res.end(data);
     } catch {
-        res.writeHead(404);
-        res.end("Not found");
+        sendStaticError(res, 404, "Not found");
     }
+}
+
+function sendStaticError(res, statusCode, message) {
+    res.writeHead(statusCode, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(message);
 }
 
 function createPayloadTooLargeError() {
@@ -762,7 +812,25 @@ query($owner: String!, $repo: String!, $cursor: String) {
         }
 
         // Static file serving from dist/
-        const urlPath = decodeURIComponent(req.url.split("?")[0]);
+        const staticRequest = resolveStaticRequest(req.url, distDir);
+        if (staticRequest.kind === "malformed") {
+            sendStaticError(res, 400, "Bad request");
+            return;
+        }
+        if (staticRequest.kind === "forbidden") {
+            sendStaticError(res, 403, "Forbidden");
+            return;
+        }
+        if (staticRequest.kind === "missing") {
+            sendStaticError(res, 404, "Not found");
+            return;
+        }
+        if (staticRequest.kind === "asset") {
+            serveStatic(res, staticRequest.filePath, staticRequest.mimePath);
+            return;
+        }
+
+        const { urlPath } = staticRequest;
         if (urlPath === "/" || urlPath === "/index.html") {
             // Inject CSRF token into HTML so the client can send it with write requests
             try {
@@ -775,19 +843,6 @@ query($owner: String!, $repo: String!, $cursor: String) {
                 res.writeHead(404);
                 res.end("Not found");
             }
-        } else if (urlPath.startsWith("/assets/")) {
-            const root = resolve(distDir);
-            const resolved = resolve(root, normalize(urlPath.slice(1)));
-            const rel = relative(root, resolved);
-            if (isRelativePathUnsafe(rel)) {
-                res.writeHead(403); res.end("Forbidden"); return;
-            }
-
-            const isSafePath = isPathWithinDist(root, resolved);
-            if (isSafePath === false) {
-                res.writeHead(403); res.end("Forbidden"); return;
-            }
-            serveStatic(res, resolved);
         } else {
             serveStatic(res, join(distDir, "index.html"));
         }
