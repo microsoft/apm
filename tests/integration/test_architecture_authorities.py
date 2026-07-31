@@ -271,6 +271,69 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
+def test_git_ref_freshness_policy_has_single_owner() -> None:
+    """Lock seeding and resolver tiers must consume one freshness policy."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/deps/tiered_ref_resolver.py").read_text()
+    resolve = (root / "src/apm_cli/install/phases/resolve.py").read_text()
+    seed = (root / "src/apm_cli/install/helpers/ref_seed.py").read_text()
+    outdated = (root / "src/apm_cli/commands/outdated.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("class RefFreshnessPolicy(Enum):") == 1
+    assert owner.count("def ref_freshness_policy_for_install(") == 1
+    assert owner.count("if freshness_policy.allows_bare_cache:") == 1
+    assert "ctx.update_refs or ctx.refresh" not in resolve
+    assert "ctx.update_refs or ctx.refresh" not in seed
+    assert resolve.count("ref_freshness_policy_for_install(ctx)") == 1
+    assert "def _requires_remote_ref_resolution(" in resolve
+    assert "update_refs = _requires_remote_ref_resolution(ctx)" in resolve
+    assert seed.count("ref_freshness_policy_for_install(ctx)") == 1
+    assert "freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE" in outdated
+    assert "Git ref freshness must route through RefFreshnessPolicy" in guard
+
+
+def test_git_ref_freshness_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The boundary lint rejects a second update/refresh freshness gate."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    seed_path = sandbox / "src/apm_cli/install/helpers/ref_seed.py"
+    source = seed_path.read_text(encoding="utf-8")
+    seed_path.write_text(
+        source.replace(
+            "if not freshness_policy.allows_lock_seed:",
+            "if ctx.update_refs or ctx.refresh:",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Git ref freshness must route through RefFreshnessPolicy" in result.stdout
+
+
 @pytest.mark.lifecycle_smoke
 def test_ado_lock_coordinates_have_single_owner() -> None:
     """AC14 derives ADO coordinates without provider-specific lock fields."""

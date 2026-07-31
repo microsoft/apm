@@ -473,7 +473,10 @@ def outdated(global_, verbose, parallel_checks):
     try:
         from ..cache.git_cache import GitCache
         from ..cache.paths import get_cache_root
-        from ..deps.tiered_ref_resolver import build_tiered_ref_resolver
+        from ..deps.tiered_ref_resolver import (
+            RefFreshnessPolicy,
+            build_tiered_ref_resolver,
+        )
 
         _git_cache = None
         if not os.environ.get("APM_NO_CACHE"):
@@ -485,6 +488,7 @@ def outdated(global_, verbose, parallel_checks):
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=_git_cache,
+            freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
         )
         if _tiered is not None:
             downloader._tiered_resolver = _tiered

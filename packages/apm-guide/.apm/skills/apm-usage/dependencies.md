@@ -539,8 +539,9 @@ install time APM runs `git ls-remote` against the dep and picks the
 highest tag matching the range; the resolved tag, commit SHA, version,
 and original constraint are pinned in the lockfile. Subsequent
 `apm install` runs replay the lockfile without network. Use
-`apm install --update` (or change the manifest constraint) to
-re-resolve against current remote tags. Tag patterns are tried in order:
+`apm update` (or change the manifest constraint) to re-resolve against
+current remote tags. Update-like commands require authenticated upstream
+truth and do not accept a stale persistent bare-cache ref. Tag patterns are tried in order:
 `v{version}`, `{name}--v{version}`, and `{name}-v{version}`, then a bare
 `{version}` fallback. For virtual subdirectory deps, `{name}` is the
 final path segment (for example `pkg-a` in `acme/mono/packages/pkg-a`). A
@@ -595,6 +596,9 @@ enterprise security guide for the threat model.
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
 of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
+`apm install --update`, `apm install --refresh`, `apm update` (including
+`--force`), `apm lock --update`, and `apm outdated` establish mutable refs from
+upstream instead of using a persistent bare-cache ref as current-state evidence.
 
 Lockfile keys keep `github.com` implicit for migration stability while
 non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)

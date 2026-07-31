@@ -232,12 +232,19 @@ def _setup_downloader(ctx: InstallContext) -> None:
     # Wired AFTER persistent_git_cache so L2 can reach it. Reused by
     # every code path that calls downloader.resolve_git_reference():
     # install, update, outdated, publish.
-    try:
-        from apm_cli.deps.tiered_ref_resolver import build_tiered_ref_resolver
+    from apm_cli.deps.tiered_ref_resolver import (
+        build_tiered_ref_resolver,
+        ref_freshness_policy_for_install,
+    )
 
+    ctx.ref_freshness_policy = ref_freshness_policy_for_install(ctx)
+    if ctx.ref_freshness_policy.requires_remote and ctx.logger:
+        ctx.logger.verbose_detail("[*] Resolving refs from upstream; local cached refs bypassed")
+    try:
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=getattr(downloader, "persistent_git_cache", None),
+            freshness_policy=ctx.ref_freshness_policy,
         )
         if _tiered is not None:
             downloader._tiered_resolver = _tiered
@@ -273,6 +280,14 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
             ctx.logger.error(error)
     joined_errors = "; ".join(dependency_graph.resolution_errors)
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
+
+
+def _requires_remote_ref_resolution(ctx: InstallContext) -> bool:
+    """Return the configured policy decision or fail before resolution."""
+    policy = ctx.ref_freshness_policy
+    if policy is None:
+        raise RuntimeError("Ref freshness policy was not configured")
+    return policy.requires_remote
 
 
 def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagingSession) -> None:
@@ -347,9 +362,9 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
     # --refresh implies re-resolution of all refs (but does NOT discard
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
-    update_refs = ctx.update_refs or ctx.refresh
+    update_refs = _requires_remote_ref_resolution(ctx)
     if ctx.refresh and ctx.logger:
-        ctx.logger.verbose_detail("[*] --refresh: re-resolving all refs")
+        ctx.logger.verbose_detail("[*] --refresh: bypassing cached package content")
     logger = ctx.logger
     existing_lockfile = ctx.existing_lockfile
     downloader = ctx.downloader

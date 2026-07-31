@@ -46,6 +46,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -64,6 +65,63 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _SHA_RE = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
+
+
+class RefFreshnessPolicy(Enum):
+    """Canonical authority for which resolver caches may establish a ref."""
+
+    REPRODUCIBLE = "reproducible"
+    CURRENT_REMOTE = "current-remote"
+
+    @classmethod
+    def for_install_intent(
+        cls,
+        *,
+        update_refs: bool,
+        refresh: bool,
+    ) -> RefFreshnessPolicy:
+        """Map install command intent to one resolver freshness policy."""
+        if update_refs or refresh:
+            return cls.CURRENT_REMOTE
+        return cls.REPRODUCIBLE
+
+    @property
+    def allows_lock_seed(self) -> bool:
+        """Return whether a lockfile SHA may seed the per-run L0 cache."""
+        return self is self.REPRODUCIBLE
+
+    @property
+    def allows_bare_cache(self) -> bool:
+        """Return whether a persistent bare ref may answer resolution."""
+        return self is self.REPRODUCIBLE
+
+    @property
+    def requires_remote(self) -> bool:
+        """Return whether the ref must be established from a remote tier."""
+        return self is self.CURRENT_REMOTE
+
+
+class RefFreshnessContext(Protocol):
+    """Structural input needed to derive install ref freshness."""
+
+    ref_freshness_policy: RefFreshnessPolicy | None
+    update_refs: bool
+    refresh: bool
+
+
+def ref_freshness_policy_for_install(
+    context: RefFreshnessContext,
+) -> RefFreshnessPolicy:
+    """Return the configured policy or derive it from install intent once."""
+    configured = context.ref_freshness_policy
+    if configured is not None:
+        if not isinstance(configured, RefFreshnessPolicy):
+            raise TypeError("ref_freshness_policy must be a RefFreshnessPolicy")
+        return configured
+    return RefFreshnessPolicy.for_install_intent(
+        update_refs=context.update_refs,
+        refresh=context.refresh,
+    )
 
 
 def _repository_cache_identity(dep_ref: DependencyReference) -> str:
@@ -193,7 +251,12 @@ class L1CommitsAPI:
                 return sha.lower()
             return None
         except Exception as exc:
-            _log.debug("L1 commits API failed for %s@%s: %s", dep_ref.repo_url, ref, exc)
+            _log.debug(
+                "L1 commits API failed for %s@%s (%s)",
+                dep_ref.repo_url,
+                ref,
+                type(exc).__name__,
+            )
             return None
 
 
@@ -207,8 +270,8 @@ class L2BareRevParse:
 
     No network. Hits only when :class:`GitCache` has a bare clone of the
     URL from a previous run. Cheap follow-up tier after L0/L1 miss --
-    catches the common ``apm install`` -> ``apm update`` second-run case
-    where the bare exists but the cheap API is unavailable (e.g. ADO).
+    catches repeat reproducible installs where the bare exists but the cheap
+    API is unavailable (e.g. ADO). Current-state commands exclude this tier.
     """
 
     name = "bare_rev_parse"
@@ -300,7 +363,11 @@ class L3LegacyClone:
         try:
             resolved = self._legacy.resolve(dep_ref)
         except Exception as exc:
-            _log.debug("L3 legacy resolve failed for %s: %s", dep_ref.repo_url, exc)
+            _log.debug(
+                "L3 legacy resolve failed for %s (%s)",
+                dep_ref.repo_url,
+                type(exc).__name__,
+            )
             return None
         sha = getattr(resolved, "resolved_commit", None)
         if sha and _SHA_RE.match(sha):
@@ -337,10 +404,12 @@ class TieredRefResolver:
         tiers: list[RefResolutionTier],
         cache: PerRunRefCache,
         legacy: L3LegacyClone,
+        freshness_policy: RefFreshnessPolicy = RefFreshnessPolicy.REPRODUCIBLE,
     ) -> None:
         self._tiers = tiers
         self._cache = cache
         self._legacy = legacy
+        self.freshness_policy = freshness_policy
         self._coalesce: dict[tuple[str, str], threading.Event] = {}
         self._coalesce_lock = threading.Lock()
         # Diagnostics: counts per tier across the run. Read by tests.
@@ -444,7 +513,7 @@ class TieredRefResolver:
             try:
                 sha = tier.try_resolve(dep_ref, ref)
             except Exception as exc:
-                _log.debug("Tier %s raised: %s", tier.name, exc)
+                _log.debug("Tier %s raised (%s)", tier.name, type(exc).__name__)
                 continue
             if sha and _SHA_RE.match(sha):
                 self.stats[tier.name] = self.stats.get(tier.name, 0) + 1
@@ -502,13 +571,25 @@ def build_tiered_ref_resolver(
     *,
     downloader: GitHubPackageDownloader,
     git_cache: GitCache | None = None,
+    freshness_policy: RefFreshnessPolicy = RefFreshnessPolicy.REPRODUCIBLE,
 ) -> TieredRefResolver | None:
     """Construct the production tier stack, or ``None`` if disabled.
+
+    The default is deliberately ``REPRODUCIBLE`` so ordinary installs retain
+    lockfile and local-cache behavior. Callers that report or change current
+    state must opt into ``CURRENT_REMOTE`` explicitly.
 
     Returns ``None`` when ``APM_TIERED_RESOLVER`` is disabled so callers
     can opt out by simply leaving ``downloader._tiered_resolver = None``;
     the downloader facade falls through to the legacy resolver in that
     case.
+
+    Args:
+        downloader: The package downloader providing auth and legacy resolve.
+        git_cache: Optional persistent git cache for the L2 bare-rev-parse tier.
+        freshness_policy: Canonical cache/remote policy for this command.
+            ``CURRENT_REMOTE`` excludes lock-seeded and persistent bare-cache
+            answers while retaining per-run coalescing of fresh results.
     """
     _ = default_host  # keep import side-effect for compat with monkeypatched tests
     if not is_tiered_resolver_enabled():
@@ -526,8 +607,19 @@ def build_tiered_ref_resolver(
     tiers: list[RefResolutionTier] = [
         L0PerRunCache(cache=cache),
         L1CommitsAPI(host=downloader),
-        L2BareRevParse(git_cache=git_cache),
-        legacy,
     ]
+    if freshness_policy.allows_bare_cache:
+        tiers.append(L2BareRevParse(git_cache=git_cache))
+    else:
+        _log.debug(
+            "TieredRefResolver: L2BareRevParse excluded by %s policy",
+            freshness_policy.value,
+        )
+    tiers.append(legacy)
 
-    return TieredRefResolver(tiers=tiers, cache=cache, legacy=legacy)
+    return TieredRefResolver(
+        tiers=tiers,
+        cache=cache,
+        legacy=legacy,
+        freshness_policy=freshness_policy,
+    )

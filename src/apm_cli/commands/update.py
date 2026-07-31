@@ -36,7 +36,8 @@ Flags
   ``apm install -g``).
 * ``[PACKAGES]...`` -- positional names to refresh only those
   dependencies; omit to refresh everything.
-* ``--force`` -- overwrite locally-authored files on collision.
+* ``--force`` -- overwrite locally-authored files and deploy despite
+  critical security findings; does not bypass upstream ref resolution.
 * ``--parallel-downloads`` -- max concurrent package downloads
   (0 disables parallelism).
 * ``--target``/``-t`` -- agent harness(es) to deploy to; comma-separated
@@ -340,7 +341,10 @@ def _run_mcp_lsp_integration(
     "--force",
     is_flag=True,
     default=False,
-    help="Overwrite locally-authored files on collision",
+    help=(
+        "Overwrite locally-authored files and deploy despite critical security "
+        "findings; does not bypass upstream ref resolution"
+    ),
 )
 @click.option(
     "--parallel-downloads",
