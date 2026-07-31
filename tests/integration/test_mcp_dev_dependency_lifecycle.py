@@ -444,7 +444,7 @@ def test_stale_dependency_dev_mcp_repair_and_frozen_no_write(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """Frozen dry-run is non-mutating; install and update prune stale state."""
+    """Frozen dry-run rejects without writes; install and update repair stale state."""
     case = _TARGET_CASES[0]
     with ExitStack() as stack:
         scenario = _create_scenario(tmp_path / "repair", case, stack)
@@ -454,13 +454,16 @@ def test_stale_dependency_dev_mcp_repair_and_frozen_no_write(
 
         _plant_stale_dependency_dev_state(scenario)
         stale = _snapshot(scenario)
-        frozen = _run_ok(
-            runner,
-            scenario,
+        frozen = runner.run(
             (*install_args, "--frozen", "--dry-run"),
-            "repair-frozen-dry-run",
+            scenario_id="repair-frozen-dry-run",
+            cwd=scenario.project,
+            env=scenario.environment,
         )
-        assert "dry" in f"{frozen.stdout}\n{frozen.stderr}".lower()
+        assert frozen.returncode == 1
+        frozen_output = f"{frozen.stdout}\n{frozen.stderr}"
+        assert "--frozen" in frozen_output
+        assert _DEP_DEV in frozen_output
         assert _snapshot(scenario) == stale
 
         _run_ok(runner, scenario, install_args, "repair-normal-install")
