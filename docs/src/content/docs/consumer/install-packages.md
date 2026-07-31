@@ -187,7 +187,7 @@ apm install --only apm                 # skip MCP server integration this run
 apm install --frozen                   # CI: lockfile-only; fail on drift
 apm install --update                   # resolve current upstream refs
 apm install --refresh                  # resolve refs and bypass cached content
-apm install --force                    # overwrite collisions; no refresh alone
+apm install --force                    # collision/security override; no ref refresh
 apm install --dev                      # treat positional args as devDependencies
 apm install -g <package>               # install to user scope (~/.apm/)
 apm install -v                         # verbose: show resolution and integration

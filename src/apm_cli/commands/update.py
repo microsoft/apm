@@ -334,7 +334,10 @@ def _run_mcp_lsp_integration(
     "--force",
     is_flag=True,
     default=False,
-    help="Overwrite locally-authored files on collision",
+    help=(
+        "Overwrite locally-authored files and deploy despite critical security "
+        "findings; ref freshness is unchanged"
+    ),
 )
 @click.option(
     "--parallel-downloads",
