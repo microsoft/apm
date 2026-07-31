@@ -49,7 +49,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import yaml
 
@@ -115,6 +115,15 @@ class HookIntegrationResult(IntegrationResult):
     def hooks_integrated(self):
         """Alias for files_integrated (backward compat)."""
         return self.files_integrated
+
+
+class HookTargetReconcileStats(TypedDict):
+    """Counts and locations produced by package-target hook contraction."""
+
+    files_removed: int
+    errors: int
+    failed_targets: list[str]
+    failed_paths: list[str]
 
 
 @dataclass(frozen=True)
@@ -908,6 +917,7 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         package_name: str,
+        dependency_sources: set[str] | None = None,
     ) -> tuple[str, frozenset[str]]:
         """Return the canonical marker and any safe legacy marker aliases."""
         primary = HookIntegrator._get_hook_source_marker(
@@ -917,9 +927,14 @@ class HookIntegrator(BaseIntegrator):
         )
         legacy: set[str] = set()
         root_local = HookIntegrator._is_root_local_package(package_info, project_root)
-        root_legacy_is_unambiguous = root_local and package_name not in dependency_hook_sources(
-            project_root
-        )
+        root_legacy_is_unambiguous = False
+        if root_local:
+            known_dependency_sources = (
+                dependency_sources
+                if dependency_sources is not None
+                else dependency_hook_sources(project_root)
+            )
+            root_legacy_is_unambiguous = package_name not in known_dependency_sources
         if primary != package_name and (
             root_legacy_is_unambiguous
             or legacy_source_marker_is_unambiguous(
@@ -1218,14 +1233,15 @@ class HookIntegrator(BaseIntegrator):
         if not hook_files:
             return _empty
 
+        heal_stale_root_source = self._is_root_local_package(package_info, project_root)
+        dependency_sources = (
+            dependency_hook_sources(project_root) if heal_stale_root_source else set()
+        )
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
             project_root,
             package_name,
-        )
-        heal_stale_root_source = self._is_root_local_package(package_info, project_root)
-        dependency_sources = (
-            dependency_hook_sources(project_root) if heal_stale_root_source else set()
+            dependency_sources,
         )
         hooks_integrated = 0
         scripts_copied = 0
@@ -1697,9 +1713,14 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         excluded_targets,
-    ) -> dict[str, int]:
+    ) -> HookTargetReconcileStats:
         """Remove this package's merged hooks from newly excluded targets."""
-        stats = {"files_removed": 0, "errors": 0}
+        stats: HookTargetReconcileStats = {
+            "files_removed": 0,
+            "errors": 0,
+            "failed_targets": [],
+            "failed_paths": [],
+        }
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
@@ -1713,6 +1734,7 @@ class HookIntegrator(BaseIntegrator):
                 continue
             target_dir = project_root / target.root_dir
             json_path = target_dir / config.config_filename
+            errors_before = stats["errors"]
             self._clean_apm_source_from_json(
                 json_path,
                 source_markers,
@@ -1720,13 +1742,16 @@ class HookIntegrator(BaseIntegrator):
                 container=config.event_container_key,
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
             )
+            if stats["errors"] != errors_before:
+                stats["failed_targets"].append(target.name)
+                stats["failed_paths"].append(portable_relpath(json_path, project_root))
         return stats
 
     @staticmethod
     def _clean_apm_source_from_json(
         json_path: Path,
         source_markers: frozenset[str],
-        stats: dict[str, int],
+        stats: HookTargetReconcileStats,
         *,
         container: str,
         sidecar_path: Path,

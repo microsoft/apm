@@ -15,7 +15,7 @@ from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS, HookIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
-from apm_cli.utils.diagnostics import DiagnosticCollector
+from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 
 
 def _package_info(
@@ -70,10 +70,11 @@ class _NoopSkillIntegrator:
 
 
 class _RecordingHookIntegrator:
-    def __init__(self) -> None:
+    def __init__(self, reconcile_result: dict | None = None) -> None:
         self.seen_targets: list[str] = []
         self.dep_targets_active_values: list[bool] = []
         self.reconciled_targets: list[str] = []
+        self.reconcile_result = reconcile_result or {"files_removed": 0, "errors": 0}
 
     def integrate_hooks_for_target(self, target, package_info, project_root: Path, **kwargs):
         self.seen_targets.append(target.name)
@@ -85,9 +86,9 @@ class _RecordingHookIntegrator:
         package_info,
         project_root: Path,
         excluded_targets,
-    ) -> dict[str, int]:
+    ) -> dict:
         self.reconciled_targets.extend(target.name for target in excluded_targets)
-        return {"files_removed": 0, "errors": 0}
+        return self.reconcile_result
 
 
 def _bundle(hook_integrator) -> IntegratorBundle:
@@ -211,6 +212,32 @@ def test_package_restriction_cannot_expand_consumer_dependency_targets(
     assert hook_integrator.seen_targets == []
     assert hook_integrator.reconciled_targets == ["claude", "cursor"]
     assert diagnostics.has_diagnostics
+
+
+def test_reconcile_failure_diagnostic_names_target_and_config(tmp_path: Path) -> None:
+    """A failed contraction tells users which target config needs attention."""
+    hook_integrator = _RecordingHookIntegrator(
+        {
+            "files_removed": 0,
+            "errors": 1,
+            "failed_targets": ["cursor"],
+            "failed_paths": [".cursor/hooks.json"],
+        }
+    )
+
+    diagnostics = _run_with_targets(
+        tmp_path,
+        ["claude", "cursor"],
+        None,
+        hook_integrator,
+        package_target="claude",
+    )
+
+    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
+    assert warning.message == "Could not fully reconcile hooks excluded by target restrictions"
+    assert warning.detail == (
+        "targets: [cursor]; configs: [.cursor/hooks.json]; run apm install again"
+    )
 
 
 def test_conflicting_package_targets_fail_before_service_dispatch(tmp_path: Path) -> None:

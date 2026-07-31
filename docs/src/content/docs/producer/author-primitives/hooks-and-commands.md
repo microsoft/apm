@@ -100,9 +100,12 @@ available at runtime:
 
 Use simple hook filenames. APM computes their reach as:
 
-`effective hook targets = project active targets INTERSECT consumer
-per-dependency targets (when set) INTERSECT package targets (when
-restrictive)`
+```text
+effective hook targets =
+  project active targets
+  INTERSECT consumer per-dependency targets (when set)
+  INTERSECT package targets (when restrictive)
+```
 
 Every selector is a filter. A package declaration only narrows the
 consumer-authorized active set; it never activates a target or expands
@@ -145,8 +148,8 @@ further, but cannot expand it.
 
 During migration, suffix routing still filters within the effective target
 set. Multi-target stems such as `claude-codex-hooks.json` match each named
-target. Ambiguous stems such as `codex-launch-hooks.json` fall back to suffix
-routing and print a warning.
+target. Ambiguous stems such as `codex-launch-hooks.json` use universal
+fallback and warn that the apparent target token was ignored.
 :::
 
 Supported targets and where the integrator writes:
