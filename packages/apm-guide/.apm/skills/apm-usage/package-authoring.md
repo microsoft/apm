@@ -121,7 +121,9 @@ A consumer can narrow it further with per-dependency `targets:`; see
 
 ### Migrating filename-routed hooks
 
-Keep hook filenames simple and declare target-specific intent in the package:
+When renaming a target-specific hook file to generic `hooks.json`, preserve
+producer intent with an explicit package `target:` declaration -- consumers
+may narrow it further but cannot expand it:
 
 ```yaml
 name: codex-hooks
@@ -130,7 +132,8 @@ target: codex
 ```
 
 Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
-After: keep hook filenames generic and declare `target: codex` in the package.
+After: rename to `hooks.json` and add `target: codex` to the package's own
+`apm.yml`. The consumer can still narrow further with per-dependency `targets:`.
 Combined deprecated stems such as `claude-codex-hooks.json` route to every
 named target token during the migration window.
 Stems with target tokens outside the trailing target suffix (for example

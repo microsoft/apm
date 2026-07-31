@@ -645,7 +645,8 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "literal no-restriction sentinel",
         "auto-detectable target set during this intersection",
         "MUST be rejected before target-scoped",
-        "under [req-lk-021]",
+        "MUST be reconciled under",
+        "[req-lk-021](#req-lk-021)",
     )
 
 
