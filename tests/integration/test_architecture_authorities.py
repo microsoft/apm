@@ -1104,6 +1104,24 @@ def test_package_target_consumer_rejects_dead_logging_only_read(
     )
 
 
+def test_merged_hook_ownership_markers_have_one_owner() -> None:
+    """HookIntegrator must consume the dedicated ownership marker authority."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_ownership.py").read_text(encoding="utf-8")
+    integrator = (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def dependency_hook_source_marker(" in owner
+    assert "def dependency_hook_sources(" in owner
+    assert "from apm_cli.integration.hook_ownership import (" in integrator
+    assert "def _dependency_hook_source_marker(" not in integrator
+    assert "Merged-hook ownership markers must route through integration/hook_ownership.py" in guard
+    assert "`src/apm_cli/integration/hook_ownership.py`" in architecture
+
+
 def test_dependency_winner_selection_has_one_algorithm() -> None:
     """Dispatch and flattening must consume one deterministic selector."""
     root = Path(__file__).parents[2]
