@@ -97,9 +97,11 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
             raise LockfileFormatError("Lockfile mcp_target_servers entries must be strings")
     for server, provenance in (data.get("mcp_config_provenance") or {}).items():
         if not isinstance(server, str) or not (
-            isinstance(provenance, str)
+            (isinstance(provenance, str) and bool(provenance))
             or (
-                isinstance(provenance, list) and all(isinstance(owner, str) for owner in provenance)
+                isinstance(provenance, list)
+                and bool(provenance)
+                and all(isinstance(owner, str) and bool(owner) for owner in provenance)
             )
         ):
             raise LockfileFormatError(

@@ -451,13 +451,19 @@ class LockfileBuilder:
                     copy.deepcopy(target_servers),
                 )
             if self.ctx.logger:
+                server_count = len(lockfile.mcp_servers)
+                config_count = len(lockfile.mcp_configs)
+                server_noun = "server" if server_count == 1 else "servers"
+                config_noun = "config" if config_count == 1 else "configs"
                 detail = (
                     "MCP state unchanged -- carrying forward "
-                    f"{len(lockfile.mcp_servers)} server(s), "
-                    f"{len(lockfile.mcp_configs)} config(s)"
+                    f"{server_count} {server_noun}, "
+                    f"{config_count} {config_noun}"
                 )
                 if target_servers:
-                    detail += f", {len(target_servers)} target mapping(s)"
+                    mapping_count = len(target_servers)
+                    mapping_noun = "mapping" if mapping_count == 1 else "mappings"
+                    detail += f", {mapping_count} target {mapping_noun}"
                 self.ctx.logger.verbose_detail(detail)
 
     def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:

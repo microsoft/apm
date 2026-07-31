@@ -17,6 +17,9 @@ _OWNED_FIELDS = frozenset(
     }
 )
 _MUTATORS = frozenset({"append", "remove", "pop", "extend", "clear", "update", "insert"})
+# This bounded AST guard intentionally does not perform alias dataflow analysis.
+# A pattern such as ``view = lock.mcp_target_servers; view.clear()`` requires a
+# heavier analyzer and remains covered by review plus the behavioral trap.
 _ALLOWED = frozenset(
     {
         Path("core/deployment_state.py"),

@@ -303,6 +303,7 @@ def test_installed_mcp_lifecycle_is_no_write_until_real_target_change(
     assert _file_identity(lock_path) == changed_identity
 
 
+@pytest.mark.lifecycle_smoke
 def test_redirected_root_registry_install_converges_without_rewrite(
     tmp_path: Path,
     apm_binary_path: Path,

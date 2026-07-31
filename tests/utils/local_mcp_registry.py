@@ -91,7 +91,7 @@ class LocalMcpRegistry:
         """Stop the endpoint and wait for its serving thread."""
         self._server.shutdown()
         self._server.server_close()
-        self._thread.join(timeout=5)
+        self._thread.join(timeout=10)
         if self._thread.is_alive():
             raise RuntimeError("local MCP registry thread did not stop")
 
@@ -123,7 +123,11 @@ class LocalMcpRegistryFactory:
             name=f"mcp-registry-{self._root.name}",
             daemon=True,
         )
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            server.server_close()
+            raise
         if not thread.is_alive():
             server.server_close()
             raise RuntimeError("local MCP registry thread did not start")
