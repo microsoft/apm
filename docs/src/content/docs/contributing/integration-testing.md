@@ -43,6 +43,7 @@ APM uses a tiered approach to integration testing:
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
 - **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
 - **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, and required selections; verifies their set partition; and preserves the required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
+- **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
 - **Run it locally** (the exact command CI runs):
   ```bash
   APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \

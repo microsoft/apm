@@ -770,6 +770,10 @@ class MCPIntegrator:
                          transitively-contributed servers). Passed in lockstep
                          with ``mcp_configs`` so the two never diverge (#2081).
                          ``None`` leaves the existing value untouched.
+
+        Raises:
+            LockfileFormatError: If the existing lockfile is malformed.
+            OSError: If the atomic lockfile write fails.
         """
         if lock_path is None:
             lock_path = get_lockfile_path(Path.cwd())
@@ -829,7 +833,7 @@ class MCPIntegrator:
             lockfile.save(lock_path)
         except Exception:
             _log.debug(
-                "Failed to update MCP servers in lockfile at %s",
+                "MCP lockfile persistence failed at %s",
                 lock_path,
                 exc_info=True,
             )
@@ -846,7 +850,7 @@ class MCPIntegrator:
                     logger.warning(message)
                 else:
                     _rich_warning(message, symbol="warning")
-                raise
+            raise
 
     # ------------------------------------------------------------------
     # Runtime detection
