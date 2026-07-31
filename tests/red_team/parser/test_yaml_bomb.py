@@ -144,20 +144,45 @@ def test_shallow_alias_doc_still_parses_under_budget(tmp_path: Path, levels: int
     assert isinstance(result, dict)
 
 
-def test_large_anchor_free_scalar_is_not_treated_as_an_alias_bomb(tmp_path: Path):
-    """A literal document above the expansion budget remains loadable.
+def test_large_anchor_free_lockfile_is_not_treated_as_an_alias_bomb(tmp_path: Path):
+    """A tree-shaped lockfile above the expansion budget remains loadable.
 
     The expansion budget defends against shared alias nodes whose logical size
-    can grow exponentially. A single unaliased scalar is linear in the input
-    size, so rejecting it as an alias bomb prevents APM from reading its own
-    large generated lockfiles without adding protection.
+    can grow exponentially. A large mapping of literal provenance values is
+    linear in the input size, so rejecting it as an alias bomb prevents APM
+    from reading its own generated lockfiles without adding protection.
     """
     from apm_cli.utils.yaml_io import _BoundedSafeLoader, load_yaml
+    from tests.utils.yaml_guard_fixtures import (
+        LARGE_LOCKFILE_PROVENANCE_ROWS,
+        large_anchor_free_lockfile,
+    )
 
-    literal = "x" * (_BoundedSafeLoader._MAX_EXPANSION_WEIGHT + 1)
+    content = large_anchor_free_lockfile(_BoundedSafeLoader._MAX_EXPANSION_WEIGHT)
     doc = tmp_path / "apm.lock.yaml"
-    doc.write_text(f"payload: {literal}\n", encoding="utf-8")
+    doc.write_text(content, encoding="utf-8")
 
     result = load_yaml(doc)
 
-    assert result == {"payload": literal}
+    assert "&" not in content
+    assert "*" not in content
+    assert len(result["mcp_config_provenance"]) == LARGE_LOCKFILE_PROVENANCE_ROWS
+
+
+def test_anchor_without_alias_uses_actual_graph_semantics(monkeypatch: pytest.MonkeyPatch):
+    """An anchor declaration alone does not make the composed graph shared."""
+    from apm_cli.utils.yaml_io import _BoundedSafeLoader, load_yaml_str
+
+    monkeypatch.setattr(_BoundedSafeLoader, "_MAX_EXPANSION_WEIGHT", 8)
+
+    assert load_yaml_str("payload: &declared literal-value\n") == {"payload": "literal-value"}
+
+
+def test_self_referential_alias_fails_closed():
+    """A cyclic alias graph is rejected without recursive work."""
+    import yaml
+
+    from apm_cli.utils.yaml_io import load_yaml_str
+
+    with pytest.raises(yaml.YAMLError, match="alias/anchor expansion exceeded"):
+        load_yaml_str("cycle: &cycle [*cycle]\n")

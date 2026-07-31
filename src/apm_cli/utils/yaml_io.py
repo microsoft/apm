@@ -120,25 +120,25 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         # would only reject legitimate large lockfiles. Aliases are the only
         # way the composed graph gains shared nodes (or cycles), and therefore
         # the only way its logical materialization can exceed its source size.
-        # Detect sharing first without recursively revisiting a seen node; this
-        # stays linear in the composed graph even for an exponential alias bomb.
+        # Detect sharing first with an explicit worklist. This stays linear in
+        # the composed graph even for an exponential alias bomb, and never adds
+        # Python call-stack pressure for a deeply nested but otherwise valid
+        # document.
         seen: set[int] = set()
-
-        def has_shared_node(node: Any) -> bool:
+        worklist = [root]
+        while worklist:
+            node = worklist.pop()
             nid = id(node)
             if nid in seen:
-                return True
+                break
             seen.add(nid)
             if isinstance(node, yaml.nodes.MappingNode):
-                return any(
-                    has_shared_node(key_node) or has_shared_node(value_node)
-                    for key_node, value_node in node.value
-                )
-            if isinstance(node, yaml.nodes.SequenceNode):
-                return any(has_shared_node(child) for child in node.value)
-            return False
-
-        if not has_shared_node(root):
+                for key_node, value_node in node.value:
+                    worklist.append(value_node)
+                    worklist.append(key_node)
+            elif isinstance(node, yaml.nodes.SequenceNode):
+                worklist.extend(node.value)
+        else:
             return
 
         weights: dict[int, int] = {}
