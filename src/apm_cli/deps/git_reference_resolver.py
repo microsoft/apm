@@ -413,6 +413,7 @@ class GitReferenceResolver:
                 target_host,
                 org,
                 port=dep_ref.port,
+                host_type=dep_ref.host_type,
             )
             return _request(file_ctx.token, file_ctx.git_env)
         except Exception:
