@@ -51,9 +51,17 @@ def resolve_dep_auth(
         return None, "basic", None
     try:
         auth_ctx = auth_resolver.resolve_for_dep(dep_ref)
-        if auth_ctx is None or not auth_ctx.token:
-            return None, "basic", getattr(auth_ctx, "git_env", None)
-        return auth_ctx.token, auth_ctx.auth_scheme, getattr(auth_ctx, "git_env", None)
+        if auth_ctx is None:
+            return None, "basic", None
+        harden = getattr(auth_resolver, "hardened_git_env_for_context", None)
+        git_env = harden(auth_ctx) if callable(harden) else getattr(auth_ctx, "git_env", None)
+        if not auth_ctx.token:
+            return None, "basic", git_env
+        return (
+            auth_ctx.token,
+            auth_ctx.auth_scheme,
+            git_env,
+        )
     except Exception:
         return None, "basic", None
 

@@ -236,10 +236,10 @@ class TestADOBackend:
     def test_https_with_pat(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
         url = backend.build_clone_https_url(self._ado_dep(), token="ado_pat_xyz")
-        # ADO embeds the PAT as basic auth.
-        assert "ado_pat_xyz" in url
-        assert "myorg" in url
-        assert "myproj" in url
+        parsed = urlparse(url)
+        assert parsed.username is None
+        assert parsed.hostname == "dev.azure.com"
+        assert parsed.path == "/myorg/myproj/_git/myrepo"
 
     def test_https_bearer_scheme_drops_token(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))

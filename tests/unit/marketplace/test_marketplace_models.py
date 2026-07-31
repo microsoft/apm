@@ -22,6 +22,14 @@ class TestMarketplaceSource:
         assert src.branch == "main"
         assert src.path == "marketplace.json"
 
+    def test_explicit_url_port_is_preserved(self):
+        src = MarketplaceSource(
+            name="ado-server",
+            url=("https://ado.example.test:8443/DefaultCollection/Platform/_git/catalog"),
+        )
+        assert src.host == "ado.example.test"
+        assert src.port == 8443
+
     def test_frozen(self):
         src = MarketplaceSource(name="x", owner="o", repo="r")
         with pytest.raises(AttributeError):

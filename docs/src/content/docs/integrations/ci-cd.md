@@ -156,7 +156,7 @@ jobs:
         # Do not set ADO_APM_PAT -- APM picks up the az session.
 ```
 
-See [Azure DevOps AAD bearer tokens](../../enterprise/security/#azure-devops-aad-bearer-tokens) for resolution precedence and verbose output.
+See [Azure DevOps Services AAD bearer tokens](../../enterprise/security/#azure-devops-services-aad-bearer-tokens) for resolution precedence and verbose output.
 
 ## General CI
 

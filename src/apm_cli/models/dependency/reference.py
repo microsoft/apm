@@ -16,6 +16,7 @@ from ...utils.github_host import (
     is_visualstudio_legacy_hostname,
     maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
+    reject_unsupported_ado_server_base_path,
     unsupported_host_error,
     validate_ssh_user,
 )
@@ -210,8 +211,6 @@ class DependencyReference(ProviderCoordinateMixin):
 
     def is_azure_devops(self) -> bool:
         """Check if this reference points to Azure DevOps."""
-        from ...utils.github_host import is_azure_devops_hostname
-
         return self.host is not None and is_azure_devops_hostname(self.host)
 
     @classmethod
@@ -1915,6 +1914,7 @@ class DependencyReference(ProviderCoordinateMixin):
             )
 
         cls._reject_shorthand_alias(dependency_str)
+        reject_unsupported_ado_server_base_path(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 
@@ -2057,7 +2057,8 @@ class DependencyReference(ProviderCoordinateMixin):
             ado_repo = self.ado_repo
             project = urllib.parse.quote(ado_project, safe="")
             repo = urllib.parse.quote(ado_repo, safe="")
-            return f"https://{netloc}/{organization}/{project}/_git/{repo}"
+            org_path = "" if is_visualstudio_legacy_hostname(host) else f"{organization}/"
+            return f"https://{netloc}/{org_path}{project}/_git/{repo}"
         elif self.artifactory_prefix:
             return f"{scheme}://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
         else:

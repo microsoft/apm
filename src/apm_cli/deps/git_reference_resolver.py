@@ -187,10 +187,20 @@ class GitReferenceResolver:
             AuthResolver._clear_git_auth_env(ls_env)
             ls_env.pop("GIT_ASKPASS", None)
         elif dep_token and transport_attempt.use_token:
-            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                ls_env = dep_auth_ctx.git_env
-            else:
-                ls_env = host.git_env
+            ls_env = (
+                host.auth_resolver.git_env_for_context(
+                    dep_auth_ctx,
+                    base_env=host.git_env,
+                )
+                if dep_auth_ctx is not None
+                else host.git_env
+            )
+        elif is_ado:
+            ls_env = host.auth_resolver._build_git_env(
+                None,
+                host_kind="ado",
+                base_env=host.git_env,
+            )
         else:
             ls_env = host._build_noninteractive_git_env(
                 preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
@@ -223,7 +233,12 @@ class GitReferenceResolver:
         def _bearer_op(bearer):
             # SECURITY: _build_git_env(scheme="bearer") yields a clean env
             # (no leaked PAT). JWT travels via http.extraHeader.
-            bearer_env = host.auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
+            bearer_env = host.auth_resolver._build_git_env(
+                bearer,
+                scheme="bearer",
+                host_kind="ado",
+                base_env=host.git_env,
+            )
             bearer_url = host._build_repo_url(
                 repo_url_base,
                 use_ssh=False,

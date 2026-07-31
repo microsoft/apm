@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On-prem Azure DevOps Server hosts configured with `ADO_HOST` or
+  `APM_ADO_HOSTS` are no longer misclassified as GitHub Enterprise Server when
+  `GITHUB_HOST` overlaps, keeping ADO credentials isolated end to end.
+  The contract is pinned by `req-sc-013` in
+  `docs/src/content/docs/specs/openapm-v0.1.md`.
+  (by @sergio-sisternes-epam, #2365)
 - Public `github.com` dependencies now try anonymous HTTPS before resolving
   credentials, so all-public installs no longer open repeated credential or
   Git Credential Manager prompts. Reported by @RuiRomano. (#2406, closes #2400)

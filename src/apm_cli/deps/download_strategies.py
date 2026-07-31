@@ -267,8 +267,8 @@ class DownloadDelegate:
             effective_token: str | None = ""
         elif token is not None:
             effective_token = token
-        elif is_ado:
-            effective_token = self._host.ado_token
+        elif is_ado and dep_ref is not None:
+            effective_token = self._host.auth_resolver.resolve_for_dep(dep_ref).token
         elif backend.is_github_family:
             effective_token = self._host.github_token
         elif backend.kind == "gitlab" and dep_ref is not None:
@@ -595,6 +595,7 @@ class DownloadDelegate:
             file_path,
             ref,
             host,
+            dep_ref.port,
         )
 
         # Set up authentication headers.
@@ -603,22 +604,21 @@ class DownloadDelegate:
         # AuthResolver.resolve() so this module stays inside the auth-protocol
         # boundary (scripts/lint-auth-signals.sh Rule A); auth.py's resolver
         # handles the AAD bearer lookup internally.
-        headers: dict[str, str] = {}
-        if self._host.ado_token:
-            # ADO uses Basic auth: username can be empty, password is the PAT
-            auth = base64.b64encode(f":{self._host.ado_token}".encode()).decode()
-            headers["Authorization"] = f"Basic {auth}"
-        else:
-            # No PAT: ask the resolver for an AAD bearer token.  If az-cli is
-            # available and the user is signed in, AuthResolver._resolve_token()
-            # returns a bearer token and auth_scheme="bearer" transparently.
-            auth_ctx = self._host.auth_resolver.resolve(
-                host,
-                dep_ref.ado_organization,
-                port=dep_ref.port,
-            )
-            if auth_ctx.token and auth_ctx.auth_scheme == "bearer":
-                headers["Authorization"] = f"Bearer {auth_ctx.token}"
+        auth_ctx = self._host.auth_resolver.resolve(
+            host,
+            dep_ref.ado_organization,
+            port=dep_ref.port,
+        )
+
+        def _headers_for(token: str | None, scheme: str) -> dict[str, str]:
+            if not token:
+                return {}
+            if scheme == "bearer":
+                return {"Authorization": f"Bearer {token}"}
+            encoded = base64.b64encode(f":{token}".encode()).decode()
+            return {"Authorization": f"Basic {encoded}"}
+
+        headers = _headers_for(auth_ctx.token, auth_ctx.auth_scheme)
 
         def _check_html_signin(response) -> None:
             """Fail-closed when ADO returns an interactive sign-in HTML page.
@@ -631,7 +631,7 @@ class DownloadDelegate:
             existing 404-fallback / 401-403 error paths.  Content-Type is
             lowercased before comparison per RFC 7230 case-insensitivity.
             """
-            if response.status_code != 200:
+            if not 200 <= response.status_code < 300:
                 return
             content_type = response.headers.get("Content-Type", "").lower()
             if "text/html" in content_type:
@@ -649,10 +649,42 @@ class DownloadDelegate:
                 )
                 raise RuntimeError(error_msg)
 
+        bearer_attempted = False
+
+        def _request(url: str):
+            nonlocal bearer_attempted
+
+            def _primary_op():
+                return self._host._resilient_get(url, headers=headers, timeout=30)
+
+            if auth_ctx.source != "ADO_APM_PAT":
+                return _primary_op()
+
+            def _bearer_op(bearer: str):
+                return self._host._resilient_get(
+                    url,
+                    headers=_headers_for(bearer, "bearer"),
+                    timeout=30,
+                )
+
+            outcome = self._host.auth_resolver.execute_with_bearer_fallback(
+                dep_ref,
+                _primary_op,
+                _bearer_op,
+                lambda response: response.status_code in (401, 403),
+            )
+            bearer_attempted = bearer_attempted or outcome.bearer_attempted
+            return outcome.outcome
+
         try:
-            response = self._host._resilient_get(api_url, headers=headers, timeout=30)
+            response = _request(api_url)
             _check_html_signin(response)
             response.raise_for_status()
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Unexpected HTTP {response.status_code} downloading "
+                    f"{file_path} from Azure DevOps"
+                )
             return response.content
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
@@ -670,12 +702,18 @@ class DownloadDelegate:
                     file_path,
                     fallback_ref,
                     host,
+                    dep_ref.port,
                 )
 
                 try:
-                    response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
+                    response = _request(fallback_url)
                     _check_html_signin(response)
                     response.raise_for_status()
+                    if response.status_code != 200:
+                        raise RuntimeError(
+                            f"Unexpected HTTP {response.status_code} downloading "
+                            f"{file_path} from Azure DevOps"
+                        )
                     return response.content
                 except requests.exceptions.HTTPError as fallback_err:
                     raise RuntimeError(
@@ -684,16 +722,14 @@ class DownloadDelegate:
                     ) from fallback_err
             elif e.response.status_code in (401, 403):
                 error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. "
-                if not self._host.ado_token:
-                    error_msg += self._host.auth_resolver.build_error_context(
-                        host,
-                        "download",
-                        org=dep_ref.ado_organization if dep_ref else None,
-                        port=dep_ref.port if dep_ref else None,
-                        dep_url=dep_ref.repo_url if dep_ref else None,
-                    )
-                else:
-                    error_msg += "Please check your Azure DevOps PAT permissions."
+                error_msg += self._host.auth_resolver.build_error_context(
+                    host,
+                    "download",
+                    org=dep_ref.ado_organization if dep_ref else None,
+                    port=dep_ref.port if dep_ref else None,
+                    dep_url=dep_ref.repo_url if dep_ref else None,
+                    bearer_also_failed=bearer_attempted,
+                )
                 raise RuntimeError(error_msg) from e
             else:
                 raise RuntimeError(

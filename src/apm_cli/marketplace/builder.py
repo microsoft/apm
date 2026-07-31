@@ -414,11 +414,21 @@ class MarketplaceBuilder:
     def _get_resolver(self) -> RefResolver:
         if self._resolver is None:
             self._ensure_auth()
+            auth = self._resolve_auth_for_host(self._host)
+            harden = getattr(
+                self._auth_resolver,
+                "hardened_git_env_for_context",
+                None,
+            )
             self._resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
                 host=self._host,
-                token=self._github_token,
+                token=auth.token if auth else self._github_token,
+                auth_scheme=getattr(auth, "auth_scheme", "basic"),
+                git_env=(harden(auth) if auth is not None and callable(harden) else None),
+                auth_resolver=self._auth_resolver,
+                auth_target=self._host,
             )
         return self._resolver
 
@@ -453,6 +463,11 @@ class MarketplaceBuilder:
             if cached is not None:
                 return cached
             auth = self._resolve_auth_for_host(resolved_host, org=org)
+            harden = getattr(
+                self._auth_resolver,
+                "hardened_git_env_for_context",
+                None,
+            )
             logger.debug(
                 "Creating per-host RefResolver for %s (org=%s, token=%s)",
                 resolved_host,
@@ -464,7 +479,10 @@ class MarketplaceBuilder:
                 offline=self._options.offline,
                 host=resolved_host,
                 token=auth.token if auth else None,
-                auth_scheme=auth.auth_scheme if auth else "basic",
+                auth_scheme=getattr(auth, "auth_scheme", "basic"),
+                git_env=(harden(auth) if auth is not None and callable(harden) else None),
+                auth_resolver=self._auth_resolver,
+                auth_target=resolved_host,
             )
             self._host_resolvers[key] = resolver
             return resolver

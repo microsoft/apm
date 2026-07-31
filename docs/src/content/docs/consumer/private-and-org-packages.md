@@ -98,8 +98,10 @@ dependencies:
 
 Token: `ADO_APM_PAT`, or `az login --tenant <id>` (APM picks up the
 Azure CLI bearer). ADO is always auth-required -- no anonymous
-fallback. For Azure DevOps Server (on-prem), use an explicit git URL
-and the same credential helper your shell uses.
+fallback. For Azure DevOps Server (on-prem), set `ADO_HOST` (or
+`APM_ADO_HOSTS` for multiple instances), set `ADO_APM_PAT`, and use the
+server URL. Azure CLI bearer auth applies to Azure DevOps Services, not
+Server. See [Authentication](../../getting-started/authentication/#on-prem-azure-devops-server).
 
 ## GitLab
 

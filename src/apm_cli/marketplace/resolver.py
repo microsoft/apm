@@ -757,19 +757,28 @@ def resolve_plugin_source(
 
 
 def _extract_auth(
-    auth_resolver: object | None, host: str, org: str | None = None
-) -> tuple[str | None, str]:
-    """Extract the token and scheme from the auth resolver for the given host."""
+    auth_resolver: object | None,
+    host: str,
+    org: str | None = None,
+    port: int | None = None,
+) -> tuple[str | None, str, dict[str, str] | None]:
+    """Extract token, scheme, and hardened Git env for one host."""
     if auth_resolver is None:
-        return None, "basic"
+        return None, "basic", None
     try:
-        ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
-        if ctx is None or not ctx.token:
-            return None, "basic"
-        return ctx.token, ctx.auth_scheme
+        ctx = auth_resolver.resolve(host, org=org, port=port)  # type: ignore[union-attr]
+        if ctx is None:
+            return None, "basic", None
+        if not ctx.token and ctx.host_info.kind != "ado":
+            return None, "basic", None
+        return (
+            ctx.token,
+            ctx.auth_scheme,
+            auth_resolver.hardened_git_env_for_context(ctx),  # type: ignore[union-attr]
+        )
     except Exception as exc:
         logger.debug("Could not extract auth for host '%s': %s", host, type(exc).__name__)
-        return None, "basic"
+        return None, "basic", None
 
 
 def resolve_marketplace_plugin(
@@ -976,16 +985,28 @@ def resolve_marketplace_plugin(
             from .version_resolver import resolve_version_constraint
 
             owner_repo = f"{source.owner}/{source.repo}"
-            token, auth_scheme = _extract_auth(auth_resolver, source.host, org=source.owner)
+            token, auth_scheme, git_env = _extract_auth(
+                auth_resolver,
+                source.host,
+                org=source.owner,
+                port=source.port,
+            )
+            version_auth = {
+                "host": source.host,
+                "token": token,
+                "auth_scheme": auth_scheme,
+                "auth_resolver": auth_resolver,
+            }
+            if git_env is not None:
+                version_auth["git_env"] = git_env
+            if source.port is not None:
+                version_auth["port"] = source.port
             try:
                 tag_name, _sha = resolve_version_constraint(
                     plugin_name,
                     owner_repo,
                     version_spec,
-                    host=source.host,
-                    token=token,
-                    auth_scheme=auth_scheme,
-                    auth_resolver=auth_resolver,
+                    **version_auth,
                 )
                 resolved_override = tag_name
                 logger.debug(

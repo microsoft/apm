@@ -456,16 +456,20 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 
 For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
 
-### Azure DevOps AAD bearer tokens
+### Azure DevOps Services AAD bearer tokens
 
-When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps with a Microsoft Entra ID bearer token issued on demand by the Azure CLI (`az account get-access-token`). The posture:
+When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps Services
+(`dev.azure.com` and `*.visualstudio.com`) with a Microsoft Entra ID bearer
+token issued on demand by the Azure CLI (`az account get-access-token`).
+Azure DevOps Server hosts configured with `ADO_HOST` or `APM_ADO_HOSTS`
+are PAT-only. The Services bearer posture:
 
 - **Short-lived.** Tokens expire in roughly 60 minutes, are acquired per resolution, and are never persisted by APM.
 - **No new secrets in manifests.** Nothing is written to `apm.yml` or `apm.lock.yaml`. The token never crosses the `apm.yml`/lockfile boundary.
 - **Compatible with managed-identity / service-account-only orgs.** Works in environments where PAT creation is disabled, including WIF-backed pipelines.
 - **Same transport rules as PATs.** Bearer values are injected via `http.extraheader`, scoped to ADO hosts only, and never logged.
 
-See [Azure DevOps AAD bearer tokens](#azure-devops-aad-bearer-tokens) above for the resolution precedence and CI patterns.
+See [Azure DevOps Services AAD bearer tokens](#azure-devops-services-aad-bearer-tokens) above for the resolution precedence and CI patterns.
 
 ## Attack surface comparison
 
