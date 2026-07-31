@@ -167,8 +167,7 @@ def test_native_hook_event_map_guard_rejects_parallel_owner(tmp_path: Path) -> N
     )
     duplicate = sandbox / "src/apm_cli/integration/hook_bundle.py"
     duplicate.write_text(
-        duplicate.read_text(encoding="utf-8")
-        + "\n_HOOK_EVENT_MAP: dict[str, dict[str, str]] = {}\n",
+        duplicate.read_text(encoding="utf-8") + "\n_HOOK_EVENT_MAP = {}\n",
         encoding="utf-8",
     )
 

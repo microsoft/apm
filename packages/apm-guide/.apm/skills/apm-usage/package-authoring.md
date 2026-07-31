@@ -158,10 +158,15 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
-For session lifecycle hooks, `SessionStart`/`sessionStart` normalize to
-Copilot `sessionStart` and Claude `SessionStart`; `Stop`/`AgentStop`/`agentStop`
-normalize to Copilot `agentStop` and Claude `Stop`. Unknown event names are
-not assigned invented native names.
+
+| Source aliases | Copilot native key | Claude native key |
+|----------------|---------------------|-------------------|
+| `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
+| `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
+
+Event names absent from this table are preserved unchanged. Only an unmapped
+camelCase or PascalCase name that conflicts with the target convention emits
+an install warning; all-lowercase names such as `stop` pass through silently.
 
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at

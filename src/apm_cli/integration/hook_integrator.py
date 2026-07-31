@@ -168,7 +168,7 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postTaskExecution": "postTaskExecution",
     },
     "claude": {
-        # Copilot camelCase -> Claude PascalCase
+        # Copilot camelCase and portable lifecycle aliases -> Claude PascalCase
         "preToolUse": "PreToolUse",
         "postToolUse": "PostToolUse",
         **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),

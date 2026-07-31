@@ -94,10 +94,10 @@ if [ "$hook_scope_owner_count" -ne 1 ] \
     violations=$((violations + 1))
 fi
 hook_event_map_owner_count=$(grep -Ec \
-    '^_HOOK_EVENT_MAP[[:space:]]*:' "$hook_file" || true)
+    '^_HOOK_EVENT_MAP[[:space:]]*[:=]' "$hook_file" || true)
 hook_event_map_duplicate_hits=$(
     grep -REn --include='*.py' \
-        '^_HOOK_EVENT_MAP[[:space:]]*:' \
+        '^_HOOK_EVENT_MAP[[:space:]]*[:=]' \
         src/apm_cli \
         | grep -v "^${hook_file}:" \
         || true

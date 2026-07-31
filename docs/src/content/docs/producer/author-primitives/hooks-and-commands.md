@@ -41,11 +41,18 @@ your-package/
 Each file is a JSON document keyed by lifecycle event. APM accepts the
 Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 `postToolUse`) shapes; events are renamed per target during merge.
-For session lifecycle events, `SessionStart` and `sessionStart` become
-Copilot's `sessionStart` or Claude's `SessionStart`. `Stop`, `AgentStop`,
-and `agentStop` become Copilot's `agentStop` or Claude's `Stop`. These are
-native mappings documented by the target runtimes; APM does not invent a
-replacement for unknown event names.
+
+For Copilot and Claude session lifecycle events:
+
+| Source aliases | Copilot native key | Claude native key |
+|----------------|---------------------|-------------------|
+| `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
+| `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
+
+Event names absent from this table are preserved unchanged. The existing
+diagnostic warns only when an unmapped camelCase or PascalCase name conflicts
+with the target convention. All-lowercase names such as `stop` have no
+detectable casing and pass through without a warning.
 
 ```json
 {
@@ -257,9 +264,9 @@ agent a procedure" fits a skill -- and reaches every harness.
 
 ## Pitfalls
 
-- **Hook event names.** Author in Claude or Copilot conventions only.
-  The integrator renames documented aliases; arbitrary event names are
-  preserved and a casing mismatch emits an install warning.
+- **Hook event names.** Use the documented aliases in the table above.
+  Unknown names are preserved; only an unmapped, detectable casing mismatch
+  emits an install warning.
 - **Cursor command frontmatter loss.** Cursor reuses the Claude
   command transformer today, so any prompt-only metadata is dropped
   with a diagnostic. Keep Cursor commands to the preserved key set.
