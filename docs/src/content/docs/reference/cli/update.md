@@ -43,7 +43,7 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 | `--dry-run` | off | Compute and print the plan without prompting and without writing the manifest, lockfile, or filesystem. |
 | `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
 | `--global`, `-g` | off | Refresh user-scope dependencies under `~/.apm/` instead of the current project (mirrors `apm install -g`). |
-| `--force` | off | Overwrite locally-authored files on collision. It does not change ref freshness: update still requires current upstream refs. |
+| `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
 | `--target TARGET`, `-t TARGET` | auto-detect | Agent harness(es) to update for. Accepts a single value (`claude`, `copilot`, `cursor`, `windsurf`, `kiro`, `codex`, `opencode`, `gemini`) or comma-separated list (`--target claude,cursor`). Overrides `apm.yml targets:` and auto-detection. |
 

@@ -43,8 +43,9 @@ Useful flags:
 - `-v, --verbose` -- show per-dependency resolution detail.
 - `-g, --global` -- refresh user-scope dependencies under `~/.apm/`
   instead of the current project (pairs with `apm outdated -g`).
-- `--force` -- overwrite locally-authored files on collision. It does not
-  weaken the upstream freshness check.
+- `--force` -- overwrite locally-authored files and deploy despite critical
+  security findings. It does not weaken the upstream freshness check. Use only
+  after independent verification.
 - `--parallel-downloads N` -- cap concurrent downloads (default 4;
   `0` disables parallelism).
 

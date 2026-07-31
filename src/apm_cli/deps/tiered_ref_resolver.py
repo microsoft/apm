@@ -101,7 +101,17 @@ class RefFreshnessPolicy(Enum):
         return self is self.CURRENT_REMOTE
 
 
-def ref_freshness_policy_for_install(context: object) -> RefFreshnessPolicy:
+class RefFreshnessContext(Protocol):
+    """Structural input needed to derive install ref freshness."""
+
+    ref_freshness_policy: RefFreshnessPolicy | None
+    update_refs: bool
+    refresh: bool
+
+
+def ref_freshness_policy_for_install(
+    context: RefFreshnessContext,
+) -> RefFreshnessPolicy:
     """Return the configured policy or derive it from install intent once."""
     configured = getattr(context, "ref_freshness_policy", None)
     if configured is not None:
@@ -503,7 +513,7 @@ class TieredRefResolver:
             try:
                 sha = tier.try_resolve(dep_ref, ref)
             except Exception as exc:
-                _log.debug("Tier %s raised: %s", tier.name, exc)
+                _log.debug("Tier %s raised (%s)", tier.name, type(exc).__name__)
                 continue
             if sha and _SHA_RE.match(sha):
                 self.stats[tier.name] = self.stats.get(tier.name, 0) + 1
