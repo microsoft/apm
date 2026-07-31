@@ -463,6 +463,7 @@ def test_uninstall_with_malformed_intellij_config_is_nonzero(
     assert uninstall.returncode == 1
     assert "malformed JSON" in uninstall.stderr + uninstall.stdout
     assert "Uninstall incomplete" in uninstall.stderr + uninstall.stdout
-    assert "run 'apm install' to finish cleanup" in uninstall.stderr + uninstall.stdout
     assert "Uninstall complete" not in uninstall.stderr + uninstall.stdout
+    normalized_output = " ".join((uninstall.stderr + uninstall.stdout).split())
+    assert normalized_output.count("rerun apm install") == 1
     assert canonical.read_bytes() == original

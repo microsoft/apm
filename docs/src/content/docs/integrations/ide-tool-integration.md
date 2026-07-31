@@ -162,12 +162,13 @@ Notes and limits:
   `${env:VAR}` instead of writing matching host secrets into the config.
 - **Policy evaluation.** APM maps `intellij` to `copilot` for organization
   allow-lists, so a policy that allows `copilot` also covers IntelliJ installs.
-- **Older APM path migration (macOS and Linux only).** Reinstalling a project
-  created by an older APM release moves only lockfile-owned server entries from
-  the obsolete data location to the canonical XDG config location.
-  User-authored entries in either file are preserved. The Windows path is
-  unchanged, so no migration is needed there. If an MCP server installed before
-  this fix is missing in JetBrains, rerun `apm install --target intellij`.
+- **Older APM path migration (macOS and Linux only).** Re-running
+  `apm install` on a project created by an older APM release moves only
+  lockfile-owned server entries from the obsolete data location to the
+  canonical XDG config location. User-authored entries in both the obsolete and
+  canonical files are preserved. The Windows path is unchanged, so no migration
+  is needed there. If an MCP server installed before this fix is missing in
+  JetBrains, rerun `apm install --target intellij`.
 
 ## Per-tool reference pages
 

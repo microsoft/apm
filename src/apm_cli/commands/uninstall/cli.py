@@ -385,14 +385,24 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
         except (IntelliJConfigError, PathTraversalError) as cleanup_error:
             mcp_cleanup_error = cleanup_error
+            recovery = ""
+            if isinstance(cleanup_error, PathTraversalError):
+                recovery = (
+                    " Fix the MCP config path, then run 'apm install' to reconcile "
+                    "the stale entry; the package was already removed from apm.yml."
+                )
             logger.error(
                 "Uninstall incomplete: package removal completed, but MCP cleanup failed: "
-                f"{cleanup_error}. Fix the MCP config, then run 'apm install' "
-                "to finish cleanup."
+                f"{cleanup_error}{recovery}"
             )
             logger.verbose_detail(traceback.format_exc().rstrip())
-        except Exception:
-            logger.warning("MCP cleanup during uninstall failed")
+        except Exception as cleanup_error:
+            logger.warning(
+                f"MCP cleanup during uninstall failed: {type(cleanup_error).__name__}: "
+                f"{cleanup_error}. Package removal completed; run 'apm install' "
+                "to reconcile stale MCP entries."
+            )
+            logger.verbose_detail(traceback.format_exc().rstrip())
 
         if lockfile and lockfile_updated and lockfile_ready:
             try:
