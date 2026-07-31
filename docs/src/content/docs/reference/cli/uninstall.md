@@ -23,13 +23,13 @@ The command only deletes files tracked in the lockfile's `deployed_files` manife
 
 | Argument | Description |
 |---|---|
-| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, or marketplace notation (`name@marketplace`). APM resolves each to the canonical identity stored in `apm.yml`. Required. |
+| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. |
 
 ## Options
 
 | Option | Description |
 |---|---|
-| `--dry-run` | Show what would be removed without touching disk. Registry fallback for marketplace notation is skipped. |
+| `--dry-run` | Show the removal plan without writes from the uninstall engine. `pre-uninstall` lifecycle scripts still run and may have side effects. Registry fallback and shared-slot survivor staging are skipped. |
 | `-v, --verbose` | Show detailed removal information. |
 | `-g, --global` | Remove from the user scope (`~/.apm/`) instead of the current project. |
 
@@ -47,7 +47,7 @@ Remove several at once:
 apm uninstall org/pkg1 org/pkg2
 ```
 
-Preview the removal without writing to disk:
+Preview the uninstall engine's plan (pre-uninstall scripts still run):
 
 ```bash
 apm uninstall acme/my-package --dry-run
@@ -57,6 +57,21 @@ Remove from the user scope:
 
 ```bash
 apm uninstall -g acme/my-package
+```
+
+Remove a local dependency by copying the portable key from `apm deps list`:
+
+```bash
+apm deps list
+apm uninstall "_local/my-local-package"
+```
+
+The same key works at user scope, so scripts do not need the absolute path used
+when the local package was installed:
+
+```bash
+apm deps list -g
+apm uninstall -g "_local/my-local-package"
 ```
 
 Remove by marketplace name (resolved via lockfile, then registry):
@@ -84,9 +99,24 @@ What gets removed, in order:
 7. The lockfile entries themselves. If no dependencies remain, `apm.lock.yaml` is deleted.
 8. Empty parent directories left behind by the cleanup.
 
-If a name passed on the command line is not found in `apm.yml`, the command warns and continues with the rest. If none of the names match, it exits without changes.
+Selection is atomic. If any requested identifier does not match a declaration,
+the command exits nonzero before lifecycle scripts or filesystem writes run. No
+matched package in the same invocation is removed. Fix the identifier and retry.
 
-If a marketplace ref cannot be resolved (neither the lockfile nor the registry has a matching entry), APM logs an error and skips that package. Use `owner/repo` notation to uninstall directly, or run `apm list` to find the canonical name.
+`_local/<name>` is resolved from the manifest and lockfile metadata that produced
+the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an
+absolute path. If two declared local dependencies have the same portable key,
+selection is ambiguous and exits nonzero without changes. Use one exact path
+already declared in the relevant manifest (`apm.yml` or `~/.apm/apm.yml`); APM
+never removes both or guesses, and diagnostics do not print declared paths.
+When an exact path removes one declaration from a shared local install slot, APM
+validates and stages the survivor before changing the manifest, then activates
+it during cleanup.
+If more than one declaration would remain in that slot, uninstall fails without
+APM writes. Pass enough exact paths in one command that at most one declaration
+remains.
+
+If a marketplace ref cannot be resolved (neither the lockfile nor the registry has a matching entry), APM logs an error and aborts without changes. Use `owner/repo` notation to uninstall directly, or run `apm deps list` to find the canonical name.
 
 ### Supply-chain guard
 
@@ -98,13 +128,13 @@ When marketplace notation (`name@marketplace`) falls through to the registry (St
 
 ### No-lockfile behavior
 
-If `apm.lock.yaml` is not present, marketplace notation has no offline anchor: Stage 1 finds nothing, and the supply-chain guard cannot cross-check the registry result. APM still attempts registry resolution and proceeds if the canonical matches an entry in `apm.yml`, but this path has weaker integrity guarantees. Prefer `owner/repo` form when there is no lockfile, or run `apm install` to regenerate the lockfile first.
+If `apm.lock.yaml` is not present, marketplace notation has no offline anchor: Stage 1 finds nothing, and the supply-chain guard cannot cross-check the registry result. APM still attempts registry resolution and proceeds if the canonical matches an entry in `apm.yml`, but this path has weaker integrity guarantees. A local `_local/<name>` key also has no persisted mapping without the lockfile, so use its exact declared path or run `apm install` to regenerate the lockfile first.
 
-`--dry-run` runs steps 1-3 in memory and prints the plan; nothing is written. Registry fallback is also skipped in dry-run mode, so marketplace refs not already in the lockfile cannot be previewed; use `owner/repo` notation or re-run without `--dry-run`.
+`--dry-run` keeps the uninstall engine read-only, but `pre-uninstall` lifecycle scripts still run and may have their own side effects. Registry fallback and shared-slot staging are skipped, so marketplace refs not already in the lockfile cannot be previewed and a real shared-slot uninstall can still fail validation; use `owner/repo` notation or re-run without `--dry-run`.
 
 ## Related
 
 - [`apm install`](../install/) -- the inverse operation.
 - [`apm prune`](../prune/) -- remove orphaned packages without naming them.
-- [`apm list`](../list/) -- see what is currently installed.
+- [`apm deps list`](../deps/) -- list installed dependencies and copy portable local identifiers.
 - [Lockfile spec](../../lockfile-spec/) -- how `deployed_files` drives safe cleanup.

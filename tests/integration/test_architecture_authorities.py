@@ -134,6 +134,57 @@ def test_hook_rewrite_scope_has_single_owner() -> None:
     assert "Hook rewrite scope must route through HookIntegrator" in guard
 
 
+def test_native_hook_event_map_has_single_owner() -> None:
+    """Target-native event names must come from HookIntegrator's map."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
+    kiro = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("_HOOK_EVENT_MAP:") == 1
+    assert "\n_HOOK_EVENT_MAP =" not in owner
+    assert "from apm_cli.integration.hook_integrator import" in kiro
+    assert "_HOOK_EVENT_MAP," in kiro
+    assert '_KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]' in kiro
+    assert "Native hook event mapping must have one HookIntegrator owner" in guard
+
+
+def test_native_hook_event_map_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """The boundary lint must reject a second native event map."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/integration/hook_bundle.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8") + "\n_HOOK_EVENT_MAP = {}\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Native hook event mapping must have one HookIntegrator owner" in result.stdout
+
+
 def test_hook_rewrite_scope_guard_rejects_parallel_decision(tmp_path: Path) -> None:
     """The boundary lint must reject scope decisions outside HookIntegrator."""
     root = Path(__file__).parents[2]
@@ -664,6 +715,74 @@ def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
     assert "require_hashes_enabled(" in handler
     assert "Local bundle installs must route policy through install_preflight.py" in guard
     assert "require_hashes enforcement must route through install/integrity.py" in guard
+
+
+def test_uninstall_selection_has_single_dependency_reference_owner() -> None:
+    """Manifest selection must consume the canonical dependency parser."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/models/dependency/selection.py").read_text()
+    consumer = (root / "src/apm_cli/commands/uninstall/engine.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("def select_manifest_dependency(") == 1
+    assert "dependency = parse_dependency_entry(entry)" in owner
+    assert (
+        consumer.count(
+            "selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)"
+        )
+        == 1
+    )
+    assert "for dep_entry in current_deps" not in consumer
+    assert "scripts/check_uninstall_selection_owner.py" in guard
+    assert "Uninstall selection must route through dependency/selection.py" in guard
+
+
+def test_uninstall_selection_guard_rejects_parser_bypass(tmp_path: Path) -> None:
+    """The boundary lint rejects uninstall selection outside its owner."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer_path = sandbox / "src/apm_cli/commands/uninstall/engine.py"
+    source = consumer_path.read_text(encoding="utf-8")
+    canonical_call = (
+        "        selection = select_manifest_dependency("
+        "canonical_for_match, current_deps, lockfile)\n"
+    )
+    duplicate_selection = (
+        "        for duplicate_entry in current_deps:\n"
+        "            duplicate_ref = _parse_dependency_entry(duplicate_entry)\n"
+        "            if duplicate_ref.get_identity() == canonical_for_match:\n"
+        "                break\n"
+    )
+    assert source.count(canonical_call) == 1
+    consumer_path.write_text(
+        source.replace(canonical_call, duplicate_selection + canonical_call, 1),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Uninstall selection must route through dependency/selection.py" in result.stdout
 
 
 def test_hook_file_routing_dep_targets_gate_has_static_guard() -> None:

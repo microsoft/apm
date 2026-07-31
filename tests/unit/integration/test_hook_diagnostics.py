@@ -131,11 +131,10 @@ class TestEmitHookEventDiagnosticsMismatch:
     """Convention-mismatch events without a known mapping trigger user warning."""
 
     def test_warns_camel_event_on_pascal_target(self, capsys):
-        # "sessionStart" is camelCase but claude expects PascalCase;
-        # no mapping exists so it may not be recognized.
-        _emit_hook_event_diagnostics(["sessionStart"], "claude", {})
+        # An unknown camelCase event has no native Claude mapping.
+        _emit_hook_event_diagnostics(["mysteryEvent"], "claude", {})
         captured = capsys.readouterr()
-        assert "sessionStart" in captured.out
+        assert "mysteryEvent" in captured.out
 
     def test_warns_pascal_event_on_camel_target(self, capsys):
         # "PreToolUse" is PascalCase but copilot expects camelCase;
@@ -256,13 +255,12 @@ class TestMultiTargetHookDiagnostics:
         assert "copilot" in targets_logged, "No INFO log for copilot target"
         assert "claude" in targets_logged, "No INFO log for claude target"
 
-    def test_camel_event_on_claude_target_emits_warning(self, temp_project, capsys):
-        """camelCase event deployed to claude (PascalCase target) produces warning."""
+    def test_session_start_alias_on_claude_target_emits_no_warning(self, temp_project, capsys):
+        """Claude recognizes the portable camelCase session-start alias."""
         pkg_info = self._make_package_with_hooks(
             temp_project,
             {
                 "hooks": {
-                    # sessionStart is camelCase but has NO mapping for claude
                     "sessionStart": [{"type": "command", "bash": "echo start"}],
                 }
             },
@@ -273,7 +271,7 @@ class TestMultiTargetHookDiagnostics:
         integrator.integrate_hooks_for_target(claude, pkg_info, temp_project)
 
         captured = capsys.readouterr()
-        assert "sessionStart" in captured.out
+        assert "may not be recognized" not in captured.out
 
     def test_collision_suppresses_diagnostics(self, temp_project, caplog, capsys):
         """No diagnostics are emitted for a hook file skipped due to collision.
