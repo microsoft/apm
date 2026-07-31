@@ -946,7 +946,12 @@ describe("Path traversal protection", () => {
     });
 
     it("rejects malformed percent encodings and keeps serving requests", async () => {
-        for (const path of ["/assets/%", "/assets/%zz", "/assets/%E0%A4%A"]) {
+        for (const path of [
+            "/assets/%",
+            "/assets/%zz",
+            "/assets/%E0%A4%A",
+            "/%zz-non-asset",
+        ]) {
             const response = await rawHttpRequest(assetBaseUrl, path);
             assertRejected(response, 400, SIBLING_SENTINEL, LINK_SENTINEL);
         }
