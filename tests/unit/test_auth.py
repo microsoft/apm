@@ -1072,6 +1072,30 @@ class TestBuildGitEnvBearerIsolation:
             env = AuthResolver._build_git_env("a-pat", scheme="basic", host_kind="github")
         assert env.get("GIT_TOKEN") == "a-pat"
 
+    def test_bearer_env_preserves_retained_git_config_entries(self):
+        """#2368: the bearer header must not clobber entries _clear_git_auth_env retained.
+
+        ``_clear_git_auth_env`` deliberately keeps inherited non-auth git
+        config (e.g. a corporate CA pin) re-indexed from 0. The bearer
+        header must be appended after those entries, not merged in with a
+        hardcoded ``GIT_CONFIG_COUNT=1`` overlay that overwrites index 0.
+        """
+        inherited = {
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": "Authorization: inherited-secret",
+            "GIT_CONFIG_KEY_1": "http.sslCAInfo",
+            "GIT_CONFIG_VALUE_1": "/corporate/ca.pem",
+        }
+        with patch.dict(os.environ, inherited, clear=False):
+            env = AuthResolver._build_git_env("fresh-jwt", scheme="bearer", host_kind="ado")
+        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
+        assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer fresh-jwt"
+        assert not any("inherited-secret" in str(v) for v in env.values())
+
 
 # ---------------------------------------------------------------------------
 # TestHostInfoPort -- port field + display_name property

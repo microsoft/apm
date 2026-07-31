@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -32,6 +33,7 @@ pytestmark = [
 _OWNER = "apm-fixture-org"
 _AUDIT_ARGS = ("audit", "--ci", "--no-policy", "--format", "json")
 _INSTALL_ARGS = ("install", "--no-policy", "--parallel-downloads", "0")
+_LOCK_ARGS = ("lock", "--no-policy", "--parallel-downloads", "0")
 
 
 @dataclass(frozen=True)
@@ -210,6 +212,23 @@ def _audit(
 
 def _deployment_paths(snapshot: LifecycleStateSnapshot) -> set[str]:
     return {record.locator.value for record in snapshot.deployment_records}
+
+
+def _single_locked_dependency(project_root: Path) -> tuple[LockFile, object]:
+    """Return the only package dependency recorded in the consumer lockfile."""
+    lockfile = LockFile.read(project_root / "apm.lock.yaml")
+    assert lockfile is not None, f"Expected lockfile at {project_root / 'apm.lock.yaml'}"
+    dependencies = lockfile.get_package_dependencies()
+    assert len(dependencies) == 1, f"Expected one locked dependency, got {dependencies!r}"
+    return lockfile, dependencies[0]
+
+
+def _record_by_value(snapshot: LifecycleStateSnapshot, value: str):
+    """Return the deployment record tracking one project-relative value."""
+    for record in snapshot.deployment_records:
+        if record.locator.value == value:
+            return record
+    raise AssertionError(f"Missing deployment record for {value!r}")
 
 
 def _assert_same_state(
@@ -446,6 +465,191 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     )
     assert not any(record.locator.target == "cursor" for record in state_final.deployment_records)
     assert audit["passed"] is True
+
+
+def test_required_lock_preserves_bytes_and_provenance_until_install_prunes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Real CLI lifecycle proof for issue #2296.
+
+    `apm lock` must preserve dropped deployed bytes plus their lockfile
+    provenance, then a later normal `apm install` must prune the same bytes
+    through the canonical cleanup chokepoint while leaving unchanged targets
+    untouched.
+    """
+    scenario = _new_scenario(tmp_path / "lock-provenance-prune", apm_binary_path)
+    source = _publish(
+        scenario,
+        "lock-provenance-kit",
+        instruction="guard",
+        skill="reviewer",
+    )
+    consumer = scenario.consumers.create(
+        "lock-provenance-consumer",
+        dependencies=(source.dependency,),
+        targets=("claude", "copilot"),
+    )
+    tracked_paths = (
+        PurePosixPath(".claude/rules/guard.md"),
+        PurePosixPath(".claude/skills/reviewer/SKILL.md"),
+        PurePosixPath(".github/instructions/guard.instructions.md"),
+        PurePosixPath(".agents/skills/reviewer/SKILL.md"),
+    )
+    capture_args = {"targets": ("claude", "copilot"), "config_paths": tracked_paths}
+
+    install_result = _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="lock-provenance-install-both",
+    )
+    installed = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    _installed_lock, installed_dep = _single_locked_dependency(consumer.root)
+    dropped_instruction = ".github/instructions/guard.instructions.md"
+    dropped_skill = ".agents/skills/reviewer/SKILL.md"
+    kept_instruction = ".claude/rules/guard.md"
+    kept_skill = ".claude/skills/reviewer/SKILL.md"
+
+    assert install_result.command == (str(apm_binary_path), *_INSTALL_ARGS)
+    assert installed.file(dropped_instruction).kind == "file"
+    assert installed.file(dropped_skill).kind == "file"
+    assert installed.file(kept_instruction).kind == "file"
+    assert installed.file(kept_skill).kind == "file"
+    assert {
+        dropped_instruction,
+        dropped_skill,
+        kept_instruction,
+        kept_skill,
+    }.issubset(_deployment_paths(installed))
+    dropped_instruction_hash = installed_dep.deployed_file_hashes[dropped_instruction]
+    dropped_skill_hash = installed_dep.deployed_file_hashes[dropped_skill]
+    installed_instruction_record = _record_by_value(installed, dropped_instruction)
+    installed_skill_record = _record_by_value(installed, dropped_skill)
+
+    scenario.consumers.set_targets(consumer, ("claude",))
+    lock_result = _run_success(
+        scenario,
+        consumer,
+        _LOCK_ARGS,
+        environment=source.environment,
+        scenario_id="lock-provenance-lock-claude-only",
+    )
+    locked = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    _locked_lock, locked_dep = _single_locked_dependency(consumer.root)
+
+    assert lock_result.command == (str(apm_binary_path), *_LOCK_ARGS)
+    assert locked.file(dropped_instruction).content == installed.file(dropped_instruction).content
+    assert locked.file(dropped_skill).content == installed.file(dropped_skill).content
+    assert locked.file(kept_instruction).content == installed.file(kept_instruction).content
+    assert locked.file(kept_skill).content == installed.file(kept_skill).content
+    assert dropped_instruction in locked_dep.deployed_files
+    assert dropped_skill in locked_dep.deployed_files
+    assert locked_dep.deployed_file_hashes[dropped_instruction] == dropped_instruction_hash
+    assert locked_dep.deployed_file_hashes[dropped_skill] == dropped_skill_hash
+    assert _record_by_value(locked, dropped_instruction) == installed_instruction_record
+    assert _record_by_value(locked, dropped_skill) == installed_skill_record
+
+    reinstall_result = _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="lock-provenance-install-prune-claude",
+    )
+    pruned = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    pruned_lock, pruned_dep = _single_locked_dependency(consumer.root)
+    _, audit = _audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="lock-provenance-audit-final",
+    )
+
+    assert reinstall_result.command == (str(apm_binary_path), *_INSTALL_ARGS)
+    assert pruned.file(dropped_instruction).kind == "missing"
+    assert pruned.file(dropped_skill).kind == "missing"
+    assert pruned.file(kept_instruction).content == installed.file(kept_instruction).content
+    assert pruned.file(kept_skill).content == installed.file(kept_skill).content
+    assert dropped_instruction not in (pruned_dep.deployed_files or [])
+    assert dropped_skill not in (pruned_dep.deployed_files or [])
+    assert dropped_instruction not in (pruned_dep.deployed_file_hashes or {})
+    assert dropped_skill not in (pruned_dep.deployed_file_hashes or {})
+    pruned_paths = _deployment_paths(pruned)
+    assert dropped_instruction not in pruned_paths
+    assert dropped_skill not in pruned_paths
+    assert kept_instruction in pruned_paths
+    assert kept_skill in pruned_paths
+    assert not any(path.startswith(".github/") for path in pruned_paths)
+    assert pruned_lock.deployment_ledger.records
+    assert audit["passed"] is True
+    assert audit["summary"]["failed"] == 0
+
+
+def test_required_lock_preserves_user_edited_dropped_file_and_row(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Lock mode must never unlink a user-edited dropped deployment.
+
+    The retained row and hash must continue to describe the last APM-deployed
+    bytes so a later normal install can route the path through the user-edit
+    safety gate instead of silently deleting it.
+    """
+    scenario = _new_scenario(tmp_path / "lock-user-edit", apm_binary_path)
+    source = _publish(
+        scenario,
+        "lock-user-edit-kit",
+        skill="reviewer",
+    )
+    consumer = scenario.consumers.create(
+        "lock-user-edit-consumer",
+        dependencies=(source.dependency,),
+        targets=("claude", "copilot"),
+    )
+    tracked_paths = (
+        PurePosixPath(".claude/skills/reviewer/SKILL.md"),
+        PurePosixPath(".agents/skills/reviewer/SKILL.md"),
+    )
+    capture_args = {"targets": ("claude", "copilot"), "config_paths": tracked_paths}
+
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="lock-user-edit-install-both",
+    )
+    installed = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    _installed_lock, installed_dep = _single_locked_dependency(consumer.root)
+    dropped_skill = ".agents/skills/reviewer/SKILL.md"
+    kept_skill = ".claude/skills/reviewer/SKILL.md"
+    dropped_record = _record_by_value(installed, dropped_skill)
+    recorded_hash = installed_dep.deployed_file_hashes[dropped_skill]
+
+    scenario.consumers.set_targets(consumer, ("claude",))
+    edited_path = consumer.root / dropped_skill
+    edited_path.write_text("# user-edited reviewer\n", encoding="utf-8")
+    edited = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    assert edited.file(dropped_skill).content != installed.file(dropped_skill).content
+
+    _run_success(
+        scenario,
+        consumer,
+        _LOCK_ARGS,
+        environment=source.environment,
+        scenario_id="lock-user-edit-lock-claude-only",
+    )
+    locked = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    _locked_lock, locked_dep = _single_locked_dependency(consumer.root)
+
+    assert locked.file(dropped_skill).content == b"# user-edited reviewer\n"
+    assert locked.file(kept_skill).content == installed.file(kept_skill).content
+    assert dropped_skill in locked_dep.deployed_files
+    assert locked_dep.deployed_file_hashes[dropped_skill] == recorded_hash
+    assert _record_by_value(locked, dropped_skill).content_hash == dropped_record.content_hash
+    assert _record_by_value(locked, dropped_skill).owners == dropped_record.owners
 
 
 def test_required_reinstall_is_byte_idempotent_across_durable_state(

@@ -113,8 +113,51 @@ def test_ado_auth_header_pat_uses_basic() -> None:
 
 
 def test_ado_auth_header_bearer_detected_from_git_env() -> None:
-    git_env = {"GIT_CONFIG_VALUE_0": "Authorization: Bearer jwt-xyz"}
+    # GIT_CONFIG_COUNT accompanies the slot in every env APM builds; git reads
+    # nothing without it, and the sniff now honours the same bound.
+    git_env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "Authorization: Bearer jwt-xyz",
+    }
     assert _ado_auth_header("jwt-xyz", git_env) == {"Authorization": "Bearer jwt-xyz"}
+
+
+def test_ado_auth_header_bearer_detected_at_any_config_index() -> None:
+    """#2368: the bearer header is appended after retained entries, so the
+    scheme sniff must scan every GIT_CONFIG_VALUE_ slot, not just index 0."""
+    git_env = {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "http.sslCAInfo",
+        "GIT_CONFIG_VALUE_0": "/corporate/ca.pem",
+        "GIT_CONFIG_KEY_1": "http.extraheader",
+        "GIT_CONFIG_VALUE_1": "Authorization: Bearer jwt-xyz",
+    }
+    assert _ado_auth_header("jwt-xyz", git_env) == {"Authorization": "Bearer jwt-xyz"}
+
+
+def test_ado_auth_header_ignores_slots_beyond_the_configured_count() -> None:
+    """Only what git reads counts.
+
+    A slot above ``GIT_CONFIG_COUNT`` is a leftover or an injected entry; git
+    never applies it, so honouring it here would send the PAT under the Bearer
+    scheme and get it rejected.
+    """
+    git_env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.sslCAInfo",
+        "GIT_CONFIG_VALUE_0": "/corporate/ca.pem",
+        "GIT_CONFIG_KEY_5": "http.extraheader",
+        "GIT_CONFIG_VALUE_5": "Authorization: Bearer not-ours",
+    }
+    expected = base64.b64encode(b":pat-123").decode("ascii")
+    assert _ado_auth_header("pat-123", git_env) == {"Authorization": f"Basic {expected}"}
+
+
+def test_ado_auth_header_tolerates_a_malformed_count() -> None:
+    git_env = {"GIT_CONFIG_COUNT": "not-a-number", "GIT_CONFIG_VALUE_0": "Authorization: Bearer x"}
+    expected = base64.b64encode(b":pat-123").decode("ascii")
+    assert _ado_auth_header("pat-123", git_env) == {"Authorization": f"Basic {expected}"}
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +208,11 @@ def test_fetch_ado_bearer_context_sends_bearer_header() -> None:
 
     resolver = _FakeResolver(
         token="jwt-xyz",
-        git_env={"GIT_CONFIG_VALUE_0": "Authorization: Bearer jwt-xyz"},
+        git_env={
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Bearer jwt-xyz",
+        },
     )
     with patch("apm_cli.marketplace.client._http_get", side_effect=fake_get):
         result = _fetch_ado(

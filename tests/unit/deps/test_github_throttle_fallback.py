@@ -177,6 +177,42 @@ def test_private_fallback_uses_only_auth_resolver_git_environment() -> None:
     assert url.call_args.kwargs["token"] == ""
 
 
+def test_private_fallback_sets_header_after_retained_git_config() -> None:
+    """#2368: the auth header must not clobber retained GIT_CONFIG entries."""
+    host = _host(token="private-token")
+    host.auth_resolver.resolve_for_dep.return_value.git_env = {
+        "GIT_TOKEN": "private-token",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+    }
+    delegate = DownloadDelegate(host)
+    transport = MagicMock()
+    transport.fetch_file_with_commit.return_value = GitFileFetchResult(b"content", _SHA)
+
+    with (
+        patch(
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=transport,
+        ) as transport_factory,
+        patch.object(delegate, "build_repo_url", return_value="https://github.com/owner/repo.git"),
+    ):
+        delegate.download_github_file_via_throttle_fallback(
+            _dep(),
+            "instructions/example.instructions.md",
+            "main",
+            GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com"),
+        )
+
+    git_env = transport_factory.call_args.kwargs["git_env"]
+    assert git_env["GIT_CONFIG_COUNT"] == "2"
+    assert git_env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert git_env["GIT_CONFIG_VALUE_0"] == "explicit"
+    assert git_env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+    assert git_env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer private-token"
+    assert "GIT_TOKEN" not in git_env
+
+
 def test_public_fallback_uses_normal_git_environment() -> None:
     """Public fallback excludes downloader auth state and uses normal Git."""
     host = _host(token=None)

@@ -937,7 +937,7 @@ class AuthResolver:
         """Pre-built env dict for subprocess git calls.
 
         For ADO bearer tokens (scheme='bearer'), injects an Authorization header
-        via GIT_CONFIG_COUNT/KEY/VALUE env vars (see github_host.build_ado_bearer_git_env).
+        via GIT_CONFIG_COUNT/KEY/VALUE env vars (see github_host.set_ado_bearer_git_env).
         For all other cases, behavior is unchanged.
         """
         env = os.environ.copy()
@@ -946,12 +946,15 @@ class AuthResolver:
         env["GIT_ASKPASS"] = "echo"
         if scheme == "bearer" and token and host_kind == "ado":
             # B2 #852: skip GIT_TOKEN for bearer scheme -- the JWT is injected via
-            # GIT_CONFIG_VALUE_0 only; GIT_TOKEN here would leak it into every
-            # child-process env (visible in /proc/<pid>/environ, ps eww).
+            # a GIT_CONFIG_VALUE_N header only; GIT_TOKEN here would leak it into
+            # every child-process env (visible in /proc/<pid>/environ, ps eww).
             #
-            from apm_cli.utils.github_host import build_ado_bearer_git_env
+            # #2368: set (append-after-retained) rather than dict-merge, so the
+            # non-auth entries _clear_git_auth_env just retained (e.g.
+            # http.sslCAInfo) are not clobbered by a hardcoded COUNT=1 overlay.
+            from apm_cli.utils.github_host import set_ado_bearer_git_env
 
-            env.update(build_ado_bearer_git_env(token))
+            set_ado_bearer_git_env(env, token)
         elif token:
             env["GIT_TOKEN"] = token
         return env

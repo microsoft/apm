@@ -1347,3 +1347,68 @@ def test_github_throttle_owner_guard_rejects_parallel_header_parsing(tmp_path: P
     assert "GitHub throttle signals must be classified only by deps/github_rate_limit.py" in (
         result.stdout
     )
+
+
+def test_git_auth_header_injection_has_single_owner() -> None:
+    """#2368: injecting an Authorization header into a git-subprocess env
+    must have exactly one owner (set_authorization_header_git_env /
+    set_ado_bearer_git_env, in-place). Dict-merging the build_* overlay
+    (hardcoded GIT_CONFIG_COUNT="1") onto a populated env is the split
+    that silently clobbered inherited git hardening across 5 call sites.
+    """
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/utils/github_host.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "def set_authorization_header_git_env(" in owner
+    assert "def set_ado_bearer_git_env(" in owner
+    assert "AC19: git-subprocess auth-header injection authority" in guard
+    assert (
+        "Git-subprocess Authorization-header injection must use "
+        "set_authorization_header_git_env / set_ado_bearer_git_env" in guard
+    )
+
+
+def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: Path) -> None:
+    """AC19 must reject a re-introduced dict-merge of the build_* overlay
+    onto a populated env -- the exact #2368 clobber pattern.
+    """
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/download_strategies.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\n"
+        + "def _reintroduced_clobber_site(base_env, token):\n"
+        + "    from .utils.github_host import build_authorization_header_git_env\n"
+        + '    return {**base_env, **build_authorization_header_git_env("Bearer", token)}\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Git-subprocess Authorization-header injection must use "
+        "set_authorization_header_git_env / set_ado_bearer_git_env" in result.stdout
+    )

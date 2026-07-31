@@ -678,6 +678,30 @@ if [ "$deployment_owner_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC19: git-subprocess auth-header injection authority"
+# #2368: build_authorization_header_git_env / build_ado_bearer_git_env return
+# an overlay with a hardcoded GIT_CONFIG_COUNT="1". Dict-merging that overlay
+# onto an env that already carries indexed GIT_CONFIG_* entries resets the
+# count and clobbers index 0, silently dropping inherited git hardening
+# (safe.bareRepository, http.sslCAInfo, credential.interactive). The single
+# owner for injecting an Authorization header into a git-subprocess env is
+# set_authorization_header_git_env / set_ado_bearer_git_env (in-place
+# rewrite); dict-merging the build_* overlay onto a populated env is the
+# exact defect those setters exist to prevent from recurring.
+auth_header_dictmerge_hits=$(
+    grep -rEn --include='*.py' \
+        '\.update\(\s*build_(authorization_header_git_env|ado_bearer_git_env)\(|\{\*\*[A-Za-z_][A-Za-z0-9_.]*,\s*\*\*build_(authorization_header_git_env|ado_bearer_git_env)\(' \
+        src/apm_cli \
+        | grep -vE ':[0-9]+:[[:space:]]*#' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ -n "$auth_header_dictmerge_hits" ]; then
+    echo "[x] Git-subprocess Authorization-header injection must use set_authorization_header_git_env / set_ado_bearer_git_env (in-place); dict-merging the build_* overlay onto a populated env re-introduces the #2368 clobber bug"
+    echo "$auth_header_dictmerge_hits"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

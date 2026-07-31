@@ -283,7 +283,7 @@ class CloneEngine:
                             AzureCliBearerError,
                             get_bearer_provider,
                         )
-                        from apm_cli.utils.github_host import build_ado_bearer_git_env
+                        from apm_cli.utils.github_host import set_ado_bearer_git_env
 
                         provider = get_bearer_provider()
                         if provider.is_available():
@@ -296,10 +296,8 @@ class CloneEngine:
                                     token=None,
                                     auth_scheme="bearer",
                                 )
-                                bearer_env = {
-                                    **host.git_env,
-                                    **build_ado_bearer_git_env(bearer),
-                                }
+                                bearer_env = dict(host.git_env)
+                                set_ado_bearer_git_env(bearer_env, bearer)
                                 clone_action(bearer_url, bearer_env, target_path)
                                 host.auth_resolver.emit_stale_pat_diagnostic(
                                     dep_host or "dev.azure.com"
