@@ -299,6 +299,32 @@ def test_sha256_content_hash_on_deployed_files():
     assert_spec_contains("SHA-256 content hash for every deployed file", "MUST re-verify")
 
 
+@pytest.mark.req("req-sc-001")
+def test_deployed_file_missing_from_deployed_files_is_reported(tmp_path):
+    """req-sc-001: "record ... for EVERY deployed file" is half the MUST.
+
+    The re-verification half is scoped to "files present in
+    ``deployed_files``", so it can never reach a deployed file the lockfile
+    omits: such a file carries no recorded hash, and the audit's scope
+    silently narrows to whatever the lockfile happens to list. This binds the
+    completeness half to the surface that detects a violation of it, so an
+    under-recording lockfile cannot pass silently again (apm#2379).
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.drift import diff_scratch_against_project
+
+    payload = b"deployed by install, claimed by no lockfile entry\n"
+    for root in ("scratch", "project"):
+        deployed = tmp_path / root / ".apm" / "skills" / "unclaimed.md"
+        deployed.parent.mkdir(parents=True, exist_ok=True)
+        deployed.write_bytes(payload)
+
+    findings = diff_scratch_against_project(
+        tmp_path / "scratch", tmp_path / "project", LockFile(), targets=[]
+    )
+    assert [(f.kind, f.path) for f in findings] == [("unrecorded", ".apm/skills/unclaimed.md")]
+
+
 @pytest.mark.req("req-sc-002")
 def test_archive_path_traversal_fails_closed():
     assert_spec_contains(

@@ -63,27 +63,29 @@ def scan_lockfile_packages(
     all_findings: dict[str, list[ScanFinding]] = {}
     files_scanned = 0
 
-    for dep_key, dep in lock.dependencies.items():
-        if package_filter and dep_key != package_filter:
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    claims = DeploymentLedgerCodec.legacy_deployed_file_claims(lock)
+    for rel_path, owner in claims.items():
+        if package_filter and owner != package_filter:
             continue
 
-        for rel_path in dep.deployed_files:
-            if not _is_safe_lockfile_path(rel_path.rstrip("/"), project_root):
-                continue
+        if not _is_safe_lockfile_path(rel_path.rstrip("/"), project_root):
+            continue
 
-            abs_path = project_root / rel_path
-            if not abs_path.exists():
-                continue
+        abs_path = project_root / rel_path
+        if not abs_path.exists():
+            continue
 
-            if abs_path.is_dir():
-                dir_findings, dir_count = _scan_files_in_dir(abs_path, rel_path.rstrip("/"))
-                files_scanned += dir_count
-                all_findings.update(dir_findings)
-                continue
+        if abs_path.is_dir():
+            dir_findings, dir_count = _scan_files_in_dir(abs_path, rel_path.rstrip("/"))
+            files_scanned += dir_count
+            all_findings.update(dir_findings)
+            continue
 
-            files_scanned += 1
-            findings = ContentScanner.scan_file(abs_path)
-            if findings:
-                all_findings[rel_path] = findings
+        files_scanned += 1
+        findings = ContentScanner.scan_file(abs_path)
+        if findings:
+            all_findings[rel_path] = findings
 
     return all_findings, files_scanned
