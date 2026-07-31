@@ -236,6 +236,23 @@ def test_native_hook_event_map_guard_rejects_parallel_owner(tmp_path: Path) -> N
     assert "Native hook event mapping must have one HookIntegrator owner" in result.stdout
 
 
+def test_effective_install_target_has_single_owner_and_shared_consumers() -> None:
+    """Package, MCP, and LSP phases must consume one effective target decision."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/target_detection.py").read_text()
+    install = (root / "src/apm_cli/commands/install.py").read_text()
+    update = (root / "src/apm_cli/commands/update.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("def resolve_effective_target_decision(") == 1
+    assert "ctx.target_decision = install_result.target_decision" in install
+    assert install.count("target_decision=ctx.target_decision") >= 2
+    assert 'target_decision = getattr(result, "target_decision", None)' in update
+    assert install.count("explicit_target=ctx.target or ctx.runtime,") == 1
+    assert "explicit_target=ctx.target," not in install
+    assert "Package, MCP, and LSP phases must share EffectiveTargetDecision" in guard
+
+
 def test_hook_rewrite_scope_guard_rejects_parallel_decision(tmp_path: Path) -> None:
     """The boundary lint must reject scope decisions outside HookIntegrator."""
     root = Path(__file__).parents[2]

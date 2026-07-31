@@ -66,6 +66,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
             ctx.total_agents_integrated,
             ctx.diagnostics,
             package_types=dict(ctx.package_types),
+            target_decision=ctx.target_decision,
         ),
         force=bool(getattr(ctx, "force", False)),
     )

@@ -47,6 +47,10 @@ class InstallFailureAlreadyRendered(RuntimeError):
     """Signal a failed install whose user-facing diagnostics are complete."""
 
 
+class RequiredIntegrationError(RuntimeError):
+    """Raised when a declared MCP or LSP write cannot be completed."""
+
+
 class AuthenticationError(RuntimeError):
     """Raised when a remote host rejects credentials or none are available.
 

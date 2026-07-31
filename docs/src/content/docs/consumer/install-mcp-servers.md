@@ -135,11 +135,16 @@ MCP install resolves targets in this order:
 1. Explicit CLI selection: `--runtime` (legacy, one runtime) or `--target`
    (one or more targets).
 2. Canonical `targets:` / `target:` values declared in `apm.yml`.
-3. Machine discovery, only when the manifest does not restrict targets.
+3. The saved `apm config set target ...` default.
+4. Machine discovery, only when the manifest and saved config do not
+   restrict targets.
 
 `--exclude` narrows whichever set wins. Progress output names that
 post-exclusion selection; project, scope, and adapter gates can still skip a
 write.
+
+The same effective decision drives package, MCP, and LSP phases; APM does
+not re-resolve each phase independently.
 
 **Portability boundary:** A committed target list makes lockfile MCP ownership
 deterministic across machines with different installed harnesses. If `targets:`
@@ -170,11 +175,15 @@ This single rule replaces two older ones that used to coexist:
 
 A malformed `targets:` field (both `target:` and `targets:` set,
 `targets: []`, or an unknown target name) fails closed before machine discovery:
-no MCP files are written and an `[x]` error names the field to fix. A
-greenfield project with no `targets:`, no `--target` flag, AND no detected
+no MCP files are written and an `[x]` error names the field to fix. A greenfield
+project with no `targets:`, no `--target` flag, no saved target, AND no detected
 signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also fails closed
 with the same `[x]` voice -- consistent with how `apm install` treats the same
-input. Pin a target with `--target` or declare one in `apm.yml`. (#1335)
+input. The command exits non-zero before adding a direct `--mcp` entry to
+`apm.yml` or deploying package files. Pin a target with `--target`, declare one
+in `apm.yml`, or save one with `apm config set target <value>`. A native MCP
+config write failure also exits non-zero and names the target path or
+permissions to check. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to

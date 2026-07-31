@@ -576,10 +576,15 @@ class TestUpdateLockfile:
         lf = LockFile.read(lock_path)
         assert lf.mcp_configs == configs
 
-    def test_noop_when_lockfile_missing(self, tmp_path):
-        # Should not raise even if lockfile doesn't exist
+    def test_creates_lockfile_when_missing(self, tmp_path):
         missing = tmp_path / "no_lock.yaml"
-        MCPIntegrator.update_lockfile({"svc"}, lock_path=missing)  # no error
+        MCPIntegrator.update_lockfile({"svc"}, lock_path=missing)
+
+        from apm_cli.deps.lockfile import LockFile
+
+        lock = LockFile.read(missing)
+        assert lock is not None
+        assert lock.mcp_servers == ["svc"]
 
     def test_mcp_servers_sorted_in_lockfile(self, tmp_path):
         lock_path = tmp_path / "apm.lock.yaml"
@@ -707,6 +712,20 @@ class TestRemoveStaleVscode:
             patch("pathlib.Path.home", return_value=tmp_path),
         ):
             MCPIntegrator.remove_stale({"ghost"}, runtime="vscode")
+
+    def test_strict_cleanup_raises_on_unwritable_config_shape(self, tmp_path):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        config_path = tmp_path / ".vscode" / "mcp.json"
+        config_path.mkdir(parents=True)
+
+        with pytest.raises(RequiredIntegrationError, match="MCP cleanup failed"):
+            MCPIntegrator.remove_stale(
+                {"stale"},
+                runtime="vscode",
+                project_root=tmp_path,
+                fail_on_write_error=True,
+            )
 
     def test_target_restricted_to_requested_runtime(self, tmp_path):
         vscode_dir = tmp_path / ".vscode"

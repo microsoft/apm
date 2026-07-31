@@ -25,6 +25,7 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from apm_cli.core.command_logger import InstallLogger
+from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.install.mcp import run_mcp_integration
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.policy.discovery import PolicyFetchResult
@@ -104,6 +105,7 @@ class TestRunMcpIntegrationInstallBranch:
             mcp_target_servers={},
             mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
             logger=ANY,
+            fail_on_write_error=True,
         )
         mock_mcp.remove_stale.assert_not_called()
 
@@ -226,7 +228,22 @@ class TestRunMcpIntegrationEmptyDepsBranch:
             mcp_target_servers={},
             mcp_config_provenance={},
             logger=ANY,
+            fail_on_write_error=True,
         )
+
+    @patch(_PATCH_TARGET)
+    def test_cleanup_is_scoped_to_effective_target(self, mock_mcp):
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[],
+                old_mcp_servers={"stale"},
+                old_mcp_configs={"stale": {"name": "stale"}},
+                target_decision=EffectiveTargetDecision("claude", "apm config target"),
+            )
+        )
+
+        assert mock_mcp.remove_stale.call_count == 1
+        assert mock_mcp.remove_stale.call_args.args[1] == "claude"
 
 
 class TestRunMcpIntegrationRestoreBranch:
@@ -252,6 +269,7 @@ class TestRunMcpIntegrationRestoreBranch:
             mcp_target_servers={"copilot": ["io.github.acme/kept"]},
             mcp_config_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
             logger=ANY,
+            fail_on_write_error=True,
         )
         mock_mcp.install.assert_not_called()
         mock_mcp.remove_stale.assert_not_called()

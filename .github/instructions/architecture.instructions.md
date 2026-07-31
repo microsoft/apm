@@ -37,6 +37,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Decision / fact | Canonical owner | Owner path selectors |
 |---|---|---|
 | Accepted target vocabulary | core/target_catalog.py | `src/apm_cli/core/target_catalog.py` |
+| Effective install target selection | core/target_detection.py (EffectiveTargetDecision) | `src/apm_cli/core/target_detection.py` |
 | Effective package target authorization | install/target_filter.py (resolve_effective_package_targets) | `src/apm_cli/install/target_filter.py` |
 | MCP target-selection precedence | integration/mcp_integrator_install.py (_resolve_target_runtimes) | `src/apm_cli/integration/mcp_integrator_install.py` |
 | Behavioral test taxonomy classification | module-level pytestmark (taxonomy inventory verifies) | `tests/quality/taxonomy_inventory_plugin.py`; `tests/quality/test_test_taxonomy.py` |

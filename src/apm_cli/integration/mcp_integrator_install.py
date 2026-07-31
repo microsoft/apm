@@ -21,7 +21,7 @@ from apm_cli.core.apm_yml import (
 )
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.target_catalog import accepted_target_values
-from apm_cli.install.errors import InstallFailureAlreadyRendered
+from apm_cli.install.errors import InstallFailureAlreadyRendered, RequiredIntegrationError
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.yaml_io import load_yaml
@@ -61,6 +61,7 @@ def _install_registry_group(
     console: Any,
     logger: Any,
     managed_target_servers: dict[str, set[str]] | None,
+    fail_on_write_error: bool,
 ) -> int:
     """Process one group of registry deps through a single ``MCPServerOperations`` instance.
 
@@ -209,7 +210,11 @@ def _install_registry_group(
                     if is_update:
                         successful_updates.add(dep)
                 if failed_runtimes:
-                    strict_failures = sorted(set(failed_runtimes) & _STRICT_CONFIG_FAILURE_RUNTIMES)
+                    strict_failures = sorted(
+                        failed_runtimes
+                        if fail_on_write_error
+                        else set(failed_runtimes) & _STRICT_CONFIG_FAILURE_RUNTIMES
+                    )
                     if strict_failures:
                         failed_installations.append(f"{dep} ({', '.join(strict_failures)})")
                     if console:
@@ -466,6 +471,7 @@ def _resolve_target_runtimes(
     project_root,
     user_scope: bool,
     explicit_target: str | list[str] | None,
+    target_decision,
     scope: InstallScope | None,
     logger,
     console,
@@ -483,6 +489,16 @@ def _resolve_target_runtimes(
         # Single runtime mode - skip auto-discovery entirely.
         target_runtimes: list[str] = [runtime]
         selection_source = _TargetSelectionSource.RUNTIME
+    elif target_decision is not None and target_decision.runtime_targets is not None:
+        target_runtimes = list(
+            target_decision.runtime_targets_for_scope(user_scope=user_scope) or ()
+        )
+        if target_decision.source == "apm.yml":
+            selection_source = _TargetSelectionSource.MANIFEST
+        elif target_decision.source.startswith("auto-detect"):
+            selection_source = _TargetSelectionSource.DISCOVERY
+        else:
+            selection_source = _TargetSelectionSource.TARGET
     elif explicit_target is not None:
         # A plural --target value is already parser-normalized. Use that exact
         # runtime set instead of broad discovery so selecting IntelliJ does not
@@ -592,7 +608,16 @@ def _resolve_target_runtimes(
     # Exclusion narrows every selected source, including explicit CLI choices.
     # Apply it before progress output so the message names the narrowed set.
     if exclude:
-        target_runtimes = [candidate for candidate in target_runtimes if candidate != exclude]
+        exclusions = {exclude}
+        try:
+            from apm_cli.core.target_detection import EffectiveTargetDecision
+
+            exclusions.update(EffectiveTargetDecision(exclude, "--exclude").runtime_targets or ())
+        except KeyError:
+            pass
+        target_runtimes = [
+            candidate for candidate in target_runtimes if candidate not in exclusions
+        ]
         # Invalid manifests continue to the shared gate for canonical rendering.
         if not target_runtimes and selection_source is not _TargetSelectionSource.INVALID_MANIFEST:
             logger.warning(
@@ -625,6 +650,22 @@ def _resolve_target_runtimes(
             "(auto-detected; add targets: to apm.yml for consistent results across machines)"
         )
 
+    if (
+        not user_scope
+        and target_decision is not None
+        and target_decision.canonical_targets is not None
+    ):
+        from apm_cli.integration.targets import materialize_project_target_profiles
+
+        root = Path(project_root) if project_root is not None else Path.cwd()
+        try:
+            materialize_project_target_profiles(root, target_decision.canonical_targets)
+        except OSError as exc:
+            raise RequiredIntegrationError(
+                f"Cannot prepare target configuration directory: {exc}. "
+                "Check directory permissions, then retry."
+            ) from exc
+
     # Codex MCP is project-scoped: only configure it when Codex is an
     # active project target (silent skip, same as Cursor/OpenCode/Gemini).
     # Claude Code is gated identically: a host-wide `claude` binary should
@@ -640,6 +681,7 @@ def _resolve_target_runtimes(
             project_root=project_root,
             apm_config=apm_config,
             explicit_target=runtime or explicit_target,
+            target_decision=target_decision,
         )
 
     # Explicit runtime/exclusion/gating can leave nothing to configure.
@@ -692,6 +734,7 @@ def _install_self_defined_deps(
     console,
     logger,
     managed_target_servers: dict[str, set[str]] | None,
+    fail_on_write_error: bool,
 ) -> int:
     """Install self-defined (``registry: false``) MCP deps for all target runtimes.
 
@@ -800,7 +843,11 @@ def _install_self_defined_deps(
             if is_update:
                 successful_updates.add(dep.name)
         if failed_runtimes:
-            strict_failures = sorted(set(failed_runtimes) & _STRICT_CONFIG_FAILURE_RUNTIMES)
+            strict_failures = sorted(
+                failed_runtimes
+                if fail_on_write_error
+                else set(failed_runtimes) & _STRICT_CONFIG_FAILURE_RUNTIMES
+            )
             if strict_failures:
                 failed_installations.append(f"{dep.name} ({', '.join(strict_failures)})")
             if console:
@@ -849,10 +896,12 @@ def run_mcp_install(
     project_root=None,
     user_scope: bool = False,
     explicit_target: str | list[str] | None = None,
+    target_decision=None,
     logger=None,
     diagnostics=None,
     scope: InstallScope | None = None,
     managed_target_servers: dict[str, set[str]] | None = None,
+    fail_on_write_error: bool = False,
 ) -> int:
     """Install MCP dependencies.
 
@@ -945,11 +994,17 @@ def run_mcp_install(
         project_root=project_root,
         user_scope=user_scope,
         explicit_target=explicit_target,
+        target_decision=target_decision,
         scope=scope,
         logger=logger,
         console=console,
     )
     if target_runtimes is None:
+        if fail_on_write_error:
+            raise RequiredIntegrationError(
+                "MCP dependencies are declared, but no effective target can accept "
+                "their configuration. Choose a supported --target and retry."
+            )
         return 0
 
     _migrate_intellij_managed_config(
@@ -1014,6 +1069,7 @@ def run_mcp_install(
                     console=console,
                     logger=logger,
                     managed_target_servers=managed_target_servers,
+                    fail_on_write_error=fail_on_write_error,
                 )
 
         except ImportError:
@@ -1035,6 +1091,7 @@ def run_mcp_install(
             console=console,
             logger=logger,
             managed_target_servers=managed_target_servers,
+            fail_on_write_error=fail_on_write_error,
         )
 
     # Close the panel

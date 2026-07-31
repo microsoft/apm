@@ -89,6 +89,7 @@ class InstallService:
             scope=request.scope,
             auth_resolver=request.auth_resolver,
             target=request.target,
+            target_decision=request.target_decision,
             allow_insecure=request.allow_insecure,
             allow_insecure_hosts=request.allow_insecure_hosts,
             marketplace_provenance=request.marketplace_provenance,

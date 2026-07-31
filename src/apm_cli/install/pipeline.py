@@ -439,7 +439,7 @@ def _transactional_pipeline(run):
 
 
 @_transactional_pipeline
-def run_install_pipeline(  # noqa: PLR0913, RUF100
+def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     apm_package: APMPackage,
     update_refs: bool = False,
     verbose: bool = False,
@@ -449,7 +449,8 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     logger: InstallLogger = None,
     scope=None,
     auth_resolver: AuthResolver = None,
-    target: str = None,  # noqa: RUF013
+    target: str | list[str] | None = None,
+    target_decision=None,
     allow_insecure: bool = False,
     allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
@@ -489,6 +490,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         scope: InstallScope controlling project vs user deployment
         auth_resolver: Shared auth resolver for caching credentials
         target: Explicit target override from --target CLI flag
+        target_decision: Canonical effective target decision when already resolved
         allow_insecure: Whether direct HTTP dependencies are approved
         allow_insecure_hosts: Extra approved hosts for transitive HTTP dependencies
         marketplace_provenance: Marketplace provenance data for packages
@@ -558,6 +560,21 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     ):
         return InstallResult()
 
+    if target_decision is None:
+        from apm_cli.core.target_detection import resolve_effective_target_decision
+        from apm_cli.models.apm_package import package_target_selection
+
+        defer_auto_detection = lockfile_only or bool(
+            plan_callback is not None and logger is not None and logger.dry_run
+        )
+        target_decision = resolve_effective_target_decision(
+            project_root,
+            explicit_target=target,
+            manifest_target=package_target_selection(apm_package),
+            user_scope=scope is InstallScope.USER,
+            auto_detect=not defer_auto_detection,
+        )
+
     # ------------------------------------------------------------------
     # Build InstallContext from function args + computed state
     # ------------------------------------------------------------------
@@ -576,7 +593,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         logger=logger,
         scope=scope,
         auth_resolver=auth_resolver,
-        target_override=target,
+        target_override=target_decision.value,
+        target_decision=target_decision,
+        target_override_source=target_decision.source,
         allow_insecure=allow_insecure,
         allow_insecure_hosts=allow_insecure_hosts,
         marketplace_provenance=marketplace_provenance,
@@ -651,7 +670,23 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         proceed = plan_callback(plan)
         if not proceed:
             transaction.rollback()
-            return InstallResult(disposition=InstallDisposition.CANCELLED)
+            return InstallResult(
+                disposition=InstallDisposition.CANCELLED,
+                target_decision=target_decision,
+            )
+
+    if target_decision.value is None and scope is InstallScope.PROJECT and not lockfile_only:
+        from apm_cli.core.target_detection import resolve_effective_target_decision
+        from apm_cli.models.apm_package import package_target_selection
+
+        target_decision = resolve_effective_target_decision(
+            project_root,
+            explicit_target=target,
+            manifest_target=package_target_selection(apm_package),
+        )
+        ctx.target_decision = target_decision
+        ctx.target_override = target_decision.value
+        ctx.target_override_source = target_decision.source
 
     ctx.tui.__enter__()
     try:

@@ -75,6 +75,7 @@ def _clean_json_mcp_config(
     servers_key: str = "mcpServers",
     trailing_newline: bool = False,
     use_rich: bool = False,
+    fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a JSON-based MCP config file.
 
@@ -111,8 +112,14 @@ def _clean_json_mcp_config(
                 else:
                     logger.progress(msg)
         return len(removed)
-    except Exception:
+    except Exception as exc:
         _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        if fail_on_write_error:
+            from apm_cli.install.errors import RequiredIntegrationError
+
+            raise RequiredIntegrationError(
+                f"MCP cleanup failed for {label}. Check the config path and permissions, then retry."
+            ) from exc
         return 0
 
 
@@ -122,6 +129,7 @@ def _clean_toml_mcp_config(
     label: str,
     logger: CommandLogger | None = None,
     use_rich: bool = True,
+    fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a TOML-based MCP config file.
 
@@ -156,8 +164,14 @@ def _clean_toml_mcp_config(
                 elif logger is not None:
                     logger.progress(msg)
         return len(removed)
-    except (OSError, TOMLKitError, UnicodeDecodeError):
+    except (OSError, TOMLKitError, UnicodeDecodeError) as exc:
         _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        if fail_on_write_error:
+            from apm_cli.install.errors import RequiredIntegrationError
+
+            raise RequiredIntegrationError(
+                f"MCP cleanup failed for {label}. Check the config path and permissions, then retry."
+            ) from exc
         return 0
 
 
@@ -166,6 +180,7 @@ def _clean_claude_config(
     stale_names: builtins.set,
     logger,
     is_user_scope: bool = False,
+    fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a Claude Code JSON config file.
 
@@ -201,8 +216,14 @@ def _clean_claude_config(
             for name in removed:
                 logger.progress(f"Removed stale MCP server '{name}' from {label}")
         return len(removed)
-    except Exception:
+    except Exception as exc:
         _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        if fail_on_write_error:
+            from apm_cli.install.errors import RequiredIntegrationError
+
+            raise RequiredIntegrationError(
+                f"MCP cleanup failed for {label}. Check the config path and permissions, then retry."
+            ) from exc
         return 0
 
 
@@ -517,6 +538,7 @@ class MCPIntegrator:
         user_scope: bool = False,
         logger=None,
         scope=None,
+        fail_on_write_error: bool = False,
     ) -> None:
         """Remove MCP server entries that are no longer required by any dependency.
 
@@ -593,6 +615,7 @@ class MCPIntegrator:
                 logger,
                 ".vscode/mcp.json",
                 servers_key="servers",
+                fail_on_write_error=fail_on_write_error,
             )
 
         if "copilot" in target_runtimes:
@@ -602,6 +625,7 @@ class MCPIntegrator:
                 logger,
                 "Copilot CLI config",
                 use_rich=True,
+                fail_on_write_error=fail_on_write_error,
             )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
@@ -615,7 +639,12 @@ class MCPIntegrator:
                     user_scope=user_scope,
                 ).get_config_path()
             )
-            _clean_toml_mcp_config(codex_cfg, expanded_stale, "Codex CLI config")
+            _clean_toml_mcp_config(
+                codex_cfg,
+                expanded_stale,
+                "Codex CLI config",
+                fail_on_write_error=fail_on_write_error,
+            )
 
         if "cursor" in target_runtimes:
             _clean_json_mcp_config(
@@ -624,6 +653,7 @@ class MCPIntegrator:
                 logger,
                 ".cursor/mcp.json",
                 use_rich=True,
+                fail_on_write_error=fail_on_write_error,
             )
 
         # Clean opencode.json (only if .opencode/ directory exists)
@@ -635,6 +665,7 @@ class MCPIntegrator:
                     logger,
                     "opencode.json",
                     servers_key="mcp",
+                    fail_on_write_error=fail_on_write_error,
                 )
 
         if "windsurf" in target_runtimes:
@@ -644,6 +675,7 @@ class MCPIntegrator:
                 logger,
                 "Windsurf config",
                 use_rich=True,
+                fail_on_write_error=fail_on_write_error,
             )
 
         if "kiro" in target_runtimes:
@@ -662,6 +694,7 @@ class MCPIntegrator:
                 logger,
                 "Kiro MCP config",
                 use_rich=True,
+                fail_on_write_error=fail_on_write_error,
             )
 
         # Clean JetBrains Copilot user-scope mcp.json
@@ -688,6 +721,7 @@ class MCPIntegrator:
                 expanded_stale,
                 logger,
                 ".gemini/settings.json",
+                fail_on_write_error=fail_on_write_error,
             )
 
         # Clean .agents/mcp_config.json (only if .agents/ directory exists)
@@ -698,6 +732,7 @@ class MCPIntegrator:
                     expanded_stale,
                     logger,
                     ".agents/mcp_config.json",
+                    fail_on_write_error=fail_on_write_error,
                 )
 
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
@@ -707,6 +742,7 @@ class MCPIntegrator:
                     project_root_path / ".mcp.json",
                     expanded_stale,
                     logger,
+                    fail_on_write_error=fail_on_write_error,
                 )
 
         # Clean Claude Code user ~/.claude.json (USER scope only)
@@ -716,6 +752,7 @@ class MCPIntegrator:
                 expanded_stale,
                 logger,
                 is_user_scope=True,
+                fail_on_write_error=fail_on_write_error,
             )
 
     # ------------------------------------------------------------------
@@ -731,6 +768,7 @@ class MCPIntegrator:
         mcp_target_servers: builtins.dict | None = None,
         mcp_config_provenance: builtins.dict | None = None,
         logger: CommandLogger | None = None,
+        fail_on_write_error: bool = False,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
@@ -748,10 +786,14 @@ class MCPIntegrator:
                          transitively-contributed servers). Passed in lockstep
                          with ``mcp_configs`` so the two never diverge (#2081).
                          ``None`` leaves the existing value untouched.
+            logger: Optional command logger for actionable creation failures.
+            fail_on_write_error: Raise a required-integration error on any
+                         persistence failure.
 
         Raises:
             LockfileFormatError: If the existing lockfile is malformed.
-            OSError: If the atomic lockfile write fails.
+            OSError: If a non-strict atomic lockfile write fails.
+            RequiredIntegrationError: If a strict persistence attempt fails.
         """
         if lock_path is None:
             lock_path = get_lockfile_path(Path.cwd())
@@ -809,7 +851,7 @@ class MCPIntegrator:
                 return
             lockfile.generated_at = datetime.now(timezone.utc).isoformat()
             lockfile.save(lock_path)
-        except Exception:
+        except Exception as exc:
             _log.debug(
                 "MCP lockfile persistence failed at %s",
                 lock_path,
@@ -828,6 +870,12 @@ class MCPIntegrator:
                     logger.warning(message)
                 else:
                     _rich_warning(message, symbol="warning")
+            if fail_on_write_error:
+                from apm_cli.install.errors import RequiredIntegrationError
+
+                raise RequiredIntegrationError(
+                    "MCP lockfile update failed. Check apm.lock.yaml permissions, then retry."
+                ) from exc
             raise
 
     # ------------------------------------------------------------------
@@ -1000,6 +1048,7 @@ class MCPIntegrator:
         project_root,
         apm_config: dict | None,
         explicit_target: str | list[str] | None,
+        target_decision=None,
     ) -> list[str]:
         """Filter *target_runtimes* against the project's active targets.
 
@@ -1052,6 +1101,24 @@ class MCPIntegrator:
             parse_targets_field,
         )
         from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+
+        if target_decision is not None and target_decision.canonical_targets is not None:
+            active = set(target_decision.canonical_targets)
+            out = [
+                runtime
+                for runtime in target_runtimes
+                if RUNTIME_TO_CANONICAL_TARGET.get(runtime, runtime) in active
+            ]
+            dropped = sorted(set(target_runtimes) - set(out))
+            if dropped:
+                active_csv = ", ".join(sorted(active)) or "<none>"
+                scope_label = ", scope: global" if user_scope else ""
+                _rich_info(
+                    f"Skipped MCP config for {', '.join(dropped)} "
+                    f"(active targets: {active_csv}{scope_label})",
+                    symbol="info",
+                )
+            return out
 
         # --- step 1: parse declared targets (fail-closed on any invalid form)
         yaml_targets: list[str] | None = None
@@ -1189,10 +1256,12 @@ class MCPIntegrator:
         project_root=None,
         user_scope: bool = False,
         explicit_target: str | list[str] | None = None,
+        target_decision=None,
         logger=None,
         diagnostics=None,
         scope=None,
         managed_target_servers: builtins.dict | None = None,
+        fail_on_write_error: bool = False,
     ) -> int:
         """Install MCP dependencies.
 
@@ -1232,8 +1301,10 @@ class MCPIntegrator:
             project_root=project_root,
             user_scope=user_scope,
             explicit_target=explicit_target,
+            target_decision=target_decision,
             logger=logger,
             diagnostics=diagnostics,
             scope=scope,
             managed_target_servers=managed_target_servers,
+            fail_on_write_error=fail_on_write_error,
         )

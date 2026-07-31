@@ -174,7 +174,11 @@ the absolute plugin path for legacy Claude Code plugin compatibility.
 
 LSP integration writes configuration for supported runtimes and leaves
 the manifest schema runtime-neutral. Target selection follows the same
-runtime detection and `--target`/`targets:` mechanics as MCP installs.
+effective decision as package and MCP installation: `--target` >
+`apm.yml targets:` > `apm config set target ...` > auto-detect. If LSP
+work is declared but no effective target supports LSP, or a native config
+write fails, install exits non-zero with a next step instead of reporting
+success.
 
 | Runtime | LSP support |
 |---|---|

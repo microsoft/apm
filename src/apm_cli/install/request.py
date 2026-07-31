@@ -37,7 +37,8 @@ class InstallRequest:
     logger: InstallLogger | None = None
     scope: InstallScope | None = None
     auth_resolver: AuthResolver | None = None
-    target: str | None = None
+    target: str | list[str] | None = None
+    target_decision: Any = None  # EffectiveTargetDecision
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
     marketplace_provenance: dict[str, Any] | None = None

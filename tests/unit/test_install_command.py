@@ -79,6 +79,8 @@ class TestInstallCommandAutoBootstrap:
                 MagicMock(repo_url="test/package", reference="main")
             ]
             mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_pkg_instance.get_all_mcp_dependencies.return_value = []
+            mock_pkg_instance.get_lsp_dependencies.return_value = []
             mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
 
             # Mock the install function to avoid actual installation
@@ -89,7 +91,7 @@ class TestInstallCommandAutoBootstrap:
             )
 
             result = self.runner.invoke(cli, ["install", "test/package"])
-            assert result.exit_code == 0
+            assert result.exit_code == 0, (result.output, result.exception)
             assert "Created apm.yml" in result.output
             assert Path("apm.yml").exists()
 
@@ -130,7 +132,7 @@ class TestInstallCommandAutoBootstrap:
 
             result = self.runner.invoke(cli, ["install", "org1/pkg1", "org2/pkg2"])
 
-            assert result.exit_code == 0
+            assert result.exit_code == 0, (result.output, result.exception)
             assert "Created apm.yml" in result.output
             assert Path("apm.yml").exists()
 
@@ -745,7 +747,7 @@ class TestDevMcpDependenciesInstall:
             patch("apm_cli.commands.install.MCPIntegrator.install", return_value=1) as install,
             patch("apm_cli.commands.install.MCPIntegrator.update_lockfile"),
         ):
-            result = CliRunner().invoke(cli, ["install"])
+            result = CliRunner().invoke(cli, ["install", "--target", "claude"])
 
         assert result.exit_code == 0, result.output
         assert install.call_count == 1
@@ -1830,6 +1832,7 @@ class TestInstallMcpFlag:
                             "version": "0.1.0",
                             "description": "",
                             "author": "",
+                            "targets": ["claude"],
                             "dependencies": {"apm": [], "mcp": []},
                             "scripts": {},
                         },

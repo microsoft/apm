@@ -53,6 +53,7 @@ def run_mcp_install(  # noqa: PLR0913
     apm_dir: Path,
     scope: str | None,
     target: str | list[str] | None = None,
+    target_decision=None,
     registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
@@ -124,11 +125,7 @@ def run_mcp_install(  # noqa: PLR0913
             logger.verbose_detail(f"Target: {rendered_target}")
         with registry_env_override(registry_url):
             try:
-                # Rename a legacy ``apm.lock`` before resolving the path, the
-                # way the main install path does. This call can now create
-                # ``apm.lock.yaml`` (#2373); without the migration first, that
-                # new file would make ``migrate_lockfile_if_needed`` skip the
-                # rename forever and strip the legacy file's pinned deps.
+                # Migrate before creating apm.lock.yaml so legacy state is not shadowed.
                 migrate_lockfile_if_needed(apm_dir)
                 _mcp_lock_path = get_lockfile_path(apm_dir)
                 _existing_lock = LockFile.read(_mcp_lock_path)
@@ -165,15 +162,17 @@ def run_mcp_install(  # noqa: PLR0913
                     for target_name, server_names in old_target_servers.items()
                     if server_names & {mcp_name}
                 }
-                # A scalar target selects the runtime directly; explicit_target
-                # also preserves the flag for downstream active-target gating.
+                # Legacy --runtime remains a direct override. Target values
+                # are projected through the shared decision below.
                 MCPIntegrator.install(
                     [dep],
-                    target if isinstance(target, str) else runtime,
+                    runtime,
                     exclude,
                     verbose,
                     stored_mcp_configs=old_configs,
                     explicit_target=target,
+                    target_decision=target_decision,
+                    fail_on_write_error=True,
                     scope=scope,
                     project_root=apm_dir,
                     user_scope=user_scope,
@@ -201,6 +200,7 @@ def run_mcp_install(  # noqa: PLR0913
                     mcp_target_servers=merged_target_servers,
                     mcp_config_provenance=merged_provenance,
                     logger=logger,
+                    fail_on_write_error=True,
                 )
             except InstallFailureAlreadyRendered:
                 raise
@@ -218,9 +218,12 @@ def run_mcp_install(  # noqa: PLR0913
                 )
                 raise click.ClickException(f"MCP integration failed for '{mcp_name}'")  # noqa: B904
 
-    if status != "skipped":
-        verb = "Replaced" if status == "replaced" else "Added"
-        logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")
+    if status == "skipped":
+        logger.success(f"Verified MCP server '{mcp_name}' integration", symbol="check")
+        return
+
+    verb = "Replaced" if status == "replaced" else "Added"
+    logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")
     if isinstance(entry, dict):
         chosen_transport = entry.get("transport") or "registry"
     else:

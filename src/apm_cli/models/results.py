@@ -28,6 +28,7 @@ class InstallResult:
     exit_code: int = 0
     committed: bool = False
     error: BaseException | None = field(default=None, repr=False)
+    target_decision: object = None  # EffectiveTargetDecision or None
 
 
 @dataclass

@@ -19,6 +19,7 @@ from apm_cli.install.errors import (
     FrozenInstallError,
     InstallFailureAlreadyRendered,
     PolicyViolationError,
+    RequiredIntegrationError,
 )
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 
@@ -177,6 +178,7 @@ class InstallContext:
     skill_subset_from_cli: bool = False
     audit_override: str | None = None
     install_result: InstallResult | None = None
+    target_decision: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -763,6 +765,19 @@ def _handle_mcp_install(  # noqa: PLR0913
     mcp_scope = InstallScope.PROJECT
     mcp_manifest_path = get_manifest_path(mcp_scope)
     mcp_apm_dir = get_apm_dir(mcp_scope)
+    from ..core.errors import TargetResolutionError
+    from ..core.target_detection import resolve_manifest_target_decision
+
+    try:
+        target_decision = resolve_manifest_target_decision(
+            Path.cwd(),
+            manifest_path=mcp_manifest_path,
+            explicit_target=target or runtime,
+        )
+    except TargetResolutionError as exc:
+        logger.error(str(exc), symbol="")
+        raise InstallFailureAlreadyRendered("MCP integration target could not be resolved") from exc
+
     # -- W2-mcp-preflight: policy enforcement before MCP install --
     # Build a lightweight MCPDependency for policy evaluation.
     # This mirrors _build_mcp_entry routing but we only need the
@@ -788,7 +803,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
     from ..core.target_detection import normalize_policy_targets
 
-    policy_targets = normalize_policy_targets(target or runtime)
+    policy_targets = normalize_policy_targets(target_decision.value)
 
     try:
         _pf_result, _pf_active = run_policy_preflight(
@@ -829,7 +844,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         dev=dev,
         force=force,
         runtime=runtime,
-        target=target,
+        target=target_decision.value,
+        target_decision=target_decision,
         exclude=exclude,
         logger=logger,
         apm_dir=mcp_apm_dir,
@@ -1373,6 +1389,7 @@ def install(  # noqa: PLR0913
                 no_policy=no_policy,
                 validated_registry_url=validated_registry_url,
             )
+            summary_rendered = True
             return
 
         # Resolve transport selection inputs.
@@ -1700,6 +1717,8 @@ def _install_apm_packages(ctx, outcome):
     prod_mcp_deps = apm_package.get_mcp_dependencies()
     dev_mcp_deps = apm_package.get_dev_mcp_dependencies()
     mcp_deps = apm_package.get_all_mcp_dependencies()
+    if not isinstance(mcp_deps, builtins.list):
+        mcp_deps = []
 
     logger.verbose_detail(
         f"Parsed {APM_YML_FILENAME}: {len(apm_deps)} APM deps, "
@@ -1829,7 +1848,7 @@ def _install_apm_packages(ctx, outcome):
                 logger=logger,
                 scope=ctx.scope,
                 auth_resolver=ctx.auth_resolver,
-                target=ctx.target,
+                target=ctx.target or ctx.runtime,
                 allow_insecure=ctx.allow_insecure,
                 allow_insecure_hosts=ctx.allow_insecure_hosts,
                 marketplace_provenance=(
@@ -1855,6 +1874,7 @@ def _install_apm_packages(ctx, outcome):
                 )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
+            ctx.target_decision = install_result.target_decision
             if install_result.disposition not in {
                 InstallDisposition.SUCCESS,
                 InstallDisposition.PARTIAL_SUCCESS,
@@ -1899,15 +1919,35 @@ def _install_apm_packages(ctx, outcome):
 
         clear_apm_yml_cache()
 
-    # -------------------------------------------------------------------------
-    # MCP integration (extracted to install/mcp/integration.py)
-    # -------------------------------------------------------------------------
     from apm_cli.install.mcp import run_mcp_integration
     from apm_cli.policy.install_preflight import PolicyBlockError
 
     from ..core.scope import get_modules_dir
 
     apm_modules_path = get_modules_dir(ctx.scope)
+    lsp_deps = apm_package.get_lsp_dependencies()
+    if not isinstance(lsp_deps, builtins.list):
+        lsp_deps = []
+    old_lsp_servers = builtins.set(_existing_lock.lsp_servers) if _existing_lock else builtins.set()
+    integration_work_required = should_install_mcp and bool(
+        mcp_deps or lsp_deps or old_mcp_servers or old_lsp_servers
+    )
+    if ctx.target_decision is None and integration_work_required:
+        from apm_cli.core.errors import TargetResolutionError
+        from apm_cli.core.target_detection import resolve_package_target_decision
+
+        try:
+            ctx.target_decision = resolve_package_target_decision(
+                ctx.project_root,
+                package=apm_package,
+                explicit_target=ctx.target or ctx.runtime,
+                user_scope=ctx.scope is InstallScope.USER,
+            )
+        except TargetResolutionError as exc:
+            logger.error(str(exc), symbol="")
+            raise InstallFailureAlreadyRendered(
+                "MCP/LSP integration target could not be resolved"
+            ) from exc
 
     try:
         mcp_count, mcp_apm_config = run_mcp_integration(
@@ -1930,7 +1970,8 @@ def _install_apm_packages(ctx, outcome):
             trust_transitive_mcp=ctx.trust_transitive_mcp,
             no_policy=ctx.no_policy,
             verbose=ctx.verbose,
-            explicit_target=ctx.target,
+            explicit_target=ctx.target_decision.value if ctx.target_decision else None,
+            target_decision=ctx.target_decision,
             scope=ctx.scope,
         )
     except PolicyBlockError:
@@ -1940,30 +1981,38 @@ def _install_apm_packages(ctx, outcome):
         )
         logger.render_summary()
         raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
+    except RequiredIntegrationError as exc:
+        logger.error(str(exc))
+        raise InstallFailureAlreadyRendered(str(exc)) from exc
 
-    # -------------------------------------------------------------------------
-    # LSP integration (extracted to install/lsp/integration.py)
-    # -------------------------------------------------------------------------
     from apm_cli.install.lsp import run_lsp_integration
 
-    lsp_count = run_lsp_integration(
-        apm_package=apm_package,
-        apm_modules_path=apm_modules_path,
-        lock_path=_lock_path,
-        existing_lock=_existing_lock,
-        project_root=ctx.project_root,
-        user_scope=(ctx.scope is InstallScope.USER),
-        should_install=should_install_lsp,
-        logger=logger,
-        diagnostics=apm_diagnostics,
-        target_context=(mcp_apm_config, ctx.target, ctx.scope),
-    )
+    try:
+        lsp_count = run_lsp_integration(
+            apm_package=apm_package,
+            apm_modules_path=apm_modules_path,
+            lock_path=_lock_path,
+            existing_lock=_existing_lock,
+            project_root=ctx.project_root,
+            user_scope=(ctx.scope is InstallScope.USER),
+            should_install=should_install_lsp,
+            logger=logger,
+            diagnostics=apm_diagnostics,
+            runtime=ctx.runtime,
+            exclude=ctx.exclude,
+            target_context=(
+                mcp_apm_config,
+                ctx.target_decision.value if ctx.target_decision else None,
+                ctx.scope,
+            ),
+            target_decision=ctx.target_decision,
+            fail_on_write_error=True,
+        )
+    except RequiredIntegrationError as exc:
+        logger.error(str(exc))
+        raise InstallFailureAlreadyRendered(str(exc)) from exc
 
-    # Local .apm/ content integration is now handled inside the
-    # install pipeline (phases/integrate.py + phases/post_deps_local.py,
-    # refactor F3).  The duplicate target resolution, integrator
-    # initialization, and inline stale-cleanup block that lived here
-    # have been removed.
+    # Local .apm/ integration already ran inside the package pipeline.
 
     from apm_cli.install.outcome import finalize_install_result
 
@@ -2036,6 +2085,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     scope=None,
     auth_resolver: "AuthResolver" = None,
     target: str | None = None,
+    target_decision=None,
     allow_insecure: bool = False,
     allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
@@ -2078,6 +2128,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
         scope=scope,
         auth_resolver=auth_resolver,
         target=target,
+        target_decision=target_decision,
         allow_insecure=allow_insecure,
         allow_insecure_hosts=allow_insecure_hosts,
         marketplace_provenance=marketplace_provenance,

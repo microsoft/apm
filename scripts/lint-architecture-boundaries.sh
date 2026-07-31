@@ -45,6 +45,29 @@ check_pattern \
     src/apm_cli/bundle/packer.py \
     src/apm_cli/install/mcp/integration.py \
     src/apm_cli/commands/uninstall/engine.py
+effective_target_owner="src/apm_cli/core/target_detection.py"
+effective_target_definition_count=$(grep -Ec \
+    '^def resolve_effective_target_decision\(' "$effective_target_owner" || true)
+effective_target_raw_count=$(grep -Ec \
+    'explicit_target=ctx\.target( or ctx\.runtime)?([,)]|$)' \
+    src/apm_cli/commands/install.py || true)
+effective_target_context_hits=$(grep -En \
+    'target_context=\([^)]*ctx\.target' src/apm_cli/commands/install.py 2>/dev/null || true)
+if [ "$effective_target_definition_count" -ne 1 ] \
+    || ! grep -q 'target_decision = resolve_effective_target_decision(' \
+        src/apm_cli/install/pipeline.py \
+    || ! grep -q 'ctx.target_decision = install_result.target_decision' \
+        src/apm_cli/commands/install.py \
+    || ! grep -q 'target_decision=ctx.target_decision' \
+        src/apm_cli/commands/install.py \
+    || ! grep -q 'target_decision = getattr(result, "target_decision", None)' \
+        src/apm_cli/commands/update.py \
+    || [ "$effective_target_raw_count" -ne 1 ] \
+    || [ -n "$effective_target_context_hits" ]; then
+    echo "[x] Package, MCP, and LSP phases must share EffectiveTargetDecision"
+    [ -n "$effective_target_context_hits" ] && echo "$effective_target_context_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Install orchestration must not branch on native locator target names" \
     'name == "copilot-(app|cowork)"|name in \{.*copilot-(app|cowork)' \

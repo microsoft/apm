@@ -59,6 +59,7 @@ class InstallContext:
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
     target_override: str | list[str] | None = None  # effective --target value
+    target_decision: Any = None  # EffectiveTargetDecision
     # Provenance label for ``target_override`` when it did NOT come from the CLI.
     # None means an explicit CLI ``--target`` selector. When the value is
     # populated from the configured default (``apm config target``), this is

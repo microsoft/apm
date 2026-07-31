@@ -103,6 +103,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apm install --target intellij`: APM writes the plugin-read config path,
   migrates only APM-owned entries from the obsolete data path, and preserves
   user-authored entries in both files. (closes #2344) (by @xalvarez, #2410)
+- Saved targets from `apm config set target` now drive package, MCP, and LSP
+  phases in `apm install` and `apm update`; unresolved or failed required
+  service writes exit non-zero instead of skipping with success.
+  (by @ryodocx, closes #2345)
+
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

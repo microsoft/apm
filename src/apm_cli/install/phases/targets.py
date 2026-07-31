@@ -406,7 +406,6 @@ def _resolve_targets_by_scope(
 
     # Project scope: v2 resolution.
     from apm_cli.core.apm_yml import CANONICAL_TARGETS as _CANONICAL
-    from apm_cli.integration.targets import KNOWN_TARGETS
 
     _v2_flag: str | list[str] | None = None
     if ctx.target_override:
@@ -458,25 +457,17 @@ def _resolve_targets_by_scope(
     _provenance_msg = format_provenance(_resolved)
     _rich_info(_provenance_msg, symbol="info")
 
-    _v2_targets = []
-    for _tname in _resolved.targets:
-        _profile = KNOWN_TARGETS.get(_tname)
-        if _profile is None:
-            continue
-        _target_dir = ctx.project_root / _profile.root_dir
-        if not _target_dir.exists():
-            try:
-                _target_dir.mkdir(parents=True, exist_ok=True)
-            except PermissionError:
-                if ctx.logger:
-                    ctx.logger.error(
-                        f"Cannot create {_profile.root_dir}/ -- permission denied. "
-                        f"Check directory permissions or use a different --target."
-                    )
-                raise SystemExit(1) from None
-            if ctx.logger:
-                ctx.logger.verbose_detail(f"Created {_profile.root_dir}/ ({_tname} target)")
-        _v2_targets.append(_profile)
+    from apm_cli.integration.targets import materialize_project_target_profiles
+
+    try:
+        _v2_targets = materialize_project_target_profiles(ctx.project_root, _resolved.targets)
+    except PermissionError as exc:
+        if ctx.logger:
+            ctx.logger.error(
+                f"Cannot create target directory -- permission denied: {exc}. "
+                "Check directory permissions or use a different --target."
+            )
+        raise SystemExit(1) from None
 
     _v2_names = {t.name for t in _v2_targets}
     _legacy_only = [t for t in targets if t.name not in _v2_names and t.name not in _CANONICAL]
@@ -512,22 +503,24 @@ def run(ctx: InstallContext) -> None:
     except _click.UsageError as exc:
         _raise_target_usage_error(ctx, exc)
 
-    default_target = None
-    if ctx.target_override is None and config_target is None:
-        from apm_cli.config import get_install_target
+    target_decision = getattr(ctx, "target_decision", None)
+    if type(target_decision).__module__ == "unittest.mock":
+        target_decision = None
+    if target_decision is None:
+        from apm_cli.core.target_detection import resolve_effective_target_decision
 
-        default_target = get_install_target()
-        if default_target is not None:
-            # Treat configured default target exactly like an explicit selector
-            # for this invocation so downstream phases and policy checks see
-            # the same effective value. Record the provenance separately so the
-            # resolution output does not misattribute it to a CLI --target flag.
-            ctx.target_override = default_target
-            ctx.target_override_source = "apm config target"
+        target_decision = resolve_effective_target_decision(
+            ctx.project_root,
+            explicit_target=ctx.target_override,
+            manifest_target=config_target,
+            user_scope=ctx.scope is InstallScope.USER,
+            auto_detect=False,
+        )
+        ctx.target_decision = target_decision
+        ctx.target_override = target_decision.value
+        ctx.target_override_source = target_decision.source
 
-    # Resolve effective explicit target: CLI --target wins, then apm.yml,
-    # then user-scoped config default target.
-    _explicit = ctx.target_override or config_target or None
+    _explicit = target_decision.value
     if _explicit == "all":
         from apm_cli.core.target_catalog import expand_all
 

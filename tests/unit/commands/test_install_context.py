@@ -74,6 +74,7 @@ class TestInstallContextFields:
         "skill_subset_from_cli",
         "audit_override",
         "install_result",
+        "target_decision",
     )
 
     def test_all_required_fields_present(self):
