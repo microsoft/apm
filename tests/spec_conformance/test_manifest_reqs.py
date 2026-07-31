@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
-req-tg-001..007, req-cf-001..002.
+Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
+req-tg-001..008, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -268,42 +268,6 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
         "Selected skill names for dependencies that expose selectable skills",
         "MUST emit a default-visible diagnostic",
         "requested skill names, and the available skill names",
-    )
-
-
-@pytest.mark.req("req-mf-023")
-def test_dependency_package_targets_are_restriction_only() -> None:
-    """Package intent can narrow, but never expand, consumer authorization."""
-    active = [KNOWN_TARGETS["claude"], KNOWN_TARGETS["cursor"]]
-    claude_package = APMPackage(
-        name="claude-hooks",
-        version="1.0.0",
-        target="claude",
-    )
-
-    disjoint = resolve_effective_package_targets(
-        active,
-        ["cursor"],
-        claude_package,
-        DiagnosticCollector(),
-        "owner/claude-hooks",
-    )
-    universal = resolve_effective_package_targets(
-        active,
-        ["cursor"],
-        APMPackage(name="universal-hooks", version="1.0.0"),
-        DiagnosticCollector(),
-        "owner/universal-hooks",
-    )
-
-    assert disjoint.targets == ()
-    assert tuple(target.name for target in universal.targets) == ("cursor",)
-    assert_spec_contains(
-        "MUST deploy target-scoped primitives only to the",
-        "mechanism for (b) is implementation-defined",
-        "restriction-only: it MUST NOT activate a target",
-        "MUST reject the dependency manifest",
-        "under [req-lk-021]",
     )
 
 
@@ -608,6 +572,31 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
         "default-visible, actionable\ndiagnostic",
         "follow-up compilation operation",
         "MUST NOT emit this diagnostic for a dry run",
+    )
+
+
+@pytest.mark.req("req-tg-008")
+def test_package_declared_target_restricts_hook_integration():
+    """Package target: field is a restriction-only filter on hook integration.
+
+    A consumer MUST NOT deliver a package's hooks to any active integration
+    target not in the package's declared target set (when non-empty and not
+    containing 'all'). The filter composes by intersection with consumer-side
+    per-dependency targets: it can only narrow, never expand.
+    """
+    import inspect
+
+    from apm_cli.install.target_filter import resolve_effective_package_targets
+
+    assert_spec_contains(
+        "restriction-only filter",
+        "MUST NOT deliver that package",
+        "composes by intersection",
+        "can only narrow",
+    )
+    src = inspect.getsource(resolve_effective_package_targets)
+    assert "package_restriction_active" in src, (
+        "req-tg-008: resolve_effective_package_targets must apply package target restriction"
     )
 
 

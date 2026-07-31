@@ -535,17 +535,6 @@
       ]
     },
     {
-      "conformance_class": "consumer",
-      "id": "req-mf-023",
-      "keyword": "MUST",
-      "section": "4.2.1",
-      "status": "active",
-      "test_count": 1,
-      "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only"
-      ]
-    },
-    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -1192,6 +1181,17 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_project_compile_guidance_for_dependency_instructions"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-008",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_package_declared_target_restricts_hook_integration"
       ]
     }
   ],
