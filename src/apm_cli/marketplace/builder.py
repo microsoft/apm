@@ -426,11 +426,7 @@ class MarketplaceBuilder:
                 host=self._host,
                 token=auth.token if auth else self._github_token,
                 auth_scheme=getattr(auth, "auth_scheme", "basic"),
-                git_env=(
-                    harden(auth)
-                    if auth is not None and callable(harden)
-                    else None
-                ),
+                git_env=(harden(auth) if auth is not None and callable(harden) else None),
                 auth_resolver=self._auth_resolver,
                 auth_target=self._host,
             )
@@ -484,11 +480,7 @@ class MarketplaceBuilder:
                 host=resolved_host,
                 token=auth.token if auth else None,
                 auth_scheme=getattr(auth, "auth_scheme", "basic"),
-                git_env=(
-                    harden(auth)
-                    if auth is not None and callable(harden)
-                    else None
-                ),
+                git_env=(harden(auth) if auth is not None and callable(harden) else None),
                 auth_resolver=self._auth_resolver,
                 auth_target=resolved_host,
             )
