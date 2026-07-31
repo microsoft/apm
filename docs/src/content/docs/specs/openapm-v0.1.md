@@ -332,6 +332,7 @@ The manifest top-level fields are:
 | `license`       | no       | string (SPDX identifier RECOMMENDED)                                                          |
 | `default_host`  | no       | string; see [Section 4.2.4](#424-default_host) and [req-mf-019](#req-mf-019)                  |
 | `target`        | no       | string or list of strings (see [Section 4.2.1](#421-target))                                  |
+| `targets`       | no       | string or non-empty list of strings; mutually exclusive with `target` (see [req-tg-008](#req-tg-008)) |
 | `type`          | no       | string (advisory, see [Section 4.2.2](#422-type-advisory))                                    |
 | `scripts`       | no       | mapping `string -> string`                                                                    |
 | `includes`      | no       | literal `auto` or list of paths                                                               |
@@ -943,8 +944,9 @@ non-per-file configuration document for a target that supports the
 which entries the consumer itself wrote), a conforming **consumer**
 implementation MUST apply the same preserve-or-remove decision defined
 by [req-lk-020](#req-lk-020) to that merge-based hook configuration.
-For an entry owned by a dependency, "current install targets" in clause
-(a) below means that dependency's effective intersection under
+For a consumer-owned entry attributable to a specific dependency,
+"current install targets" in clause (a) below means that dependency's
+effective intersection under
 [req-tg-008](#req-tg-008).
 It MUST remove only the consumer-owned entries -- and any ownership
 record left empty by that removal -- attributable to a target that is
@@ -953,9 +955,11 @@ declared target, or (c) an implementation-recognized target whose
 activation is outside the manifest target field. It MUST preserve
 every entry that does not carry the consumer's own ownership
 attribution, regardless of target, and every consumer-owned entry for
-a target that remains attributable under (a)-(c). A well-formed
-ownership attribution to a foreign or unresolvable principal does not
-identify an entry as consumer-owned and MUST be preserved. If the manifest does
+a target that remains attributable under (a)-(c).
+
+A well-formed ownership attribution to a foreign or unresolvable owner
+identity does not identify an entry as consumer-owned and MUST be
+preserved. If the manifest does
 not declare a `target` field, or the consumer cannot determine which
 target governs a prior entry, the consumer MUST preserve that entry
 and its ownership attribution, mirroring
@@ -2285,21 +2289,42 @@ NOT trigger the diagnostic by itself.
 #### 8.5.3 Package-declared target restrictions
 
 <a id="req-tg-008"></a>
-**[req-tg-008]** A conforming **consumer** implementation MUST treat a
-package's declared `target:` or `targets:` field in `apm.yml` as a
-restriction-only filter on hook primitive integration. If the field
-resolves to a non-empty set that does not contain `all`, the consumer
-MUST NOT deliver that package's hook primitives to any active
-integration target whose name is not in the declared set, even when the
-active target was authorised by the project's target list and the
-consumer's per-dependency `targets:` filter. Omitting `target:` and
-`targets:`, or declaring `targets: [all]`, applies no package-level
-restriction. The package filter composes by intersection with the
-consumer-side per-dependency `targets:` filter: the effective
-integration target set is
-`project_active_targets INTERSECT consumer_per_dep_targets (when set) INTERSECT package_declared_targets (when restrictive)`.
-The package filter MUST NOT expand the integration target set beyond
-the targets that are already active in the project.
+**[req-tg-008]** For each dependency, a conforming **consumer**
+implementation MUST integrate target-scoped primitives only into the
+intersection of (a) the project's currently active targets, (b) the
+target subset authorized by the consumer for that dependency, and (c)
+the dependency package's declared `target:` or `targets:` set when that
+set is restrictive. The mechanism for (b) is implementation-defined;
+when the consumer has no explicit per-dependency authorization
+mechanism or subset, (b) adds no restriction.
+
+The package set is restriction-only: it MUST NOT activate a target or
+expand either (a) or (b). Omitting both package fields, or including the
+universal `all` value, adds no package-side restriction. Scalar and list
+spellings under `target:` accept the aliases defined in
+[Section 4.2.1](#421-target); `targets:` accepts canonical names only.
+The `all` token remains a literal no-restriction sentinel and MUST NOT
+be expanded to the auto-detectable target set during this intersection.
+A null value under singular `target:` is treated as field omission for
+legacy compatibility; an empty string or list is invalid. A declaration
+with both fields (even when either value is null), a null or empty
+`targets:` value, a `targets:` token that is neither canonical nor
+`all`, or a `target:` token that does not satisfy
+[req-mf-005](#req-mf-005) MUST be rejected before target-scoped
+deployment with a diagnostic naming the invalid declaration or token.
+
+When no explicit package field exists, a consumer MAY infer an
+additional legacy hook-only restriction when the filename stem is
+`hooks-<target>` or ends in one or more contiguous recognized target
+tokens immediately before `-hooks`. A recognized token is a canonical
+target, a recognized alias, or an implementation-registered extension
+target. This filename filter is applied after the effective
+intersection and MUST only narrow it. A consumer MUST NOT infer a
+package restriction from a generic or otherwise unmatched filename.
+When an update narrows the intersection, consumer-owned merge-based
+hook entries and their ownership record MUST be reconciled under
+[req-lk-021](#req-lk-021), while entries without the consumer's own
+ownership attribution remain preserved.
 
 ### 8.6 Per-target primitive support (informational)
 
@@ -3236,7 +3261,7 @@ renumbering of conformance classes.
 | [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
 | [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-tg-007](#req-tg-007)                | MUST    | 8.5     | consumer    |
-| [req-tg-008](#req-tg-008)                | MUST    | 8.5     | consumer    |
+| [req-tg-008](#req-tg-008)                | MUST    | 8.5.3   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
