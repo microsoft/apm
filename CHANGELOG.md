@@ -98,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --target intellij` now writes JetBrains Copilot MCP servers to
   the plugin-read config location, migrates only APM-owned entries from the
   obsolete data path, and preserves user-authored entries in both files.
-  Reported by @xalvarez. (closes #2344)
+  Reported by @xalvarez. (#2410, closes #2344)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
