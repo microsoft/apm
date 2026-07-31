@@ -26,6 +26,7 @@ from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.install.plan import UpdatePlan
+
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
 # (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
@@ -1747,7 +1748,6 @@ def _install_apm_packages(ctx, outcome):
     # Determine what to install based on install mode
     should_install_apm = ctx.install_mode != InstallMode.MCP
     should_install_mcp = ctx.install_mode != InstallMode.APM
-    should_install_lsp = should_install_mcp
 
     # Show what will be installed if dry run
     if ctx.dry_run:
@@ -1810,7 +1810,6 @@ def _install_apm_packages(ctx, outcome):
 
     # Enter the APM install path when there are deps, local .apm/ primitives
     # (#714), OR orphan deps in the lockfile to clean up (manifest emptied).
-    from apm_cli.core.scope import InstallScope
     from apm_cli.core.scope import get_deploy_root as _get_deploy_root
     from apm_cli.deps.lockfile import _SELF_KEY as _LOCK_SELF_KEY
 
@@ -1916,62 +1915,31 @@ def _install_apm_packages(ctx, outcome):
 
         clear_apm_yml_cache()
 
-    from apm_cli.install.mcp import run_mcp_integration
+    from apm_cli.core.errors import TargetResolutionError
+    from apm_cli.install.service_integration import run_service_integrations
     from apm_cli.policy.install_preflight import PolicyBlockError
 
-    from ..core.scope import get_modules_dir
-
-    apm_modules_path = get_modules_dir(ctx.scope)
-    lsp_deps = apm_package.get_lsp_dependencies()
-    if not isinstance(lsp_deps, builtins.list):
-        logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
-        lsp_deps = []
-    old_lsp_servers = builtins.set(_existing_lock.lsp_servers) if _existing_lock else builtins.set()
-    integration_work_required = should_install_mcp and bool(
-        mcp_deps or lsp_deps or old_mcp_servers or old_lsp_servers
-    )
-    if ctx.target_decision is None and integration_work_required:
-        from apm_cli.core.errors import TargetResolutionError
-        from apm_cli.core.target_detection import resolve_package_target_decision
-
-        try:
-            ctx.target_decision = resolve_package_target_decision(
-                ctx.project_root,
-                package=apm_package,
-                explicit_target=ctx.target or ctx.runtime,
-                user_scope=ctx.scope is InstallScope.USER,
-            )
-        except TargetResolutionError as exc:
-            logger.error(str(exc), symbol="")
-            raise InstallFailureAlreadyRendered(
-                "MCP/LSP integration target could not be resolved"
-            ) from exc
-
     try:
-        mcp_count, mcp_apm_config = run_mcp_integration(
+        service_result = run_service_integrations(
+            ctx,
             apm_package=apm_package,
             mcp_deps=mcp_deps,
-            apm_modules_path=apm_modules_path,
             lock_path=_lock_path,
+            existing_lock=_existing_lock,
             old_mcp_servers=old_mcp_servers,
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
             old_mcp_target_servers=old_mcp_target_servers,
             old_mcp_target_servers_present=old_mcp_target_servers_present,
-            project_root=ctx.project_root,
-            user_scope=(ctx.scope is InstallScope.USER),
-            should_install=should_install_mcp,
-            logger=logger,
             diagnostics=apm_diagnostics,
-            runtime=ctx.runtime,
-            exclude=ctx.exclude,
-            trust_transitive_mcp=ctx.trust_transitive_mcp,
-            no_policy=ctx.no_policy,
-            verbose=ctx.verbose,
-            explicit_target=ctx.target_decision.value if ctx.target_decision else None,
+            explicit_target=ctx.target or ctx.runtime,
             target_decision=ctx.target_decision,
-            scope=ctx.scope,
         )
+    except TargetResolutionError as exc:
+        logger.error(str(exc), symbol="")
+        raise InstallFailureAlreadyRendered(
+            "MCP/LSP integration target could not be resolved"
+        ) from exc
     except PolicyBlockError:
         logger.error(
             "MCP server(s) blocked by org policy. "
@@ -1984,33 +1952,9 @@ def _install_apm_packages(ctx, outcome):
         logger.render_summary()
         raise InstallFailureAlreadyRendered(str(exc)) from exc
 
-    from apm_cli.install.lsp import run_lsp_integration
-
-    try:
-        lsp_count = run_lsp_integration(
-            apm_package=apm_package,
-            apm_modules_path=apm_modules_path,
-            lock_path=_lock_path,
-            existing_lock=_existing_lock,
-            project_root=ctx.project_root,
-            user_scope=(ctx.scope is InstallScope.USER),
-            should_install=should_install_lsp,
-            logger=logger,
-            diagnostics=apm_diagnostics,
-            runtime=ctx.runtime,
-            exclude=ctx.exclude,
-            target_context=(
-                mcp_apm_config,
-                ctx.target_decision.value if ctx.target_decision else None,
-                ctx.scope,
-            ),
-            target_decision=ctx.target_decision,
-            fail_on_write_error=True,
-        )
-    except RequiredIntegrationError as exc:
-        logger.error(str(exc))
-        logger.render_summary()
-        raise InstallFailureAlreadyRendered(str(exc)) from exc
+    ctx.target_decision = service_result.target_decision
+    mcp_count = service_result.mcp_count
+    lsp_count = service_result.lsp_count
 
     # Local .apm/ integration already ran inside the package pipeline.
 
