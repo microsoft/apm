@@ -428,9 +428,9 @@ jobs:
   #
   # Why this job exists
   # --------------------
-  # Every module under tests/integration/ -- including the curated
-  # producer/consumer/govern contracts in tests/quality/critical_suite.toml
-  # and the regression coverage added by #2226 (ADO lock coordinate
+  # Every module under tests/integration/ -- including marker-classified
+  # producer/consumer/govern contracts and the regression coverage added by
+  # #2226 (ADO lock coordinate
   # preservation) and #2240 (virtual/manifestless lifecycle convergence) --
   # only ran on merge_group (ci-integration.yml), never as a required PR
   # check. A revert of either fix could sit un-caught until a PR reached the
@@ -443,15 +443,14 @@ jobs:
   # marked `lifecycle_merge_group`; ci-integration.yml's full integration
   # shards still execute those nodes from the unfiltered tests/integration root.
   #
-  # Why these 20 required nodes, Consume/Produce/Govern coverage
+  # Why these 32 required nodes, Consume/Produce/Govern coverage
   # ------------------------------------------------------------
-  # Fourteen original nodes retain the exact assurance promoted by #2247:
-  # one static authority guard plus in-process policy, content-hash, hook,
-  # virtual-skill, and virtual-package lifecycle contracts. Six additional
-  # nodes in test_required_lifecycle_state_machine.py drive the uv-installed
-  # `apm` console script through real subprocess boundaries and local Git:
-  # pack/install/compile/audit closure, target widen/narrow, reinstall
-  # idempotency, prune/uninstall cascade, tamper/repair, and mixed primitives.
+  # The marker family retains one static authority guard plus policy,
+  # content-hash, hook, virtual-package, audit, auth, and installed-console
+  # lifecycle contracts. Real subprocess rows use the uv-installed `apm`
+  # console script and local Git for pack/install/compile/audit closure,
+  # target widen/narrow, reinstall idempotency, prune/uninstall cascade,
+  # tamper/repair, and mixed primitives.
   # This is installed-console-script coverage, not frozen PyInstaller parity;
   # the packaged-platform lane owns frozen-binary coverage.
   #
@@ -463,7 +462,7 @@ jobs:
   #
   # Why this stays hermetic, network-free, and credential-free
   # ------------------------------------------------------------
-  # The six subprocess nodes carry requires_apm_binary and requires_e2e_mode.
+  # Subprocess nodes carry requires_apm_binary and requires_e2e_mode.
   # `uv sync --extra dev` puts the installed console script on PATH, while the
   # pytest step's APM_E2E_TESTS=1 enables only the declarative E2E prerequisite.
   # APM_RUN_INTEGRATION_TESTS remains unset: no live network integration is
@@ -477,12 +476,12 @@ jobs:
   #
   # Why timeout-minutes: 3
   # ------------------------
-  # Two idle final runs of the current 23-node selection measured 65.93s and
-  # 41.74s pytest time (67.89s and 43.27s command wall). The 3-minute job cap includes
-  # checkout/setup/sync and still fails fast on accidental network retries or
-  # unreviewed marker growth. Hosted job duration is the release authority.
+  # Recent hosted runs of the current 32-node required selection complete in
+  # about one minute. The 3-minute job cap includes checkout/setup/sync and
+  # still fails fast on accidental network retries or unreviewed marker growth.
+  # Hosted job duration is the release authority.
   #
-  # tests/quality/test_ci_topology.py guards the 23/3/20 marker partition, this
+  # tests/quality/test_ci_topology.py guards the 35/3/32 marker partition, this
   # exact expression, the full merge-group integration path, --strict-markers,
   # required-check membership, E2E opt-in placement, and credential/network
   # prohibitions.

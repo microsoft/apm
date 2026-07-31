@@ -600,6 +600,42 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     )
 
 
+def test_behavioral_taxonomy_is_owned_by_module_pytestmark() -> None:
+    """Distributed module markers must not regress to a central file list."""
+    root = Path(__file__).parents[2]
+    quality_root = root / "tests" / "quality"
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    plugin = (quality_root / "taxonomy_inventory_plugin.py").read_text(encoding="utf-8")
+    contract = (quality_root / "test_test_taxonomy.py").read_text(encoding="utf-8")
+    source = root / ".apm/instructions/architecture.instructions.md"
+    deployed = root / ".github/instructions/architecture.instructions.md"
+
+    assert list(quality_root.glob("*suite*.toml")) == []
+    assert source.read_bytes() == deployed.read_bytes()
+    assert (
+        "| Behavioral test taxonomy classification | module-level pytestmark "
+        "(taxonomy inventory verifies) |" in source.read_text(encoding="utf-8")
+    )
+    assert "AC22: module-level behavioral test taxonomy authority" in guard
+    assert "Behavioral test taxonomy must stay owned by module-level pytestmark" in guard
+    assert 'getattr(module, "pytestmark"' in plugin
+    assert '"modules": modules' in plugin
+    assert "def _assert_marker_only_taxonomy(" in contract
+    assert "def test_tm003_multiple_node_classifications_fail(" in contract
+    assert "def test_tm003_mixed_module_classifications_fail(" in contract
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    lockfile = LockFile.load_or_create(root / "apm.lock.yaml")
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    tests_instruction = root / ".github/instructions/tests.instructions.md"
+    record = ledger.records.get("copilot||project|.github/instructions/tests.instructions.md")
+    assert record is not None
+    assert record.content_hash == compute_file_hash(tests_instruction)
+
+
 @pytest.mark.parametrize(
     ("target_flag", "expected_targets"),
     (

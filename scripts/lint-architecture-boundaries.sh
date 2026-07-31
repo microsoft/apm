@@ -824,6 +824,29 @@ if ! grep -q 'parse_targets_field(apm_config)' <<<"$mcp_manifest_adapter" \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC22: module-level behavioral test taxonomy authority"
+taxonomy_plugin="tests/quality/taxonomy_inventory_plugin.py"
+taxonomy_contract="tests/quality/test_test_taxonomy.py"
+taxonomy_parallel_hits=$(
+    grep -En \
+        '(^|[^A-Za-z_])(MANIFEST|_manifest_modules|tracked_python_inventory)|behavioral markers outside critical manifest|len\(modules\)[[:space:]]*==' \
+        "$taxonomy_contract" \
+        || true
+)
+if ! grep -q 'getattr(module, "pytestmark"' "$taxonomy_plugin" \
+    || ! grep -q '"modules": modules' "$taxonomy_plugin" \
+    || ! grep -q '"nodes": nodes' "$taxonomy_plugin" \
+    || ! grep -q '^def _assert_marker_only_taxonomy(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm003_multiple_node_classifications_fail(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm003_mixed_module_classifications_fail(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm004_new_module_classification_needs_no_whitelist(' \
+        "$taxonomy_contract" \
+    || [ -n "$taxonomy_parallel_hits" ]; then
+    echo "[x] Behavioral test taxonomy must stay owned by module-level pytestmark"
+    [ -n "$taxonomy_parallel_hits" ] && echo "$taxonomy_parallel_hits"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1
