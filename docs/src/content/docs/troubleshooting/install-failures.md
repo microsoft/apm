@@ -38,14 +38,15 @@ Common fixes:
 
 ### GHES (GitHub Enterprise Server)
 
-Set `GITHUB_HOST` to switch host classification, transport, and the auth chain:
+Set `GITHUB_HOST` for a GHES instance:
 
 ```bash
 export GITHUB_HOST=ghe.example.com
 export GITHUB_APM_PAT=ghp_ghes_xxx
 ```
 
-The same precedence chain applies; the host just changes which API endpoint is hit and which clone URLs are composed.
+APM applies the GitHub precedence chain and composes API and clone URLs for
+that host. Azure DevOps Server uses the separate host configuration below.
 
 ### GitLab (SaaS and self-managed)
 
@@ -64,6 +65,8 @@ If you operate multiple GitLab instances, list them in `APM_GITLAB_HOSTS` (comma
 
 ### Azure DevOps
 
+Azure DevOps Services hosts (`dev.azure.com` and `*.visualstudio.com`) use:
+
 ```text
 ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   none
 ```
@@ -72,13 +75,33 @@ ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   none
 export ADO_APM_PAT=ado_pat_xxx
 ```
 
-If both are set and the request still fails, APM emits a hint that `ADO_APM_PAT` was rejected and the AAD bearer was tried. Unset the PAT to test AAD auth alone:
+If `ADO_APM_PAT` is set and `az` is logged in but the request still fails,
+APM emits a hint that the PAT was rejected and the bearer was tried. Unset
+the PAT to test bearer auth alone:
 
 ```bash
 unset ADO_APM_PAT
 az login
 apm install
 ```
+
+Azure DevOps Server is PAT-only:
+
+```text
+ADO_APM_PAT   ->   none
+```
+
+```bash
+export ADO_HOST=ado.example.com
+export ADO_APM_PAT=ado_pat_xxx
+```
+
+Use `APM_ADO_HOSTS` for multiple Server instances. A configured ADO host wins
+when `GITHUB_HOST` names the same host. Host variables accept FQDNs only,
+without a scheme, port, or path; put a non-default HTTPS port in the
+dependency URL. Use a root-hosted collection path. APM rejects `/tfs/`
+prefixes. If the PAT is rejected, rotate it -- Azure CLI bearer auth does
+not apply to Server.
 
 ### Test your token
 
@@ -93,12 +116,18 @@ curl -H "Authorization: Bearer $GITHUB_APM_PAT" \
 curl -H "PRIVATE-TOKEN: $GITLAB_APM_PAT" \
      "https://${GITLAB_HOST:-gitlab.com}/api/v4/projects/<owner>%2F<repo>"
 
-# Azure DevOps
+# Azure DevOps Services (PAT)
 curl -u ":${ADO_APM_PAT}" \
      "https://dev.azure.com/<org>/<project>/_apis/git/repositories/<repo>?api-version=7.0"
+
+# Azure DevOps Server (remove :8443 when using default HTTPS)
+curl -u ":${ADO_APM_PAT}" \
+     "https://${ADO_HOST}:8443/DefaultCollection/<project>/_apis/git/repositories/<repo>?api-version=7.0"
 ```
 
-A `200` here with a failing `apm install` points at precedence (a higher-priority var is set to a different token). Run `apm install --verbose` to see which source APM picked.
+A `200` confirms the credential works. If `apm install` still fails, run
+`apm install --verbose` to see which source APM picked. For Server, confirm
+the hostname is registered through `ADO_HOST` or `APM_ADO_HOSTS`.
 
 For end-to-end auth setup see [Authentication](../../getting-started/authentication/).
 
