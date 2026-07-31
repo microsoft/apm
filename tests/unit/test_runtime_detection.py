@@ -204,7 +204,7 @@ class TestRuntimeDetectionIntegration(unittest.TestCase):
 class TestVSCodeRuntimeDetection(unittest.TestCase):
     """Tests for the _is_vscode_available() production helper."""
 
-    MODULE = "apm_cli.integration.mcp_integrator"
+    MODULE = "apm_cli.integration.mcp_vscode"
 
     def _run(self, code_on_path: bool, vscode_dir_exists: bool) -> bool:
         from apm_cli.integration.mcp_integrator import _is_vscode_available

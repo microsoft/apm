@@ -105,13 +105,33 @@ def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> 
     ``package_info.dependency_ref.skill_subset`` untouched (no recomputation,
     no dropping to ``None``) so the replay pipeline enforces exactly what was
     locked -- not a value re-derived at replay time.
+
+    Stage-2 call shape (issue #1078): skill_subset arrives inside
+    ``options=IntegrationOptions(skill_subset=...)``.  The guard accepts this
+    parameter-object routing while remaining strict: it requires a direct
+    ``IntegrationOptions(...)`` literal (not a pre-built variable), requires a
+    ``skill_subset=`` kwarg inside it, and requires that kwarg's value to trace
+    back to ``package_info.dependency_ref.skill_subset`` -- so a future change
+    passing ``skill_subset=None`` or re-deriving the subset would still fail.
+
+    Pre-#1078 call shape (preserved as comment for archaeology):
+        integrate_package_primitives(..., skill_subset=package_info.dependency_ref.skill_subset, ...)
     """
     source_path = _REPO_ROOT / "src" / "apm_cli" / "install" / "drift.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
 
     func = _find_function(tree, "run_replay")
     call = _find_call(func, "integrate_package_primitives")
-    value = _keyword_value(call, "skill_subset")
+
+    # #1078: skill_subset is now nested inside options=IntegrationOptions(skill_subset=...).
+    # _keyword_value on the outer call finds "options="; then we drill into the
+    # IntegrationOptions literal to find "skill_subset=" and verify its provenance.
+    options_value = _keyword_value(call, "options")
+    assert isinstance(options_value, ast.Call), (
+        "run_replay()'s integrate_package_primitives options= must be a direct "
+        "IntegrationOptions(...) call, not a pre-built variable or expression"
+    )
+    value = _keyword_value(options_value, "skill_subset")
 
     assert _expression_depends_on(value, "package_info.dependency_ref.skill_subset"), (
         "run_replay()'s integrate_package_primitives(...) call must pass "

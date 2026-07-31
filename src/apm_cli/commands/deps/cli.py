@@ -1,10 +1,8 @@
 """APM dependency management CLI commands."""
 
-import re
 import shutil
 import sys
-from collections.abc import Iterator
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 
 import click
 
@@ -15,15 +13,18 @@ from ...core.target_detection import TargetParamType
 from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
 from .._helpers import (
-    UnknownPackageError,
     _expand_with_ancestors,
     _standalone_installed_packages,
-    resolve_requested_packages,
 )
+from ._cli_ops import _show_scope_deps, _update_impl
 from ._utils import (
+    _absolute_local_display,
     _count_primitives,
     _get_package_display_info,
+    _is_absolute_local_path,
     _is_nested_under_package,
+    _logical_local_display,
+    _walk_tree_children,
 )
 from .why import why as _why_cmd
 
@@ -61,49 +62,6 @@ def _deps_list_source_label(
     return "github"
 
 
-_LOCAL_HASH_SLOT_RE = re.compile(r"^(_local)/[0-9a-f]{12}/(.+)$")
-
-
-def _is_absolute_local_path(path: str) -> bool:
-    """True if a declared local path embeds host filesystem structure.
-
-    Absolute POSIX paths (``/Users/...``), home-relative paths (``~/...``), and
-    Windows drive/UNC paths (``C:\\...``, ``\\\\server\\share``) all leak the
-    author's machine layout and must not reach user-facing output. Relative
-    declared paths (``../pkg``, ``./packages/foo``) are portable and safe.
-    """
-    if not path:
-        return False
-    if path.startswith("~"):
-        return True
-    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
-
-
-def _absolute_local_display(path: str, fallback: str) -> str:
-    """Return a portable logical name for an absolute local dependency."""
-    windows_path = PureWindowsPath(path)
-    parsed_path = (
-        windows_path
-        if windows_path.is_absolute() or path.startswith("~\\")
-        else PurePosixPath(path)
-    )
-    return f"_local/{parsed_path.name}" if parsed_path.name else fallback
-
-
-def _logical_local_display(physical_name: str) -> str:
-    """Strip the physical hash segment from an unmapped local slot.
-
-    Orphaned local transitive slots (``_local/<12hex>/pkg``) have no lockfile
-    entry, so ``physical_to_logical`` cannot resolve them. Orphan *detection*
-    keeps the raw physical identity, but the name shown to the user must be the
-    hash-free logical form (``_local/pkg``). Non-local names pass through.
-    """
-    match = _LOCAL_HASH_SLOT_RE.match(physical_name)
-    if match:
-        return f"{match.group(1)}/{match.group(2)}"
-    return physical_name
-
-
 def _dep_display_name(dep: LockedDependency) -> str:
     """Get display name for a locked dependency (key@version).
 
@@ -132,45 +90,6 @@ def _dep_display_name(dep: LockedDependency) -> str:
         or "latest"
     )
     return f"{key}@{version}"
-
-
-def _walk_tree_children(
-    parent_key: str,
-    children_map: dict[str, list[LockedDependency]],
-) -> Iterator[tuple[LockedDependency, tuple[int, ...], tuple[bool, ...], bool]]:
-    """Yield dependency-tree descendants depth-first without Python recursion."""
-    ancestors = frozenset({parent_key})
-    children = children_map.get(parent_key, [])
-    stack: list[tuple[LockedDependency, tuple[int, ...], tuple[bool, ...], frozenset[str]]] = []
-    for index in range(len(children) - 1, -1, -1):
-        stack.append(
-            (
-                children[index],
-                (index,),
-                (index == len(children) - 1,),
-                ancestors,
-            )
-        )
-
-    while stack:
-        child_dep, path, last_flags, parent_ancestors = stack.pop()
-        child_key = child_dep.get_unique_key()
-        is_circular = child_key in parent_ancestors
-        yield child_dep, path, last_flags, is_circular
-        if is_circular:
-            continue
-
-        child_ancestors = parent_ancestors | {child_key}
-        grandchildren = children_map.get(child_key, [])
-        for index in range(len(grandchildren) - 1, -1, -1):
-            stack.append(
-                (
-                    grandchildren[index],
-                    (*path, index),
-                    (*last_flags, index == len(grandchildren) - 1),
-                    child_ancestors,
-                )
-            )
 
 
 def _add_tree_children(
@@ -415,125 +334,6 @@ def deps():
 deps.add_command(_why_cmd)
 
 
-def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
-    """Display dependencies for a single scope (Project or Global)."""
-    installed_packages, orphaned_packages = _resolve_scope_deps(apm_dir, logger, insecure_only)
-
-    if installed_packages is None:
-        logger.progress(f"No APM dependencies installed ({scope_label} scope)")
-        logger.verbose_detail("Run 'apm install' to install dependencies from apm.yml")
-        return
-
-    if not installed_packages:
-        if insecure_only:
-            logger.progress(f"No insecure APM dependencies installed ({scope_label} scope)")
-        else:
-            logger.progress(
-                f"apm_modules/ directory exists but contains no valid packages ({scope_label} scope)"
-            )
-        return
-
-    # Display packages in table format
-    if has_rich:
-        from rich.table import Table
-
-        table = Table(
-            title=(
-                f" Insecure APM Dependencies ({scope_label})"
-                if insecure_only
-                else f" APM Dependencies ({scope_label})"
-            ),
-            show_header=True,
-            header_style="bold cyan",
-        )
-        table.add_column("Package", style="bold white")
-        table.add_column("Version", style="yellow")
-        table.add_column("Source", style="blue")
-        if insecure_only:
-            table.add_column("Origin", style="bold red")
-        table.add_column("Prompts", style="magenta", justify="center")
-        table.add_column("Instructions", style="green", justify="center")
-        table.add_column("Agents", style="cyan", justify="center")
-        table.add_column("Skills", style="yellow", justify="center")
-        table.add_column("Hooks", style="red", justify="center")
-
-        for pkg in installed_packages:
-            p = pkg["primitives"]
-            table.add_row(
-                pkg["name"],
-                pkg["version"],
-                pkg["source"],
-                *([pkg["insecure_via"]] if insecure_only else []),
-                str(p.get("prompts", 0)) if p.get("prompts", 0) > 0 else "-",
-                str(p.get("instructions", 0)) if p.get("instructions", 0) > 0 else "-",
-                str(p.get("agents", 0)) if p.get("agents", 0) > 0 else "-",
-                str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-",
-                str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-",
-            )
-
-        console.print(table)
-
-        # Show orphaned packages warning -- routed through CommandLogger
-        # so output goes through the central STATUS_SYMBOLS prefix path
-        # (no raw `[!]` literal that Rich would parse as markup) and so
-        # behaviour is consistent with prune.py.
-        if orphaned_packages:
-            logger.warning(
-                f"{len(orphaned_packages)} orphaned package(s) found "
-                "(not in resolved dependency graph):"
-            )
-            for pkg in orphaned_packages:
-                logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
-    else:
-        # Fallback text table
-        if insecure_only:
-            click.echo(f" Insecure APM Dependencies ({scope_label}):")
-            click.echo(
-                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Origin':<18} "
-                f"{'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
-            )
-            click.echo("-" * 117)
-        else:
-            click.echo(f" APM Dependencies ({scope_label}):")
-            click.echo(
-                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
-            )
-            click.echo("-" * 98)
-
-        for pkg in installed_packages:
-            p = pkg["primitives"]
-            name = pkg["name"][:28]
-            version = pkg["version"][:8]
-            source = pkg["source"][:10]
-            insecure_via = pkg["insecure_via"][:16]
-            prompts = str(p.get("prompts", 0)) if p.get("prompts", 0) > 0 else "-"
-            instructions = str(p.get("instructions", 0)) if p.get("instructions", 0) > 0 else "-"
-            agents = str(p.get("agents", 0)) if p.get("agents", 0) > 0 else "-"
-            skills = str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-"
-            hooks = str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-"
-            if insecure_only:
-                click.echo(
-                    f"{name:<30} {version:<10} {source:<12} {insecure_via:<18} "
-                    f"{prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
-                )
-            else:
-                click.echo(
-                    f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
-                )
-
-        # Show orphaned packages warning -- route through CommandLogger
-        # for consistency with the rich branch above and with prune.py.
-        if orphaned_packages:
-            logger.warning(
-                f"{len(orphaned_packages)} orphaned package(s) found "
-                "(not in resolved dependency graph):"
-            )
-            for pkg in orphaned_packages:
-                logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
-
-
 @deps.command(name="list", help="List installed APM dependencies and their primitives")
 @click.option(
     "--global",
@@ -635,8 +435,7 @@ def _build_dep_tree(apm_dir):
             'apm_modules_path': Path,
             'source': 'lockfile' | 'directory',
             'direct': [dep, ...],           # lockfile mode only
-            'children_map': {unique_key: [dep]},  # lockfile mode only
-            'unresolved': [dep, ...],       # lockfile mode only
+            'children_map': {url: [dep]},   # lockfile mode only
             'scanned_packages': [{...}],    # directory fallback only
             'has_modules': bool,
         }
@@ -959,145 +758,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
         apm deps update org/a org/b        # Update specific packages
         apm deps update --verbose          # Show detailed progress
     """
-    from ...core.auth import AuthResolver
-    from ...core.command_logger import InstallLogger
-    from ...utils.console import _rich_warning
-    from ..install import (
-        _APM_IMPORT_ERROR,
-        APM_DEPS_AVAILABLE,
-        _install_apm_dependencies,
-    )
-
-    # Soft-deprecation (issue #1525): `apm update` is now a strict superset
-    # of this command. Kept working for one release; removed in the next
-    # breaking release.
-    _rich_warning(
-        "'apm deps update' is deprecated; use 'apm update' instead. "
-        "'apm update' now supports -g/--global, [PACKAGES]..., --force, and "
-        "--parallel-downloads, plus an interactive plan, --dry-run, and --yes.",
-        symbol="warning",
-    )
-
-    logger = InstallLogger(verbose=verbose, partial=bool(packages))
-
-    if not APM_DEPS_AVAILABLE:
-        logger.error("APM dependency system not available")
-        if _APM_IMPORT_ERROR:
-            logger.progress(f"Import error: {_APM_IMPORT_ERROR}")
-        sys.exit(1)
-
-    from ...core.scope import InstallScope, get_apm_dir
-
-    scope = InstallScope.USER if global_ else InstallScope.PROJECT
-    project_root = get_apm_dir(scope)
-    apm_yml_path = project_root / APM_YML_FILENAME
-
-    if not apm_yml_path.exists():
-        scope_hint = "~/.apm/" if global_ else "current directory"
-        logger.error(f"No {APM_YML_FILENAME} found in {scope_hint}")
-        sys.exit(1)
-
-    try:
-        apm_package = APMPackage.from_apm_yml(apm_yml_path)
-    except Exception as e:
-        logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
-        sys.exit(1)
-
-    all_deps = apm_package.get_apm_dependencies() + apm_package.get_dev_apm_dependencies()
-    if not all_deps:
-        logger.progress("No APM dependencies defined in apm.yml")
-        return
-
-    # Validate and normalize requested packages to canonical dependency keys.
-    # Shared with `apm update` (see commands/_helpers.py) so the two update
-    # surfaces resolve short names identically.
-    try:
-        only_pkgs = resolve_requested_packages(packages, all_deps)
-    except UnknownPackageError as e:
-        logger.error(f"Package '{e.token}' not found in {APM_YML_FILENAME}")
-        logger.progress(f"Available: {', '.join(e.available)}")
-        sys.exit(1)
-
-    # Migrate legacy lockfile first, then snapshot SHAs for before/after diff
-    from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
-
-    lockfile_path = get_lockfile_path(project_root)
-    migrate_lockfile_if_needed(project_root)
-
-    old_lockfile = LockFile.read(lockfile_path)
-    had_baseline = old_lockfile is not None
-    old_shas: dict = {}
-    if old_lockfile:
-        for key, dep in old_lockfile.dependencies.items():
-            old_shas[key] = dep.resolved_commit
-
-    auth_resolver = AuthResolver()
-
-    noun = f"{len(packages)} package(s)" if packages else f"all {len(all_deps)} dependencies"
-    # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
-    if not legacy_skill_paths:
-        from ...integration.targets import should_use_legacy_skill_paths
-
-        legacy_skill_paths = should_use_legacy_skill_paths()
-
-    logger.start(f"Updating {noun}...")
-
-    try:
-        install_result = _install_apm_dependencies(
-            apm_package,
-            update_refs=True,
-            verbose=verbose,
-            only_packages=only_pkgs,
-            force=force,
-            parallel_downloads=parallel_downloads,
-            logger=logger,
-            auth_resolver=auth_resolver,
-            target=target,
-            scope=scope,
-            legacy_skill_paths=legacy_skill_paths,
-        )
-    except Exception as e:
-        logger.error(f"Update failed: {e}")
-        if not verbose:
-            logger.progress("Run with --verbose for detailed diagnostics")
-        sys.exit(1)
-
-    # Show diagnostics if any
-    if install_result.diagnostics and install_result.diagnostics.has_diagnostics:
-        install_result.diagnostics.render_summary()
-
-    # Compare old vs new lockfile SHAs to show what changed
-    new_lockfile = LockFile.read(lockfile_path)
-    changed: list = []
-    if new_lockfile:
-        for key, dep in new_lockfile.dependencies.items():
-            old_sha = old_shas.get(key)
-            new_sha = dep.resolved_commit
-            if old_sha and new_sha and old_sha != new_sha:
-                changed.append((key, old_sha[:8], new_sha[:8], dep.resolved_ref or ""))
-
-    error_count = 0
-    if install_result.diagnostics:
-        try:
-            error_count = int(install_result.diagnostics.error_count)
-        except (TypeError, ValueError):
-            error_count = 0
-
-    if changed:
-        pkg_noun = "package" if len(changed) == 1 else "packages"
-        if error_count > 0:
-            logger.warning(f"Updated {len(changed)} {pkg_noun} with {error_count} error(s).")
-        else:
-            logger.success(f"Updated {len(changed)} {pkg_noun}:")
-        for key, old_sha, new_sha, ref in changed:
-            ref_str = f" ({ref})" if ref else ""
-            click.echo(f"  {key}{ref_str}: {old_sha} -> {new_sha}")
-    elif error_count > 0:
-        logger.error(f"Update failed with {error_count} error(s).")
-    elif not had_baseline:
-        logger.success("Update complete.")
-    else:
-        logger.success("All packages already at latest refs.")
+    _update_impl(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths)
 
 
 @deps.command(

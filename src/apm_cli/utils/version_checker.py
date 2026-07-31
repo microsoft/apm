@@ -105,6 +105,24 @@ def _normalize_release_tag(tag_name: str) -> str | None:
     return None
 
 
+def _parse_releases_response(data: object, include_prerelease: bool) -> str | None:
+    """Extract a version string from a GitHub releases API response payload."""
+    if include_prerelease:
+        if not isinstance(data, list):
+            return None
+        for release in data:
+            if not isinstance(release, dict):
+                continue
+            if release.get("draft") or not release.get("prerelease"):
+                continue
+            normalized = _normalize_release_tag(str(release.get("tag_name", "")))
+            if normalized is not None:
+                return normalized
+        return None
+    tag_name = data.get("tag_name", "") if isinstance(data, dict) else ""  # type: ignore[union-attr]
+    return _normalize_release_tag(tag_name)
+
+
 def get_latest_version_from_github(
     repo: str | None = None,
     timeout: int = 2,
@@ -141,7 +159,6 @@ def get_latest_version_from_github(
     Returns:
         Version string (e.g., ``"0.6.3"``) or ``None`` if unable to fetch.
     """
-    # When VERSION is pinned, skip the network call entirely.
     pinned = _get_air_gap_version()
     if pinned is not None:
         return _normalize_release_tag(pinned)
@@ -166,28 +183,9 @@ def get_latest_version_from_github(
             {"Authorization": f"token {token}"} if token and release_metadata_url is None else {}
         )
         response = requests.get(url, headers=headers, timeout=timeout)
-
         if response.status_code != 200:
             return None
-
-        data = response.json()
-        if include_prerelease and release_metadata_url is None:
-            if not isinstance(data, list):
-                return None
-            for release in data:
-                if not isinstance(release, dict):
-                    continue
-                if release.get("draft"):
-                    continue
-                if not release.get("prerelease"):
-                    continue
-                normalized = _normalize_release_tag(str(release.get("tag_name", "")))
-                if normalized is not None:
-                    return normalized
-            return None
-
-        tag_name = data.get("tag_name", "")
-        return _normalize_release_tag(tag_name)
+        return _parse_releases_response(response.json(), include_prerelease)
     except Exception:
         # Silently fail for any network/parsing errors
         return None

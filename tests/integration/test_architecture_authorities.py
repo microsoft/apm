@@ -81,22 +81,27 @@ def test_frozen_install_decisions_have_single_owner() -> None:
     root = Path(__file__).parents[2]
     service = (root / "src/apm_cli/install/service.py").read_text(encoding="utf-8")
     adapter = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
+    # #1078 split: the APM install pipeline that owns the frozen preflight and
+    # the legacy-lockfile migration was extracted out of the CLI adapter, and
+    # the local-bundle probe moved behind _try_local_bundle_install(). The
+    # ordering invariants below are unchanged -- only their host files moved.
+    pipeline = (root / "src/apm_cli/install/apm_packages.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     assert service.count("def enforce_frozen(") == 1
     assert service.count("def reject_frozen_mutation(") == 1
     assert service.count("def reject_missing_frozen_root(") == 1
-    assert "InstallService.enforce_frozen(" in adapter
+    assert "InstallService.enforce_frozen(" in pipeline
     assert "InstallService.reject_frozen_mutation(" in adapter
     assert "InstallService.reject_missing_frozen_root(" in adapter
-    assert adapter.index("InstallService.enforce_frozen(") < adapter.index(
+    assert pipeline.index("InstallService.enforce_frozen(") < pipeline.index(
         "migrate_lockfile_if_needed(ctx.apm_dir)"
     )
     assert adapter.index("InstallService.reject_missing_frozen_root(") < adapter.index(
         "_root_redirect = install_root_redirect("
     )
     assert adapter.index("InstallService.reject_frozen_mutation(") < adapter.index(
-        "if len(packages) == 1 and not mcp_name"
+        "_try_local_bundle_install("
     )
     assert "Frozen install decisions must route through InstallService before mutation" in guard
 
@@ -259,7 +264,9 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     """Fixture authoring must consume the product parser's field vocabulary."""
     root = Path(__file__).parents[2]
     object_fields = (root / "src/apm_cli/models/dependency/object_fields.py").read_text()
-    parser = (root / "src/apm_cli/models/dependency/reference.py").read_text()
+    # Calls moved to _reference_parse.py in #1078 strangler-fig split;
+    # reference.py is now a pure facade re-exporting from the sibling.
+    parser = (root / "src/apm_cli/models/dependency/_reference_parse.py").read_text()
     fixture = (root / "tests/utils/local_package.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
@@ -364,7 +371,9 @@ def test_ado_lock_coordinates_have_single_owner() -> None:
 def test_packed_marketplace_source_parsing_has_single_owner() -> None:
     """Packed marketplace URL/ref/path parsing must use DependencyReference."""
     root = Path(__file__).parents[2]
-    resolver = (root / "src/apm_cli/marketplace/resolver.py").read_text(encoding="utf-8")
+    # Function moved to _resolver_match.py in #1078 strangler-fig split;
+    # resolver.py re-exports it; authority is still singular.
+    resolver = (root / "src/apm_cli/marketplace/_resolver_match.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     helper = resolver.split(
@@ -394,7 +403,8 @@ def test_packed_marketplace_source_owner_guard_rejects_parallel_parser(
             "node_modules",
         ),
     )
-    resolver_path = sandbox / "src/apm_cli/marketplace/resolver.py"
+    # Function moved to _resolver_match.py in #1078; update sandbox path accordingly.
+    resolver_path = sandbox / "src/apm_cli/marketplace/_resolver_match.py"
     resolver_source = resolver_path.read_text(encoding="utf-8")
     resolver_path.write_text(
         resolver_source.replace(
@@ -567,7 +577,9 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     """Bundle persistence and drift exclusion must consume the deployment ledger."""
     root = Path(__file__).parents[2]
     handler = (root / "src/apm_cli/install/local_bundle_handler.py").read_text()
-    drift = (root / "src/apm_cli/install/drift.py").read_text()
+    # #1078 strangler-fig split: the diff engine moved to _drift_diff.py;
+    # drift.py re-exports it, so the single-owner claim is unchanged.
+    drift = (root / "src/apm_cli/install/_drift_diff.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert "DeploymentLedgerCodec.record_local_bundle_files" in handler
@@ -1153,9 +1165,15 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
     """Dispatch and flattening must consume one deterministic selector."""
     root = Path(__file__).parents[2]
     source = (root / "src/apm_cli/deps/apm_resolver.py").read_text()
+    # #1078 strangler-fig split: def + flatten call live in apm_resolver_helpers.py;
+    # BFS dispatch call remains in apm_resolver.py. Combined count must still be 3.
+    helpers = (root / "src/apm_cli/deps/apm_resolver_helpers.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
-    assert source.count("_select_dependency_winners(") == 3
+    assert (
+        source.count("_select_dependency_winners(") + helpers.count("_select_dependency_winners(")
+        == 3
+    )
     assert "Dependency ref winner selection must use one helper" in guard
     for duplicate in (
         "download_winners",
@@ -1189,14 +1207,17 @@ def test_skill_subset_filtering_has_one_canonical_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/models/dependency/subsets.py").read_text()
     integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text()
-    exporter = (root / "src/apm_cli/bundle/plugin_exporter.py").read_text()
+    # #1078 strangler-fig split: exporter logic moved from plugin_exporter.py into
+    # _plugin_exporter_ops.py; the canonical call lives there.
+    exporter_ops = (root / "src/apm_cli/bundle/_plugin_exporter_ops.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert "def skill_subset_filter_tokens(" in owner
     assert "skill_subset_filter_tokens(skill_subset)" in integrator
-    assert "skill_subset_filter_tokens(dep.skill_subset)" in exporter
+    assert "skill_subset_filter_tokens(dep.skill_subset)" in exporter_ops
     assert "Skill subset filter tokens must come from models/dependency/subsets.py" in guard
     assert "def _skill_subset_name_filter" not in integrator
+    assert "def _skill_subset_name_filter" not in exporter_ops
 
 
 def test_cached_update_resolution_stays_with_downloader_owner() -> None:
@@ -1212,7 +1233,9 @@ def test_cached_update_resolution_stays_with_downloader_owner() -> None:
 def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
     """Full and cached paths must share Claude Skill lock metadata logic."""
     root = Path(__file__).parents[2]
-    validation = (root / "src/apm_cli/models/validation.py").read_text()
+    # _validate_claude_skill moved from models/validation.py to
+    # models/_validation_rules.py in #1078 Stage-2 split; authority is singular.
+    validation = (root / "src/apm_cli/models/_validation_rules.py").read_text()
     sources = (root / "src/apm_cli/install/sources.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
@@ -1230,7 +1253,9 @@ def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
     """Cold-cache CI audit replay must route through install/drift.py."""
     root = Path(__file__).parents[2]
     replay = (root / "src/apm_cli/install/audit_replay.py").read_text(encoding="utf-8")
-    audit = (root / "src/apm_cli/commands/audit.py").read_text(encoding="utf-8")
+    # #1078 strangler-fig split: _audit_ci_gate moved to commands/_audit_ops.py;
+    # commands/audit.py is now a facade re-exporting it.
+    audit = (root / "src/apm_cli/commands/_audit_ops.py").read_text(encoding="utf-8")
     ci_checks = (root / "src/apm_cli/policy/ci_checks.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
@@ -1502,6 +1527,10 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     from scripts.check_repository_cache_identity_owner import check
 
     root = Path(__file__).parents[2]
+    # #1078 strangler-fig split: download logic moved from github_downloader.py into
+    # github_downloader_package_ops.py and github_downloader_subdir_ops.py.
+    downloader_pkg = (root / "src/apm_cli/deps/github_downloader_package_ops.py").read_text()
+    downloader_sub = (root / "src/apm_cli/deps/github_downloader_subdir_ops.py").read_text()
     downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text()
     shared_cache = (root / "src/apm_cli/deps/shared_clone_cache.py").read_text()
     tiered_resolver = (root / "src/apm_cli/deps/tiered_ref_resolver.py").read_text()
@@ -1516,11 +1545,11 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     assert "AC11: Git repository cache identity authority" in guard
     assert "check_repository_cache_identity_owner.py" in guard
     assert "repository = normalize_repo_url(repository_url)" in shared_cache
-    assert "repository_url = dep_ref.to_github_url()" in downloader
-    assert (
-        "_persistent_cache.get_checkout(\n                    dep_ref.to_github_url(),"
-        in downloader
-    )
+    # Both ops modules assign the canonical URL before passing it to the persistent cache.
+    assert "repository_url = dep_ref.to_github_url()" in downloader_pkg
+    assert "repository_url = dep_ref.to_github_url()" in downloader_sub
+    # Ops modules pass repository_url (derived from dep_ref.to_github_url()) into the cache.
+    assert "persistent_cache.get_checkout(\n            repository_url," in downloader_pkg
     assert "cache_shard_key(dep_ref.to_github_url())" in tiered_resolver
     assert "cache_shard_key(dep_ref.repo_url)" not in tiered_resolver
     assert tiered_resolver.count("_repository_cache_identity(dep_ref)") >= 2
@@ -1530,6 +1559,8 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     assert "to_repository_cache_url" not in downloader
     for retired_derivation in ("cache_owner", "cache_repo", '_canonical_url = f"https://'):
         assert retired_derivation not in downloader
+        assert retired_derivation not in downloader_pkg
+        assert retired_derivation not in downloader_sub
 
 
 def _load_hook_config_write_owner_checker() -> ModuleType:
@@ -1659,7 +1690,9 @@ def test_hook_config_write_ast_checker_passes_on_real_consumers() -> None:
 def test_ac15_uninstall_reachability_has_single_owner() -> None:
     """AC15 keeps post-uninstall dependency reachability behind one owner."""
     root = Path(__file__).parents[2]
-    engine = (root / "src/apm_cli/commands/uninstall/engine.py").read_text(encoding="utf-8")
+    # _orphan_ops.py is the sibling delegate extracted from engine.py in #1078
+    # (800-line guardrail split); compute_forward_reachable_keys moved with it.
+    engine = (root / "src/apm_cli/commands/uninstall/_orphan_ops.py").read_text(encoding="utf-8")
     reachability = (root / "src/apm_cli/deps/reachability.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
@@ -1694,12 +1727,14 @@ def test_ac15_reachability_owner_guard_rejects_manifest_bypass(tmp_path: Path) -
             "node_modules",
         ),
     )
-    engine_path = sandbox / "src/apm_cli/commands/uninstall/engine.py"
-    engine_source = engine_path.read_text(encoding="utf-8")
+    # _orphan_ops.py is the sibling delegate extracted from engine.py in #1078;
+    # _compute_actual_orphans and the manifest-parsing logic moved with it.
+    orphan_ops_path = sandbox / "src/apm_cli/commands/uninstall/_orphan_ops.py"
+    orphan_ops_source = orphan_ops_path.read_text(encoding="utf-8")
     # Simulate a bypass: re-derive reachability inline by parsing a nested
     # package's own manifest directly inside commands/uninstall, instead of
     # going through the single deps/reachability.py owner.
-    bypass_source = engine_source.replace(
+    bypass_source = orphan_ops_source.replace(
         "def _compute_actual_orphans(",
         (
             "def _bypass_manifest_scan(apm_package):\n"
@@ -1710,8 +1745,8 @@ def test_ac15_reachability_owner_guard_rejects_manifest_bypass(tmp_path: Path) -
         ),
         1,
     )
-    assert bypass_source != engine_source
-    engine_path.write_text(bypass_source, encoding="utf-8")
+    assert bypass_source != orphan_ops_source
+    orphan_ops_path.write_text(bypass_source, encoding="utf-8")
 
     result = subprocess.run(
         ("bash", "scripts/lint-architecture-boundaries.sh"),
@@ -1746,9 +1781,11 @@ def test_ac15_reachability_owner_guard_rejects_parallel_local_walk(tmp_path: Pat
             "node_modules",
         ),
     )
-    engine_path = sandbox / "src/apm_cli/commands/uninstall/engine.py"
-    engine_source = engine_path.read_text(encoding="utf-8")
-    bypass_source = engine_source.replace(
+    # _orphan_ops.py is the sibling delegate extracted from engine.py in #1078;
+    # _compute_actual_orphans moved with it.
+    orphan_ops_path = sandbox / "src/apm_cli/commands/uninstall/_orphan_ops.py"
+    orphan_ops_source = orphan_ops_path.read_text(encoding="utf-8")
+    bypass_source = orphan_ops_source.replace(
         "def _compute_actual_orphans(",
         (
             "def _bypass_local_walk(dep_ref, lockfile, project_root):\n"
@@ -1759,8 +1796,8 @@ def test_ac15_reachability_owner_guard_rejects_parallel_local_walk(tmp_path: Pat
         ),
         1,
     )
-    assert bypass_source != engine_source
-    engine_path.write_text(bypass_source, encoding="utf-8")
+    assert bypass_source != orphan_ops_source
+    orphan_ops_path.write_text(bypass_source, encoding="utf-8")
 
     result = subprocess.run(
         ("bash", "scripts/lint-architecture-boundaries.sh"),

@@ -27,7 +27,7 @@ from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
 from apm_cli.install.helpers.ref_reuse import (
-    maybe_resolve_git_semver as _maybe_resolve_git_semver,
+    maybe_resolve_git_semver as _maybe_resolve_git_semver,  # noqa: F401 -- re-export for @patch compat
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.transaction import resolution_for_context
@@ -80,6 +80,7 @@ def _purge_cached_semver_paths_for_update(
     apm_modules_dir,
     logger,
     staging_session: ResolutionStagingSession,
+    existing_lockfile=None,
 ) -> None:
     """Pre-purge on-disk install paths for direct git-source and registry semver deps
     when ``--update`` / ``--refresh`` is set.
@@ -99,14 +100,19 @@ def _purge_cached_semver_paths_for_update(
     """
     from contextlib import suppress
 
+    from apm_cli.drift import should_force_ref_recheck
     from apm_cli.utils.file_ops import robust_rmtree as _rrm
 
     for _dep in all_apm_deps:
+        # Route through the canonical ref-drift gate (drift.py), passing the
+        # locked dep so the semver predicate is used (update_refs=True path).
+        # Pre-guard on semver to skip non-range deps before the lockfile lookup.
         if getattr(_dep, "ref_kind", None) != "semver":
             continue
-        if _dep.is_local:
-            continue
-        if getattr(_dep, "artifactory_prefix", None):
+        _locked = (
+            existing_lockfile.get_dependency(_dep.get_unique_key()) if existing_lockfile else None
+        )
+        if not should_force_ref_recheck(_dep, _locked, update_refs=True):
             continue
         try:
             _ip = _dep.get_install_path(apm_modules_dir)
@@ -292,9 +298,6 @@ def _requires_remote_ref_resolution(ctx: InstallContext) -> bool:
 
 def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagingSession) -> None:
     """Resolve dependencies and populate the resolution fields on ``ctx``."""
-    import threading as _threading
-
-    from apm_cli.core.scope import InstallScope
     from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.install.insecure_policy import (
         _check_insecure_dependencies,
@@ -302,7 +305,6 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
         _guard_transitive_insecure_dependencies,
         _warn_insecure_dependencies,
     )
-    from apm_cli.install.phases.local_content import _copy_local_package
 
     # ------------------------------------------------------------------
     # 3b. Dedicated registry resolver (design §3.1, §8)
@@ -331,334 +333,37 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
     ctx.registry_resolver = registry_resolver
 
     # ------------------------------------------------------------------
-    # 4. Tracking variables (phase-local except where noted)
+    # 4. Tracking variables + transitive download callback
     # ------------------------------------------------------------------
-    # direct_dep_keys is phase-local (only read inside download_callback)
+    # direct_dep_keys is phase-local (only read by the download callback).
     direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
-    # These three escape to later phases via ctx
-    callback_downloaded: builtins.dict = {}
-    transitive_failures: builtins.list = []
-    callback_failures: builtins.set = builtins.set()
-    # F7 (#1116): the resolver may dispatch ``download_callback`` calls
-    # across a worker pool. CPython's GIL makes individual dict/set/list
-    # mutations atomic, but logging emission and the read+update on
-    # ``callback_downloaded`` (e.g. duplicate-key races) are not. A single
-    # narrow lock around the result-recording sites is sufficient and
-    # cheap; the heavy I/O work runs OUTSIDE the lock.
-    callback_lock = _threading.Lock()
-
-    # ------------------------------------------------------------------
-    # 5. Download callback for transitive resolution
-    # ------------------------------------------------------------------
-    # Capture frequently-used ctx fields as locals for the closure.
-    # This matches the original code's closure over function-level locals.
-    scope = ctx.scope
+    # project_root is reused below when building dep_base_dirs for transitive
+    # local deps (#857).
     project_root = ctx.project_root
-    # Local-path package references in apm.yml are relative to the
-    # manifest's location (source_root), not the deploy override.
-    # source_root is required on InstallContext; equals project_root
-    # when --root is not used.
-    source_root = ctx.source_root
     # --refresh implies re-resolution of all refs (but does NOT discard
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
     update_refs = _requires_remote_ref_resolution(ctx)
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: bypassing cached package content")
-    logger = ctx.logger
-    existing_lockfile = ctx.existing_lockfile
-    downloader = ctx.downloader
 
-    from apm_cli.drift import (
-        build_download_ref,
-        detect_ref_change,
-        should_force_ref_recheck,
+    # The former nested ``download_callback`` closure now lives in a stateful
+    # callable so this function stays within the complexity/statement budget.
+    # It accumulates downloaded / failures / transitive_failures which are
+    # folded back onto ctx after resolution (same mutable objects, by
+    # identity). Constructed lazily to avoid a resolve <-> resolve_transitive
+    # import cycle.
+    from apm_cli.install.phases.resolve_transitive import _TransitiveDownloader
+
+    download_cb = _TransitiveDownloader(
+        ctx,
+        registry_resolver=registry_resolver,
+        apply_lockfile_registry_name=_apply_lockfile_registry_name,
+        registries_map=registries_map,
+        direct_dep_keys=direct_dep_keys,
+        update_refs=update_refs,
+        staging_session=staging_session,
     )
-
-    verbose = ctx.verbose  # noqa: F841
-
-    def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
-        """Download a package during dependency resolution.
-
-        Args:
-            dep_ref: The dependency to download.
-            modules_dir: Target apm_modules directory.
-            parent_chain: Human-readable breadcrumb (e.g. "root > mid")
-                showing which dependency path led to this transitive dep.
-            parent_pkg: APMPackage that declared *dep_ref*, or None for direct
-                deps from the root project. For local deps we use its
-                ``source_path`` as the anchor for relative paths so a
-                transitive ``../sibling`` resolves against the declaring
-                package's directory rather than the root consumer (#857).
-        """
-        install_path = dep_ref.get_install_path(modules_dir)
-        # Cache reuse stays behind the canonical ref-drift owner.
-        if install_path.exists():
-            _locked_for_recheck = (
-                existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                if existing_lockfile
-                else None
-            )
-            if not should_force_ref_recheck(dep_ref, _locked_for_recheck, update_refs=update_refs):
-                return install_path
-        staging_session.prepare_path(install_path)
-        # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
-        # users see the install advancing past silent transitive lookups.
-        # Under F7's parallel BFS this callback may run on a worker
-        # thread, so serialise the emission via ``callback_lock`` to
-        # keep heartbeat lines from interleaving with each other.
-        # Workstream B (#1116): when the shared InstallTui is painting
-        # the Live region, the static heartbeat line would interleave
-        # with the spinner -- route the heartbeat to the TUI's
-        # task_started instead and skip the static line.
-        if logger:
-            with callback_lock:
-                _display = dep_ref.get_display_name()
-                _tui = getattr(ctx, "tui", None)
-                if _tui is not None:
-                    _tui.task_started(dep_ref.get_unique_key(), f"resolve {_display}")
-                if _tui is None or not _tui.is_animating():
-                    logger.resolving_heartbeat(_display)
-        try:
-            # ─── Registry-sourced dep (design §8) ──────────────────────
-            # Routed before local/git so the registry resolver owns the
-            # download for source=="registry" entries. Lockfile re-installs
-            # may arrive with registry_name=None — look it up by URL prefix
-            # against the configured registries map.
-            if dep_ref.source == "registry":
-                from apm_cli.deps.registry.feature_gate import (
-                    require_package_registry_enabled,
-                )
-
-                require_package_registry_enabled("Registry-sourced downloads")
-
-                if registry_resolver is None:
-                    raise RuntimeError(
-                        f"dep {dep_ref.repo_url!r} is registry-sourced but no "
-                        f"registries: block is configured in apm.yml and the "
-                        f"lockfile carries no resolved_url for it."
-                    )
-                dep_ref = _apply_lockfile_registry_name(
-                    dep_ref,
-                    registries_map,
-                    existing_lockfile=existing_lockfile,
-                )
-                # Registry T5: honor lockfile on apm install (mirrors git T5
-                # at lines below). When the lockfile has full replay data and
-                # the manifest range still covers the locked version, fetch
-                # from the locked URL and verify against the locked hash
-                # (npm install model — no /versions API call).
-                _locked_reg = (
-                    existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                    if existing_lockfile
-                    else None
-                )
-                if (
-                    not update_refs
-                    and _locked_reg
-                    and _locked_reg.resolved_url
-                    and _locked_reg.resolved_hash
-                    and _locked_reg.version
-                ):
-                    from apm_cli.drift import detect_ref_change as _detect_ref_change
-
-                    if not _detect_ref_change(dep_ref, _locked_reg, update_refs=False):
-                        registry_resolver.download_from_lockfile(
-                            dep_ref,
-                            install_path,
-                            resolved_url=_locked_reg.resolved_url,
-                            resolved_hash=_locked_reg.resolved_hash,
-                            version=_locked_reg.version,
-                        )
-                        callback_downloaded[dep_ref.get_unique_key()] = None
-                        return install_path
-                registry_resolver.download_package(dep_ref, install_path)
-                _annotate_registry_dep_ref(dep_ref, registry_resolver)
-                # Mark as already-downloaded so the parallel pre-download
-                # phase skips this dep. No SHA for registry deps.
-                callback_downloaded[dep_ref.get_unique_key()] = None
-                return install_path
-
-            # Handle local packages: copy instead of git clone
-            if dep_ref.is_local and dep_ref.local_path:
-                if (
-                    scope is InstallScope.USER
-                    and not Path(dep_ref.local_path).expanduser().is_absolute()
-                ):
-                    # At user scope, relative local paths have no meaningful
-                    # root (cwd is arbitrary, $HOME is not a project).  Only
-                    # absolute paths are unambiguous; reject relative refs.
-                    # Note: callback_failures is a set (see line ~105),
-                    # so use .add() rather than dict-style assignment.
-                    with callback_lock:
-                        callback_failures.add(dep_ref.get_unique_key())
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_failed(dep_ref.get_unique_key())
-                    return None
-                # Anchor relative paths on the *declaring* package's source
-                # directory when available (#857). Falls back to project_root
-                # for direct deps and for parents that predate source_path.
-                # Direct deps from the root project anchor at ``source_root``
-                # (which equals ``project_root`` unless ``apm install --root``
-                # redirects writes -- then it stays at $PWD).  Transitive
-                # deps from a parent local package anchor at that package's
-                # source_path, which is already an absolute path and not
-                # affected by ``--root``.
-                base_dir = (
-                    parent_pkg.source_path
-                    if parent_pkg is not None and parent_pkg.source_path is not None
-                    else source_root
-                )
-                result_path = _copy_local_package(
-                    dep_ref,
-                    install_path,
-                    base_dir,
-                    project_root=project_root,
-                    logger=logger,
-                )
-                if result_path:
-                    with callback_lock:
-                        callback_downloaded[dep_ref.get_unique_key()] = None
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_completed(dep_ref.get_unique_key())
-                    return result_path
-                _tui = getattr(ctx, "tui", None)
-                if _tui is not None:
-                    _tui.task_failed(dep_ref.get_unique_key())
-                return None
-
-            # --- Git-source semver range resolution (issue #1488) ---
-            # When the manifest carries a semver range as ``ref:`` and
-            # the dep is non-local, non-registry, and non-proxy, resolve
-            # it to a concrete tag BEFORE any git operation. The result
-            # is stashed on ctx so install/sources.py can plumb it into
-            # the lockfile, and the dep_ref's ``reference`` is replaced
-            # with the concrete tag so build_download_ref / clone use a
-            # literal git ref.
-            _semver_resolution = _maybe_resolve_git_semver(
-                dep_ref=dep_ref,
-                existing_lockfile=existing_lockfile,
-                update_refs=update_refs,
-                auth_resolver=ctx.auth_resolver,
-                ref_resolver_cache=ctx.ref_resolver_cache,
-                ref_resolver_cache_lock=callback_lock,
-                transport_selector=ctx.downloader._transport_selector,
-                protocol_pref=ctx.downloader._protocol_pref,
-            )
-            if _semver_resolution is not None:
-                with callback_lock:
-                    ctx.git_semver_resolutions[dep_ref.get_unique_key()] = _semver_resolution
-                # Rewrite the dep_ref's ref to the concrete tag so the
-                # rest of the pipeline (drift detection, download, etc.)
-                # operates on a literal git ref. The original constraint
-                # is preserved in the resolution dataclass.
-                dep_ref.reference = _semver_resolution.resolved_tag
-
-            # T5: Use locked commit for reproducibility, unless the manifest
-            # ref has drifted from what the lockfile recorded (spec drift).
-            _locked_dep = (
-                existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                if existing_lockfile
-                else None
-            )
-            _ref_changed = detect_ref_change(dep_ref, _locked_dep, update_refs=update_refs)
-
-            # When ref drifts, signal downstream that a content-hash change
-            # is expected so the supply-chain check in sources.py doesn't
-            # treat a legitimate re-resolution as an attack.
-            if _ref_changed:
-                with callback_lock:
-                    ctx.expected_hash_change_deps.add(dep_ref.get_unique_key())
-                if logger:
-                    _old = (
-                        _locked_dep.resolved_ref or _locked_dep.resolved_commit[:8]
-                        if _locked_dep
-                        else "?"
-                    )
-                    _new = dep_ref.reference or "HEAD"
-                    logger.verbose_detail(
-                        f"  [!] Spec drift: {dep_ref.get_unique_key()} "
-                        f"{_old} -> {_new}, re-resolving"
-                    )
-
-            download_dep = build_download_ref(
-                dep_ref,
-                existing_lockfile,
-                update_refs=update_refs,
-                ref_changed=_ref_changed,
-            )
-
-            # Silent download - no progress display for transitive deps
-            result = downloader.download_package(download_dep, install_path)
-            # Capture resolved commit SHA for lockfile
-            resolved_sha = None
-            if result and hasattr(result, "resolved_reference") and result.resolved_reference:
-                # Download wins over cached pre-plan state; tiered re-resolution is cheap.
-                dep_ref.resolved_reference = result.resolved_reference
-                resolved_sha = result.resolved_reference.resolved_commit
-            callback_downloaded_value = resolved_sha
-            with callback_lock:
-                callback_downloaded[dep_ref.get_unique_key()] = callback_downloaded_value
-            _tui = getattr(ctx, "tui", None)
-            if _tui is not None:
-                _tui.task_completed(dep_ref.get_unique_key())
-            return install_path
-        except Exception as e:
-            dep_display = dep_ref.get_display_name()
-            dep_key = dep_ref.get_unique_key()
-            is_direct = dep_key in direct_dep_keys
-
-            # Distinguish resolution failures (git-semver no-match) from
-            # download failures: the dep_ref was rewritten to a concrete
-            # tag BEFORE clone, so a NoMatchingTagError means we never
-            # got to the download step. Using "download" as the verb
-            # would mislead users who are debugging an unsatisfied
-            # constraint -- nothing was downloaded yet.
-            from apm_cli.deps.git_semver_resolver import NoMatchingTagError
-            from apm_cli.models.dependency.reference import InvalidSemverRangeError
-
-            if isinstance(e, InvalidSemverRangeError):
-                if is_direct:
-                    fail_msg = f"Invalid dependency spec for {dep_ref.repo_url}: {e}"
-                else:
-                    chain_hint = f" (via {parent_chain})" if parent_chain else ""
-                    fail_msg = (
-                        f"Invalid dependency spec for transitive dep "
-                        f"{dep_ref.repo_url}{chain_hint}: {e}"
-                    )
-            elif isinstance(e, NoMatchingTagError):
-                if is_direct:
-                    fail_msg = f"No matching tag for {dep_ref.repo_url}: {e}"
-                else:
-                    chain_hint = f" (via {parent_chain})" if parent_chain else ""
-                    fail_msg = (
-                        f"No matching tag for transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
-                    )
-            # Distinguish direct vs transitive failure messages so users
-            # don't see a misleading "transitive dep" label for top-level deps.
-            elif is_direct:
-                fail_msg = f"Failed to download dependency {dep_ref.repo_url}: {e}"
-            else:
-                chain_hint = f" (via {parent_chain})" if parent_chain else ""
-                fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
-
-            # Verbose: inline detail via logger (single output path).
-            # Deferred diagnostics below cover the non-logger case.
-            # F7 (#1116): single critical section for both the logger
-            # emission and the result-recording so concurrent failures
-            # don't interleave their lines.
-            with callback_lock:
-                if logger:
-                    logger.verbose_detail(f"  {fail_msg}")
-                # Collect for deferred diagnostics summary (always, even non-verbose)
-                callback_failures.add(dep_key)
-                transitive_failures.append((dep_display, fail_msg))
-            _tui = getattr(ctx, "tui", None)
-            if _tui is not None:
-                _tui.task_failed(dep_key)
-            return None
 
     # ------------------------------------------------------------------
     # 6. Resolver creation + dependency resolution
@@ -669,11 +374,12 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
             apm_modules_dir=ctx.apm_modules_dir,
             logger=ctx.logger,
             staging_session=staging_session,
+            existing_lockfile=existing_lockfile,
         )
 
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
-        download_callback=download_callback,
+        download_callback=download_cb,
         auth_resolver=ctx.auth_resolver,
         update_refs=update_refs,
         existing_lockfile=existing_lockfile,
@@ -695,6 +401,13 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
     dependency_graph = resolver.resolve_dependencies(manifest_anchor)
     ctx.dependency_graph = dependency_graph
     _fail_on_resolution_errors(ctx, dependency_graph)
+
+    # Read back the accumulators populated by the download callback (same
+    # mutable objects, by identity) so the post-resolution code and the
+    # ctx.callback_* assignments below operate unchanged.
+    callback_downloaded = download_cb.downloaded
+    transitive_failures = download_cb.transitive_failures
+    callback_failures = download_cb.failures
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so
     # the integrate phase skips them via the same gate used for download
@@ -755,7 +468,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
 
     ctx.deps_to_install = annotate_update_plan_refs(
         deps_to_install,
-        downloader,
+        ctx.downloader,
         update_refs=update_refs,
     )
 

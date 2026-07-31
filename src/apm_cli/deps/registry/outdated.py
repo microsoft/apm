@@ -152,6 +152,40 @@ def _semver_lt(left: str, right: str) -> bool:
     return vl < vr
 
 
+def _registry_manifest_range_or_row(manifest_dep, package_name, current):
+    """Resolve a manifest version range or a terminal unknown-status row.
+
+    Returns ``(manifest_range, early_row)``. When *early_row* is non-None the
+    caller returns it directly (missing, invalid, or pinned non-semver
+    selector); *manifest_range* is None in that case. When *manifest_dep* is
+    None (lockfile-only) both values are None.
+    """
+    if manifest_dep is None:
+        return None, None
+
+    def _unknown(source):
+        return OutdatedRow(
+            package=package_name,
+            current=current or "(none)",
+            latest="-",
+            status="unknown",
+            source=source,
+        )
+
+    manifest_range = manifest_dep.reference
+    if not manifest_range:
+        return None, _unknown("registry (no version selector)")
+    if not is_semver_range(manifest_range):
+        from apm_cli.models.dependency.identity import _looks_like_invalid_semver_range
+
+        if _looks_like_invalid_semver_range(manifest_range):
+            return None, _unknown("registry (invalid manifest range)")
+        # Valid non-semver selector (branch/label/exact tag): pinned to an
+        # opaque version; range-based outdated detection does not apply.
+        return None, _unknown("registry (pinned ref)")
+    return manifest_range, None
+
+
 def check_registry_locked_dep(
     locked: LockedDependency,
     ctx: RegistryOutdatedContext | None,
@@ -163,57 +197,23 @@ def check_registry_locked_dep(
     package_name = locked.get_unique_key()
     current = locked.version or ""
 
-    if ctx is None:
+    # Combine two early-exit guards (no context / feature disabled) into one
+    # return statement to keep PLR0911 satisfied.
+    if ctx is None or not is_package_registry_enabled():
+        source = "registry" if ctx is None else "registry (feature disabled)"
         return OutdatedRow(
             package=package_name,
             current=current or "(none)",
             latest="-",
             status="unknown",
-            source="registry",
-        )
-
-    if not is_package_registry_enabled():
-        return OutdatedRow(
-            package=package_name,
-            current=current or "(none)",
-            latest="-",
-            status="unknown",
-            source="registry (feature disabled)",
+            source=source,
         )
 
     manifest_dep = ctx.manifest_index.get(package_name)
     lockfile_only = manifest_dep is None
-    manifest_range: str | None = None
-    if manifest_dep is not None:
-        manifest_range = manifest_dep.reference
-        if not manifest_range:
-            return OutdatedRow(
-                package=package_name,
-                current=current or "(none)",
-                latest="-",
-                status="unknown",
-                source="registry (no version selector)",
-            )
-        if not is_semver_range(manifest_range):
-            from apm_cli.models.dependency.identity import _looks_like_invalid_semver_range
-
-            if _looks_like_invalid_semver_range(manifest_range):
-                return OutdatedRow(
-                    package=package_name,
-                    current=current or "(none)",
-                    latest="-",
-                    status="unknown",
-                    source="registry (invalid manifest range)",
-                )
-            # Valid non-semver selector (branch/label/exact tag): pinned to an
-            # opaque version; range-based outdated detection does not apply.
-            return OutdatedRow(
-                package=package_name,
-                current=current or "(none)",
-                latest="-",
-                status="unknown",
-                source="registry (pinned ref)",
-            )
+    manifest_range, early_row = _registry_manifest_range_or_row(manifest_dep, package_name, current)
+    if early_row is not None:
+        return early_row
 
     if not current:
         return OutdatedRow(
@@ -225,23 +225,18 @@ def check_registry_locked_dep(
         )
 
     registry_name = (manifest_dep.registry_name if manifest_dep else None) or ctx.default_registry
-    if not registry_name:
-        return OutdatedRow(
-            package=package_name,
-            current=current,
-            latest="-",
-            status="unknown",
-            source="registry (no default registry)",
+    base_url = ctx.registries.get(registry_name) if registry_name else None
+    # Combine registry-name-missing and base-url-missing into one return.
+    if not registry_name or not base_url:
+        source_detail = (
+            "no default registry" if not registry_name else f"{registry_name!r} not configured"
         )
-
-    base_url = ctx.registries.get(registry_name)
-    if not base_url:
         return OutdatedRow(
             package=package_name,
             current=current,
             latest="-",
             status="unknown",
-            source=f"registry ({registry_name!r} not configured)",
+            source=f"registry ({source_detail})",
         )
 
     source_label = f"registry: {registry_name}"

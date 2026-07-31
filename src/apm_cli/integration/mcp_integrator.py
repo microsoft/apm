@@ -12,198 +12,57 @@ The existing adapters (client/, package_manager/) and registry operations
 from __future__ import annotations
 
 import builtins
-import copy
-import json
 import logging
 import re
-import shutil
+import shutil as shutil  # re-export: `mcp_integrator.shutil.which` patch seam for mcp_vscode
 import warnings
-from collections.abc import MutableMapping
-from datetime import datetime, timezone
+from datetime import datetime as datetime  # re-export: RULE B seam for mcp_lockfile_state
+from datetime import timezone as timezone  # re-export: RULE B seam for mcp_lockfile_state
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import tomlkit
-from tomlkit.exceptions import TOMLKitError
-
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
+from apm_cli.deps.lockfile import (  # re-export: RULE B patch seam for mcp_lockfile_state
+    LockFile as LockFile,
+)
+from apm_cli.deps.lockfile import (
+    get_lockfile_path as get_lockfile_path,
+)
+from apm_cli.deps.lockfile import (
+    installed_apm_version as installed_apm_version,
+)
+from apm_cli.integration.mcp_config_clean import (
+    _clean_claude_config as _clean_claude_config,
+)
+from apm_cli.integration.mcp_config_clean import (
+    _clean_json_mcp_config as _clean_json_mcp_config,
+)
+from apm_cli.integration.mcp_config_clean import (
+    _clean_toml_mcp_config as _clean_toml_mcp_config,
+)
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
     _get_server_configs,
     _get_server_provenance,
 )
+from apm_cli.integration.mcp_vscode import (
+    _is_vscode_available as _is_vscode_available,
+)
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
-    _rich_error,
-    _rich_info,
     _rich_success,
-    _rich_warning,
+)
+from apm_cli.utils.console import (
+    _rich_warning as _rich_warning,  # re-export: RULE B seam for mcp_lockfile_state
 )
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
 
 _log = logging.getLogger(__name__)
-
-
-def _is_vscode_available(project_root: Path | str | None = None) -> bool:
-    """Return True when VS Code can be targeted for MCP configuration.
-
-    VS Code is considered available when either:
-    - the ``code`` CLI command is on PATH (the standard case), or
-    - a ``.vscode/`` directory exists in the resolved project root
-      (common on macOS where the user hasn't run "Install 'code' command
-      in PATH" from the VS Code command palette).
-
-    Args:
-        project_root: Project root to inspect for a `.vscode/` directory when
-            explicit project context is provided. Falls back to CWD when unset.
-    """
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    return shutil.which("code") is not None or (root / ".vscode").is_dir()
-
-
-def _clean_json_mcp_config(
-    config_path: Path,
-    stale_names: builtins.set,
-    logger,
-    label: str,
-    servers_key: str = "mcpServers",
-    trailing_newline: bool = False,
-    use_rich: bool = False,
-) -> int:
-    """Remove stale entries from a JSON-based MCP config file.
-
-    Args:
-        config_path: Path to the JSON config file.
-        stale_names: Set of server names to remove (expanded form).
-        logger: Command logger for progress messages.
-        label: Human-readable config label used in log messages.
-        servers_key: Key under which MCP servers are stored (default: ``"mcpServers"``).
-        trailing_newline: When True, append a trailing newline after JSON serialisation.
-        use_rich: When True, emit removal notices via ``_rich_success``; otherwise use
-            ``logger.progress``.
-
-    Returns:
-        Number of entries removed.
-    """
-    if not config_path.exists():
-        return 0
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        servers = config.get(servers_key, {})
-        removed = [n for n in stale_names if n in servers]
-        for name in removed:
-            del servers[name]
-        if removed:
-            text = json.dumps(config, indent=2)
-            if trailing_newline:
-                text += "\n"
-            write_text_lf(config_path, text)
-            for name in removed:
-                msg = f"Removed stale MCP server '{name}' from {label}"
-                if use_rich:
-                    _rich_success(msg, symbol="check")
-                else:
-                    logger.progress(msg)
-        return len(removed)
-    except Exception:
-        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
-        return 0
-
-
-def _clean_toml_mcp_config(
-    config_path: Path,
-    stale_names: builtins.set,
-    label: str,
-    logger: CommandLogger | None = None,
-    use_rich: bool = True,
-) -> int:
-    """Remove stale entries from a TOML-based MCP config file.
-
-    Args:
-        config_path: Path to the TOML config file.
-        stale_names: Set of server names to remove (expanded form).
-        label: Human-readable config label used in log messages.
-        logger: Optional command logger for progress messages. When provided
-            and *use_rich* is False, removal notices use ``logger.progress``.
-        use_rich: When True (default), emit removal notices via ``_rich_success``;
-            otherwise use ``logger.progress``.
-
-    Returns:
-        Number of entries removed.
-    """
-    if not config_path.exists():
-        return 0
-    try:
-        config = tomlkit.parse(config_path.read_text(encoding="utf-8"))
-        servers = config.get("mcp_servers", {})
-        if not isinstance(servers, MutableMapping):
-            return 0
-        removed = [n for n in stale_names if n in servers]
-        for name in removed:
-            del servers[name]
-        if removed:
-            atomic_write_text(config_path, tomlkit.dumps(config), new_file_mode=0o600)
-            for name in removed:
-                msg = f"Removed stale MCP server '{name}' from {label}"
-                if use_rich:
-                    _rich_success(msg, symbol="check")
-                elif logger is not None:
-                    logger.progress(msg)
-        return len(removed)
-    except (OSError, TOMLKitError, UnicodeDecodeError):
-        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
-        return 0
-
-
-def _clean_claude_config(
-    config_path: Path,
-    stale_names: builtins.set,
-    logger,
-    is_user_scope: bool = False,
-) -> int:
-    """Remove stale entries from a Claude Code JSON config file.
-
-    Handles both the project-level ``.mcp.json`` and the user-level
-    ``~/.claude.json``, which share the same JSON structure but differ in
-    scope-validation requirements and log labels.
-
-    Args:
-        config_path: Path to the Claude JSON config file.
-        stale_names: Set of server names to remove (expanded form).
-        logger: Command logger for progress messages.
-        is_user_scope: When True, validates that the top-level config is a dict
-            (``~/.claude.json`` guard) and uses the user-scope log label.
-
-    Returns:
-        Number of entries removed.
-    """
-    label = "~/.claude.json" if is_user_scope else ".mcp.json"
-    if not config_path.exists():
-        return 0
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        if is_user_scope and not isinstance(config, dict):
-            return 0
-        servers = config.get("mcpServers", {})
-        if not isinstance(servers, dict):
-            servers = {}
-        removed = [n for n in stale_names if n in servers]
-        for name in removed:
-            del servers[name]
-        if removed:
-            write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
-            for name in removed:
-                logger.progress(f"Removed stale MCP server '{name}' from {label}")
-        return len(removed)
-    except Exception:
-        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
-        return 0
 
 
 class MCPIntegrator:
@@ -410,17 +269,7 @@ class MCPIntegrator:
 
     @staticmethod
     def get_server_provenance(mcp_deps: list) -> builtins.dict:
-        """Extract transitive provenance as {name: declaring_package} from MCP deps.
-
-        Only servers carrying a ``resolved_by`` (set by
-        :meth:`collect_transitive` for servers declared by a sub-package)
-        are included. Servers declared directly in the root manifest have
-        ``resolved_by is None`` and are omitted -- absence means "direct",
-        mirroring the dependency-side convention. Because ``mcp_deps`` is the
-        final deduplicated list (root entries listed first, first-wins), a
-        server declared both in the root and transitively resolves to the
-        root entry and is correctly treated as direct here (#2081).
-        """
+        """Extract transitive provenance as {name: declaring_package} from MCP deps."""
         return _get_server_provenance(mcp_deps)
 
     @staticmethod
@@ -756,101 +605,20 @@ class MCPIntegrator:
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
-        Accepts the lock path directly to avoid a redundant disk read when the
-        caller already has it.
-
-        Args:
-            mcp_server_names: Set of MCP server names to persist.
-            lock_path: Path to the lockfile.  Defaults to ``apm.lock.yaml`` in CWD.
-            mcp_configs: Keyword-only.  When provided, overwrites ``mcp_configs``
-                         in the lockfile (used for drift-detection baseline).
-            mcp_target_servers: Keyword-only. Per-target APM-owned server names.
-            mcp_config_provenance: Keyword-only.  When provided, overwrites
-                         ``mcp_config_provenance`` (name -> declaring package for
-                         transitively-contributed servers). Passed in lockstep
-                         with ``mcp_configs`` so the two never diverge (#2081).
-                         ``None`` leaves the existing value untouched.
-
         Raises:
             LockfileFormatError: If the existing lockfile is malformed.
             OSError: If the atomic lockfile write fails.
         """
-        if lock_path is None:
-            lock_path = get_lockfile_path(Path.cwd())
-        # A project whose apm.yml declares only MCP dependencies never enters
-        # the APM install pipeline, so nothing else creates apm.lock.yaml --
-        # yet `apm audit` counts MCP dependencies when deciding a lockfile is
-        # required, and failed with "run 'apm install'" right after a
-        # successful install (#2373). Establish the lockfile here when there
-        # is MCP state to record. Calls that clear the last server keep the
-        # early return: they must not conjure a lockfile for a project that
-        # never had one.
-        creating = not lock_path.exists()
-        if creating and not (mcp_server_names or mcp_configs):
-            return
-        try:
-            existing_lockfile = None if creating else LockFile.read(lock_path)
-            if existing_lockfile is None and not creating:
-                return
-            lockfile = (
-                LockFile(apm_version=installed_apm_version())
-                if existing_lockfile is None
-                else copy.deepcopy(existing_lockfile)
-            )
-            lockfile.mcp_servers = sorted(mcp_server_names)
-            if mcp_configs is not None:
-                lockfile.mcp_configs = mcp_configs
-            if mcp_target_servers is not None:
-                from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+        from apm_cli.integration.mcp_lockfile_state import write_mcp_state
 
-                DeploymentLedgerCodec.replace_mcp_target_servers(
-                    lockfile,
-                    {
-                        target: sorted(servers)
-                        for target, servers in sorted(mcp_target_servers.items())
-                        if servers
-                    },
-                )
-            if mcp_config_provenance is not None:
-                lockfile.mcp_config_provenance = mcp_config_provenance
-            # Invariant: provenance only carries entries that still have a live
-            # config. Prune dangling keys unconditionally so a caller that
-            # rewrites mcp_configs without an explicit provenance argument (e.g.
-            # the single-server ``apm install mcp`` path) can never leave a
-            # stale entry that would exempt a genuinely orphaned server (#2081).
-            if lockfile.mcp_config_provenance:
-                lockfile.mcp_config_provenance = {
-                    name: pkg
-                    for name, pkg in lockfile.mcp_config_provenance.items()
-                    if name in lockfile.mcp_configs
-                }
-            if existing_lockfile is not None and lockfile.is_semantically_equivalent(
-                existing_lockfile
-            ):
-                _log.debug("MCP lockfile unchanged -- skipping write")
-                return
-            lockfile.generated_at = datetime.now(timezone.utc).isoformat()
-            lockfile.save(lock_path)
-        except Exception:
-            _log.debug(
-                "MCP lockfile persistence failed at %s",
-                lock_path,
-                exc_info=True,
-            )
-            if creating:
-                # Failing to UPDATE leaves a usable lockfile behind, but failing
-                # to CREATE one reproduces #2373 exactly -- install reports
-                # success and the next audit says "run 'apm install'". Debug
-                # level would hide the fix silently not applying.
-                message = (
-                    f"Could not write {lock_path.name}; 'apm audit' will report it as "
-                    "missing. Ensure the directory is writable and re-run 'apm install'."
-                )
-                if logger is not None:
-                    logger.warning(message)
-                else:
-                    _rich_warning(message, symbol="warning")
-            raise
+        write_mcp_state(
+            mcp_server_names,
+            lock_path,
+            mcp_configs=mcp_configs,
+            mcp_target_servers=mcp_target_servers,
+            mcp_config_provenance=mcp_config_provenance,
+            logger=logger,
+        )
 
     # ------------------------------------------------------------------
     # Runtime detection
@@ -934,79 +702,19 @@ class MCPIntegrator:
         user_scope: bool = False,
         logger=None,
     ) -> bool:
-        """Install MCP dependencies for a specific runtime.
+        """Install MCP deps for a runtime (see mcp_runtime_ops.install_for_runtime)."""
+        from apm_cli.integration import mcp_runtime_ops
 
-        Returns True if all deps were configured successfully, False otherwise.
-        """
-        if logger is None:
-            logger = NullCommandLogger()
-        try:
-            from apm_cli.core.operations import install_package
-
-            all_ok = True
-            for dep in mcp_deps:
-                logger.verbose_detail(f"  Installing {dep}...")
-                try:
-                    result = install_package(
-                        runtime,
-                        dep,
-                        shared_env_vars=shared_env_vars,
-                        server_info_cache=server_info_cache,
-                        shared_runtime_vars=shared_runtime_vars,
-                        project_root=project_root,
-                        user_scope=user_scope,
-                    )
-                    if result["failed"]:
-                        logger.error(f"  Failed to install {dep}")
-                        all_ok = False
-                    elif logger and runtime == "codex":
-                        from apm_cli.factory import ClientFactory
-
-                        config_path = ClientFactory.create_client(
-                            runtime,
-                            project_root=project_root,
-                            user_scope=user_scope,
-                        ).get_config_path()
-                        _log.debug("Codex config written to %s", config_path)
-                        logger.verbose_detail(f"  Codex config: {config_path}")
-                except Exception as install_error:
-                    _log.debug(
-                        "Failed to install MCP dep %s for runtime %s",
-                        dep,
-                        runtime,
-                        exc_info=True,
-                    )
-                    logger.error(f"  Failed to install {dep}: {install_error}")
-                    all_ok = False
-
-            # Emit aggregated post-install diagnostics for runtimes that
-            # support runtime env-var substitution (currently Copilot CLI).
-            # Safe no-op for runtimes whose adapter doesn't aggregate state.
-            try:
-                if runtime == "copilot":
-                    from apm_cli.adapters.client.copilot import CopilotClientAdapter
-
-                    CopilotClientAdapter.emit_install_run_summary()
-            except Exception:
-                _log.debug("Failed to emit install-run summary", exc_info=True)
-
-            return all_ok
-
-        except ImportError as e:
-            logger.warning(f"Core operations not available for runtime {runtime}: {e}")
-            logger.progress(f"Dependencies for {runtime}: {', '.join(mcp_deps)}")
-            return False
-        except ValueError as e:
-            from apm_cli.factory import ClientFactory
-
-            supported_runtimes = ", ".join(sorted(ClientFactory.supported_clients()))
-            logger.warning(f"Runtime {runtime} not supported: {e}")
-            logger.progress(f"Supported runtimes: {supported_runtimes}")
-            return False
-        except Exception as e:
-            _log.debug("Unexpected error installing for runtime %s", runtime, exc_info=True)
-            logger.error(f"Error installing for runtime {runtime}: {e}")
-            return False
+        return mcp_runtime_ops.install_for_runtime(
+            runtime,
+            mcp_deps,
+            shared_env_vars=shared_env_vars,
+            server_info_cache=server_info_cache,
+            shared_runtime_vars=shared_runtime_vars,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+        )
 
     # ------------------------------------------------------------------
     # Main orchestrator
@@ -1021,185 +729,19 @@ class MCPIntegrator:
         apm_config: dict | None,
         explicit_target: str | list[str] | None,
     ) -> list[str]:
-        """Filter *target_runtimes* against the project's active targets.
+        """Filter runtimes against active project targets (see mcp_runtime_ops)."""
+        from apm_cli.integration import mcp_runtime_ops
 
-        UX parity with ``apm install`` for apm dependencies: the active
-        target set (explicit ``--target`` > ``targets:`` field >
-        directory-signal detection) is the whitelist for MCP writes. Any
-        runtime outside that set is skipped with an info line naming both
-        what was dropped and the active set, so users can audit the
-        decision input without re-reading apm.yml (#1335).
-
-        Strict resolution model -- mirrors :func:`resolve_targets`,
-        the same call ``apm install`` uses
-        (``install/phases/targets.py:233``):
-
-          - flag > yaml-targets > directory signals (no permissive
-            "fallback to copilot" greenfield default);
-          - no flag, no ``targets:``, and no harness-signal directory ->
-            :class:`NoHarnessError` (red ``[x]``, write nothing);
-          - multiple ambiguous signals with no disambiguation ->
-            :class:`AmbiguousHarnessError` (same fail-closed shape).
-
-        ``explicit_target`` accepts ``str``, ``list[str]``, or a CSV
-        string (``"claude,copilot"``) -- the latter is produced by
-        legacy callers; it is normalized to a list before the resolver
-        is invoked so the canonical-name validator does not reject it as
-        one unknown token.
-
-        A malformed ``targets:`` field (conflicting ``target:`` +
-        ``targets:``, ``targets: []``, or unknown canonical name) likewise
-        fails closed: nothing is written.
-
-        Exit semantics differ deliberately from ``install/phases/targets.py``:
-        the canonical install phase calls ``raise SystemExit(2)`` when
-        resolution fails; this gate may be invoked mid-bundle (see
-        ``install/local_bundle_handler``) where a hard exit would corrupt
-        partial state, so we render the same red ``[x]`` voice and return
-        an empty list (fail-closed-continue).
-
-        At user scope the package's declared ``targets:`` field and the
-        ``--target`` flag are still respected: a package that declares
-        ``targets: copilot`` is only installed for Copilot, even when
-        Kiro (or another runtime) is detected on the host.  When neither
-        the package nor the CLI restricts targets, all detected runtimes
-        pass through (backward-compatible).
-        """
-        from apm_cli.core.apm_yml import (
-            ConflictingTargetsError,
-            EmptyTargetsListError,
-            UnknownTargetError,
-            parse_targets_field,
+        return mcp_runtime_ops.gate_project_scoped_runtimes(
+            target_runtimes,
+            user_scope=user_scope,
+            project_root=project_root,
+            apm_config=apm_config,
+            explicit_target=explicit_target,
         )
-        from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
-
-        # --- step 1: parse declared targets (fail-closed on any invalid form)
-        yaml_targets: list[str] | None = None
-        if apm_config:
-            try:
-                parsed = parse_targets_field(apm_config)
-                yaml_targets = parsed if parsed else None
-            except (
-                ConflictingTargetsError,
-                EmptyTargetsListError,
-                UnknownTargetError,
-            ) as exc:
-                _rich_error(
-                    "Skipping all MCP config writes -- apm.yml 'targets' field is invalid.",
-                    symbol="error",
-                )
-                _rich_error(str(exc), symbol="")
-                _log.debug(
-                    "parse_targets_field failed; failing closed (no MCP writes)",
-                    exc_info=True,
-                )
-                return []
-
-        # --- step 2: normalize CSV explicit_target sugar to a list -----
-        flag: str | list[str] | None
-        if isinstance(explicit_target, str) and "," in explicit_target:
-            flag = [t.strip() for t in explicit_target.split(",") if t.strip()]
-        else:
-            flag = explicit_target
-
-        if flag is not None:
-            tokens = [flag] if isinstance(flag, str) else list(flag)
-            flag = [RUNTIME_TO_CANONICAL_TARGET.get(t, t) for t in tokens]
-
-        # --- step 2b: user-scope short path ----------------------------
-        # At user scope directory-signal detection is meaningless (there
-        # is no "project root" to probe).  If the package or the CLI
-        # restricts targets we filter here; otherwise every detected
-        # runtime passes through unchanged (backward-compatible default).
-        if user_scope:
-            # Collect the canonical target names from flag / yaml.
-            active: set[str] | None = None
-            if flag is not None:
-                tokens_list = flag if isinstance(flag, list) else [flag]
-                # "all" is a special passthrough -- mirror resolve_targets.
-                if "all" in tokens_list:
-                    return target_runtimes
-                active = set(tokens_list)
-            elif yaml_targets is not None:
-                active = set(yaml_targets)
-
-            if active is None:
-                return target_runtimes
-
-            out = [
-                rt for rt in target_runtimes if RUNTIME_TO_CANONICAL_TARGET.get(rt, rt) in active
-            ]
-            dropped = sorted(set(target_runtimes) - set(out))
-            if dropped:
-                active_csv = ", ".join(sorted(active)) or "<none>"
-                _rich_info(
-                    f"Skipped MCP config for {', '.join(dropped)} (active targets: {active_csv}, scope: global)",
-                    symbol="info",
-                )
-                _log.debug(
-                    "Active-targets gate dropped (user scope): %s (active=%s)",
-                    dropped,
-                    sorted(active),
-                )
-            return out
-
-        # --- step 3 (project scope): delegate to the v2 resolver -------
-        if flag is not None:
-            project_tokens = flag if isinstance(flag, list) else [flag]
-            if "all" in project_tokens:
-                from apm_cli.core.target_catalog import expand_all
-
-                flag = [
-                    RUNTIME_TO_CANONICAL_TARGET.get(target, target)
-                    for target in expand_all("install")
-                ]
-        from apm_cli.core.errors import (
-            AmbiguousHarnessError,
-            NoHarnessError,
-        )
-        from apm_cli.core.target_detection import resolve_targets
-
-        root = project_root or Path.cwd()
-        try:
-            resolved = resolve_targets(root, flag=flag, yaml_targets=yaml_targets)
-        except (NoHarnessError, AmbiguousHarnessError) as exc:
-            _rich_error(
-                "Skipping all MCP config writes -- could not resolve active targets.",
-                symbol="error",
-            )
-            _rich_error(str(exc), symbol="")
-            _log.debug(
-                "resolve_targets failed; failing closed (no MCP writes)",
-                exc_info=True,
-            )
-            return []
-
-        active = set(resolved.targets)
-
-        out = [rt for rt in target_runtimes if RUNTIME_TO_CANONICAL_TARGET.get(rt, rt) in active]
-        dropped = sorted(set(target_runtimes) - set(out))
-        if dropped:
-            # Mirror the canonical `Targets: X  (source: Y)` provenance shape
-            # (install/phases/targets.py:265, core/target_detection.py:777):
-            # double-space before the parenthetical. The "or '<none>'" guard is
-            # defensive -- an empty active set is unreachable when
-            # _resolve_targets_v2 succeeded, but if a future contract change
-            # widens that contract we surface "<none>" rather than render
-            # "(active targets: )" which reads as a renderer bug.
-            active_csv = ", ".join(sorted(active)) or "<none>"
-            _rich_info(
-                f"Skipped MCP config for {', '.join(dropped)}  (active targets: {active_csv})",
-                symbol="info",
-            )
-            _log.debug(
-                "Active-targets gate dropped: %s (active=%s)",
-                dropped,
-                sorted(active),
-            )
-        return out
 
     @staticmethod
-    def install(
+    def install(  # noqa: PLR0913
         mcp_deps: list,
         runtime: str = None,  # noqa: RUF013
         exclude: str = None,  # noqa: RUF013
@@ -1214,32 +756,7 @@ class MCPIntegrator:
         scope=None,
         managed_target_servers: builtins.dict | None = None,
     ) -> int:
-        """Install MCP dependencies.
-
-        Args:
-            mcp_deps: List of MCP dependency entries (registry strings or
-                MCPDependency objects).
-            runtime: Target specific runtime only.
-            exclude: Exclude specific runtime from installation.
-            verbose: Show detailed installation information.
-            apm_config: The parsed apm.yml configuration dict (optional).
-                When not provided, the method loads it from disk.
-            stored_mcp_configs: Previously stored MCP configs from lockfile
-                for diff-aware installation.  When provided, servers whose
-                manifest config has changed are re-applied automatically.
-            project_root: Project root for repo-local runtime configs.
-            user_scope: Whether runtime configuration is being resolved at user scope.
-            explicit_target: Explicit target selected by CLI or manifest.
-            scope: InstallScope (PROJECT or USER). When USER, only
-                runtimes whose adapter declares ``supports_user_scope``
-                are targeted; workspace-only runtimes are skipped.
-            managed_target_servers: Mutable per-target ownership state. Existing
-                entries are reconciled to active targets and successful writes
-                are recorded in place.
-
-        Returns:
-            Number of MCP servers newly configured or updated.
-        """
+        """Install MCP dependencies."""
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         return run_mcp_install(

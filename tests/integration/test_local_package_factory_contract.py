@@ -132,6 +132,45 @@ def test_create_authors_manifest_and_primitives_only(tmp_path: Path) -> None:
     assert not (tmp_path / "packages/invalid-target").exists()
 
 
+def _assert_malformed_manifest_guards(
+    factory: LocalPackageFactory,
+    child: "LocalPackage",
+) -> None:
+    """Verify that add_relative_dependency rejects malformed manifests atomically."""
+    malformed = factory.create("malformed")
+    dump_yaml(
+        {
+            "name": "malformed",
+            "dependencies": [],
+        },
+        malformed.manifest_path,
+    )
+    malformed_bytes = malformed.manifest_path.read_bytes()
+    with pytest.raises(ValueError, match="Invalid dependencies mapping"):
+        factory.add_relative_dependency(malformed, child)
+    assert malformed.manifest_path.read_bytes() == malformed_bytes
+
+    malformed_yaml = factory.create("malformed-yaml")
+    malformed_yaml.manifest_path.write_bytes(b"dependencies: [\n")
+    malformed_yaml_bytes = malformed_yaml.manifest_path.read_bytes()
+    with pytest.raises(ValueError, match="Invalid manifest YAML"):
+        factory.add_relative_dependency(malformed_yaml, child)
+    assert malformed_yaml.manifest_path.read_bytes() == malformed_yaml_bytes
+
+    malformed_apm = factory.create("malformed-apm")
+    dump_yaml(
+        {
+            "name": "malformed-apm",
+            "dependencies": {"apm": "../dependency"},
+        },
+        malformed_apm.manifest_path,
+    )
+    malformed_apm_bytes = malformed_apm.manifest_path.read_bytes()
+    with pytest.raises(ValueError, match="Invalid APM dependencies list"):
+        factory.add_relative_dependency(malformed_apm, child)
+    assert malformed_apm.manifest_path.read_bytes() == malformed_apm_bytes
+
+
 def test_create_authors_production_and_development_mcp_blocks(tmp_path: Path) -> None:
     """Fixture packages preserve the package-authoring MCP scope boundary."""
     package = LocalPackageFactory(tmp_path / "packages").create(
@@ -466,38 +505,7 @@ def test_relative_dependency_uses_portable_manifest_path(
     assert windows_manifest["dependencies"]["apm"] == [{"path": "../dependency"}]
     _assert_source_tree(windows_parent.root, {"apm.yml"})
 
-    malformed = factory.create("malformed")
-    dump_yaml(
-        {
-            "name": "malformed",
-            "dependencies": [],
-        },
-        malformed.manifest_path,
-    )
-    malformed_bytes = malformed.manifest_path.read_bytes()
-    with pytest.raises(ValueError, match="Invalid dependencies mapping"):
-        factory.add_relative_dependency(malformed, child)
-    assert malformed.manifest_path.read_bytes() == malformed_bytes
-
-    malformed_yaml = factory.create("malformed-yaml")
-    malformed_yaml.manifest_path.write_bytes(b"dependencies: [\n")
-    malformed_yaml_bytes = malformed_yaml.manifest_path.read_bytes()
-    with pytest.raises(ValueError, match="Invalid manifest YAML"):
-        factory.add_relative_dependency(malformed_yaml, child)
-    assert malformed_yaml.manifest_path.read_bytes() == malformed_yaml_bytes
-
-    malformed_apm = factory.create("malformed-apm")
-    dump_yaml(
-        {
-            "name": "malformed-apm",
-            "dependencies": {"apm": "../dependency"},
-        },
-        malformed_apm.manifest_path,
-    )
-    malformed_apm_bytes = malformed_apm.manifest_path.read_bytes()
-    with pytest.raises(ValueError, match="Invalid APM dependencies list"):
-        factory.add_relative_dependency(malformed_apm, child)
-    assert malformed_apm.manifest_path.read_bytes() == malformed_apm_bytes
+    _assert_malformed_manifest_guards(factory, child)
 
     outside_manifest = tmp_path / "outside-manifest.yml"
     outside_manifest.write_text("name: outside\n", encoding="utf-8")

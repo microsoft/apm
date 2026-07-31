@@ -35,7 +35,7 @@ from ..utils.github_host import (
     is_ado_auth_failure_signal,
     is_github_hostname,
 )
-from .bare_cache import build_clone_failure_message
+from .bare_cache import CloneFailureContext, build_clone_failure_message
 from .transport_selection import TransportAttempt, TransportPlan
 
 if TYPE_CHECKING:
@@ -403,13 +403,7 @@ class CloneEngine:
             repo_url_base=repo_url_base,
             plan=plan,
             dep_ref=dep_ref,
-            dep_host=dep_host,
-            is_ado=bool(is_ado),
-            is_generic=is_generic,
-            has_ado_token=host.has_ado_token,
-            has_token=has_token or authenticated_fallback_used,
             auth_resolver=host.auth_resolver,
-            configured_github_host=os.environ.get("GITHUB_HOST", ""),
             default_host_fn=default_host,
             last_error=last_error,
             last_attempt_scheme=prev_scheme,
@@ -418,6 +412,16 @@ class CloneEngine:
                 public_github_https_first
                 and last_error is not None
                 and not host.auth_resolver.is_public_github_auth_failure(last_error)
+            ),
+            clone_ctx=CloneFailureContext(
+                is_ado=bool(is_ado),
+                is_generic=is_generic,
+                has_ado_token=host.has_ado_token,
+                # Main's anonymous-first path may have escalated to an
+                # authenticated retry; that still counts as "had a token".
+                has_token=has_token or authenticated_fallback_used,
+                dep_host=dep_host,
+                configured_github_host=os.environ.get("GITHUB_HOST", ""),
             ),
         )
 

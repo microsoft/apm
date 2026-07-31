@@ -20,10 +20,8 @@ What it does
 3. Prompt ``Apply these changes? [y/N]`` -- default **No**, mirroring
    the security framing in the public response on issue #1203.
 4. On ``y``: continue the install pipeline (download + integrate +
-   lockfile rewrite).  On ``N`` / ``--dry-run``: exit cleanly with no
-   on-disk mutations.  In no-TTY mode, ref changes fail closed; an
-   unchanged locked graph may still restore a wholly absent package cache
-   without prompting.
+   lockfile rewrite).  On ``N`` / ``--dry-run`` / no-TTY: exit cleanly
+   with no on-disk mutations.
 
 Flags
 -----
@@ -82,11 +80,14 @@ from ..install.errors import (
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
+from ._update_ops import (
+    _fire_update_scripts,
+    _LifecycleCtx,
+    _module_cache_needs_rehydration,
+    _run_mcp_lsp_integration,
+)
 
 if TYPE_CHECKING:
-    from ..core.command_logger import CommandLogger
-    from ..core.scope import InstallScope
-    from ..deps.lockfile import LockFile
     from ..models.dependency.reference import DependencyReference
 
 
@@ -111,24 +112,6 @@ def _stdin_is_tty() -> bool:
         return sys.stdin is not None and sys.stdin.isatty()
     except (AttributeError, ValueError):
         return False
-
-
-def _module_cache_needs_rehydration(
-    lockfile: LockFile | None,
-    modules_dir: Path,
-) -> bool:
-    """Return whether a locked dependency tree has no materialized cache."""
-    if lockfile is None:
-        return False
-    has_locked_dependency = False
-    for key, dependency in lockfile.dependencies.items():
-        if key == ".":
-            continue
-        has_locked_dependency = True
-        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
-        if install_path.exists():
-            return False
-    return has_locked_dependency
 
 
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
@@ -212,95 +195,6 @@ def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionP
             changed = True
     if changed:
         lockfile.save(lockfile_path)
-
-
-def _run_mcp_lsp_integration(
-    *,
-    scope: InstallScope,
-    project_root: Path,
-    existing_lock: LockFile | None,
-    lock_path: Path,
-    target: str | list[str] | None,
-    diagnostics: Any,
-    logger: InstallLogger,
-    verbose: bool,
-) -> None:
-    """Reconcile MCP and LSP servers against the current apm.yml.
-
-    ``apm update`` calls ``_install_apm_dependencies`` directly rather than
-    going through ``_install_apm_packages`` (see ``commands/install.py``),
-    so it must separately run the same MCP/LSP integration that helper
-    performs. Mirrors ``_install_apm_packages``'s ordering: clear the
-    apm.yml parse cache, re-parse the on-disk manifest (revision pins are
-    already applied by this point), then reconcile MCP and LSP servers.
-    """
-    from apm_cli.core.scope import InstallScope, get_modules_dir
-    from apm_cli.install.lsp import run_lsp_integration
-    from apm_cli.install.mcp import run_mcp_integration
-    from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
-    from apm_cli.policy.install_preflight import PolicyBlockError
-
-    clear_apm_yml_cache()
-    apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
-
-    old_mcp_servers: set = set()
-    old_mcp_configs: dict = {}
-    old_mcp_provenance: dict = {}
-    old_mcp_target_servers: dict = {}
-    if existing_lock:
-        old_mcp_servers = set(existing_lock.mcp_servers)
-        old_mcp_configs = dict(existing_lock.mcp_configs)
-        old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
-        old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
-    trusted_transitive_configs = {
-        name: (old_mcp_provenance[name], config)
-        for name, config in old_mcp_configs.items()
-        if name in old_mcp_provenance and config.get("registry") is False
-    }
-
-    apm_modules_path = get_modules_dir(scope)
-    user_scope = scope is InstallScope.USER
-
-    try:
-        _mcp_count, mcp_apm_config = run_mcp_integration(
-            apm_package=apm_package,
-            mcp_deps=apm_package.get_all_mcp_dependencies(),
-            apm_modules_path=apm_modules_path,
-            lock_path=lock_path,
-            old_mcp_servers=old_mcp_servers,
-            old_mcp_configs=old_mcp_configs,
-            old_mcp_provenance=old_mcp_provenance,
-            old_mcp_target_servers=old_mcp_target_servers,
-            trusted_transitive_configs=trusted_transitive_configs,
-            project_root=project_root,
-            user_scope=user_scope,
-            should_install=True,
-            logger=logger,
-            diagnostics=diagnostics,
-            verbose=verbose,
-            explicit_target=target,
-            scope=scope,
-        )
-    except PolicyBlockError:
-        _rich_error(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
-        logger.render_summary()
-        sys.exit(1)
-
-    run_lsp_integration(
-        apm_package=apm_package,
-        apm_modules_path=apm_modules_path,
-        lock_path=lock_path,
-        existing_lock=existing_lock,
-        project_root=project_root,
-        user_scope=user_scope,
-        should_install=True,
-        logger=logger,
-        diagnostics=diagnostics,
-        target_context=(mcp_apm_config, target, scope),
-    )
 
 
 @click.command(
@@ -715,38 +609,78 @@ def _run_dep_update(
             _rich_info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
+    _finalize_dep_update(
+        plan_state=plan_state,
+        result=result,
+        revision_pin_updates=revision_pin_updates,
+        dry_run=dry_run,
+        target=target,
+        scope=scope,
+        verbose=verbose,
+        logger=logger,
+        lifecycle=_LifecycleCtx(
+            mcp_lsp_project_root=_mcp_lsp_project_root,
+            apm_dir=_apm_dir,
+            lock_path=_lock_path,
+            existing_lock=_existing_lock,
+            staged_apm_package=staged_apm_package,
+        ),
+    )
+
+
+def _finalize_dep_update(
+    *,
+    plan_state: _UpdateRunState,
+    result,
+    revision_pin_updates: list[RevisionPinUpdate],
+    dry_run: bool = False,
+    target: str | list[str] | None = None,
+    scope: Any = None,
+    verbose: bool = False,
+    logger: Any = None,
+    lifecycle: _LifecycleCtx | None = None,
+) -> None:
+    """Record revision-pin tags, reconcile state, and emit the post-update summary."""
+    if lifecycle is None:
+        lifecycle = _LifecycleCtx(
+            mcp_lsp_project_root=None,
+            apm_dir=None,
+            lock_path=None,
+            existing_lock=None,
+            staged_apm_package=None,
+        )
     plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return
 
     reconcile_noop = not dry_run and not plan.has_changes and not revision_pin_updates
     if plan_state.proceeded or reconcile_noop:
+        from apm_cli.core.scope import InstallScope
         from apm_cli.install.manifest_reconcile import reconcile_project_deployed_state
 
         reconcile_project_deployed_state(
             Path.cwd(),
             explicit_target=target,
-            deploy_root=_mcp_lsp_project_root,
-            lock_root=_apm_dir,
-            user_scope=scope is InstallScope.USER,
+            deploy_root=lifecycle.mcp_lsp_project_root,
+            lock_root=lifecycle.apm_dir,
+            user_scope=scope is InstallScope.USER if scope is not None else False,
             verbose=verbose,
         )
 
-    if plan_state.proceeded:
-        if revision_pin_updates:
-            try:
-                _annotate_lockfile_revision_tags(Path.cwd(), revision_pin_updates)
-            except Exception as e:
-                _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
-                sys.exit(1)
+    if plan_state.proceeded and revision_pin_updates:
+        try:
+            _annotate_lockfile_revision_tags(Path.cwd(), revision_pin_updates)
+        except Exception as e:
+            _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
+            sys.exit(1)
 
     if plan_state.proceeded or reconcile_noop:
         try:
             _run_mcp_lsp_integration(
                 scope=scope,
-                project_root=_mcp_lsp_project_root,
-                existing_lock=_existing_lock,
-                lock_path=_lock_path,
+                project_root=lifecycle.mcp_lsp_project_root,
+                existing_lock=lifecycle.existing_lock,
+                lock_path=lifecycle.lock_path,
                 target=target,
                 diagnostics=getattr(result, "diagnostics", None),
                 logger=logger,
@@ -758,94 +692,49 @@ def _run_dep_update(
                 _rich_info("Run with --verbose for detailed diagnostics.")
             sys.exit(1)
 
-    if plan_state.proceeded:
-        # Report the number of dependencies that actually changed (per the
-        # plan), not the total tree re-materialized (result.installed_count).
-        # The latter counts unchanged deps that were re-integrated, which
-        # contradicts the "N updated" line the plan just printed.
-        # installed_count is still the guard for whether anything materialized:
-        # a proceeded run that installed nothing reports the no-op outcome even
-        # if the plan predicted changes.
-        installed = getattr(result, "installed_count", 0)
-        changed = len(plan.changed_entries)
-        applied = bool(installed) and changed > 0
-        dep_noun = "dependency" if changed == 1 else "dependencies"
-        if applied and revision_pin_updates:
-            count = len(revision_pin_updates)
-            pin_noun = "pin" if count == 1 else "pins"
-            _rich_success(
-                f"Updated {changed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
-            )
-        elif applied:
-            _rich_success(f"Updated {changed} APM {dep_noun}.")
-        elif plan_state.cache_rehydration_requested and installed:
-            logger.success(
-                "Restored dependency cache without changing refs.",
-                symbol="check",
-            )
-        elif revision_pin_updates:
-            count = len(revision_pin_updates)
-            noun = "pin" if count == 1 else "pins"
-            _rich_success(f"Updated {count} revision {noun} in apm.yml.")
-        else:
-            _rich_success("No dependency changes were applied.")
+    if not plan_state.proceeded:
+        return
 
-        # Fire post-update lifecycle scripts
+    # Report the number of dependencies that actually changed (per the
+    # plan), not the total tree re-materialized (result.installed_count).
+    # The latter counts unchanged deps that were re-integrated, which
+    # contradicts the "N updated" line the plan just printed.
+    # installed_count is still the guard for whether anything materialized:
+    # a proceeded run that installed nothing reports the no-op outcome even
+    # if the plan predicted changes.
+    installed = getattr(result, "installed_count", 0)
+    changed = len(plan.changed_entries)
+    applied = bool(installed) and changed > 0
+    dep_noun = "dependency" if changed == 1 else "dependencies"
+    if applied and revision_pin_updates:
+        count = len(revision_pin_updates)
+        pin_noun = "pin" if count == 1 else "pins"
+        _rich_success(
+            f"Updated {changed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
+        )
+    elif applied:
+        _rich_success(f"Updated {changed} APM {dep_noun}.")
+    elif plan_state.cache_rehydration_requested and installed:
+        logger.success(
+            "Restored dependency cache without changing refs.",
+            symbol="check",
+        )
+    elif revision_pin_updates:
+        count = len(revision_pin_updates)
+        noun = "pin" if count == 1 else "pins"
+        _rich_success(f"Updated {count} revision {noun} in apm.yml.")
+    else:
+        _rich_success("No dependency changes were applied.")
+
+    # Fire post-update lifecycle scripts
+    if lifecycle.staged_apm_package is not None:
         _fire_update_scripts(
             "post-update",
-            apm_package=staged_apm_package,
+            apm_package=lifecycle.staged_apm_package,
             scope=scope,
             logger=logger,
             verbose=verbose,
         )
-
-
-def _fire_update_scripts(
-    event_name: str,
-    *,
-    apm_package: Any,
-    scope: Any,
-    logger: CommandLogger | None,
-    verbose: bool,
-) -> None:
-    """Build a script runner and fire an update lifecycle event.
-
-    Best-effort: all exceptions are swallowed so scripts never block
-    the update flow.
-    """
-    import contextlib
-
-    with contextlib.suppress(Exception):
-        from apm_cli.core.lifecycle_scripts import (
-            LifecycleEvent,
-            PackageInfo,
-            build_runner_from_context,
-        )
-
-        project_root = None
-        pkg_path = getattr(apm_package, "package_path", None)
-        if pkg_path is not None:
-            project_root = str(pkg_path)
-
-        runner = build_runner_from_context(
-            logger=logger,
-            verbose=verbose,
-            project_root=project_root,
-        )
-
-        pkg_infos = []
-        for dep in apm_package.get_apm_dependencies():
-            pkg_infos.append(PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference))
-
-        scope_name = scope.value if hasattr(scope, "value") else str(scope)
-        event = LifecycleEvent.create(
-            event=event_name,
-            packages=pkg_infos,
-            scope=scope_name,
-            working_directory=project_root,
-        )
-
-        runner.fire(event_name, event)
 
 
 __all__ = ["update"]

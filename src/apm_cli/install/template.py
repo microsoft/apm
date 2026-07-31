@@ -15,7 +15,11 @@ from __future__ import annotations
 
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.package_resolution import effective_deploy_skill_subset
-from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
+from apm_cli.install.services import (
+    IntegrationOptions,
+    IntegratorBundle,
+    integrate_package_primitives,
+)
 from apm_cli.install.sources import DependencySource, Materialization
 
 
@@ -175,24 +179,16 @@ def _integrate_materialization(
             m.package_info,
             ctx.project_root,
             targets=ctx.targets,
-            integrators=IntegratorBundle(
-                prompt=ctx.integrators["prompt"],
-                agent=ctx.integrators["agent"],
-                skill=ctx.integrators["skill"],
-                instruction=ctx.integrators["instruction"],
-                command=ctx.integrators["command"],
-                hook=ctx.integrators["hook"],
-                canvas=ctx.integrators.get("canvas"),
-            ),
+            integrators=IntegratorBundle.from_mapping(ctx.integrators),
             force=ctx.force,
             managed_files=ctx.managed_files,
             diagnostics=diagnostics,
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
-            skill_subset=effective_skill_subset,
-            dep_target_subset=dep_ref.target_subset,
             ctx=ctx,
+            options=IntegrationOptions(skill_subset=effective_skill_subset),
+            dep_target_subset=dep_ref.target_subset,
             allow_executables=_effective_allow(ctx),
         )
         mutation_keys = (

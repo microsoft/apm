@@ -2,22 +2,64 @@
 
 import builtins
 import sys
-import traceback
 
 import click
 
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
-from ...models.apm_package import APMPackage
+from ._orphan_ops import _persist_uninstall_state
 from .engine import (
-    _cleanup_stale_mcp,
     _cleanup_transitive_orphans,
     _dry_run_uninstall,
     _parse_dependency_entry,
     _remove_packages_from_disk,
-    _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
 )
+
+
+def _collect_deployed_files(packages_to_remove, actual_orphans, lockfile):
+    """Collect deployed files for removed packages before lockfile mutation."""
+    from ...integration.base_integrator import BaseIntegrator
+
+    removed_keys = builtins.set()
+    for pkg in packages_to_remove:
+        try:
+            ref = _parse_dependency_entry(pkg)
+            removed_keys.add(ref.get_unique_key())
+        except (ValueError, TypeError, AttributeError, KeyError):
+            removed_keys.add(pkg)
+    removed_keys.update(actual_orphans)
+    all_deployed_files = builtins.set()
+    if lockfile:
+        for dep_key, dep in lockfile.dependencies.items():
+            if dep_key in removed_keys:
+                all_deployed_files.update(dep.deployed_files)
+    return BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
+
+
+def _update_lockfile_after_remove(lockfile, packages_to_remove, actual_orphans):
+    """Mutate lockfile in memory after package removal; returns True if changed.
+
+    Does NOT write to disk -- the caller is responsible for the deferred write
+    after all in-memory mutations (ledger reconciliation, MCP state) agree.
+    """
+    if not lockfile:
+        return False
+    lockfile_updated = False
+    for pkg in packages_to_remove:
+        try:
+            ref = _parse_dependency_entry(pkg)
+            key = ref.get_unique_key()
+        except (ValueError, TypeError, AttributeError, KeyError):
+            key = pkg
+        if key in lockfile.dependencies:
+            del lockfile.dependencies[key]
+            lockfile_updated = True
+    for orphan_key in actual_orphans:
+        if orphan_key in lockfile.dependencies:
+            del lockfile.dependencies[orphan_key]
+            lockfile_updated = True
+    return lockfile_updated
 
 
 @click.command(help="Remove APM packages, their integrated files, and apm.yml entries")
@@ -187,132 +229,28 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         removed_from_modules += orphan_removed
 
         # Step 7: Collect deployed files for removed packages (before lockfile mutation)
-        from ...integration.base_integrator import BaseIntegrator
-
-        removed_keys = builtins.set()
-        for pkg in packages_to_remove:
-            try:
-                ref = _parse_dependency_entry(pkg)
-                removed_keys.add(ref.get_unique_key())
-            except (ValueError, TypeError, AttributeError, KeyError):
-                removed_keys.add(pkg)
-        removed_keys.update(actual_orphans)
-        all_deployed_files = builtins.set()
-        if lockfile:
-            for dep_key, dep in lockfile.dependencies.items():
-                if dep_key in removed_keys:
-                    all_deployed_files.update(dep.deployed_files)
-        all_deployed_files = (
-            BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
-        )
+        all_deployed_files = _collect_deployed_files(packages_to_remove, actual_orphans, lockfile)
 
         # Step 8: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.
-        lockfile_updated = False
-        if lockfile:
-            for pkg in packages_to_remove:
-                try:
-                    ref = _parse_dependency_entry(pkg)
-                    key = ref.get_unique_key()
-                except (ValueError, TypeError, AttributeError, KeyError):
-                    key = pkg
-                if key in lockfile.dependencies:
-                    del lockfile.dependencies[key]
-                    lockfile_updated = True
-            for orphan_key in actual_orphans:
-                if orphan_key in lockfile.dependencies:
-                    del lockfile.dependencies[orphan_key]
-                    lockfile_updated = True
+        lockfile_updated = _update_lockfile_after_remove(
+            lockfile, packages_to_remove, actual_orphans
+        )
 
-        # Step 9: Sync integrations
-        cleaned = {
-            "prompts": 0,
-            "agents": 0,
-            "skills": 0,
-            "commands": 0,
-            "hooks": 0,
-            "instructions": 0,
-        }
-        surviving_deployed_files = {}
-        lockfile_ready = True
-        try:
-            apm_package = APMPackage.from_apm_yml(manifest_path)
-            cleaned, surviving_deployed_files = _sync_integrations_after_uninstall(
-                apm_package,
-                deploy_root,
-                all_deployed_files,
-                logger,
-                user_scope=scope is InstallScope.USER,
-                lockfile=lockfile,
-            )
-        except Exception as _sync_err:
-            # Surface why integration cleanup failed instead of swallowing
-            # silently. Previously a bare `except: pass` here masked
-            # Windows-only failures where the DB row was never deleted on
-            # `apm uninstall --target copilot-app`.
-            logger.warning(f"Integration cleanup failed: {type(_sync_err).__name__}: {_sync_err}")
-            # Preserve the traceback under verbose for diagnosing
-            # platform-specific failures without spamming default output.
-            logger.verbose_detail(traceback.format_exc().rstrip())
-            logger.verbose_detail(
-                "Some integrated files may remain. Run `apm install --force` to resync."
-            )
-
-        if lockfile:
-            try:
-                from .lockfile_state import reconcile_uninstall_deployment_state
-
-                lockfile_updated = (
-                    reconcile_uninstall_deployment_state(
-                        lockfile,
-                        deploy_root=deploy_root,
-                        all_deployed_files=all_deployed_files,
-                        surviving_deployed_files=surviving_deployed_files,
-                    )
-                    or lockfile_updated
-                )
-            except Exception as state_err:
-                lockfile_ready = False
-                logger.warning(
-                    "Lockfile state could not be reconciled. "
-                    "Run 'apm install --force' to resync before retrying."
-                )
-                logger.verbose_detail(f"Lockfile reconciliation error: {state_err}")
-
-        for label, count in cleaned.items():
-            if count > 0:
-                logger.progress(f"Cleaned up {count} integrated {label}", symbol="check")
-                logger.verbose_detail(f"    Removed {count} deployed {label} file(s)")
-
-        # Step 10: MCP cleanup
-        try:
-            apm_package = APMPackage.from_apm_yml(manifest_path)
-            _cleanup_stale_mcp(
-                apm_package,
-                lockfile,
-                lockfile_path,
-                _pre_uninstall_mcp_servers,
-                modules_dir=get_modules_dir(scope),
-                project_root=deploy_root,
-                user_scope=scope is InstallScope.USER,
-                scope=scope,
-                persist=False,
-            )
-        except Exception:
-            logger.warning("MCP cleanup during uninstall failed")
-
-        if lockfile and lockfile_updated and lockfile_ready:
-            try:
-                from .lockfile_state import lockfile_has_persisted_state
-
-                if lockfile_has_persisted_state(lockfile):
-                    lockfile.write(lockfile_path)
-                else:
-                    lockfile_path.unlink(missing_ok=True)
-            except Exception:
-                logger.warning(
-                    "Failed to update lockfile -- it may be out of sync with uninstalled packages."
-                )
+        # Steps 9-10: Sync integrations, reconcile lockfile state, MCP cleanup,
+        # and flush the deferred lockfile write.
+        _persist_uninstall_state(
+            manifest_path=manifest_path,
+            deploy_root=deploy_root,
+            all_deployed_files=all_deployed_files,
+            lockfile=lockfile,
+            lockfile_path=lockfile_path,
+            lockfile_updated=lockfile_updated,
+            scope=scope,
+            logger=logger,
+            pre_mcp_servers=_pre_uninstall_mcp_servers,
+            modules_dir=modules_dir,
+        )
 
         # Final summary
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]

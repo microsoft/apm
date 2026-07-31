@@ -73,19 +73,21 @@ def test_task_completed_called_on_local_copy_path() -> None:
 
 
 def test_resolve_module_imports_tui_attr_safely() -> None:
-    """Resolve uses getattr(ctx, 'tui', None) -- ctx without tui is OK.
+    """Download callback uses getattr(ctx, 'tui', None) -- ctx without tui is OK.
 
     Pins the duck-typed access pattern so older test fixtures
-    constructing minimal contexts don't break.
+    constructing minimal contexts don't break. The callback now lives in
+    ``resolve_transitive`` (extracted from ``resolve.py``'s former nested
+    closure), so the guard follows the code there.
     """
-    from apm_cli.install.phases import resolve as resolve_mod
+    from apm_cli.install.phases import resolve_transitive as transitive_mod
 
-    # The module must use getattr(ctx, "tui", None) -- not direct
+    # The module must use getattr(self.ctx, "tui", None) -- not direct
     # attribute access -- so a missing attr does not raise.
-    src = resolve_mod.__file__
+    src = transitive_mod.__file__
     with open(src) as fh:
         text = fh.read()
-    assert 'getattr(ctx, "tui", None)' in text, (
-        "resolve.py must access ctx.tui via getattr(...,None) so "
+    assert 'getattr(self.ctx, "tui", None)' in text, (
+        "resolve_transitive.py must access ctx.tui via getattr(...,None) so "
         "minimal/older context objects don't trigger AttributeError"
     )

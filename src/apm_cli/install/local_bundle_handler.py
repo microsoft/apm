@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,18 @@ import click
 
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
+
+
+@dataclass
+class _BundleSecurityCtx:
+    """Security-related settings for a local-bundle install call.
+
+    Groups ``no_policy`` and ``allow_executables`` so ``install_local_bundle``
+    and ``_try_local_bundle_install`` stay within the Stage-2 max-args=12 budget.
+    """
+
+    no_policy: bool = False
+    allow_executables: dict[str, dict[str, bool]] | None = field(default=None)
 
 
 def install_local_bundle(
@@ -41,12 +54,11 @@ def install_local_bundle(
     force: bool,
     dry_run: bool,
     verbose: bool,
-    no_policy: bool,
+    security_ctx: _BundleSecurityCtx,
     alias: str | None,
     logger,
     legacy_skill_paths: bool = False,
     rejected_flags: dict[str, object],
-    allow_executables: dict | None = None,
 ) -> None:
     """Deploy a local bundle into project / user scope.
 
@@ -131,7 +143,7 @@ def install_local_bundle(
             project_root=project_root,
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
-            no_policy=no_policy,
+            no_policy=security_ctx.no_policy,
             logger=logger,
             dry_run=dry_run,
             effective_target=[resolved.name for resolved in targets],
@@ -188,7 +200,7 @@ def install_local_bundle(
             logger=logger,
             scope=scope,
             alias=alias,
-            allow_executables=allow_executables,
+            allow_executables=security_ctx.allow_executables,
         )
 
         deployed = result.get("deployed_files", [])

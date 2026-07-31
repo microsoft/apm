@@ -315,8 +315,6 @@ def _check_config_consistency(
 
     details = [f"{problem.package_key}: {problem.message}" for problem in view.problems]
 
-    # Preserve the established diagnostics while sourcing every partition from
-    # the canonical symmetric diff.
     for name in sorted(diff.changed):
         details.append(f"{name}: config differs from lockfile baseline")
 
@@ -400,8 +398,6 @@ def _check_content_integrity(
 
     # Per-file hash verification across canonical deployment records.
     hash_mismatches: list[tuple] = []  # (dep_key, rel_path, expected, actual)
-    # Local import: matches the scoping pattern used in
-    # _check_deployed_files_present (line 131); avoids cycles.
     from ..integration.base_integrator import BaseIntegrator as _BaseIntegrator
 
     for record in ledger.records.values():
@@ -718,52 +714,28 @@ def run_baseline_checks(
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # Check 2: Ref consistency (external manifest <-> lockfile identity)
-    #
-    # External-boundary identity checks MUST surface before internal
-    # reconciliation checks (Check 3, deployment-ledger-owners) because the
-    # latter's remedy assumes the lockfile's identity claims are legitimate.
-    # A source-identity tamper (attacker rewrites a dependency's host/repo_url)
-    # trips both: ref-consistency ("not found in lockfile" -> re-resolve from the
-    # trusted manifest via 'apm install --update') and deployment-ledger-owners
-    # (stale owner -> 'apm prune'). Under fail-fast the first failing check wins,
-    # and 'apm prune' on a tampered lockfile would reconcile ownership toward the
-    # attacker source, so ref-consistency -- the safe, manifest-driven remedy --
-    # must be evaluated first. The ledger-owner check still owns the genuine
-    # departed-owner case (req-pl-016), where ref-consistency passes.
-    if _run(_check_ref_consistency(manifest, lock)):
-        return result
-
-    # Check 3: Canonical deployment owner references
-    if _run(_check_deployment_ledger_owners(lock)):
-        return result
-
-    # Check 4: Deployed files present
-    if _run(_check_deployed_files_present(project_root, lock)):
-        return result
-
-    # Check 5: No orphaned packages
-    if _run(_check_no_orphans(manifest, lock)):
-        return result
-
-    # Check 6: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock)):
-        return result
-
-    # Check 7: Config consistency (MCP)
-    if _run(
-        _check_config_consistency(
+    # Checks 2-8: ordered sequence; stop on first failure when fail_fast.
+    # Lambdas ensure lazy evaluation so expensive checks (content integrity)
+    # are skipped when an earlier check fails in fail_fast mode.
+    # Check 2: Ref consistency (external manifest <-> lockfile identity).
+    # Must run BEFORE ledger-owners (Check 3) so the safe manifest-driven
+    # remedy surfaces first under fail-fast.
+    for _check_fn in [
+        lambda: _check_ref_consistency(manifest, lock),  # 2
+        lambda: _check_deployment_ledger_owners(lock),  # 3
+        lambda: _check_deployed_files_present(project_root, lock),  # 4
+        lambda: _check_no_orphans(manifest, lock),  # 5
+        lambda: _check_skill_subset_consistency(manifest, lock),  # 6
+        lambda: _check_config_consistency(  # 7
             manifest,
             lock,
             prepared_replay=prepared_replay,
             prepared_replay_error=prepared_replay_error,
-        )
-    ):
-        return result
-
-    # Check 8: Content integrity
-    if _run(_check_content_integrity(project_root, lock)):
-        return result
+        ),
+        lambda: _check_content_integrity(project_root, lock),  # 8
+    ]:
+        if _run(_check_fn()):
+            return result
 
     # Check 9: Includes consent (advisory; never hard-fails)
     _run(_check_includes_consent(manifest, lock))

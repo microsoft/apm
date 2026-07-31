@@ -4013,23 +4013,30 @@ class TestMCPConflictMatrix:
 
     def _base_kwargs(self, **overrides) -> dict:
         """Return base valid kwargs for validate_mcp_conflicts."""
-        return {
-            "mcp_name": "my-server",
-            "packages": [],
-            "pre_dash_packages": [],
-            "transport": None,
-            "url": None,
-            "env": {},
-            "headers": {},
-            "mcp_version": None,
-            "command_argv": None,
-            "global_": False,
-            "only": None,
-            "update": False,
-            "any_transport_flag": False,
-            "registry_url": None,
-            **overrides,
-        }
+        from apm_cli.install.mcp.spec import MCPRequestSpec
+
+        _spec_keys = {"mcp_name", "transport", "url", "mcp_version", "command_argv", "registry_url"}
+        _spec_defaults: dict = dict(
+            mcp_name="my-server",
+            transport=None,
+            url=None,
+            mcp_version=None,
+            command_argv=None,
+            registry_url=None,
+        )
+        _other: dict = dict(
+            packages=[],
+            pre_dash_packages=[],
+            env={},
+            headers={},
+            global_=False,
+            only=None,
+            update=False,
+            any_transport_flag=False,
+        )
+        spec_kwargs = {k: overrides.pop(k, _spec_defaults[k]) for k in _spec_keys}
+        _other.update(overrides)
+        return {"spec": MCPRequestSpec(**spec_kwargs), **_other}
 
     def test_validate_mcp_conflicts_valid_passes(self) -> None:
         """Valid combination does not raise."""

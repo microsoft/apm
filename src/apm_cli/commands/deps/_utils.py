@@ -1,11 +1,82 @@
 """Utility helpers for APM dependency commands."""
 
-from pathlib import Path
+import re
+from collections.abc import Iterator
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ...constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage
 from ...utils.yaml_io import load_yaml
+
+_LOCAL_HASH_SLOT_RE = re.compile(r"^(_local)/[0-9a-f]{12}/(.+)$")
+
+
+def _is_absolute_local_path(path: str) -> bool:
+    """True if a declared local path embeds host filesystem structure."""
+    if not path:
+        return False
+    if path.startswith("~"):
+        return True
+    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
+
+
+def _absolute_local_display(path: str, fallback: str) -> str:
+    """Return a portable logical name for an absolute local dependency."""
+    windows_path = PureWindowsPath(path)
+    parsed_path = (
+        windows_path
+        if windows_path.is_absolute() or path.startswith("~\\")
+        else PurePosixPath(path)
+    )
+    return f"_local/{parsed_path.name}" if parsed_path.name else fallback
+
+
+def _logical_local_display(physical_name: str) -> str:
+    """Strip the physical hash segment from an unmapped local slot."""
+    match = _LOCAL_HASH_SLOT_RE.match(physical_name)
+    if match:
+        return f"{match.group(1)}/{match.group(2)}"
+    return physical_name
+
+
+def _walk_tree_children(
+    parent_key: str,
+    children_map: dict[str, list],
+) -> Iterator[tuple]:
+    """Yield dependency-tree descendants depth-first without Python recursion."""
+    ancestors = frozenset({parent_key})
+    children = children_map.get(parent_key, [])
+    stack: list = []
+    for index in range(len(children) - 1, -1, -1):
+        stack.append(
+            (
+                children[index],
+                (index,),
+                (index == len(children) - 1,),
+                ancestors,
+            )
+        )
+
+    while stack:
+        child_dep, path, last_flags, parent_ancestors = stack.pop()
+        child_key = child_dep.get_unique_key()
+        is_circular = child_key in parent_ancestors
+        yield child_dep, path, last_flags, is_circular
+        if is_circular:
+            continue
+
+        child_ancestors = parent_ancestors | {child_key}
+        grandchildren = children_map.get(child_key, [])
+        for index in range(len(grandchildren) - 1, -1, -1):
+            stack.append(
+                (
+                    grandchildren[index],
+                    (*path, index),
+                    (*last_flags, index == len(grandchildren) - 1),
+                    child_ancestors,
+                )
+            )
 
 
 def _scan_installed_packages(apm_modules_dir: Path) -> list:

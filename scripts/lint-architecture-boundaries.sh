@@ -68,7 +68,7 @@ fi
 hook_file="src/apm_cli/integration/hook_integrator.py"
 validation_line=$(grep -n 'if not validation\.valid:' "$hook_file" | tail -1 | cut -d: -f1)
 continue_line=$(awk -v start="$validation_line" 'NR > start && /continue/ {print NR; exit}' "$hook_file")
-write_line=$(grep -n 'with open(target_path, "w"' "$hook_file" | tail -1 | cut -d: -f1)
+write_line=$(grep -n 'atomic_write_text(target_path' "$hook_file" | tail -1 | cut -d: -f1)
 if [ -z "$validation_line" ] || [ -z "$continue_line" ] || [ -z "$write_line" ] \
     || [ "$continue_line" -gt "$write_line" ]; then
     echo "[x] Hook payload validation must continue before the native payload write"
@@ -125,12 +125,14 @@ if ! grep -A20 'def _merge_manifest' src/apm_cli/policy/inheritance.py \
     echo "[x] Manifest inheritance must merge require_explicit_includes"
     violations=$((violations + 1))
 fi
-if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
+if ! grep -q 'incomplete_chain' src/apm_cli/policy/_discovery_chain.py \
     || ! grep -q 'incomplete_chain' src/apm_cli/policy/outcome_routing.py; then
+    # PR #1681 split fail-closed chain handling into _discovery_chain.py;
+    # old path was src/apm_cli/policy/discovery.py
     echo "[x] Incomplete policy chains must route through fail-closed outcome handling"
     violations=$((violations + 1))
 fi
-policy_file="src/apm_cli/policy/discovery.py"
+policy_file="src/apm_cli/policy/_discovery_cache.py"
 policy_named_defs=$(grep -Ec \
     '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
     "$policy_file" || true)
@@ -156,7 +158,7 @@ if [ "$policy_named_defs" -ne 2 ] \
     || ! printf '%s\n' "$policy_serializer_body" \
         | grep -Eq '^[[:space:]]*[^#]*_policy_to_dict\(policy\)' \
     || ! printf '%s\n' "$policy_cache_write_body" \
-        | grep -Eq '^[[:space:]]*serialized[[:space:]]*=[[:space:]]*_serialize_policy\(policy\)' \
+        | grep -Eq '^[[:space:]]*serialized[[:space:]]*=[[:space:]]*(_d\.)?_serialize_policy\(policy\)' \
     || [ -n "$policy_duplicate_hits" ]; then
     echo "[x] Cached policy shape must route through policy/discovery.py::_policy_to_dict"
     [ -n "$policy_duplicate_hits" ] && echo "$policy_duplicate_hits"
@@ -194,7 +196,12 @@ check_pattern \
     "Dependency ref winner selection must use one helper" \
     'download_winners|level_winners|seen_keys|nodes_at_depth\.sort' \
     src/apm_cli/deps/apm_resolver.py
-winner_selector_calls=$(grep -c '_select_dependency_winners(' src/apm_cli/deps/apm_resolver.py)
+# #1078 strangler-fig split: def + flatten call moved to apm_resolver_helpers.py;
+# BFS dispatch call remains in apm_resolver.py. Combined count must still be 3.
+winner_selector_calls=$(( \
+    $(grep -c '_select_dependency_winners(' src/apm_cli/deps/apm_resolver.py) + \
+    $(grep -c '_select_dependency_winners(' src/apm_cli/deps/apm_resolver_helpers.py) \
+))
 if [ "$winner_selector_calls" -ne 3 ]; then
     echo "[x] Dependency dispatch and flattening must share _select_dependency_winners"
     violations=$((violations + 1))
@@ -330,7 +337,7 @@ if ! grep -A25 'if plugin.registry:' src/apm_cli/marketplace/resolver.py \
     echo "[x] Marketplace registry intent must create a registry dependency"
     violations=$((violations + 1))
 fi
-claude_skill_metadata_owner="src/apm_cli/models/validation.py"
+claude_skill_metadata_owner="src/apm_cli/models/_validation_rules.py"  # moved from models/validation.py in #1078 Stage-2 split
 claude_skill_metadata_consumer="src/apm_cli/install/sources.py"
 claude_skill_owner_body=$(awk '
     /^def _validate_claude_skill\(/ {flag=1}
@@ -392,11 +399,15 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
     echo "[x] Audit replay must preserve locked skill subset intent"
     violations=$((violations + 1))
 fi
+# #1078 strangler-fig split: _audit_ci_gate moved from commands/audit.py to
+# commands/_audit_ops.py (audit.py re-exports it and is now a facade). The
+# routing intent this rule guards -- the CI gate hydrates via
+# prepare_ci_audit_replay and never calls run_replay directly -- is unchanged.
 audit_ci_gate_body=$(awk '
     /^def _audit_ci_gate\(/ {flag=1}
     flag && /^def / && !/^def _audit_ci_gate\(/ {exit}
     flag {print}
-' src/apm_cli/commands/audit.py)
+' src/apm_cli/commands/_audit_ops.py)
 config_consistency_body=$(awk '
     /^def _check_config_consistency\(/ {flag=1}
     flag && /^def / && !/^def _check_config_consistency\(/ {exit}
@@ -417,10 +428,12 @@ local_bundle_marker_hits=$(
         | grep -v 'architecture-authority-exempt:' \
         || true
 )
+# #1078 strangler-fig split: the diff engine (and its local-bundle exemption)
+# moved from install/drift.py to install/_drift_diff.py; drift.py re-exports it.
 if ! grep -q 'DeploymentLedgerCodec.record_local_bundle_files' \
     src/apm_cli/install/local_bundle_handler.py \
     || ! grep -q 'DeploymentLedgerCodec.local_bundle_paths' \
-    src/apm_cli/install/drift.py \
+    src/apm_cli/install/_drift_diff.py \
     || [ -n "$local_bundle_marker_hits" ]; then
     echo "[x] Local-bundle replay provenance must route through DeploymentLedgerCodec"
     [ -n "$local_bundle_marker_hits" ] && echo "$local_bundle_marker_hits"
@@ -479,7 +492,9 @@ if ! echo "$update_plan_ref_body" | grep -q 'downloader\.resolve_git_reference(d
     violations=$((violations + 1))
 fi
 dependency_field_owner="src/apm_cli/models/dependency/object_fields.py"
-dependency_parser="src/apm_cli/models/dependency/reference.py"
+# Code moved to _reference_parse.py in #1078 strangler-fig split;
+# reference.py is now a pure facade re-exporting from the sibling.
+dependency_parser="src/apm_cli/models/dependency/_reference_parse.py"
 dependency_field_duplicate_hits=$(
     grep -rEn --include='*.py' \
         'def reject_unknown_git_fields|_(REMOTE|PARENT)_GIT_DEPENDENCY_FIELDS' \
@@ -520,7 +535,7 @@ if ! grep -q 'detect_output_mode' src/apm_cli/cli.py \
     echo "[x] Root CLI must establish machine mode and handler-level redaction"
     violations=$((violations + 1))
 fi
-if ! grep -q '_clear_git_auth_env(env)' src/apm_cli/core/auth.py; then
+if ! grep -q '_clear_git_auth_env(env)' src/apm_cli/core/_auth_support.py; then
     echo "[x] AuthResolver must scrub inherited Git authorization state"
     violations=$((violations + 1))
 fi
@@ -596,7 +611,9 @@ packed_source_body=$(awk '
     /^def _dependency_reference_from_packed_source\(/ {flag=1}
     flag && /^def / && !/^def _dependency_reference_from_packed_source\(/ {exit}
     flag {print}
-' src/apm_cli/marketplace/resolver.py)
+# Function moved to _resolver_match.py in #1078 strangler-fig split;
+# resolver.py re-exports it; authority is still singular.
+' src/apm_cli/marketplace/_resolver_match.py)
 packed_source_parallel_hits=$(printf '%s\n' "$packed_source_body" \
     | grep -En 'urlparse\(|urllib\.parse|DependencyReference\(' \
     | grep -v 'DependencyReference\.parse_from_dict' \
@@ -631,8 +648,13 @@ if ! grep -q 'repository = normalize_repo_url(repository_url)' \
     echo "[x] SharedCloneCache must normalize the complete repository URL"
     violations=$((violations + 1))
 fi
-if ! grep -q 'repository_url = dep_ref.to_github_url()' \
-    src/apm_cli/deps/github_downloader.py; then
+# #1078 strangler-fig split: download logic moved from github_downloader.py into
+# github_downloader_package_ops.py and github_downloader_subdir_ops.py, both of which
+# assign repository_url = dep_ref.to_github_url() before passing it to the cache.
+if ! (grep -q 'repository_url = dep_ref.to_github_url()' \
+    src/apm_cli/deps/github_downloader_package_ops.py || \
+    grep -q 'repository_url = dep_ref.to_github_url()' \
+    src/apm_cli/deps/github_downloader_subdir_ops.py); then
     echo "[x] Downloader cache consumers must pass the complete canonical Git URL"
     violations=$((violations + 1))
 fi
@@ -734,8 +756,9 @@ if [ "$target_instruction_contraction_status" -ne 0 ]; then
 fi
 
 echo "[*] AC16: post-uninstall reachability owner authority"
+# Code moved from engine.py to _orphan_ops.py in #1078 (800-line guardrail split).
 if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
-    src/apm_cli/commands/uninstall/engine.py; then
+    src/apm_cli/commands/uninstall/_orphan_ops.py; then
     echo "[x] Uninstall engine must call deps/reachability.py's compute_forward_reachable_keys"
     violations=$((violations + 1))
 fi
@@ -767,8 +790,14 @@ if ! grep -q '^def classify_github_throttle(' "$github_throttle_owner" \
 fi
 
 echo "[*] AC18: deployment owner and cleanup authority"
+# _prune_ops.py and _audit_ops.py are sibling delegates extracted in #1078
+# (800-line guardrail split); they replaced prune.py and audit.py as the
+# canonical call sites for legacy_value, reconcile_owner_references, and
+# owner_reference_violations respectively.
 deployment_owner_output=$(python3 scripts/check_deployment_owner_boundaries.py \
+    src/apm_cli/commands/_prune_ops.py \
     src/apm_cli/commands/prune.py \
+    src/apm_cli/commands/_audit_ops.py \
     src/apm_cli/commands/audit.py \
     src/apm_cli/policy/ci_checks.py 2>&1)
 deployment_owner_status=$?
@@ -833,9 +862,13 @@ public_github_auth_duplicate_defs=$(
         | grep -v 'architecture-authority-exempt:' \
         || true
 )
+# Stage-2 strangler split (issue #1078): the download bodies moved out of
+# deps/download_strategies.py into deps/download_strategies_ops.py, so the
+# owner-routing call now lives in the ops module. Intent is unchanged --
+# every download consumer must still route through AuthResolver.
 public_github_auth_consumers="
 src/apm_cli/deps/clone_engine.py
-src/apm_cli/deps/download_strategies.py
+src/apm_cli/deps/download_strategies_ops.py
 src/apm_cli/deps/git_reference_resolver.py
 src/apm_cli/deps/github_downloader.py
 src/apm_cli/deps/github_downloader_validation.py
@@ -1002,9 +1035,14 @@ fi
 echo "[*] AC24: frozen install decision authority"
 frozen_owner="src/apm_cli/install/service.py"
 frozen_adapter="src/apm_cli/commands/install.py"
-frozen_preflight_line=$(grep -n 'InstallService\.enforce_frozen(' "$frozen_adapter" \
+# #1078 split: the APM install pipeline that owns the frozen preflight and the
+# legacy-lockfile migration was extracted out of the CLI adapter. The ordering
+# invariant (preflight strictly before migration) is unchanged -- only the file
+# that hosts both statements moved.
+frozen_pipeline="src/apm_cli/install/apm_packages.py"
+frozen_preflight_line=$(grep -n 'InstallService\.enforce_frozen(' "$frozen_pipeline" \
     | head -1 | cut -d: -f1)
-frozen_migration_line=$(grep -n 'migrate_lockfile_if_needed(ctx\.apm_dir)' "$frozen_adapter" \
+frozen_migration_line=$(grep -n 'migrate_lockfile_if_needed(ctx\.apm_dir)' "$frozen_pipeline" \
     | head -1 | cut -d: -f1)
 frozen_add_guard_line=$(grep -n 'InstallService\.reject_frozen_mutation(' "$frozen_adapter" \
     | head -1 | cut -d: -f1)
@@ -1014,7 +1052,10 @@ root_redirect_line=$(grep -n '_root_redirect = install_root_redirect(' "$frozen_
     | head -1 | cut -d: -f1)
 dedicated_mcp_line=$(grep -n '^[[:space:]]*_handle_mcp_install(' "$frozen_adapter" \
     | tail -1 | cut -d: -f1)
-local_bundle_line=$(grep -n 'if len(packages) == 1 and not mcp_name' "$frozen_adapter" \
+# #1078 split: the local-bundle probe moved into install/install_cmd_phases.py;
+# the adapter now reaches it through _try_local_bundle_install(), which is the
+# statement the frozen add-guard must still precede.
+local_bundle_line=$(grep -n '_try_local_bundle_install(' "$frozen_adapter" \
     | head -1 | cut -d: -f1)
 frozen_duplicate_hits=$(
     grep -rEn --include='*.py' 'raise FrozenInstallError' src/apm_cli \

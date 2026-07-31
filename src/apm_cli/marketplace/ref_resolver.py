@@ -340,9 +340,13 @@ class RefResolver:
         if not use_ssh:
             env["GIT_ASKPASS"] = "echo"
         if bearer and self._token:
+            # Auth header already injected by _build_git_env (or present in
+            # self._git_env from AuthContext); just ensure GIT_TOKEN is absent
+            # so the JWT never leaks into the child-process env table.
             env.pop("GIT_TOKEN", None)
             set_ado_bearer_git_env(env, self._token)
         elif ado_host and url_token:
+            # ADO PAT via Basic header -- append to retained config entries.
             credential = base64.b64encode(f":{url_token}".encode()).decode()
             set_authorization_header_git_env(env, "Basic", credential)
         return url, env

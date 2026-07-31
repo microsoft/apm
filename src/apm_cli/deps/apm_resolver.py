@@ -1,19 +1,66 @@
 """APM dependency resolution engine with recursive resolution and conflict detection."""
 
-import inspect
 import logging
-import os
 import threading
 from collections import deque
-from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
-from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
-from ..utils.paths import portable_relpath
+from ..utils.path_security import PathTraversalError
+from .apm_resolver_helpers import _DEFAULT_RESOLVE_PARALLEL as _DEFAULT_RESOLVE_PARALLEL
+from .apm_resolver_helpers import (
+    _anchor_local_sub_dep as _anchor_local_sub_dep_helper,
+)
+from .apm_resolver_helpers import (
+    _compute_dep_source_path as _compute_dep_source_path,
+)
+from .apm_resolver_helpers import (
+    _create_resolution_summary as _create_resolution_summary,
+)
+from .apm_resolver_helpers import (
+    _detect_circular_deps,
+    _expand_parent_repo_decl,
+    _flatten_dependencies,
+    _portable_anchor_identity,
+    _remote_parent_eligible,
+    _select_dependency_winners,
+    _validate_dependency_reference,
+)
+from .apm_resolver_helpers import (
+    _download_dedup_key as _download_dedup_key,
+)
+from .apm_resolver_helpers import (
+    _effective_base_dir as _effective_base_dir,
+)
+from .apm_resolver_helpers import (
+    _expand_remote_parent_local_path as _expand_remote_parent_local_path_fn,
+)
+from .apm_resolver_helpers import (
+    _inherit_remote_parent_fields as _inherit_remote_parent_fields,
+)
+from .apm_resolver_helpers import (
+    _is_absolute_local_path as _is_absolute_local_path,
+)
+from .apm_resolver_helpers import (
+    _is_remote_parent as _is_remote_parent,
+)
+from .apm_resolver_helpers import (
+    _remote_repo_root_for_parent as _remote_repo_root_for_parent_fn,
+)
+from .apm_resolver_helpers import (
+    _resolve_marketplace_dep as _resolve_marketplace_dep_fn,
+)
+from .apm_resolver_helpers import (
+    _resolve_marketplace_or_record_error as _resolve_marketplace_or_record_error_fn,
+)
+from .apm_resolver_helpers import (
+    _resolve_max_parallel as _resolve_max_parallel,
+)
+from .apm_resolver_helpers import (
+    _signature_accepts_parent_pkg as _signature_accepts_parent_pkg,
+)
 from .dependency_graph import (
     CircularRef,
     DependencyGraph,
@@ -26,29 +73,6 @@ if TYPE_CHECKING:
     from .lockfile import LockFile
 
 _logger = logging.getLogger(__name__)
-
-
-# Default worker pool size for the level-batched BFS download phase.
-# Parallel resolution is the CENTRAL execution model (uv-inspired);
-# the ``APM_RESOLVE_PARALLEL`` env var exists solely as a diagnostic /
-# parity-testing knob (e.g. ``APM_RESOLVE_PARALLEL=1 apm install`` to
-# reproduce legacy sequential ordering for diff-debugging).  It is NOT
-# a user-facing feature toggle.
-_DEFAULT_RESOLVE_PARALLEL = 4
-
-
-def _select_dependency_winners(
-    nodes: Iterable[DependencyNode],
-) -> tuple[tuple[DependencyNode, ...], dict[str, str]]:
-    """Return canonical dependency order and first-wins node IDs."""
-    ordered = tuple(sorted(nodes, key=lambda node: (node.depth, node.get_id())))
-    winner_ids: dict[str, str] = {}
-    for node in ordered:
-        winner_ids.setdefault(
-            node.dependency_ref.get_unique_key(),
-            node.get_id(),
-        )
-    return ordered, winner_ids
 
 
 # Type alias for the download callback.
@@ -86,31 +110,16 @@ class APMDependencyResolver:
         update_refs: bool = False,
         existing_lockfile: "LockFile | None" = None,
     ):
-        """Initialize the resolver with maximum recursion depth.
+        """Initialize the resolver.
 
         Args:
-            max_depth: Maximum depth for dependency resolution (default: 50)
-            apm_modules_dir: Optional explicit apm_modules directory. If not provided,
-                             will be determined from project_root during resolution.
-            download_callback: Optional callback to download missing packages. If provided,
-                               the resolver will attempt to fetch uninstalled transitive deps.
-            max_parallel: Max worker threads for the level-batched
-                parallel BFS download phase (the default execution
-                model). ``None`` resolves from the
-                ``APM_RESOLVE_PARALLEL`` env var, falling back to
-                ``_DEFAULT_RESOLVE_PARALLEL`` (4). Set to ``1`` ONLY
-                for parity-testing against the legacy sequential path
-                -- this is a diagnostic knob, not a user toggle.
-            auth_resolver: Optional auth resolver for marketplace dependency resolution.
-            update_refs: True for ``apm update`` / ``--refresh``. When set,
-                ``_should_force_recheck`` gives ``download_callback`` a
-                chance to run for a semver-ranged dep even when its
-                install path already exists, at any depth -- see that
-                method's docstring for why this can't be scoped to direct
-                deps only.
-            existing_lockfile: Existing resolved dependency state used by the
-                canonical ref-drift owner to decide whether a plain install
-                must re-enter the download callback.
+            max_depth: Maximum recursion depth (default: 50).
+            apm_modules_dir: Explicit apm_modules dir; auto-detected from project_root if None.
+            download_callback: Optional callback to download missing packages.
+            max_parallel: Worker threads for parallel BFS; None reads APM_RESOLVE_PARALLEL env.
+            auth_resolver: Optional auth resolver for marketplace deps.
+            update_refs: If True (``apm update``), force-recheck even when install path exists.
+            existing_lockfile: Prior lockfile state for ref-drift checking.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
@@ -118,84 +127,50 @@ class APMDependencyResolver:
         self._download_callback = download_callback
         self._update_refs = update_refs
         self._existing_lockfile = existing_lockfile
-        # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
-        # Detected once via signature inspection so legacy callbacks that
-        # predate the field still work without raising a silent TypeError
-        # that would mask the dependency.
+        # Whether callback accepts parent_pkg (added in #857). Detected once via
+        # signature inspection so legacy callbacks still work without a TypeError.
         self._callback_accepts_parent_pkg: bool = (
             self._signature_accepts_parent_pkg(download_callback)
             if download_callback is not None
             else False
         )
-        self._downloaded_packages: set[str] = (
-            set()
-        )  # Track what we downloaded during this resolution
-        # Tracks ``dep_ref.get_unique_key()`` values rejected by the
-        # remote-parent local_path guard (#940 / PR #1111 review C2). The
-        # resolve phase folds this into ``ctx.callback_failures`` so the
-        # integrate phase skips them with the same "already failed during
-        # resolution" path used for download failures -- otherwise the
-        # rejected dep would still sit in the dependency tree and get
-        # copied later via ``_copy_local_package``, defeating the
-        # fail-closed posture this guard is meant to enforce.
+        self._downloaded_packages: set[str] = set()
+        # Dep unique_keys rejected by the remote-parent local_path guard (#940).
         self._rejected_remote_local_keys: set[str] = set()
-        # Protects mutations of ``_downloaded_packages`` and
-        # ``_rejected_remote_local_keys`` when the parallel BFS
-        # dispatches ``_try_load_dependency_package`` calls onto a
-        # worker pool. The ``max_parallel=1`` parity path still
-        # acquires the lock -- the overhead is negligible and the
-        # symmetry simplifies reasoning.
+        # Protects mutations of the above sets in the parallel BFS worker pool.
         self._download_lock = threading.Lock()
         self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
 
     @staticmethod
     def _resolve_max_parallel(explicit: int | None) -> int:
-        """Compute effective worker count for level-batched parallel BFS.
-
-        Parallel is the default and central execution model.  The
-        override exists for parity testing (``APM_RESOLVE_PARALLEL=1``)
-        and CI diagnostics, not as a user-facing knob.
-
-        Order of precedence:
-        1. Explicit ``max_parallel`` ctor arg.
-        2. ``APM_RESOLVE_PARALLEL`` env var (diagnostic/parity knob).
-        3. ``_DEFAULT_RESOLVE_PARALLEL``.
-
-        Always coerced to ``>= 1`` so the executor never gets a zero
-        or negative ``max_workers``.
-        """
-        if explicit is not None:
-            return max(1, int(explicit))
-        env = os.environ.get("APM_RESOLVE_PARALLEL", "").strip()
-        if env:
-            try:
-                return max(1, int(env))
-            except ValueError:
-                _logger.debug("Ignoring invalid APM_RESOLVE_PARALLEL=%r", env)
-        return _DEFAULT_RESOLVE_PARALLEL
+        """Compute effective worker count; see :func:`_resolve_max_parallel`."""
+        return _resolve_max_parallel(explicit)
 
     @staticmethod
     def _signature_accepts_parent_pkg(callback) -> bool:
-        """Return True if ``callback`` declares a ``parent_pkg`` parameter
-        (or accepts ``**kwargs``).
+        """Return True if callback accepts ``parent_pkg``; see helper."""
+        return _signature_accepts_parent_pkg(callback)
 
-        Falls back to False if the signature can't be introspected (e.g. C
-        extensions, builtins). The conservative fallback is correct: if we
-        don't know the callback's shape, assume the legacy 3-arg form so
-        the resolver won't pass an extra positional/keyword that triggers
-        TypeError and silently drops the dependency (#940 SR1).
-        """
-        try:
-            sig = inspect.signature(callback)
-        except (TypeError, ValueError):
-            return False
-        for param in sig.parameters.values():
-            if param.kind is inspect.Parameter.VAR_KEYWORD:
-                return True
-            if param.name == "parent_pkg":
-                return True
-        return False
+    @staticmethod
+    def _portable_anchor_identity(anchored: Path, base: Path | None) -> str:
+        """Return a machine-independent identity string; see :func:`_portable_anchor_identity`."""
+        return _portable_anchor_identity(anchored, base)
+
+    def _should_force_recheck(self, dep_ref: DependencyReference) -> bool:
+        """Delegate existing-path recheck policy to the canonical drift owner."""
+        from apm_cli.drift import should_force_ref_recheck
+
+        locked_dep = (
+            self._existing_lockfile.get_dependency(dep_ref.get_unique_key())
+            if self._existing_lockfile is not None
+            else None
+        )
+        return should_force_ref_recheck(
+            dep_ref,
+            locked_dep,
+            update_refs=self._update_refs,
+        )
 
     def resolve_dependencies(self, project_root: Path) -> DependencyGraph:
         """
@@ -264,43 +239,15 @@ class APMDependencyResolver:
 
     def _remote_parent_eligible(self, parent_dep: DependencyReference) -> bool:
         """Return True if *parent_dep* can serve as the Git repo for ``git: parent`` expansion."""
-        if parent_dep.is_azure_devops():
-            return bool(parent_dep.ado_repo and parent_dep.repo_url.count("/") >= 2)
-        return "/" in parent_dep.repo_url
+        return _remote_parent_eligible(parent_dep)
 
     def expand_parent_repo_decl(
         self,
         parent_dep: DependencyReference,
         child_dep: DependencyReference,
     ) -> DependencyReference:
-        """Expand ``{ git: parent, path: ... }`` using the declaring package's coordinates.
-
-        The child keeps its ``virtual_path`` (monorepo subdirectory), ``alias``, and
-        optional ``ref`` override; repository identity (host, ``repo_url``, ADO
-        fields, etc.) is inherited from *parent_dep*.
-        """
-        if not child_dep.is_parent_repo_inheritance:
-            raise ValueError(
-                "expand_parent_repo_decl requires child_dep.is_parent_repo_inheritance"
-            )
-        if parent_dep.is_local:
-            raise ValueError("git: parent cannot inherit from a local path dependency")
-        if parent_dep.repo_url.startswith("_local/"):
-            raise ValueError("git: parent cannot inherit from a local path dependency")
-        if not self._remote_parent_eligible(parent_dep):
-            raise ValueError("git: parent requires a remote Git parent package dependency")
-
-        merged_ref = (
-            child_dep.reference if child_dep.reference is not None else parent_dep.reference
-        )
-
-        return self._inherit_remote_parent_fields(
-            parent_dep,
-            child_dep,
-            virtual_path=child_dep.virtual_path,
-            reference=merged_ref,
-            is_virtual=True,
-        )
+        """Expand ``{ git: parent, path: ... }`` using the declaring package's coordinates."""
+        return _expand_parent_repo_decl(parent_dep, child_dep)
 
     @staticmethod
     def _inherit_remote_parent_fields(
@@ -312,58 +259,18 @@ class APMDependencyResolver:
         is_virtual: bool,
     ) -> DependencyReference:
         """Return *child_dep* with remote identity inherited from *parent_dep*."""
-        return replace(
+        return _inherit_remote_parent_fields(
+            parent_dep,
             child_dep,
-            repo_url=parent_dep.repo_url,
-            host=parent_dep.host,
-            port=parent_dep.port,
-            explicit_scheme=parent_dep.explicit_scheme,
-            ado_organization=parent_dep.ado_organization,
-            ado_project=parent_dep.ado_project,
-            ado_repo=parent_dep.ado_repo,
-            artifactory_prefix=parent_dep.artifactory_prefix,
-            is_insecure=parent_dep.is_insecure,
-            allow_insecure=parent_dep.allow_insecure,
-            source=parent_dep.source,
-            registry_name=None,
-            reference=reference,
             virtual_path=virtual_path,
+            reference=reference,
             is_virtual=is_virtual,
-            is_parent_repo_inheritance=False,
-            is_local=False,
-            local_path=None,
         )
 
     @staticmethod
     def _is_absolute_local_path(local_path: str) -> bool:
         """Return True for POSIX, home-expanded, or Windows absolute paths."""
-        raw = local_path.strip()
-        return Path(raw).expanduser().is_absolute() or PureWindowsPath(raw).is_absolute()
-
-    @staticmethod
-    def _portable_anchor_identity(anchored: Path, base: Path | None) -> str:
-        """Return a machine-independent identity string for a resolved local dep.
-
-        ``anchored`` is the absolute, resolved on-disk location of a local
-        package. The returned value is the package's stable identity only --
-        it feeds the ``local:`` cycle key, the lockfile
-        ``dependencies[].anchored_local_path`` field, and (via that same owner
-        identity) the deployment-ledger owner rows. It is never re-opened as a
-        filesystem path.
-
-        A lockfile is a committed, cross-machine artifact, so this identity
-        MUST NOT carry a developer's home directory or any absolute prefix.
-        Packages inside ``base`` (the project root) are recorded relative to
-        it in forward-slash POSIX form -- matching how directly-declared local
-        owners already serialize -- which keeps a regenerated lockfile
-        deterministic across machines and CI. Packages outside ``base`` (or
-        when ``base`` is unknown) fall back to the resolved absolute POSIX
-        path: such out-of-project local deps are inherently non-committable,
-        and the fallback preserves a unique identity without inventing one.
-        """
-        if base is None:
-            return anchored.resolve().as_posix()
-        return portable_relpath(anchored, base)
+        return _is_absolute_local_path(local_path)
 
     def _remote_repo_root_for_parent(
         self,
@@ -371,18 +278,11 @@ class APMDependencyResolver:
         parent_pkg: APMPackage,
     ) -> Path:
         """Return the on-disk clone root for a remote parent package."""
-        if self._apm_modules_dir is None or parent_pkg.source_path is None:
+        if self._apm_modules_dir is None:
             raise PathTraversalError(
                 "remote parent package has no source path to anchor local path"
             )
-        source_path = ensure_path_within(parent_pkg.source_path, self._apm_modules_dir)
-        repo_root = source_path
-        if parent_dep.virtual_path:
-            validate_path_segments(parent_dep.virtual_path, context="virtual_path")
-            for _segment in parent_dep.virtual_path.replace("\\", "/").split("/"):
-                if _segment:
-                    repo_root = repo_root.parent
-        return ensure_path_within(repo_root, self._apm_modules_dir)
+        return _remote_repo_root_for_parent_fn(parent_dep, parent_pkg, self._apm_modules_dir)
 
     def _expand_remote_parent_local_path(
         self,
@@ -390,44 +290,13 @@ class APMDependencyResolver:
         parent_pkg: APMPackage,
         child_dep: DependencyReference,
     ) -> DependencyReference:
-        """Expand a remote package's relative ``path:`` dep to a same-repo virtual dep.
-
-        The security boundary is the authenticated parent repository root: a
-        relative path must resolve inside that root. The returned dependency keeps
-        the parent's host/repo/ref fields so downstream download code reuses the
-        same origin and shared clone cache instead of treating the path as a
-        consumer-filesystem local dependency.
-        """
-        if not child_dep.local_path:
-            raise PathTraversalError("remote local dependency has no path")
-        if child_dep.source == "registry" or parent_dep.source == "registry":
-            raise PathTraversalError("registry packages cannot declare same-repo local paths")
-        if not self._remote_parent_eligible(parent_dep):
-            raise PathTraversalError("remote local dependency has no eligible git parent")
-        local_str = str(child_dep.local_path)
-        if self._is_absolute_local_path(local_str):
-            raise PathTraversalError("absolute paths inside remote packages are not allowed")
-
-        repo_root = self._remote_repo_root_for_parent(parent_dep, parent_pkg)
-        parent_source = ensure_path_within(parent_pkg.source_path, repo_root)
-        local_path = Path(local_str.replace("\\", "/"))
-        resolved = ensure_path_within(parent_source / local_path, repo_root)
-        virtual_path = resolved.relative_to(repo_root).as_posix()
-        if virtual_path in ("", "."):
-            return self._inherit_remote_parent_fields(
-                parent_dep,
-                child_dep,
-                virtual_path=None,
-                reference=parent_dep.reference,
-                is_virtual=False,
+        """Expand a remote package's relative ``path:`` dep to a same-repo virtual dep."""
+        if self._apm_modules_dir is None:
+            raise PathTraversalError(
+                "remote parent package has no source path to anchor local path"
             )
-        validate_path_segments(virtual_path, context="same-repo path")
-        return self._inherit_remote_parent_fields(
-            parent_dep,
-            child_dep,
-            virtual_path=virtual_path,
-            reference=parent_dep.reference,
-            is_virtual=True,
+        return _expand_remote_parent_local_path_fn(
+            parent_dep, parent_pkg, child_dep, self._apm_modules_dir
         )
 
     def _reject_remote_parent_local_path(
@@ -469,38 +338,8 @@ class APMDependencyResolver:
             return None
 
     def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
-        """Resolve a marketplace dependency to a concrete DependencyReference.
-
-        Uses :func:`resolve_marketplace_plugin` to look up the plugin in the
-        registered marketplace and returns a resolved git-backed reference.
-        Prefers the structured ``dependency_reference`` from the resolution
-        when available (GitLab-class hosts, in-marketplace subdirectory
-        plugins) over parsing the canonical string.
-
-        Args:
-            dep_ref: An unresolved marketplace DependencyReference.
-
-        Returns:
-            A concrete (non-marketplace) DependencyReference.
-
-        Raises:
-            MarketplaceNotFoundError: Marketplace is not registered.
-            PluginNotFoundError: Plugin not found in the marketplace.
-            MarketplaceFetchError: Network/auth error fetching marketplace data.
-            ValueError: Invalid marketplace or plugin configuration.
-        """
-        from apm_cli.marketplace.resolver import resolve_marketplace_plugin
-
-        resolution = resolve_marketplace_plugin(
-            dep_ref.marketplace_plugin_name,
-            dep_ref.marketplace_name,
-            version_spec=dep_ref.marketplace_version_spec,
-            auth_resolver=self._auth_resolver,
-            warning_handler=_logger.warning,
-        )
-        if resolution.dependency_reference is not None:
-            return resolution.dependency_reference
-        return DependencyReference.parse(resolution.canonical)
+        """Resolve a marketplace dependency to a concrete DependencyReference."""
+        return _resolve_marketplace_dep_fn(dep_ref, self._auth_resolver, _logger.warning)
 
     def _resolve_marketplace_or_record_error(
         self,
@@ -508,50 +347,10 @@ class APMDependencyResolver:
         tree: DependencyTree,
         context: str,
     ) -> DependencyReference | None:
-        """Try to resolve a marketplace dep; record an error on the tree on failure.
-
-        Catches known marketplace exceptions and records them as resolution
-        errors.  Unknown exceptions propagate so programmer errors are not
-        silently swallowed.
-
-        Args:
-            dep_ref: Unresolved marketplace dependency.
-            tree: The dependency tree to record errors on.
-            context: Human-readable context for error messages
-                     (e.g. ``"required by owner/repo"``).
-
-        Returns:
-            Resolved DependencyReference on success, ``None`` on known failure.
-        """
-        from apm_cli.marketplace.errors import (
-            BuildError,
-            MarketplaceFetchError,
-            MarketplaceNotFoundError,
-            PluginNotFoundError,
+        """Try to resolve a marketplace dep; record an error on the tree on failure."""
+        return _resolve_marketplace_or_record_error_fn(
+            dep_ref, tree, context, self._auth_resolver, _logger.warning
         )
-
-        try:
-            return self._resolve_marketplace_dep(dep_ref)
-        except (
-            MarketplaceNotFoundError,
-            PluginNotFoundError,
-            MarketplaceFetchError,
-            BuildError,
-            ValueError,
-        ) as exc:
-            _logger.debug(
-                "Marketplace resolution failed for %s@%s: %s",
-                dep_ref.marketplace_plugin_name,
-                dep_ref.marketplace_name,
-                exc,
-            )
-            tree.resolution_errors.append(
-                f"Failed to resolve marketplace dependency "
-                f"'{dep_ref.marketplace_plugin_name}' from "
-                f"marketplace '{dep_ref.marketplace_name}'"
-                f"{f' ({context})' if context else ''}: {exc}"
-            )
-            return None
 
     def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
         """
@@ -632,22 +431,14 @@ class APMDependencyResolver:
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
                 queued_keys.add(key)
-            # If already queued as prod, prod wins — skip
+            # If already queued as prod, prod wins -- skip
 
         # Process dependencies breadth-first with level-batched parallelism.
-        #
-        # Parallel BFS is the CENTRAL resolution strategy (uv-inspired).
-        # Each level fans out potentially I/O-bound
-        # ``_try_load_dependency_package`` calls across a bounded worker
-        # pool. All tree mutations -- ``tree.add_node``,
-        # ``parent_node.children.append``, ``processing_queue.append``,
-        # ``queued_keys`` writes -- still happen on the main thread, in
-        # deterministic submission order, so parallelism never affects
-        # the resolved tree shape.
-        #
-        # The ``max_parallel == 1`` branch exists SOLELY as a parity-
-        # testing escape hatch (verifies sequential-identical output);
-        # it is not a user-facing toggle.
+        # Phase A (main thread): dedup + node creation.
+        # Phase B (workers): I/O-bound package loading via ``_try_load_dependency_package``.
+        # Phase C (main thread): enqueue discovered sub-deps.
+        # All tree mutations happen on the main thread; parallelism never affects tree shape.
+        # ``max_parallel == 1`` is a parity-testing escape hatch only.
         while processing_queue:
             # --- Drain one level ---
             current_depth = processing_queue[0][1]
@@ -656,31 +447,18 @@ class APMDependencyResolver:
                 level_items.append(processing_queue.popleft())
 
             # --- Phase A (main thread): dedup + node creation ---
-            # Each work_item is (node, dep_ref, parent_node, is_dev)
-            # and represents a NEW node that needs its package loaded.
-            # Items that hit the existing-node fast-path or exceed
-            # ``max_depth`` are resolved here and never reach the worker
-            # pool.
             work_items: list[
                 tuple[DependencyNode, DependencyReference, DependencyNode | None, bool]
             ]
             work_items = []
             for dep_ref, depth, parent_node, is_dev in level_items:
-                # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
-
-                # Check maximum depth to prevent infinite recursion
                 if depth > self.max_depth:
                     continue
-
-                # Check if we already processed this dependency at this level or higher
                 existing_node = tree.nodes.get(dep_ref.get_resolution_key())
                 if existing_node and existing_node.depth <= depth:
-                    # Prod wins over dev: if existing was dev and this is prod, promote it
                     if existing_node.is_dev and not is_dev:
                         existing_node.is_dev = False
-                    # We've already processed this dependency at a shallower or equal depth
-                    # Create parent-child relationship if parent exists
                     if parent_node and all(
                         child is not existing_node for child in parent_node.children
                     ):
@@ -702,13 +480,9 @@ class APMDependencyResolver:
                     is_dev=is_dev,
                 )
 
-                # Add to tree
                 tree.add_node(node)
-
-                # Create parent-child relationship
                 if parent_node:
                     parent_node.children.append(node)
-
                 work_items.append((node, dep_ref, parent_node, is_dev))
 
             winner_candidates.extend(item[0] for item in work_items)
@@ -729,18 +503,12 @@ class APMDependencyResolver:
                     ]
                 ] = []
             elif self._max_parallel == 1 or len(work_items) == 1:
-                # Parity-testing path: byte-identical to legacy sequential
-                # output so ``APM_RESOLVE_PARALLEL=1`` can be used to
-                # diff-debug ordering issues.  NOT a feature flag.
                 results = [self._load_work_item(it) for it in work_items]
             else:
                 workers = min(self._max_parallel, len(work_items))
                 with ThreadPoolExecutor(
                     max_workers=workers, thread_name_prefix="apm-resolve"
                 ) as executor:
-                    # ``executor.map`` preserves submission order, which
-                    # keeps next-level enqueuing deterministic regardless
-                    # of which worker finishes first.
                     results = list(executor.map(self._load_work_item, work_items))
 
             # --- Phase C (main thread): integrate results, enqueue sub-deps ---
@@ -778,37 +546,9 @@ class APMDependencyResolver:
                         )
                         if sub_dep is None:
                             continue
-                        if (
-                            sub_dep.is_local
-                            and sub_dep.local_path
-                            and node.package.source_path is not None
-                        ):
-                            local_path = Path(sub_dep.local_path).expanduser()
-                            anchored = (
-                                local_path.resolve()
-                                if local_path.is_absolute()
-                                else (node.package.source_path / local_path).resolve()
-                            )
-                            sub_dep = replace(
-                                sub_dep,
-                                declaring_parent=node.get_id(),
-                                anchored_local_path=self._portable_anchor_identity(
-                                    anchored, root_package.source_path
-                                ),
-                            )
-                            ancestor: DependencyNode | None = node
-                            while ancestor is not None:
-                                if (
-                                    ancestor.dependency_ref.get_cycle_key()
-                                    == sub_dep.get_cycle_key()
-                                ):
-                                    if all(child is not ancestor for child in node.children):
-                                        node.children.append(ancestor)
-                                    sub_dep = None
-                                    break
-                                ancestor = ancestor.parent
-                            if sub_dep is None:
-                                continue
+                        sub_dep = _anchor_local_sub_dep_helper(sub_dep, node, root_package)
+                        if sub_dep is None:
+                            continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
                                 sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
@@ -817,124 +557,23 @@ class APMDependencyResolver:
                                 sub_dep = resolved
                             else:
                                 continue
-                        # Avoid infinite recursion by checking if we're already processing this dep
-                        # Use O(1) set lookup instead of O(n) list comprehension
-                        queue_key = sub_dep.get_resolution_key()
-                        if queue_key not in queued_keys:
+                        if sub_dep.get_resolution_key() not in queued_keys:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
-                            queued_keys.add(queue_key)
+                            queued_keys.add(sub_dep.get_resolution_key())
 
         return tree
 
     def detect_circular_dependencies(self, tree: DependencyTree) -> list[CircularRef]:
-        """
-        Detect and report circular dependency chains.
-
-        Uses depth-first search to detect cycles in the dependency graph.
-        A cycle is detected when we encounter the same repository URL
-        in our current traversal path.
-
-        Args:
-            tree: The dependency tree to analyze
-
-        Returns:
-            List[CircularRef]: List of detected circular dependencies
-        """
-        circular_deps = []
-        visited: set[str] = set()
-        current_path: list[str] = []
-        current_path_set: set[str] = set()  # O(1) membership test (#171)
-
-        def dfs_detect_cycles(node: DependencyNode) -> None:
-            """Recursive DFS function to detect cycles."""
-            node_id = node.get_id()
-            # Use unique key (includes subdirectory path) to distinguish monorepo packages
-            # e.g., vineethsoma/agent-packages/agents/X vs vineethsoma/agent-packages/skills/Y
-            unique_key = node.dependency_ref.get_cycle_key()
-
-            # Check if this unique key is already in our current path (cycle detected)
-            if unique_key in current_path_set:
-                # Found a cycle - create the cycle path
-                cycle_start_index = current_path.index(unique_key)
-                cycle_path = current_path[cycle_start_index:] + [unique_key]  # noqa: RUF005
-
-                circular_ref = CircularRef(cycle_path=cycle_path, detected_at_depth=node.depth)
-                circular_deps.append(circular_ref)
-                return
-
-            # Mark current node as visited and add unique key to path
-            visited.add(node_id)
-            current_path.append(unique_key)
-            current_path_set.add(unique_key)
-
-            # Check all children
-            for child in node.children:
-                child_id = child.get_id()
-
-                # Only recurse if we haven't processed this subtree completely
-                if (
-                    child_id not in visited
-                    or child.dependency_ref.get_cycle_key() in current_path_set
-                ):
-                    dfs_detect_cycles(child)
-
-            # Remove from path when backtracking (but keep in visited)
-            current_path_set.discard(current_path.pop())
-
-        # Start DFS from all root level dependencies (depth 1)
-        root_deps = tree.get_nodes_at_depth(1)
-        for root_dep in root_deps:
-            if root_dep.get_id() not in visited:
-                current_path = []  # Reset path for each root
-                current_path_set = set()
-                dfs_detect_cycles(root_dep)
-
-        return circular_deps
+        """Detect cycles; see :func:`apm_resolver_helpers._detect_circular_deps`."""
+        return _detect_circular_deps(tree)
 
     def flatten_dependencies(self, tree: DependencyTree) -> FlatDependencyMap:
-        """
-        Flatten tree to avoid duplicate installations (NPM hoisting).
-
-        Implements "first wins" conflict resolution strategy where the first
-        declared dependency takes precedence over later conflicting dependencies.
-
-        Args:
-            tree: The dependency tree to flatten
-
-        Returns:
-            FlatDependencyMap: Flattened dependencies ready for installation
-        """
-        flat_map = FlatDependencyMap()
-        ordered, winner_ids = _select_dependency_winners(
-            node for node in tree.nodes.values() if node.depth >= 1
-        )
-        for node in ordered:
-            unique_key = node.dependency_ref.get_unique_key()
-            flat_map.add_dependency(
-                node.dependency_ref,
-                is_conflict=winner_ids[unique_key] != node.get_id(),
-            )
-
-        return flat_map
+        """Flatten tree (NPM hoisting); see :func:`apm_resolver_helpers._flatten_dependencies`."""
+        return _flatten_dependencies(tree)
 
     def _validate_dependency_reference(self, dep_ref: DependencyReference) -> bool:
-        """
-        Validate that a dependency reference is well-formed.
-
-        Args:
-            dep_ref: The dependency reference to validate
-
-        Returns:
-            bool: True if valid, False otherwise
-        """
-        if not dep_ref.repo_url:
-            return False
-
-        # Basic validation - in real implementation would be more thorough
-        if "/" not in dep_ref.repo_url:  # noqa: SIM103
-            return False
-
-        return True
+        """Validate that *dep_ref* is well-formed; see helper."""
+        return _validate_dependency_reference(dep_ref)
 
     def _load_work_item(self, item):
         """Worker payload for the level-batched parallel BFS.
@@ -959,21 +598,6 @@ class APMDependencyResolver:
             return (item, loaded, None)
         except (ValueError, FileNotFoundError) as exc:
             return (item, None, exc)
-
-    def _should_force_recheck(self, dep_ref: DependencyReference) -> bool:
-        """Delegate existing-path recheck policy to the canonical drift owner."""
-        from apm_cli.drift import should_force_ref_recheck
-
-        locked_dep = (
-            self._existing_lockfile.get_dependency(dep_ref.get_unique_key())
-            if self._existing_lockfile is not None
-            else None
-        )
-        return should_force_ref_recheck(
-            dep_ref,
-            locked_dep,
-            update_refs=self._update_refs,
-        )
 
     def _try_load_dependency_package(
         self,
@@ -1027,8 +651,7 @@ class APMDependencyResolver:
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
-        # If package doesn't exist locally, try to download it. Also fall
-        # through for a forced semver re-check (see _should_force_recheck).
+        # If package doesn't exist locally (or needs forced recheck), try to download it
         if not install_path.exists() or self._should_force_recheck(dep_ref):
             if self._download_callback is not None:
                 unique_key = self._download_dedup_key(dep_ref, parent_pkg)
@@ -1138,34 +761,8 @@ class APMDependencyResolver:
 
     @staticmethod
     def _is_remote_parent(parent_pkg: APMPackage | None) -> bool:
-        """Return True if *parent_pkg* is a REMOTE package (i.e. fetched via
-        git URL or pinned by ref/path).
-
-        Used to gate ``local_path`` deps: only the root project and other
-        local packages may legitimately declare them. Remote packages
-        declaring a local_path is a path-confusion vector.
-
-        SECURITY NOTE: this is a heuristic on the ``source`` field. A
-        sufficiently adversarial remote could spoof a local-looking source.
-        The downstream containment check via ``ensure_path_within`` is the
-        actual security boundary; this gate just produces the user-facing
-        error early.
-        """
-        if parent_pkg is None or not parent_pkg.source:
-            return False
-        src = str(parent_pkg.source)
-        # Local deps get ``source = "_local/<name>"`` (see DependencyReference
-        # construction for is_local=True). Treat that prefix as definitively
-        # local even though it contains a slash.
-        if src.startswith("_local/"):
-            return False
-        # Remote sources look like URLs or owner/repo refs. Local sources
-        # are filesystem paths the user typed in their apm.yml.
-        return (
-            src.startswith(("http://", "https://", "git@", "ssh://", "git+"))
-            or "://" in src
-            or (src.count("/") >= 1 and not src.startswith((".", "/", "~")))
-        )
+        """Return True if *parent_pkg* is a REMOTE package; see helper."""
+        return _is_remote_parent(parent_pkg)
 
     @staticmethod
     def _compute_dep_source_path(
@@ -1173,75 +770,19 @@ class APMDependencyResolver:
         parent_pkg: APMPackage | None,
         install_path: Path,
     ) -> Path:
-        """Return the source-path anchor for a dependency.
-
-        For LOCAL deps we return the *original* user source directory so that
-        transitive ``../sibling`` references inside its apm.yml resolve as a
-        developer reading the file expects (#857). For REMOTE deps we return
-        the clone location under apm_modules.
-        """
-        if dep_ref.is_local and dep_ref.local_path:
-            local = Path(dep_ref.local_path).expanduser()
-            if not local.is_absolute() and parent_pkg is not None and parent_pkg.source_path:
-                return (parent_pkg.source_path / local).resolve()
-            return local.resolve()
-        return install_path.resolve()
+        """Return the source-path anchor for a dependency; see helper."""
+        return _compute_dep_source_path(dep_ref, parent_pkg, install_path)
 
     @staticmethod
     def _download_dedup_key(dep_ref: DependencyReference, parent_pkg: APMPackage | None) -> str:
-        """Dedup key for the download cache.
-
-        Includes the parent's source_path so two parents anchoring the same
-        local dep at different absolute locations don't collide on the first
-        one's resolved path. For non-local deps, the parent anchor doesn't
-        affect resolution, so the package identity suffices. Conflicting refs
-        are reduced to one winner before worker dispatch.
-        """
-        base = dep_ref.get_unique_key()
-        if dep_ref.is_local and parent_pkg is not None and parent_pkg.source_path:
-            return f"{base}@{parent_pkg.source_path}"
-        return base
+        """Dedup key for the download cache; see helper."""
+        return _download_dedup_key(dep_ref, parent_pkg)
 
     @staticmethod
     def _effective_base_dir(parent_pkg: APMPackage | None, project_root: Path) -> Path:
-        """Return the directory used to anchor relative ``local_path`` deps.
-
-        For direct (root-declared) deps, this is the project root. For
-        transitive deps, it is the declaring package's source_path so a
-        ``../sibling`` written inside the original package directory means
-        what the author meant (#857).
-        """
-        if parent_pkg is not None and parent_pkg.source_path is not None:
-            return parent_pkg.source_path
-        return project_root
+        """Return the directory used to anchor relative ``local_path`` deps; see helper."""
+        return _effective_base_dir(parent_pkg, project_root)
 
     def _create_resolution_summary(self, graph: DependencyGraph) -> str:
-        """
-        Create a human-readable summary of the resolution results.
-
-        Args:
-            graph: The resolved dependency graph
-
-        Returns:
-            str: Summary string
-        """
-        summary = graph.get_summary()
-        lines = [
-            "Dependency Resolution Summary:",
-            f"  Root package: {summary['root_package']}",
-            f"  Total dependencies: {summary['total_dependencies']}",
-            f"  Maximum depth: {summary['max_depth']}",
-        ]
-
-        if summary["has_conflicts"]:
-            lines.append(f"  Conflicts detected: {summary['conflict_count']}")
-
-        if summary["has_circular_dependencies"]:
-            lines.append(f"  Circular dependencies: {summary['circular_count']}")
-
-        if summary["has_errors"]:
-            lines.append(f"  Resolution errors: {summary['error_count']}")
-
-        lines.append(f"  Status: {'[+] Valid' if summary['is_valid'] else '[x] Invalid'}")
-
-        return "\n".join(lines)
+        """Create a human-readable summary of the resolution results; see helper."""
+        return _create_resolution_summary(graph)

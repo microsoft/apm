@@ -60,24 +60,24 @@ def _suppress_console(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestIsVscodeAvailable:
     def test_returns_true_when_code_cli_exists(self, tmp_path: Path) -> None:
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"):
+        with patch("apm_cli.integration.mcp_vscode.shutil.which", return_value="/usr/bin/code"):
             assert _is_vscode_available(tmp_path) is True
 
     def test_returns_true_when_vscode_directory_exists(self, tmp_path: Path) -> None:
         (tmp_path / ".vscode").mkdir()
 
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None):
+        with patch("apm_cli.integration.mcp_vscode.shutil.which", return_value=None):
             assert _is_vscode_available(tmp_path) is True
 
     def test_returns_false_when_no_cli_and_no_directory(self, tmp_path: Path) -> None:
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None):
+        with patch("apm_cli.integration.mcp_vscode.shutil.which", return_value=None):
             assert _is_vscode_available(tmp_path) is False
 
     def test_uses_current_working_directory_when_project_root_missing(self, tmp_path: Path) -> None:
         (tmp_path / ".vscode").mkdir()
 
         with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None),
+            patch("apm_cli.integration.mcp_vscode.shutil.which", return_value=None),
             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
         ):
             assert _is_vscode_available() is True

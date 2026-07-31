@@ -411,17 +411,73 @@ def _safe_token(value: object) -> str:
         return f"<{type(value).__name__}>"
 
 
-def _validate_script_file(path: Path, source: str) -> list[str]:
-    """Validate a single script file. Returns a list of error messages."""
+def _parse_yaml_scripts(path: Path) -> tuple[dict | None, list[str]]:
+    """Parse a YAML script file and return ``(scripts_dict, early_errors)``.
+
+    Returns ``(None, [])`` when the file has no ``lifecycle:`` section --
+    the caller should treat this as "no errors, nothing to validate".
+    """
+    try:
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(path)
+    except Exception as e:
+        return None, [f"Invalid YAML: {e}"]
+
+    if not isinstance(data, dict):
+        return None, ["Root must be a mapping object"]
+
+    lifecycle = data.get("lifecycle")
+    if lifecycle is None:
+        return None, []
+    if not isinstance(lifecycle, dict):
+        return None, ["lifecycle: must be a mapping object"]
+    return lifecycle, []
+
+
+def _parse_json_scripts(raw_text: str) -> tuple[dict | None, list[str]]:
+    """Parse raw JSON text and return ``(scripts_dict, early_errors)``.
+
+    ``scripts_dict`` is ``None`` when a structural error stops script-level
+    validation.  ``early_errors`` may contain version-related warnings even
+    when ``scripts_dict`` is not ``None`` (version mismatch appended before
+    the scripts loop runs).
+    """
     import json as _json
 
-    from apm_cli.core.lifecycle_scripts import (
-        LIFECYCLE_EVENTS,
-        SCRIPT_FILE_VERSION,
-        SCRIPT_TYPES,
-    )
+    from apm_cli.core.lifecycle_scripts import SCRIPT_FILE_VERSION
+
+    try:
+        data = _json.loads(raw_text)
+    except (ValueError, RecursionError) as e:
+        # ValueError subsumes JSONDecodeError and the CPython int-string
+        # conversion limit (a bare ValueError on >4300-digit integers) so a
+        # hostile policy JSON drop-in is reported, never crashing validate.
+        return None, [f"Invalid JSON: {e}"]
+
+    if not isinstance(data, dict):
+        return None, ["Root must be a mapping object"]
 
     errors: list[str] = []
+    version = data.get("version")
+    if version is None:
+        errors.append("Missing 'version' field")
+    elif version != SCRIPT_FILE_VERSION:
+        errors.append(f"Unsupported version: {version} (expected {SCRIPT_FILE_VERSION})")
+
+    scripts_raw = data.get("scripts")
+    if scripts_raw is None:
+        errors.append("Missing 'scripts' field")
+        return None, errors
+    if not isinstance(scripts_raw, dict):
+        errors.append("'scripts' must be a mapping object")
+        return None, errors
+    return scripts_raw, errors
+
+
+def _validate_script_file(path: Path, source: str) -> list[str]:
+    """Validate a single script file. Returns a list of error messages."""
+    from apm_cli.core.lifecycle_scripts import LIFECYCLE_EVENTS, SCRIPT_TYPES
 
     try:
         raw_text = path.read_text(encoding="utf-8")
@@ -430,47 +486,14 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
 
     is_apm_yml = source in ("project", "user") or path.suffix in (".yml", ".yaml")
     if is_apm_yml:
-        try:
-            from apm_cli.utils.yaml_io import load_yaml
-
-            data = load_yaml(path)
-        except Exception as e:
-            return [f"Invalid YAML: {e}"]
+        scripts_dict, early_errors = _parse_yaml_scripts(path)
     else:
-        try:
-            data = _json.loads(raw_text)
-        except (ValueError, RecursionError) as e:
-            # ValueError subsumes JSONDecodeError and the CPython int-string
-            # conversion limit (a bare ValueError on >4300-digit integers) so a
-            # hostile policy JSON drop-in is reported, never crashing validate.
-            return [f"Invalid JSON: {e}"]
+        scripts_dict, early_errors = _parse_json_scripts(raw_text)
 
-    if not isinstance(data, dict):
-        return ["Root must be a mapping object"]
+    if scripts_dict is None:
+        return early_errors
 
-    if is_apm_yml:
-        lifecycle = data.get("lifecycle")
-        if lifecycle is None:
-            return []
-        if not isinstance(lifecycle, dict):
-            return ["lifecycle: must be a mapping object"]
-        scripts_dict = lifecycle
-    else:
-        version = data.get("version")
-        if version is None:
-            errors.append("Missing 'version' field")
-        elif version != SCRIPT_FILE_VERSION:
-            errors.append(f"Unsupported version: {version} (expected {SCRIPT_FILE_VERSION})")
-
-        scripts_dict_raw = data.get("scripts")
-        if scripts_dict_raw is None:
-            errors.append("Missing 'scripts' field")
-            return errors
-        if not isinstance(scripts_dict_raw, dict):
-            errors.append("'scripts' must be a mapping object")
-            return errors
-        scripts_dict = scripts_dict_raw
-
+    errors = list(early_errors)
     for event_name, script_list in scripts_dict.items():
         if event_name not in LIFECYCLE_EVENTS:
             errors.append(f"Unknown event: '{_safe_token(event_name)}'")

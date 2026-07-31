@@ -20,22 +20,95 @@ Artifactory Archive Entry Download proxy first. Cache lives at
 ``~/.apm/cache/marketplace/`` with a 1-hour TTL.
 """
 
-import base64
-import contextlib
-import hashlib
 import json
 import logging
-import os
 import re
 import subprocess
-import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
-import requests
-
+from ._client_ado import (
+    _ado_auth_header as _ado_auth_header,
+)
+from ._client_ado import (
+    _AdoItemNotFound as _AdoItemNotFound,
+)
+from ._client_ado import (
+    _fetch_ado_rest as _fetch_ado_rest,
+)
+from ._client_cache import (
+    _cache_data_path as _cache_data_path,
+)
+from ._client_cache import (
+    _cache_dir as _cache_dir,
+)
+from ._client_cache import (
+    _cache_key as _cache_key,
+)
+from ._client_cache import (
+    _cache_meta_path as _cache_meta_path,
+)
+from ._client_cache import (
+    _clear_cache as _clear_cache,
+)
+from ._client_cache import (
+    _host_from_url as _host_from_url,
+)
+from ._client_cache import (
+    _read_cache as _read_cache,
+)
+from ._client_cache import (
+    _read_stale_cache as _read_stale_cache,
+)
+from ._client_cache import (
+    _read_stale_meta as _read_stale_meta,
+)
+from ._client_cache import (
+    _sanitize_cache_name as _sanitize_cache_name,
+)
+from ._client_cache import (
+    _write_cache as _write_cache,
+)
+from ._client_http import (
+    _HTTP_SESSION as _HTTP_SESSION,
+)
+from ._client_http import (
+    _MAX_MARKETPLACE_JSON_BYTES as _MAX_MARKETPLACE_JSON_BYTES,
+)
+from ._client_http import (
+    FetchResult as FetchResult,
+)
+from ._client_http import (
+    _fetch_url_direct as _fetch_url_direct,
+)
+from ._client_http import (
+    _http_get as _http_get,
+)
+from ._client_http import (
+    _read_bounded_response_bytes as _read_bounded_response_bytes,
+)
+from ._client_http import (
+    _read_capped_json as _read_capped_json,
+)
+from ._client_http import (
+    _try_proxy_fetch as _try_proxy_fetch,
+)
+from ._client_http import (
+    _try_proxy_fetch_raw as _try_proxy_fetch_raw,
+)
+from ._client_http import (
+    requests as requests,
+)
+from ._client_local import (
+    _fetch_local_direct_read as _fetch_local_direct_read,
+)
+from ._client_local import (
+    _fetch_local_file as _fetch_local_file,
+)
+from ._client_local import (
+    _fetch_local_via_git_show as _fetch_local_via_git_show,
+)
 from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
     MarketplaceManifest,
@@ -46,24 +119,6 @@ from .models import (
 from .registry import get_registered_marketplaces
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class FetchResult:
-    """Cache-layer DTO for a direct remote marketplace.json fetch."""
-
-    data: dict
-    digest: str
-    etag: str = ""
-    last_modified: str = ""
-
-
-_CACHE_TTL_SECONDS = 3600  # 1 hour
-_MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
-_HTTP_CHUNK_BYTES = 1024 * 1024
-_CACHE_DIR_NAME = os.path.join("cache", "marketplace")
-_HTTP_SESSION = requests.Session()
-_HTTP_SESSION.max_redirects = 5
 
 # Candidate locations for marketplace.json in a repository (priority order)
 _MARKETPLACE_PATHS = [
@@ -92,341 +147,9 @@ def _validate_ref(ref: str, source_name: str) -> str:
     return ref
 
 
-def _cache_dir() -> str:
-    """Return the cache directory, creating it if needed."""
-    from ..config import CONFIG_DIR
-
-    d = os.path.join(CONFIG_DIR, _CACHE_DIR_NAME)
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def _sanitize_cache_name(name: str) -> str:
-    """Sanitize marketplace name for safe use in file paths."""
-    from ..utils.path_security import PathTraversalError, validate_path_segments
-
-    safe = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
-    # Prevent path traversal even after sanitization
-    safe = safe.strip(".").strip("_") or "unnamed"
-    # Defense-in-depth: validate with centralized path security
-    try:
-        validate_path_segments(safe, context="cache name")
-    except PathTraversalError:
-        safe = "unnamed"
-    return safe
-
-
-def _cache_key(source: MarketplaceSource) -> str:
-    """Cache key that includes kind+host to avoid collisions across hosts."""
-    kind = source.kind
-    if kind == "url":
-        return f"url__{hashlib.sha256(source.url.encode()).hexdigest()[:16]}"
-    if kind == "local":
-        return f"local__{_sanitize_cache_name(source.name)}"
-    if kind in ("git", "ado"):
-        # Generic git / ADO: include host so a.com/o/r vs b.com/o/r never
-        # collapse, and prefix by kind so the same host on the two paths keeps
-        # distinct sidecar files.
-        host = _host_from_url(source.url) or source.host or "unknown"
-        return f"{kind}__{_sanitize_cache_name(host)}__{_sanitize_cache_name(source.name)}"
-    normalized_host = (source.host or "github.com").lower()
-    if normalized_host == "github.com":
-        return source.name
-    return f"{_sanitize_cache_name(normalized_host)}__{source.name}"
-
-
-def _cache_data_path(name: str) -> str:
-    return os.path.join(_cache_dir(), f"{_sanitize_cache_name(name)}.json")
-
-
-def _cache_meta_path(name: str) -> str:
-    return os.path.join(_cache_dir(), f"{_sanitize_cache_name(name)}.meta.json")
-
-
-def _read_cache(name: str) -> dict | None:
-    """Read cached marketplace data if valid (not expired)."""
-    data_path = _cache_data_path(name)
-    meta_path = _cache_meta_path(name)
-    if not os.path.exists(data_path) or not os.path.exists(meta_path):
-        return None
-    try:
-        with open(meta_path, encoding="utf-8") as f:
-            meta = json.load(f)
-        fetched_at = meta.get("fetched_at", 0)
-        ttl = meta.get("ttl_seconds", _CACHE_TTL_SECONDS)
-        if time.time() - fetched_at > ttl:
-            return None  # Expired
-        with open(data_path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError, KeyError) as exc:
-        logger.debug("Cache read failed for '%s': %s", name, exc)
-        return None
-
-
-def _read_stale_cache(name: str) -> dict | None:
-    """Read cached data even if expired (stale-while-revalidate)."""
-    data_path = _cache_data_path(name)
-    if not os.path.exists(data_path):
-        return None
-    try:
-        with open(data_path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _write_cache(
-    name: str,
-    data: dict,
-    *,
-    index_digest: str = "",
-    etag: str = "",
-    last_modified: str = "",
-) -> None:
-    """Write marketplace data and metadata to cache."""
-    data_path = _cache_data_path(name)
-    meta_path = _cache_meta_path(name)
-    try:
-        with open(data_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        meta = {"fetched_at": time.time(), "ttl_seconds": _CACHE_TTL_SECONDS}
-        if index_digest:
-            meta["index_digest"] = index_digest
-        if etag:
-            meta["etag"] = etag
-        if last_modified:
-            meta["last_modified"] = last_modified
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
-    except OSError as exc:
-        logger.debug("Cache write failed for '%s': %s", name, exc)
-
-
-def _clear_cache(name: str) -> None:
-    """Remove cached data for a marketplace."""
-    for path in (_cache_data_path(name), _cache_meta_path(name)):
-        with contextlib.suppress(OSError):
-            os.remove(path)
-
-
-def _read_stale_meta(name: str) -> dict | None:
-    """Read cache metadata even when the data cache is expired."""
-    meta_path = _cache_meta_path(name)
-    if not os.path.exists(meta_path):
-        return None
-    try:
-        with open(meta_path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Network fetch -- direct remote marketplace.json URL
-# ---------------------------------------------------------------------------
-
-
-def _http_get(url: str, **kwargs: object):
-    """Issue HTTP GET through a shared session without persisting cookies."""
-    cookies = getattr(_HTTP_SESSION, "cookies", None)
-    if cookies is not None:
-        cookies.clear()
-    response = _HTTP_SESSION.get(url, **kwargs)
-    if cookies is not None:
-        cookies.clear()
-    return response
-
-
-def _read_bounded_response_bytes(resp, url: str, max_bytes: int) -> bytes:
-    """Read response body from streaming chunks, enforcing *max_bytes*."""
-    chunks: list[bytes] = []
-    total = 0
-    for chunk in resp.iter_content(chunk_size=_HTTP_CHUNK_BYTES):
-        if not chunk:
-            continue
-        total += len(chunk)
-        if total > max_bytes:
-            raise MarketplaceFetchError(url, f"marketplace.json exceeds {max_bytes} bytes")
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
-def _read_capped_json(resp, label: str) -> dict:
-    """Read and parse a streamed JSON API response under the byte ceiling.
-
-    The GitHub Contents / GitLab raw / ADO REST responses are
-    attacker-influenceable (a compromised or MITM'd marketplace repo). The
-    direct ``url`` path streams them through :func:`_read_bounded_response_bytes`;
-    mirror that ``_MAX_MARKETPLACE_JSON_BYTES`` ceiling here so an oversized body
-    cannot be buffered whole and OOM the installer. The caller MUST issue the
-    request with ``stream=True`` so ``iter_content`` enforces the cap
-    incrementally instead of ``requests`` pre-buffering the entire body before
-    we ever see it. The response is closed when the read finishes.
-    """
-    try:
-        content_length = resp.headers.get("Content-Length", "")
-        if content_length:
-            with contextlib.suppress(ValueError):
-                if int(content_length) > _MAX_MARKETPLACE_JSON_BYTES:
-                    raise MarketplaceFetchError(
-                        label,
-                        f"marketplace.json exceeds {_MAX_MARKETPLACE_JSON_BYTES} bytes",
-                    )
-        raw = _read_bounded_response_bytes(resp, label, _MAX_MARKETPLACE_JSON_BYTES)
-    finally:
-        close = getattr(resp, "close", None)
-        if callable(close):
-            close()
-    try:
-        return json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError, RecursionError) as exc:
-        raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
-
-
-def _fetch_url_direct(
-    url: str,
-    *,
-    etag: str = "",
-    last_modified: str = "",
-    expected_digest: str = "",
-) -> FetchResult | None:
-    """Fetch a remote marketplace.json URL over HTTPS.
-
-    Returns ``None`` for HTTP 304 so callers can serve cached data.
-    """
-    parsed = urlsplit(url)
-    if parsed.scheme.lower() != "https":
-        raise MarketplaceFetchError(url, "remote marketplace.json URLs must use HTTPS")
-
-    headers = {"User-Agent": "apm-cli"}
-    if etag:
-        headers["If-None-Match"] = etag
-    if last_modified:
-        headers["If-Modified-Since"] = last_modified
-
-    resp = None
-    try:
-        resp = _http_get(url, headers=headers, timeout=30, stream=True)
-    except requests.exceptions.RequestException as exc:
-        raise MarketplaceFetchError(url, str(exc)) from exc
-
-    try:
-        final_url = getattr(resp, "url", url)
-        if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
-            raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
-
-        if resp.status_code == 304:
-            return None
-        if resp.status_code == 404:
-            raise MarketplaceFetchError(url, "404 Not Found")
-
-        try:
-            resp.raise_for_status()
-        except requests.exceptions.RequestException as exc:
-            raise MarketplaceFetchError(url, str(exc)) from exc
-
-        content_length = resp.headers.get("Content-Length", "")
-        if content_length:
-            with contextlib.suppress(ValueError):
-                if int(content_length) > _MAX_MARKETPLACE_JSON_BYTES:
-                    raise MarketplaceFetchError(
-                        url,
-                        f"marketplace.json exceeds {_MAX_MARKETPLACE_JSON_BYTES} bytes",
-                    )
-
-        raw = _read_bounded_response_bytes(resp, url, _MAX_MARKETPLACE_JSON_BYTES)
-    finally:
-        if resp is not None:
-            close = getattr(resp, "close", None)
-            if callable(close):
-                close()
-
-    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-    if expected_digest and digest != expected_digest:
-        raise MarketplaceFetchError(
-            url, f"digest mismatch: expected {expected_digest}, got {digest}"
-        )
-
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError) as exc:
-        raise MarketplaceFetchError(url, f"invalid JSON response: {exc}") from exc
-    if not isinstance(data, dict):
-        raise MarketplaceFetchError(url, "marketplace.json root must be an object")
-
-    return FetchResult(
-        data=data,
-        digest=digest,
-        etag=resp.headers.get("ETag", ""),
-        last_modified=resp.headers.get("Last-Modified", ""),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Network fetch -- API path (GitHub / GitLab)
 # ---------------------------------------------------------------------------
-
-
-def _try_proxy_fetch_raw(
-    owner: str,
-    repo: str,
-    file_path: str,
-    ref: str,
-) -> bytes | None:
-    """Try to fetch a file as raw bytes via the registry proxy."""
-    from ..deps.registry_proxy import RegistryConfig
-
-    cfg = RegistryConfig.from_env()
-    if cfg is None:
-        return None
-
-    from ..deps.artifactory_entry import fetch_entry_from_archive
-
-    return fetch_entry_from_archive(
-        host=cfg.host,
-        prefix=cfg.prefix,
-        owner=owner,
-        repo=repo,
-        file_path=file_path,
-        ref=ref,
-        scheme=cfg.scheme,
-        headers=cfg.get_headers(),
-    )
-
-
-def _try_proxy_fetch(
-    source: MarketplaceSource,
-    file_path: str,
-) -> dict | None:
-    """Try to fetch marketplace JSON via the registry proxy.
-
-    Returns parsed JSON dict on success, ``None`` when no proxy is
-    configured or the entry download fails.
-    """
-    content = _try_proxy_fetch_raw(source.owner, source.repo, file_path, source.ref)
-    if content is None:
-        return None
-
-    if len(content) > _MAX_MARKETPLACE_JSON_BYTES:
-        logger.debug(
-            "Proxy returned oversized marketplace.json for %s/%s %s (%d bytes)",
-            source.owner,
-            source.repo,
-            file_path,
-            len(content),
-        )
-        return None
-
-    try:
-        return json.loads(content)
-    except (json.JSONDecodeError, ValueError):
-        logger.debug(
-            "Proxy returned non-JSON for %s/%s %s",
-            source.owner,
-            source.repo,
-            file_path,
-        )
-        return None
 
 
 def _github_contents_url(source: MarketplaceSource, file_path: str, host_info) -> str:
@@ -477,10 +200,10 @@ def _fetch_via_api(
 
     Owns the common boilerplate: build URL, build headers, run
     ``try_with_fallback``, map 404 -> None, raise ``MarketplaceFetchError``
-    on unexpected errors. Specialised callers pass kind-specific URL and
-    header builders. The request is streamed and the body read through
+    on unexpected errors. The request is streamed and the body read through
     :func:`_read_capped_json` so an oversized marketplace.json cannot OOM the
     installer (the direct ``url`` path enforces the same ceiling).
+    Specialised callers pass kind-specific URL and header builders.
     """
     url = url_builder(source, file_path, host_info)
 
@@ -504,6 +227,9 @@ def _fetch_via_api(
             path=f"{source.owner}/{source.repo}",
             unauth_first=False,
         )
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
+        logger.debug("API fetch failed for '%s'", source.name, exc_info=True)
+        raise MarketplaceFetchError(source.name, str(exc)) from exc
     except Exception as exc:
         logger.debug("API fetch failed for '%s'", source.name, exc_info=True)
         raise MarketplaceFetchError(source.name, str(exc)) from exc
@@ -608,180 +334,8 @@ def _fetch_git(
     try:
         with open(target, encoding="utf-8") as f:
             return json.load(f)
-    except (OSError, ValueError, RecursionError, MemoryError) as exc:
+    except (json.JSONDecodeError, OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {file_path}: {exc}") from exc
-
-
-# ---------------------------------------------------------------------------
-# Network fetch -- Azure DevOps REST items API (fast path, git fallback)
-# ---------------------------------------------------------------------------
-
-
-class _AdoItemNotFound(Exception):
-    """Sentinel: the ADO items API returned a confirmed 404 for the path.
-
-    Distinguishes "the file is definitively absent at this ref" (map to
-    ``None`` so ``_auto_detect_path`` can probe the next candidate) from a
-    transport/auth failure (fall back to the generic-git clone path).
-    """
-
-
-def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
-    """Build the Azure DevOps ``Authorization`` header for a resolved token.
-
-    ``AuthResolver.try_with_fallback`` hands the operation a ``(token, git_env)``
-    pair but not the auth scheme. Bearer contexts carry the full
-    ``Authorization: Bearer <jwt>`` header in a ``GIT_CONFIG_VALUE_<i>`` slot
-    (see ``AuthResolver._build_git_env``); detect that and emit the Bearer
-    scheme. The slot index is not fixed -- since #2368 the header is appended
-    after any retained non-auth entries -- so the whole indexed set is scanned.
-
-    Only indices below ``GIT_CONFIG_COUNT`` are read, because that is all git
-    itself reads. A slot above the count is either a leftover from an env this
-    process did not build or an injected one, and honouring it would send an
-    ADO PAT under the Bearer scheme, which the server rejects.
-
-    Otherwise treat the token as an ADO PAT and use HTTP Basic with
-    ``base64(":" + PAT)`` per ADO's convention (empty username, PAT as
-    password). Returns an empty dict for an anonymous request.
-
-    The returned dict carries the credential -- callers MUST NOT log it.
-    """
-    if not token:
-        return {}
-    env = git_env or {}
-    try:
-        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
-    except (TypeError, ValueError):
-        count = 0
-    for index in range(count):
-        value = str(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
-        if value.strip().lower().startswith("authorization: bearer "):
-            return {"Authorization": f"Bearer {token}"}
-    encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
-    return {"Authorization": f"Basic {encoded}"}
-
-
-def _fetch_ado_rest(
-    source: MarketplaceSource,
-    file_path: str,
-    *,
-    org: str,
-    project: str,
-    repo: str,
-    host: str,
-    auth_resolver,
-) -> dict | None:
-    """Read a single metadata file from Azure DevOps via the REST items API.
-
-    Routes auth through ``AuthResolver.try_with_fallback`` for the ADO host so
-    a resolved PAT (``ADO_APM_PAT``) is tried first and an AAD bearer (``az``)
-    is the runtime fallback -- the same auth posture as the clone path. The
-    token is never logged. Raises on any failure (network, auth, non-JSON,
-    sign-in page) so the caller can fall back to the generic-git path; raises
-    ``_AdoItemNotFound`` for a confirmed 404.
-    """
-    from ..utils.github_host import build_ado_api_url
-
-    url = build_ado_api_url(org, project, repo, file_path, source.ref, host)
-
-    def _do_fetch(token, git_env):
-        headers = {"User-Agent": "apm-cli"}
-        headers.update(_ado_auth_header(token, git_env))
-        resp = _http_get(url, headers=headers, timeout=30, stream=True)
-        try:
-            if resp.status_code == 404:
-                # No message: this sentinel flows through ``try_with_fallback`` ->
-                # ``is_ado_auth_failure_signal(str(exc))``; an empty string never
-                # trips an auth-failure keyword, so a 404 never wastes a bearer
-                # retry.
-                raise _AdoItemNotFound
-            # ADO answers an unauthenticated/under-scoped request with HTTP 200 +
-            # an HTML sign-in page rather than a 401 (#1671). Treat that as an auth
-            # failure so try_with_fallback can attempt the AAD bearer before we
-            # give up and clone. The word "unauthorized" is load-bearing: it makes
-            # ``is_ado_auth_failure_signal(str(exc))`` match, which is the gate the
-            # PAT->bearer fallback checks (see AuthResolver._try_ado_bearer_fallback).
-            if resp.status_code == 200:
-                content_type = resp.headers.get("Content-Type", "").lower()
-                if "text/html" in content_type:
-                    raise MarketplaceFetchError(
-                        source.name,
-                        "Azure DevOps returned a sign-in page (unauthorized: authentication required)",
-                    )
-            resp.raise_for_status()
-            return _read_capped_json(resp, source.name)
-        finally:
-            close = getattr(resp, "close", None)
-            if callable(close):
-                close()
-
-    return auth_resolver.try_with_fallback(
-        host,
-        _do_fetch,
-        org=org,
-        path=f"{org}/{project}/{repo}",
-        unauth_first=False,
-    )
-
-
-def _fetch_ado(
-    source: MarketplaceSource,
-    file_path: str,
-    *,
-    host_info,
-    auth_resolver,
-) -> dict | None:
-    """Fetch marketplace.json from Azure DevOps, REST-first with git fallback.
-
-    Optional latency optimisation over the generic-git path: ADO single-file
-    metadata reads go through ``GET .../_apis/git/repositories/{repo}/items``
-    instead of a subprocess clone, matching the GitHub/GitLab fast path.
-
-    Falls back to ``_fetch_git`` (the subprocess clone) on any REST/transport
-    failure or offline condition so there is no regression vs. the prior
-    behaviour. A confirmed 404 returns ``None`` (the file is absent at this
-    path) so ``_auto_detect_path`` can probe the next candidate without paying
-    for a clone that would also miss.
-    """
-    from ..utils.github_host import parse_ado_repo_url
-
-    parsed = parse_ado_repo_url(source.url)
-    if parsed is None:
-        # URL does not decompose into org/project/repo (unusual ADO shape) --
-        # nothing to REST against, so use the generic-git path directly.
-        return _fetch_git(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
-
-    org, project, repo = parsed
-    host = host_info.host if host_info is not None else "dev.azure.com"
-    try:
-        return _fetch_ado_rest(
-            source,
-            file_path,
-            org=org,
-            project=project,
-            repo=repo,
-            host=host,
-            auth_resolver=auth_resolver,
-        )
-    except _AdoItemNotFound:
-        return None
-    except Exception as exc:
-        # REST failed (network, auth exhausted, sign-in page, malformed JSON,
-        # 5xx, ...). Fall back to the clone path so offline/unusual repos keep
-        # working. Sanitize exception text because requests exceptions can
-        # include URLs with query parameters.
-        from ..cache.git_cache import _sanitize_url
-
-        logger.info(
-            "ADO REST metadata fetch unavailable for '%s'; falling back to git.", source.name
-        )
-        logger.debug(
-            "ADO REST metadata fetch failed for '%s'; falling back to generic-git: %s",
-            source.name,
-            _sanitize_url(str(exc)),
-        )
-        return _fetch_git(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 
 
 # ---------------------------------------------------------------------------
@@ -836,97 +390,46 @@ def _fetch_local(
     return _fetch_local_direct_read(source, file_path, repo_path)
 
 
-def _fetch_local_file(source: MarketplaceSource, manifest_file: Path) -> dict | None:
-    """Read an explicit local marketplace.json file.
-
-    The parent directory is the containment boundary by design: unlike a
-    directory source, a direct file source is a single user-selected file, so
-    there is no broader marketplace root to enforce.
-    """
-    from ..utils.path_security import PathTraversalError, ensure_path_within
-
-    try:
-        safe_file = ensure_path_within(manifest_file, manifest_file.parent)
-    except PathTraversalError as exc:
-        raise MarketplaceFetchError(
-            source.name, "local marketplace file escapes its parent"
-        ) from exc
-
-    try:
-        with open(safe_file, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError, RecursionError, MemoryError) as exc:
-        raise MarketplaceFetchError(source.name, f"failed to read {safe_file}: {exc}") from exc
-
-
-def _fetch_local_via_git_show(
-    source: MarketplaceSource, file_path: str, git_dir: Path
+def _fetch_ado(
+    source: MarketplaceSource,
+    file_path: str,
+    *,
+    host_info,
+    auth_resolver,
 ) -> dict | None:
-    """Use ``git show <ref>:<file>`` against a bare repo or .git directory."""
-    from ..utils.git_env import git_subprocess_env
+    """Fetch marketplace.json from Azure DevOps, REST-first with git fallback."""
+    from ..utils.github_host import parse_ado_repo_url
 
-    cmd = [
-        "git",
-        "--git-dir",
-        str(git_dir),
-        "-c",
-        "core.hooksPath=/dev/null",
-        "show",
-        f"{source.ref}:{file_path}",
-    ]
+    parsed = parse_ado_repo_url(source.url)
+    if parsed is None:
+        return _fetch_git(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
+
+    org, project, repo = parsed
+    host = host_info.host if host_info is not None else "dev.azure.com"
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            check=False,
-            timeout=30,
-            env=git_subprocess_env(),
+        return _fetch_ado_rest(
+            source,
+            file_path,
+            org=org,
+            project=project,
+            repo=repo,
+            host=host,
+            auth_resolver=auth_resolver,
         )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        raise MarketplaceFetchError(source.name, f"git show failed for {file_path}: {exc}") from exc
-
-    if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace").strip()
-        # Missing path or ref -> None so _auto_detect_path can probe next candidate
-        if (
-            "does not exist" in stderr.lower()
-            or "exists on disk, but not in" in stderr.lower()
-            or "fatal: path" in stderr.lower()
-        ):
-            return None
-        raise MarketplaceFetchError(source.name, f"git show failed: {stderr}")
-
-    try:
-        return json.loads(result.stdout.decode("utf-8"))
-    except (OSError, ValueError, RecursionError, MemoryError) as exc:
-        raise MarketplaceFetchError(source.name, f"invalid JSON in {file_path}: {exc}") from exc
-
-
-def _fetch_local_direct_read(
-    source: MarketplaceSource, file_path: str, repo_root: Path
-) -> dict | None:
-    """Read a file directly from a working-dir local marketplace.
-
-    Symlink-escape guard: resolves the target through ``Path.resolve`` and
-    asserts it stays within ``repo_root`` via ``ensure_path_within``.
-    """
-    from ..utils.path_security import PathTraversalError, ensure_path_within
-
-    candidate = (repo_root / file_path).resolve(strict=False)
-    try:
-        ensure_path_within(candidate, repo_root)
-    except PathTraversalError as exc:
-        raise MarketplaceFetchError(
-            source.name, f"path escapes marketplace root: {file_path}"
-        ) from exc
-
-    if not candidate.exists():
+    except _AdoItemNotFound:
         return None
-    try:
-        with open(candidate, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError, RecursionError, MemoryError) as exc:
-        raise MarketplaceFetchError(source.name, f"failed to read {file_path}: {exc}") from exc
+    except Exception as exc:
+        from ..cache.git_cache import _sanitize_url
+
+        logger.info(
+            "ADO REST metadata fetch unavailable for '%s'; falling back to git.", source.name
+        )
+        logger.debug(
+            "ADO REST metadata fetch failed for '%s'; falling back to generic-git: %s",
+            source.name,
+            _sanitize_url(str(exc)),
+        )
+        return _fetch_git(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 
 
 # ---------------------------------------------------------------------------
@@ -1064,22 +567,6 @@ def _fetch_file(
     return fetcher(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 
 
-def _host_from_url(url: str) -> str:
-    """Extract host from a URL (handles SCP-like SSH URLs too)."""
-    if not url:
-        return ""
-    # SCP-like: git@host:path
-    if "@" in url and not url.startswith(("http", "git://", "ssh://", "file://")):
-        try:
-            return url.split("@", 1)[1].split(":", 1)[0]
-        except (IndexError, ValueError):
-            return ""
-    try:
-        return urlsplit(url).hostname or ""
-    except ValueError:
-        return ""
-
-
 def _auto_detect_path(
     source: MarketplaceSource,
     auth_resolver: object | None = None,
@@ -1109,8 +596,8 @@ def fetch_marketplace(
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
-    Uses the JSON sidecar cache for ``kind in ("github", "gitlab", "ado",
-    "url")``. Generic-git fetches rely on ``GitCache`` + ``git ls-remote`` for
+    Uses the JSON sidecar cache for ``kind in ("github", "gitlab", "ado", "url")``.
+    Generic-git fetches rely on ``GitCache`` + ``git ls-remote`` for
     freshness; local fetches read directly without caching.
 
     Args:
@@ -1125,7 +612,7 @@ def fetch_marketplace(
         MarketplaceFetchError: If fetch fails and no cache is available.
     """
     cache_name = _cache_key(source)
-    use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
+    use_sidecar_cache = source.kind in ("github", "gitlab", "url", "ado")
 
     # Try fresh cache first (API kinds only)
     if use_sidecar_cache and not force_refresh:

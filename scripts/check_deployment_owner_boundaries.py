@@ -8,8 +8,12 @@ import ast
 from pathlib import Path
 
 _REQUIRED_CALLS = {
-    "prune.py": {"legacy_value", "reconcile_owner_references"},
-    "audit.py": {"owner_reference_violations"},
+    # _prune_ops.py and _audit_ops.py are sibling delegates extracted from
+    # prune.py and audit.py in #1078 (800-line guardrail split).  The
+    # required canonical calls moved with the code; old paths: prune.py,
+    # audit.py.
+    "_prune_ops.py": {"legacy_value", "reconcile_owner_references"},
+    "_audit_ops.py": {"owner_reference_violations"},
     "ci_checks.py": {"owner_reference_violations"},
 }
 _OWNER_ATTRIBUTES = {"owners", "active_owner", "deployment_ledger"}

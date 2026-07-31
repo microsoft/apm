@@ -490,10 +490,12 @@ class LocalPackageFactory:
         parts = relative_path.parts
         if "\\" in relative_path.as_posix() or ".git" in parts:
             return None
-        if parts == ("apm.yml",):
-            return _MANIFEST_LAYOUT
-        if parts == ("apm-policy.yml",):
-            return _POLICY_LAYOUT
+        _exact: dict[tuple[str, ...], str] = {
+            ("apm.yml",): _MANIFEST_LAYOUT,
+            ("apm-policy.yml",): _POLICY_LAYOUT,
+        }
+        if parts in _exact:
+            return _exact[parts]
         if len(parts) >= 3 and parts[0] == "skills":
             return _SKILL_LAYOUT
         if len(parts) >= 4 and parts[:2] == (".apm", "extensions"):
@@ -502,27 +504,23 @@ class LocalPackageFactory:
             return _HOOK_LAYOUT
         if len(parts) != 3:
             return None
-        if (
-            parts[:2] == (".apm", "agents")
-            and parts[2].endswith(".agent.md")
-            and parts[2] != ".agent.md"
-        ):
-            return _AGENT_LAYOUT
-        if (
-            parts[:2] == (".apm", "instructions")
-            and parts[2].endswith(".instructions.md")
-            and parts[2] != ".instructions.md"
-        ):
-            return _INSTRUCTION_LAYOUT
-        if (
-            parts[:2] == (".apm", "prompts")
-            and parts[2].endswith(".prompt.md")
-            and parts[2] != ".prompt.md"
-        ):
-            return _PROMPT_LAYOUT
-        if parts[:2] == (".apm", "hooks") and parts[2].endswith(".json") and parts[2] != ".json":
-            return _HOOK_LAYOUT
-        return None
+        # Exactly three-part `.apm/<subdir>/<file>` paths -- data-driven suffix dispatch.
+        _apm3: tuple[tuple[str, str, str, str], ...] = (
+            ("agents", ".agent.md", ".agent.md", _AGENT_LAYOUT),
+            ("instructions", ".instructions.md", ".instructions.md", _INSTRUCTION_LAYOUT),
+            ("prompts", ".prompt.md", ".prompt.md", _PROMPT_LAYOUT),
+            ("hooks", ".json", ".json", _HOOK_LAYOUT),
+        )
+        return next(
+            (
+                layout
+                for subdir, suffix, sentinel, layout in _apm3
+                if parts[:2] == (".apm", subdir)
+                and parts[2].endswith(suffix)
+                and parts[2] != sentinel
+            ),
+            None,
+        )
 
     @staticmethod
     def _validate_segment(name: str, kind: str) -> None:

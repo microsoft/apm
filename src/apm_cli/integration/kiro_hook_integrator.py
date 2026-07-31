@@ -138,28 +138,18 @@ def _write_kiro_hook_docs(
                     target_paths.append(target_path)
                     continue
                 if integrator.check_collision(
-                    target_path,
-                    rel_path,
-                    managed_files,
-                    force,
-                    diagnostics=diagnostics,
+                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
                 ):
                     files_skipped += 1
                     continue
 
                 atomic_write_text(target_path, rendered, new_file_mode=0o600)
-                # Keep existing hook files private after updates too.
                 os.chmod(target_path, 0o600)
                 files_integrated += 1
                 target_paths.append(target_path)
                 display_payloads.append(
                     _display_payload(
-                        integrator,
-                        target_filename,
-                        hook_file,
-                        event_name,
-                        action,
-                        rendered,
+                        integrator, target_filename, hook_file, event_name, action, rendered
                     )
                 )
     return files_integrated, files_skipped, files_adopted
@@ -235,9 +225,6 @@ def integrate_kiro_hooks(
 
     hook_files = integrator.find_hook_files(package_info.install_path)
     package_name = integrator._get_package_name(package_info, project_root)
-    # Per-file target routing always runs; a dep-level ``targets:`` list narrows
-    # the active target set upstream but must not disable per-file routing (see
-    # HookIntegrator.integrate_package_hooks for the full rationale).
     hook_files = _filter_hook_files_for_target(
         hook_files,
         "kiro",
@@ -260,12 +247,14 @@ def integrate_kiro_hooks(
     target_paths: list[Path] = []
     display_payloads: list = []
 
+    from apm_cli.integration.hook_transforms import _rewrite_hooks_data
+
     for hook_file in hook_files:
         data = integrator._parse_hook_json(hook_file)
         if data is None:
             continue
 
-        rewritten, scripts = integrator._rewrite_hooks_data(
+        rewritten, scripts = _rewrite_hooks_data(
             data,
             package_info.install_path,
             package_name,

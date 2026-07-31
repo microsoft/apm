@@ -346,9 +346,10 @@ class GitReferenceResolver:
         host = self._host
 
         try:
-            if dep_ref.is_artifactory() or dep_ref.is_azure_devops():
-                return None
+            is_unsupported = dep_ref.is_artifactory() or dep_ref.is_azure_devops()
         except Exception:
+            is_unsupported = True
+        if is_unsupported:
             return None
 
         target_host = dep_ref.host or default_host()

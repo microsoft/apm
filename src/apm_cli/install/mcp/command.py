@@ -18,6 +18,7 @@ import click
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
 from .registry import registry_env_override
+from .spec import MCPRequestSpec
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
 
@@ -35,15 +36,11 @@ except ImportError:
     pass
 
 
-def run_mcp_install(  # noqa: PLR0913
+def run_mcp_install(
     *,
-    mcp_name: str,
-    transport: str | None,
-    url: str | None,
+    spec: MCPRequestSpec,
     env_pairs: Sequence[str] | None,
     header_pairs: Sequence[str] | None,
-    mcp_version: str | None,
-    command_argv: Sequence[str] | None,
     dev: bool,
     force: bool,
     runtime: str | None,
@@ -52,12 +49,18 @@ def run_mcp_install(  # noqa: PLR0913
     apm_dir: Path,
     scope: str | None,
     target: str | list[str] | None = None,
-    registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
     ``manifest_path`` is derived from ``apm_dir`` (``apm_dir / 'apm.yml'``)."""
     from ...constants import APM_YML_FILENAME
+
+    mcp_name = spec.mcp_name
+    transport = spec.transport
+    url = spec.url
+    mcp_version = spec.mcp_version
+    command_argv = spec.command_argv
+    registry_url = spec.registry_url
 
     manifest_path = apm_dir / APM_YML_FILENAME
     verbose = logger.verbose
@@ -117,9 +120,8 @@ def run_mcp_install(  # noqa: PLR0913
     if APM_DEPS_AVAILABLE:
         if registry_url and logger:
             logger.verbose_detail(f"Registry: {registry_url}")
-        if target is not None and logger:
-            rendered_target = target if isinstance(target, str) else ", ".join(target)
-            logger.verbose_detail(f"Target: {rendered_target}")
+        if target and logger:
+            logger.verbose_detail(f"Target: {target}")
         with registry_env_override(registry_url):
             try:
                 # Rename a legacy ``apm.lock`` before resolving the path, the
@@ -132,16 +134,14 @@ def run_mcp_install(  # noqa: PLR0913
                 _existing_lock = LockFile.read(_mcp_lock_path)
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
-                # A scalar target selects the runtime directly; explicit_target
-                # also preserves the flag for downstream active-target gating.
                 MCPIntegrator.install(
                     [dep],
                     target if isinstance(target, str) else runtime,
                     exclude,
                     verbose,
                     stored_mcp_configs=old_configs,
-                    explicit_target=target,
                     scope=scope,
+                    explicit_target=target,
                 )
                 new_names = MCPIntegrator.get_server_names([dep])
                 new_configs = MCPIntegrator.get_server_configs([dep])

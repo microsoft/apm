@@ -732,10 +732,11 @@ def test_run_replay_threads_locked_skill_subset(
 
     def _spy_integrate(*args: object, **kwargs: object) -> dict[str, list[str]]:
         package_info = args[0]
+        options = kwargs.get("options")
         captured.append(
             {
                 "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
-                "skill_subset": kwargs.get("skill_subset"),
+                "skill_subset": options.skill_subset if options is not None else None,
             }
         )
         return {"deployed_files": []}

@@ -9,7 +9,7 @@ from __future__ import annotations
 import builtins
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from yaml import YAMLError
 
@@ -21,12 +21,38 @@ from apm_cli.core.apm_yml import (
 )
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.target_catalog import accepted_target_values
+from apm_cli.integration._shared import _hermes_runtime_opted_in as _hermes_opted_in_impl
+from apm_cli.integration._shared import _RegistryDepGroup, _runtime_opted_in
+from apm_cli.integration.mcp_install_registry_ops import (
+    _install_registry_group,
+    _record_managed_server,
+)
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
+
+# Opt-in runtimes gated solely on the presence of a project marker directory.
+# Data-driven so the parallel detection branches collapse into one loop.
+_DIR_GATED_RUNTIMES: dict[str, str] = {
+    "cursor": ".cursor",
+    "opencode": ".opencode",
+    "gemini": ".gemini",
+    "windsurf": ".windsurf",
+    "kiro": ".kiro",
+}
+
+
+def _hermes_runtime_opted_in() -> bool:
+    """Wrapper that passes this module's find_runtime_binary so monkeypatch seams work.
+
+    Tests that patch ``mcp_integrator_install.find_runtime_binary`` must call
+    this wrapper -- not ``_shared._hermes_runtime_opted_in`` directly -- so
+    the patched reference is picked up at call time.
+    """
+    return _hermes_opted_in_impl(_find_binary=find_runtime_binary)
 
 
 class _TargetSelectionSource(StrEnum):
@@ -40,308 +66,18 @@ class _TargetSelectionSource(StrEnum):
     INVALID_MANIFEST = "invalid-manifest"
 
 
-def _install_registry_group(
-    operations: Any,
-    group_dep_names: list,
-    group_dep_map: dict,
-    group_deps: list,
-    target_runtimes: list,
-    stored_mcp_configs: dict,
-    servers_to_update: builtins.set,
-    successful_updates: builtins.set,
-    project_root: Any,
-    user_scope: bool,
-    verbose: bool,
-    console: Any,
-    logger: Any,
-    managed_target_servers: dict[str, set[str]] | None,
-) -> int:
-    """Process one group of registry deps through a single ``MCPServerOperations`` instance.
-
-    All deps in ``group_deps`` share the same target registry (either the
-    default or a per-dep override URL).  ``servers_to_update`` and
-    ``successful_updates`` are mutated in-place; the function returns the
-    number of servers newly configured or updated in this group.
-    """
-    # Lazy import: only available after MCPIntegrator finishes loading.
-    from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-    configured_count = 0
-
-    # Early validation: check all servers exist in registry (fail-fast).
-    # F4 (#1116): emit a single batch heartbeat so users see the
-    # registry round-trip in progress instead of silent stall.
-    logger.mcp_lookup_heartbeat(len(group_dep_names))
-    if verbose:
-        logger.verbose_detail(f"Validating {len(group_deps)} registry servers...")
-    valid_servers, invalid_servers = operations.validate_servers_exist(group_dep_names)
-
-    if invalid_servers:
-        logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
-        logger.progress("Run 'apm mcp search <query>' to find available servers")
-        raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
-
-    if valid_servers:
-        servers_to_install = operations.check_servers_needing_installation(
-            target_runtimes,
-            valid_servers,
-            project_root=project_root,
-            user_scope=user_scope,
-        )
-        already_configured_candidates = [
-            dep for dep in valid_servers if dep not in servers_to_install
-        ]
-
-        # Detect config drift for "already configured" servers
-        if stored_mcp_configs and already_configured_candidates:
-            drifted_reg_deps = [
-                group_dep_map[n] for n in already_configured_candidates if n in group_dep_map
-            ]
-            drifted = MCPIntegrator._detect_mcp_config_drift(
-                drifted_reg_deps,
-                stored_mcp_configs,
-            )
-            if drifted:
-                servers_to_update.update(drifted)
-                MCPIntegrator._append_drifted_to_install_list(servers_to_install, drifted)
-        already_configured_servers = [
-            dep for dep in already_configured_candidates if dep not in servers_to_update
-        ]
-
-        if not servers_to_install:
-            if console:
-                for dep in already_configured_servers:
-                    console.print(
-                        f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
-                        f"[dim](already configured)[/dim]"
-                    )
-            else:
-                logger.success("All registry MCP servers already configured")
-        else:
-            if already_configured_servers:
-                if console:
-                    for dep in already_configured_servers:
-                        console.print(
-                            f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
-                            f"[dim](already configured)[/dim]"
-                        )
-                else:
-                    logger.verbose_detail(
-                        "Already configured registry MCP servers: "
-                        f"{', '.join(already_configured_servers)}"
-                    )
-
-            # Batch fetch server info once
-            if verbose:
-                logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
-            server_info_cache = operations.batch_fetch_server_info(servers_to_install)
-
-            # Apply overlays
-            for server_name in servers_to_install:
-                dep = group_dep_map.get(server_name)
-                if dep:
-                    MCPIntegrator._apply_overlay(server_info_cache, dep)
-
-            # Collect env and runtime variables
-            shared_env_vars = operations.collect_environment_variables(
-                servers_to_install, server_info_cache
-            )
-            for server_name in servers_to_install:
-                dep = group_dep_map.get(server_name)
-                if dep and dep.env:
-                    shared_env_vars.update(dep.env)
-            shared_runtime_vars = operations.collect_runtime_variables(
-                servers_to_install, server_info_cache
-            )
-
-            # Install for each target runtime
-            for dep in servers_to_install:
-                is_update = dep in servers_to_update
-                action_text = "Updating" if is_update else "Configuring"
-                if console:
-                    console.print(f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep}")
-                    console.print(
-                        f"|     +- {action_text} for "
-                        f"{', '.join([rt.title() for rt in target_runtimes])}..."
-                    )
-                else:
-                    logger.progress(
-                        f"{dep}: {action_text.lower()} for {', '.join(target_runtimes)}..."
-                    )
-
-                any_ok = False
-                for rt in target_runtimes:
-                    if verbose:
-                        logger.verbose_detail(f"Configuring {rt}...")
-                    if MCPIntegrator._install_for_runtime(
-                        rt,
-                        [dep],
-                        shared_env_vars,
-                        server_info_cache,
-                        shared_runtime_vars,
-                        project_root=project_root,
-                        user_scope=user_scope,
-                        logger=logger,
-                    ):
-                        any_ok = True
-                        _record_managed_server(managed_target_servers, rt, dep)
-
-                if any_ok:
-                    if console:
-                        label = "updated" if is_update else "configured"
-                        console.print(
-                            f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep} -> "
-                            f"{', '.join([rt.title() for rt in target_runtimes])}"
-                            f" [dim]({label})[/dim]"
-                        )
-                    configured_count += 1
-                    if is_update:
-                        successful_updates.add(dep)
-                elif console:
-                    console.print(
-                        f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep}  "
-                        "-- failed for all runtimes"
-                    )
-                else:
-                    logger.error(f"{dep} -- failed for all runtimes")
-
-    return configured_count
-
-
-def _record_managed_server(
-    managed_target_servers: dict[str, set[str]] | None,
-    runtime: str,
-    server_name: str,
-) -> None:
-    """Record a server only after APM successfully writes its target config."""
-    if managed_target_servers is not None:
-        managed_target_servers.setdefault(runtime, set()).add(server_name)
-
-
-def _hermes_runtime_opted_in() -> bool:
-    """Return ``True`` when Hermes MCP writes are opted into.
-
-    Gate: the ``hermes`` experimental flag is enabled AND Hermes is actually
-    present on the host (its home dir exists, or the ``hermes`` binary is on
-    PATH).  Prevents surprise writes to ``~/.hermes/`` on hosts where Hermes
-    was never installed.  Any import/path error is treated as "not opted in".
-    """
-    try:
-        from apm_cli.core.experimental import is_enabled
-        from apm_cli.integration.targets import resolve_hermes_root
-
-        if not is_enabled("hermes"):
-            return False
-        return resolve_hermes_root().is_dir() or find_runtime_binary("hermes") is not None
-    except (ImportError, ValueError):
-        return False
-
-
-def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list[str]:
-    """Detect which MCP-capable runtimes are installed on the host.
-
-    Each runtime is opt-in via a binary-on-PATH and/or directory-presence
-    signal (see per-runtime comments).  The primary path constructs each
-    adapter via :class:`ClientFactory`; the ``ImportError`` fallback degrades
-    to a binary/directory probe when optional deps are unavailable.
-    """
-    from apm_cli.integration.mcp_integrator import _is_vscode_available
-
-    # Directory-signal opt-in runtimes: name -> required project dir.
-    dir_signal = {
-        "cursor": ".cursor",
-        "opencode": ".opencode",
-        "gemini": ".gemini",
-        "windsurf": ".windsurf",
-        "kiro": ".kiro",
-    }
-    try:
-        from apm_cli.factory import ClientFactory
-        from apm_cli.runtime.manager import RuntimeManager
-
-        manager = RuntimeManager()
-        installed_runtimes: list[str] = []
-
-        for runtime_name in [
-            "copilot",
-            "codex",
-            "vscode",
-            "cursor",
-            "opencode",
-            "gemini",
-            "windsurf",
-            "kiro",
-            "claude",
-            "intellij",
-            "hermes",
-        ]:
-            try:
-                if not _runtime_is_present(
-                    runtime_name, project_root_path, manager, dir_signal, user_scope=user_scope
-                ):
-                    continue
-                ClientFactory.create_client(
-                    runtime_name,
-                    project_root=project_root_path,
-                    user_scope=user_scope,
-                )
-                installed_runtimes.append(runtime_name)
-            except (ValueError, ImportError):
-                continue
-        return installed_runtimes
-    except ImportError:
-        return _discover_installed_runtimes_fallback(
-            project_root_path, _is_vscode_available, user_scope=user_scope
-        )
-
-
-def _runtime_is_present(
-    runtime_name, project_root_path, manager, dir_signal, *, user_scope: bool
-) -> bool:
-    """Return ``True`` when *runtime_name*'s opt-in presence signal fires."""
-    from apm_cli.integration.mcp_integrator import _is_vscode_available
-
-    if runtime_name == "vscode":
-        return _is_vscode_available(project_root=project_root_path)
-    if runtime_name == "kiro" and user_scope:
-        return True
-    if runtime_name in dir_signal:
-        return (project_root_path / dir_signal[runtime_name]).is_dir()
-    if runtime_name == "claude":
-        # .claude/ (project-scope) OR `claude` on PATH (user-scope). The PATH
-        # gate prevents writing ~/.claude.json on hosts without Claude Code.
-        return (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None
-    if runtime_name == "intellij":
-        # JetBrains Copilot writes its config dir on first run -> presence
-        # reliably signals the plugin is installed.
-        from apm_cli.adapters.client.intellij import _intellij_config_dir
-
-        return _intellij_config_dir().is_dir()
-    if runtime_name == "hermes":
-        return _hermes_runtime_opted_in()
-    return manager.is_runtime_available(runtime_name)
-
-
 def _discover_installed_runtimes_fallback(
-    project_root_path, _is_vscode_available, *, user_scope: bool
+    project_root_path: Path, is_vscode_available, *, user_scope: bool = False
 ) -> list[str]:
-    """Binary/directory-only runtime probe used when adapters fail to import."""
+    """Binary/marker-probe runtime detection when the ClientFactory stack is absent."""
     installed_runtimes = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
-    if _is_vscode_available(project_root=project_root_path):
+    if is_vscode_available(project_root=project_root_path):
         installed_runtimes.append("vscode")
-    for name, signal in (
-        ("cursor", ".cursor"),
-        ("opencode", ".opencode"),
-        ("gemini", ".gemini"),
-        ("windsurf", ".windsurf"),
-        ("kiro", ".kiro"),
-    ):
-        if (name == "kiro" and user_scope) or (project_root_path / signal).is_dir():
+    for name, marker in _DIR_GATED_RUNTIMES.items():
+        if (name == "kiro" and user_scope) or (project_root_path / marker).is_dir():
             installed_runtimes.append(name)
-    # Claude Code: directory-presence OR binary-on-PATH
-    if (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None:
+    if (project_root_path / ".claude").is_dir() or (find_runtime_binary("claude") is not None):
         installed_runtimes.append("claude")
-    # JetBrains Copilot: user-scope config directory presence
     try:
         from apm_cli.adapters.client.intellij import _intellij_config_dir
 
@@ -351,10 +87,139 @@ def _discover_installed_runtimes_fallback(
         # ValueError (PathTraversalError) when LOCALAPPDATA/XDG_DATA_HOME is
         # misconfigured -- treat as "not installed" rather than crash.
         pass
-    # Hermes: experimental flag enabled AND home-dir/binary present.
     if _hermes_runtime_opted_in():
         installed_runtimes.append("hermes")
     return installed_runtimes
+
+
+def _discover_installed_runtimes(project_root_path: Path, *, user_scope: bool = False) -> list[str]:
+    """Discover all MCP-capable runtimes installed for ``project_root_path``."""
+    from apm_cli.integration.mcp_integrator import _is_vscode_available
+
+    try:
+        from apm_cli.factory import ClientFactory
+        from apm_cli.runtime.manager import RuntimeManager
+
+        manager = RuntimeManager()
+    except ImportError:
+        return _discover_installed_runtimes_fallback(
+            project_root_path, _is_vscode_available, user_scope=user_scope
+        )
+
+    installed_runtimes: list[str] = []
+    for runtime_name in [
+        "copilot",
+        "codex",
+        "vscode",
+        "cursor",
+        "opencode",
+        "gemini",
+        "windsurf",
+        "kiro",
+        "claude",
+        "intellij",
+        "hermes",
+    ]:
+        try:
+            if _runtime_opted_in(
+                runtime_name,
+                project_root_path,
+                _is_vscode_available,
+                manager,
+                _DIR_GATED_RUNTIMES,
+                user_scope=user_scope,
+            ):
+                ClientFactory.create_client(runtime_name, project_root=project_root_path)
+                installed_runtimes.append(runtime_name)
+        except (ValueError, ImportError):
+            continue
+    return installed_runtimes
+
+
+def _intersect_script_runtimes(
+    installed_runtimes: list[str],
+    apm_config: dict | None,
+    verbose: bool,
+    logger,
+    console,
+) -> list[str]:
+    """Narrow installed runtimes to those referenced in apm.yml scripts.
+
+    With no script references, all installed runtimes are targeted.
+    """
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    script_runtimes = MCPIntegrator._detect_runtimes(
+        apm_config.get("scripts", {}) if apm_config else {}
+    )
+
+    if not script_runtimes:
+        target_runtimes = installed_runtimes
+        if target_runtimes:
+            if verbose:
+                logger.verbose_detail(
+                    f"No scripts detected, using all installed runtimes: "
+                    f"{', '.join(target_runtimes)}"
+                )
+        else:
+            logger.warning("No MCP-compatible runtimes installed")
+            logger.progress("Install a runtime with: apm runtime setup copilot")
+        return target_runtimes
+
+    target_runtimes = [rt for rt in installed_runtimes if rt in script_runtimes]
+    if verbose:
+        if console:
+            console.print(f"|  [cyan]{STATUS_SYMBOLS['info']}  Runtime Detection[/cyan]")
+            console.print(f"|     +- Installed: {', '.join(installed_runtimes)}")
+            console.print(f"|     +- Used in scripts: {', '.join(script_runtimes)}")
+            if target_runtimes:
+                console.print(
+                    f"|     +- Target: {', '.join(target_runtimes)} (available + used in scripts)"
+                )
+            console.print("|")
+        else:
+            logger.verbose_detail(f"Installed runtimes: {', '.join(installed_runtimes)}")
+            logger.verbose_detail(f"Script runtimes: {', '.join(script_runtimes)}")
+            if target_runtimes:
+                logger.verbose_detail(f"Target runtimes: {', '.join(target_runtimes)}")
+    if not target_runtimes:
+        logger.warning("Scripts reference runtimes that are not installed")
+        logger.progress("Install missing runtimes with: apm runtime setup <runtime>")
+    return target_runtimes
+
+
+def _apply_user_scope_filter(target_runtimes: list[str], scope, logger) -> list[str] | None:
+    """At USER scope, keep only runtimes that support global installation."""
+    from apm_cli.core.scope import InstallScope as _IS
+
+    if scope is not _IS.USER:
+        return target_runtimes
+
+    from apm_cli.factory import ClientFactory as _CF
+
+    pre_filter = list(target_runtimes)
+    filtered_runtimes = []
+    for rt in target_runtimes:
+        try:
+            client = _CF.create_client(rt)
+        except ValueError:
+            continue
+        if client.supports_user_scope:
+            filtered_runtimes.append(rt)
+    skipped = set(pre_filter) - set(filtered_runtimes)
+    if skipped:
+        msg = (
+            f"Skipped workspace-only runtimes at user scope: "
+            f"{', '.join(sorted(skipped))}"
+            f" -- omit --global to install these"
+        )
+        logger.warning(msg)
+    if not filtered_runtimes:
+        logger.warning(
+            "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot)"
+        )
+        return None
+    return filtered_runtimes
 
 
 def _declared_manifest_target_runtimes(
@@ -399,9 +264,7 @@ def _resolve_target_runtimes(
 ) -> list[str] | None:
     """Detect, filter, and gate the target runtimes for MCP installation.
 
-    Returns a (possibly empty) list of runtime names to target, or ``None``
-    when the caller should immediately return 0 (e.g. all runtimes excluded,
-    no user-scope-capable runtimes available).
+    Returns a list of runtime names, or ``None`` when nothing to configure.
     """
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -411,9 +274,6 @@ def _resolve_target_runtimes(
         target_runtimes: list[str] = [runtime]
         selection_source = _TargetSelectionSource.RUNTIME
     elif explicit_target is not None:
-        # A plural --target value is already parser-normalized. Use that exact
-        # runtime set instead of broad discovery so selecting IntelliJ does not
-        # also select adjacent runtimes that share its Copilot policy profile.
         target_runtimes = (
             [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
         )
@@ -459,55 +319,12 @@ def _resolve_target_runtimes(
                 f"{', '.join(target_runtimes)} (machine discovery skipped)"
             )
         else:
-            # Step 1: Get all installed runtimes on the system
             installed_runtimes = _discover_installed_runtimes(
                 project_root_path, user_scope=user_scope
             )
-
-            # Step 2: Get runtimes referenced in apm.yml scripts
-            script_runtimes = MCPIntegrator._detect_runtimes(
-                apm_config.get("scripts", {}) if apm_config else {}
+            target_runtimes = _intersect_script_runtimes(
+                installed_runtimes, apm_config, verbose, logger, console
             )
-
-            # Step 3: Target runtimes BOTH installed AND referenced in scripts
-            if script_runtimes:
-                target_runtimes = [rt for rt in installed_runtimes if rt in script_runtimes]
-
-                if verbose:
-                    if console:
-                        console.print(
-                            f"|  [cyan]{STATUS_SYMBOLS['info']}  Runtime Detection[/cyan]"
-                        )
-                        console.print(f"|     +- Installed: {', '.join(installed_runtimes)}")
-                        console.print(f"|     +- Used in scripts: {', '.join(script_runtimes)}")
-                        if target_runtimes:
-                            console.print(
-                                f"|     +- Target: {', '.join(target_runtimes)} "
-                                f"(available + used in scripts)"
-                            )
-                        console.print("|")
-                    else:
-                        logger.verbose_detail(
-                            f"Installed runtimes: {', '.join(installed_runtimes)}"
-                        )
-                        logger.verbose_detail(f"Script runtimes: {', '.join(script_runtimes)}")
-                        if target_runtimes:
-                            logger.verbose_detail(f"Target runtimes: {', '.join(target_runtimes)}")
-
-                if not target_runtimes:
-                    logger.warning("Scripts reference runtimes that are not installed")
-                    logger.progress("Install missing runtimes with: apm runtime setup <runtime>")
-            else:
-                target_runtimes = installed_runtimes
-                if target_runtimes:
-                    if verbose:
-                        logger.verbose_detail(
-                            f"No scripts detected, using all installed runtimes: "
-                            f"{', '.join(target_runtimes)}"
-                        )
-                else:
-                    logger.warning("No MCP-compatible runtimes installed")
-                    logger.progress("Install a runtime with: apm runtime setup copilot")
 
             # Fall back to VS Code only if no runtimes are installed at all
             if not target_runtimes and not installed_runtimes:
@@ -575,36 +392,7 @@ def _resolve_target_runtimes(
 
     # Scope filtering: at USER scope, keep only global-capable runtimes.
     # Applied after both explicit --runtime and auto-discovery paths.
-    from apm_cli.core.scope import InstallScope as _IS
-
-    if scope is _IS.USER:
-        from apm_cli.factory import ClientFactory as _CF
-
-        pre_filter = list(target_runtimes)
-        filtered_runtimes = []
-        for rt in target_runtimes:
-            try:
-                client = _CF.create_client(rt)
-            except ValueError:
-                continue
-            if client.supports_user_scope:
-                filtered_runtimes.append(rt)
-        target_runtimes = filtered_runtimes
-        skipped = set(pre_filter) - set(target_runtimes)
-        if skipped:
-            msg = (
-                f"Skipped workspace-only runtimes at user scope: "
-                f"{', '.join(sorted(skipped))}"
-                f" -- omit --global to install these"
-            )
-            logger.warning(msg)
-        if not target_runtimes:
-            logger.warning(
-                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot)"
-            )
-            return None
-
-    return target_runtimes
+    return _apply_user_scope_filter(target_runtimes, scope, logger)
 
 
 def _install_self_defined_deps(
@@ -618,13 +406,9 @@ def _install_self_defined_deps(
     verbose: bool,
     console,
     logger,
-    managed_target_servers: dict[str, set[str]] | None,
+    managed_target_servers: dict[str, builtins.set[str]] | None,
 ) -> int:
-    """Install self-defined (``registry: false``) MCP deps for all target runtimes.
-
-    Mutates ``servers_to_update`` and ``successful_updates`` in-place.
-    Returns the number of servers newly configured or updated.
-    """
+    """Install self-defined (``registry: false``) MCP deps for all target runtimes."""
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
     configured_count = 0
@@ -676,9 +460,6 @@ def _install_self_defined_deps(
         synthetic_info = MCPIntegrator._build_self_defined_info(dep)
         self_defined_cache = {dep.name: synthetic_info}
         transport_label = dep.transport or "stdio"
-        # Stdio env values live in _raw_stdio and resolve in the adapter
-        # pipeline; env_overrides would shadow os.environ with the raw
-        # placeholder string.
         self_defined_env = {} if transport_label == "stdio" else dep.env or {}
         action_text = "Updating" if is_update else "Configuring"
         if console:
@@ -755,7 +536,7 @@ def _print_mcp_summary(
         console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
-def run_mcp_install(
+def run_mcp_install(  # noqa: PLR0913
     mcp_deps: list,
     runtime: str | None = None,
     exclude: str | None = None,
@@ -768,28 +549,21 @@ def run_mcp_install(
     logger=None,
     diagnostics=None,
     scope: InstallScope | None = None,
-    managed_target_servers: dict[str, set[str]] | None = None,
+    managed_target_servers: dict[str, builtins.set[str]] | None = None,
 ) -> int:
     """Install MCP dependencies.
 
     Args:
-        mcp_deps: List of MCP dependency entries (registry strings or
-            MCPDependency objects).
+        mcp_deps: MCP dependency entries (registry strings or MCPDependency objects).
         runtime: Target specific runtime only.
-        exclude: Exclude specific runtime from installation.
-        verbose: Show detailed installation information.
-        apm_config: The parsed apm.yml configuration dict (optional).
-            When not provided, this function loads ``apm.yml`` from the project
-            root if it exists.
-        stored_mcp_configs: Previously stored MCP configs from lockfile
-            for diff-aware installation.  When provided, servers whose
-            manifest config has changed are re-applied automatically.
+        exclude: Exclude specific runtime.
+        verbose: Show detailed information.
+        apm_config: Parsed apm.yml config dict (loaded from disk when None).
+        stored_mcp_configs: Lockfile MCP configs for diff-aware install.
         project_root: Project root for repo-local runtime configs.
-        user_scope: Whether runtime configuration is being resolved at user scope.
+        user_scope: Whether resolving at user scope.
         explicit_target: Explicit target selected by CLI or manifest.
-        scope: InstallScope (PROJECT or USER). When USER, only
-            runtimes whose adapter declares ``supports_user_scope``
-            are targeted; workspace-only runtimes are skipped.
+        scope: InstallScope (PROJECT or USER).
         managed_target_servers: Mutable per-target APM ownership state.
 
     Returns:
@@ -909,9 +683,11 @@ def run_mcp_install(
                 operations = MCPServerOperations(registry_url=group_registry_url)
                 configured_count += _install_registry_group(
                     operations=operations,
-                    group_dep_names=group_dep_names,
-                    group_dep_map=group_dep_map,
-                    group_deps=group_deps_list,
+                    group=_RegistryDepGroup(
+                        deps=group_deps_list,
+                        names=group_dep_names,
+                        dep_map=group_dep_map,
+                    ),
                     target_runtimes=target_runtimes,
                     stored_mcp_configs=stored_mcp_configs,
                     servers_to_update=servers_to_update,

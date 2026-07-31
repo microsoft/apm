@@ -286,9 +286,11 @@ class TestIgnoreNonContentSourceGuard(unittest.TestCase):
     # plugin_parser has 7 copytree calls in total: 2 agents + 3 skills +
     # 2 hooks. After PR #1153 follow-up #2, ALL 7 use ignore_non_content;
     # the import + 7 call sites yields >= 8 references.
+    # #1078 strangler-fig split: packer.pack_bundle decomposed into _packer_ops.py;
+    # copytree + ignore_non_content moved there (old path: apm_cli.bundle.packer).
     _MODULES: typing.ClassVar[list[tuple[str, str, int]]] = [
         ("apm_cli.deps", "plugin_parser", 5),
-        ("apm_cli.bundle", "packer", 2),
+        ("apm_cli.bundle", "_packer_ops", 2),
         ("apm_cli.bundle", "unpacker", 2),
     ]
 

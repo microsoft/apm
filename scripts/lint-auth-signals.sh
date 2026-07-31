@@ -40,8 +40,10 @@ rule_a_hits=$(
 
 # Exempt sites (tracked here, not via inline annotations, so the boundary is
 # auditable in one place).
-#   - install/validation.py: legacy direct provider use; refactor tracked
-#     as a follow-up to #1212.
+#   - install/_validation_git_probe.py: legacy direct provider use; refactor
+#     tracked as a follow-up to #1212. Originally lived in
+#     install/validation.py; extracted to install/_validation_git_probe.py
+#     as part of the 800-line-per-file guardrail decomposition (#1078).
 #   - deps/github_downloader.py and deps/clone_engine.py: the
 #     transport-plan clone path open-codes the PAT->bearer protocol.
 #     Originally lived in github_downloader._execute_transport_plan;
@@ -49,7 +51,7 @@ rule_a_hits=$(
 #     monolith decomposition. Refactor onto execute_with_bearer_fallback
 #     is non-trivial because the loop wraps a stateful clone_action that
 #     mutates target_path; refactor tracked as a follow-up to #1212.
-rule_a_exempt="src/apm_cli/install/validation.py src/apm_cli/deps/github_downloader.py src/apm_cli/deps/clone_engine.py"
+rule_a_exempt="src/apm_cli/install/_validation_git_probe.py src/apm_cli/deps/github_downloader.py src/apm_cli/deps/clone_engine.py"
 
 while IFS= read -r hit; do
     [ -z "$hit" ] && continue
@@ -95,7 +97,7 @@ while IFS= read -r hit; do
     case "$file" in
         src/apm_cli/marketplace/ref_resolver.py) continue ;;
         src/apm_cli/commands/marketplace/doctor.py) continue ;;
-        src/apm_cli/install/validation.py) continue ;;
+        src/apm_cli/install/_validation_git_probe.py) continue ;;
         src/apm_cli/marketplace/git_stderr.py) continue ;;  # docstring example, not a call
     esac
     echo "  [x] $hit"

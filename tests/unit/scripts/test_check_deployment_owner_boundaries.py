@@ -27,7 +27,13 @@ def test_current_consumers_satisfy_boundary() -> None:
     root = Path(__file__).parents[3]
 
     for relative in (
+        # _prune_ops.py and _audit_ops.py are sibling delegates extracted in
+        # #1078 (800-line guardrail split); they replaced prune.py and audit.py
+        # as the canonical call sites for legacy_value,
+        # reconcile_owner_references, and owner_reference_violations.
+        "src/apm_cli/commands/_prune_ops.py",
         "src/apm_cli/commands/prune.py",
+        "src/apm_cli/commands/_audit_ops.py",
         "src/apm_cli/commands/audit.py",
         "src/apm_cli/policy/ci_checks.py",
     ):
@@ -85,14 +91,15 @@ def cleanup(owner_violations, root, diagnostics):
 def test_mutating_prune_codec_delegation_breaks_guard() -> None:
     checker = _load_checker()
     root = Path(__file__).parents[3]
-    source = (root / "src/apm_cli/commands/prune.py").read_text(encoding="utf-8")
+    # reconcile_owner_references moved to _prune_ops.py in #1078 (was prune.py)
+    source = (root / "src/apm_cli/commands/_prune_ops.py").read_text(encoding="utf-8")
     mutated = source.replace(
         "DeploymentLedgerCodec.reconcile_owner_references(",
         "DeploymentLedgerCodec.skip_owner_references(",
         1,
     )
 
-    violations = checker.analyze_source(mutated, filename="prune.py")
+    violations = checker.analyze_source(mutated, filename="_prune_ops.py")
 
     assert any("reconcile_owner_references is missing" in item for item in violations)
 
@@ -100,14 +107,15 @@ def test_mutating_prune_codec_delegation_breaks_guard() -> None:
 def test_mutating_prune_legacy_projection_delegation_breaks_guard() -> None:
     checker = _load_checker()
     root = Path(__file__).parents[3]
-    source = (root / "src/apm_cli/commands/prune.py").read_text(encoding="utf-8")
+    # legacy_value moved to _prune_ops.py in #1078 (was prune.py)
+    source = (root / "src/apm_cli/commands/_prune_ops.py").read_text(encoding="utf-8")
     mutated = source.replace(
         "DeploymentLedgerCodec.legacy_value(record.locator)",
         "record.locator.value",
         1,
     )
 
-    violations = checker.analyze_source(mutated, filename="prune.py")
+    violations = checker.analyze_source(mutated, filename="_prune_ops.py")
 
     assert any("legacy_value is missing" in item for item in violations)
 
@@ -115,14 +123,15 @@ def test_mutating_prune_legacy_projection_delegation_breaks_guard() -> None:
 def test_mutating_cleanup_to_ghost_selector_breaks_guard() -> None:
     checker = _load_checker()
     root = Path(__file__).parents[3]
-    source = (root / "src/apm_cli/commands/prune.py").read_text(encoding="utf-8")
+    # remove_stale_deployed_files call moved to _prune_ops.py in #1078 (was prune.py)
+    source = (root / "src/apm_cli/commands/_prune_ops.py").read_text(encoding="utf-8")
     mutated = source.replace(
         "trusted_paths - retained_paths,",
         "{item.locator.value for item in owner_violations},",
         1,
     )
 
-    violations = checker.analyze_source(mutated, filename="prune.py")
+    violations = checker.analyze_source(mutated, filename="_prune_ops.py")
 
     assert any("dependency claims" in item for item in violations)
     assert any("must not authorize" in item for item in violations)

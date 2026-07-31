@@ -1,20 +1,27 @@
-"""Bundle packer  -- creates self-contained APM bundles from the resolved dependency tree."""
+"""Bundle packer -- creates self-contained APM bundles from the resolved dependency tree."""
 
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core.target_detection import detect_target
+from ..core.target_detection import (
+    detect_target,  # noqa: F401 -- RULE B: tests patch packer.detect_target
+)
 from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
-from ..models.apm_package import APMPackage
 from ..utils.archive import (
     projected_archive_path,
     validate_archive_format,
     write_tar_archive,
     write_zip_archive,
 )
-from .attest import verify_attested_file
-from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
+from ._packer_ops import (
+    _collect_and_filter_deployed,
+    _copy_files_verified,
+    _resolve_package_meta,
+    _scan_and_warn_hidden_chars,
+    _verify_deployed_paths,
+)
+from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack  # noqa: F401
 
 
 @dataclass
@@ -44,12 +51,10 @@ def pack_bundle(
     Args:
         project_root: Root of the project containing ``apm.lock.yaml`` and ``apm.yml``.
         output_dir: Directory where the bundle will be created.
-        fmt: Bundle format  -- ``"plugin"`` (default, Claude Code plugin layout) or ``"apm"`` (legacy APM bundle).
-        target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, a list of
-            target strings (e.g. ``["claude", "vscode"]``), or *None*
-            (auto-detect from apm.yml / project structure).
-        archive: If *True*, produce a ``.zip`` (or ``.tar.gz`` when *archive_format* is ``"tar.gz"``) and remove the directory.
-        archive_format: Archive format when *archive* is True -- ``"zip"`` (default) or ``"tar.gz"``.
+        fmt: Bundle format -- ``"plugin"`` (Claude Code plugin layout) or ``"apm"`` (legacy).
+        target: Target filter or *None* (auto-detect from apm.yml / project structure).
+        archive: If *True*, produce a ``.zip`` / ``.tar.gz`` and remove the directory.
+        archive_format: ``"zip"`` (default) or ``"tar.gz"``.
         dry_run: If *True*, resolve the file list but write nothing to disk.
         force: On collision (plugin format), last writer wins.
 
@@ -60,10 +65,8 @@ def pack_bundle(
         FileNotFoundError: If ``apm.lock.yaml`` is missing.
         ValueError: If deployed files referenced in the lockfile are missing on disk.
     """
-    # 1. Read lockfile (migrate legacy apm.lock → apm.lock.yaml if needed)
     migrate_lockfile_if_needed(project_root)
 
-    # Plugin format: delegate to dedicated exporter
     if fmt == "plugin":
         from .plugin_exporter import export_plugin_bundle
 
@@ -82,131 +85,18 @@ def pack_bundle(
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise FileNotFoundError(
-            "apm.lock.yaml not found  -- run 'apm install' first to resolve dependencies."
+            "apm.lock.yaml not found -- run 'apm install' first to resolve dependencies."
         )
 
-    # 2. Read apm.yml for name / version / config target
-    apm_yml_path = project_root / "apm.yml"
-    skill_md_path = project_root / "SKILL.md"
-    is_hybrid_root = apm_yml_path.exists() and skill_md_path.exists()
-    try:
-        package = APMPackage.from_apm_yml(apm_yml_path)
-        pkg_name = package.name
-        pkg_version = package.version or "0.0.0"
-        from apm_cli.models.apm_package import package_target_selection
+    pkg_name, pkg_version, effective_target = _resolve_package_meta(project_root, target, logger)
 
-        config_target = package_target_selection(package)
+    unique_files, path_mappings, deployed_hashes, hash_dep_labels = _collect_and_filter_deployed(
+        lockfile, effective_target
+    )
 
-        # HYBRID author guard: apm.yml.description and SKILL.md
-        # description serve different consumers (human-facing CLI/search
-        # vs. agent-runtime invocation matcher) and are NOT merged. If
-        # the author shipped a SKILL.md description but left
-        # apm.yml.description blank, the human-facing surfaces (apm view,
-        # apm search, marketplace listings) will degrade silently while
-        # Claude/Copilot still invoke the skill correctly. Warn loudly
-        # at pack time -- this is the publish gate for the AUTHOR.
-        if is_hybrid_root and not package.description and logger:
-            try:
-                from apm_cli.utils.yaml_io import load_frontmatter
-
-                with open(skill_md_path, encoding="utf-8") as _f:
-                    _skill_post = load_frontmatter(_f)
-                _skill_desc = _skill_post.metadata.get("description")
-            except Exception:
-                _skill_desc = None
-            if _skill_desc:
-                logger.warning(
-                    "apm.yml is missing 'description'. SKILL.md has its own "
-                    "description, but that is for agent invocation -- not "
-                    "for 'apm view' or search. Add a short tagline to "
-                    'apm.yml:  description: "One-line human summary"'
-                )
-
-        # Guard: reject local-path dependencies (non-portable)
-        for dep_ref in package.get_apm_dependencies():
-            if dep_ref.is_local:
-                raise ValueError(
-                    f"Cannot pack — apm.yml contains local path dependency: "
-                    f"{dep_ref.local_path}\n"
-                    f"Local dependencies are for development only. Replace them with "
-                    f"remote references (e.g., 'owner/repo') before packing."
-                )
-    except ValueError:
-        raise
-    except FileNotFoundError:
-        pkg_name = project_root.resolve().name
-        pkg_version = "0.0.0"
-        config_target = None
-
-    # 3. Resolve effective target
-    if isinstance(target, list):
-        # List from CLI (e.g. --target claude,copilot) passes through directly
-        effective_target = target
-    elif isinstance(config_target, list) and target is None:
-        # Canonical list from either apm.yml target spelling.
-        effective_target = config_target
-    else:
-        effective_target, _reason = detect_target(
-            project_root,
-            explicit_target=target,
-            config_target=config_target if isinstance(config_target, str) else None,
-        )
-        # For packing purposes, "minimal" means nothing to pack  -- treat as "all"
-        if effective_target == "minimal":
-            effective_target = "all"
-
-    # 4. Collect deployed_files from all dependencies, filtered by target.
-    #    Skip local-source entries: these include the synthesized root self-entry
-    #    (local_path == ".") and any local-path manifest deps. Local content is
-    #    not portable and is bundled separately via the project's own files
-    #    (or rejected outright at L89-97 for manifest-declared local deps).
-    all_deployed: list[str] = []
-    # Provenance map: deployed-path -> (attested SHA-256, dependency label).
-    # ``deployed_file_hashes`` is keyed by the on-disk deployed path recorded
-    # at install time (see install/phases/lockfile.compute_deployed_hashes), so
-    # verification below must look up the on-disk path, not the bundle path.
-    deployed_hashes: dict[str, str] = {}
-    hash_dep_labels: dict[str, str] = {}
-    for dep in lockfile.get_all_dependencies():
-        if dep.source == "local":
-            continue
-        all_deployed.extend(dep.deployed_files)
-        for _dpath, _dhash in dep.deployed_file_hashes.items():
-            deployed_hashes[_dpath] = _dhash
-            hash_dep_labels[_dpath] = dep.repo_url
-
-    filtered_files, path_mappings = _filter_files_by_target(all_deployed, effective_target)
-    # Deduplicate while preserving order
-    seen = set()
-    unique_files: list[str] = []
-    for f in filtered_files:
-        if f not in seen:
-            seen.add(f)
-            unique_files.append(f)
-
-    # 5. Verify each path is safe (no traversal) and exists on disk
     project_root_resolved = project_root.resolve()
-    missing: list[str] = []
-    for rel_path in unique_files:
-        # Guard against absolute paths or path-traversal entries in deployed_files
-        p = Path(rel_path)
-        if p.is_absolute() or ".." in p.parts:
-            raise ValueError(f"Refusing to pack unsafe path from lockfile: {rel_path!r}")
-        # For cross-target mapped files, verify the original (on-disk) path
-        disk_path = path_mappings.get(rel_path, rel_path)
-        abs_path = project_root / disk_path
-        if not abs_path.resolve().is_relative_to(project_root_resolved):
-            raise ValueError(f"Refusing to pack path that escapes project root: {disk_path!r}")
-        # deployed_files may reference directories (ending with /)
-        if not abs_path.exists():
-            missing.append(disk_path)
-    if missing:
-        raise ValueError(
-            f"The following deployed files are missing on disk  -- "  # noqa: F541
-            f"run 'apm install' to restore them:\n" + "\n".join(f"  - {m}" for m in missing)  # noqa: F541
-        )
+    _verify_deployed_paths(unique_files, path_mappings, project_root, project_root_resolved)
 
-    # Dry-run: return file list without writing anything
     if dry_run:
         bundle_name = f"{pkg_name}-{pkg_version}"
         bundle_path = (
@@ -222,98 +112,23 @@ def pack_bundle(
             path_mappings=path_mappings,
         )
 
-    # 5b. Scan files for hidden characters before bundling.
-    # Intentionally non-blocking (warn only) — pack is an authoring tool.
-    # Critical findings here mean the author's own source files contain
-    # hidden characters. We surface them so the author can fix before
-    # publishing, but don't block the bundle. Consumers are protected by
-    # install/unpack which block on critical.
-    from ..security.gate import WARN_POLICY, SecurityGate
-    from ..utils.console import _rich_warning
+    _scan_and_warn_hidden_chars(unique_files, path_mappings, project_root, logger)
 
-    _scan_findings_total = 0
-    for rel_path in unique_files:
-        disk_path = path_mappings.get(rel_path, rel_path)
-        src = project_root / disk_path
-        if src.is_symlink():
-            continue
-        if src.is_dir():
-            verdict = SecurityGate.scan_files(src, policy=WARN_POLICY)
-            _scan_findings_total += len(verdict.all_findings)
-        elif src.is_file():
-            verdict = SecurityGate.scan_text(
-                src.read_text(encoding="utf-8", errors="replace"),
-                str(src),
-                policy=WARN_POLICY,
-            )
-            _scan_findings_total += len(verdict.all_findings)
-    if _scan_findings_total:
-        _warn_msg = (
-            f"Bundle contains {_scan_findings_total} hidden character(s) across source files "
-            f"— run 'apm audit' to inspect before publishing"
-        )
-        if logger:
-            logger.warning(_warn_msg)
-        else:
-            _rich_warning(_warn_msg)
-
-    # 6. Build output directory
     bundle_dir = output_dir / f"{pkg_name}-{pkg_version}"
     bundle_dir.mkdir(parents=True, exist_ok=True)
     bundle_dir_resolved = bundle_dir.resolve()
 
-    # 7. Copy files preserving directory structure.
-    #    Provenance gate (#2013): each dependency file recorded in the lockfile
-    #    is verified against its attested SHA-256 before it enters the bundle --
-    #    the same integrity guarantee the plugin format enforces, applied to the
-    #    default/most-used ``apm`` format. Files with no recorded hash (older
-    #    lockfiles) pack without verification; a mismatch fails loud.
-    for rel_path in unique_files:
-        # For cross-target mapped files, read from the original disk path
-        disk_path = path_mappings.get(rel_path, rel_path)
-        src = project_root / disk_path
-        if src.is_symlink():
-            continue  # Never bundle symlinks
-        dest = bundle_dir / rel_path
-        # Defense-in-depth: verify mapped destination stays inside the bundle
-        if not dest.resolve().is_relative_to(bundle_dir_resolved):
-            raise ValueError(f"Refusing to write outside bundle directory: {rel_path!r}")
-        if src.is_dir():
-            from ..security.gate import ignore_non_content
+    _copy_files_verified(
+        unique_files,
+        path_mappings,
+        deployed_hashes,
+        hash_dep_labels,
+        project_root,
+        project_root_resolved,
+        bundle_dir,
+        bundle_dir_resolved,
+    )
 
-            # Verify each contained file's attested hash and re-assert
-            # containment per child. copytree already drops symlinks via
-            # ignore_non_content, but the walk guards against a directory
-            # symlink whose target escapes the project root regardless of the
-            # walker's version-specific symlink-following behaviour.
-            disk_base = disk_path.rstrip("/")
-            for child in sorted(src.rglob("*")):
-                if not child.is_file() or child.is_symlink():
-                    continue
-                if not child.resolve().is_relative_to(project_root_resolved):
-                    raise ValueError(
-                        f"Refusing to pack path that escapes project root: "
-                        f"{child.relative_to(project_root)!r}"
-                    )
-                child_key = f"{disk_base}/{child.relative_to(src).as_posix()}"
-                verify_attested_file(
-                    child,
-                    deployed_hashes.get(child_key),
-                    hash_dep_labels.get(child_key, "dependency"),
-                    child_key,
-                )
-            shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_non_content)
-        else:
-            verify_attested_file(
-                src,
-                deployed_hashes.get(disk_path),
-                hash_dep_labels.get(disk_path, "dependency"),
-                disk_path,
-            )
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest, follow_symlinks=False)
-
-    # 8. Enrich lockfile copy and write to bundle
     enriched_yaml = enrich_lockfile_for_pack(lockfile, fmt, effective_target)
     (bundle_dir / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
 
@@ -325,7 +140,6 @@ def pack_bundle(
         path_mappings=path_mappings,
     )
 
-    # 10. Archive if requested
     if archive:
         validate_archive_format(archive_format)
         archive_path = projected_archive_path(

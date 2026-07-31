@@ -756,6 +756,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Windsurf skills now deploy to the cross-tool `.agents/skills/<name>/SKILL.md` path (was `.windsurf/skills/`), converging with Copilot, Cursor, Codex, Gemini, and OpenCode. Pass `--legacy-skill-paths` or set `APM_LEGACY_SKILL_PATHS=1` to restore the per-client `.windsurf/skills/` layout. The lockfile pack-time cross-target skill map for Windsurf is swept separately in #1805. (closes #1520) (#1802)
 
+### Changed
+
+- Tightened Stage 2 code-complexity thresholds (`max-statements` 120,
+  `max-branches` 40, `max-complexity` 35, `max-args` 12, `max-returns` 8) and
+  lowered the source file-length guardrail to 800 lines, splitting the remaining
+  oversized `policy/` and `marketplace/` modules into focused submodules with no
+  behaviour change. (#1681)
+
 ### Removed
 
 - `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)

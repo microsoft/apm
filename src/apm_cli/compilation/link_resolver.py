@@ -463,6 +463,28 @@ class UnifiedLinkResolver:
         idx = min(positions)
         return link_path[:idx], link_path[idx:]
 
+    def _compute_deployment_candidate(
+        self,
+        candidate: "Path",
+        source_package_root: "Path",
+        ctx: "LinkResolutionContext",
+    ) -> "Path | None":
+        """Project *candidate* into the deployment frame, or return None on error."""
+        candidate_in_deployment = candidate
+        if ctx.deployment_package_root is not None:
+            try:
+                package_relative = candidate.relative_to(source_package_root)
+                candidate_in_deployment = ctx.deployment_package_root / package_relative
+            except (OSError, ValueError):
+                return None
+        elif not candidate.is_relative_to(ctx.base_dir):
+            try:
+                package_relative = candidate.relative_to(source_package_root)
+                candidate_in_deployment = ctx.base_dir / package_relative
+            except (OSError, ValueError):
+                return None
+        return candidate_in_deployment
+
     def _resolve_in_package_asset_link(
         self, link_path: str, ctx: LinkResolutionContext
     ) -> str | None:
@@ -484,23 +506,14 @@ class UnifiedLinkResolver:
           ``..`` chains, etc.).
         * Path computation raises (broken filesystem, encoding, ...).
         """
-        if ctx.package_root is None:
-            return None
-        if not ctx.package_root.is_dir():
-            return None
-
         path_part, suffix = self._split_link_target(link_path)
-        if not path_part:
+        if ctx.package_root is None or not ctx.package_root.is_dir() or not path_part:
             return None
 
         try:
             source_dir = (
                 ctx.source_file.parent if ctx.source_file.is_file() else ctx.source_location
             )
-        except OSError:
-            return None
-
-        try:
             candidate = (source_dir / path_part).resolve()
         except (OSError, ValueError):
             return None
@@ -521,22 +534,11 @@ class UnifiedLinkResolver:
         except (OSError, ValueError, PathTraversalError):
             return None
 
-        candidate_in_deployment = candidate
-        if ctx.deployment_package_root is not None:
-            # Source containment is already enforced above. This projection only
-            # changes emitted link text; it does not access the deployment path.
-            try:
-                package_relative = candidate.relative_to(source_package_root)
-                candidate_in_deployment = ctx.deployment_package_root / package_relative
-            except (OSError, ValueError):
-                return None
-        elif not candidate.is_relative_to(ctx.base_dir):
-            # Legacy replay callers project source-relative assets under base_dir.
-            try:
-                package_relative = candidate.relative_to(source_package_root)
-                candidate_in_deployment = ctx.base_dir / package_relative
-            except (OSError, ValueError):
-                return None
+        candidate_in_deployment = self._compute_deployment_candidate(
+            candidate, source_package_root, ctx
+        )
+        if candidate_in_deployment is None:
+            return None
 
         try:
             relative_path = os.path.relpath(candidate_in_deployment, ctx.target_location)
