@@ -901,6 +901,13 @@ describe("Path traversal protection", () => {
             "public, max-age=31536000, immutable",
         );
 
+        const cacheBusted = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/nested/app..js?v=123",
+        );
+        assert.equal(cacheBusted.statusCode, 200);
+        assert.deepEqual(cacheBusted.body, SAFE_ASSET);
+
         const prefix = await rawHttpRequest(assetBaseUrl, "/assets/dist-evil/inside.txt");
         assert.equal(prefix.statusCode, 200);
         assert.equal(prefix.body.toString("utf8"), "inside-prefix");
