@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **104 normative statements** indexed in
+- OpenAPM v0.1 carries **105 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -943,6 +943,9 @@ non-per-file configuration document for a target that supports the
 which entries the consumer itself wrote), a conforming **consumer**
 implementation MUST apply the same preserve-or-remove decision defined
 by [req-lk-020](#req-lk-020) to that merge-based hook configuration.
+For an entry owned by a dependency, "current install targets" in clause
+(a) below means that dependency's effective intersection under
+[req-tg-008](#req-tg-008).
 It MUST remove only the consumer-owned entries -- and any ownership
 record left empty by that removal -- attributable to a target that is
 not attributable to (a) the current install targets, (b) another
@@ -2293,6 +2296,25 @@ NOT trigger the diagnostic by itself.
 > requirement does not prescribe a lockfile field for this check:
 > compile-only instruction sources are not necessarily deployed outputs.
 
+#### 8.5.3 Package-declared target restrictions
+
+<a id="req-tg-008"></a>
+**[req-tg-008]** A conforming **consumer** implementation MUST treat a
+package's declared `target:` or `targets:` field in `apm.yml` as a
+restriction-only filter on hook primitive integration. If the field
+resolves to a non-empty set that does not contain `all`, the consumer
+MUST NOT deliver that package's hook primitives to any active
+integration target whose name is not in the declared set, even when the
+active target was authorised by the project's target list and the
+consumer's per-dependency `targets:` filter. Omitting `target:` and
+`targets:`, or declaring `targets: [all]`, applies no package-level
+restriction. The package filter composes by intersection with the
+consumer-side per-dependency `targets:` filter: the effective
+integration target set is
+`project_active_targets INTERSECT consumer_per_dep_targets (when set) INTERSECT package_declared_targets (when restrictive)`.
+The package filter MUST NOT expand the integration target set beyond
+the targets that are already active in the project.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2306,7 +2328,8 @@ without a spec revision. The current matrix is in the companion
   [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
-  [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007).
+  [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
+  [req-tg-008](#req-tg-008).
 
 ---
 
@@ -2632,6 +2655,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
 | 15| Cross-repository cache substitution                  | [req-rs-016](#req-rs-016)                                         | Consumer-default  |
 | 16| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
+| 17| Cross-target primitive deployment                    | [req-tg-008](#req-tg-008), [req-lk-021](#req-lk-021)               | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2808,7 +2832,7 @@ conformance statement identifying:
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
-[req-sc-001](#req-sc-001),
+[req-tg-008](#req-tg-008),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
@@ -3226,6 +3250,7 @@ renumbering of conformance classes.
 | [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
 | [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-tg-007](#req-tg-007)                | MUST    | 8.5     | consumer    |
+| [req-tg-008](#req-tg-008)                | MUST    | 8.5     | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3242,7 +3267,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 104** (99 MUST, 5 SHOULD).
+**Total normative statements: 105** (100 MUST, 5 SHOULD).
 
 ---
 
@@ -3272,6 +3297,7 @@ renumbering of conformance classes.
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
 | 0.1.20  | 2026-07-30 | Defensive amendment of [req-lk-006] (no new normative statement; count remains 104 (99 MUST, 5 SHOULD)): frozen validation now covers direct MCP server names and configurations as well as package pins, runs before lockfile, target-config, deployment, or cache mutation, and rejects manifest dependency mutation. |
+| 0.1.21  | 2026-07-31 | Spec-citation fold for package-declared hook target restrictions (closes #2321 Mode-B silent-extension gate). Added [req-tg-008] (Section 8.5.3, consumer MUST): a consumer MUST treat a package's declared `target:`/`targets:` field as a restriction-only filter on hook primitive integration; if the field resolves to a non-empty set that does not contain `all`, the consumer MUST NOT deliver that package's hooks to any active integration target not in the declared set; the filter composes by intersection with the consumer-side per-dependency `targets:` filter and can only narrow, never expand. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
