@@ -1822,8 +1822,8 @@ class HookIntegrator(BaseIntegrator):
         """
         if dep_targets_active and (not allowed_targets or target.name not in allowed_targets):
             raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
-        _d = package_info.package.canonical_targets
-        if _d and "all" not in _d and target.name not in _d:
+        _pkg_targets = package_info.package.canonical_targets
+        if _pkg_targets and "all" not in _pkg_targets and target.name not in _pkg_targets:
             return HookIntegrationResult(
                 files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
             )

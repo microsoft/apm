@@ -248,7 +248,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     deployed = result["deployed_files"]
 
     # SECURITY: dep_target_subset comes from CONSUMER manifest only.
-    # Package-side targets are advisory metadata; never a routing input.
+    # Package-side targets may restrict (narrow) which active targets receive
+    # primitives, but can never activate or expand beyond the consumer-authorized
+    # set -- restriction-only narrowing is safe; expansion is not permitted.
     targets, allowed_dep_targets, dep_targets_active = filter_targets_for_dependency(
         targets,
         dep_target_subset,
