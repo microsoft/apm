@@ -29,11 +29,19 @@ _ALLOWED_LOOPBACK_PORTS = {
 }
 
 
+def _normalized_port(port):
+    if isinstance(port, int):
+        return port
+    if isinstance(port, str) and port.isdigit():
+        return int(port)
+    return None
+
+
 def _is_allowed_loopback(address):
     if not isinstance(address, tuple) or len(address) < 2:
         return False
     host, port = address[:2]
-    return host in ("127.0.0.1", "::1") and port in _ALLOWED_LOOPBACK_PORTS
+    return host in ("127.0.0.1", "::1") and _normalized_port(port) in _ALLOWED_LOOPBACK_PORTS
 
 
 class _GuardedSocketOperations:
@@ -89,7 +97,10 @@ def _deny_network(*args, **kwargs):
 
 
 def _guarded_getaddrinfo(host, port, *args, **kwargs):
-    if host not in ("127.0.0.1", "::1") or port not in _ALLOWED_LOOPBACK_PORTS:
+    if (
+        host not in ("127.0.0.1", "::1")
+        or _normalized_port(port) not in _ALLOWED_LOOPBACK_PORTS
+    ):
         raise OSError(_MESSAGE)
     return _REAL_GETADDRINFO(host, port, *args, **kwargs)
 
@@ -137,6 +148,18 @@ socket.gethostbyname_ex = _deny_network
 socket.getnameinfo = _deny_network
 builtins.__import__ = _guarded_import
 importlib.import_module = _guarded_import_module
+
+if os.environ.get("APM_TEST_FAIL_LOCK_REPLACE") == "1":
+    import apm_cli.utils.atomic_io as _atomic_io
+
+    _real_replace = _atomic_io.os.replace
+
+    def _fail_lock_replace(source, destination):
+        if os.path.basename(os.fspath(destination)) == "apm.lock.yaml":
+            raise OSError("lockfile replace blocked by test")
+        return _real_replace(source, destination)
+
+    _atomic_io.os.replace = _fail_lock_replace
 """
 
 _APM_AUTH_ENV_NAMES = frozenset(
@@ -181,6 +204,7 @@ _APM_REMOTE_CONTROL_ENV_NAMES = frozenset(
         "APM_GITLAB_HOSTS",
         "APM_NO_CACHE",
         "APM_POLICY_DISABLE",
+        "APM_TEST_FAIL_LOCK_REPLACE",
         "APM_TEST_LOOPBACK_PORTS",
         "GITHUB_HOST",
         "GITHUB_URL",

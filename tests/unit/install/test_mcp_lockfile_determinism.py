@@ -312,7 +312,7 @@ def test_unchanged_mcp_target_servers_do_not_rewrite_lockfile(tmp_path: Path) ->
         ".github/instructions/dep.instructions.md",
     ) in deployment_rows
     second_context.logger.verbose_detail.assert_any_call(
-        "MCP state unchanged -- carrying forward 1 server, 1 config, 1 runtime mapping"
+        "MCP state unchanged -- carrying forward 1 server, 1 config, 1 target mapping"
     )
 
 
@@ -555,6 +555,12 @@ def test_mcp_persistence_write_failure_is_not_hidden(tmp_path: Path) -> None:
             "generated_at": "2026-01-01T00:00:00+00:00",
             "dependencies": [],
             "mcp_config_provenance": {"atlassian": []},
+        },
+        {
+            "lockfile_version": "1",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "dependencies": [],
+            "mcp_config_provenance": {"atlassian": [123]},
         },
     ],
 )

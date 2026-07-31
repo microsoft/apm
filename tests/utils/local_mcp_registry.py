@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,7 +21,7 @@ class _RegistryServer(ThreadingHTTPServer):
     def __init__(
         self,
         server_document: Mapping[str, Any],
-        request_paths: list[str],
+        request_paths: deque[str],
     ) -> None:
         self.server_document = dict(server_document)
         self.request_paths = request_paths
@@ -79,7 +80,7 @@ class LocalMcpRegistry:
 
     _server: _RegistryServer
     _thread: threading.Thread
-    request_paths: list[str] = field(default_factory=list)
+    request_paths: deque[str] = field(default_factory=deque)
 
     @property
     def url(self) -> str:
@@ -116,7 +117,7 @@ class LocalMcpRegistryFactory:
         """Start a registry endpoint for one immutable server document."""
         if not isinstance(server_document.get("name"), str):
             raise ValueError("server_document.name must be a string")
-        request_paths: list[str] = []
+        request_paths: deque[str] = deque()
         server = _RegistryServer(server_document, request_paths)
         thread = threading.Thread(
             target=server.serve_forever,

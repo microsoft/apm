@@ -402,3 +402,29 @@ def test_redirected_root_registry_install_converges_without_rewrite(
         assert _file_identity(lock_path) == first_identity
         assert project.manifest_path.read_bytes() == source_manifest
         assert registry.request_paths
+
+
+def test_installed_mcp_write_failure_exits_nonzero_without_partial_lock(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A real MCP persistence failure is explicit and leaves the lock intact."""
+    scenario = _new_scenario(tmp_path / "installed-write-failure", apm_binary_path)
+    project_root = scenario.project.root
+    lock_path = project_root / "apm.lock.yaml"
+    _run_ok(scenario, _INSTALL_BOTH, "mcp-write-failure-baseline")
+    baseline_bytes = lock_path.read_bytes()
+
+    scenario.packages.set_targets(scenario.project, ("copilot",))
+    failing_environment = dict(scenario.environment)
+    failing_environment["APM_TEST_FAIL_LOCK_REPLACE"] = "1"
+    result = scenario.runner.run(
+        _INSTALL_COPILOT,
+        scenario_id="mcp-write-failure-injected",
+        cwd=project_root,
+        env=failing_environment,
+    )
+
+    assert result.returncode != 0
+    assert lock_path.read_bytes() == baseline_bytes
+    assert list(project_root.glob("apm-atomic-*")) == []
