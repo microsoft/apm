@@ -1,4 +1,6 @@
 client/node_modules/
+tests/.static-assets-*
+.github/extensions/
 
 
 # APM dependencies

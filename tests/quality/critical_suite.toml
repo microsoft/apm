@@ -110,3 +110,11 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_package_target_hook_routing_e2e.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_audit_cold_cache_ci_e2e.py"
+marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_virtual_skill_audit_e2e.py"
+marker = "e2e"
