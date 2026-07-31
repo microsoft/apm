@@ -54,6 +54,9 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |
 <!-- /canonical-owner-table -->
 
+Host + credential resolution includes public github.com anonymous-first ordering.
+Consumers must ask `AuthResolver` rather than reclassifying that host locally.
+
 If you are about to compute one of these locally, stop and call the
 owner. If the owner is missing a case you need, EXTEND the owner --
 never fork it.

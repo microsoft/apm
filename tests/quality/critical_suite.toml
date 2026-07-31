@@ -114,3 +114,7 @@ marker = "e2e"
 [[modules]]
 path = "tests/integration/test_virtual_skill_audit_e2e.py"
 marker = "e2e"
+
+[[modules]]
+path = "tests/integration/test_public_github_anonymous_lifecycle_e2e.py"
+marker = "e2e"

@@ -719,6 +719,42 @@ if [ -n "$auth_header_dictmerge_hits" ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC20: public github.com anonymous-first auth authority"
+public_github_auth_owner="src/apm_cli/core/auth.py"
+public_github_auth_duplicate_defs=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def uses_public_github_anonymous_first\(' \
+        src/apm_cli \
+        | grep -v "^${public_github_auth_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+public_github_auth_consumers="
+src/apm_cli/deps/clone_engine.py
+src/apm_cli/deps/download_strategies.py
+src/apm_cli/deps/git_reference_resolver.py
+src/apm_cli/deps/github_downloader.py
+src/apm_cli/deps/github_downloader_validation.py
+"
+public_github_auth_missing_consumers=""
+for consumer in $public_github_auth_consumers; do
+    if ! grep -q 'uses_public_github_anonymous_first(' "$consumer"; then
+        public_github_auth_missing_consumers="${public_github_auth_missing_consumers}
+${consumer}"
+    fi
+done
+if ! grep -q '^    def uses_public_github_anonymous_first(' "$public_github_auth_owner" \
+    || ! grep -q '^    def build_public_github_anonymous_git_env(' "$public_github_auth_owner" \
+    || ! grep -q 'lazy_public_github' "$public_github_auth_owner" \
+    || [ -n "$public_github_auth_duplicate_defs" ] \
+    || [ -n "$public_github_auth_missing_consumers" ]; then
+    echo "[x] Public github.com anonymous-first auth ordering must stay owned by AuthResolver"
+    [ -n "$public_github_auth_duplicate_defs" ] && echo "$public_github_auth_duplicate_defs"
+    [ -n "$public_github_auth_missing_consumers" ] \
+        && echo "Missing owner routing:${public_github_auth_missing_consumers}"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1
