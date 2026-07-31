@@ -1188,11 +1188,11 @@
       "conformance_class": "consumer",
       "id": "req-tg-008",
       "keyword": "MUST",
-      "section": "8.5",
+      "section": "8.5.3",
       "status": "active",
       "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_package_declared_target_restricts_hook_integration"
+        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only"
       ]
     }
   ],
