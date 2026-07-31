@@ -4,7 +4,8 @@
 
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest } from "node:http";
 import {
     createHandler,
@@ -16,6 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = join(__dir, "..", ".apm", "extensions", "issue-monitor", "dist");
+const REPO_ROOT = join(__dir, "..", "..", "..");
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -1027,5 +1029,28 @@ describe("Path traversal protection", () => {
         assert.equal(alias.kind, "asset");
         assert.equal(alias.filePath, "C:\\dashboard\\dist\\assets\\nested\\app.js");
         assert.equal(alias.mimePath, aliasCandidate);
+    });
+});
+
+describe("Package source ownership", () => {
+    it("keeps generated extension copies out of tracked source", async () => {
+        const tracked = execFileSync(
+            "git",
+            [
+                "-C",
+                REPO_ROOT,
+                "ls-files",
+                "--",
+                "packages/apm-contributor-dashboard/.github/extensions/**",
+            ],
+            { encoding: "utf8" },
+        );
+        assert.equal(tracked.trim(), "");
+
+        const ignoreFile = await readFile(
+            join(REPO_ROOT, "packages", "apm-contributor-dashboard", ".gitignore"),
+            "utf8",
+        );
+        assert.match(ignoreFile, /^\.github\/extensions\/$/m);
     });
 });
