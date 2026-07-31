@@ -113,14 +113,14 @@ def ref_freshness_policy_for_install(
     context: RefFreshnessContext,
 ) -> RefFreshnessPolicy:
     """Return the configured policy or derive it from install intent once."""
-    configured = getattr(context, "ref_freshness_policy", None)
+    configured = context.ref_freshness_policy
     if configured is not None:
         if not isinstance(configured, RefFreshnessPolicy):
             raise TypeError("ref_freshness_policy must be a RefFreshnessPolicy")
         return configured
     return RefFreshnessPolicy.for_install_intent(
-        update_refs=bool(getattr(context, "update_refs", False)),
-        refresh=bool(getattr(context, "refresh", False)),
+        update_refs=context.update_refs,
+        refresh=context.refresh,
     )
 
 
