@@ -68,6 +68,16 @@ class _RecordingLogger:
 
     def __init__(self) -> None:
         self.details: list[str] = []
+        self.progress_messages: list[str] = []
+        self.warning_messages: list[str] = []
+
+    def progress(self, message: str) -> None:
+        """Record one progress diagnostic."""
+        self.progress_messages.append(message)
+
+    def warning(self, message: str) -> None:
+        """Record one warning diagnostic."""
+        self.warning_messages.append(message)
 
     def verbose_detail(self, message: str) -> None:
         """Record one verbose diagnostic."""
