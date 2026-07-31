@@ -158,10 +158,34 @@ class TestInferRegistryNameOci(unittest.TestCase):
 
     def test_non_string_registry_type_fails_closed_before_launcher_dispatch(self):
         """Malformed explicit types must never reach the generic npx fallback."""
-        with self.assertRaisesRegex(ValueError, "registry_name must be a string"):
+        for malformed in (0, 5, [], {}):
+            with self.subTest(malformed=malformed):
+                with self.assertRaisesRegex(ValueError, "registry_name must be a string"):
+                    MCPClientAdapter._infer_registry_name(
+                        {
+                            "name": "p",
+                            "registry_name": malformed,
+                            "runtime_hint": "docker",
+                        }
+                    )
+
+    def test_whitespace_registry_type_fails_closed_before_launcher_dispatch(self):
+        with self.assertRaisesRegex(ValueError, "registry_name must not be whitespace"):
             MCPClientAdapter._infer_registry_name(
-                {"name": "p", "registry_name": 5, "runtime_hint": "docker"}
+                {
+                    "name": "registry.example.invalid/team/server:1",
+                    "registry_name": " ",
+                    "runtime_hint": "docker",
+                }
             )
+
+    def test_empty_registry_type_still_uses_safe_runtime_inference(self):
+        self.assertEqual(
+            MCPClientAdapter._infer_registry_name(
+                {"name": "p", "registry_name": "", "runtime_hint": "docker"}
+            ),
+            "docker",
+        )
 
     def test_oci_package_wins_container_selection_priority(self):
         """_select_best_package ranks containers above pypi; oci must qualify."""
@@ -226,6 +250,38 @@ class TestEnsureDockerImageArg(unittest.TestCase):
             ["run", "--rm", "--name", "mcp-server", "-v", "/w:/w"], "mcp-server:1.0"
         )
         self.assertEqual(args[-1], "mcp-server:1.0")
+
+    def test_a_trailing_option_value_does_not_stand_in_for_the_image(self):
+        args = MCPClientAdapter._ensure_docker_image_arg(
+            ["run", "--rm", "--name", "mcp-server"], "mcp-server:1.0"
+        )
+        self.assertEqual(args, ["run", "--rm", "--name", "mcp-server", "mcp-server:1.0"])
+
+    def test_pull_policy_value_does_not_stand_in_for_the_image(self):
+        args = MCPClientAdapter._ensure_docker_image_arg(
+            ["run", "--pull", "always"], "docker.io/library/always:latest"
+        )
+        self.assertEqual(
+            args,
+            ["run", "--pull", "always", "docker.io/library/always:latest"],
+        )
+
+    def test_image_before_container_argv_is_not_duplicated(self):
+        base = ["run", "--rm", OCI_IMAGE, "--transport", "stdio"]
+        self.assertEqual(MCPClientAdapter._ensure_docker_image_arg(base, OCI_IMAGE), base)
+
+    def test_clustered_short_value_option_does_not_hide_the_image(self):
+        args = MCPClientAdapter._ensure_docker_image_arg(
+            ["run", "-itp", "8080:80"], "docker.io/library/8080:latest"
+        )
+        self.assertEqual(
+            args,
+            ["run", "-itp", "8080:80", "docker.io/library/8080:latest"],
+        )
+
+    def test_missing_value_for_docker_option_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "Docker run option '--user' requires a value"):
+            MCPClientAdapter._ensure_docker_image_arg(["run", "--user"], OCI_IMAGE)
 
     def test_docker_hub_short_form_matches_the_qualified_identifier(self):
         """Registries qualify the identifier while their run args stay implicit."""
@@ -303,6 +359,20 @@ class TestOciLauncherAcrossTargets(unittest.TestCase):
         config = _make_codex()._format_server_config(SERVER_INFO, runtime_vars=RUNTIME_VARS)
         self.assertEqual(config.get("command"), "docker")
         self.assertEqual(config.get("args"), EXPECTED_ARGS)
+
+    def test_codex_named_runtime_argument_emits_name_then_value(self):
+        package = dict(OCI_PACKAGE)
+        package["runtime_arguments"] = [
+            {"type": "positional", "value": "run"},
+            {"type": "named", "name": "--network", "value": "none"},
+        ]
+        config = _make_codex()._format_server_config(
+            {"id": "s", "name": "s", "packages": [package]}
+        )
+        self.assertEqual(
+            config.get("args"),
+            ["run", "--network", "none", OCI_IMAGE],
+        )
 
     def test_existing_docker_package_gains_no_duplicate_image(self):
         """Regression guard for packages that already worked before #2376.
@@ -387,6 +457,33 @@ class TestOciLauncherAcrossTargets(unittest.TestCase):
                 image_at = args.index(OCI_IMAGE)
                 self.assertEqual(args.count(OCI_IMAGE), 1)
                 self.assertEqual(args[image_at + 1 :], ["--transport", "stdio"])
+
+    def test_package_only_arguments_follow_synthesized_image_across_adapters(self):
+        package = {
+            "name": OCI_IMAGE,
+            "registry_name": "oci",
+            "runtime_hint": "docker",
+            "runtime_arguments": [],
+            "package_arguments": [
+                {"value": "--transport", "type": "positional"},
+                {"value": "stdio", "type": "positional"},
+            ],
+        }
+        for name, make_adapter in (
+            ("copilot", _make_copilot),
+            ("codex", _make_codex),
+            ("gemini", _make_gemini),
+            ("vscode", _make_vscode),
+        ):
+            with self.subTest(adapter=name):
+                rendered = make_adapter()._format_server_config(
+                    {"id": "s", "name": "s", "packages": [package]}
+                )
+                config = rendered[0] if isinstance(rendered, tuple) else rendered
+                self.assertEqual(
+                    config["args"],
+                    ["run", "-i", "--rm", OCI_IMAGE, "--transport", "stdio"],
+                )
 
     def test_vscode_still_renders_a_docker_launcher_for_an_oci_package(self):
         """Guard: VS Code already keyed off runtime_hint, and must stay that way.

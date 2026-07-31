@@ -354,6 +354,7 @@ class CodexClientAdapter(MCPClientAdapter):
                         config["env"] = resolved_env
                 elif registry_name == "docker":
                     config["command"] = "docker"
+                    runtime_args = processed_runtime_args or ["run", "-i", "--rm"]
 
                     # For Docker packages in Codex TOML format:
                     # - Ensure all environment variables from resolved_env are represented as -e flags in args
@@ -368,7 +369,7 @@ class CodexClientAdapter(MCPClientAdapter):
                     # container argv, where docker never applies them.
                     config["args"] = (
                         self._ensure_docker_env_flags(
-                            self._ensure_docker_image_arg(processed_runtime_args, package_name),
+                            self._ensure_docker_image_arg(runtime_args, package_name),
                             resolved_env,
                         )
                         + processed_package_args
@@ -424,16 +425,20 @@ class CodexClientAdapter(MCPClientAdapter):
                         )
                         processed.append(processed_value)
                 elif arg_type == "named":
-                    # For named arguments, the flag name is in the "value" field
-                    flag_name = arg.get("value", "")
+                    name = arg.get("name", "")
+                    value = arg.get("value", arg.get("default", ""))
+                    if isinstance(name, str) and name.startswith("-"):
+                        flag_name = name
+                        additional_value = value
+                    else:
+                        flag_name = value
+                        additional_value = name
                     if flag_name:
                         processed.append(flag_name)
-                        # Some named arguments might have additional values (rare)
-                        additional_value = arg.get("name", "")
                         if (
                             additional_value
                             and additional_value != flag_name
-                            and not additional_value.startswith("-")
+                            and not str(additional_value).startswith("-")
                         ):
                             processed_value = self._resolve_variable_placeholders(
                                 str(additional_value), resolved_env, runtime_vars

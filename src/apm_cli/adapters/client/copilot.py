@@ -12,7 +12,6 @@ from typing import ClassVar
 
 import click
 
-from ...core.docker_args import DockerArgsProcessor
 from ...core.token_manager import GitHubTokenManager
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
@@ -559,16 +558,12 @@ class CopilotClientAdapter(MCPClientAdapter):
                 config["env"] = resolved_env
         elif registry_name == "docker":
             config["command"] = "docker"
-            if processed_runtime_args:
-                docker_args = self._inject_env_vars_into_docker_args(
-                    self._ensure_docker_image_arg(processed_runtime_args, package_name),
-                    resolved_env,
-                )
-                config["args"] = docker_args + processed_package_args
-            else:
-                config["args"] = DockerArgsProcessor.process_docker_args(
-                    ["run", "-i", "--rm", package_name], resolved_env
-                )
+            runtime_args = processed_runtime_args or ["run", "-i", "--rm"]
+            docker_args = self._inject_env_vars_into_docker_args(
+                self._ensure_docker_image_arg(runtime_args, package_name),
+                resolved_env,
+            )
+            config["args"] = docker_args + processed_package_args
         else:
             self._apply_pypi_homebrew_generic_config(
                 config,

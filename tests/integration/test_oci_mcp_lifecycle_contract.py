@@ -31,6 +31,12 @@ _ENV_NAME = "OCI_TEST_ENV"
 _ENV_VALUE = "lifecycle-value"
 _RUNTIME_ARGS = ["run", "--rm", "-i", "--label", "apm.lifecycle=true", "-e"]
 _PACKAGE_ARGS = ["--transport", "stdio"]
+_VALUE_SERVER_NAME = "com.example.lifecycle/vscode-value-server"
+_VALUE_SERVER_IMAGE = "registry.example.invalid/team/vscode-value-server:2.0.0"
+_WORKDIR_VARIABLE = "MCP_TEST_WORKDIR"
+_WORKDIR_VALUE = "/fixture/workdir"
+_CONFIG_VARIABLE = "MCP_TEST_CONFIG"
+_CONFIG_VALUE = "/fixture/config.json"
 
 
 @dataclass(frozen=True)
@@ -105,6 +111,66 @@ def _server_document() -> dict[str, object]:
                         "description": "Lifecycle fixture environment value",
                         "isRequired": True,
                     }
+                ],
+            }
+        ],
+    }
+
+
+def _vscode_value_server_document() -> dict[str, object]:
+    """Return a v0.1 container package with typed and variable-backed arguments."""
+    return {
+        "name": _VALUE_SERVER_NAME,
+        "description": "Lifecycle fixture for VS Code typed container arguments",
+        "version": "2.0.0",
+        "packages": [
+            {
+                "registryType": "oci",
+                "identifier": _VALUE_SERVER_IMAGE,
+                "runtimeHint": "docker",
+                "transport": {"type": "stdio"},
+                "runtimeArguments": [
+                    {
+                        "type": "positional",
+                        "value": "run",
+                        "valueHint": "docker_subcommand",
+                    },
+                    {"type": "named", "name": "--read-only"},
+                    {
+                        "type": "named",
+                        "name": "--mount",
+                        "value": f"type=bind,src={{{_WORKDIR_VARIABLE}}},dst=/workspace",
+                        "valueHint": "mount_spec",
+                        "variables": {
+                            _WORKDIR_VARIABLE: {
+                                "description": "Workspace path mounted into the container",
+                                "isRequired": True,
+                            }
+                        },
+                    },
+                    {
+                        "type": "named",
+                        "name": "--workdir",
+                        "default": "/workspace",
+                    },
+                ],
+                "packageArguments": [
+                    {
+                        "type": "named",
+                        "name": "--transport",
+                        "value": "stdio",
+                    },
+                    {
+                        "type": "named",
+                        "name": "--config",
+                        "value": f"{{{_CONFIG_VARIABLE}}}",
+                        "variables": {
+                            _CONFIG_VARIABLE: {
+                                "description": "Container config path",
+                                "isRequired": True,
+                            }
+                        },
+                    },
                 ],
             }
         ],
@@ -272,3 +338,127 @@ def test_oci_mcp_install_lifecycle_is_cross_adapter_and_idempotent(
     assert audit.returncode == 0, f"stdout={audit.stdout!r}\nstderr={audit.stderr!r}"
     audit_payload = json.loads(audit.stdout)
     assert audit_payload["passed"] is True
+
+
+def test_vscode_typed_value_mount_survives_install_update_and_offline_audit(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Render collected v0.1 values through the installed CLI and keep state exact."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "vscode-value-runtime-args",
+        base_env=dict(os.environ),
+    )
+    project = (
+        LocalPackageFactory(isolated.work_root)
+        .create(
+            "vscode-value-consumer",
+            targets=("copilot",),
+        )
+        .root
+    )
+    config_path = PurePosixPath(".vscode/mcp.json")
+    (project / config_path.parent).mkdir(parents=True, exist_ok=True)
+    registry_factory = LocalMcpRegistryFactory(isolated.root / "registries")
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),),
+        timeout_seconds=120,
+        scenario_timeout_seconds=300,
+    )
+    runtime_values = {
+        _WORKDIR_VARIABLE: _WORKDIR_VALUE,
+        _CONFIG_VARIABLE: _CONFIG_VALUE,
+    }
+    install_env = isolated.subprocess_env(overrides=runtime_values)
+    install_env.pop("PYTHONPATH")
+    install_env["MCP_REGISTRY_ALLOW_HTTP"] = "1"
+    reinstall = (
+        "install",
+        "--runtime",
+        "vscode",
+        "--target",
+        "copilot",
+        "--trust-transitive-mcp",
+        "--no-policy",
+    )
+    update = ("update", "--yes", "--target", "vscode")
+    expected_args = [
+        "run",
+        "-i",
+        "--rm",
+        "--read-only",
+        "--mount",
+        f"type=bind,src={_WORKDIR_VALUE},dst=/workspace",
+        "--workdir",
+        "/workspace",
+        _VALUE_SERVER_IMAGE,
+        "--transport",
+        "stdio",
+        "--config",
+        _CONFIG_VALUE,
+    ]
+
+    with registry_factory.start(_vscode_value_server_document()) as registry:
+        source = LocalPackageFactory(isolated.package_root).create(
+            "vscode-value-source",
+            mcp_dependencies=(
+                {
+                    "name": _VALUE_SERVER_NAME,
+                    "registry": registry.url,
+                },
+            ),
+        )
+        initial_install = (
+            "install",
+            str(source.root),
+            "--runtime",
+            "vscode",
+            "--target",
+            "copilot",
+            "--trust-transitive-mcp",
+            "--no-policy",
+        )
+        runner.run_sequence(
+            (initial_install,),
+            expected_returncodes=(0,),
+            scenario_id="vscode-value-initial-install",
+            cwd=project,
+            env=install_env,
+        )
+        first = LifecycleStateSnapshot.capture(project, config_paths=(config_path,))
+        document = json.loads((project / config_path).read_text(encoding="utf-8"))
+        assert document == {
+            "servers": {
+                _VALUE_SERVER_NAME: {
+                    "type": "stdio",
+                    "command": "docker",
+                    "args": expected_args,
+                }
+            },
+            "inputs": [],
+        }
+
+        runner.run_sequence(
+            (reinstall, update),
+            expected_returncodes=(0, 0),
+            scenario_id="vscode-value-reinstall-update",
+            cwd=project,
+            env=install_env,
+        )
+        converged = LifecycleStateSnapshot.capture(project, config_paths=(config_path,))
+        _assert_idempotent_state(first, converged)
+        assert any(path.startswith("/v0.1/servers?") for path in registry.request_paths)
+        assert any(path.endswith("/versions/latest") for path in registry.request_paths)
+
+    audit_env = isolated.subprocess_env(overrides=runtime_values)
+    before_audit = LifecycleStateSnapshot.capture(project, config_paths=(config_path,))
+    audit = runner.run(
+        ("audit", "--ci", "--no-policy", "--format", "json"),
+        scenario_id="vscode-value-offline-audit",
+        cwd=project,
+        env=audit_env,
+    )
+    assert audit.returncode == 0, f"stdout={audit.stdout!r}\nstderr={audit.stderr!r}"
+    assert json.loads(audit.stdout)["passed"] is True
+    after_audit = LifecycleStateSnapshot.capture(project, config_paths=(config_path,))
+    assert after_audit == before_audit

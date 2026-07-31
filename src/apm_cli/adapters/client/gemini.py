@@ -31,7 +31,6 @@ import logging
 import os
 from pathlib import Path
 
-from ...core.docker_args import DockerArgsProcessor
 from ...utils.console import _rich_error, _rich_success
 from .copilot import CopilotClientAdapter
 
@@ -235,15 +234,11 @@ class GeminiClientAdapter(CopilotClientAdapter):
             config["args"] = ["-y", package_name] + processed_rt + processed_pkg  # noqa: RUF005
         elif registry_name == "docker":
             config["command"] = "docker"
-            if processed_rt:
-                docker_args = self._inject_env_vars_into_docker_args(
-                    self._ensure_docker_image_arg(processed_rt, package_name), resolved_env
-                )
-                config["args"] = docker_args + processed_pkg
-            else:
-                config["args"] = DockerArgsProcessor.process_docker_args(
-                    ["run", "-i", "--rm", package_name], resolved_env
-                )
+            runtime_args = processed_rt or ["run", "-i", "--rm"]
+            docker_args = self._inject_env_vars_into_docker_args(
+                self._ensure_docker_image_arg(runtime_args, package_name), resolved_env
+            )
+            config["args"] = docker_args + processed_pkg
         elif registry_name == "pypi":
             config["command"] = runtime_hint or "uvx"
             config["args"] = [package_name] + processed_rt + processed_pkg  # noqa: RUF005
