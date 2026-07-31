@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public `github.com` dependencies now try anonymous HTTPS before resolving
   credentials, so all-public installs no longer open repeated credential or
   Git Credential Manager prompts. Reported by @RuiRomano. (#2406, closes #2400)
+- `apm update`, `apm update --force`, and `apm outdated` now establish
+  mutable Git refs from the authenticated upstream instead of accepting
+  outdated locally cached refs; normal installs retain lockfile and cache reuse. (by
+  @sergio-sisternes-epam, closes #2342, #2364)
 - `apm self-update` now downloads the installer script from the exact selected
   release tag and passes that same normalized version to the installer, avoiding
   drift between installer bytes and stable or prerelease selection. (by
@@ -43,16 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale. The matching `openapm-v0.1.md` frozen-install requirement now covers
   MCP state and all durable writes. (by @edenfunf, #2390; fixes #2373)
 
-- `apm update`, `apm update --force`, and `apm outdated` now establish
-  mutable Git refs from the authenticated upstream instead of accepting
-- `apm update` and `apm update --force` now establish mutable Git refs
-  from the authenticated upstream instead of accepting
-  outdated locally cached refs; normal installs retain lockfile and cache reuse. (by
-  @sergio-sisternes-epam, closes #2342, #2364)
-- `apm update` and `apm update --force` now resolve mutable Git refs from
-  the authenticated remote even when the local cache is stale; normal installs
-  retain lockfile and cache reuse. (by @sergio-sisternes-epam, closes #2342,
-  #2364)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
