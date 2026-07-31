@@ -230,8 +230,8 @@ apm install ado.company.com/DefaultCollection/MyProject/_git/MyRepo
 # Multiple on-prem hosts
 export APM_ADO_HOSTS=ado1.company.com,ado2.company.com
 apm install ado1.company.com/DefaultCollection/MyProject/_git/MyRepo
+
 # Explicit port (e.g. IIS with non-standard port)
-apm install https://ado.company.com:8080/DefaultCollection/MyProject/_git/MyRepo
 apm install https://ado.company.com:8080/DefaultCollection/MyProject/_git/MyRepo
 ```
 
