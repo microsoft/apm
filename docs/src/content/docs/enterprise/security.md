@@ -188,6 +188,13 @@ apm audit --strip --dry-run      # Preview what --strip would remove
 
 The `--file` flag is useful for inspecting files obtained outside APM — downloaded rules files, copy-pasted instructions, or files from pull requests.
 
+`apm audit --ci` also checks membership completeness. If install replay
+produces a governed file whose normalized bytes match the project but no
+`deployed_files` entry claims it, audit reports `unrecorded` drift and fails.
+This prevents the lock-backed hidden-Unicode scan scope from shrinking
+silently. Shared merge-hook targets and sidecars remain exempt because APM
+merges into user-owned files rather than claiming them.
+
 For CI pipelines, `apm audit` supports SARIF, JSON, and Markdown output:
 
 ```bash

@@ -267,6 +267,7 @@ def remove_stale_deployed_files(
     diagnostics,
     recorded_hashes: dict[str, str] | None = None,
     failed_path_retained: bool = True,
+    user_scope: bool = False,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -295,6 +296,8 @@ def remove_stale_deployed_files(
             owning package is being removed from the lockfile so a
             failed path cannot be retained; the diagnostic instructs
             the user to remove the file manually instead.
+        user_scope: Include registered user-root prefixes such as
+            ``.copilot/`` when validating legacy deployed-file paths.
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
@@ -378,7 +381,12 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not BaseIntegrator.validate_deploy_path(stale_path, project_root, targets=targets):
+            if not BaseIntegrator.validate_deploy_path(
+                stale_path,
+                project_root,
+                targets=targets,
+                user_scope=user_scope,
+            ):
                 result.skipped_unmanaged.append(stale_path)
                 continue
             stale_target = project_root / stale_path

@@ -119,6 +119,36 @@ def is_governed_by_install(path: str, file_prefixes: set[str], uri_schemes: set[
     )
 
 
+def merge_hook_config_paths(targets: list[TargetProfile]) -> set[str]:
+    """Return project-relative paths that hook integration MERGES into.
+
+    These files are shared with the user: APM injects its own event entries
+    (and its ownership sidecar) but never claims the file, so they sit
+    deliberately outside ``deployed_files`` / ``local_deployed_files``
+    tracking -- the same state ``reconcile_dropped_merge_hook_targets`` below
+    exists to reconcile. A membership-driven check must therefore exempt them,
+    or it reports every hooks-using project as under-recording. Content
+    coverage is unaffected: the drift replay reproduces these files and
+    compares them byte-for-byte.
+
+    Lives here rather than beside ``_MERGE_HOOK_TARGETS`` because
+    ``hook_integrator.py`` is at its CI line-count budget, the same reason
+    ``integration/_hook_dropped_targets.py`` was split out; the registry stays
+    the single source of truth for the filenames.
+    """
+    from apm_cli.integration import hook_integrator as _hi
+
+    paths: set[str] = set()
+    for target in targets or []:
+        config = _hi._MERGE_HOOK_TARGETS.get(getattr(target, "name", ""))
+        root = str(getattr(target, "root_dir", "") or "").rstrip("/")
+        if config is None or not root:
+            continue
+        paths.add(f"{root}/{config.config_filename}")
+        paths.add(f"{root}/{_hi._APM_HOOKS_SIDECAR}")
+    return paths
+
+
 def union_preserving(
     current_files: list[str],
     current_hashes: dict[str, str],
@@ -157,6 +187,7 @@ def union_preserving(
     legacy preserve-all behaviour is kept so a genuine multi-target deploy is
     never clobbered (issue #1716).
     """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.deployment_state import (
         DeploymentIntent,
         DeploymentLedger,
@@ -202,7 +233,7 @@ def union_preserving(
             target=_target_for(path),
             value=path,
             runtime=None,
-            scope="project",
+            scope=DeploymentLedgerCodec.legacy_scope(path),
         )
 
     prior_values = set(prior_files or ())
@@ -409,6 +440,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     owner: str = "legacy",
     include_ledger: bool = False,
     apply_disk_deletion: bool = True,
+    user_scope: bool = False,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
 
@@ -418,6 +450,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     the lockfile keeps mirroring on-disk reality and the drop signal survives to
     the next ``apm install``, which performs the physical prune through the
     ``remove_stale_deployed_files`` chokepoint (issue #2296).
+    ``user_scope`` permits cleanup of registered user-root compatibility paths.
     """
     files, hashes, ledger = union_preserving(
         current_files,
@@ -490,6 +523,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         targets=None,
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
+        user_scope=user_scope,
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
@@ -589,6 +623,7 @@ def reconcile_target_deployed_files(
             diagnostics=diagnostics,
             prior_ledger=prior_ledger,
             on_cleanup=partial(_surface_target_cleanup, logger, dep_key),
+            user_scope=user_scope,
         )
         if files != prior_files or hashes != prior_hashes:
             DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
@@ -612,6 +647,7 @@ def reconcile_target_deployed_files(
         diagnostics=diagnostics,
         prior_ledger=prior_ledger,
         on_cleanup=partial(_surface_target_cleanup, logger, "<local .apm/>"),
+        user_scope=user_scope,
     )
     if local_files != prior_local or local_hashes != prior_local_hashes:
         DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)

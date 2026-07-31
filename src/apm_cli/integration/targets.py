@@ -1058,7 +1058,7 @@ def _flag_gated(profile: TargetProfile) -> bool:
     return _is_flag_enabled(profile.requires_flag)
 
 
-def get_integration_prefixes(targets=None) -> tuple:
+def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple:
     """Return all known target root prefixes as a tuple.
 
     Used by ``BaseIntegrator.validate_deploy_path`` so the allow-list
@@ -1066,7 +1066,8 @@ def get_integration_prefixes(targets=None) -> tuple:
 
     When *targets* is provided, prefixes are derived from those
     (already scope-resolved) profiles.  Otherwise falls back to
-    ``KNOWN_TARGETS`` for backward compatibility.
+    ``KNOWN_TARGETS`` for backward compatibility. When *user_scope* is
+    true, that fallback also includes static ``user_root_dir`` prefixes.
 
     Includes prefixes from ``deploy_root`` overrides (e.g. ``.agents/``
     for Codex skills) so cross-root paths pass security validation.
@@ -1093,6 +1094,11 @@ def get_integration_prefixes(targets=None) -> tuple:
         if t.prefix not in seen:
             seen.add(t.prefix)
             prefixes.append(t.prefix)
+        if targets is None and user_scope and t.user_root_dir is not None:
+            user_prefix = f"{t.user_root_dir}/"
+            if user_prefix not in seen:
+                seen.add(user_prefix)
+                prefixes.append(user_prefix)
         for m in t.primitives.values():
             if m.deploy_root is not None:
                 dp = f"{m.deploy_root}/"

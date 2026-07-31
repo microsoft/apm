@@ -618,7 +618,16 @@ class TestGetIntegrationPrefixesTargetsParam:
 
         prefixes = get_integration_prefixes()
         assert ".github/" in prefixes
+        assert ".copilot/" not in prefixes
         assert ".claude/" in prefixes
+
+    def test_user_scope_prefixes_include_copilot_user_root(self):
+        """User cleanup may validate static Copilot user-scope paths."""
+        from apm_cli.integration.targets import get_integration_prefixes
+
+        prefixes = get_integration_prefixes(user_scope=True)
+        assert ".github/" in prefixes
+        assert ".copilot/" in prefixes
 
 
 # ===================================================================
@@ -689,6 +698,11 @@ class TestScopeResolvedPartition:
         assert not BaseIntegrator.validate_deploy_path(
             ".copilot/agents/my-agent.md",
             root,
+        )
+        assert BaseIntegrator.validate_deploy_path(
+            ".copilot/agents/my-agent.md",
+            root,
+            user_scope=True,
         )
 
     def test_validate_deploy_path_backward_compat(self):

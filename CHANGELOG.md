@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Package-declared targets now restrict deployment without expanding project authorization -- a Claude-only hook package can no longer leak into Cursor (`req-tg-008`). By @sergio-sisternes-epam (#2362)
 - Package-declared targets now restrict dependency primitive deployment without expanding project or consumer authorization, preventing Claude-only hooks from leaking into Cursor and repairing stale owned entries on update; the contract is cited in `docs/src/content/docs/specs/openapm-v0.1.md`. By @sergio-sisternes-epam (#2362)
+- Copilot hook packages with JavaScript scripts no longer fail with "hooks: hooks must be an object"; APM keeps generated `package.json` and nested JSON bundle assets out of project `.github/hooks/scripts/` and user `~/.copilot/hooks/scripts/`, where Copilot's recursive hook-loader scan would reject them as descriptors; use `.mjs` for ES module scripts targeting Copilot or VS Code. (#2322)
 - Public `github.com` dependencies now try anonymous HTTPS before resolving
   credentials, so all-public installs no longer open repeated credential or
   Git Credential Manager prompts. Reported by @RuiRomano. (#2406, closes #2400)
@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact selected release tag and passes that same normalized version to the
   installer, while configured installer mirrors remain authoritative. (by
   @fallintoplace, #2026)
+- `apm audit` now reports a deployed file that no `apm.lock.yaml` entry claims
+  as `unrecorded` drift. Such a file carried no recorded hash, so
+- `apm audit --ci` may surface new `unrecorded` failures on upgrade when
+  deployed files were committed without the regenerated `apm.lock.yaml`.
+  The new drift finding closes a gap where `content-integrity` silently skipped
+  such files. Run `apm install` and commit the regenerated lockfile; shared
+  hook merge targets remain exempt. (by @salpers, #2380)
+- Run `apm install` and commit the regenerated lockfile to resolve new
+  `unrecorded` failures that `apm audit --ci` may surface on upgrade when
+  deployed files were committed without an `apm.lock.yaml` claim. This closes
+  a gap where `content-integrity` silently skipped such files; shared hook
+  merge targets remain exempt. (by @salpers, #2380)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

@@ -16,6 +16,7 @@ from apm_cli.core.scope import (
     get_manifest_path,
     get_modules_dir,
     get_unsupported_targets,
+    is_user_scope,
     warn_unsupported_user_scope,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -39,6 +40,12 @@ class TestInstallScope:
     def test_invalid_raises(self):
         with pytest.raises(ValueError):
             InstallScope("global")
+
+    def test_user_scope_identity_is_fail_closed(self):
+        assert is_user_scope(InstallScope.USER)
+        assert not is_user_scope(InstallScope.PROJECT)
+        assert not is_user_scope("user")
+        assert not is_user_scope(None)
 
 
 # ---------------------------------------------------------------------------
