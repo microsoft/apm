@@ -817,8 +817,8 @@ class TestInstallProjectRootDetection:
         """Regression for #2298: declared `targets:` must not gain undeclared runtimes.
 
         `.vscode/` exists on disk (as it would on one developer's machine
-        but not another's) but is NOT declared, so it must not be
-        targeted even though it would otherwise be auto-detected.
+        but not another's). The declared Copilot target intentionally projects
+        to the VS Code project runtime; no additional runtime may be inferred.
         """
         nested = tmp_path / "nested-project"
         (nested / ".vscode").mkdir(parents=True)
@@ -843,8 +843,7 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"copilot", "cursor", "opencode"}
-        assert "vscode" not in called_runtimes
+        assert called_runtimes == {"vscode", "cursor", "opencode"}
 
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
@@ -908,8 +907,8 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"copilot"}
-        logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
+        assert called_runtimes == {"vscode"}
+        logger.progress.assert_any_call("Targeting declared target from apm.yml: vscode")
 
     @pytest.mark.parametrize(
         "apm_config",
@@ -1415,6 +1414,8 @@ class TestGateProjectScopedRuntimes:
             explicit_target=None,
         )
         out = capsys.readouterr().out
+        first_line = next(line for line in out.splitlines() if line.strip())
+        assert first_line.lstrip().startswith("[i] Skipped MCP config")
         assert "Skipped MCP config for claude, codex" in out
         assert "active targets: copilot" in out
         # Symbol prefix asserts the gate honors the [+]/[!]/[i]/[x] contract.

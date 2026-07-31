@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
 # ---------------------------------------------------------------------------
@@ -24,6 +25,9 @@ def _make_downloader() -> GitHubPackageDownloader:
     """Construct a downloader with minimal external dependencies mocked."""
     dl = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
     dl.auth_resolver = MagicMock()
+    dl.auth_resolver.build_noninteractive_git_env.side_effect = (
+        AuthResolver.build_noninteractive_git_env
+    )
     dl.token_manager = MagicMock()
     dl.git_env = {}
     dl.github_token = None

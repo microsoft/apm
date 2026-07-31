@@ -104,6 +104,19 @@ class TestSetupEnvironment:
         env = GitAuthEnvBuilder(_FakeTokenManager()).setup_environment()
         assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
 
+    def test_caller_git_config_global_is_preserved(self):
+        env = GitAuthEnvBuilder(
+            _FakeTokenManager(
+                {
+                    "GIT_CONFIG_GLOBAL": "/caller/gitconfig",
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                }
+            )
+        ).setup_environment()
+
+        assert env["GIT_CONFIG_GLOBAL"] == "/caller/gitconfig"
+        assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+
 
 class TestSetupEnvironmentWin32:
     """Cover the win32 branch in setup_environment (lines 66-74)."""

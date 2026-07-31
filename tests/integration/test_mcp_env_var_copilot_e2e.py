@@ -3,7 +3,7 @@ must contain ``${VAR}`` runtime placeholders for env-var references in
 apm.yml -- never the literal value resolved at install time.
 
 This exercises the full pipeline:
-    apm.yml  ->  apm install --target copilot  ->  ~/.copilot/mcp-config.json
+    apm.yml  ->  apm install --runtime copilot  ->  ~/.copilot/mcp-config.json
 
 The unit tests in tests/unit/test_copilot_adapter.py cover translation in
 isolation; this test pins the integration boundary so plaintext secrets
@@ -96,7 +96,7 @@ class TestMcpEnvVarHeadersCopilot:
         env["APM_NON_INTERACTIVE"] = "1"
 
         result = subprocess.run(
-            [apm_binary_path, "install", "--target", "copilot"],
+            [apm_binary_path, "install", "--runtime", "copilot"],
             cwd=project_dir,
             capture_output=True,
             text=True,
@@ -185,7 +185,7 @@ class TestMcpEnvVarHeadersCopilot:
         env["APM_NON_INTERACTIVE"] = "1"
 
         result = subprocess.run(
-            [apm_binary_path, "install", "--target", "copilot"],
+            [apm_binary_path, "install", "--runtime", "copilot"],
             cwd=project_dir,
             capture_output=True,
             text=True,

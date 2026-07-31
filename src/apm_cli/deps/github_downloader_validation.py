@@ -436,10 +436,10 @@ def _build_validation_attempts(
         downloader.auth_resolver.build_public_github_anonymous_git_env()
         if public_github_anonymous_first
         else (
-            downloader.auth_resolver._build_git_env(
-                None,
-                host_kind="ado",
+            downloader.auth_resolver.build_noninteractive_git_env(
                 base_env=downloader.git_env,
+                host_kind="ado",
+                preserve_config_isolation=True,
             )
             if is_ado
             else downloader._build_noninteractive_git_env(

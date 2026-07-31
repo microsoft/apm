@@ -1154,6 +1154,7 @@ class TestRunInstallPipelineEarlyExits:
                 pkg,
                 update_refs=False,
                 plan_callback=_cancel_callback,
+                target="copilot",
             )
         assert isinstance(result, InstallResult)
 
@@ -1440,9 +1441,7 @@ class TestDiffScratchAgainstProject:
             p.parent.mkdir(parents=True)
             p.write_bytes(content)
 
-        mock_lf = MagicMock()
-        mock_lf.dependencies = {}
-        mock_lf.local_deployed_files = []
+        mock_lf = self._make_lockfile({".apm/instructions/rules.instructions.md": "pkg"})
         findings = diff_scratch_against_project(scratch, project, mock_lf, targets=[])
         assert findings == []
 
@@ -1722,15 +1721,17 @@ class TestDriftDataClasses:
 class TestMaterializeInstallPath:
     """_materialize_install_path returns correct paths and raises on misses."""
 
-    def test_not_implemented_for_non_cache_only(self, tmp_path: Path) -> None:
-        from apm_cli.install.drift import _materialize_install_path
+    def test_non_cache_only_requires_downloader(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import CacheMissError, _materialize_install_path
 
         lock_dep = MagicMock()
         lock_dep.source = "github.com"
         lock_dep.local_path = None
         lock_dep.resolved_commit = "abc123"
+        lock_dep.repo_url = "owner/repo"
+        lock_dep.to_dependency_ref.return_value = _make_dep_ref(repo_url="owner/repo")
 
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(CacheMissError, match="no downloader"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=False)
 
     def test_local_dep_returns_project_subpath(self, tmp_path: Path) -> None:

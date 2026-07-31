@@ -196,10 +196,10 @@ class GitReferenceResolver:
                 else host.git_env
             )
         elif is_ado:
-            ls_env = host.auth_resolver._build_git_env(
-                None,
-                host_kind="ado",
+            ls_env = host.auth_resolver.build_noninteractive_git_env(
                 base_env=host.git_env,
+                host_kind="ado",
+                preserve_config_isolation=True,
             )
         else:
             ls_env = host._build_noninteractive_git_env(

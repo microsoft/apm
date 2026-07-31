@@ -10,7 +10,7 @@ APM works without tokens for public packages on github.com. Authentication is ne
 
 Public `github.com` packages need no token configuration. APM tries HTTPS repository operations anonymously before resolving credentials.
 
-The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
+The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. APM preserves caller-supplied Git config (including URL rewrites and CA settings) while overriding credential helpers and authorization headers for that attempt. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
 
 APM resolves ordinary tokens per `(host, port, org)` scope. When a private `github.com` fallback asks the credential helper for a repository path, that path also scopes the cache entry. APM then walks a **host-class-specific** chain until it finds a token:
 
@@ -22,7 +22,7 @@ APM resolves ordinary tokens per `(host, port, org)` scope. When a private `gith
 Azure DevOps uses its own chain. Azure DevOps Services checks
 `ADO_APM_PAT` -> Azure CLI bearer. Azure DevOps Server checks `ADO_APM_PAT`
 only. See [Azure DevOps](#azure-devops).
-If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an anonymous `github.com` attempt, APM also disables credential helpers and global/system Git config while preserving non-auth process-scoped Git settings such as CA paths, URL rewrites, and `credential.interactive=never`.
+If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an anonymous `github.com` attempt, APM disables credential helpers and authorization headers without discarding caller-supplied global/system Git config such as CA paths, URL rewrites, and `credential.interactive=never`.
 
 Results are cached per-process. Validation and later fetch phases for the same private repository reuse one path-scoped fallback instead of prompting repeatedly, while another repository can resolve its own credential. All token-bearing requests use HTTPS.
 

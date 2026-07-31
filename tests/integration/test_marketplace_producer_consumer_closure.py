@@ -238,6 +238,7 @@ def _create_closure_fixture(
             "url": "https://github.com/apm-closure-tests",
         },
         "sourceBase": f"https://{_GITLAB_HOST}/team/platform",
+        "build": {"tagPattern": "{name}--v{version}"},
         "packages": [
             {
                 "name": _CROSS_PACKAGE,

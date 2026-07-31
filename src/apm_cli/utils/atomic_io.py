@@ -17,6 +17,13 @@ import tempfile
 from pathlib import Path
 
 
+def _replace_atomic_file(source: str, destination: Path) -> None:
+    """Replace one atomic temp file, with a narrow installed-binary test seam."""
+    if os.environ.get("APM_TEST_FAIL_LOCK_REPLACE") == "1" and destination.name == "apm.lock.yaml":
+        raise OSError("lockfile replace blocked by test")
+    os.replace(source, destination)
+
+
 def normalize_crlf_to_lf(data: str) -> str:
     """Normalize CRLF to LF (leaves bare CR alone, like the drift normalizer).
 
@@ -69,7 +76,7 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
         fd_wrapped = True
         with fh:
             fh.write(normalize_crlf_to_lf(data))
-        os.replace(tmp_name, path)
+        _replace_atomic_file(tmp_name, path)
     except Exception:
         if not fd_wrapped:
             # fdopen never took ownership of the descriptor; close it so

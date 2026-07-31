@@ -1604,11 +1604,13 @@ class TestFileScannerScanLockfilePackages:
         assert scanned == 1
         assert "suspicious.md" in findings
 
-    def test_scans_directory_via_scan_files_in_dir(self, tmp_path: Path) -> None:
+    def test_scans_claimed_directory_recursively(self, tmp_path: Path) -> None:
         from apm_cli.security.file_scanner import scan_lockfile_packages
 
         dir_path = tmp_path / "mypkg"
         dir_path.mkdir()
+        (dir_path / "one.md").write_text("one\n", encoding="ascii")
+        (dir_path / "two.md").write_text("two\n", encoding="ascii")
 
         mock_lock = MagicMock()
         mock_dep = MagicMock()
@@ -1618,7 +1620,6 @@ class TestFileScannerScanLockfilePackages:
         with (
             patch("apm_cli.security.file_scanner.LockFile") as mock_lf,
             patch("apm_cli.security.file_scanner._is_safe_lockfile_path", return_value=True),
-            patch("apm_cli.security.file_scanner._scan_files_in_dir", return_value=({}, 2)),
         ):
             mock_lf.read.return_value = mock_lock
             _findings, scanned = scan_lockfile_packages(tmp_path)

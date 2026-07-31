@@ -310,6 +310,8 @@ class TestPluginIntegration:
         (tmp_path / "apm.yml").write_text(
             "name: consumer\n"
             "version: 1.0.0\n"
+            "targets:\n"
+            "  - copilot\n"
             "dependencies:\n"
             "  apm:\n"
             "    - name: missing-plugin\n"

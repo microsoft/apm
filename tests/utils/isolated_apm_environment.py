@@ -148,18 +148,6 @@ socket.gethostbyname_ex = _deny_network
 socket.getnameinfo = _deny_network
 builtins.__import__ = _guarded_import
 importlib.import_module = _guarded_import_module
-
-if os.environ.get("APM_TEST_FAIL_LOCK_REPLACE") == "1":
-    import apm_cli.utils.atomic_io as _atomic_io
-
-    _real_replace = _atomic_io.os.replace
-
-    def _fail_lock_replace(source, destination):
-        if os.path.basename(os.fspath(destination)) == "apm.lock.yaml":
-            raise OSError("lockfile replace blocked by test")
-        return _real_replace(source, destination)
-
-    _atomic_io.os.replace = _fail_lock_replace
 """
 
 _APM_AUTH_ENV_NAMES = frozenset(

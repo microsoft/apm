@@ -62,7 +62,7 @@ class GitAuthEnvBuilder:
         else:
             env["GIT_SSH_COMMAND"] = f"ssh {ssh_timeout}"
 
-        env["GIT_CONFIG_GLOBAL"] = self.isolated_global_config_path()
+        env.setdefault("GIT_CONFIG_GLOBAL", self.isolated_global_config_path())
 
         return env
 
@@ -130,8 +130,10 @@ class GitAuthEnvBuilder:
 
         if preserve_config_isolation or suppress_credential_helpers:
             env["GIT_CONFIG_NOSYSTEM"] = "1"
-            if "GIT_CONFIG_GLOBAL" in base_git_env:
-                env["GIT_CONFIG_GLOBAL"] = base_git_env["GIT_CONFIG_GLOBAL"]
+            env.setdefault(
+                "GIT_CONFIG_GLOBAL",
+                GitAuthEnvBuilder.isolated_global_config_path(),
+            )
         else:
             env.pop("GIT_CONFIG_GLOBAL", None)
             env.pop("GIT_CONFIG_NOSYSTEM", None)

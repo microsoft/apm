@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 import pytest
 from git.exc import GitCommandError
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
@@ -55,6 +56,9 @@ def _build_downloader():
         }
         mock_auth._token_manager.get_token_for_purpose.return_value = None
         mock_auth.build_error_context.return_value = "Check your auth setup."
+        mock_auth.build_noninteractive_git_env.side_effect = (
+            AuthResolver.build_noninteractive_git_env
+        )
 
         # Wire execute_with_bearer_fallback to delegate to primary_op so
         # tests can drive the auth-eligible (ADO + basic + token) path

@@ -315,8 +315,8 @@ class GitHubPackageDownloader:
         )
         git_env = GitAuthEnvBuilder.subprocess_env_dict(base_env)
         if dep_ref.is_insecure:
-            git_env = GitAuthEnvBuilder.noninteractive_env(
-                git_env,
+            git_env = self.auth_resolver.build_noninteractive_git_env(
+                base_env=git_env,
                 preserve_config_isolation=True,
                 suppress_credential_helpers=True,
             )
@@ -520,10 +520,8 @@ class GitHubPackageDownloader:
 
         Delegates to :class:`GitAuthEnvBuilder.noninteractive_env`.
         """
-        from .git_auth_env import GitAuthEnvBuilder
-
-        return GitAuthEnvBuilder.noninteractive_env(
-            self.git_env,
+        return self.auth_resolver.build_noninteractive_git_env(
+            base_env=self.git_env,
             preserve_config_isolation=preserve_config_isolation,
             suppress_credential_helpers=suppress_credential_helpers,
         )

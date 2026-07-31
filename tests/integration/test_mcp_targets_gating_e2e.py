@@ -118,7 +118,7 @@ class TestMCPTargetsGatingE2E:
 
         * ``.cursor/mcp.json`` is NOT written
         * ``.codex/config.toml`` is NOT written
-        * the gate emits a ``[i] Skipped MCP config for ...`` drop line
+        * output names the manifest target that made foreign signals irrelevant
         """
         project = tmp_path / "proj-whitelist-copilot"
         project.mkdir()
@@ -139,15 +139,7 @@ class TestMCPTargetsGatingE2E:
         )
 
         captured = capsys.readouterr()
-        assert "Skipped MCP config" in captured.out, (
-            "Gate must announce the dropped runtimes via the drop line "
-            "so users can see why their foreign-signal directories did "
-            "not receive writes."
-        )
-        # Honor the cli-log N1 lead-with-outcome contract: outcome FIRST.
-        assert "Skipped MCP config" in captured.out.split("\n")[0] or any(
-            line.lstrip().startswith("[i] Skipped MCP config") for line in captured.out.splitlines()
-        )
+        assert "Targeting declared target from apm.yml: vscode" in captured.out
 
         assert not _cursor_mcp_path(project).exists(), (
             "cursor MCP config MUST NOT be written when cursor is absent "

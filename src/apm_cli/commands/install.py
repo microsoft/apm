@@ -1704,6 +1704,8 @@ def _install_apm_packages(ctx, outcome):
     # Parse apm.yml to get both APM and MCP dependencies
     try:
         apm_package = APMPackage.from_apm_yml(ctx.manifest_path)
+    except click.UsageError:
+        raise
     except Exception as e:
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         raise InstallFailureAlreadyRendered("Failed to parse install manifest") from e

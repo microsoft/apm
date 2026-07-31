@@ -461,7 +461,12 @@ def _declared_manifest_target_runtimes(
         parsed = parse_targets_field(apm_config)
     except (ConflictingTargetsError, EmptyTargetsListError, UnknownTargetError):
         return None, False
-    return parsed or None, True
+    if not parsed:
+        return None, True
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+
+    projected = EffectiveTargetDecision(parsed, "apm.yml").runtime_targets
+    return list(projected or ()), True
 
 
 def _resolve_target_runtimes(
@@ -1009,6 +1014,15 @@ def run_mcp_install(
                 "their configuration. Choose a supported --target and retry."
             )
         return 0
+
+    if managed_target_servers is not None:
+        from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
+
+        migrate_legacy_project_target_servers(
+            managed_target_servers,
+            active_runtimes=set(target_runtimes),
+            user_scope=user_scope,
+        )
 
     _migrate_intellij_managed_config(
         target_runtimes,

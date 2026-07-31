@@ -152,7 +152,7 @@ def main():
             ),
             "git_token_present": "GIT_TOKEN" in os.environ,
             "auth_config_present": any(
-                "extraheader" in key.lower()
+                (value and "extraheader" in key.lower())
                 or value.strip().lower().startswith("authorization:")
                 for key, value in entries
             ),

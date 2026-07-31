@@ -460,7 +460,8 @@ def test_primitive_target_covering_array(
     source_factory = LocalPackageFactory(isolated.package_root)
     package_name = f"fixture-{row.id}"
     manifest_targets = () if row.dynamic_refusal else row.targets
-    source = source_factory.create(package_name, targets=manifest_targets)
+    package_targets = row.widen_targets or manifest_targets
+    source = source_factory.create(package_name, targets=package_targets)
     _add_primitives(source_factory, source, row)
     repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
     repository = repositories.create(package_name, source_tree=source.root)

@@ -612,7 +612,7 @@ class TestRunMcpInstall:
         logger.verbose_detail = MagicMock()
         return logger
 
-    def test_skipped_status_returns_early(self, tmp_path: Path) -> None:
+    def test_skipped_status_verifies_integration(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install
 
         apm_yml = tmp_path / "apm.yml"
@@ -630,6 +630,11 @@ class TestRunMcpInstall:
             ),
             patch("apm_cli.install.mcp.command.warn_ssrf_url"),
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
+            patch(
+                "apm_cli.install.mcp.command.MCPIntegrator.install",
+                return_value=0,
+            ) as install_mcp,
+            patch("apm_cli.install.mcp.command.MCPIntegrator.update_lockfile"),
         ):
             run_mcp_install(
                 mcp_name="my-server",
@@ -646,10 +651,13 @@ class TestRunMcpInstall:
                 logger=logger,
                 apm_dir=tmp_path,
                 scope=None,
+                target="copilot",
             )
 
         logger.progress.assert_called_once()
-        assert "unchanged" in logger.progress.call_args[0][0]
+        assert "already declared" in logger.progress.call_args[0][0]
+        logger.success.assert_called_once()
+        install_mcp.assert_called_once()
 
     def test_added_string_entry_no_deps_available(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install

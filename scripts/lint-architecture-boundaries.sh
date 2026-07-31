@@ -935,15 +935,27 @@ for consumer in $public_github_auth_consumers; do
 ${consumer}"
     fi
 done
+noninteractive_git_env_bypasses=$(
+    grep -rEn --include='*.py' \
+        'GitAuthEnvBuilder\.noninteractive_env\(' \
+        src/apm_cli \
+        | grep -v '^src/apm_cli/core/auth.py:' \
+        | grep -v '^src/apm_cli/deps/git_auth_env.py:' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
 if ! grep -q '^    def uses_public_github_anonymous_first(' "$public_github_auth_owner" \
     || ! grep -q '^    def build_public_github_anonymous_git_env(' "$public_github_auth_owner" \
+    || ! grep -q '^    def build_noninteractive_git_env(' "$public_github_auth_owner" \
     || ! grep -q 'lazy_public_github' "$public_github_auth_owner" \
     || [ -n "$public_github_auth_duplicate_defs" ] \
-    || [ -n "$public_github_auth_missing_consumers" ]; then
-    echo "[x] Public github.com anonymous-first auth ordering must stay owned by AuthResolver"
+    || [ -n "$public_github_auth_missing_consumers" ] \
+    || [ -n "$noninteractive_git_env_bypasses" ]; then
+    echo "[x] Public and noninteractive Git environments must stay owned by AuthResolver"
     [ -n "$public_github_auth_duplicate_defs" ] && echo "$public_github_auth_duplicate_defs"
     [ -n "$public_github_auth_missing_consumers" ] \
         && echo "Missing owner routing:${public_github_auth_missing_consumers}"
+    [ -n "$noninteractive_git_env_bypasses" ] && echo "$noninteractive_git_env_bypasses"
     violations=$((violations + 1))
 fi
 
@@ -1013,6 +1025,23 @@ if ! grep -q 'parse_targets_field(apm_config)' <<<"$mcp_manifest_adapter" \
     || ! grep -q 'return {"target": singular, "targets": list(plural)}' \
         <<<"$mcp_target_projection"; then
     echo "[x] MCP target precedence must route through the canonical manifest adapter before discovery"
+    violations=$((violations + 1))
+fi
+mcp_ownership_migration_owner="src/apm_cli/install/mcp/ownership.py"
+mcp_ownership_migration_duplicates=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def migrate_legacy_project_target_servers\(' \
+        src/apm_cli \
+        | grep -v "^${mcp_ownership_migration_owner}:" \
+        || true
+)
+if ! grep -q '^def migrate_legacy_project_target_servers(' \
+        "$mcp_ownership_migration_owner" \
+    || ! grep -q 'migrate_legacy_project_target_servers(' \
+        src/apm_cli/integration/mcp_integrator_install.py \
+    || [ -n "$mcp_ownership_migration_duplicates" ]; then
+    echo "[x] Legacy MCP target ownership migration must stay owned by install/mcp/ownership.py"
+    [ -n "$mcp_ownership_migration_duplicates" ] && echo "$mcp_ownership_migration_duplicates"
     violations=$((violations + 1))
 fi
 

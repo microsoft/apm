@@ -10,7 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.isolated_apm_environment import (
+    _NETWORK_GUARD,
+    IsolatedApmEnvironment,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SUBPROCESS_TIMEOUT_SECONDS = 10.0
@@ -24,6 +27,10 @@ _ROOT_ATTRIBUTES = (
     "work_root",
     "temp_root",
 )
+
+
+def test_generated_network_guard_is_syntactically_valid() -> None:
+    compile(_NETWORK_GUARD, "sitecustomize.py", "exec")
 
 
 def test_create_builds_unique_scenario_roots(tmp_path: Path) -> None:

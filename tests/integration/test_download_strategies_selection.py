@@ -37,11 +37,14 @@ def make_host(
     host._resilient_get = MagicMock()
 
     auth_resolver = MagicMock()
-    ctx = SimpleNamespace(token=resolved_token, source=source)
+    effective_token = resolved_token if resolved_token is not None else ado_token
+    ctx = SimpleNamespace(token=effective_token, source=source, auth_scheme="basic")
     auth_resolver.resolve.return_value = ctx
     auth_resolver.resolve_for_dep.return_value = ctx
     auth_resolver.classify_host.return_value = SimpleNamespace(kind="generic", api_base=api_base)
-    auth_resolver.build_error_context.return_value = "Set a token."
+    auth_resolver.build_error_context.return_value = (
+        "Check PAT permissions." if effective_token else "Set a token."
+    )
     host.auth_resolver = auth_resolver
     host._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
     return host

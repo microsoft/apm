@@ -146,6 +146,7 @@ class APMDependencyResolver:
         # acquires the lock -- the overhead is negligible and the
         # symmetry simplifies reasoning.
         self._download_lock = threading.Lock()
+        self._local_materialization_locks: dict[Path, threading.Lock] = {}
         self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
         self._marketplace_provenance: dict[str, dict[str, str]] = {}
@@ -964,11 +965,25 @@ class APMDependencyResolver:
         # errors can report "root > mid > failing-dep" context.
         parent_chain = node.get_ancestor_chain()
         try:
-            loaded = self._try_load_dependency_package(
-                dep_ref,
-                parent_chain=parent_chain,
-                parent_pkg=parent_node.package if parent_node else None,
-            )
+            if dep_ref.is_local and self._apm_modules_dir is not None:
+                install_path = dep_ref.get_install_path(self._apm_modules_dir)
+                with self._download_lock:
+                    materialization_lock = self._local_materialization_locks.setdefault(
+                        install_path,
+                        threading.Lock(),
+                    )
+                with materialization_lock:
+                    loaded = self._try_load_dependency_package(
+                        dep_ref,
+                        parent_chain=parent_chain,
+                        parent_pkg=parent_node.package if parent_node else None,
+                    )
+            else:
+                loaded = self._try_load_dependency_package(
+                    dep_ref,
+                    parent_chain=parent_chain,
+                    parent_pkg=parent_node.package if parent_node else None,
+                )
             return (item, loaded, None)
         except (ValueError, FileNotFoundError) as exc:
             return (item, None, exc)
@@ -1042,7 +1057,7 @@ class APMDependencyResolver:
 
         # If package doesn't exist locally, try to download it. Also fall
         # through for a forced semver re-check (see _should_force_recheck).
-        if not install_path.exists() or self._should_force_recheck(dep_ref):
+        if dep_ref.is_local or not install_path.exists() or self._should_force_recheck(dep_ref):
             if self._download_callback is not None:
                 unique_key = self._download_dedup_key(dep_ref, parent_pkg)
                 # Avoid re-downloading the same logical (dep_ref, anchor) pair

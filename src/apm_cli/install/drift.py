@@ -197,7 +197,7 @@ class CheckLogger(CommandLogger):
         click.echo(f"{STATUS_SYMBOLS[symbol_key]} {msg}", err=True)
 
     def replay_start(self) -> None:
-        self._emit("running", "Replaying install...")
+        self._emit("running", "Replaying install (cache-only)...")
 
     def scratch_root(self, path: Path) -> None:
         """Verbose-only: announce the scratch tmpdir to stderr.

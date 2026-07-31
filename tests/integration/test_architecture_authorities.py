@@ -1146,6 +1146,7 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     integration_source = (root / "src/apm_cli/install/mcp/integration.py").read_text(
         encoding="utf-8"
     )
+    ownership_source = (root / "src/apm_cli/install/mcp/ownership.py").read_text(encoding="utf-8")
 
     assert "parse_targets_field" in adapter_calls
     assert local_string_collections == []
@@ -1161,6 +1162,11 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     assert (
         "MCP target precedence must route through the canonical manifest adapter before discovery"
         in guard
+    )
+    assert "def migrate_legacy_project_target_servers(" in ownership_source
+    assert "migrate_legacy_project_target_servers(" in source_path.read_text(encoding="utf-8")
+    assert (
+        "Legacy MCP target ownership migration must stay owned by install/mcp/ownership.py" in guard
     )
 
 
@@ -2439,11 +2445,52 @@ def test_public_github_anonymous_first_has_single_auth_owner() -> None:
 
     assert "def uses_public_github_anonymous_first(" in owner
     assert "def build_public_github_anonymous_git_env(" in owner
+    assert "def build_noninteractive_git_env(" in owner
     assert "AC20: public github.com anonymous-first auth authority" in guard
-    assert (
-        "Public github.com anonymous-first auth ordering must stay owned by AuthResolver" in guard
-    )
+    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in guard
     assert "public github.com anonymous-first ordering" in architecture_doc
+
+
+def test_noninteractive_git_env_owner_guard_rejects_direct_builder_call(
+    tmp_path: Path,
+) -> None:
+    """AC20 rejects noninteractive Git env construction outside AuthResolver."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/clone_engine.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\ndef duplicate_noninteractive_env(base_env):\n"
+        + "    return GitAuthEnvBuilder.noninteractive_env(base_env)\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in (
+        result.stdout
+    )
 
 
 def test_public_github_auth_owner_guard_rejects_duplicate_owner(
@@ -2483,9 +2530,8 @@ def test_public_github_auth_owner_guard_rejects_duplicate_owner(
     )
 
     assert result.returncode == 1
-    assert (
-        "Public github.com anonymous-first auth ordering must stay owned by "
-        "AuthResolver" in result.stdout
+    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in (
+        result.stdout
     )
 
 

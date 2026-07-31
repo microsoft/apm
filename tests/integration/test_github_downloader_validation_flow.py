@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
 # ---------------------------------------------------------------------------
@@ -24,6 +25,9 @@ def _make_downloader() -> GitHubPackageDownloader:
     """Construct a downloader with minimal external dependencies mocked."""
     dl = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
     dl.auth_resolver = MagicMock()
+    dl.auth_resolver.build_noninteractive_git_env.side_effect = (
+        AuthResolver.build_noninteractive_git_env
+    )
     dl.token_manager = MagicMock()
     dl.git_env = {}
     dl.github_token = None
@@ -566,16 +570,25 @@ class TestDownloadSubdirectoryErrorHandling:
 
 
 class TestBuildNoninteractiveGitEnv:
-    def test_delegates_to_git_auth_env_builder(self):
-        """Lines 419-440: builds GIT_ASKPASS env dict."""
+    def test_delegates_with_downloader_git_environment(self):
+        """Noninteractive attempts derive from the downloader-owned Git env."""
         dl = _make_downloader()
-        dl.github_token = "tok123"
+        dl.git_env = {"GIT_CONFIG_GLOBAL": "/caller/gitconfig"}
+        expected = {"GIT_TERMINAL_PROMPT": "0"}
+        dl.auth_resolver.build_noninteractive_git_env.side_effect = None
+        dl.auth_resolver.build_noninteractive_git_env.return_value = expected
 
-        with patch("apm_cli.deps.git_auth_env.GitAuthEnvBuilder") as MockBuilder:
-            MockBuilder.noninteractive_env.return_value = {"GIT_ASKPASS": "/dev/null"}
-            result = dl._build_noninteractive_git_env()
+        result = dl._build_noninteractive_git_env(
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
 
-        assert isinstance(result, dict)
+        assert result is expected
+        dl.auth_resolver.build_noninteractive_git_env.assert_called_once_with(
+            base_env=dl.git_env,
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
 
 
 # ---------------------------------------------------------------------------

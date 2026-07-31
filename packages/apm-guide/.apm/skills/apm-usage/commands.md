@@ -91,6 +91,10 @@ writing the direct MCP manifest entry or deploying packages. Native service
 config write failures also exit non-zero with an actionable path/permissions
 diagnostic.
 
+For MCP, the canonical `copilot` target writes `.vscode/mcp.json` at project
+scope and `~/.copilot/mcp-config.json` with `--global`. The legacy
+`--runtime copilot` override addresses the Copilot CLI adapter directly.
+
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
 
 ## Compilation

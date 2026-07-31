@@ -206,10 +206,10 @@ class CloneEngine:
                     suppress_credential_helpers=True,
                 )
             if is_ado:
-                return host.auth_resolver._build_git_env(
-                    None,
-                    host_kind="ado",
+                return host.auth_resolver.build_noninteractive_git_env(
                     base_env=host.git_env,
+                    host_kind="ado",
+                    preserve_config_isolation=True,
                 )
             return host._build_noninteractive_git_env()
 

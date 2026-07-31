@@ -287,13 +287,13 @@ def test_installed_mcp_lifecycle_is_no_write_until_real_target_change(
     changed_identity = _file_identity(lock_path)
     assert changed.lockfile_bytes != baseline.lockfile_bytes
     assert changed_lock.generated_at != baseline_lock.generated_at
-    assert changed_lock.mcp_target_servers == {"copilot": [_SERVER_NAME]}
+    assert changed_lock.mcp_target_servers == {"vscode": [_SERVER_NAME]}
     assert changed_identity != baseline_identity
     assert {
         record.locator.runtime
         for record in changed.deployment_records
         if record.locator.target == "mcp"
-    } == {"copilot"}
+    } == {"vscode"}
     _assert_user_configs(project_root)
 
     time.sleep(0.02)
@@ -425,6 +425,7 @@ def test_installed_mcp_write_failure_exits_nonzero_without_partial_lock(
         env=failing_environment,
     )
 
-    assert result.returncode != 0
+    assert result.returncode != 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+    assert "lockfile replace blocked by test" in f"{result.stdout}\n{result.stderr}"
     assert lock_path.read_bytes() == baseline_bytes
     assert list(project_root.glob("apm-atomic-*")) == []

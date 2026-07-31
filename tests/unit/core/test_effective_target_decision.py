@@ -64,7 +64,15 @@ def test_multi_target_runtime_projection_uses_catalog_aliases(_saved, tmp_path: 
     )
 
     assert decision.canonical_targets == ("claude", "copilot")
-    assert decision.runtime_targets == ("claude", "copilot", "intellij")
+    assert decision.runtime_targets == ("claude", "vscode", "intellij")
+
+
+@patch("apm_cli.config.get_install_target", return_value=None)
+def test_canonical_copilot_projects_to_vscode_runtime(_saved, tmp_path: Path) -> None:
+    decision = _resolve(tmp_path, explicit_target="copilot")
+
+    assert decision.canonical_targets == ("copilot",)
+    assert decision.runtime_targets == ("vscode",)
 
 
 @patch("apm_cli.config.get_install_target", return_value="agents")

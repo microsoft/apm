@@ -1286,10 +1286,16 @@ class TestMCPIntegratorUpdateLockfile:
         assert "mcp_configs" in content or "srv" in content
 
     def test_handles_corrupt_lockfile_gracefully(self, tmp_path: Path) -> None:
+        from apm_cli.deps.lockfile import LockfileFormatError
+
         lock_path = tmp_path / "apm.lock.yaml"
         lock_path.write_text("{invalid: yaml: content: [}")
-        # Must not raise
-        MCPIntegrator.update_lockfile({"srv"}, lock_path=lock_path)
+        original = lock_path.read_bytes()
+
+        with pytest.raises(LockfileFormatError):
+            MCPIntegrator.update_lockfile({"srv"}, lock_path=lock_path)
+
+        assert lock_path.read_bytes() == original
 
 
 # ===========================================================================
@@ -1454,7 +1460,7 @@ class TestRunMcpInstall:
     def test_explicit_runtime_no_runtimes_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """With an explicit runtime and no installed runtimes, returns 0 (no-op after gate)."""
+        """A closed project gate returns 0 without attempting installation."""
         monkeypatch.chdir(tmp_path)
         from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -1468,12 +1474,11 @@ class TestRunMcpInstall:
         ):
             result = run_mcp_install(
                 [dep],
-                runtime="unknown-runtime-xyz",
+                runtime="copilot",
                 project_root=tmp_path,
                 logger=NullCommandLogger(),
             )
-        # Accept any int return; just ensure no exception
-        assert isinstance(result, int)
+        assert result == 0
 
     def test_user_scope_enum_sets_user_scope_true(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

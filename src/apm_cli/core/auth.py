@@ -1205,9 +1205,41 @@ class AuthResolver:
         return env
 
     @classmethod
-    def build_public_github_anonymous_git_env(cls) -> dict[str, str]:
+    def build_noninteractive_git_env(
+        cls,
+        *,
+        base_env: dict[str, str],
+        host_kind: str = "generic",
+        preserve_config_isolation: bool = False,
+        suppress_credential_helpers: bool = False,
+    ) -> dict[str, str]:
+        """Build a credential-free Git environment from caller-owned config."""
+        from ..deps.git_auth_env import GitAuthEnvBuilder
+
+        env = cls._build_git_env(
+            None,
+            host_kind=host_kind,
+            base_env=base_env,
+        )
+        return GitAuthEnvBuilder.noninteractive_env(
+            env,
+            preserve_config_isolation=preserve_config_isolation,
+            suppress_credential_helpers=suppress_credential_helpers,
+        )
+
+    @classmethod
+    def build_public_github_anonymous_git_env(
+        cls,
+        *,
+        base_env: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         """Build a credential-free Git env for public github.com attempts."""
-        env = cls._build_git_env(None, host_kind="github")
+        caller_env = os.environ if base_env is None else base_env
+        env = cls._build_git_env(
+            None,
+            host_kind="github",
+            base_env=dict(caller_env),
+        )
         for name in tuple(env):
             if name in {"GH_TOKEN", "GITHUB_APM_PAT", "GITHUB_TOKEN"} or name.startswith(
                 "GITHUB_APM_PAT_"
@@ -1216,8 +1248,15 @@ class AuthResolver:
         from ..deps.git_auth_env import GitAuthEnvBuilder
 
         env["GIT_CONFIG_NOSYSTEM"] = "1"
-        env["GIT_CONFIG_GLOBAL"] = GitAuthEnvBuilder.isolated_global_config_path()
+        if base_env is None:
+            env["GIT_CONFIG_GLOBAL"] = GitAuthEnvBuilder.isolated_global_config_path()
+        else:
+            env.setdefault(
+                "GIT_CONFIG_GLOBAL",
+                GitAuthEnvBuilder.isolated_global_config_path(),
+            )
         cls._append_git_config(env, "credential.helper", "")
+        cls._append_git_config(env, "http.extraheader", "")
         return env
 
     @staticmethod

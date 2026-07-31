@@ -846,9 +846,9 @@ class EffectiveTargetDecision:
         for target, capability in _target_capabilities(self.value):
             runtime = (
                 capability.compile_family
-                if target in capability.aliases and capability.compile_family in capability.runtimes
+                if capability.compile_family in capability.runtimes
                 else target
-                if target in capability.runtimes or target == capability.name
+                if target in capability.runtimes
                 else capability.runtimes[0]
                 if capability.runtimes
                 else capability.name

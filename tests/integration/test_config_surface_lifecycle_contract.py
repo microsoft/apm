@@ -185,11 +185,8 @@ def _capture_portable_mcp_state(
 ) -> LifecycleStateSnapshot:
     """Capture exact project and native MCP state for Copilot and Codex."""
     copilot_root = isolated.home / ".copilot"
-    assert copilot_root.is_dir()
-    return LifecycleStateSnapshot.capture(
-        project_root,
-        config_paths=(PurePosixPath(".codex/config.toml"),),
-        external_roots=(
+    external_roots = (
+        (
             LifecycleStateRoot(
                 root_id="copilot-user",
                 target="copilot",
@@ -197,7 +194,17 @@ def _capture_portable_mcp_state(
                 path=copilot_root,
                 config_paths=(PurePosixPath("mcp-config.json"),),
             ),
+        )
+        if copilot_root.is_dir()
+        else ()
+    )
+    return LifecycleStateSnapshot.capture(
+        project_root,
+        config_paths=(
+            PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".vscode/mcp.json"),
         ),
+        external_roots=external_roots,
     )
 
 
@@ -235,7 +242,7 @@ def _create_divergent_mcp_runtime_signal(
 ) -> None:
     """Create one machine-local signal that maps to the Copilot target."""
     if signal == "vscode":
-        (project_root / ".vscode").mkdir()
+        (project_root / ".vscode").mkdir(exist_ok=True)
         return
     if signal != "intellij":
         raise ValueError(f"Unsupported MCP runtime signal: {signal}")
@@ -280,7 +287,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
     assert seed_lock is not None
     assert seed_lock.mcp_target_servers == {
         "codex": ["portable-server"],
-        "copilot": ["portable-server"],
+        "vscode": ["portable-server"],
     }
     seed_ledger = DeploymentLedgerCodec.from_lockfile(seed_lock)
     seed_rows = tuple(
@@ -288,7 +295,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
         for _key, record in sorted(seed_ledger.records.items())
         if record.locator.target == "mcp"
     )
-    assert {record.locator.runtime for record in seed_rows} == {"codex", "copilot"}
+    assert {record.locator.runtime for record in seed_rows} == {"codex", "vscode"}
 
     seed_codex_config = project.root / ".codex" / "config.toml"
     seed_codex_config.unlink()
@@ -393,7 +400,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
         assert lockfile is not None
         assert lockfile.mcp_target_servers == {
             "codex": ["portable-server"],
-            "copilot": ["portable-server"],
+            "vscode": ["portable-server"],
         }
         ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         rows = tuple(
@@ -723,7 +730,6 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     runner = _runner(apm_binary_path)
     environment = fixture.isolated.subprocess_env()
-    copilot_root = fixture.isolated.home / ".copilot"
     broad_install = (
         "install",
         "--trust-transitive-mcp",
@@ -744,23 +750,17 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     broad = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(PurePosixPath(".codex/config.toml"),),
-        external_roots=(
-            LifecycleStateRoot(
-                root_id="copilot-user",
-                target="copilot",
-                scope="project",
-                path=copilot_root,
-                config_paths=(PurePosixPath("mcp-config.json"),),
-            ),
+        config_paths=(
+            PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".vscode/mcp.json"),
         ),
     )
-    assert broad.file("mcp-config.json", root_id="copilot-user").kind == "file"
+    assert broad.file(".vscode/mcp.json").kind == "file"
     assert b"managed-contract-server" in broad.file(".codex/config.toml").content
     assert b"user-authored" in broad.file(".codex/config.toml").content
     assert b"trust_level" in broad.file(".codex/config.toml").content
     assert (
-        b'"target_servers":{"codex":["managed-contract-server"],"copilot":["managed-contract-server"]}'
+        b'"target_servers":{"codex":["managed-contract-server"],"vscode":["managed-contract-server"]}'
         in (broad.mcp_state_bytes)
     )
 
@@ -777,15 +777,9 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     narrow = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(PurePosixPath(".codex/config.toml"),),
-        external_roots=(
-            LifecycleStateRoot(
-                root_id="copilot-user",
-                target="copilot",
-                scope="project",
-                path=copilot_root,
-                config_paths=(PurePosixPath("mcp-config.json"),),
-            ),
+        config_paths=(
+            PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".vscode/mcp.json"),
         ),
     )
     codex_bytes = narrow.file(".codex/config.toml").content
@@ -793,7 +787,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     assert b"managed-contract-server" not in codex_bytes
     assert b"user-authored" in codex_bytes
     assert b"trust_level" in codex_bytes
-    assert b'"target_servers":{"copilot":["managed-contract-server"]}' in narrow.mcp_state_bytes
+    assert b'"target_servers":{"vscode":["managed-contract-server"]}' in narrow.mcp_state_bytes
     assert unrelated_codex_file.read_bytes() == unrelated_codex_bytes
 
     runner.run_sequence(
@@ -805,15 +799,9 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     converged = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(PurePosixPath(".codex/config.toml"),),
-        external_roots=(
-            LifecycleStateRoot(
-                root_id="copilot-user",
-                target="copilot",
-                scope="project",
-                path=copilot_root,
-                config_paths=(PurePosixPath("mcp-config.json"),),
-            ),
+        config_paths=(
+            PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".vscode/mcp.json"),
         ),
     )
     _assert_semantic_lifecycle_state(narrow, converged)
@@ -821,15 +809,9 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
 
     before_audit = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(PurePosixPath(".codex/config.toml"),),
-        external_roots=(
-            LifecycleStateRoot(
-                root_id="copilot-user",
-                target="copilot",
-                scope="project",
-                path=copilot_root,
-                config_paths=(PurePosixPath("mcp-config.json"),),
-            ),
+        config_paths=(
+            PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".vscode/mcp.json"),
         ),
     )
     assert (
@@ -843,15 +825,9 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     after_audit = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(PurePosixPath(".codex/config.toml"),),
-        external_roots=(
-            LifecycleStateRoot(
-                root_id="copilot-user",
-                target="copilot",
-                scope="project",
-                path=copilot_root,
-                config_paths=(PurePosixPath("mcp-config.json"),),
-            ),
+        config_paths=(
+            PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".vscode/mcp.json"),
         ),
     )
     _assert_exact_lifecycle_state(before_audit, after_audit)

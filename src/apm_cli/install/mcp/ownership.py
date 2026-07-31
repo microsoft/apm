@@ -8,6 +8,20 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def migrate_legacy_project_target_servers(
+    target_servers: dict[str, set[str]],
+    *,
+    active_runtimes: set[str],
+    user_scope: bool,
+) -> None:
+    """Move legacy project Copilot ownership to the VS Code runtime key."""
+    if user_scope or "vscode" not in active_runtimes or "copilot" in active_runtimes:
+        return
+    legacy_servers = target_servers.pop("copilot", set())
+    if legacy_servers:
+        target_servers.setdefault("vscode", set()).update(legacy_servers)
+
+
 def adopt_legacy_mcp_target_servers(
     *,
     server_names: set[str],

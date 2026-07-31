@@ -184,6 +184,25 @@ class TestAtomicWriteText:
 
         assert not target.exists()
 
+    def test_lock_replace_fault_is_narrow_and_preserves_original(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The installed-binary seam fails only lock replacement on every OS."""
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text("original\n", encoding="ascii")
+        other_path = tmp_path / "other.yaml"
+        monkeypatch.setenv("APM_TEST_FAIL_LOCK_REPLACE", "1")
+
+        with pytest.raises(OSError, match="lockfile replace blocked by test"):
+            atomic_write_text(lock_path, "replacement\n")
+        atomic_write_text(other_path, "allowed\n")
+
+        assert lock_path.read_text(encoding="ascii") == "original\n"
+        assert other_path.read_text(encoding="ascii") == "allowed\n"
+        assert list(tmp_path.glob("apm-atomic-*")) == []
+
     # ------------------------------------------------------------------
     # Deterministic LF line endings (cross-platform hash stability)
     # ------------------------------------------------------------------

@@ -54,7 +54,8 @@ def _git_auth_entries(env: dict[str, str]) -> list[tuple[str, str]]:
     return [
         (key, value)
         for key, value in _indexed_git_config(env)
-        if "extraheader" in key.lower() or value.strip().lower().startswith("authorization:")
+        if (value and "extraheader" in key.lower())
+        or value.strip().lower().startswith("authorization:")
     ]
 
 
@@ -97,6 +98,7 @@ def _assert_anonymous_attempt_env(env: dict[str, str]) -> None:
 
     config = dict(_indexed_git_config(env))
     assert config["credential.helper"] == ""
+    assert config["http.extraheader"] == ""
     assert config["credential.interactive"] == "never"
     assert config["url.file:///fixture.git/.insteadOf"] == ("https://github.com/acme/widgets")
     assert config["http.sslCAInfo"] == "/authorization/corporate-ca.pem"
@@ -134,6 +136,43 @@ def test_public_github_success_never_resolves_or_leaks_credentials() -> None:
     manager.get_token_for_purpose.assert_not_called()
     manager.resolve_credential_from_gh_cli.assert_not_called()
     manager.resolve_credential_from_git.assert_not_called()
+
+
+def test_public_github_preserves_caller_git_config_isolation(tmp_path: Path) -> None:
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text(
+        '[url "file:///fixture.git/"]\n\tinsteadOf = https://github.com/acme/widgets\n',
+        encoding="ascii",
+    )
+
+    env = AuthResolver.build_public_github_anonymous_git_env(
+        base_env={
+            "GIT_CONFIG_GLOBAL": str(git_config),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GITHUB_TOKEN": "must-not-leak",
+        }
+    )
+
+    assert env["GIT_CONFIG_GLOBAL"] == str(git_config)
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert "GITHUB_TOKEN" not in env
+    assert dict(_indexed_git_config(env))["credential.helper"] == ""
+
+
+def test_public_github_ignores_ambient_git_config_isolation(tmp_path: Path) -> None:
+    ambient_config = tmp_path / "ambient-gitconfig"
+    ambient_config.write_text(
+        '[http "https://github.com/"]\n\textraHeader = Authorization: secret\n',
+        encoding="ascii",
+    )
+
+    with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(ambient_config)}, clear=True):
+        env = AuthResolver.build_public_github_anonymous_git_env()
+
+    assert env["GIT_CONFIG_GLOBAL"] != str(ambient_config)
+    config = dict(_indexed_git_config(env))
+    assert config["credential.helper"] == ""
+    assert config["http.extraheader"] == ""
 
 
 @pytest.mark.parametrize("status_code", (401, 403, 404))

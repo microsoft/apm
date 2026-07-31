@@ -154,6 +154,11 @@ write.
 The same effective decision drives package, MCP, and LSP phases; APM does
 not re-resolve each phase independently.
 
+At project scope, the canonical `copilot` target writes MCP state to VS Code's
+`.vscode/mcp.json`. At global scope it writes Copilot CLI's
+`~/.copilot/mcp-config.json`. Use the legacy `--runtime copilot` override only
+when a project-scoped command must address the Copilot CLI adapter directly.
+
 **Portability boundary:** A committed target list makes lockfile MCP ownership
 deterministic across machines with different installed harnesses. If `targets:`
 is omitted (or a legacy `all` declaration is folded to omission), machine
