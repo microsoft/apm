@@ -432,10 +432,10 @@ class BaseIntegrator:
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
     @staticmethod
-    def _get_integration_prefixes(targets=None) -> tuple:
+    def _get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple:
         from apm_cli.integration.targets import get_integration_prefixes
 
-        return get_integration_prefixes(targets=targets)
+        return get_integration_prefixes(targets=targets, user_scope=user_scope)
 
     @staticmethod
     def validate_deploy_path(
@@ -443,6 +443,7 @@ class BaseIntegrator:
         project_root: Path,
         allowed_prefixes: tuple | None = None,
         targets=None,
+        user_scope: bool = False,
     ) -> bool:
         """Return True if *rel_path* is safe for APM to deploy or remove.
 
@@ -451,7 +452,7 @@ class BaseIntegrator:
 
         When *targets* is provided, allowed prefixes are derived from
         those (scope-resolved) profiles.  Otherwise uses all known
-        target prefixes.
+        project prefixes, plus known user roots when *user_scope* is true.
 
         Checks:
         1. No path-traversal components (``..``)
@@ -469,7 +470,10 @@ class BaseIntegrator:
             return _managed_absolute_target_root(candidate, targets) is not None
 
         if allowed_prefixes is None:
-            allowed_prefixes = BaseIntegrator._get_integration_prefixes(targets=targets)
+            allowed_prefixes = BaseIntegrator._get_integration_prefixes(
+                targets=targets,
+                user_scope=user_scope,
+            )
 
         # --- cowork:// paths: validate against cowork root ---
         if rel_path.startswith(COWORK_URI_SCHEME):

@@ -342,6 +342,24 @@ def test_deployment_owner_reconciliation_has_single_owner() -> None:
     assert "Deployment ownership must route through DeploymentLedgerCodec" in guard
 
 
+def test_legacy_user_deployment_scope_has_single_owner() -> None:
+    """Global compatibility paths must share one scope decoder."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/deployment_ledger.py").read_text()
+    consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text()
+    targets = (root / "src/apm_cli/integration/targets.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def legacy_scope(" in owner
+    assert "scope=DeploymentLedgerCodec.legacy_scope(path)" in consumer
+    assert "if targets is None and user_scope and t.user_root_dir is not None:" in targets
+    assert "Legacy user deployment scope must route through DeploymentLedgerCodec" in guard
+    assert DeploymentLedgerCodec.legacy_scope(".copilot/hooks/demo.json") == "user"
+    assert DeploymentLedgerCodec.legacy_scope(".github/hooks/demo.json") == "project"
+
+
 def test_shared_target_contraction_has_single_reconciler_owner() -> None:
     """Generic shared-root supersession must remain inside DeploymentReconciler."""
     root = Path(__file__).parents[2]
