@@ -48,6 +48,7 @@ class InstallRequest:
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS
+    trust_transitive_mcp: bool = False
 
     # --frozen: refuse to install if lockfile is missing or stale relative
     # to apm.yml.  Enforced in InstallService.run() BEFORE delegating to

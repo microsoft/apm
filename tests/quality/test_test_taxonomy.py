@@ -273,6 +273,9 @@ def test_tm005_behavioral_marker_prose_mirrors_canonical_definitions() -> None:
         assert _documented_marker_definitions(path) == EXPECTED_MARKERS
         text = path.read_text(encoding="utf-8")
         assert AUTHORITY_PROSE in text
+        assert "marker-only behavioral taxonomy" in text
+        assert "critical_suite.toml" not in text
+        assert "finite manifest" not in text.lower()
         assert "uv run --frozen python scripts/check_test_assertions.py" in text
         assert "uv run --frozen python scripts/check_exact_test_duplicates.py" in text
         assert "--allow-provisional" not in text

@@ -869,7 +869,12 @@ def _handle_mcp_install(  # noqa: PLR0913
 @click.option(
     "--frozen",
     is_flag=True,
-    help="Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (CI-safe; mutually exclusive with --update). Structural presence check only; use 'apm audit' for on-disk integrity.",
+    help=(
+        "Refuse to install when apm.lock.yaml is missing or out of sync with "
+        "apm.yml, including MCP config state (CI-safe; mutually exclusive with "
+        "--update, --mcp, and positional packages). Use 'apm audit' for on-disk "
+        "integrity."
+    ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
 @click.option(
@@ -1161,6 +1166,15 @@ def install(  # noqa: PLR0913
     logger = None
     command_result: InstallResult | None = None
     transaction: InstallTransaction | None = None
+    from ..install.service import InstallService
+
+    try:
+        if mcp_name is not None:
+            InstallService.reject_frozen_mutation(frozen, "--mcp")
+        elif packages:
+            InstallService.reject_frozen_mutation(frozen, "positional packages")
+    except FrozenInstallError as exc:
+        raise click.ClickException(str(exc)) from exc
     if frozen and update:
         raise click.UsageError(
             "--frozen and --update are mutually exclusive. "
@@ -1185,6 +1199,10 @@ def install(  # noqa: PLR0913
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 
+    try:
+        InstallService.reject_missing_frozen_root(frozen, root)
+    except FrozenInstallError as exc:
+        raise click.ClickException(str(exc)) from exc
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _root_redirect.__enter__()
     try:
@@ -1331,7 +1349,6 @@ def install(  # noqa: PLR0913
             any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
             registry_url=validated_registry_url,
         )
-
         # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
         if skill_names and mcp_name is not None:
             raise click.UsageError("--skill cannot be combined with --mcp.")
@@ -1574,7 +1591,7 @@ def install(  # noqa: PLR0913
         logger.error(str(e))
         for reason in e.reasons:
             logger.error_detail(reason)
-        logger.info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
+        logger.info(_frozen_install_tip(e))
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1636,6 +1653,20 @@ def install(  # noqa: PLR0913
 # ---------------------------------------------------------------------------
 
 
+def _frozen_install_tip(error: FrozenInstallError) -> str:
+    """Return recovery guidance tailored to package or MCP lock drift."""
+    has_mcp_drift = any("MCP server" in reason for reason in error.reasons)
+    has_package_drift = any("MCP server" not in reason for reason in error.reasons)
+    if has_mcp_drift and has_package_drift:
+        return (
+            "Tip: run 'apm outdated' to inspect package drift, then run "
+            "'apm install' without --frozen to repair package and MCP lock state."
+        )
+    if has_mcp_drift:
+        return "Tip: run 'apm install' without --frozen to create or repair MCP lock state."
+    return "Tip: run 'apm outdated' to see what changed, then 'apm update'."
+
+
 def _install_apm_packages(ctx, outcome):
     """Execute the APM + transitive MCP installation pipeline.
 
@@ -1681,6 +1712,19 @@ def _install_apm_packages(ctx, outcome):
 
     all_apm_deps = list(apm_deps) + list(dev_apm_deps)
     _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
+
+    if ctx.frozen is True:
+        from apm_cli.install.request import InstallRequest
+        from apm_cli.install.service import InstallService
+
+        InstallService.enforce_frozen(
+            InstallRequest(
+                apm_package=apm_package,
+                frozen=True,
+                scope=ctx.scope,
+                trust_transitive_mcp=ctx.trust_transitive_mcp,
+            )
+        )
 
     # Determine what to install based on install mode
     should_install_apm = ctx.install_mode != InstallMode.MCP
@@ -1796,6 +1840,7 @@ def _install_apm_packages(ctx, outcome):
                 no_policy=ctx.no_policy,
                 audit_override=ctx.audit_override,
                 legacy_skill_paths=ctx.legacy_skill_paths,
+                trust_transitive_mcp=ctx.trust_transitive_mcp,
                 frozen=ctx.frozen,
                 plan_callback=ctx.plan_callback,
                 skill_subset=ctx.skill_subset,
@@ -1829,7 +1874,7 @@ def _install_apm_packages(ctx, outcome):
             logger.error(str(e))
             for reason in e.reasons:
                 logger.error_detail(reason)
-            logger.info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
+            logger.info(_frozen_install_tip(e))
             raise InstallFailureAlreadyRendered(str(e)) from e
         except InstallFailureAlreadyRendered:
             raise
@@ -2001,6 +2046,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     skill_subset: "builtins.tuple | None" = None,
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
+    trust_transitive_mcp: bool = False,
     frozen: bool = False,
     plan_callback=None,
     refresh: bool = False,
@@ -2042,6 +2088,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         legacy_skill_paths=legacy_skill_paths,
+        trust_transitive_mcp=trust_transitive_mcp,
         frozen=frozen,
         plan_callback=plan_callback,
         refresh=refresh,

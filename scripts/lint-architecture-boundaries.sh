@@ -942,6 +942,23 @@ if ! grep -q 'getattr(module, "pytestmark"' "$taxonomy_plugin" \
     violations=$((violations + 1))
 fi
 
+lifecycle_topology_contract="tests/quality/test_ci_topology.py"
+lifecycle_membership_hits=$(
+    grep -En \
+        'LIFECYCLE_SMOKE_(FULL_COUNT|MERGE_GROUP_COUNT|REQUIRED_COUNT|MERGE_GROUP_NODES)|expected_(full_count|merge_group_nodes|required_count)' \
+        "$lifecycle_topology_contract" \
+        || true
+)
+if ! grep -q '^def _validated_lifecycle_node_set(' "$lifecycle_topology_contract" \
+    || ! grep -q '^def _assert_lifecycle_partition_sets(' "$lifecycle_topology_contract" \
+    || ! grep -q 'merge_group < full' "$lifecycle_topology_contract" \
+    || ! grep -q 'required == full - merge_group' "$lifecycle_topology_contract" \
+    || [ -n "$lifecycle_membership_hits" ]; then
+    echo "[x] Lifecycle marker partitions must be collection-derived, never count/list pinned"
+    [ -n "$lifecycle_membership_hits" ] && echo "$lifecycle_membership_hits"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC23: self-update release selection authority"
 self_update_owner="src/apm_cli/commands/self_update.py"
 self_update_owner_defs=$(grep -Ec \
@@ -972,6 +989,53 @@ if [ "$self_update_owner_defs" -ne 2 ] \
     [ -n "$self_update_duplicate_defs" ] && echo "$self_update_duplicate_defs"
     violations=$((violations + 1))
 fi
+
+echo "[*] AC24: frozen install decision authority"
+frozen_owner="src/apm_cli/install/service.py"
+frozen_adapter="src/apm_cli/commands/install.py"
+frozen_preflight_line=$(grep -n 'InstallService\.enforce_frozen(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_migration_line=$(grep -n 'migrate_lockfile_if_needed(ctx\.apm_dir)' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_add_guard_line=$(grep -n 'InstallService\.reject_frozen_mutation(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_root_guard_line=$(grep -n 'InstallService\.reject_missing_frozen_root(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+root_redirect_line=$(grep -n '_root_redirect = install_root_redirect(' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+dedicated_mcp_line=$(grep -n '^[[:space:]]*_handle_mcp_install(' "$frozen_adapter" \
+    | tail -1 | cut -d: -f1)
+local_bundle_line=$(grep -n 'if len(packages) == 1 and not mcp_name' "$frozen_adapter" \
+    | head -1 | cut -d: -f1)
+frozen_duplicate_hits=$(
+    grep -rEn --include='*.py' 'raise FrozenInstallError' src/apm_cli \
+        | grep -v "^${frozen_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^    def enforce_frozen(' "$frozen_owner" \
+    || ! grep -q '^    def reject_frozen_mutation(' "$frozen_owner" \
+    || ! grep -q '^    def reject_missing_frozen_root(' "$frozen_owner" \
+    || [ -z "$frozen_preflight_line" ] \
+    || [ -z "$frozen_migration_line" ] \
+    || [ "$frozen_preflight_line" -ge "$frozen_migration_line" ] \
+    || [ -z "$frozen_add_guard_line" ] \
+    || [ -z "$frozen_root_guard_line" ] \
+    || [ -z "$root_redirect_line" ] \
+    || [ "$frozen_root_guard_line" -ge "$root_redirect_line" ] \
+    || [ -z "$dedicated_mcp_line" ] \
+    || [ -z "$local_bundle_line" ] \
+    || [ "$frozen_add_guard_line" -ge "$dedicated_mcp_line" ] \
+    || [ "$frozen_add_guard_line" -ge "$local_bundle_line" ] \
+    || [ -n "$frozen_duplicate_hits" ]; then
+    echo "[x] Frozen install decisions must route through InstallService before mutation"
+    [ -n "$frozen_duplicate_hits" ] && echo "$frozen_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
+
+
+
 
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"

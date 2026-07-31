@@ -20,7 +20,7 @@ preserves the original branch-by-branch behaviour:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -103,6 +103,7 @@ class TestRunMcpIntegrationInstallBranch:
             mcp_configs={"io.github.acme/server": dep.to_dict()},
             mcp_target_servers={},
             mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
+            logger=ANY,
         )
         mock_mcp.remove_stale.assert_not_called()
 
@@ -224,6 +225,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
             mcp_configs={},
             mcp_target_servers={},
             mcp_config_provenance={},
+            logger=ANY,
         )
 
 
@@ -249,6 +251,7 @@ class TestRunMcpIntegrationRestoreBranch:
             mcp_configs={"io.github.acme/kept": {"name": "kept"}},
             mcp_target_servers={"copilot": ["io.github.acme/kept"]},
             mcp_config_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
+            logger=ANY,
         )
         mock_mcp.install.assert_not_called()
         mock_mcp.remove_stale.assert_not_called()

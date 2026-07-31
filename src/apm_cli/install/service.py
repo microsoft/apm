@@ -65,7 +65,7 @@ class InstallService:
         # well under a second; running it here keeps the contract simple
         # for the pipeline (which never sees a `frozen` flag).
         if request.frozen:
-            self._enforce_frozen(request)
+            self.enforce_frozen(request)
 
         # Local import keeps service module import-cheap and matches the
         # existing pipeline's lazy-import discipline.
@@ -165,13 +165,40 @@ class InstallService:
         )
 
     @staticmethod
-    def _enforce_frozen(request: InstallRequest) -> None:
+    def reject_frozen_mutation(frozen: bool, operation: str) -> None:
+        """Reject an add-style install operation before it can mutate state."""
+        if not frozen:
+            return
+        from apm_cli.install.errors import FrozenInstallError
+
+        raise FrozenInstallError(
+            f"--frozen cannot be combined with {operation}. "
+            "Update apm.yml first, run 'apm install' without --frozen to refresh "
+            "apm.lock.yaml, then retry the frozen install."
+        )
+
+    @staticmethod
+    def reject_missing_frozen_root(frozen: bool, root: str | None) -> None:
+        """Reject a missing redirected root before the redirect creates it."""
+        if not frozen or root is None:
+            return
+        from pathlib import Path
+
+        from apm_cli.install.errors import FrozenInstallError
+
+        if not Path(root).exists():
+            raise FrozenInstallError(
+                f"--frozen requires --root directory {root!r} to exist. "
+                "Create and populate it with a normal install before retrying."
+            )
+
+    @staticmethod
+    def enforce_frozen(request: InstallRequest) -> None:
         """Raise :class:`FrozenInstallError` if lockfile is absent or stale.
 
         Looks up ``apm.lock.yaml`` next to the manifest's ``apm.yml``,
-        loads it, and runs ``lockfile_satisfies_manifest`` against the
-        manifest's direct deps (regular + dev).  Any miss raises with a
-        list of human-readable reasons the renderer can show.
+        loads it, and checks both package dependencies and the canonical
+        current MCP config view. Any miss raises before install mutation.
         """
         from pathlib import Path
 
@@ -211,6 +238,37 @@ class InstallService:
         manifest_deps.extend(request.apm_package.get_dev_apm_dependencies())
 
         satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
+        from apm_cli.core.scope import get_modules_dir
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+        root_mcp = list(request.apm_package.get_all_mcp_dependencies())
+        check_mcp = bool(root_mcp) or bool(lockfile.mcp_configs) or bool(lockfile.mcp_servers)
+        if check_mcp:
+            current_mcp = CurrentMcpConfigView.derive(
+                request.apm_package,
+                lockfile,
+                get_modules_dir(request.scope),
+                trust_transitive_self_defined=request.trust_transitive_mcp,
+            )
+            config_diff = current_mcp.diff(lockfile.mcp_configs)
+            if current_mcp.problems:
+                reasons.extend(
+                    f"  - {problem.package_key}: {problem.message}"
+                    for problem in current_mcp.problems
+                )
+            if not config_diff.is_empty:
+                for name in sorted(config_diff.changed):
+                    reasons.append(f"  - MCP server {name!r} config differs from apm.lock.yaml")
+                for name in sorted(config_diff.source_only):
+                    reasons.append(f"  - MCP server {name!r} is missing from apm.lock.yaml")
+                for name in sorted(config_diff.lock_only):
+                    reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
+            expected_names = set(current_mcp.configs)
+            locked_names = set(lockfile.mcp_servers)
+            if expected_names != locked_names and config_diff.is_empty:
+                reasons.append("  - MCP server names in apm.lock.yaml are out of sync with apm.yml")
+
+        satisfied = satisfied and not reasons
         if not satisfied:
             raise FrozenInstallError(
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",

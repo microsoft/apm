@@ -207,6 +207,7 @@ def run_mcp_integration(  # noqa: PLR0913
             mcp_configs=new_mcp_configs,
             mcp_target_servers=managed_target_servers,
             mcp_config_provenance=new_mcp_provenance,
+            logger=logger,
         )
     elif should_install and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
@@ -225,6 +226,7 @@ def run_mcp_integration(  # noqa: PLR0913
                 mcp_configs={},
                 mcp_target_servers={},
                 mcp_config_provenance={},
+                logger=logger,
             )
         logger.verbose_detail("No MCP dependencies found in apm.yml")
     elif not should_install and old_mcp_servers:
@@ -236,6 +238,7 @@ def run_mcp_integration(  # noqa: PLR0913
             mcp_configs=old_mcp_configs,
             mcp_target_servers=old_mcp_target_servers,
             mcp_config_provenance=old_mcp_provenance,
+            logger=logger,
         )
 
     return mcp_count, mcp_apm_config
