@@ -29,6 +29,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from apm_cli.core.deployment_state import DeploymentReconciler
+from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.cleanup import remove_stale_deployed_files
@@ -52,6 +53,7 @@ def run(ctx: InstallContext) -> None:
     _targets = ctx.targets
     diagnostics = ctx.diagnostics
     logger = ctx.logger
+    user_scope = is_user_scope(getattr(ctx, "scope", None))
     package_deployed_files = ctx.package_deployed_files
     orphan_cleanup_retained = getattr(ctx, "orphan_cleanup_retained", None)
     if orphan_cleanup_retained is None:
@@ -114,6 +116,7 @@ def run(ctx: InstallContext) -> None:
                 diagnostics=diagnostics,
                 recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
                 failed_path_retained=False,
+                user_scope=user_scope,
             )
             _orphan_total_deleted += len(_orphan_result.deleted)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
@@ -185,6 +188,7 @@ def run(ctx: InstallContext) -> None:
                 targets=_targets or None,
                 diagnostics=diagnostics,
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
+                user_scope=user_scope,
             )
             # Re-insert every non-deletion so the lockfile retains the
             # prior ownership claim for retry or user review.

@@ -52,6 +52,11 @@ class InstallScope(Enum):
     USER = "user"
 
 
+def is_user_scope(scope: object) -> bool:
+    """Return whether *scope* is the canonical user installation scope."""
+    return scope is InstallScope.USER
+
+
 # ---------------------------------------------------------------------------
 # Source-root override (managed by the ``--root`` flag handlers)
 # ---------------------------------------------------------------------------

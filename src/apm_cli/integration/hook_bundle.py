@@ -1,6 +1,7 @@
 """Helpers for deploying hook script bundles."""
 
 import json
+import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -107,8 +109,19 @@ def copy_deployed_hook_bundle(
     diagnostics=None,
     target_paths: list[Path],
     hook_descriptor_files: set[Path] | None = None,
+    exclude_json_files: bool = False,
 ) -> HookBundleCopyResult:
-    """Copy each referenced script's whole hooks root and module type."""
+    """Copy each referenced script's whole hooks root and module type.
+
+    When exclude_json_files is True, source JSON assets and the generated
+    package.json sidecar are not written. Use this for targets whose hook
+    loader recursively scans the deployment directory for JSON hook
+    descriptors (e.g. Copilot/VS Code), where package metadata or a nested
+    configuration file would be mistaken for a hook descriptor. Hook packages
+    that need ES module support on such targets should use the .mjs file
+    extension instead; without the sidecar, Node.js treats bare .js files as
+    CommonJS.
+    """
     result = HookBundleCopyResult()
     source_target_roots: dict[tuple[Path, Path], str] = {}
     root_has_js_hook: dict[tuple[Path, Path], bool] = {}
@@ -132,6 +145,12 @@ def copy_deployed_hook_bundle(
     copy_plan: dict[str, Path] = {}
     for source_root, target_root in source_target_roots:
         for source_file in sorted(source_root.rglob("*")):
+            if exclude_json_files and source_file.suffix.lower() == ".json":
+                _log.debug(
+                    "Skipping JSON hook bundle asset %s for recursive-scanner target",
+                    source_file,
+                )
+                continue
             if (
                 source_file.is_symlink()
                 or not source_file.is_file()
@@ -165,6 +184,9 @@ def copy_deployed_hook_bundle(
         if target_rel in command_target_rels:
             result.scripts_copied += 1
         target_paths.append(target_file)
+
+    if exclude_json_files:
+        return result
 
     for (_source_root, target_root), module_type in source_target_roots.items():
         if not root_has_js_hook.get((_source_root, target_root), False):

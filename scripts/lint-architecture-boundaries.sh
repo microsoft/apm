@@ -694,6 +694,18 @@ if [ "$deployment_owner_status" -ne 0 ]; then
     echo "$deployment_owner_output"
     violations=$((violations + 1))
 fi
+if ! grep -q '^_LEGACY_USER_TARGET_PREFIXES = {' src/apm_cli/core/deployment_ledger.py \
+    || ! grep -q '".copilot/": "copilot"' src/apm_cli/core/deployment_ledger.py \
+    || ! grep -q '^    def legacy_scope(' src/apm_cli/core/deployment_ledger.py \
+    || ! grep -q \
+        'scope=DeploymentLedgerCodec.legacy_scope(path)' \
+        src/apm_cli/install/manifest_reconcile.py \
+    || ! grep -q \
+        'if targets is None and user_scope and t.user_root_dir is not None:' \
+        src/apm_cli/integration/targets.py; then
+    echo "[x] Legacy user deployment scope must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC19: git-subprocess auth-header injection authority"
 # #2368: build_authorization_header_git_env / build_ado_bearer_git_env return
@@ -890,6 +902,37 @@ if ! grep -q '_clear_platform_token_env(env)' src/apm_cli/core/auth.py \
     || [ -n "$ado_transport_direct_hits" ]; then
     echo "[x] ADO transport credentials must route through AuthResolver context"
     [ -n "$ado_transport_direct_hits" ] && echo "$ado_transport_direct_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC25: self-update release selection authority"
+self_update_owner="src/apm_cli/commands/self_update.py"
+self_update_owner_defs=$(grep -Ec \
+    '^class _ResolvedSelfUpdateRelease:|^def _resolve_self_update_release\(' \
+    "$self_update_owner" || true)
+self_update_duplicate_defs=$(
+    grep -rEn --include='*.py' \
+        '^class _ResolvedSelfUpdateRelease:|^def _resolve_self_update_release\(' \
+        src/apm_cli \
+        | grep -v "^${self_update_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$self_update_owner_defs" -ne 2 ] \
+    || [ -n "$self_update_duplicate_defs" ] \
+    || ! grep -q \
+        'release = _resolve_self_update_release(latest_version)' \
+        "$self_update_owner" \
+    || ! grep -q \
+        'resolved_ref = release.tag if release is not None else _INSTALL_SCRIPT_REF' \
+        "$self_update_owner" \
+    || ! grep -q 'env\[_ENV_VERSION\] = release.tag' "$self_update_owner" \
+    || ! grep -q '_get_update_installer_url(release)' "$self_update_owner" \
+    || ! grep -q '_build_self_update_installer_env(release)' "$self_update_owner" \
+    || ! grep -q 'return _normalize_release_tag(pinned)' \
+        src/apm_cli/utils/version_checker.py; then
+    echo "[x] Self-update installer URL and VERSION must share _ResolvedSelfUpdateRelease"
+    [ -n "$self_update_duplicate_defs" ] && echo "$self_update_duplicate_defs"
     violations=$((violations + 1))
 fi
 

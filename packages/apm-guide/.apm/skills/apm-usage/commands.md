@@ -24,6 +24,15 @@
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
+For JavaScript hook bundles, `apm install --target copilot` and its
+`--target vscode` alias omit the generated `package.json` sidecar from
+project `.github/hooks/` and user `~/.copilot/hooks/` because Copilot
+recursively treats JSON there as hook configuration. Use `.mjs` for ES
+module hooks and keep runtime configuration in a non-JSON format on these
+targets. Other targets keep JSON bundle assets and the Node module-type
+sidecar when their runtime requires it; see
+[Package authoring](package-authoring.md#hook-files).
+
 `apm publish --package OWNER/REPO` normalizes the owner and repository to
 lowercase before constructing the package-registry path.
 
@@ -269,7 +278,7 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 
 `apm config set target <value>` persists a default install target (single token or comma-separated list) for `apm install` when both `--target` and `apm.yml target(s)` are absent. `apm config unset target` removes this fallback.
 
-`apm config set self-update.channel stable|prerelease` and `apm config set self-update.install-dir <path>` persist non-secret installer defaults for `apm self-update`. Environment variables win: `VERSION` pins an exact release, `APM_SELF_UPDATE_CHANNEL` overrides the channel, and `APM_INSTALL_DIR` overrides the install directory. Self-update config deliberately rejects credentials, tokens, mirror URLs, commands, and installer args; credentials stay on the existing auth path and enterprise mirror URLs stay env-only.
+`apm config set self-update.channel stable|prerelease` and `apm config set self-update.install-dir <path>` persist non-secret installer defaults for `apm self-update`. Environment variables win: `VERSION` pins an exact release, `APM_SELF_UPDATE_CHANNEL` overrides the channel, and `APM_INSTALL_DIR` overrides the install directory. When `VERSION` is unset, self-update passes the release selected by either channel to the installer as one normalized `v<version>` value; a custom GitHub/GHES raw installer URL uses that same tag. `APM_INSTALLER_BASE_URL` remains authoritative and receives only the platform script name. Self-update config deliberately rejects credentials, tokens, mirror URLs, commands, and installer args; credentials stay on the existing auth path and enterprise mirror URLs stay env-only.
 
 `apm self-update` shares the Windows installer codepath used by `install.ps1`: it stages the new release under `%LOCALAPPDATA%\Programs\apm\releases\<tag>` before running `apm.exe --version`, so an AppLocker / WDAC allow-list rule for `%LOCALAPPDATA%\Programs\apm\*` suffices. When the smoke test fails with HRESULT `0x80070005` (`Access is denied`), the installer emits a specific AppLocker/WDAC diagnostic with three remediations (allow-list rule, set `APM_TEMP_DIR` to an allow-listed path, or fall back to `pip install --user apm-cli`) instead of silently retrying via pip.
 
