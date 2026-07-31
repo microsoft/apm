@@ -549,7 +549,7 @@ def _resolve_target_runtimes(
         # Machine discovery is intentionally the unrestricted-manifest fallback.
         logger.progress(
             f"Detected runtimes: {', '.join(target_runtimes)} "
-            "(machine-local; declare targets for portable ownership)"
+            "(auto-detected; add targets: to apm.yml for consistent results across machines)"
         )
 
     # Codex MCP is project-scoped: only configure it when Codex is an
