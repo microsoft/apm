@@ -94,7 +94,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/src/content/docs/specs/openapm-v0.1.md`.
   (by @sergio-sisternes-epam, #2365)
 - Package-declared targets now restrict dependency primitive deployment without expanding project or consumer authorization, preventing Claude-only hooks from leaking into Cursor and repairing stale owned entries on update; the contract is cited in `docs/src/content/docs/specs/openapm-v0.1.md`. By @sergio-sisternes-epam (#2362)
-- Package-declared targets now restrict deployment without expanding project authorization -- a Claude-only hook package can no longer leak into Cursor (`req-tg-008`). By @sergio-sisternes-epam (#2362)
 - Copilot hooks now normalize session lifecycle aliases to documented `sessionStart` and `agentStop` keys while preserving Claude's `SessionStart` and `Stop` output (reported by @SaulMoro, closes #2337, #2405)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
