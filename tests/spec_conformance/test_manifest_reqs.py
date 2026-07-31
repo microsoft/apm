@@ -1,6 +1,6 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
+Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
 req-tg-001..007, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
@@ -19,8 +19,11 @@ import jsonschema
 import pytest
 
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
+from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_WARNING,
@@ -265,6 +268,42 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
         "Selected skill names for dependencies that expose selectable skills",
         "MUST emit a default-visible diagnostic",
         "requested skill names, and the available skill names",
+    )
+
+
+@pytest.mark.req("req-mf-023")
+def test_dependency_package_targets_are_restriction_only() -> None:
+    """Package intent can narrow, but never expand, consumer authorization."""
+    active = [KNOWN_TARGETS["claude"], KNOWN_TARGETS["cursor"]]
+    claude_package = APMPackage(
+        name="claude-hooks",
+        version="1.0.0",
+        target="claude",
+    )
+
+    disjoint = resolve_effective_package_targets(
+        active,
+        ["cursor"],
+        claude_package,
+        DiagnosticCollector(),
+        "owner/claude-hooks",
+    )
+    universal = resolve_effective_package_targets(
+        active,
+        ["cursor"],
+        APMPackage(name="universal-hooks", version="1.0.0"),
+        DiagnosticCollector(),
+        "owner/universal-hooks",
+    )
+
+    assert disjoint.targets == ()
+    assert tuple(target.name for target in universal.targets) == ("cursor",)
+    assert_spec_contains(
+        "MUST deploy target-scoped primitives only to the",
+        "mechanism for (b) is implementation-defined",
+        "restriction-only: it MUST NOT activate a target",
+        "MUST reject the dependency manifest",
+        "under [req-lk-021]",
     )
 
 
