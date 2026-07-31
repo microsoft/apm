@@ -24,6 +24,15 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 
 
+def _authorization_headers(env: dict[str, str]) -> list[tuple[str, str]]:
+    """Return indexed Authorization header entries regardless of slot."""
+    return [
+        (env[f"GIT_CONFIG_KEY_{index}"], value)
+        for index in range(int(env.get("GIT_CONFIG_COUNT", "0")))
+        if (value := env.get(f"GIT_CONFIG_VALUE_{index}", "")).startswith("Authorization:")
+    ]
+
+
 def _git_config_value(env: dict[str, str], expected_key: str) -> str:
     """Return one indexed Git config value by its exact key."""
     count = int(env.get("GIT_CONFIG_COUNT", "0"))

@@ -194,13 +194,22 @@ class CloneEngine:
 
         def _env_for(attempt: TransportAttempt) -> dict[str, str]:
             if attempt.use_token:
-                if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                    return dep_auth_ctx.git_env
+                if dep_auth_ctx is not None:
+                    return host.auth_resolver.git_env_for_context(
+                        dep_auth_ctx,
+                        base_env=host.git_env,
+                    )
                 return host.git_env
             if attempt.scheme == "http":
                 return host._build_noninteractive_git_env(
                     preserve_config_isolation=True,
                     suppress_credential_helpers=True,
+                )
+            if is_ado:
+                return host.auth_resolver._build_git_env(
+                    None,
+                    host_kind="ado",
+                    base_env=host.git_env,
                 )
             return host._build_noninteractive_git_env()
 
@@ -354,6 +363,8 @@ class CloneEngine:
                     and attempt.use_token
                     and dep_auth_scheme == "basic"
                     and has_token
+                    and dep_auth_ctx is not None
+                    and host.auth_resolver._supports_ado_bearer(dep_auth_ctx.host_info.host)
                     and is_ado_auth_failure_signal(err_msg)
                 ):
                     try:
@@ -361,7 +372,6 @@ class CloneEngine:
                             AzureCliBearerError,
                             get_bearer_provider,
                         )
-                        from apm_cli.utils.github_host import set_ado_bearer_git_env
 
                         provider = get_bearer_provider()
                         if provider.is_available():
@@ -374,8 +384,12 @@ class CloneEngine:
                                     token=None,
                                     auth_scheme="bearer",
                                 )
-                                bearer_env = dict(host.git_env)
-                                set_ado_bearer_git_env(bearer_env, bearer)
+                                bearer_env = host.auth_resolver._build_git_env(
+                                    bearer,
+                                    scheme="bearer",
+                                    host_kind="ado",
+                                    base_env=host.git_env,
+                                )
                                 clone_action(bearer_url, bearer_env, target_path)
                                 host.auth_resolver.emit_stale_pat_diagnostic(
                                     dep_host or "dev.azure.com"

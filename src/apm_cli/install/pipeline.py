@@ -142,7 +142,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         if not host or is_github_hostname(host):
             continue  # github.com uses API probe with unauth fallback
         org = dep.repo_url.split("/")[0] if dep.repo_url and "/" in dep.repo_url else None
-        key = (host, org)
+        key = (host, dep.port, org)
         if key in seen:
             continue
         seen.add(key)
@@ -174,33 +174,24 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             token=dep_ctx.token,
             auth_scheme=_auth_scheme,
         )
-        _ctx_env = getattr(dep_ctx, "git_env", {}) or {}
-        safe_overlay_keys = (
-            "GIT_SSH_COMMAND",
-            "GIT_CONFIG_GLOBAL",
-            "GIT_CONFIG_NOSYSTEM",
+        probe_env = auth_resolver.git_env_for_context(
+            dep_ctx,
+            base_env=_dl.git_env,
         )
-        _dl_overlay = {key: value for key, value in _dl.git_env.items() if key in safe_overlay_keys}
-        probe_env = {**_ctx_env, **_dl_overlay}
         # GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM carve-out: GitAuthEnvBuilder
         # forces an empty global gitconfig for ALL hosts to prevent a user's
         # ~/.gitconfig insteadOf rewrites or credential helpers from leaking
         # tokens during a clone. But for preflight probes (a single ls-remote
         # against the same host the dep targets), the redirection surface is
         # nil and killing the user's global config kills Git Credential
-        # Manager along with it -- the helper most Windows ADO users rely on
-        # for Entra-cached credentials. For ADO specifically that matters
-        # because bearer acquisition can fail for reasons unrelated to login
-        # state (sandbox, proxy, microsoft/apm#1430-style PATH quirks), and
-        # GCM is the only remaining channel that can save us. Generic hosts
-        # have the same logic; widening the carve-out to ADO keeps the
-        # actual clone path isolated (it builds its own clean env) while
-        # giving the preflight probe the best chance to succeed.
-        if is_generic or is_azure_devops_hostname(host):
+        # Manager along with it. This carve-out applies only to generic hosts;
+        # ADO credentials come exclusively from AuthResolver.
+        if is_generic:
             for _key in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ASKPASS"):
                 probe_env.pop(_key, None)
 
-        host_display = host if not org else f"{host}/{org}"
+        endpoint = dep_ctx.host_info.display_name
+        host_display = endpoint if not org else f"{endpoint}/{org}"
 
         def _run_ls_remote(url, env):
             # auth-delegated: invoked via _primary_op/_bearer_op below, both
@@ -230,7 +221,12 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             # rejected PAT into the child-process env table even though the
             # GIT_CONFIG_VALUE_0 header carries the bearer. _build_git_env
             # explicitly skips GIT_TOKEN for scheme="bearer".
-            bearer_env = auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
+            bearer_env = auth_resolver._build_git_env(
+                bearer,
+                scheme="bearer",
+                host_kind="ado",
+                base_env=_dl.git_env,
+            )
             bearer_url = _dl._build_repo_url(
                 dep.repo_url,
                 use_ssh=False,

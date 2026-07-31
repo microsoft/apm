@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import subprocess
 import time
 import urllib.parse
@@ -214,6 +215,54 @@ class TestRefResolver:
         assert parsed.scheme == "https"
         assert parsed.hostname == "dev.azure.com"
         assert parsed.path == "/apm-org/apm-project/_git/consume-contract"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_visualstudio_remote_uses_legacy_two_segment_path(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            host="contoso.visualstudio.com",
+        )
+        resolver.list_remote_refs(
+            "contoso/Platform/standards",
+            remote_url="https://contoso.visualstudio.com/Platform/_git/standards",
+        )
+
+        parsed = urllib.parse.urlparse(mock_run.call_args.args[0][-1])
+        assert parsed.hostname == "contoso.visualstudio.com"
+        assert parsed.path == "/Platform/_git/standards"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ado_server_remote_preserves_explicit_port(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        with patch.dict(
+            os.environ,
+            {"ADO_HOST": "ado.example.test"},
+            clear=False,
+        ):
+            resolver = RefResolver(
+                timeout_seconds=5.0,
+                host="ado.example.test",
+                port=8443,
+            )
+            resolver.list_remote_refs(
+                "DefaultCollection/Platform/standards",
+                remote_url=(
+                    "https://ado.example.test:8443/DefaultCollection/Platform/_git/standards"
+                ),
+            )
+
+        parsed = urllib.parse.urlparse(mock_run.call_args.args[0][-1])
+        assert parsed.hostname == "ado.example.test"
+        assert parsed.port == 8443
         resolver.close()
 
     @pytest.mark.parametrize(

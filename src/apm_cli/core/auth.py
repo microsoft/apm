@@ -28,6 +28,7 @@ For operations with automatic auth/unauth fallback::
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
@@ -120,6 +121,23 @@ _PORT_CREDENTIAL_DOCS_URL = (
     "https://microsoft.github.io/apm/getting-started/authentication/"
     "#custom-port-hosts-and-per-port-credentials"
 )
+_GIT_CHILD_TOKEN_ENV_NAMES = frozenset(
+    {
+        "ADO_APM_PAT",
+        "COPILOT_GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GH_TOKEN",
+        "GITHUB_APM_PAT",
+        "GITHUB_COPILOT_PAT",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "GITHUB_MODELS_KEY",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_TOKEN",
+        "GITLAB_APM_PAT",
+        "GITLAB_TOKEN",
+    }
+)
+_GIT_CHILD_TOKEN_ENV_PREFIXES = ("GITHUB_APM_PAT_",)
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +308,7 @@ class AuthResolver:
             host=host,
             kind=provider.kind,
             has_public_repos=provider.has_public_repos,
-            api_base=provider.api_base(host.lower()),
+            api_base=provider.build_api_base(host.lower(), port),
             port=port,
             credential_purpose=provider.credential_purpose,
         )
@@ -658,6 +676,7 @@ class AuthResolver:
             auth_ctx is not None
             and auth_ctx.host_info.kind == "ado"
             and auth_ctx.source == "ADO_APM_PAT"
+            and self._supports_ado_bearer(auth_ctx.host_info.host)
         )
 
         def _try_ado_bearer_fallback(exc: Exception) -> T:
@@ -831,8 +850,9 @@ class AuthResolver:
         if host_info.kind == "ado":
             from apm_cli.core.azure_cli import get_bearer_provider
 
-            provider = get_bearer_provider()
-            az_available = provider.is_available()
+            bearer_supported = self._supports_ado_bearer(host_info.host)
+            provider = get_bearer_provider() if bearer_supported else None
+            az_available = bool(provider and provider.is_available())
             pat_set = bool(os.environ.get("ADO_APM_PAT"))
 
             org_part = org or ""
@@ -846,9 +866,17 @@ class AuthResolver:
                         org_part = parts[1] if len(parts) > 1 else ""
 
             token_url = (
-                f"https://dev.azure.com/{org_part}/_usersSettings/tokens"
+                (
+                    f"https://dev.azure.com/{org_part}/_usersSettings/tokens"
+                    if bearer_supported
+                    else f"https://{display}/{org_part}/_usersSettings/tokens"
+                )
                 if org_part
-                else "https://dev.azure.com/<org>/_usersSettings/tokens"
+                else (
+                    "https://dev.azure.com/<org>/_usersSettings/tokens"
+                    if bearer_supported
+                    else f"https://{display}/<collection>/_usersSettings/tokens"
+                )
             )
 
             if pat_set:
@@ -886,6 +914,19 @@ class AuthResolver:
                 )
 
             # No PAT set
+            if not bearer_supported:
+                return (
+                    "\n    Azure DevOps Server requires ADO_APM_PAT.\n\n"
+                    "    To fix:\n"
+                    "      1. Create a PAT with Code (Read) scope in your "
+                    "Azure DevOps Server collection.\n"
+                    "      2. Set it for this process: export ADO_APM_PAT=your_token\n"
+                    "      3. Retry: apm install\n\n"
+                    "    Azure CLI bearer authentication applies to Azure DevOps "
+                    "Services, not Server.\n\n"
+                    "    Docs: https://microsoft.github.io/apm/"
+                    "getting-started/authentication/#on-prem-azure-devops-server"
+                )
             if not az_available:
                 # Case 1: no az, no PAT
                 return (
@@ -1023,15 +1064,19 @@ class AuthResolver:
         Resolution order (``generic``): credential helper only (no GitHub or
         GitLab platform env vars).
 
-        Resolution order (ADO): ``ADO_APM_PAT`` → AAD bearer → ``none``.
+        Resolution order (ADO Services): ``ADO_APM_PAT`` -> AAD bearer -> ``none``.
+        Resolution order (ADO Server): ``ADO_APM_PAT`` -> ``none``.
 
         All token-bearing requests use HTTPS.
         """
         if host_info.kind == "ado":
-            # ADO resolution chain: PAT env -> AAD bearer -> none
+            # ADO resolution chain: PAT env -> cloud AAD bearer -> none.
+            # Azure DevOps Server does not support Entra OAuth credentials.
             pat = os.environ.get("ADO_APM_PAT")
             if pat:
                 return pat, "ADO_APM_PAT", "basic"
+            if not self._supports_ado_bearer(host_info.host):
+                return None, "none", "basic"
             # Try AAD bearer via az cli (lazy import to avoid module-load cost on non-ADO paths)
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
 
@@ -1099,6 +1144,14 @@ class AuthResolver:
         return None, "none", "basic"
 
     @staticmethod
+    def _supports_ado_bearer(host: str) -> bool:
+        """Return whether Azure CLI bearer auth applies to this ADO host."""
+        normalized = host.lower()
+        return normalized in {"dev.azure.com", "ssh.dev.azure.com"} or normalized.endswith(
+            ".visualstudio.com"
+        )
+
+    @staticmethod
     def _purpose_for_host(host_info: HostInfo) -> str:
         return host_info.credential_purpose or HOST_PROVIDERS[host_info.kind].credential_purpose
 
@@ -1115,28 +1168,38 @@ class AuthResolver:
         *,
         scheme: str = "basic",
         host_kind: str = "github",
+        base_env: dict | None = None,
     ) -> dict:
         """Pre-built env dict for subprocess git calls.
 
-        For ADO bearer tokens (scheme='bearer'), injects an Authorization header
-        via GIT_CONFIG_COUNT/KEY/VALUE env vars (see github_host.set_ado_bearer_git_env).
-        For all other cases, behavior is unchanged.
+        ADO PATs and bearer tokens use an Authorization header via
+        GIT_CONFIG_COUNT/KEY/VALUE. Other host classes retain GIT_TOKEN.
         """
-        env = os.environ.copy()
+        env = dict(base_env) if base_env is not None else os.environ.copy()
+        AuthResolver._clear_platform_token_env(env)
         AuthResolver._clear_git_auth_env(env)
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
-        if scheme == "bearer" and token and host_kind == "ado":
-            # B2 #852: skip GIT_TOKEN for bearer scheme -- the JWT is injected via
-            # a GIT_CONFIG_VALUE_N header only; GIT_TOKEN here would leak it into
-            # every child-process env (visible in /proc/<pid>/environ, ps eww).
+        if token and host_kind == "ado" and scheme in {"basic", "bearer"}:
+            # ADO credentials use an Authorization header, never argv or
+            # GIT_TOKEN. This keeps PATs and bearer JWTs out of process lists.
             #
             # #2368: set (append-after-retained) rather than dict-merge, so the
             # non-auth entries _clear_git_auth_env just retained (e.g.
             # http.sslCAInfo) are not clobbered by a hardcoded COUNT=1 overlay.
-            from apm_cli.utils.github_host import set_ado_bearer_git_env
+            from apm_cli.utils.github_host import set_authorization_header_git_env
 
-            set_ado_bearer_git_env(env, token)
+            if scheme == "bearer":
+                credential = token
+                header_scheme = "Bearer"
+            else:
+                credential = base64.b64encode(f":{token}".encode()).decode()
+                header_scheme = "Basic"
+            set_authorization_header_git_env(
+                env,
+                header_scheme,
+                credential,
+            )
         elif token:
             env["GIT_TOKEN"] = token
         return env
@@ -1167,6 +1230,45 @@ class AuthResolver:
         env["GIT_CONFIG_COUNT"] = str(count + 1)
         env[f"GIT_CONFIG_KEY_{count}"] = key
         env[f"GIT_CONFIG_VALUE_{count}"] = value
+
+    @staticmethod
+    def git_env_for_context(
+        ctx: AuthContext,
+        *,
+        base_env: dict,
+    ) -> dict:
+        """Apply one resolved credential to a hardened Git base environment."""
+        return AuthResolver._build_git_env(
+            ctx.token,
+            scheme=ctx.auth_scheme,
+            host_kind=ctx.host_info.kind,
+            base_env=base_env,
+        )
+
+    def hardened_git_base_env(self) -> dict:
+        """Build the credential-free hardened base for Git subprocesses."""
+        from apm_cli.deps.git_auth_env import GitAuthEnvBuilder
+
+        return GitAuthEnvBuilder(self._token_manager).setup_environment()
+
+    def hardened_git_env_for_context(self, ctx: AuthContext) -> dict:
+        """Build a hardened Git environment for one resolved context."""
+        return self.git_env_for_context(
+            ctx,
+            base_env=self.hardened_git_base_env(),
+        )
+
+    @staticmethod
+    def _clear_platform_token_env(env: dict) -> None:
+        """Neutralize raw platform token sources before spawning git.
+
+        GitPython treats ``env`` as an overlay on the parent process, so
+        deleting a key from the overlay leaves the ambient value intact.
+        Empty values mask those sources in GitPython and direct subprocesses.
+        """
+        for key in tuple(env):
+            if key in _GIT_CHILD_TOKEN_ENV_NAMES or key.startswith(_GIT_CHILD_TOKEN_ENV_PREFIXES):
+                env[key] = ""
 
     @staticmethod
     def _clear_git_auth_env(env: dict) -> None:
@@ -1325,6 +1427,9 @@ class AuthResolver:
             else dep_ref is not None and getattr(dep_ref, "is_azure_devops", lambda: False)()
         )
         if not is_ado:
+            return BearerFallbackOutcome(primary, False)
+        ado_host = dep_ref if isinstance(dep_ref, str) else getattr(dep_ref, "host", "")
+        if not self._supports_ado_bearer(ado_host or ""):
             return BearerFallbackOutcome(primary, False)
         if not is_auth_failure(primary):
             return BearerFallbackOutcome(primary, False)

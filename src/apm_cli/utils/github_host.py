@@ -21,15 +21,34 @@ def _get_gitlab_hosts_list() -> list[str]:
     return [part.strip().lower().split("/")[0] for part in raw.split(",") if part.strip()]
 
 
+def _normalize_configured_host(value: str) -> str:
+    """Return a lowercase hostname from one configured host value."""
+    candidate = value.strip()
+    if not candidate:
+        return ""
+    parsed = urllib.parse.urlsplit(
+        candidate if "://" in candidate else f"//{candidate}",
+        scheme="https",
+    )
+    try:
+        if parsed.port is not None:
+            return ""
+    except ValueError:
+        return ""
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment or parsed.username:
+        return ""
+    return (parsed.hostname or "").lower()
+
+
 def _get_ado_single_host() -> str:
-    """Return the normalised ADO_HOST env value."""
-    return os.environ.get("ADO_HOST", "").strip().lower().split("/")[0]
+    """Return the normalized ADO_HOST env value."""
+    return _normalize_configured_host(os.environ.get("ADO_HOST", ""))
 
 
 def _get_ado_hosts_list() -> list[str]:
-    """Return normalised APM_ADO_HOSTS entries."""
+    """Return normalized APM_ADO_HOSTS entries."""
     raw = os.environ.get("APM_ADO_HOSTS", "")
-    return [part.strip().lower().split("/")[0] for part in raw.split(",") if part.strip()]
+    return [host for part in raw.split(",") if (host := _normalize_configured_host(part))]
 
 
 def default_host() -> str:
@@ -57,7 +76,9 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
     """
     if not hostname:
         return False
-    h = hostname.strip().lower().split("/")[0]
+    h = _normalize_configured_host(hostname)
+    if not h:
+        return False
     if h == "dev.azure.com":
         return True
     if h == "ssh.dev.azure.com":
@@ -454,7 +475,12 @@ def build_gitlab_https_clone_url(
 
 
 def build_ado_https_clone_url(
-    org: str, project: str, repo: str, token: str | None = None, host: str = "dev.azure.com"
+    org: str,
+    project: str,
+    repo: str,
+    token: str | None = None,
+    host: str = "dev.azure.com",
+    port: int | None = None,
 ) -> str:
     """Build Azure DevOps HTTPS clone URL.
 
@@ -467,15 +493,18 @@ def build_ado_https_clone_url(
         repo: Repository name
         token: Optional Personal Access Token for authentication
         host: Azure DevOps host (default: dev.azure.com)
+        port: Optional non-default HTTPS port for Azure DevOps Server
 
     Returns:
         str: HTTPS clone URL for Azure DevOps
     """
     quoted_project = urllib.parse.quote(project, safe="")
+    netloc = f"{host}:{port}" if port is not None else host
+    org_path = "" if is_visualstudio_legacy_hostname(host) else f"{org}/"
     if token:
         # ADO uses PAT as password with empty username
-        return f"https://{token}@{host}/{org}/{quoted_project}/_git/{repo}"
-    return f"https://{host}/{org}/{quoted_project}/_git/{repo}"
+        return f"https://{token}@{netloc}/{org_path}{quoted_project}/_git/{repo}"
+    return f"https://{netloc}/{org_path}{quoted_project}/_git/{repo}"
 
 
 def build_authorization_header_git_env(scheme: str, credential: str) -> dict:
@@ -732,7 +761,13 @@ def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.az
 
 
 def build_ado_api_url(
-    org: str, project: str, repo: str, path: str, ref: str = "main", host: str = "dev.azure.com"
+    org: str,
+    project: str,
+    repo: str,
+    path: str,
+    ref: str = "main",
+    host: str = "dev.azure.com",
+    port: int | None = None,
 ) -> str:
     """Build Azure DevOps REST API URL for file contents.
 
@@ -745,11 +780,13 @@ def build_ado_api_url(
         path: Path to file within the repository
         ref: Git reference (branch, tag, or commit). Defaults to "main"
         host: Azure DevOps host (default: dev.azure.com)
+        port: Optional non-default HTTPS port for Azure DevOps Server
 
     Returns:
         str: API URL for retrieving file contents
     """
     api_host = "dev.azure.com" if host == "ssh.dev.azure.com" else host
+    api_netloc = f"{api_host}:{port}" if port is not None else api_host
     encoded_path = urllib.parse.quote(path, safe="")
     quoted_org = urllib.parse.quote(org, safe="")
     quoted_project = urllib.parse.quote(project, safe="")
@@ -757,7 +794,7 @@ def build_ado_api_url(
     quoted_ref = urllib.parse.quote(ref, safe="")
     org_path = "" if is_visualstudio_legacy_hostname(api_host) else f"{quoted_org}/"
     return (
-        f"https://{api_host}/{org_path}{quoted_project}/_apis/git/repositories/{quoted_repo}/items"
+        f"https://{api_netloc}/{org_path}{quoted_project}/_apis/git/repositories/{quoted_repo}/items"
         f"?path={encoded_path}&versionDescriptor.version={quoted_ref}&api-version=7.0"
     )
 
@@ -797,6 +834,16 @@ def parse_ado_repo_url(url: str | None) -> tuple[str, str, str] | None:
     if "_git" not in segments:
         return None
     git_idx = segments.index("_git")
+    if (
+        not is_visualstudio_legacy_hostname(hostname)
+        and hostname not in {"dev.azure.com", "ssh.dev.azure.com"}
+        and segments[0].lower() == "tfs"
+        and git_idx >= 3
+    ):
+        raise ValueError(
+            "Azure DevOps Server URLs mounted below '/tfs/' are not "
+            "currently supported. Use a root-hosted collection URL."
+        )
     # repo is the segment immediately after the ``_git`` marker.
     if git_idx + 1 >= len(segments):
         return None

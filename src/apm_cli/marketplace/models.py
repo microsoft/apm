@@ -180,6 +180,16 @@ class MarketplaceSource:
         return self.path == "" and url_names_remote_manifest(self.url)
 
     @property
+    def port(self) -> int | None:
+        """Return the explicit remote URL port, if present."""
+        if not self.url or _looks_like_local_path(self.url):
+            return None
+        try:
+            return urlsplit(self.url).port
+        except ValueError:
+            return None
+
+    @property
     def kind(self) -> str:
         """Derived source kind: ``local`` | ``url`` | ``github`` | ``gitlab`` | ``ado`` | ``git``.
 

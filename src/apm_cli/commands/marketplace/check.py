@@ -104,6 +104,13 @@ def check(offline, verbose):
                     host=host,
                     token=auth.token if auth else None,
                     auth_scheme=auth.auth_scheme if auth else "basic",
+                    git_env=(
+                        auth_resolver.hardened_git_env_for_context(auth)
+                        if auth_resolver is not None and auth is not None
+                        else None
+                    ),
+                    auth_resolver=auth_resolver,
+                    auth_target=host,
                 )
         return resolvers[key]
 

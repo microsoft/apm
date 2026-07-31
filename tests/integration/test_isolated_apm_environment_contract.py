@@ -242,7 +242,9 @@ if Path.cwd() != parent_cwd:
 
 def test_bounded_apm_git_environment_contract(tmp_path: Path) -> None:
     remote_control_names = (
+        "ADO_HOST",
         "APM_ALLOW_PROTOCOL_FALLBACK",
+        "APM_ADO_HOSTS",
         "APM_GIT_CREDENTIAL_TIMEOUT",
         "APM_GITLAB_HOSTS",
         "APM_GIT_PROTOCOL",
