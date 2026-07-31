@@ -1,6 +1,6 @@
 ---
 title: "Install MCP servers"
-description: "Declare MCP servers in apm.yml and install them into explicitly selected, declared, or discovered targets."
+description: "Keep MCP target ownership portable across your team's machines with declarations in apm.yml."
 ---
 
 `apm install` is the same driver for two artifact kinds: APM packages
