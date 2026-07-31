@@ -476,7 +476,7 @@ are PAT-only. The Services bearer posture:
 - **Compatible with managed-identity / service-account-only orgs.** Works in environments where PAT creation is disabled, including WIF-backed pipelines.
 - **Same transport rules as PATs.** Bearer values are injected via `http.extraheader`, scoped to ADO hosts only, and never logged.
 
-See [Azure DevOps AAD bearer tokens](#azure-devops-aad-bearer-tokens) above for the resolution precedence and CI patterns.
+See [Azure DevOps Services AAD bearer tokens](#azure-devops-services-aad-bearer-tokens) above for the resolution precedence and CI patterns.
 
 ## Attack surface comparison
 
