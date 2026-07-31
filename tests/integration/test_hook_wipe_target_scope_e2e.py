@@ -278,10 +278,10 @@ def test_narrowing_targets_preserves_sibling_hooks_in_dropped_target(
     cursor_sidecar = project / ".cursor" / "apm-hooks.json"
     claude_settings = project / ".claude" / "settings.json"
     claude_sidecar = project / ".claude" / "apm-hooks.json"
-    assert {"pkg-a", "pkg-b"} <= _sidecar_sources(cursor_sidecar), (
+    assert {"acme/pkg-a", "acme/pkg-b"} <= _sidecar_sources(cursor_sidecar), (
         "precondition: both packages merged into cursor"
     )
-    assert {"pkg-a", "pkg-b"} <= _sidecar_sources(claude_sidecar), (
+    assert {"acme/pkg-a", "acme/pkg-b"} <= _sidecar_sources(claude_sidecar), (
         "precondition: both packages merged into claude"
     )
 
@@ -310,7 +310,7 @@ def test_narrowing_targets_preserves_sibling_hooks_in_dropped_target(
     # manual entry must all still be present exactly as before.
     assert cursor_settings.exists(), "cursor config must not be deleted by a narrowed-away wipe"
     assert cursor_sidecar.exists(), "cursor's ownership sidecar must survive"
-    assert {"pkg-a", "pkg-b"} <= _sidecar_sources(cursor_sidecar), (
+    assert {"acme/pkg-a", "acme/pkg-b"} <= _sidecar_sources(cursor_sidecar), (
         "neither package's cursor hook entry may be lost when cursor is out of scope"
     )
     assert "echo manual-cursor-hook" in _pre_tool_use_commands(cursor_settings), (
@@ -320,8 +320,8 @@ def test_narrowing_targets_preserves_sibling_hooks_in_dropped_target(
     # The currently-declared harness (claude) IS in scope: pkg-b's entry
     # must be reconciled out, pkg-a's must survive.
     claude_sources = _sidecar_sources(claude_sidecar)
-    assert "pkg-b" not in claude_sources, "removed package's claude hook entry must be gone"
-    assert "pkg-a" in claude_sources, "surviving sibling's claude hook entry must remain"
+    assert "acme/pkg-b" not in claude_sources, "removed package's claude hook entry must be gone"
+    assert "acme/pkg-a" in claude_sources, "surviving sibling's claude hook entry must remain"
     claude_commands = _pre_tool_use_commands(claude_settings)
     assert "./scripts/pkg-a-hook.sh" in claude_commands
     assert "./scripts/pkg-b-hook.sh" not in claude_commands
@@ -349,8 +349,10 @@ def test_negative_twin_without_narrowing_still_cleans_removed_target(
 
     for sidecar, label in ((cursor_sidecar, "cursor"), (claude_sidecar, "claude")):
         sources = _sidecar_sources(sidecar)
-        assert "pkg-b" not in sources, f"pkg-b's {label} entry must be reconciled when in scope"
-        assert "pkg-a" in sources, f"pkg-a's {label} entry must survive"
+        assert "acme/pkg-b" not in sources, (
+            f"pkg-b's {label} entry must be reconciled when in scope"
+        )
+        assert "acme/pkg-a" in sources, f"pkg-a's {label} entry must survive"
 
 
 @pytest.mark.parametrize("caller", _CALLERS)
@@ -457,7 +459,7 @@ def test_scope_symmetry_is_load_bearing_mutation_break(
     _narrow_targets(project, ["claude"])
 
     cursor_sidecar = project / ".cursor" / "apm-hooks.json"
-    assert {"pkg-a", "pkg-b"} <= _sidecar_sources(cursor_sidecar)
+    assert {"acme/pkg-a", "acme/pkg-b"} <= _sidecar_sources(cursor_sidecar)
 
     original_sync_integration = HookIntegrator.sync_integration
 
@@ -473,7 +475,7 @@ def test_scope_symmetry_is_load_bearing_mutation_break(
         result = _remove_package("prune", project, monkeypatch, "acme/pkg-b")
     assert result.exit_code == 0, result.output
 
-    assert "pkg-a" not in _sidecar_sources(cursor_sidecar), (
+    assert "acme/pkg-a" not in _sidecar_sources(cursor_sidecar), (
         "with the targets= scope neutered (simulating the pre-#2250 unscoped "
         "wipe), pkg-a's still-installed cursor hook entry must be gone -- "
         "proving the real scoped call is what actually preserves it in "
