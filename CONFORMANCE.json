@@ -979,8 +979,9 @@
       "keyword": "MUST",
       "section": "10.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_deployed_file_missing_from_deployed_files_is_reported",
         "tests/spec_conformance/test_manifest_reqs.py::test_sha256_content_hash_on_deployed_files"
       ]
     },

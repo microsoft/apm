@@ -42,11 +42,15 @@ lockfile-exists -> ref-consistency -> deployment-ledger-owners
 
 After the baseline passes, it replays the install in a scratch directory
 and diffs against the working tree to surface `unintegrated`, `modified`,
-and `orphaned` files. Pass `--no-drift` to skip the replay. In bare
-`apm audit`, the replay remains cache-only and a fresh checkout without a
-warm cache yields an informational skip. In `apm audit --ci`, a cold cache
-instead triggers a lock-pinned scratch self-hydration path; if that replay
-cannot be materialized, the drift check fails closed. With `--policy
+`orphaned`, and `unrecorded` files. `unrecorded` means replay produced the
+same normalized bytes as the project but no exact or directory
+`deployed_files` claim covers the path; shared merge-hook targets are exempt
+and differing bytes report `modified`. Pass `--no-drift` to skip the replay.
+In bare `apm audit`, the replay remains cache-only and a fresh checkout
+without a warm cache yields an informational skip. In `apm audit --ci`, a
+cold cache instead triggers the lock-pinned scratch self-hydration owned by
+`install/audit_replay.py`; if it cannot be materialized, audit fails closed.
+With `--policy
 <source>` it also evaluates the discovered policy against the lockfile.
 Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 

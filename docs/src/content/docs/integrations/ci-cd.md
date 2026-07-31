@@ -171,7 +171,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (8 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [Enforce in CI guide](../../enterprise/enforce-in-ci/).
+`apm audit --ci` verifies lockfile consistency in CI (the baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules. For full setup including SARIF integration and GitHub Code Scanning, see the [Enforce in CI guide](../../enterprise/enforce-in-ci/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 

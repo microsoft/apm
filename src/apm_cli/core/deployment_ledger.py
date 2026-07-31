@@ -74,6 +74,28 @@ class DeploymentLedgerCodec:
     """Translate canonical deployment records to and from lockfile views."""
 
     @staticmethod
+    def legacy_deployed_file_claims(lockfile: LockFile) -> dict[str, str]:
+        """Return the compatibility ``deployed_files`` view by owning package."""
+        claims: dict[str, str] = {}
+        for owner, dependency in lockfile.dependencies.items():
+            if owner == ".":
+                continue
+            for path in dependency.deployed_files:
+                claims.setdefault(path, owner)
+        for path in lockfile.local_deployed_files:
+            claims.setdefault(path, ".")
+        return claims
+
+    @staticmethod
+    def legacy_deployed_file_hash_paths(lockfile: LockFile) -> frozenset[str]:
+        """Return paths explicitly file-shaped by compatibility hash views."""
+        paths = set(lockfile.local_deployed_file_hashes)
+        for owner, dependency in lockfile.dependencies.items():
+            if owner != ".":
+                paths.update(dependency.deployed_file_hashes)
+        return frozenset(paths)
+
+    @staticmethod
     def valid_owner_keys(
         lockfile: LockFile,
         *,

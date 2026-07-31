@@ -312,6 +312,24 @@ def test_shared_target_contraction_has_single_reconciler_owner() -> None:
     assert "Shared target contraction must use DeploymentReconciler" in guard
 
 
+def test_drift_hook_membership_exemptions_use_canonical_registries() -> None:
+    """Drift exemptions must derive hook paths instead of copying filenames."""
+    root = Path(__file__).parents[2]
+    consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    body = consumer.split("def merge_hook_config_paths(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+
+    assert "_MERGE_HOOK_TARGETS" in body
+    assert "_APM_HOOKS_SIDECAR" in body
+    assert "settings.json" not in body
+    assert "hooks.json" not in body
+    assert "apm-hooks.json" not in body
+    assert "Drift hook membership exemptions must derive from HookIntegrator registries" in guard
+
+
 def test_shared_target_contraction_guard_rejects_missing_reconciler_delegation(
     tmp_path: Path,
 ) -> None:
@@ -361,6 +379,64 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     assert "DeploymentLedgerCodec.record_local_bundle_files" in handler
     assert "DeploymentLedgerCodec.local_bundle_paths" in drift
     assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
+
+
+def test_drift_deployment_membership_has_single_owner() -> None:
+    """Drift membership and file shape must consume the deployment ledger."""
+    root = Path(__file__).parents[2]
+    drift = (root / "src/apm_cli/install/drift.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    tracked_body = drift.split("def _collect_tracked_files(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+    hashed_body = drift.split("def _collect_hashed_files(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+
+    assert "DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)" in tracked_body
+    assert "DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile)" in hashed_body
+    for legacy_view in (
+        "lockfile.dependencies",
+        "local_deployed_files",
+        "deployed_file_hashes",
+    ):
+        assert legacy_view not in tracked_body
+        assert legacy_view not in hashed_body
+    assert "Drift deployment membership must route through DeploymentLedgerCodec" in guard
+
+
+def test_hidden_unicode_membership_uses_deployment_ledger_codec() -> None:
+    """The scanner and drift classifier must consume one membership view."""
+    root = Path(__file__).parents[2]
+    scanner = (root / "src/apm_cli/security/file_scanner.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    body = scanner.split("def scan_lockfile_packages(", maxsplit=1)[1].split(
+        "\ndef ",
+        maxsplit=1,
+    )[0]
+
+    assert "DeploymentLedgerCodec.legacy_deployed_file_claims(lock)" in body
+    assert "lock.dependencies" not in body
+    assert "dep.deployed_files" not in body
+    assert "Hidden-Unicode membership must route through DeploymentLedgerCodec" in guard
+
+
+def test_deployment_ledger_codec_owns_legacy_membership_projection() -> None:
+    """The compatibility claim set must stay distinct from canonical rows."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/deployment_ledger.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    body = owner.split("def legacy_deployed_file_claims(", maxsplit=1)[1].split(
+        "\n    def ",
+        maxsplit=1,
+    )[0]
+
+    assert "dependency.deployed_files" in body
+    assert "lockfile.local_deployed_files" in body
+    assert "from_lockfile" not in body
+    assert "Legacy deployed-file membership projection belongs to DeploymentLedgerCodec" in guard
 
 
 def test_ac13_git_ref_transport_selection_has_single_owner() -> None:

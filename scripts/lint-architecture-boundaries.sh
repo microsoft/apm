@@ -270,6 +270,18 @@ if [ "$shared_target_status" -ne 0 ]; then
     echo "$shared_target_output"
     violations=$((violations + 1))
 fi
+merge_hook_membership_body=$(awk '
+    /^def merge_hook_config_paths\(/ {flag=1}
+    flag && /^def / && !/^def merge_hook_config_paths\(/ {exit}
+    flag {print}
+' src/apm_cli/install/manifest_reconcile.py)
+if ! printf '%s\n' "$merge_hook_membership_body" | grep -q '_MERGE_HOOK_TARGETS' \
+    || ! printf '%s\n' "$merge_hook_membership_body" | grep -q '_APM_HOOKS_SIDECAR' \
+    || printf '%s\n' "$merge_hook_membership_body" \
+        | grep -Eq 'settings\.json|hooks\.json|apm-hooks\.json'; then
+    echo "[x] Drift hook membership exemptions must derive from HookIntegrator registries"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
@@ -383,6 +395,48 @@ if ! grep -q 'DeploymentLedgerCodec.record_local_bundle_files' \
     || [ -n "$local_bundle_marker_hits" ]; then
     echo "[x] Local-bundle replay provenance must route through DeploymentLedgerCodec"
     [ -n "$local_bundle_marker_hits" ] && echo "$local_bundle_marker_hits"
+    violations=$((violations + 1))
+fi
+drift_membership_body=$(awk '
+    /^def _collect_tracked_files\(/ {flag=1}
+    flag && /^def / && !/^def _collect_tracked_files\(/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+drift_hash_shape_body=$(awk '
+    /^def _collect_hashed_files\(/ {flag=1}
+    flag && /^def / && !/^def _collect_hashed_files\(/ {exit}
+    flag {print}
+' src/apm_cli/install/drift.py)
+if ! printf '%s\n' "$drift_membership_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_claims' \
+    || ! printf '%s\n' "$drift_hash_shape_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_hash_paths' \
+    || printf '%s\n%s\n' "$drift_membership_body" "$drift_hash_shape_body" \
+        | grep -Eq 'lockfile\.dependencies|local_deployed_files|deployed_file_hashes'; then
+    echo "[x] Drift deployment membership must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
+scanner_membership_body=$(awk '
+    /^def scan_lockfile_packages\(/ {flag=1}
+    flag && /^def / && !/^def scan_lockfile_packages\(/ {exit}
+    flag {print}
+' src/apm_cli/security/file_scanner.py)
+if ! printf '%s\n' "$scanner_membership_body" \
+        | grep -q 'DeploymentLedgerCodec.legacy_deployed_file_claims' \
+    || printf '%s\n' "$scanner_membership_body" \
+        | grep -Eq 'lock\.dependencies|dep\.deployed_files'; then
+    echo "[x] Hidden-Unicode membership must route through DeploymentLedgerCodec"
+    violations=$((violations + 1))
+fi
+membership_owner_body=$(awk '
+    /^    def legacy_deployed_file_claims\(/ {flag=1}
+    flag && /^    def / && !/legacy_deployed_file_claims/ {exit}
+    flag {print}
+' src/apm_cli/core/deployment_ledger.py)
+if ! printf '%s\n' "$membership_owner_body" | grep -q 'dependency\.deployed_files' \
+    || ! printf '%s\n' "$membership_owner_body" | grep -q 'lockfile\.local_deployed_files' \
+    || printf '%s\n' "$membership_owner_body" | grep -q 'from_lockfile'; then
+    echo "[x] Legacy deployed-file membership projection belongs to DeploymentLedgerCodec"
     violations=$((violations + 1))
 fi
 update_plan_ref_body=$(awk '
