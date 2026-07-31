@@ -144,7 +144,7 @@ The generated source object is also a producer-to-consumer contract.
 the generated entry rather than from the marketplace host, and preserves
 the generated path and ref.
 
-For an Azure DevOps marketplace, point `sourceBase` at the
+For an Azure DevOps Services marketplace, point `sourceBase` at the
 `https://dev.azure.com/{org}/{project}/_git` base; relative sources compose
 onto it and the `dev.azure.com` host is kept on the consumer side:
 
@@ -157,8 +157,12 @@ marketplace:
       ref: 3f2a9b1c
 ```
 
-Azure DevOps authentication uses `ADO_APM_PAT` (with an `az` CLI bearer
-fallback); see [authentication](../../getting-started/authentication/#azure-devops).
+Services authentication checks `ADO_APM_PAT`, then the Azure CLI bearer. For
+Azure DevOps Server, register the host with `ADO_HOST` or `APM_ADO_HOSTS`,
+use `ADO_APM_PAT`, and use the portless root-hosted
+`https://host/Collection/Project/_git` form for `sourceBase`. Server does not
+use the Azure CLI bearer. See
+[authentication](../../getting-started/authentication/#azure-devops).
 
 Before:
 

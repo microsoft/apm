@@ -16,7 +16,11 @@ Pick the path that matches your dependencies:
 - **All public github.com packages.** Do nothing.
 - **Private github.com / GHE.com / GHES packages.** Either run `gh auth login` (recommended) or set `GITHUB_APM_PAT`.
 - **GitLab packages (SaaS or self-managed).** Set `GITLAB_APM_PAT`, or rely on your `git credential` helper.
-- **Azure DevOps packages.** Run `az login`, or set `ADO_APM_PAT`.
+- **Azure DevOps Services packages.** Set `ADO_APM_PAT`, or run `az login`;
+  APM checks the PAT first.
+- **Azure DevOps Server packages.** Register the host with `ADO_HOST` or
+  `APM_ADO_HOSTS`, then set `ADO_APM_PAT`. Server does not use the Azure CLI
+  bearer.
 - **Bitbucket, Gitea, or any other git host.** Use your existing `git credential` helper -- if `git clone <url>` works in your shell, `apm install` works too.
 
 That covers the consumer case. The rest of this page expands each path.
@@ -80,21 +84,31 @@ If you have configured a git credential helper for GitLab (e.g. `git credential-
 
 ## Azure DevOps
 
-If a dependency lives on `dev.azure.com/...`:
-
-```bash
-az login --tenant <your-tenant-id>
-apm install
-```
-
-Or, if you cannot use `az`:
+For Azure DevOps Services (`dev.azure.com` and `*.visualstudio.com`), set a
+PAT or use an active Azure CLI session:
 
 ```bash
 export ADO_APM_PAT=your_ado_pat
 apm install
 ```
 
-ADO is always auth-required -- there is no anonymous fallback.
+```bash
+az login --tenant <your-tenant-id>
+apm install
+```
+
+For Azure DevOps Server, register the host and set a PAT:
+
+```bash
+export ADO_HOST=ado.example.com
+export ADO_APM_PAT=your_ado_pat
+apm install
+```
+
+Use `APM_ADO_HOSTS` instead when you have multiple Server instances. Server
+is PAT-only; the Azure CLI bearer does not apply. ADO is always
+auth-required -- there is no anonymous fallback. See the
+[full Azure DevOps flow](../../getting-started/authentication/#azure-devops).
 
 ## Bitbucket, Gitea, and any other git host
 
@@ -119,6 +133,9 @@ rewritten to HTTPS. See
 
 ## Going further
 
-Token scopes, SSO authorization, Enterprise Managed Users (EMU), GHES hostnames, multi-org `GITHUB_APM_PAT_{ORG}` setups, GitLab self-managed FQDN routing, and the ADO bearer fallback are covered in the [enterprise authentication](../../enterprise/security/) page.
+Token scopes, SSO authorization, Enterprise Managed Users (EMU), GHES
+hostnames, multi-org `GITHUB_APM_PAT_{ORG}` setups, GitLab self-managed FQDN
+routing, and the Azure DevOps Services and Server credential flows are
+covered in the [authentication guide](../../getting-started/authentication/).
 
 For how a token is used once resolved, see [Private and org packages](../private-and-org-packages/).
