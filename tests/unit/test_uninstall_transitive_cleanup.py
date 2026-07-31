@@ -419,7 +419,9 @@ class TestUninstallTransitiveDependencyCleanup:
                     result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
 
                 assert result.exit_code == 0
-                assert remaining_install_path in observed_paths
+                assert (root / remaining_install_path).resolve() in [
+                    p.resolve() for p in observed_paths
+                ]
             finally:
                 os.chdir(
                     os.path.dirname(os.path.abspath(__file__))
