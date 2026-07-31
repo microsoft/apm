@@ -593,6 +593,7 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     assert integration_source.index("parse_targets_field(mcp_apm_config)") < (
         integration_source.index("MCPIntegrator.install(")
     )
+    assert "AC21: MCP manifest target precedence authority" in guard
     assert (
         "MCP target precedence must route through the canonical manifest adapter before discovery"
         in guard
