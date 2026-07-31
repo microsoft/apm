@@ -149,20 +149,13 @@ def scan_deployed_trees(project_root: Path) -> tuple[dict[str, list[ScanFinding]
     return result.findings_by_file, len(result.scanned_files)
 
 
-def _scan_lockfile_packages(
+def _scan_claimed_files(
     project_root: Path,
-    package_filter: str | None = None,
-    lockfile: LockFile | None = None,
+    claims: dict[str, str],
+    package_filter: str | None,
 ) -> _FileScanResult:
-    """Collect the exact lockfile-driven scan result."""
-    lock = lockfile if lockfile is not None else LockFile.read(get_lockfile_path(project_root))
-    if lock is None:
-        return _empty_scan()
-
-    from ..core.deployment_ledger import DeploymentLedgerCodec
-
+    """Scan one canonical deployment-claim projection."""
     result = _empty_scan()
-    claims = DeploymentLedgerCodec.legacy_deployed_file_claims(lock)
     for rel_path, owner in claims.items():
         if package_filter and owner != package_filter:
             continue
@@ -190,6 +183,22 @@ def _scan_lockfile_packages(
     return result
 
 
+def _scan_lockfile_packages(
+    project_root: Path,
+    package_filter: str | None = None,
+    lockfile: LockFile | None = None,
+) -> _FileScanResult:
+    """Collect the exact lockfile-driven scan result."""
+    lock = lockfile if lockfile is not None else LockFile.read(get_lockfile_path(project_root))
+    if lock is None:
+        return _empty_scan()
+
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+
+    claims = DeploymentLedgerCodec.legacy_deployed_file_claims(lock)
+    return _scan_claimed_files(project_root, claims, package_filter)
+
+
 def scan_lockfile_packages(
     project_root: Path,
     package_filter: str | None = None,
@@ -204,7 +213,14 @@ def scan_lockfile_packages(
     Returns:
         Findings grouped by path and the exact unique number of files scanned.
     """
-    result = _scan_lockfile_packages(project_root, package_filter, lockfile)
+    lock = lockfile if lockfile is not None else LockFile.read(get_lockfile_path(project_root))
+    if lock is None:
+        return {}, 0
+
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+
+    claims = DeploymentLedgerCodec.legacy_deployed_file_claims(lock)
+    result = _scan_claimed_files(project_root, claims, package_filter)
     return result.findings_by_file, len(result.scanned_files)
 
 
