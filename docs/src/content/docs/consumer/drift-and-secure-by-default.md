@@ -138,10 +138,14 @@ reported:
 | `modified` | A deployed file's content differs from what install would produce. Fix: revert the hand-edit, or move it into source. |
 | `orphaned` | A deployed file exists with no current source. Fix: `apm install` (orphan cleanup runs automatically). |
 
-The replay is cache-only. It does no network I/O and does not write
-to your project. If the cache is missing the entries the lockfile
-references, the audit fails fast with a "run `apm install` first"
-message rather than guessing.
+Bare `apm audit` keeps the replay cache-only: it does no network I/O and
+does not write to your project. If the cache is missing the entries the
+lockfile references, the command reports an informational "run
+`apm install` first" skip instead of guessing. `apm audit --ci` is
+stricter: when `apm_modules/` is absent but `apm.lock.yaml` is present, it
+self-hydrates a lock-pinned scratch replay for `config-consistency` and
+drift without mutating the checkout, and fails closed only if that replay
+cannot be materialized.
 
 For the full flag set, see [CLI audit](../../reference/cli/audit/).
 

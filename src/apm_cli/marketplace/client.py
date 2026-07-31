@@ -631,8 +631,16 @@ def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
 
     ``AuthResolver.try_with_fallback`` hands the operation a ``(token, git_env)``
     pair but not the auth scheme. Bearer contexts carry the full
-    ``Authorization: Bearer <jwt>`` header in ``GIT_CONFIG_VALUE_0`` (see
-    ``AuthResolver._build_git_env``); detect that and emit the Bearer scheme.
+    ``Authorization: Bearer <jwt>`` header in a ``GIT_CONFIG_VALUE_<i>`` slot
+    (see ``AuthResolver._build_git_env``); detect that and emit the Bearer
+    scheme. The slot index is not fixed -- since #2368 the header is appended
+    after any retained non-auth entries -- so the whole indexed set is scanned.
+
+    Only indices below ``GIT_CONFIG_COUNT`` are read, because that is all git
+    itself reads. A slot above the count is either a leftover from an env this
+    process did not build or an injected one, and honouring it would send an
+    ADO PAT under the Bearer scheme, which the server rejects.
+
     Otherwise treat the token as an ADO PAT and use HTTP Basic with
     ``base64(":" + PAT)`` per ADO's convention (empty username, PAT as
     password). Returns an empty dict for an anonymous request.
@@ -641,9 +649,15 @@ def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
     """
     if not token:
         return {}
-    extra_header = (git_env or {}).get("GIT_CONFIG_VALUE_0", "").strip()
-    if extra_header.lower().startswith("authorization: bearer "):
-        return {"Authorization": f"Bearer {token}"}
+    env = git_env or {}
+    try:
+        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
+    except (TypeError, ValueError):
+        count = 0
+    for index in range(count):
+        value = str(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
+        if value.strip().lower().startswith("authorization: bearer "):
+            return {"Authorization": f"Bearer {token}"}
     encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
     return {"Authorization": f"Basic {encoded}"}
 

@@ -351,6 +351,23 @@ if ! echo "$run_replay_body" | grep -q 'integrate_package_primitives(' \
     echo "[x] Audit replay must preserve locked skill subset intent"
     violations=$((violations + 1))
 fi
+audit_ci_gate_body=$(awk '
+    /^def _audit_ci_gate\(/ {flag=1}
+    flag && /^def / && !/^def _audit_ci_gate\(/ {exit}
+    flag {print}
+' src/apm_cli/commands/audit.py)
+config_consistency_body=$(awk '
+    /^def _check_config_consistency\(/ {flag=1}
+    flag && /^def / && !/^def _check_config_consistency\(/ {exit}
+    flag {print}
+' src/apm_cli/policy/ci_checks.py)
+if ! grep -q '^def prepare_ci_audit_replay(' src/apm_cli/install/audit_replay.py \
+    || ! printf '%s\n' "$audit_ci_gate_body" | grep -q 'prepare_ci_audit_replay' \
+    || printf '%s\n' "$audit_ci_gate_body" | grep -q 'run_replay(' \
+    || ! printf '%s\n' "$config_consistency_body" | grep -q 'prepared_replay\.modules_root'; then
+    echo "[x] CI audit scratch materialization must route through install/audit_replay.py"
+    violations=$((violations + 1))
+fi
 local_bundle_marker_hits=$(
     grep -rEn --include='*.py' \
         "_LOCAL_BUNDLE_OWNER|active_owner.*[\"']local-bundle[\"']|[\"']local-bundle[\"'].*active_owner|owners.*[\"']local-bundle[\"']" \
@@ -675,6 +692,158 @@ deployment_owner_status=$?
 if [ "$deployment_owner_status" -ne 0 ]; then
     echo "[x] Deployment ownership must route through DeploymentLedgerCodec"
     echo "$deployment_owner_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC19: git-subprocess auth-header injection authority"
+# #2368: build_authorization_header_git_env / build_ado_bearer_git_env return
+# an overlay with a hardcoded GIT_CONFIG_COUNT="1". Dict-merging that overlay
+# onto an env that already carries indexed GIT_CONFIG_* entries resets the
+# count and clobbers index 0, silently dropping inherited git hardening
+# (safe.bareRepository, http.sslCAInfo, credential.interactive). The single
+# owner for injecting an Authorization header into a git-subprocess env is
+# set_authorization_header_git_env / set_ado_bearer_git_env (in-place
+# rewrite); dict-merging the build_* overlay onto a populated env is the
+# exact defect those setters exist to prevent from recurring.
+auth_header_dictmerge_hits=$(
+    grep -rEn --include='*.py' \
+        '\.update\(\s*build_(authorization_header_git_env|ado_bearer_git_env)\(|\{\*\*[A-Za-z_][A-Za-z0-9_.]*,\s*\*\*build_(authorization_header_git_env|ado_bearer_git_env)\(' \
+        src/apm_cli \
+        | grep -vE ':[0-9]+:[[:space:]]*#' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ -n "$auth_header_dictmerge_hits" ]; then
+    echo "[x] Git-subprocess Authorization-header injection must use set_authorization_header_git_env / set_ado_bearer_git_env (in-place); dict-merging the build_* overlay onto a populated env re-introduces the #2368 clobber bug"
+    echo "$auth_header_dictmerge_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC20: public github.com anonymous-first auth authority"
+public_github_auth_owner="src/apm_cli/core/auth.py"
+public_github_auth_duplicate_defs=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def uses_public_github_anonymous_first\(' \
+        src/apm_cli \
+        | grep -v "^${public_github_auth_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+public_github_auth_consumers="
+src/apm_cli/deps/clone_engine.py
+src/apm_cli/deps/download_strategies.py
+src/apm_cli/deps/git_reference_resolver.py
+src/apm_cli/deps/github_downloader.py
+src/apm_cli/deps/github_downloader_validation.py
+"
+public_github_auth_missing_consumers=""
+for consumer in $public_github_auth_consumers; do
+    if ! grep -q 'uses_public_github_anonymous_first(' "$consumer"; then
+        public_github_auth_missing_consumers="${public_github_auth_missing_consumers}
+${consumer}"
+    fi
+done
+if ! grep -q '^    def uses_public_github_anonymous_first(' "$public_github_auth_owner" \
+    || ! grep -q '^    def build_public_github_anonymous_git_env(' "$public_github_auth_owner" \
+    || ! grep -q 'lazy_public_github' "$public_github_auth_owner" \
+    || [ -n "$public_github_auth_duplicate_defs" ] \
+    || [ -n "$public_github_auth_missing_consumers" ]; then
+    echo "[x] Public github.com anonymous-first auth ordering must stay owned by AuthResolver"
+    [ -n "$public_github_auth_duplicate_defs" ] && echo "$public_github_auth_duplicate_defs"
+    [ -n "$public_github_auth_missing_consumers" ] \
+        && echo "Missing owner routing:${public_github_auth_missing_consumers}"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC21: MCP manifest target precedence authority"
+mcp_manifest_adapter=$(
+    awk '
+        /^def _declared_manifest_target_runtimes\(/ { capture = 1 }
+        /^def _resolve_target_runtimes\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/integration/mcp_integrator_install.py
+)
+mcp_target_resolver=$(
+    awk '
+        /^def _resolve_target_runtimes\(/ { capture = 1 }
+        /^def _install_self_defined_deps\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/integration/mcp_integrator_install.py
+)
+mcp_manifest_selection_line=$(
+    grep -n '_declared_manifest_target_runtimes(apm_config)' \
+        <<<"$mcp_target_resolver" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_discovery_line=$(
+    grep -n '_discover_installed_runtimes(' \
+        <<<"$mcp_target_resolver" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_integration_validation=$(
+    awk '
+        /^def run_mcp_integration\(/ { capture = 1 }
+        capture { print }
+    ' src/apm_cli/install/mcp/integration.py
+)
+mcp_validation_line=$(
+    grep -n 'parse_targets_field(mcp_apm_config)' \
+        <<<"$mcp_integration_validation" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_install_line=$(
+    grep -n 'MCPIntegrator.install(' \
+        <<<"$mcp_integration_validation" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_target_projection=$(
+    awk '
+        /^def canonical_package_target_config\(/ { capture = 1 }
+        /^def package_target_selection\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/models/apm_package.py
+)
+if ! grep -q 'parse_targets_field(apm_config)' <<<"$mcp_manifest_adapter" \
+    || grep -Eq \
+        'TARGET_CAPABILITIES|CANONICAL_TARGETS|KNOWN_TARGETS|\[[^]]*(copilot|claude|cursor|codex|gemini|opencode|windsurf|kiro)' \
+        <<<"$mcp_manifest_adapter" \
+    || [ -z "$mcp_manifest_selection_line" ] \
+    || [ -z "$mcp_discovery_line" ] \
+    || [ "$mcp_manifest_selection_line" -ge "$mcp_discovery_line" ] \
+    || grep -q 'parse_targets_field(' <<<"$mcp_target_resolver" \
+    || [ -z "$mcp_validation_line" ] \
+    || [ -z "$mcp_install_line" ] \
+    || [ "$mcp_validation_line" -ge "$mcp_install_line" ] \
+    || ! grep -q 'return {"target": singular, "targets": list(plural)}' \
+        <<<"$mcp_target_projection"; then
+    echo "[x] MCP target precedence must route through the canonical manifest adapter before discovery"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC22: module-level behavioral test taxonomy authority"
+taxonomy_plugin="tests/quality/taxonomy_inventory_plugin.py"
+taxonomy_contract="tests/quality/test_test_taxonomy.py"
+taxonomy_parallel_hits=$(
+    grep -En \
+        '(^|[^A-Za-z_])(MANIFEST|_manifest_modules|tracked_python_inventory)|behavioral markers outside critical manifest|len\(modules\)[[:space:]]*==' \
+        "$taxonomy_contract" \
+        || true
+)
+if ! grep -q 'getattr(module, "pytestmark"' "$taxonomy_plugin" \
+    || ! grep -q '"modules": modules' "$taxonomy_plugin" \
+    || ! grep -q '"nodes": nodes' "$taxonomy_plugin" \
+    || ! grep -q '^def _assert_marker_only_taxonomy(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm003_multiple_node_classifications_fail(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm003_mixed_module_classifications_fail(' "$taxonomy_contract" \
+    || ! grep -q '^def test_tm004_new_module_classification_needs_no_whitelist(' \
+        "$taxonomy_contract" \
+    || [ -n "$taxonomy_parallel_hits" ]; then
+    echo "[x] Behavioral test taxonomy must stay owned by module-level pytestmark"
+    [ -n "$taxonomy_parallel_hits" ] && echo "$taxonomy_parallel_hits"
     violations=$((violations + 1))
 fi
 

@@ -21,6 +21,16 @@ from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
 
 
+def _authorization_config_values(env: dict[str, str]) -> set[str]:
+    """Return only indexed Git config values whose key is an auth header."""
+    count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    return {
+        env.get(f"GIT_CONFIG_VALUE_{index}", "")
+        for index in range(count)
+        if "extraheader" in env.get(f"GIT_CONFIG_KEY_{index}", "").lower()
+    }
+
+
 def _semver_dep(repo_url: str, virtual_path: str) -> DependencyReference:
     """A git-source semver-range dep (ref_kind == 'semver')."""
     return DependencyReference(
@@ -360,9 +370,7 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
     assert {resolver._auth_scheme for resolver in cache.values()} == {"basic", "bearer"}
     ado_args, ado_kwargs = calls[0]
     github_args, github_kwargs = calls[1]
-    ado_auth_values = {
-        value for key, value in ado_kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")
-    }
+    ado_auth_values = _authorization_config_values(ado_kwargs["env"])
     assert ado_auth_values == {f"Authorization: Bearer {bearer_token}"}
     assert urlparse(ado_args[-1]).username is None
     assert urlparse(github_args[-1]).password == basic_token
@@ -437,9 +445,7 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
 
     def _run(args, **kwargs):
         calls.append((args, kwargs))
-        auth_values = {
-            value for key, value in kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")
-        }
+        auth_values = _authorization_config_values(kwargs["env"])
         if any("Bearer " in value for value in auth_values):
             return SimpleNamespace(
                 returncode=0,
@@ -465,8 +471,7 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
     assert resolution.resolved_tag == "v1.2.0"
     assert len(calls) == 2
     auth_headers = [
-        {value for key, value in call_kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")}
-        for _call_args, call_kwargs in calls
+        _authorization_config_values(call_kwargs["env"]) for _call_args, call_kwargs in calls
     ]
     assert len(auth_headers[0]) == 1
     assert next(iter(auth_headers[0])).startswith("Authorization: Basic ")

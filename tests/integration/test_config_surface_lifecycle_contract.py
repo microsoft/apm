@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import pytest
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -174,6 +177,294 @@ def _check(payload: dict[str, object], name: str) -> dict[str, object]:
         if check["name"] == name:
             return check
     raise AssertionError(f"Audit did not report {name!r}: {checks!r}")
+
+
+def _capture_portable_mcp_state(
+    project_root: Path,
+    isolated: IsolatedApmEnvironment,
+) -> LifecycleStateSnapshot:
+    """Capture exact project and native MCP state for Copilot and Codex."""
+    copilot_root = isolated.home / ".copilot"
+    assert copilot_root.is_dir()
+    return LifecycleStateSnapshot.capture(
+        project_root,
+        config_paths=(PurePosixPath(".codex/config.toml"),),
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="project",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
+        ),
+    )
+
+
+def _assert_exact_lifecycle_state(
+    expected: LifecycleStateSnapshot,
+    actual: LifecycleStateSnapshot,
+) -> None:
+    """Assert byte and semantic idempotency inside one isolated machine."""
+    assert actual.manifest_bytes == expected.manifest_bytes
+    assert actual.lockfile_bytes == expected.lockfile_bytes
+    assert actual.deployment_records == expected.deployment_records
+    assert actual.mcp_state_bytes == expected.mcp_state_bytes
+    assert actual.lsp_state_bytes == expected.lsp_state_bytes
+    assert actual.files == expected.files
+    assert actual.semantic_bytes == expected.semantic_bytes
+
+
+def _assert_semantic_lifecycle_state(
+    expected: LifecycleStateSnapshot,
+    actual: LifecycleStateSnapshot,
+) -> None:
+    """Assert convergence while ignoring the separate generated-at churn lane."""
+    assert actual.manifest_bytes == expected.manifest_bytes
+    assert actual.deployment_records == expected.deployment_records
+    assert actual.mcp_state_bytes == expected.mcp_state_bytes
+    assert actual.lsp_state_bytes == expected.lsp_state_bytes
+    assert actual.files == expected.files
+    assert actual.semantic_bytes == expected.semantic_bytes
+
+
+def _create_divergent_mcp_runtime_signal(
+    signal: str,
+    project_root: Path,
+    isolated: IsolatedApmEnvironment,
+) -> None:
+    """Create one machine-local signal that maps to the Copilot target."""
+    if signal == "vscode":
+        (project_root / ".vscode").mkdir()
+        return
+    if signal != "intellij":
+        raise ValueError(f"Unsupported MCP runtime signal: {signal}")
+    if sys.platform == "win32":
+        data_root = Path(isolated.process_environment["LOCALAPPDATA"])
+    elif sys.platform == "darwin":
+        data_root = isolated.home / "Library" / "Application Support"
+    else:
+        data_root = isolated.home / ".local" / "share"
+    (data_root / "github-copilot" / "intellij").mkdir(parents=True)
+
+
+def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """One committed project converges identically on divergent machines."""
+    seed = IsolatedApmEnvironment.create(tmp_path / "portable-seed", base_env=dict(os.environ))
+    seed_environment = seed.subprocess_env()
+    project = LocalPackageFactory(seed.work_root).create(
+        "portable-mcp-project",
+        mcp_dependencies=(
+            {
+                "name": "portable-server",
+                "registry": False,
+                "transport": "stdio",
+                "command": "echo",
+                "args": ["portable"],
+            },
+        ),
+        targets=("copilot", "codex"),
+    )
+    LockFile().write(project.root / "apm.lock.yaml")
+    _runner(apm_binary_path).run_sequence(
+        (("install", "--no-policy", "--parallel-downloads", "0"),),
+        expected_returncodes=(0,),
+        scenario_id="portable-mcp-seed-install",
+        cwd=project.root,
+        env=seed_environment,
+    )
+    seed_lock = LockFile.read(project.root / "apm.lock.yaml")
+    assert seed_lock is not None
+    assert seed_lock.mcp_target_servers == {
+        "codex": ["portable-server"],
+        "copilot": ["portable-server"],
+    }
+    seed_ledger = DeploymentLedgerCodec.from_lockfile(seed_lock)
+    seed_rows = tuple(
+        record
+        for _key, record in sorted(seed_ledger.records.items())
+        if record.locator.target == "mcp"
+    )
+    assert {record.locator.runtime for record in seed_rows} == {"codex", "copilot"}
+
+    seed_codex_config = project.root / ".codex" / "config.toml"
+    seed_codex_config.unlink()
+    seed_codex_config.parent.rmdir()
+    repositories = LocalGitRepositoryFactory(
+        seed.repository_root,
+        env=seed_environment,
+    )
+    committed_project = repositories.create(
+        "portable-mcp-project",
+        source_tree=project.root,
+    )
+    project_commit = repositories.commit(
+        committed_project,
+        message="seed portable MCP project",
+    )
+
+    machine_states: list[LifecycleStateSnapshot] = []
+    for machine_name, runtime_signal in (
+        ("vscode-machine", "vscode"),
+        ("intellij-machine", "intellij"),
+    ):
+        isolated = IsolatedApmEnvironment.create(
+            tmp_path / machine_name,
+            base_env=dict(os.environ),
+        )
+        environment = isolated.subprocess_env()
+        clone = isolated.work_root / "portable-mcp-project"
+        cloned = subprocess.run(
+            ("git", "clone", "--quiet", committed_project.file_url, str(clone)),
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        assert cloned.returncode == 0
+        clone_head = subprocess.run(
+            ("git", "rev-parse", "HEAD"),
+            cwd=clone,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        assert clone_head.stdout.strip() == project_commit.sha
+        _create_divergent_mcp_runtime_signal(runtime_signal, clone, isolated)
+
+        runner = _runner(apm_binary_path)
+        install = ("install", "--no-policy", "--parallel-downloads", "0")
+        runner.run_sequence(
+            (install,),
+            expected_returncodes=(0,),
+            scenario_id=f"{machine_name}-install",
+            cwd=clone,
+            env=environment,
+        )
+        installed = _capture_portable_mcp_state(clone, isolated)
+        runner.run_sequence(
+            (install,),
+            expected_returncodes=(0,),
+            scenario_id=f"{machine_name}-unchanged-reinstall",
+            cwd=clone,
+            env=environment,
+        )
+        repeated = _capture_portable_mcp_state(clone, isolated)
+        _assert_exact_lifecycle_state(installed, repeated)
+
+        runner.run_sequence(
+            (("update", "--yes"),),
+            expected_returncodes=(0,),
+            scenario_id=f"{machine_name}-update",
+            cwd=clone,
+            env=environment,
+        )
+        updated = _capture_portable_mcp_state(clone, isolated)
+        _assert_exact_lifecycle_state(installed, updated)
+
+        runner.run_sequence(
+            (("install", "--frozen", "--no-policy"),),
+            expected_returncodes=(0,),
+            scenario_id=f"{machine_name}-frozen-install",
+            cwd=clone,
+            env=environment,
+        )
+        frozen = _capture_portable_mcp_state(clone, isolated)
+        _assert_exact_lifecycle_state(installed, frozen)
+
+        before_audit = _capture_portable_mcp_state(clone, isolated)
+        audit = _audit_payload(
+            runner,
+            scenario_id=f"{machine_name}-audit",
+            cwd=clone,
+            environment=environment,
+        )
+        assert audit["passed"] is True
+        after_audit = _capture_portable_mcp_state(clone, isolated)
+        _assert_exact_lifecycle_state(before_audit, after_audit)
+
+        lockfile = LockFile.read(clone / "apm.lock.yaml")
+        assert lockfile is not None
+        assert lockfile.mcp_target_servers == {
+            "codex": ["portable-server"],
+            "copilot": ["portable-server"],
+        }
+        ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+        rows = tuple(
+            record
+            for _key, record in sorted(ledger.records.items())
+            if record.locator.target == "mcp"
+        )
+        assert rows == seed_rows
+        machine_states.append(after_audit)
+
+    first, second = machine_states
+    assert first.manifest_bytes == second.manifest_bytes
+    assert first.lockfile_bytes == second.lockfile_bytes
+    assert first.deployment_records == second.deployment_records
+    assert first.mcp_state_bytes == second.mcp_state_bytes
+    assert first.semantic_bytes == second.semantic_bytes
+
+
+def test_conflicting_manifest_targets_fail_before_installed_binary_writes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A conflicting MCP-only manifest exits explicitly without mutating state."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "conflicting-targets",
+        base_env=dict(os.environ),
+    )
+    project = LocalPackageFactory(isolated.work_root).create(
+        "conflicting-target-project",
+        mcp_dependencies=(
+            {
+                "name": "must-not-write",
+                "registry": False,
+                "transport": "stdio",
+                "command": "echo",
+            },
+        ),
+        targets=("copilot",),
+    )
+    manifest = load_yaml(project.manifest_path)
+    assert isinstance(manifest, dict)
+    manifest["target"] = "codex"
+    dump_yaml(manifest, project.manifest_path)
+    LockFile().write(project.root / "apm.lock.yaml")
+
+    codex_config = project.root / ".codex" / "config.toml"
+    codex_config.parent.mkdir()
+    codex_config.write_text(
+        '[mcp_servers.user-authored]\ncommand = "user-command"\n',
+        encoding="utf-8",
+    )
+    copilot_root = isolated.home / ".copilot"
+    copilot_root.mkdir()
+    copilot_config = copilot_root / "mcp-config.json"
+    copilot_config.write_text(
+        '{"mcpServers":{"user-authored":{"command":"user-command"}}}\n',
+        encoding="utf-8",
+    )
+    before = _capture_portable_mcp_state(project.root, isolated)
+
+    result = _runner(apm_binary_path).run(
+        ("install", "--no-policy"),
+        scenario_id="conflicting-targets-no-write",
+        cwd=project.root,
+        env=isolated.subprocess_env(),
+    )
+
+    assert result.returncode != 0
+    assert "Cannot use both 'target:' and 'targets:'" in f"{result.stdout}\n{result.stderr}"
+    after = _capture_portable_mcp_state(project.root, isolated)
+    _assert_exact_lifecycle_state(before, after)
 
 
 def test_project_mcp_reinstall_repairs_canonical_ownership(
@@ -419,6 +710,9 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     codex_config = fixture.project_root / ".codex" / "config.toml"
     codex_config.parent.mkdir()
+    unrelated_codex_file = codex_config.parent / "user-notes.txt"
+    unrelated_codex_bytes = b"user-owned codex notes\n"
+    unrelated_codex_file.write_bytes(unrelated_codex_bytes)
     codex_config.write_text(
         "[projects.'c:\\\\contracts\\\\consumer']\n"
         'trust_level = "trusted"\n'
@@ -429,17 +723,14 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     runner = _runner(apm_binary_path)
     environment = fixture.isolated.subprocess_env()
+    copilot_root = fixture.isolated.home / ".copilot"
     broad_install = (
         "install",
-        "--target",
-        "copilot,codex",
         "--trust-transitive-mcp",
         "--no-policy",
     )
     narrow_install = (
         "install",
-        "--target",
-        "copilot",
         "--trust-transitive-mcp",
         "--no-policy",
     )
@@ -453,17 +744,23 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     broad = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(
-            PurePosixPath(".vscode/mcp.json"),
-            PurePosixPath(".codex/config.toml"),
+        config_paths=(PurePosixPath(".codex/config.toml"),),
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="project",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
         ),
     )
-    assert broad.file(".vscode/mcp.json").kind == "file"
+    assert broad.file("mcp-config.json", root_id="copilot-user").kind == "file"
     assert b"managed-contract-server" in broad.file(".codex/config.toml").content
     assert b"user-authored" in broad.file(".codex/config.toml").content
     assert b"trust_level" in broad.file(".codex/config.toml").content
     assert (
-        b'"target_servers":{"codex":["managed-contract-server"],"vscode":["managed-contract-server"]}'
+        b'"target_servers":{"codex":["managed-contract-server"],"copilot":["managed-contract-server"]}'
         in (broad.mcp_state_bytes)
     )
 
@@ -480,9 +777,15 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     )
     narrow = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(
-            PurePosixPath(".vscode/mcp.json"),
-            PurePosixPath(".codex/config.toml"),
+        config_paths=(PurePosixPath(".codex/config.toml"),),
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="project",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
         ),
     )
     codex_bytes = narrow.file(".codex/config.toml").content
@@ -491,6 +794,44 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     assert b"user-authored" in codex_bytes
     assert b"trust_level" in codex_bytes
     assert b'"target_servers":{"copilot":["managed-contract-server"]}' in narrow.mcp_state_bytes
+    assert unrelated_codex_file.read_bytes() == unrelated_codex_bytes
+
+    runner.run_sequence(
+        (narrow_install,),
+        expected_returncodes=(0,),
+        scenario_id="mcp-target-contraction-convergence",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    converged = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".codex/config.toml"),),
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="project",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
+        ),
+    )
+    _assert_semantic_lifecycle_state(narrow, converged)
+    assert unrelated_codex_file.read_bytes() == unrelated_codex_bytes
+
+    before_audit = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".codex/config.toml"),),
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="project",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
+        ),
+    )
     assert (
         _audit_payload(
             runner,
@@ -500,6 +841,20 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         )["passed"]
         is True
     )
+    after_audit = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(PurePosixPath(".codex/config.toml"),),
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="copilot-user",
+                target="copilot",
+                scope="project",
+                path=copilot_root,
+                config_paths=(PurePosixPath("mcp-config.json"),),
+            ),
+        ),
+    )
+    _assert_exact_lifecycle_state(before_audit, after_audit)
 
 
 def test_lsp_reinstall_and_update_keep_copilot_state_deterministic(

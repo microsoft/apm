@@ -24,6 +24,18 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 
 
+def _git_config_value(env: dict[str, str], expected_key: str) -> str:
+    """Return one indexed Git config value by its exact key."""
+    count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    matches = [
+        env.get(f"GIT_CONFIG_VALUE_{index}", "")
+        for index in range(count)
+        if env.get(f"GIT_CONFIG_KEY_{index}", "").lower() == expected_key.lower()
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _make_subdir_dep(
     repo_url: str = "owner/repo",
     vpath: str = "skills/my-skill",
@@ -235,8 +247,7 @@ class TestAdoBearerHeaderInjection:
 
         assert secret not in url, "ADO PAT must not appear in the URL"
         # The env must carry the Basic header.
-        assert env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        header_value = _git_config_value(env, "http.extraheader")
         assert header_value.startswith("Authorization: Basic "), header_value
         # base64(":<PAT>") must contain the expected encoded form.
         import base64
@@ -277,7 +288,7 @@ class TestAdoBearerHeaderInjection:
         assert len(ado_attempts) == 1
         _label, url, env = ado_attempts[0]
         assert secret not in url
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        header_value = _git_config_value(env, "http.extraheader")
         assert header_value == f"Authorization: Bearer {secret}"
 
     def test_non_ado_token_uses_header_not_url(self) -> None:
@@ -317,17 +328,10 @@ class TestAdoBearerHeaderInjection:
             "Round-3 security: non-ADO token must not be embedded in the URL"
         )
 
-        labels = [a.label for a in attempts]
-        # Header label, no longer the bare 'authenticated HTTPS'.
-        assert any(lbl == "authenticated HTTPS (header)" for lbl in labels), labels
-
-        auth_attempts = [a for a in attempts if a.label == "authenticated HTTPS (header)"]
-        assert len(auth_attempts) == 1
-        _label, url, env = auth_attempts[0]
+        assert [attempt.label for attempt in attempts] == ["anonymous GitHub HTTPS"]
+        _label, url, env = attempts[0]
         assert secret not in url
-        # Header carries the token.
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
-        assert header_value == f"Authorization: Bearer {secret}"
+        assert _git_config_value(env, "credential.helper") == ""
 
     def test_gitlab_pat_injected_as_oauth2_basic_header_not_url(self) -> None:
         """GitLab validation matches oauth2 PAT clone semantics without URL userinfo."""
@@ -357,7 +361,7 @@ class TestAdoBearerHeaderInjection:
         assert len(gitlab_attempts) == 1
         _label, url, env = gitlab_attempts[0]
         assert secret not in url
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        header_value = _git_config_value(env, "http.extraheader")
         assert header_value.startswith("Authorization: Basic "), header_value
 
         import base64
@@ -472,10 +476,35 @@ class TestRound3NonAdoTokenNotInProcessArgv:
 
         for attempt in attempts:
             assert secret not in attempt.url, f"Token leaked into URL for attempt '{attempt.label}'"
-        # Header injection: the auth attempt env must contain a Bearer header.
-        auth_attempt = next(a for a in attempts if "header" in a.label)
-        assert auth_attempt.env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
-        assert auth_attempt.env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {secret}"
+        assert [attempt.label for attempt in attempts] == ["anonymous GitHub HTTPS"]
+        assert _git_config_value(attempts[0].env, "credential.helper") == ""
+
+
+def test_public_ref_probe_threads_host_type_to_fallback() -> None:
+    """Virtual ref validation keeps the manifest host hint in the auth owner."""
+    downloader = GitHubPackageDownloader()
+    dep_ref = _make_subdir_dep(host="github.com", ref="main")
+    dep_ref.host_type = "gitlab"
+    auth_resolver = MagicMock()
+    auth_resolver.uses_public_github_anonymous_first.return_value = True
+    winning = gdv.AttemptSpec(
+        "anonymous GitHub HTTPS",
+        "https://github.com/owner/repo.git",
+        {},
+    )
+    auth_resolver.try_with_fallback.return_value = (
+        f"{'a' * 40}\trefs/heads/main\n",
+        winning,
+    )
+    downloader.auth_resolver = auth_resolver
+
+    assert gdv._ref_exists_via_ls_remote(
+        downloader,
+        dep_ref,
+        "main",
+        lambda _message: None,
+    ) == (True, winning)
+    assert auth_resolver.try_with_fallback.call_args.kwargs["host_type"] == "gitlab"
 
 
 class TestRound3SafeRmtreeNotRobustRmtreeDirect:

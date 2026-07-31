@@ -792,9 +792,15 @@ class TestRefResolverTokenInjection:
         assert parsed.hostname == "dev.azure.com"
         assert parsed.username is None
         env = mock_run.call_args.kwargs["env"]
-        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+        # Header index is not fixed (#2368: appended after retained entries),
+        # so locate it instead of assuming slot 0.
         expected = base64.b64encode(b":ado_pat").decode()
-        assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Basic {expected}"
+        headers = [
+            (env[f"GIT_CONFIG_KEY_{i}"], v)
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+            if "Authorization" in (v := env[f"GIT_CONFIG_VALUE_{i}"])
+        ]
+        assert headers == [("http.extraheader", f"Authorization: Basic {expected}")]
 
     def test_ado_ssh_transport_skips_bearer_retry(self) -> None:
         """SSH transport never retries an ADO PAT as an HTTP bearer flow."""
@@ -818,3 +824,75 @@ class TestRefResolverTokenInjection:
                 resolver.list_remote_refs("contoso/platform/repo")
 
         auth_resolver.execute_with_bearer_fallback.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# #2368: auth header injection must preserve retained GIT_CONFIG entries
+# ---------------------------------------------------------------------------
+
+
+class TestGitUrlAndEnvPreservesRetainedGitConfig:
+    """The env returned by _git_url_and_env must keep non-auth git config."""
+
+    @staticmethod
+    def _retained() -> dict[str, str]:
+        return {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.sslCAInfo",
+            "GIT_CONFIG_VALUE_0": "/corporate/ca.pem",
+        }
+
+    def test_ado_bearer_appends_after_retained_entries(self) -> None:
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="aad-jwt",
+            auth_scheme="bearer",
+            git_env=self._retained(),
+        )
+        _url, env = resolver._git_url_and_env("contoso/platform/repo")
+        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
+        assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer aad-jwt"
+        resolver.close()
+
+    def test_ado_basic_appends_after_retained_entries(self) -> None:
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="ado_pat",
+            auth_scheme="basic",
+            git_env=self._retained(),
+        )
+        _url, env = resolver._git_url_and_env("contoso/platform/repo")
+        expected = base64.b64encode(b":ado_pat").decode()
+        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_1"] == f"Authorization: Basic {expected}"
+        resolver.close()
+
+    def test_ado_bearer_replaces_stale_header_instead_of_stacking(self) -> None:
+        stale = {
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Bearer stale-jwt",
+            "GIT_CONFIG_KEY_1": "http.sslCAInfo",
+            "GIT_CONFIG_VALUE_1": "/corporate/ca.pem",
+        }
+        resolver = RefResolver(
+            host="dev.azure.com",
+            token="fresh-jwt",
+            auth_scheme="bearer",
+            git_env=stale,
+        )
+        _url, env = resolver._git_url_and_env("contoso/platform/repo")
+        headers = [
+            v
+            for k, v in env.items()
+            if k.startswith("GIT_CONFIG_VALUE_") and "Authorization" in str(v)
+        ]
+        assert headers == ["Authorization: Bearer fresh-jwt"]
+        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        resolver.close()

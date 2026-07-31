@@ -9,10 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Public `github.com` dependencies now try anonymous HTTPS before resolving
+  credentials, so all-public installs no longer open repeated credential or
+  Git Credential Manager prompts. Reported by @RuiRomano. (#2406, closes #2400)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
   which never removes them. (by @mia106dev, #2069)
+- Teammates with different harnesses installed no longer rewrite each other's
+  `mcp_target_servers`; lockfile ownership now follows declared `apm.yml`
+  `targets:` before local runtime detection. (by @rrazvd, closes #2298, #2307)
+
+### Security
+
+- Corporate git security settings -- SSL CA pins (`http.sslCAInfo`), bare-repo
+  protection (`safe.bareRepository=explicit`), and other inherited `GIT_CONFIG_*`
+  hardening -- are no longer silently dropped when apm injects an
+  `Authorization` header for a clone, download, or marketplace `ls-remote`.
+  The header overlay previously hardcoded `GIT_CONFIG_COUNT=1`, so merging it
+  onto an already-configured environment reset the count and clobbered index
+  0. (by @edenfunf, #2368)
 
 ## [0.26.0] - 2026-07-18
 

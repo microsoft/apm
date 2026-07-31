@@ -17,9 +17,11 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
+from apm_cli.models.apm_package import clear_apm_yml_cache
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,6 +53,53 @@ def _make_self_defined_dep(
     dep.transport = transport
     dep.env = env or {}
     return dep
+
+
+def _mcp_ownership_bytes(lock_path) -> bytes:
+    """Serialize canonical MCP runtime ownership and its compatibility view."""
+    lockfile = LockFile.read(lock_path)
+    assert lockfile is not None
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    runtime_ownership = [
+        {
+            "runtime": record.locator.runtime,
+            "server": record.locator.value,
+            "owners": list(record.owners),
+            "active_owner": record.active_owner,
+        }
+        for _key, record in sorted(ledger.records.items())
+        if record.locator.target == "mcp"
+    ]
+    return json.dumps(
+        {
+            "deployments": runtime_ownership,
+            "mcp_target_servers": lockfile.mcp_target_servers,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+
+
+def _self_defined_manifest(*, targets: list[str] | None) -> dict:
+    """Build one hermetic MCP manifest with optional target restriction."""
+    manifest = {
+        "name": "mcp-target-lifecycle",
+        "version": "0.0.1",
+        "dependencies": {
+            "mcp": [
+                {
+                    "name": "apm-managed",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "echo",
+                    "args": ["managed"],
+                }
+            ]
+        },
+    }
+    if targets is not None:
+        manifest["targets"] = targets
+    return manifest
 
 
 def test_install_restores_dev_mcp_dependencies_to_lockfile_and_config(tmp_path, monkeypatch):
@@ -95,27 +144,75 @@ def test_install_restores_dev_mcp_dependencies_to_lockfile_and_config(tmp_path, 
     assert lockfile.mcp_configs["dev-server"]["command"] == "python"
 
 
+def test_manifest_targets_make_mcp_ownership_portable_across_machines(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Different machine signals produce byte-identical manifest-owned MCP state."""
+    snapshots: list[bytes] = []
+    for machine_name, signal_dir, detected in (
+        ("cursor-machine", ".cursor", ["cursor"]),
+        ("opencode-machine", ".opencode", ["opencode"]),
+    ):
+        project = tmp_path / machine_name
+        project.mkdir()
+        (project / signal_dir).mkdir()
+        monkeypatch.setenv("HOME", str(project / "home"))
+        monkeypatch.chdir(project)
+        LockFile().write(project / "apm.lock.yaml")
+        (project / "apm.yml").write_text(
+            yaml.safe_dump(_self_defined_manifest(targets=["copilot", "codex"])),
+            encoding="utf-8",
+        )
+
+        with patch(
+            "apm_cli.integration.mcp_integrator_install._discover_installed_runtimes",
+            return_value=detected,
+        ) as discover:
+            result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+        assert result.exit_code == 0, result.output
+        discover.assert_not_called()
+        snapshots.append(_mcp_ownership_bytes(project / "apm.lock.yaml"))
+
+    assert snapshots[0] == snapshots[1]
+    payload = json.loads(snapshots[0])
+    assert payload["mcp_target_servers"] == {
+        "codex": ["apm-managed"],
+        "copilot": ["apm-managed"],
+    }
+    assert {row["runtime"] for row in payload["deployments"]} == {"codex", "copilot"}
+
+
+def test_omitted_targets_use_one_machine_discovery_fallback(tmp_path, monkeypatch) -> None:
+    """An unrestricted manifest keeps the bounded machine-discovery fallback."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".cursor").mkdir()
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    (tmp_path / "apm.yml").write_text(
+        yaml.safe_dump(_self_defined_manifest(targets=None)),
+        encoding="utf-8",
+    )
+
+    with patch(
+        "apm_cli.integration.mcp_integrator_install._discover_installed_runtimes",
+        return_value=["cursor"],
+    ) as discover:
+        result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    discover.assert_called_once()
+    payload = json.loads(_mcp_ownership_bytes(tmp_path / "apm.lock.yaml"))
+    assert payload["mcp_target_servers"] == {"cursor": ["apm-managed"]}
+    assert {row["runtime"] for row in payload["deployments"]} == {"cursor"}
+
+
 def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_path, monkeypatch):
     """Reinstalling with fewer targets purges APM-owned entries from dropped targets."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     LockFile().write(tmp_path / "apm.lock.yaml")
-    manifest = {
-        "name": "mcp-target-contraction",
-        "version": "0.0.1",
-        "targets": ["copilot", "codex"],
-        "dependencies": {
-            "mcp": [
-                {
-                    "name": "apm-managed",
-                    "registry": False,
-                    "transport": "stdio",
-                    "command": "echo",
-                    "args": ["managed"],
-                }
-            ]
-        },
-    }
+    manifest = _self_defined_manifest(targets=["copilot", "codex"])
     (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
     codex_config = tmp_path / ".codex" / "config.toml"
     codex_config.parent.mkdir()
@@ -128,10 +225,7 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
         encoding="utf-8",
     )
 
-    broad = CliRunner().invoke(
-        cli,
-        ["install", "--target", "copilot,codex", "--no-policy"],
-    )
+    broad = CliRunner().invoke(cli, ["install", "--no-policy"])
     assert broad.exit_code == 0, broad.output
     broad_config = tomlkit.parse(codex_config.read_text(encoding="utf-8"))
     assert broad_config["mcp_servers"]["apm-managed"]["command"] == "echo"
@@ -139,15 +233,13 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
     assert broad_lock is not None
     assert broad_lock.mcp_target_servers == {
         "codex": ["apm-managed"],
-        "vscode": ["apm-managed"],
+        "copilot": ["apm-managed"],
     }
 
     manifest["targets"] = ["copilot"]
     (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
-    contracted = CliRunner().invoke(
-        cli,
-        ["install", "--target", "copilot", "--no-policy"],
-    )
+    clear_apm_yml_cache()
+    contracted = CliRunner().invoke(cli, ["install", "--no-policy"])
 
     assert contracted.exit_code == 0, contracted.output
     updated_text = codex_config.read_text(encoding="utf-8")
@@ -742,24 +834,11 @@ class TestExcludeRuntime:
         with (
             patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
             patch(
-                "apm_cli.factory.ClientFactory",
-                side_effect=ImportError,
-            ),
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime",
+            ) as install_for_runtime,
             patch(
-                "apm_cli.integration.mcp_integrator_install.find_runtime_binary",
-                side_effect=lambda rt: "/usr/bin/" + rt if rt == "copilot" else None,
-            ),
-            patch(
-                "apm_cli.integration.mcp_integrator._is_vscode_available",
-                return_value=False,
-            ),
-            patch(
-                "apm_cli.integration.mcp_integrator.MCPIntegrator._detect_runtimes",
-                return_value=[],
-            ),
-            patch(
-                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
-                return_value=[],
+                "apm_cli.integration.mcp_integrator_install._discover_installed_runtimes",
+                return_value=["copilot"],
             ),
         ):
             result = run_mcp_install(
@@ -771,6 +850,39 @@ class TestExcludeRuntime:
             )
 
         assert result == 0
+        install_for_runtime.assert_not_called()
+        logger.warning.assert_called_once_with(
+            "All selected MCP runtimes excluded (--exclude copilot), skipping MCP configuration"
+        )
+
+    def test_write_failure_is_explicit_and_does_not_claim_ownership(
+        self,
+        tmp_path,
+    ) -> None:
+        """A failed adapter write emits an error and records no durable owner."""
+        dep = _make_self_defined_dep("write-failure")
+        logger = MagicMock()
+        managed_target_servers: dict[str, set[str]] = {}
+
+        with (
+            patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime",
+                return_value=False,
+            ) as install_for_runtime,
+        ):
+            result = run_mcp_install(
+                [dep],
+                runtime="copilot",
+                logger=logger,
+                project_root=tmp_path,
+                managed_target_servers=managed_target_servers,
+            )
+
+        assert result == 0
+        install_for_runtime.assert_called_once()
+        assert managed_target_servers == {}
+        logger.error.assert_called_once_with("write-failure -- failed for all runtimes")
 
 
 # ---------------------------------------------------------------------------

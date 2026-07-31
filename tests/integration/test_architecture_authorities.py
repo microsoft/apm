@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import shutil
 import subprocess
@@ -533,6 +534,108 @@ def test_target_catalog_matches_native_profiles() -> None:
     assert set(KNOWN_TARGETS) == expected
 
 
+def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> None:
+    """MCP precedence may adapt canonical targets but must not fork vocabulary."""
+    root = Path(__file__).parents[2]
+    source_path = root / "src/apm_cli/integration/mcp_integrator_install.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    adapter = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_declared_manifest_target_runtimes"
+    )
+    resolver = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_resolve_target_runtimes"
+    )
+    adapter_calls = {
+        node.func.id
+        for node in ast.walk(adapter)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    resolver_calls = [
+        node
+        for node in ast.walk(resolver)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    manifest_selection_calls = [
+        node for node in resolver_calls if node.func.id == "_declared_manifest_target_runtimes"
+    ]
+    discovery_calls = [
+        node for node in resolver_calls if node.func.id == "_discover_installed_runtimes"
+    ]
+    local_string_collections = [
+        node
+        for node in ast.walk(adapter)
+        if isinstance(node, (ast.List, ast.Set, ast.Tuple))
+        and any(
+            isinstance(item, ast.Constant) and isinstance(item.value, str) for item in node.elts
+        )
+    ]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    package_source = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
+    target_projection = package_source.split(
+        "def canonical_package_target_config(package: object) -> dict[str, object]:",
+        maxsplit=1,
+    )[1].split("def package_target_selection(", maxsplit=1)[0]
+    integration_source = (root / "src/apm_cli/install/mcp/integration.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "parse_targets_field" in adapter_calls
+    assert local_string_collections == []
+    assert len(manifest_selection_calls) == 1
+    assert len(discovery_calls) == 1
+    assert manifest_selection_calls[0].lineno < discovery_calls[0].lineno
+    assert all(node.func.id != "parse_targets_field" for node in resolver_calls)
+    assert 'return {"target": singular, "targets": list(plural)}' in target_projection
+    assert integration_source.index("parse_targets_field(mcp_apm_config)") < (
+        integration_source.index("MCPIntegrator.install(")
+    )
+    assert "AC21: MCP manifest target precedence authority" in guard
+    assert (
+        "MCP target precedence must route through the canonical manifest adapter before discovery"
+        in guard
+    )
+
+
+def test_behavioral_taxonomy_is_owned_by_module_pytestmark() -> None:
+    """Distributed module markers must not regress to a central file list."""
+    root = Path(__file__).parents[2]
+    quality_root = root / "tests" / "quality"
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    plugin = (quality_root / "taxonomy_inventory_plugin.py").read_text(encoding="utf-8")
+    contract = (quality_root / "test_test_taxonomy.py").read_text(encoding="utf-8")
+    source = root / ".apm/instructions/architecture.instructions.md"
+    deployed = root / ".github/instructions/architecture.instructions.md"
+
+    assert list(quality_root.glob("*suite*.toml")) == []
+    assert source.read_bytes() == deployed.read_bytes()
+    assert (
+        "| Behavioral test taxonomy classification | module-level pytestmark "
+        "(taxonomy inventory verifies) |" in source.read_text(encoding="utf-8")
+    )
+    assert "AC22: module-level behavioral test taxonomy authority" in guard
+    assert "Behavioral test taxonomy must stay owned by module-level pytestmark" in guard
+    assert 'getattr(module, "pytestmark"' in plugin
+    assert '"modules": modules' in plugin
+    assert "def _assert_marker_only_taxonomy(" in contract
+    assert "def test_tm003_multiple_node_classifications_fail(" in contract
+    assert "def test_tm003_mixed_module_classifications_fail(" in contract
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    lockfile = LockFile.load_or_create(root / "apm.lock.yaml")
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    tests_instruction = root / ".github/instructions/tests.instructions.md"
+    record = ledger.records.get("copilot||project|.github/instructions/tests.instructions.md")
+    assert record is not None
+    assert record.content_hash == compute_file_hash(tests_instruction)
+
+
 @pytest.mark.parametrize(
     ("target_flag", "expected_targets"),
     (
@@ -758,6 +861,25 @@ def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
     assert "Cached Claude Skill is invalid" in sources
     assert "build_claude_skill_package" not in sources
     assert "Cached/frozen Claude Skill lock metadata must route through validation.py" in guard
+
+
+def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
+    """Cold-cache CI audit replay must route through install/drift.py."""
+    root = Path(__file__).parents[2]
+    replay = (root / "src/apm_cli/install/audit_replay.py").read_text(encoding="utf-8")
+    audit = (root / "src/apm_cli/commands/audit.py").read_text(encoding="utf-8")
+    ci_checks = (root / "src/apm_cli/policy/ci_checks.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def prepare_ci_audit_replay(" in replay
+    assert "prepare_ci_audit_replay(" in audit
+    assert "prepared_replay.modules_root" in ci_checks
+    assert "CI audit scratch materialization must route through install/audit_replay.py" in guard
+    assert "CI audit scratch materialization" in architecture_doc
+    assert "src/apm_cli/install/audit_replay.py" in architecture_doc
 
 
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
@@ -1346,4 +1468,130 @@ def test_github_throttle_owner_guard_rejects_parallel_header_parsing(tmp_path: P
     assert result.returncode == 1
     assert "GitHub throttle signals must be classified only by deps/github_rate_limit.py" in (
         result.stdout
+    )
+
+
+def test_git_auth_header_injection_has_single_owner() -> None:
+    """#2368: injecting an Authorization header into a git-subprocess env
+    must have exactly one owner (set_authorization_header_git_env /
+    set_ado_bearer_git_env, in-place). Dict-merging the build_* overlay
+    (hardcoded GIT_CONFIG_COUNT="1") onto a populated env is the split
+    that silently clobbered inherited git hardening across 5 call sites.
+    """
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/utils/github_host.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "def set_authorization_header_git_env(" in owner
+    assert "def set_ado_bearer_git_env(" in owner
+    assert "AC19: git-subprocess auth-header injection authority" in guard
+    assert (
+        "Git-subprocess Authorization-header injection must use "
+        "set_authorization_header_git_env / set_ado_bearer_git_env" in guard
+    )
+
+
+def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: Path) -> None:
+    """AC19 must reject a re-introduced dict-merge of the build_* overlay
+    onto a populated env -- the exact #2368 clobber pattern.
+    """
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/download_strategies.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\n"
+        + "def _reintroduced_clobber_site(base_env, token):\n"
+        + "    from .utils.github_host import build_authorization_header_git_env\n"
+        + '    return {**base_env, **build_authorization_header_git_env("Bearer", token)}\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Git-subprocess Authorization-header injection must use "
+        "set_authorization_header_git_env / set_ado_bearer_git_env" in result.stdout
+    )
+
+
+def test_public_github_anonymous_first_has_single_auth_owner() -> None:
+    """Public GitHub auth ordering belongs to AuthResolver and its consumers."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/auth.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def uses_public_github_anonymous_first(" in owner
+    assert "def build_public_github_anonymous_git_env(" in owner
+    assert "AC20: public github.com anonymous-first auth authority" in guard
+    assert (
+        "Public github.com anonymous-first auth ordering must stay owned by AuthResolver" in guard
+    )
+    assert "public github.com anonymous-first ordering" in architecture_doc
+
+
+def test_public_github_auth_owner_guard_rejects_duplicate_owner(
+    tmp_path: Path,
+) -> None:
+    """AC20 rejects a second host-ordering implementation outside auth.py."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/clone_engine.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\ndef uses_public_github_anonymous_first(host):\n"
+        + '    return host.lower() == "github.com"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Public github.com anonymous-first auth ordering must stay owned by "
+        "AuthResolver" in result.stdout
     )
