@@ -1042,6 +1042,35 @@ if ! grep -q '^    def enforce_frozen(' "$frozen_owner" \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC25: root vs dependency MCP declaration-scope authority"
+mcp_scope_owner="src/apm_cli/integration/mcp_config_view.py"
+mcp_root_scope_body=$(awk '
+    /^    def derive\(/ {flag=1}
+    flag && /^    def / && !/^    def derive\(/ {exit}
+    flag {print}
+' "$mcp_scope_owner")
+mcp_locked_scope_body=$(awk '
+    /^def _collect_locked_dependencies\(/ {flag=1}
+    flag && /^def / && !/^def _collect_locked_dependencies\(/ {exit}
+    flag {print}
+' "$mcp_scope_owner")
+mcp_unlocked_scope_body=$(awk '
+    /^def _collect_unlocked_compat\(/ {flag=1}
+    flag && /^def / && !/^def _collect_unlocked_compat\(/ {exit}
+    flag {print}
+' "$mcp_scope_owner")
+if [ "$(printf '%s\n' "$mcp_root_scope_body" \
+        | grep -c 'root\.get_all_mcp_dependencies()')" -ne 1 ] \
+    || printf '%s\n%s\n' "$mcp_locked_scope_body" "$mcp_unlocked_scope_body" \
+        | grep -q 'get_all_mcp_dependencies()' \
+    || [ "$(printf '%s\n' "$mcp_locked_scope_body" \
+        | grep -c 'package\.get_mcp_dependencies()')" -ne 1 ] \
+    || [ "$(printf '%s\n' "$mcp_unlocked_scope_body" \
+        | grep -c 'package\.get_mcp_dependencies()')" -ne 1 ]; then
+    echo "[x] Transitive MCP dependency scope must use production-only collection"
+    violations=$((violations + 1))
+fi
+
 
 
 

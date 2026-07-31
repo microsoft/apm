@@ -7,7 +7,11 @@ from pathlib import Path
 import yaml
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.integration.mcp_config_view import CurrentMcpConfigView, McpConfigDiff
+from apm_cli.integration.mcp_config_view import (
+    CurrentMcpConfigView,
+    McpConfigDiff,
+    _collect_transitive_compat,
+)
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -59,8 +63,29 @@ def _derive(
     )
 
 
-def test_derives_root_and_package_production_and_dev_mcp(tmp_path: Path) -> None:
-    """Root and locked package prod/dev declarations share manifest order."""
+class _RecordingLogger:
+    """Capture compatibility-path verbose diagnostics."""
+
+    def __init__(self) -> None:
+        self.details: list[str] = []
+        self.progress_messages: list[str] = []
+        self.warning_messages: list[str] = []
+
+    def progress(self, message: str) -> None:
+        """Record one progress diagnostic."""
+        self.progress_messages.append(message)
+
+    def warning(self, message: str) -> None:
+        """Record one warning diagnostic."""
+        self.warning_messages.append(message)
+
+    def verbose_detail(self, message: str) -> None:
+        """Record one verbose diagnostic."""
+        self.details.append(message)
+
+
+def test_root_dev_mcp_included_dep_dev_mcp_excluded(tmp_path: Path) -> None:
+    """Root dev MCP is included; locked package dev MCP is excluded (#2340)."""
     root = _write_manifest(
         tmp_path,
         name="root",
@@ -83,15 +108,14 @@ def test_derives_root_and_package_production_and_dev_mcp(tmp_path: Path) -> None
 
     view = _derive(root, _lock(locked), tmp_path / "apm_modules")
 
+    # Root dev MCP is included (authoring project); dep dev MCP is NOT (#2340).
     assert [dep.name for dep in view.dependencies] == [
         "root-prod",
         "root-dev",
         "package-prod",
-        "package-dev",
     ]
     assert view.provenance == {
         "package-prod": "tools",
-        "package-dev": "tools",
     }
 
 
@@ -493,6 +517,60 @@ def test_transitive_self_defined_trust_matches_install_behavior(tmp_path: Path) 
     assert [dep.name for dep in trusted.dependencies] == ["direct-server", "deep-server"]
 
 
+def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
+    tmp_path: Path,
+) -> None:
+    """A no-op update preserves prior trust without trusting changed code."""
+    root = _write_manifest(tmp_path, name="root")
+    deep_dir = tmp_path / "packages" / "deep"
+    package = _write_manifest(
+        deep_dir,
+        name="deep",
+        mcp=[_self_defined("deep-server", "trusted-command")],
+    )
+    deep = LockedDependency(
+        repo_url="_local/deep",
+        source="local",
+        local_path="./packages/deep",
+        depth=2,
+    )
+    stored_config = package.get_mcp_dependencies()[0].to_dict()
+
+    preserved = CurrentMcpConfigView.derive(
+        root,
+        _lock(deep),
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=False,
+        trusted_transitive_configs={"deep-server": ("deep", stored_config)},
+    )
+    changed = CurrentMcpConfigView.derive(
+        root,
+        _lock(deep),
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=False,
+        trusted_transitive_configs={
+            "deep-server": (
+                "deep",
+                {
+                    **stored_config,
+                    "command": "different-command",
+                },
+            )
+        },
+    )
+    wrong_declarer = CurrentMcpConfigView.derive(
+        root,
+        _lock(deep),
+        tmp_path / "apm_modules",
+        trust_transitive_self_defined=False,
+        trusted_transitive_configs={"deep-server": ("other-package", stored_config)},
+    )
+
+    assert [dependency.name for dependency in preserved.dependencies] == ["deep-server"]
+    assert changed.dependencies == ()
+    assert wrong_declarer.dependencies == ()
+
+
 def test_view_dependencies_are_mcp_dependency_objects(tmp_path: Path) -> None:
     """The public dependencies tuple remains strongly typed."""
     root = _write_manifest(tmp_path, name="root", mcp=["server"])
@@ -500,3 +578,90 @@ def test_view_dependencies_are_mcp_dependency_objects(tmp_path: Path) -> None:
     view = _derive(root, None, tmp_path / "apm_modules")
 
     assert all(isinstance(dep, MCPDependency) for dep in view.dependencies)
+
+
+def test_dependency_dev_mcp_is_excluded_from_consumer(tmp_path: Path) -> None:
+    """Regression #2340: dep devDependencies.mcp must not reach the consumer."""
+    root = _write_manifest(tmp_path, name="root")
+    dep_dir = tmp_path / "packages" / "dep"
+    _write_manifest(
+        dep_dir,
+        name="dep",
+        mcp=[
+            {
+                "name": "prod-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/prod",
+            }
+        ],
+        dev_mcp=[
+            {
+                "name": "dev-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/dev",
+            }
+        ],
+    )
+    locked = LockedDependency(
+        repo_url="_local/dep",
+        source="local",
+        local_path="./packages/dep",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    names = [dep.name for dep in view.dependencies]
+    assert "prod-server" in names, "prod MCP from dependency must be included"
+    assert "dev-server" not in names, "dev MCP from dependency must NOT be included"
+
+
+def test_unlocked_compat_excludes_dep_dev_mcp(tmp_path: Path) -> None:
+    """Regression #2340: no-lock compat path also excludes dependency dev MCP.
+
+    _collect_unlocked_compat is the legacy path when no lockfile exists;
+    it must enforce the same prod-only rule as _collect_locked_dependencies.
+    """
+    modules_root = tmp_path / "apm_modules"
+    dep_dir = modules_root / "dep-pkg"
+    _write_manifest(
+        dep_dir,
+        name="dep-pkg",
+        mcp=[
+            {
+                "name": "prod-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/prod",
+            }
+        ],
+        dev_mcp=[
+            {
+                "name": "dev-server",
+                "registry": False,
+                "transport": "http",
+                "url": "https://example.com/dev",
+            }
+        ],
+    )
+    logger = _RecordingLogger()
+
+    # No lock_path -- forces the _collect_unlocked_compat branch.
+    result = _collect_transitive_compat(
+        modules_root,
+        lock_path=None,
+        trust_private=True,
+        logger=logger,
+        diagnostics=None,
+    )
+
+    assert [(dependency.name, dependency.resolved_by) for dependency in result] == [
+        ("prod-server", "dep-pkg")
+    ]
+    assert logger.details == [
+        "Skipping 1 author-only MCP server(s) from 'dep-pkg'; "
+        "transitive devDependencies.mcp do not propagate"
+    ]
+    assert all("dev-server" not in detail for detail in logger.details)
