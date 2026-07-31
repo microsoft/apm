@@ -155,9 +155,11 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            # Restore local compatibility state first so the canonical ledger is
+            # complete when MCP target rows are projected into it.
+            self._preserve_existing_local_state(lockfile)
             self._preserve_existing_mcp_state(lockfile)
             self._preserve_existing_lsp_state(lockfile)
-            self._preserve_existing_local_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
 
             # Only write when the semantic content has actually changed
@@ -437,12 +439,32 @@ class LockfileBuilder:
             lockfile.mcp_config_provenance = copy.deepcopy(
                 self.ctx.existing_lockfile.mcp_config_provenance
             )
-            if self.ctx.logger:
-                self.ctx.logger.verbose_detail(
-                    "MCP state unchanged -- carrying forward "
-                    f"{len(lockfile.mcp_servers)} server(s), "
-                    f"{len(lockfile.mcp_configs)} config(s)"
+            target_servers = self.ctx.existing_lockfile.mcp_target_servers
+            # The codec rebuild is linear in deployment rows and also marks the
+            # compatibility view present, so skip it when there is no target
+            # state to preserve.
+            if target_servers:
+                from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+                DeploymentLedgerCodec.replace_mcp_target_servers(
+                    lockfile,
+                    copy.deepcopy(target_servers),
                 )
+            if self.ctx.logger:
+                server_count = len(lockfile.mcp_servers)
+                config_count = len(lockfile.mcp_configs)
+                server_noun = "server" if server_count == 1 else "servers"
+                config_noun = "config" if config_count == 1 else "configs"
+                detail = (
+                    "MCP state unchanged -- carrying forward "
+                    f"{server_count} {server_noun}, "
+                    f"{config_count} {config_noun}"
+                )
+                if target_servers:
+                    mapping_count = len(target_servers)
+                    mapping_noun = "mapping" if mapping_count == 1 else "mappings"
+                    detail += f", {mapping_count} target {mapping_noun}"
+                self.ctx.logger.verbose_detail(detail)
 
     def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:
         """Keep LSP fields until LSP integration reconciles them later in install."""

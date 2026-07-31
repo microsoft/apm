@@ -1,50 +1,22 @@
 """Source invariant for canonical deployment-state mutation."""
 
-import ast
+import importlib.util
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
-_OWNED_FIELDS = frozenset(
-    {
-        "deployed_files",
-        "deployed_file_hashes",
-        "local_deployed_files",
-        "local_deployed_file_hashes",
-        "mcp_target_servers",
-    }
-)
-_MUTATORS = frozenset({"append", "remove", "pop", "extend", "clear", "update", "insert"})
-_ALLOWED = {
-    Path("core/deployment_state.py"),
-    Path("core/deployment_ledger.py"),
-    Path("deps/lockfile.py"),
-}
 
-
-def _owned_attribute(node: ast.AST) -> bool:
-    return isinstance(node, ast.Attribute) and node.attr in _OWNED_FIELDS
-
-
-def _mutation_lines(source: str) -> list[int]:
-    tree = ast.parse(source)
-    violations: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AugAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if _owned_attribute(target) or (
-                    isinstance(target, ast.Subscript) and _owned_attribute(target.value)
-                ):
-                    violations.add(node.lineno)
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in _MUTATORS
-            and _owned_attribute(node.func.value)
-        ):
-            violations.add(node.lineno)
-    return sorted(violations)
+def _load_checker() -> ModuleType:
+    root = Path(__file__).resolve().parents[3]
+    path = root / "scripts/check_deployment_state_mutations.py"
+    spec = importlib.util.spec_from_file_location("check_deployment_state_mutations", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.mark.parametrize(
@@ -60,10 +32,11 @@ def _mutation_lines(source: str) -> list[int]:
         "lock.local_deployed_files.clear()",
         "lock.local_deployed_file_hashes.update({'path': 'hash'})",
         "lock.local_deployed_files.insert(0, 'path')",
+        "lock.mcp_target_servers = {'vscode': ['server']}",
     ],
 )
 def test_mutation_detector_catches_negative_controls(source: str) -> None:
-    assert _mutation_lines(source) == [1]
+    assert _load_checker().mutation_lines(source) == [1]
 
 
 @pytest.mark.parametrize(
@@ -75,16 +48,9 @@ def test_mutation_detector_catches_negative_controls(source: str) -> None:
     ],
 )
 def test_mutation_detector_allows_owned_field_reads(source: str) -> None:
-    assert _mutation_lines(source) == []
+    assert _load_checker().mutation_lines(source) == []
 
 
 def test_only_canonical_owner_mutates_legacy_deployment_fields() -> None:
     root = Path(__file__).resolve().parents[3] / "src" / "apm_cli"
-    violations: list[str] = []
-    for source in root.rglob("*.py"):
-        relative = source.relative_to(root)
-        if relative in _ALLOWED:
-            continue
-        for line_number in _mutation_lines(source.read_text(encoding="utf-8")):
-            violations.append(f"{relative.as_posix()}:{line_number}")
-    assert violations == []
+    assert _load_checker().analyze_tree(root) == []
