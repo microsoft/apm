@@ -225,14 +225,14 @@ the generic or GHES chain. No manual host-type flag is needed:
 # Single on-prem host
 export ADO_HOST=ado.company.com
 export ADO_APM_PAT=your_ado_server_pat
-apm install ado.company.com/DefaultCollection/project/repo
-
-# A server using a non-default HTTPS port
-apm install https://ado.company.com:8443/DefaultCollection/project/_git/repo
+apm install ado.company.com/DefaultCollection/MyProject/_git/MyRepo
 
 # Multiple on-prem hosts
 export APM_ADO_HOSTS=ado1.company.com,ado2.company.com
-apm install ado1.company.com/DefaultCollection/project/repo
+apm install ado1.company.com/DefaultCollection/MyProject/_git/MyRepo
+# Explicit port (e.g. IIS with non-standard port)
+apm install https://ado.company.com:8080/DefaultCollection/MyProject/_git/MyRepo
+apm install https://ado.company.com:8080/DefaultCollection/MyProject/_git/MyRepo
 ```
 
 Both variables accept hostnames only: no scheme, port, or path. Entries are
@@ -255,9 +255,13 @@ export ADO_APM_PAT=your_ado_server_pat
 The Azure CLI bearer fallback described below applies to Azure DevOps
 Services (`dev.azure.com` and `*.visualstudio.com`), not Azure DevOps Server.
 
-### Authenticating with Microsoft Entra ID (AAD) bearer tokens
+Create your PAT at `https://{ado-host}/_usersSettings/tokens` with **Code (Read)** permission.
 
-When your org has disabled PAT creation (managed-identity-only orgs, locked-down enterprise tenants), APM can use an AAD bearer token issued by the Azure CLI instead. No env var is required: APM picks up the token from your active `az` session on demand.
+### Authenticating with Microsoft Entra ID (AAD) bearer tokens (Azure DevOps Services)
+
+When your org has disabled PAT creation (managed-identity-only orgs, locked-down enterprise tenants), APM can use an AAD bearer token issued by the Azure CLI instead. This applies to **Azure DevOps Services** (`dev.azure.com`, `*.visualstudio.com`). For on-prem ADO Server, see the note in the section above.
+
+No env var is required: APM picks up the token from your active `az` session on demand.
 
 **Prerequisite:** install the [Azure CLI](https://aka.ms/installazurecli) and sign in against the tenant that owns the org:
 
