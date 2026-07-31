@@ -2,7 +2,11 @@
 
 ## Token precedence chain
 
-APM checks these sources in order, using the first valid token found:
+For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables and authorization headers, and disables Git credential helpers plus global/system Git config. It preserves non-auth process-scoped Git config such as CA settings, URL rewrites, and `credential.interactive=never`.
+
+Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Private-repository fallback is cached per repository path for the process, so later phases reuse it without applying that credential to a different repository.
+
+When fallback is required, APM checks these sources in order:
 
 | Priority | Variable | Scope | Notes |
 |----------|----------|-------|-------|
@@ -12,12 +16,13 @@ APM checks these sources in order, using the first valid token found:
 | 4 | `GH_TOKEN` | Global | Set by `gh auth login` |
 | 5 | `gh auth token --hostname <host>` | GitHub-like hosts | Active `gh auth login` account |
 | 6 | `git credential fill` | Per-host | System credential manager. APM forwards `path=<owner>/<repo>` so Git Credential Manager users with `credential.useHttpPath = true` get per-URL account selection (no account-picker prompt). |
-| -- | None | -- | Unauthenticated (public GitHub repos only) |
+| -- | None | -- | No credential was available after an auth-shaped anonymous failure |
 
 APM checks the active `gh` CLI account before invoking OS credential helpers. This reduces ambiguous multi-account prompts on hosts like github.com. If the `gh` CLI is not installed or no account is active, APM skips this step silently and continues to `git credential fill`.
 
-Unauthenticated public-repository retries use a fresh Git environment with
-inherited token and authorization-header settings removed.
+This anonymous-first rule applies only to `github.com` HTTPS. GHE Cloud, GHES, ADO,
+GitLab, SSH, local paths, and generic hosts keep their existing authentication
+and transport behavior.
 
 For multi-account Git Credential Manager setups, see the [Multi-account Git Credential Manager](https://microsoft.github.io/apm/getting-started/authentication/#multi-account-git-credential-manager) section in the main authentication guide.
 

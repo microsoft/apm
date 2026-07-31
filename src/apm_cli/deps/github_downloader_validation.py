@@ -253,7 +253,6 @@ def _directory_exists_at_ref(
         log(f"  [x] repo_url '{dep_ref.repo_url}' missing owner/repo split")
         return False
     owner, repo = parts
-    token = downloader.auth_resolver.resolve_for_dep(dep_ref).token
 
     from urllib.parse import quote
 
@@ -274,11 +273,10 @@ def _directory_exists_at_ref(
             f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
         )
 
-    headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
-    if token:
-        headers["Authorization"] = f"token {token}"
-
-    try:
+    def _request(token: str | None, _git_env: dict[str, str]) -> bool:
+        headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
         response = downloader._resilient_get(
             api_url,
             headers=headers,
@@ -289,16 +287,38 @@ def _directory_exists_at_ref(
         if response.status_code == 200:
             log(f"  [+] {path}@{ref} (directory)")
             return True
-        # 404 is the expected "not present at this ref" outcome -- the
-        # marker-file fallback path treats this as informational, not
-        # an error.  Reserve [x] for unexpected HTTP statuses.
-        if response.status_code == 404:
-            log(f"  [i] {path}@{ref} (HTTP 404)")
-        else:
-            log(f"  [x] {path}@{ref} (HTTP {response.status_code})")
+        response.raise_for_status()
         return False
+
+    try:
+        if (
+            downloader.auth_resolver.uses_public_github_anonymous_first(
+                host,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            is True
+        ):
+            return downloader.auth_resolver.try_with_fallback(
+                host,
+                _request,
+                org=owner,
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
+                unauth_first=True,
+            )
+        auth_ctx = downloader.auth_resolver.resolve_for_dep(dep_ref)
+        return _request(auth_ctx.token, auth_ctx.git_env)
     except GitHubThrottleError:
         raise
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        if status == 404:
+            log(f"  [i] {path}@{ref} (HTTP 404)")
+        else:
+            log(f"  [x] {path}@{ref} (HTTP {status})")
+        return False
     except (requests.exceptions.RequestException, RuntimeError) as exc:
         log(f"  [x] {path}@{ref} ({exc})")
         return False
@@ -339,9 +359,6 @@ def _build_validation_attempts(
     if dep_ref.is_artifactory():
         return []
 
-    dep_token: str | None = downloader._resolve_dep_token(dep_ref)
-    dep_auth_ctx = downloader._resolve_dep_auth_ctx(dep_ref)
-    dep_auth_scheme: str = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
     is_insecure: bool = bool(getattr(dep_ref, "is_insecure", False))
     is_ado: bool = dep_ref.is_azure_devops()
     host_info = (
@@ -354,6 +371,24 @@ def _build_validation_attempts(
         else None
     )
     is_gitlab = host_info is not None and host_info.kind == "gitlab"
+    public_github_anonymous_first = bool(
+        host_info is not None
+        and not is_insecure
+        and downloader.auth_resolver.uses_public_github_anonymous_first(
+            host_info.host,
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
+        is True
+    )
+    if public_github_anonymous_first:
+        dep_token = None
+        dep_auth_ctx = None
+        dep_auth_scheme = "basic"
+    else:
+        dep_token = downloader._resolve_dep_token(dep_ref)
+        dep_auth_ctx = downloader._resolve_dep_auth_ctx(dep_ref)
+        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
     attempts: list[AttemptSpec] = []
 
@@ -390,9 +425,13 @@ def _build_validation_attempts(
         attempts.append(AttemptSpec(label, token_url, token_env))
 
     # Attempt 2: plain HTTPS w/ credential helper (no token, no header).
-    plain_env = downloader._build_noninteractive_git_env(
-        preserve_config_isolation=is_insecure,
-        suppress_credential_helpers=is_insecure,
+    plain_env = (
+        downloader.auth_resolver.build_public_github_anonymous_git_env()
+        if public_github_anonymous_first
+        else downloader._build_noninteractive_git_env(
+            preserve_config_isolation=is_insecure,
+            suppress_credential_helpers=is_insecure,
+        )
     )
     plain_url = downloader._build_repo_url(
         dep_ref.repo_url,
@@ -400,7 +439,12 @@ def _build_validation_attempts(
         dep_ref=dep_ref,
         token="",
     )
-    attempts.append(AttemptSpec("plain HTTPS w/ credential helper", plain_url, plain_env))
+    plain_label = (
+        "anonymous GitHub HTTPS"
+        if public_github_anonymous_first
+        else "plain HTTPS w/ credential helper"
+    )
+    attempts.append(AttemptSpec(plain_label, plain_url, plain_env))
 
     # Attempt 3 (SSH): only when allowed. StrictHostKeyChecking is
     # intentionally inherited from the user's ssh config; do NOT add
@@ -447,13 +491,86 @@ def _ref_exists_via_ls_remote(
         if ls-remote succeeded via SSH but the follow-up probe used the
         rejected PAT, the fallback would silently false-reject).
     """
+    is_sha = _is_sha_pin(ref)
+    ref_lc = ref.lower()
+    g = git.cmd.Git()
+    host = dep_ref.host or default_host()
+    if (
+        not dep_ref.is_insecure
+        and downloader.auth_resolver.uses_public_github_anonymous_first(
+            host,
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
+        is True
+    ):
+
+        def _public_github_ref_probe(
+            token: str | None,
+            git_env: dict[str, str],
+        ) -> tuple[str, AttemptSpec]:
+            probe_env = dict(git_env)
+            label = "anonymous GitHub HTTPS"
+            if token:
+                set_authorization_header_git_env(probe_env, "Bearer", token)
+                probe_env.pop("GIT_TOKEN", None)
+                label = "authenticated GitHub HTTPS"
+            url = downloader._build_repo_url(
+                dep_ref.repo_url,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token="",
+            )
+            if is_sha:
+                output = g.ls_remote(url, env=probe_env)
+            else:
+                output = g.ls_remote(
+                    "--heads",
+                    "--tags",
+                    url,
+                    ref,
+                    env=probe_env,
+                )
+            return output, AttemptSpec(label, url, probe_env)
+
+        org = dep_ref.repo_url.split("/", 1)[0]
+        try:
+            output, attempt = downloader.auth_resolver.try_with_fallback(
+                host,
+                _public_github_ref_probe,
+                org=org,
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
+                unauth_first=True,
+            )
+            if is_sha:
+                matched = bool(
+                    output
+                    and any(
+                        line.split("\t", 1)[0].lower().startswith(ref_lc)
+                        for line in output.splitlines()
+                        if line
+                    )
+                )
+            else:
+                matched = bool(output and output.strip())
+            if matched:
+                log(f"  [+] ls-remote ok via {attempt.label}")
+                return True, attempt
+            log(f"  [!] ls-remote returned no matching refs via {attempt.label}")
+            return False, None
+        except (GitCommandError, OSError) as exc:
+            log(
+                "  [x] ls-remote failed via anonymous-first GitHub HTTPS: "
+                f"{downloader._sanitize_git_error(str(exc))}"
+            )
+            return False, None
+
     attempts = _build_validation_attempts(downloader, dep_ref, log)
     if not attempts:
         return False, None
 
-    is_sha = _is_sha_pin(ref)
-    ref_lc = ref.lower()
-    g = git.cmd.Git()
     for attempt in attempts:
         label, url, env = attempt
         try:
