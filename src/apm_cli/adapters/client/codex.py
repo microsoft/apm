@@ -358,8 +358,20 @@ class CodexClientAdapter(MCPClientAdapter):
                     # For Docker packages in Codex TOML format:
                     # - Ensure all environment variables from resolved_env are represented as -e flags in args
                     # - Put actual environment variable values in separate [env] section
-                    config["args"] = self._ensure_docker_env_flags(
-                        processed_runtime_args + processed_package_args, resolved_env
+                    # _ensure_docker_env_flags inserts -e flags immediately
+                    # before the trailing operand on the assumption that it is
+                    # the image, so it must run while the image IS trailing.
+                    # Package arguments are the container's own argv and are
+                    # appended afterwards, keeping them behind the image per
+                    # `docker run [OPTIONS] IMAGE [ARG...]`; folding them in
+                    # first pushed the env flags past the image into the
+                    # container argv, where docker never applies them.
+                    config["args"] = (
+                        self._ensure_docker_env_flags(
+                            self._ensure_docker_image_arg(processed_runtime_args, package_name),
+                            resolved_env,
+                        )
+                        + processed_package_args
                     )
 
                     # Environment variables go in separate env section for Codex TOML format

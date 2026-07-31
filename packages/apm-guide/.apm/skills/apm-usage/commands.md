@@ -231,6 +231,11 @@ Self-defined stdio MCP entries declared in `apm.yml` (`env:` / `args:`) have the
 
 Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL is validated at startup and must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. The registry must implement the [MCP Registry v0.1 spec](https://github.com/modelcontextprotocol/registry) (apm calls `/v0.1/servers/...`); legacy `/v0/`-only registries will return 404. When the override is set and the registry is unreachable during install pre-flight, APM fails closed.
 
+For a v0.1 package with `registryType: oci`, install generates a `docker`
+launcher automatically. Docker run options stay before the image and
+package arguments stay after it. Docker must be available when the
+harness starts the server; no manual launcher override is required.
+
 ## Runtime management (experimental)
 
 | Command | Purpose | Key flags |

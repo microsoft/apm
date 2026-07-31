@@ -60,6 +60,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |
 | Git ref freshness and cache eligibility | deps/tiered_ref_resolver.py (RefFreshnessPolicy) | `src/apm_cli/deps/tiered_ref_resolver.py` |
 | Root vs dependency MCP declaration scope | integration/mcp_config_view.py (CurrentMcpConfigView) | `src/apm_cli/integration/mcp_config_view.py` |
+| MCP container launcher selection and Docker argv shape | adapters/client/base.py (MCPClientAdapter) | `src/apm_cli/adapters/client/base.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

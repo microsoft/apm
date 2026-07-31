@@ -289,8 +289,11 @@ class VSCodeClientAdapter(MCPClientAdapter):
             package = self._select_best_package(server_info["packages"])
             runtime_hint = package.get("runtime_hint", "") if package else ""
             registry_name = self._infer_registry_name(package) if package else ""
+            is_docker = runtime_hint == "docker" or registry_name == "docker"
             pkg_args = (
-                self._extract_package_args(package, runtime_vars=runtime_vars) if package else []
+                (self._extract_package_args(package, runtime_vars=runtime_vars) if package else [])
+                if not is_docker
+                else []
             )
 
             # Handle npm packages
@@ -307,8 +310,24 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 }
 
             # Handle docker packages
-            elif runtime_hint == "docker" or registry_name == "docker":
-                args = pkg_args if pkg_args else ["run", "-i", "--rm", package.get("name")]
+            elif is_docker:
+                runtime_args = self._extract_package_args(
+                    {"runtime_arguments": package.get("runtime_arguments") or []},
+                    runtime_vars=runtime_vars,
+                )
+                package_args = (
+                    self._extract_package_args(
+                        {"package_arguments": package["package_arguments"]},
+                        runtime_vars=runtime_vars,
+                    )
+                    if package.get("package_arguments")
+                    else []
+                )
+                args = self._ensure_docker_image_arg(
+                    runtime_args or ["run", "-i", "--rm"],
+                    package.get("name"),
+                )
+                args += package_args
 
                 server_config = {"type": "stdio", "command": "docker", "args": args}
 
@@ -652,6 +671,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
                     elif "value_hint" in arg and arg["value_hint"] and "is_required" not in arg:
                         # v0.1 format: plain value_hint entries without is_required
                         args.append(arg["value_hint"])
+                    elif arg.get("value"):
+                        args.append(arg["value"])
             if args:
                 return args
 

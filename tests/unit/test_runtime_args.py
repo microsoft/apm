@@ -134,14 +134,10 @@ class TestRuntimeArguments(unittest.TestCase):
                     "registry_name": "docker",
                     "runtime_hint": "docker",
                     "runtime_arguments": [
-                        {"is_required": True, "value": "test-image", "value_hint": "test-image"},
-                        {
-                            "is_required": True,
-                            "value": "<PORT>",
-                            "value_hint": "8080",
-                            "description": "Port to expose",
-                        },
+                        {"is_required": True, "value": "run", "value_hint": "run"},
+                        {"is_required": True, "value": "--rm", "value_hint": "--rm"},
                     ],
+                    "package_arguments": [{"type": "positional", "value": "8080"}],
                 }
             ],
         }
@@ -152,11 +148,7 @@ class TestRuntimeArguments(unittest.TestCase):
         # Validate the args array includes all required runtime arguments
         self.assertEqual(server_config["type"], "stdio")
         self.assertEqual(server_config["command"], "docker")
-        self.assertEqual(
-            len(server_config["args"]), 2
-        )  # All arguments should come directly from runtime_arguments
-        self.assertEqual(server_config["args"][0], "test-image")
-        self.assertEqual(server_config["args"][1], "8080")
+        self.assertEqual(server_config["args"], ["run", "--rm", "test-image", "8080"])
 
     def test_python_runtime_args_handling(self):
         """Test that python runtime arguments are correctly added to the args list."""

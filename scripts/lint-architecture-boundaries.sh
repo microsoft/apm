@@ -1092,9 +1092,26 @@ if [ "$(printf '%s\n' "$mcp_root_scope_body" \
     violations=$((violations + 1))
 fi
 
-
-
-
+echo "[*] AC26: MCP container launcher authority"
+mcp_container_owner="src/apm_cli/adapters/client/base.py"
+mcp_container_consumers=(
+    src/apm_cli/adapters/client/copilot.py
+    src/apm_cli/adapters/client/codex.py
+    src/apm_cli/adapters/client/gemini.py
+    src/apm_cli/adapters/client/vscode.py
+)
+mcp_image_owner_defs=$(grep -rEc \
+    '^[[:space:]]*def _ensure_docker_image_arg\(' \
+    src/apm_cli/adapters/client --include='*.py' \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+mcp_container_missing_consumers=$(grep -L \
+    '_ensure_docker_image_arg(' "${mcp_container_consumers[@]}" || true)
+if ! grep -q '_REGISTRY_TYPE_ALIASES = {"oci": "docker"}' "$mcp_container_owner" \
+    || [ "$mcp_image_owner_defs" -ne 1 ] \
+    || [ -n "$mcp_container_missing_consumers" ]; then
+    echo "[x] MCP container launcher decisions must route through MCPClientAdapter"
+    violations=$((violations + 1))
+fi
 
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"

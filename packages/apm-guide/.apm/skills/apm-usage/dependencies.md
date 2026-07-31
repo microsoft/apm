@@ -453,6 +453,14 @@ dependencies:
         callbackPort: 3118
 ```
 
+MCP Registry v0.1 uses `registryType: oci` for container packages. APM
+maps that type to the Docker launcher automatically, preserves Docker
+run options before the image, and appends package arguments after the
+image. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
+then PyPI; VS Code selects `npm`, PyPI, then OCI. Docker must be
+available when the harness starts an OCI server. Do not add per-target
+launcher overrides.
+
 ### Development MCP scope
 
 Use `dependencies.mcp` for servers that a consuming project should

@@ -236,7 +236,10 @@ class GeminiClientAdapter(CopilotClientAdapter):
         elif registry_name == "docker":
             config["command"] = "docker"
             if processed_rt:
-                config["args"] = self._inject_env_vars_into_docker_args(processed_rt, resolved_env)
+                docker_args = self._inject_env_vars_into_docker_args(
+                    self._ensure_docker_image_arg(processed_rt, package_name), resolved_env
+                )
+                config["args"] = docker_args + processed_pkg
             else:
                 config["args"] = DockerArgsProcessor.process_docker_args(
                     ["run", "-i", "--rm", package_name], resolved_env

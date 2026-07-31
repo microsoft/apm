@@ -2093,3 +2093,31 @@ def test_public_github_auth_owner_guard_rejects_duplicate_owner(
         "Public github.com anonymous-first auth ordering must stay owned by "
         "AuthResolver" in result.stdout
     )
+
+
+def test_mcp_container_launcher_has_one_canonical_owner() -> None:
+    """OCI selection and image placement must stay shared across adapters."""
+    root = Path(__file__).parents[2]
+    owner = root / "src/apm_cli/adapters/client/base.py"
+    consumers = (
+        root / "src/apm_cli/adapters/client/copilot.py",
+        root / "src/apm_cli/adapters/client/codex.py",
+        root / "src/apm_cli/adapters/client/gemini.py",
+        root / "src/apm_cli/adapters/client/vscode.py",
+    )
+    owner_source = owner.read_text(encoding="utf-8")
+    definitions = [
+        node
+        for path in (owner, *consumers)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_ensure_docker_image_arg"
+    ]
+
+    assert '_REGISTRY_TYPE_ALIASES = {"oci": "docker"}' in owner_source
+    assert len(definitions) == 1
+    for consumer in consumers:
+        assert "_ensure_docker_image_arg(" in consumer.read_text(encoding="utf-8")
+
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    assert "MCP container launcher decisions must route through MCPClientAdapter" in guard

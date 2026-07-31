@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale. The matching `openapm-v0.1.md` frozen-install requirement now covers
   MCP state and all durable writes. (by @edenfunf, #2390; fixes #2373)
 - Package-declared targets now restrict dependency primitive deployment without expanding project or consumer authorization, preventing Claude-only hooks from leaking into Cursor and repairing stale owned entries on update; the contract is cited in `docs/src/content/docs/specs/openapm-v0.1.md`. By @sergio-sisternes-epam (#2362)
+- MCP servers whose registry entry uses the MCP Registry v0.1 container type
+  `oci` now render a `docker` launcher. They previously matched no launcher
+  branch and fell through to the generic `npx` default, which handed the
+  container image reference to npm as a package name. (by @edenfunf, #2376)
+
+### Changed
+
+- A server publishing both a container and a pypi package now resolves to the
+  container on Copilot, Codex, Gemini and the adapters inheriting them,
+  following the documented `npm, docker, pypi` selection order. Such a server
+  previously fell through to `uvx` and now requires a Docker daemon. VS Code
+  keeps its own `npm, pypi, docker` order. (by @edenfunf, #2376)
 - Consuming projects no longer inherit a dependency author's development-only
   MCP servers. Only `dependencies.mcp` from direct and transitive packages
   propagates; the root project's `dependencies.mcp` and `devDependencies.mcp`
