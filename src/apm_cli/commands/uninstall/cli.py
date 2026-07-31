@@ -41,7 +41,11 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
 
 @click.command(help="Remove packages using manifest entries or keys from 'apm deps list'")
 @click.argument("packages", nargs=-1, required=True)
-@click.option("--dry-run", is_flag=True, help="Show what would be removed without removing")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Preview removal plan (pre-uninstall scripts still run)",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed removal information")
 @click.option(
     "--global",

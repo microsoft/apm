@@ -47,7 +47,7 @@ Remove several at once:
 apm uninstall org/pkg1 org/pkg2
 ```
 
-Preview the removal without writing to disk:
+Preview the uninstall engine's plan (pre-uninstall scripts still run):
 
 ```bash
 apm uninstall acme/my-package --dry-run
