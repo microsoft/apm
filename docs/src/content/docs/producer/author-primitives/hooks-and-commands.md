@@ -51,7 +51,8 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 
 Event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
-an install warning; all-lowercase names such as `stop` pass through silently.
+an install warning. All-lowercase names such as `stop` pass through silently;
+`stop` is not a native Copilot or Claude event and will not fire.
 
 ```json
 {
@@ -263,9 +264,11 @@ agent a procedure" fits a skill -- and reaches every harness.
 
 ## Pitfalls
 
-- **Hook event names.** Use the documented aliases in the table above.
-  Unknown names are preserved; only an unmapped, detectable casing mismatch
-  emits an install warning.
+- **Hook event names.** Use the documented
+  [session lifecycle aliases](#session-lifecycle-event-aliases). Unknown names
+  are preserved. An install warning appears only when an unmapped name starts
+  with a capital letter or starts lowercase and contains a later capital
+  letter, and that casing conflicts with the target convention.
 - **Cursor command frontmatter loss.** Cursor reuses the Claude
   command transformer today, so any prompt-only metadata is dropped
   with a diagnostic. Keep Cursor commands to the preserved key set.
