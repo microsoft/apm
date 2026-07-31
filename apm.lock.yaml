@@ -686,7 +686,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:4b71113da805c5504b4d74029f3113402044bc7e5c48abd010c0b8df3f18938b
+  content_hash: sha256:63bea701baffd9b2a6769aaf919f2a0ff1d017e4c7426728bb6379b8b8892b03
 - kind: project-relative
   target: agents
   value: .agents/skills/apm-spec-guardian/assets/panelist-return-schema.json
@@ -3053,7 +3053,7 @@ local_deployed_files:
 local_deployed_file_hashes:
   .agents/skills/apm-spec-guardian/SKILL.md: sha256:5e2b98792b458ca946d3bfc06a1e0c661f9a0dc05a4606602eb71d7d8afae4dd
   .agents/skills/apm-spec-guardian/assets/comment-template.md: sha256:8f5703aa98d1036d2418ffa45eac9d0270504dac33f3e9b1892884a9d48da1a6
-  .agents/skills/apm-spec-guardian/assets/linter-checklist.md: sha256:4b71113da805c5504b4d74029f3113402044bc7e5c48abd010c0b8df3f18938b
+  .agents/skills/apm-spec-guardian/assets/linter-checklist.md: sha256:63bea701baffd9b2a6769aaf919f2a0ff1d017e4c7426728bb6379b8b8892b03
   .agents/skills/apm-spec-guardian/assets/panelist-return-schema.json: sha256:bb66b270394c386665c6b93d83befe05ce9f8206abf8d656079c29d65729fefd
   .agents/skills/apm-spec-guardian/assets/synthesizer-return-schema.json: sha256:e6e2771f2fe8578e72d12e51edcc3817717f8a0bbef66d8a8a5c556f0dce06d7
   .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef

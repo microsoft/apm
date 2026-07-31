@@ -627,6 +627,16 @@ def test_dependency_package_targets_are_restriction_only() -> None:
             "manifest-v0.1.schema.json",
             {"name": "blank-target", "version": "1.0.0", "targets": [""]},
         )
+    for malformed_token in ("Cursor", "../cursor"):
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against(
+                "manifest-v0.1.schema.json",
+                {
+                    "name": "malformed-target",
+                    "version": "1.0.0",
+                    "targets": [malformed_token],
+                },
+            )
     for invalid_fields in (
         {"target": ""},
         {"target": []},
@@ -647,6 +657,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be rejected before target-scoped",
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
+        "[req-tg-008](#req-tg-008),\n[req-sc-001](#req-sc-001),",
     )
 
 
