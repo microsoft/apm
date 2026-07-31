@@ -98,49 +98,47 @@ Packages can ship hooks (pre/post tool-use scripts) by placing JSON
 files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
 (`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
 
-To limit which harnesses receive a package's hooks, use either:
+APM computes hook reach with one restriction-only intersection:
 
-- **Package-side** (`target:` or `targets:` in the package's own `apm.yml`):
-  APM skips every active target not in the declared set. No consumer
-  configuration required. Example -- a package that ships Claude-formatted
-  hooks should declare `target: claude` so `.cursor/hooks.json` is never
-  written.
-- **Consumer-side** (`targets:` inside a `dependencies.apm` entry):
-  the consumer restricts which active targets the dependency is expanded for.
+`effective hook targets = project active targets INTERSECT consumer
+per-dependency targets (when set) INTERSECT package targets (when
+restrictive)`
 
-Both gates are independent and AND-combined.
+Package declarations never activate targets or expand consumer authorization.
+Omitting package `target:` / `targets:`, or using legacy `all`, adds no package
+restriction.
 
-Package-level `targets:` (top-level) controls compile/install runtimes AND
-now also gates hook routing; per-dependency `targets:` (inside a
-`dependencies.apm` entry) selects which active harnesses receive that
-dependency's target-scoped primitives. They compose via intersection. See
-`dependencies.md` for consumer syntax.
+```yaml
+name: claude-hooks
+version: "1.0.0"
+target: claude
+```
+
+This package cannot write to `.cursor/hooks.json`, even when Cursor is active.
+A consumer can narrow it further with per-dependency `targets:`; see
+`dependencies.md`.
 
 ### Migrating filename-routed hooks
 
-Keep hook filenames simple, then document the target set consumers
-should use:
+Keep hook filenames simple and declare target-specific intent in the package:
 
 ```yaml
-dependencies:
-  apm:
-    - git: owner/my-hooks-pkg
-      targets: [codex]
+name: codex-hooks
+version: "1.0.0"
+target: codex
 ```
 
 Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
-After: keep hook filenames generic and let the consumer set `targets: [codex]`.
+After: keep hook filenames generic and declare `target: codex` in the package.
 Combined deprecated stems such as `claude-codex-hooks.json` route to every
 named target token during the migration window.
 Stems with target tokens outside the trailing target suffix (for example
 `codex-launch-hooks.json`) fall back to universal or suffix routing and print a
 warning naming the ignored token.
 
-During the deprecation window, existing suffix-named hook files still
-route to their matching harness and emit an install-time warning. A
-consumer's per-dependency `targets:` list only narrows the active target
-set; filename routing still runs inside that set, so the two filters
-compose by intersection.
+During the deprecation window, suffix routing remains an additional
+restriction inside the effective target set and emits an install-time warning.
+Consumer per-dependency `targets:` can narrow that set further.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
@@ -189,20 +187,30 @@ Two keys control which output runtimes a package compiles and installs to:
 
 Setting both keys in the same `apm.yml` is a parse error (`ConflictingTargetsError`); pick one. An empty `targets: []` is also a parse error -- omit the line if you mean auto-detect.
 
-Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same validator, so identical input is rejected or accepted the same way at every entry point. Invalid values fail at parse time with a message naming the apm.yml path and the offending token -- they do **not** silently fall through to auto-detect.
+Both manifest keys validate against the target catalog, with one compatibility
+difference: `target:` accepts aliases such as `vscode` and normalizes them to
+their canonical target (`copilot`), while `targets:` accepts canonical names
+only. Invalid values fail at parse time -- they do **not** silently fall
+through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
 | `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
-| `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
+| `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
+| `target: vscode` | Alias spelling; canonical package restriction is `copilot` |
+| `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
+| `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
+| `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
 | `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
-Error messages always name the `apm.yml` path and the offending token, so the fix point is unambiguous. The list form (`targets: [a, b]`) is the recommended shape; the singular `target:` and CSV-string forms are supported indefinitely as sugar.
+Validation errors identify the conflicting key, empty list, or unknown token.
+The list form (`targets: [a, b]`) is recommended; singular `target:` and
+CSV-string forms remain supported compatibility spellings.
 
 The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
 

@@ -429,6 +429,18 @@ def _load_target_instruction_contraction_owner_checker(root: Path) -> ModuleType
     return module
 
 
+def _load_package_target_authority_checker(root: Path) -> ModuleType:
+    """Import the restriction-only package target authority checker."""
+    module_name = "check_package_target_authority"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_skill_subset_owner_checker() -> ModuleType:
     """Import scripts/check_skill_subset_owner.py as a standalone module.
 
@@ -681,6 +693,111 @@ def test_target_instruction_contraction_uses_manifest_reconciliation() -> None:
         "Target-specific instruction contraction must route through manifest_reconcile.py" in guard
     )
     assert "Target-scoped deployed-file contraction" in architecture
+
+
+def test_effective_package_target_authorization_has_one_owner() -> None:
+    """All runtime consumers must use the restriction-only target selector."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert checker.check(root) == []
+    assert "scripts/check_package_target_authority.py" in guard
+    assert (
+        "Effective package target authorization must route through install/target_filter.py"
+    ) in guard
+    assert (
+        "| Effective package target authorization | install/target_filter.py "
+        "(resolve_effective_package_targets) |"
+    ) in architecture
+
+
+def test_package_target_authority_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The static owner check rejects a package-target read in an integrator."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    parallel = tmp_path / "hook_integrator.py"
+    parallel.write_text(
+        "def bypass(package_info):\n    return package_info.package.canonical_targets\n",
+        encoding="utf-8",
+    )
+
+    violations = checker.find_parallel_target_reads([parallel])
+
+    assert len(violations) == 1
+    assert "package_info.package.canonical_targets" in violations[0]
+
+
+def test_package_target_authority_guard_rejects_aliased_package_read(
+    tmp_path: Path,
+) -> None:
+    """Renaming the package object cannot evade the semantic owner check."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    parallel = tmp_path / "hook_integrator.py"
+    parallel.write_text(
+        "def bypass(package_info):\n"
+        "    package = package_info.package\n"
+        "    return package.targets\n",
+        encoding="utf-8",
+    )
+
+    violations = checker.find_parallel_target_reads([parallel])
+
+    assert len(violations) == 1
+    assert "package.targets" in violations[0]
+
+
+def test_package_target_consumer_requires_live_assigned_selector_result(
+    tmp_path: Path,
+) -> None:
+    """A comment or ignored selector call cannot satisfy the delegation gate."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    consumer = tmp_path / "services.py"
+    consumer.write_text(
+        "def integrate_package_primitives():\n"
+        "    # target_selection = resolve_effective_package_targets()\n"
+        "    resolve_effective_package_targets()\n"
+        "    targets = []\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        checker.consumer_routes_through_selector(
+            consumer,
+            "integrate_package_primitives",
+        )
+        is False
+    )
+
+
+def test_package_target_consumer_rejects_dead_logging_only_read(
+    tmp_path: Path,
+) -> None:
+    """Reading selector output for logging cannot mask unfiltered dispatch."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    consumer = tmp_path / "services.py"
+    consumer.write_text(
+        "def integrate_package_primitives(original_targets):\n"
+        "    target_selection = resolve_effective_package_targets()\n"
+        "    print(target_selection.targets)\n"
+        "    for target in original_targets:\n"
+        "        integrate(target)\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        checker.consumer_routes_through_selector(
+            consumer,
+            "integrate_package_primitives",
+        )
+        is False
+    )
 
 
 def test_dependency_winner_selection_has_one_algorithm() -> None:
