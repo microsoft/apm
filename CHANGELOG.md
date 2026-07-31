@@ -115,10 +115,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marketplace semver range resolution now honours the `tagPattern` declared by the producer; `version: "~2.1.0"` entries no longer silently fall back to the hardcoded `{name}--v{version}` tag pattern. Existing marketplace files without `tag_pattern` keep the legacy convention. (#2366)
 - Marketplace semver range resolution now honours the `tagPattern` declared by the producer; `version: "~2.1.0"` entries no longer silently fall back to the hardcoded `{name}--v{version}` tag pattern. Existing marketplace files without `tag_pattern` keep the legacy convention. Bare versions also fail closed when no tag matches; use an explicit tag ref instead. (#2366)
-- Marketplace semver range resolution now honours the `tagPattern` declared by the producer; `version: "~2.1.0"` entries no longer silently fall back to the hardcoded `{name}--v{version}` tag pattern. Existing marketplace files without `tag_pattern` keep the legacy convention. Bare versions also fail closed when no tag matches; use an explicit tag ref instead. (#2366)
-- Public `github.com` dependencies now try anonymous HTTPS before resolving
-  credentials, so all-public installs no longer open repeated credential or
-  Git Credential Manager prompts. Reported by @RuiRomano. (#2406, closes #2400)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
@@ -136,13 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The header overlay previously hardcoded `GIT_CONFIG_COUNT=1`, so merging it
   onto an already-configured environment reset the count and clobbered index
   0. (by @edenfunf, #2368)
-- Marketplace semver range resolution now honours the `tagPattern` declared
-  by the marketplace producer. Previously, `version: "~2.1.0"` marketplace
-  dependencies always resolved tags using the hardcoded `{name}--v{version}`
-  pattern, causing silent install failures when a marketplace used a different
-  convention. The effective tag pattern is now propagated from `apm pack`
-  through `marketplace.json` and read by `apm install` at resolution time.
-  (#2319)
 
 ## [0.26.0] - 2026-07-18
 
