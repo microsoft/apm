@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,10 @@ def _setup_commonjs_hook_package(
         "module.exports = { message: 'nested' };\n",
         encoding="utf-8",
     )
+    (hooks_dir / "lib" / "config.json").write_text(
+        json.dumps({"message": "configuration"}),
+        encoding="utf-8",
+    )
     (hooks_dir / target_manifest).write_text(
         json.dumps(_session_start_hook("${CLAUDE_PLUGIN_ROOT}/hooks/ponytail.js session-start")),
         encoding="utf-8",
@@ -221,20 +226,31 @@ def test_claude_deploys_hook_directory_siblings_and_package_module_type(
     assert deployed_script.exists()
     assert (deployed_script.parent / "ponytail-config.js").exists()
     assert (deployed_script.parent / "lib" / "helper.js").exists()
+    assert (deployed_script.parent / "lib" / "config.json").exists()
     assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
     assert deployed_script in result.target_paths
     assert (deployed_script.parent / "ponytail-config.js") in result.target_paths
     assert (deployed_script.parent / "lib" / "helper.js") in result.target_paths
+    assert (deployed_script.parent / "lib" / "config.json") in result.target_paths
     assert deployed_package_json in result.target_paths
 
 
-def test_copilot_deploys_hook_directory_siblings_and_package_module_type(
+def test_copilot_deploys_hook_directory_siblings_without_package_json_sidecar(
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Copilot deployment must NOT write a package.json sidecar.
+
+    Copilot's hook loader scans .github/hooks/ recursively for JSON hook
+    descriptors.  A bare {"type": "..."} package.json is not a valid hook
+    descriptor and causes Copilot to fail with "hooks: hooks must be an object".
+    See: https://github.com/microsoft/apm/issues/2322
+    """
     project = tmp_path / "project"
     project.mkdir()
     (project / "package.json").write_text(json.dumps({"type": "module"}), encoding="utf-8")
     pkg_info = _setup_commonjs_hook_package(tmp_path, "hooks-copilot.json")
+    caplog.set_level(logging.DEBUG, logger="apm_cli.integration.hook_bundle")
 
     result = HookIntegrator().integrate_package_hooks(pkg_info, project)
 
@@ -245,11 +261,57 @@ def test_copilot_deploys_hook_directory_siblings_and_package_module_type(
     assert deployed_script.exists()
     assert (deployed_script.parent / "ponytail-config.js").exists()
     assert (deployed_script.parent / "lib" / "helper.js").exists()
-    assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
+    assert not (deployed_script.parent / "lib" / "config.json").exists()
+    assert not deployed_package_json.exists(), (
+        "package.json must not be deployed to Copilot hooks scripts dir -- "
+        "Copilot scans .github/hooks/ recursively and rejects non-hook JSON files"
+    )
     assert deployed_script in result.target_paths
     assert (deployed_script.parent / "ponytail-config.js") in result.target_paths
     assert (deployed_script.parent / "lib" / "helper.js") in result.target_paths
-    assert deployed_package_json in result.target_paths
+    assert (deployed_script.parent / "lib" / "config.json") not in result.target_paths
+    assert deployed_package_json not in result.target_paths
+    assert "Skipping JSON hook bundle asset" in caplog.text
+    assert "config.json" in caplog.text
+
+
+def test_copilot_does_not_deploy_package_json_sidecar_into_scanned_hooks_dir(
+    tmp_path: Path,
+) -> None:
+    """Regression test for #2322.
+
+    APM must not write a package.json sidecar into .github/hooks/scripts/ when
+    deploying hooks for the Copilot target.  Copilot reads all JSON files under
+    .github/hooks/ (recursively) and treats them as hook descriptors.  A
+    {"type": "module"} or {"type": "commonjs"} file has no "hooks" key and
+    causes Copilot to abort hook loading with:
+        hooks: hooks must be an object
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    package_path = tmp_path / "myhooks"
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (package_path / "package.json").write_text(
+        json.dumps({"type": "commonjs"}),
+        encoding="utf-8",
+    )
+    (hooks_dir / "validate.js").write_text("console.log('ok');\n", encoding="utf-8")
+    (hooks_dir / "hooks-copilot.json").write_text(
+        json.dumps(
+            {"hooks": {"preToolUse": [{"bash": "${CLAUDE_PLUGIN_ROOT}/hooks/validate.js"}]}}
+        ),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks(_package_info(package_path, "myhooks"), project)
+
+    scripts_dir = project / ".github" / "hooks" / "scripts" / "myhooks" / "hooks"
+    assert (scripts_dir / "validate.js").exists()
+    assert not (scripts_dir / "package.json").exists(), (
+        "package.json must not appear in .github/hooks/** -- "
+        "Copilot scans this directory recursively and rejects non-hook JSON"
+    )
 
 
 def test_hook_bundle_defaults_sidecar_to_commonjs_without_package_type(

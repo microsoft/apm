@@ -98,6 +98,16 @@ def test_windows_installer_does_not_send_token_to_mirror() -> None:
     assert "if ($headers.Count -gt 0 -and -not $releaseBaseUrl) {" in text
 
 
+def test_windows_pinned_installer_requires_release_checksum() -> None:
+    """A VERSION-pinned self-update must retain fail-closed checksum checks."""
+    text = _read_repo_file("install.ps1")
+
+    assert "$checksumRequired = [bool]($pinnedVersion -and -not $skipChecksum)" in text
+    assert "Could not download checksum file for pinned install." in text
+    assert "Pinned install requires the release .sha256 file next to the zip." in text
+    assert "Checksum verification FAILED." in text
+
+
 def _run_unix_installer(extra_env: dict[str, str]) -> subprocess.CompletedProcess:
     """Execute install.sh with a sanitized env and no mirror coverage.
 

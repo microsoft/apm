@@ -19,6 +19,7 @@ import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import is_user_scope
 from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -292,6 +293,7 @@ class LockfileBuilder:
                 owner=dep_key,
                 include_ledger=True,
                 apply_disk_deletion=not lockfile_only,
+                user_scope=is_user_scope(getattr(self.ctx, "scope", None)),
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;

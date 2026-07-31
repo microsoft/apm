@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import is_user_scope
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -121,6 +123,7 @@ def run(ctx: InstallContext) -> None:
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
         current_run_trusted=not _local_had_errors,
+        user_scope=is_user_scope(getattr(ctx, "scope", None)),
     )
 
     DeploymentLedgerCodec.replace_context_local_files(ctx, sorted(_files))
