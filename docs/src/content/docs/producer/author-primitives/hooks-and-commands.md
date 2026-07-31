@@ -42,6 +42,18 @@ Each file is a JSON document keyed by lifecycle event. APM accepts the
 Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 `postToolUse`) shapes; events are renamed per target during merge.
 
+### Session lifecycle event aliases
+
+| Source aliases | Copilot native key | Claude native key |
+|----------------|---------------------|-------------------|
+| `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
+| `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
+
+Event names absent from this table are preserved unchanged. Only an unmapped
+camelCase or PascalCase name that conflicts with the target convention emits
+an install warning. All-lowercase names such as `stop` pass through silently;
+`stop` is not a native Copilot or Claude event and will not fire.
+
 ```json
 {
   "hooks": {
@@ -252,8 +264,11 @@ agent a procedure" fits a skill -- and reaches every harness.
 
 ## Pitfalls
 
-- **Hook event names.** Author in Claude or Copilot conventions only.
-  The integrator renames; arbitrary event names will not be mapped.
+- **Hook event names.** Use the documented
+  [session lifecycle aliases](#session-lifecycle-event-aliases). Unknown names
+  are preserved. An install warning appears only when an unmapped name starts
+  with a capital letter or starts lowercase and contains a later capital
+  letter, and that casing conflicts with the target convention.
 - **Cursor command frontmatter loss.** Cursor reuses the Claude
   command transformer today, so any prompt-only metadata is dropped
   with a diagnostic. Keep Cursor commands to the preserved key set.

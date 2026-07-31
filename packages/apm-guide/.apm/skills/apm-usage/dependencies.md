@@ -206,6 +206,23 @@ package's directory, not the project root.
   targets: [claude]
 ```
 
+After install, `apm deps list` presents a local dependency as
+`_local/<directory-name>`. For a direct declaration with matching
+`apm.lock.yaml` metadata, that portable key is accepted verbatim by
+`apm uninstall` and `apm uninstall -g`; user-scope automation does not need to
+discover or print the absolute declared path. Without a lockfile, use the exact
+manifest path. Remove transitive local dependencies through their declaring
+parent.
+
+If two declarations end in the same directory name, their portable keys are
+ambiguous. Uninstall exits nonzero without running lifecycle scripts or writing
+files. Use one exact path already present in the relevant `apm.yml`; APM never
+guesses or removes both.
+
+When three or more declarations share a slot, one exact-path uninstall must not
+leave multiple physical survivors. Pass enough exact paths in the same command
+that at most one declaration remains.
+
 ### Marketplace (`name` + `marketplace`)
 
 | Field | Required | Description |

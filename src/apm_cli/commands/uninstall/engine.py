@@ -1,14 +1,23 @@
 """APM uninstall engine  -- validation, removal, and cleanup helpers."""
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
-from ...utils.path_security import PathTraversalError, safe_rmtree
+from ...models.dependency.selection import (
+    DependencySelectionStatus,
+    select_manifest_dependency,
+)
+from ...models.dependency.selection import (
+    parse_dependency_entry as _parse_dependency_entry,
+)
+from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
 
 
@@ -35,15 +44,238 @@ def _build_children_index(lockfile):
     return children
 
 
-def _parse_dependency_entry(dep_entry):
-    """Parse a dependency entry from apm.yml into a DependencyReference."""
-    if isinstance(dep_entry, DependencyReference):
-        return dep_entry
-    if isinstance(dep_entry, str):
-        return DependencyReference.parse(dep_entry)
-    if isinstance(dep_entry, builtins.dict):
-        return DependencyReference.parse_from_dict(dep_entry)
-    raise ValueError(f"Unsupported dependency entry type: {type(dep_entry).__name__}")
+def _dependency_public_label(dep_entry: object) -> str:
+    """Return a path-safe dependency label for user-facing uninstall output."""
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return dep_entry if isinstance(dep_entry, str) else str(dep_entry)
+    if dependency.is_local:
+        return dependency.repo_url
+    return dependency.get_identity()
+
+
+def _is_private_local_identity(value: str) -> bool:
+    """Return whether a diagnostic identity can expose a declared local path."""
+    return value.startswith(("local:", "_local/")) or DependencyReference.is_local_path(value)
+
+
+def _reintegration_error_detail(
+    dependency: DependencyReference,
+    error: Exception,
+) -> str:
+    """Return verbose failure detail without exposing a local declaration."""
+    error_type = type(error).__name__
+    if dependency.is_local:
+        return error_type
+    return f"{error_type}: {error}"
+
+
+def _surviving_local_refs_at_install_path(
+    package: object,
+    surviving_dependencies: list[object],
+    apm_modules_dir: Path,
+) -> list[DependencyReference]:
+    """Return surviving local declarations that share a package install slot."""
+    try:
+        removed_ref = _parse_dependency_entry(package)
+        removed_path = removed_ref.get_install_path(apm_modules_dir)
+    except (ValueError, TypeError, AttributeError, KeyError, PathTraversalError):
+        return []
+
+    survivors: list[DependencyReference] = []
+    for entry in surviving_dependencies:
+        try:
+            survivor = _parse_dependency_entry(entry)
+            if survivor.is_local and survivor.get_install_path(apm_modules_dir) == removed_path:
+                survivors.append(survivor)
+        except (ValueError, TypeError, AttributeError, KeyError, PathTraversalError):
+            continue
+    return survivors
+
+
+class _LocalRefreshLogger:
+    """Redact declared source paths from local re-materialization failures."""
+
+    def __init__(self, logger: CommandLogger, package_label: str) -> None:
+        self._logger = logger
+        self._package_label = package_label
+        self.failed = False
+
+    def error(self, _message: str) -> None:
+        """Report a safe, actionable local refresh failure."""
+        self.failed = True
+        self._logger.error(
+            f"Failed to refresh {self._package_label} from its declared local path. "
+            "Check the exact path in apm.yml, run 'apm install', and retry."
+        )
+
+
+class LocalSurvivorRefreshError(RuntimeError):
+    """Raised when a shared local install slot cannot preserve its survivors."""
+
+
+@dataclass(frozen=True)
+class LocalSlotRefresh:
+    """Validated staged content for one shared local materialization slot."""
+
+    install_path: Path
+    staged_path: Path
+    survivor_keys: tuple[str, ...]
+
+
+_LOCAL_REFRESH_BACKUP_SUFFIX = ".apm-uninstall-backup"
+
+
+def _cleanup_staged_local_refreshes(
+    refreshes: dict[Path, LocalSlotRefresh],
+    apm_modules_dir: Path,
+) -> None:
+    """Best-effort cleanup for hidden local refresh staging directories."""
+    for refresh in refreshes.values():
+        if not refresh.staged_path.exists():
+            continue
+        try:
+            safe_rmtree(refresh.staged_path, apm_modules_dir)
+        except OSError:
+            continue
+
+
+def _recover_local_refresh_backups(
+    apm_modules_dir: Path,
+    logger: CommandLogger,
+) -> None:
+    """Recover or remove deterministic backups left by interrupted activation."""
+    local_root = apm_modules_dir / "_local"
+    if not local_root.is_dir():
+        return
+    for backup_path in local_root.glob(f".*{_LOCAL_REFRESH_BACKUP_SUFFIX}"):
+        target_name = backup_path.name[1 : -len(_LOCAL_REFRESH_BACKUP_SUFFIX)]
+        if not target_name:
+            continue
+        install_path = local_root / target_name
+        ensure_path_within(backup_path, apm_modules_dir)
+        ensure_path_within(install_path, apm_modules_dir)
+        if install_path.exists():
+            safe_rmtree(backup_path, apm_modules_dir)
+            continue
+        backup_path.rename(install_path)
+        logger.progress(f"Recovered interrupted local materialization for _local/{target_name}")
+
+
+def _stage_shared_local_survivors(
+    packages_to_remove: list[object],
+    surviving_dependencies: list[object],
+    apm_modules_dir: Path,
+    project_root: Path,
+    logger: CommandLogger,
+) -> dict[Path, LocalSlotRefresh]:
+    """Validate and stage every surviving shared-slot local package."""
+    from ...install.phases.local_content import _copy_local_package
+
+    _recover_local_refresh_backups(apm_modules_dir, logger)
+    refreshes: dict[Path, LocalSlotRefresh] = {}
+    for package in packages_to_remove:
+        try:
+            install_path = _parse_dependency_entry(package).get_install_path(apm_modules_dir)
+        except (ValueError, TypeError, AttributeError, KeyError, PathTraversalError):
+            continue
+        if install_path in refreshes:
+            continue
+        survivors = _surviving_local_refs_at_install_path(
+            package,
+            surviving_dependencies,
+            apm_modules_dir,
+        )
+        if not survivors:
+            continue
+        if len(survivors) > 1:
+            logger.error(
+                f"Cannot preserve {_dependency_public_label(package)} because "
+                f"{len(survivors)} declarations would still share one install slot. "
+                "Use exact paths from apm.yml in one uninstall command so at most "
+                "one declaration remains."
+            )
+            _cleanup_staged_local_refreshes(refreshes, apm_modules_dir)
+            raise LocalSurvivorRefreshError(
+                "Multiple local declarations would remain in one shared install slot. "
+                "No manifest changes were made."
+            )
+
+        staged_path = apm_modules_dir / "_local" / f".apm-uninstall-refresh-{uuid4().hex}"
+        refresh_logger = _LocalRefreshLogger(
+            logger,
+            _dependency_public_label(package),
+        )
+        try:
+            for survivor in survivors:
+                staged = _copy_local_package(
+                    survivor,
+                    staged_path,
+                    project_root,
+                    project_root=project_root,
+                    logger=refresh_logger,
+                )
+                if staged is None:
+                    raise LocalSurvivorRefreshError(
+                        "A surviving local dependency could not be staged. "
+                        "No manifest changes were made."
+                    )
+            from ...models.validation import validate_apm_package
+
+            validation = validate_apm_package(staged_path)
+            if not validation.is_valid or validation.package is None:
+                refresh_logger.error("staged local package validation failed")
+                raise LocalSurvivorRefreshError(
+                    "A surviving local dependency could not be staged. "
+                    "No manifest changes were made."
+                )
+        except Exception as exc:
+            if staged_path.exists():
+                safe_rmtree(staged_path, apm_modules_dir)
+            _cleanup_staged_local_refreshes(refreshes, apm_modules_dir)
+            if isinstance(exc, LocalSurvivorRefreshError):
+                raise
+            logger.verbose_detail(f"    Local refresh staging error type: {type(exc).__name__}")
+            refresh_logger.error("local refresh staging failed")
+            raise LocalSurvivorRefreshError(
+                "A surviving local dependency could not be staged. No manifest changes were made."
+            ) from None
+
+        refreshes[install_path] = LocalSlotRefresh(
+            install_path=install_path,
+            staged_path=staged_path,
+            survivor_keys=tuple(survivor.get_unique_key() for survivor in survivors),
+        )
+    return refreshes
+
+
+def _activate_staged_local_refresh(
+    refresh: LocalSlotRefresh,
+    apm_modules_dir: Path,
+) -> None:
+    """Replace one materialization with staged survivor content or restore it."""
+    install_path = refresh.install_path
+    ensure_path_within(install_path, apm_modules_dir)
+    ensure_path_within(refresh.staged_path, apm_modules_dir)
+    backup_path = install_path.parent / (f".{install_path.name}{_LOCAL_REFRESH_BACKUP_SUFFIX}")
+    ensure_path_within(backup_path, apm_modules_dir)
+    if backup_path.exists():
+        raise LocalSurvivorRefreshError(
+            "A stale local refresh backup must be recovered before activation."
+        )
+    if install_path.exists():
+        install_path.rename(backup_path)
+    try:
+        refresh.staged_path.rename(install_path)
+    except OSError as exc:
+        if backup_path.exists() and not install_path.exists():
+            backup_path.rename(install_path)
+        raise LocalSurvivorRefreshError(
+            "A staged local dependency could not replace its shared install slot."
+        ) from exc
+    if backup_path.exists():
+        safe_rmtree(backup_path, apm_modules_dir)
 
 
 def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
@@ -84,14 +316,14 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
         return []
 
     refs = []
-    for dep_entry in data.get("dependencies", {}).get("apm", []) or []:
-        try:
-            ref = _parse_dependency_entry(dep_entry)
-        except (ValueError, TypeError, AttributeError, KeyError):
-            continue
-        if ref.get_identity() in removed_identities:
-            continue
-        refs.append(ref)
+    for section_name in ("dependencies", "devDependencies"):
+        for dep_entry in data.get(section_name, {}).get("apm", []) or []:
+            try:
+                ref = _parse_dependency_entry(dep_entry)
+            except (ValueError, TypeError, AttributeError, KeyError):
+                continue
+            if ref.get_identity() not in removed_identities:
+                refs.append(ref)
     return refs
 
 
@@ -112,7 +344,10 @@ def _warn_reachability_incomplete(reachability, logger):
         logger.info("Run with --verbose to see which manifest(s) failed.")
     logger.info("Fix or restore the affected manifest(s), then re-run to complete cleanup.")
     for pkg_id, reason in reachability.unverifiable:
-        logger.verbose_detail(f"    {pkg_id}: {reason}")
+        if _is_private_local_identity(pkg_id):
+            logger.verbose_detail("    local dependency: package manifest could not be verified")
+        else:
+            logger.verbose_detail(f"    {pkg_id}: {reason}")
 
 
 def _compute_actual_orphans(
@@ -335,6 +570,7 @@ def _validate_uninstall_packages(
     lockfile: "LockFile | None" = None,
     auth_resolver=None,
     dry_run: bool = False,
+    log_matches: bool = True,
 ) -> tuple[list, list]:
     """Validate which packages can be removed and return matched/unmatched lists.
 
@@ -352,6 +588,7 @@ def _validate_uninstall_packages(
             is attempted instead.
         auth_resolver: Optional auth resolver forwarded to the registry call.
         dry_run: When ``True``, skip the network registry call in Stage 2.
+        log_matches: Emit success diagnostics for matched identifiers.
 
     Returns:
         A two-tuple ``(packages_to_remove, packages_not_found)`` where
@@ -398,7 +635,8 @@ def _validate_uninstall_packages(
             else:
                 logger.error(
                     f"Invalid package format: {package}. "
-                    "Use 'owner/repo' or 'plugin-name@marketplace' format."
+                    "Use 'owner/repo', 'plugin-name@marketplace', a local path, "
+                    "or a key copied from 'apm deps list'."
                 )
                 packages_not_found.append(package)
                 continue
@@ -406,45 +644,74 @@ def _validate_uninstall_packages(
             canonical_for_match = package
             display_label = package
 
-        matched_dep = None
-        try:
-            pkg_ref = DependencyReference.parse(canonical_for_match)
-            pkg_identity = pkg_ref.get_identity()
-        except Exception:
-            pkg_identity = canonical_for_match
-
-        for dep_entry in current_deps:
-            try:
-                dep_ref = _parse_dependency_entry(dep_entry)
-                if dep_ref.get_identity() == pkg_identity:
-                    matched_dep = dep_entry
-                    break
-            except (ValueError, TypeError, AttributeError, KeyError):
-                dep_str = dep_entry if isinstance(dep_entry, str) else str(dep_entry)
-                if dep_str == canonical_for_match:
-                    matched_dep = dep_entry
-                    break
-
-        if matched_dep is not None:
-            packages_to_remove.append(matched_dep)
+        selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
+        if selection.status is DependencySelectionStatus.MATCHED:
+            matched_dep = selection.manifest_entry
+            if matched_dep not in packages_to_remove:
+                packages_to_remove.append(matched_dep)
+            if not log_matches:
+                continue
             if canonical_for_match != display_label:
                 logger.progress(
                     f"{display_label} - found in apm.yml (as {canonical_for_match})",
                     symbol="check",
                 )
             else:
-                logger.progress(f"{display_label} - found in apm.yml", symbol="check")
+                logger.progress(
+                    f"{_dependency_public_label(matched_dep)} - found in apm.yml",
+                    symbol="check",
+                )
+        elif selection.status is DependencySelectionStatus.AMBIGUOUS:
+            packages_not_found.append(package)
+            if is_local:
+                safe_label = _dependency_public_label(package)
+                logger.error(
+                    f"Local dependency '{safe_label}' is ambiguous: it matches "
+                    f"{selection.match_count} declarations. Use one exact path from "
+                    "apm.yml to uninstall a single dependency."
+                )
+            else:
+                logger.error(
+                    f"Ambiguous dependency '{display_label}': it matches "
+                    f"{selection.match_count} declarations. Use one exact path from apm.yml "
+                    "to uninstall a single dependency."
+                )
         else:
             packages_not_found.append(package)
-            if canonical_for_match != display_label:
-                logger.warning(f"{display_label} ({canonical_for_match}) - not found in apm.yml")
+            if canonical_for_match.startswith("_local/"):
+                logger.error(
+                    f"{display_label} could not be mapped to one declared local dependency. "
+                    "Run 'apm install' to regenerate apm.lock.yaml, or use one exact "
+                    "path from apm.yml."
+                )
+            elif is_local:
+                logger.error(
+                    "The requested local path was not found in apm.yml. "
+                    "Copy a local key from 'apm deps list', or use one exact "
+                    "path already declared in apm.yml."
+                )
+            elif canonical_for_match != display_label:
+                logger.error(
+                    f"{display_label} ({canonical_for_match}) was not found in apm.yml. "
+                    "Run 'apm deps list' and retry with an installed package identifier."
+                )
             else:
-                logger.warning(f"{display_label} - not found in apm.yml")
+                logger.error(
+                    f"{display_label} was not found in apm.yml. "
+                    "Run 'apm deps list' and retry with an installed package identifier."
+                )
 
     return packages_to_remove, packages_not_found
 
 
-def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger, apm_yml_path=None):
+def _dry_run_uninstall(
+    packages_to_remove,
+    apm_modules_dir,
+    logger,
+    apm_yml_path=None,
+    *,
+    surviving_dependencies=None,
+):
     """Show what would be removed without making changes.
 
     *apm_yml_path* is the project's manifest, read here BEFORE it is
@@ -457,7 +724,8 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger, apm_yml_path
     """
     logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
     for pkg in packages_to_remove:
-        logger.progress(f"  - {pkg} from apm.yml")
+        package_label = _dependency_public_label(pkg)
+        logger.progress(f"  - {package_label} from apm.yml")
         try:
             dep_ref = _parse_dependency_entry(pkg)
             package_path = dep_ref.get_install_path(apm_modules_dir)
@@ -465,7 +733,18 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger, apm_yml_path
             pkg_str = pkg if isinstance(pkg, str) else str(pkg)
             package_path = apm_modules_dir / pkg_str.split("/")[-1]
         if apm_modules_dir.exists() and package_path.exists():
-            logger.progress(f"  - {pkg} from apm_modules/")
+            shared_survivors = _surviving_local_refs_at_install_path(
+                pkg,
+                surviving_dependencies or [],
+                apm_modules_dir,
+            )
+            if shared_survivors:
+                logger.progress(
+                    f"  - refresh {package_label} in apm_modules/ for "
+                    f"{len(shared_survivors)} surviving declaration(s)"
+                )
+            else:
+                logger.progress(f"  - {package_label} from apm_modules/")
 
     from ...deps.lockfile import LockFile, get_lockfile_path
 
@@ -511,19 +790,28 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger, apm_yml_path
     logger.success("Dry run complete - no changes made")
 
 
-def _remove_packages_from_disk(packages_to_remove, apm_modules_dir, logger):
+def _remove_packages_from_disk(
+    packages_to_remove,
+    apm_modules_dir,
+    logger,
+    *,
+    staged_refreshes=None,
+    refreshed_survivor_keys=None,
+):
     """Remove direct packages from apm_modules/ and return removal count."""
     removed = 0
     if not apm_modules_dir.exists():
         return removed
 
     deleted_pkg_paths = []
+    activated_refresh_paths: set[Path] = set()
     for package in packages_to_remove:
+        package_label = _dependency_public_label(package)
         try:
             dep_ref = _parse_dependency_entry(package)
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except PathTraversalError as e:
-            logger.error(f"Refusing to remove {package}: {e}")
+            logger.error(f"Refusing to remove {package_label}: {e}")
             continue
         except (ValueError, TypeError, AttributeError, KeyError):
             package_str = package if isinstance(package, str) else str(package)
@@ -533,19 +821,33 @@ def _remove_packages_from_disk(packages_to_remove, apm_modules_dir, logger):
             else:
                 package_path = apm_modules_dir / package_str
 
+        refresh = (staged_refreshes or {}).get(package_path)
+        if refresh is not None:
+            if package_path in activated_refresh_paths:
+                continue
+            _activate_staged_local_refresh(refresh, apm_modules_dir)
+            activated_refresh_paths.add(package_path)
+            if refreshed_survivor_keys is not None:
+                refreshed_survivor_keys.update(refresh.survivor_keys)
+            logger.progress(
+                f"Refreshed {package_label} in apm_modules/ for "
+                f"{len(refresh.survivor_keys)} surviving declaration(s)"
+            )
+            continue
+
         if package_path.exists():
             try:
                 safe_rmtree(package_path, apm_modules_dir)
-                logger.progress(f"Removed {package} from apm_modules/")
+                logger.progress(f"Removed {package_label} from apm_modules/")
                 logger.verbose_detail(
                     f"    Path: {portable_relpath(package_path, apm_modules_dir)}"
                 )
                 removed += 1
                 deleted_pkg_paths.append(package_path)
             except Exception as e:
-                logger.error(f"Failed to remove {package} from apm_modules/: {e}")
+                logger.error(f"Failed to remove {package_label} from apm_modules/: {e}")
         else:
-            logger.warning(f"Package {package} not found in apm_modules/")
+            logger.warning(f"Package {package_label} not found in apm_modules/")
 
     from ...integration.base_integrator import BaseIntegrator as _BI2
 
@@ -654,6 +956,7 @@ def _sync_integrations_after_uninstall(
     logger: CommandLogger,
     user_scope: bool = False,
     lockfile: LockFile | None = None,
+    modules_dir: Path | None = None,
 ) -> tuple[dict[str, int], dict[str, list[str]]]:
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -692,16 +995,17 @@ def _sync_integrations_after_uninstall(
     _resolved_targets = resolve_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
     survivor_plan = []
     for dep_ref in surviving_dependency_refs_for_reintegration(
         apm_package,
         project_root,
         lockfile=lockfile,
     ):
-        install_path = dep_ref.get_install_path(project_root / APM_MODULES_DIR)
+        install_path = dep_ref.get_install_path(installed_modules_dir)
         pkg_info = build_installed_package_info(
             dep_ref,
-            project_root / APM_MODULES_DIR,
+            installed_modules_dir,
         )
         if pkg_info is None:
             if install_path.exists():
@@ -900,10 +1204,13 @@ def _sync_integrations_after_uninstall(
                 deployed_files.append(_deployed_path_entry(path, project_root, _targets))
                 deployed_files.extend(_skill_bundle_file_entries(path, project_root, _targets))
         except Exception as exc:
-            pkg_id = dep_ref.get_identity() if hasattr(dep_ref, "get_identity") else str(dep_ref)
+            pkg_id = _dependency_public_label(dep_ref)
             logger.warning(
-                f"Best-effort re-integration skipped for {pkg_id}: {exc}. "
+                f"Best-effort re-integration skipped for {pkg_id}. "
                 "Run 'apm install' to rebuild integrated files."
+            )
+            logger.verbose_detail(
+                f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
             )
 
     return counts, package_deployed_files
