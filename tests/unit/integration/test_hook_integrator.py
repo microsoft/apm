@@ -4183,7 +4183,10 @@ class TestIssue1007Fixes:
             encoding="utf-8",
         )
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+        assert HookIntegrator._dependency_hook_sources(temp_project) == {
+            "dep-hooks",
+            "owner/repo/collections/dep-hooks",
+        }
 
     def test_dependency_hook_sources_rejects_lockfile_symlink_root(
         self,
@@ -4234,7 +4237,10 @@ class TestIssue1007Fixes:
             encoding="utf-8",
         )
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+        assert HookIntegrator._dependency_hook_sources(temp_project) == {
+            "dep-hooks",
+            "owner/dep-hooks",
+        }
 
     def test_bounded_dependency_scan_stops_at_package_root(
         self,
