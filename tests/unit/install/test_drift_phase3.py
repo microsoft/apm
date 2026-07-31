@@ -131,11 +131,11 @@ class TestCheckLogger:
 
 
 class TestMaterializeInstallPath:
-    def test_not_cache_only_raises_not_implemented(self, tmp_path: Path) -> None:
+    def test_not_cache_only_without_downloader_fails_closed(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import _materialize_install_path
 
         dep = LockedDependency(repo_url="example/pkg", resolved_commit="abc")
-        with pytest.raises(NotImplementedError, match="no-cache"):
+        with pytest.raises(CacheMissError, match="no downloader"):
             _materialize_install_path(dep, tmp_path, tmp_path, cache_only=False)
 
     def test_local_dep_no_local_path_raises_cache_miss(self, tmp_path: Path) -> None:

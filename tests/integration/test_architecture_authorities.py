@@ -888,6 +888,25 @@ def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
     assert "Cached/frozen Claude Skill lock metadata must route through validation.py" in guard
 
 
+def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
+    """Cold-cache CI audit replay must route through install/drift.py."""
+    root = Path(__file__).parents[2]
+    replay = (root / "src/apm_cli/install/audit_replay.py").read_text(encoding="utf-8")
+    audit = (root / "src/apm_cli/commands/audit.py").read_text(encoding="utf-8")
+    ci_checks = (root / "src/apm_cli/policy/ci_checks.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def prepare_ci_audit_replay(" in replay
+    assert "prepare_ci_audit_replay(" in audit
+    assert "prepared_replay.modules_root" in ci_checks
+    assert "CI audit scratch materialization must route through install/audit_replay.py" in guard
+    assert "CI audit scratch materialization" in architecture_doc
+    assert "src/apm_cli/install/audit_replay.py" in architecture_doc
+
+
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
     """The Bash guard must invoke the semantic AST checker, not only grep.
 
@@ -1539,4 +1558,65 @@ def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: 
     assert (
         "Git-subprocess Authorization-header injection must use "
         "set_authorization_header_git_env / set_ado_bearer_git_env" in result.stdout
+    )
+
+
+def test_public_github_anonymous_first_has_single_auth_owner() -> None:
+    """Public GitHub auth ordering belongs to AuthResolver and its consumers."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/core/auth.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def uses_public_github_anonymous_first(" in owner
+    assert "def build_public_github_anonymous_git_env(" in owner
+    assert "AC20: public github.com anonymous-first auth authority" in guard
+    assert (
+        "Public github.com anonymous-first auth ordering must stay owned by AuthResolver" in guard
+    )
+    assert "public github.com anonymous-first ordering" in architecture_doc
+
+
+def test_public_github_auth_owner_guard_rejects_duplicate_owner(
+    tmp_path: Path,
+) -> None:
+    """AC20 rejects a second host-ordering implementation outside auth.py."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/clone_engine.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\ndef uses_public_github_anonymous_first(host):\n"
+        + '    return host.lower() == "github.com"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Public github.com anonymous-first auth ordering must stay owned by "
+        "AuthResolver" in result.stdout
     )
