@@ -58,6 +58,24 @@ def test_reachability_verbose_diagnostics_redact_local_paths():
     assert "local dependency" in rendered
 
 
+def test_reintegration_verbose_detail_redacts_only_local_dependency_paths():
+    """Remote errors retain detail while local declarations remain private."""
+    from apm_cli.commands.uninstall.engine import _reintegration_error_detail
+    from apm_cli.models.dependency import DependencyReference
+
+    remote = DependencyReference.parse("owner/repo")
+    local_path = r"C:\Users\runner\Private Package"
+    local = DependencyReference.parse(local_path)
+    error = RuntimeError("failed at remote primitive")
+
+    assert _reintegration_error_detail(remote, error) == (
+        "RuntimeError: failed at remote primitive"
+    )
+    local_detail = _reintegration_error_detail(local, RuntimeError(local_path))
+    assert local_detail == "RuntimeError"
+    assert local_path not in local_detail
+
+
 # ---------------------------------------------------------------------------
 # _build_children_index
 # ---------------------------------------------------------------------------

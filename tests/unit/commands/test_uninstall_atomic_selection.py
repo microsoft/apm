@@ -337,6 +337,45 @@ def test_pre_uninstall_manifest_edits_are_reloaded_and_preserved(
     assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == ["owner/added-by-hook"]
 
 
+def test_duplicate_identifier_removes_manifest_entry_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated equivalent arguments remain idempotent within one command."""
+    project = tmp_path / "project"
+    project.mkdir()
+    package = "owner/installed"
+    _write_manifest(project, [package])
+    dependency = LockedDependency(repo_url=package)
+    LockFile(dependencies={dependency.get_unique_key(): dependency}).write(
+        project / "apm.lock.yaml"
+    )
+    monkeypatch.chdir(project)
+
+    with (
+        patch("apm_cli.commands.uninstall.cli._fire_uninstall_scripts") as fire_scripts,
+        patch(
+            "apm_cli.commands.uninstall.cli._remove_packages_from_disk",
+            return_value=0,
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._cleanup_transitive_orphans",
+            return_value=(0, set()),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
+            return_value=({}, {}),
+        ),
+        patch("apm_cli.commands.uninstall.cli._cleanup_stale_mcp"),
+    ):
+        result = CliRunner().invoke(uninstall, [package, package])
+
+    assert result.exit_code == 0, result.output
+    assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == []
+    assert fire_scripts.call_count == 2
+    assert all(call.kwargs["packages"] == (package,) for call in fire_scripts.call_args_list)
+
+
 def test_interrupted_local_refresh_backup_is_recovered(
     tmp_path: Path,
 ) -> None:

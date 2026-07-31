@@ -60,6 +60,17 @@ def _is_private_local_identity(value: str) -> bool:
     return value.startswith(("local:", "_local/")) or DependencyReference.is_local_path(value)
 
 
+def _reintegration_error_detail(
+    dependency: DependencyReference,
+    error: Exception,
+) -> str:
+    """Return verbose failure detail without exposing a local declaration."""
+    error_type = type(error).__name__
+    if dependency.is_local:
+        return error_type
+    return f"{error_type}: {error}"
+
+
 def _surviving_local_refs_at_install_path(
     package: object,
     surviving_dependencies: list[object],
@@ -636,7 +647,8 @@ def _validate_uninstall_packages(
         selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
         if selection.status is DependencySelectionStatus.MATCHED:
             matched_dep = selection.manifest_entry
-            packages_to_remove.append(matched_dep)
+            if matched_dep not in packages_to_remove:
+                packages_to_remove.append(matched_dep)
             if not log_matches:
                 continue
             if canonical_for_match != display_label:
@@ -1197,7 +1209,9 @@ def _sync_integrations_after_uninstall(
                 f"Best-effort re-integration skipped for {pkg_id}. "
                 "Run 'apm install' to rebuild integrated files."
             )
-            logger.verbose_detail(f"    Re-integration error type: {type(exc).__name__}")
+            logger.verbose_detail(
+                f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
+            )
 
     return counts, package_deployed_files
 
