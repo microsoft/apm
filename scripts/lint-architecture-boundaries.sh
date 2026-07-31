@@ -253,6 +253,35 @@ if ! grep -q '^def should_force_ref_recheck(' "$ref_recheck_owner" \
     echo "[x] Existing-path ref rechecks must use drift.py::should_force_ref_recheck"
     violations=$((violations + 1))
 fi
+ref_freshness_owner="src/apm_cli/deps/tiered_ref_resolver.py"
+ref_freshness_consumers=(
+    src/apm_cli/install/phases/resolve.py
+    src/apm_cli/install/helpers/ref_seed.py
+    src/apm_cli/commands/outdated.py
+)
+ref_freshness_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'ctx\.update_refs[[:space:]]+or[[:space:]]+ctx\.refresh|def [[:alnum:]_]*ref_freshness|class [[:alnum:]_]*RefFreshness' \
+        src/apm_cli \
+        | grep -v "^${ref_freshness_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^class RefFreshnessPolicy(Enum):' "$ref_freshness_owner" \
+    || ! grep -q '^def ref_freshness_policy_for_install(' "$ref_freshness_owner" \
+    || ! grep -q '^    if freshness_policy\.allows_bare_cache:' \
+        "$ref_freshness_owner" \
+    || ! grep -q 'ref_freshness_policy_for_install(ctx)' "${ref_freshness_consumers[0]}" \
+    || ! grep -q 'ref_freshness_policy_for_install(ctx)' "${ref_freshness_consumers[1]}" \
+    || ! grep -q 'freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE' \
+        "${ref_freshness_consumers[2]}" \
+    || grep -rEq --include='*.py' --exclude='tiered_ref_resolver.py' \
+        'L2BareRevParse' src/apm_cli \
+    || [ -n "$ref_freshness_duplicate_hits" ]; then
+    echo "[x] Git ref freshness must route through RefFreshnessPolicy"
+    [ -n "$ref_freshness_duplicate_hits" ] && echo "$ref_freshness_duplicate_hits"
+    violations=$((violations + 1))
+fi
 cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
 cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
 cleanup_claim_status=$?

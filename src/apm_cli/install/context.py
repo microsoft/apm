@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
     from apm_cli.install.helpers.ref_reuse import RefResolverCacheKey
     from apm_cli.security.executables import ExecTrustContext
 
@@ -96,6 +97,7 @@ class InstallContext:
     apm_modules_dir: Path | None = None  # resolve
     downloader: Any = None  # resolve (GitHubPackageDownloader)
     ref_resolver: Any = None  # resolve (TieredRefResolver | None) -- #1369 fast-path
+    ref_freshness_policy: RefFreshnessPolicy | None = None  # resolve
     callback_downloaded: dict[str, Any] = field(default_factory=dict)  # resolve
     callback_failures: set[str] = field(default_factory=set)  # resolve
     transitive_failures: list[tuple[str, str]] = field(default_factory=list)  # resolve

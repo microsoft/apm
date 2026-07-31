@@ -38,7 +38,10 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
     ``DependencyReference`` so host, port, and complete repository path flow
     through the same normalized identity as ``resolve()``.
     """
-    if ctx.update_refs or ctx.refresh:
+    from apm_cli.deps.tiered_ref_resolver import ref_freshness_policy_for_install
+
+    freshness_policy = ref_freshness_policy_for_install(ctx)
+    if not freshness_policy.allows_lock_seed:
         return
     resolver = getattr(ctx, "ref_resolver", None)
     lockfile = ctx.existing_lockfile

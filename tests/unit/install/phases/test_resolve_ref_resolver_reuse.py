@@ -48,6 +48,21 @@ def _ado_semver_dep() -> DependencyReference:
     return dep
 
 
+def _git_config_values(environment: dict[str, str]) -> set[str]:
+    """Return indexed Git config values, including non-auth policy entries."""
+    return {value for key, value in environment.items() if key.startswith("GIT_CONFIG_VALUE_")}
+
+
+def _set_noninteractive_git_policy(monkeypatch) -> None:
+    """Arrange the indexed Git policy that auth overlays must preserve."""
+    for name in tuple(os.environ):
+        if name == "GIT_CONFIG_COUNT" or name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.interactive")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "never")
+
+
 def _patched_resolver_env():
     """Patch RefResolver (counting ctor) + GitSemverResolver (no-op resolve)."""
     made = []
@@ -325,8 +340,9 @@ def test_cache_separates_basic_and_bearer_for_same_host_and_token():
     assert len(cache) == 2
 
 
-def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
+def test_semver_resolution_preserves_bearer_and_basic_auth_schemes(monkeypatch):
     """Semver tag listing must use the complete per-dependency auth context."""
+    _set_noninteractive_git_policy(monkeypatch)
     bearer_token = "dummy-ado-bearer"
     basic_token = "dummy-github-basic"
     calls = []
@@ -373,12 +389,10 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
     ado_auth_values = _authorization_config_values(ado_kwargs["env"])
     assert ado_auth_values == {f"Authorization: Bearer {bearer_token}"}
     assert urlparse(ado_args[-1]).username is None
+    assert "never" in _git_config_values(ado_kwargs["env"])
     assert urlparse(github_args[-1]).password == basic_token
-    assert not {
-        value
-        for key, value in github_kwargs["env"].items()
-        if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization:")
-    }
+    assert _authorization_config_values(github_kwargs["env"]) == set()
+    assert "never" in _git_config_values(github_kwargs["env"])
 
 
 def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
@@ -421,8 +435,9 @@ def test_resolve_dep_auth_preserves_sanitized_git_environment():
     assert resolve_dep_auth(dep, _Resolver()) == ("pat", "basic", sanitized)
 
 
-def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
+def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer(monkeypatch):
     """A stale ADO PAT retries tag listing with the canonical bearer scheme."""
+    _set_noninteractive_git_policy(monkeypatch)
     from apm_cli.core.auth import BearerFallbackOutcome
 
     calls = []
@@ -473,6 +488,7 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
     auth_headers = [
         _authorization_config_values(call_kwargs["env"]) for _call_args, call_kwargs in calls
     ]
+    assert all("never" in _git_config_values(call_kwargs["env"]) for _args, call_kwargs in calls)
     assert len(auth_headers[0]) == 1
     assert next(iter(auth_headers[0])).startswith("Authorization: Basic ")
     assert len(auth_headers[1]) == 1

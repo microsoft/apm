@@ -2783,7 +2783,11 @@ deployments:
   owners:
   - .
   active_owner: .
+<<<<<<< HEAD
   content_hash: sha256:ff22fbee2c9194c14ef2de92cc67ff19cfcb092a109fae033022c0751acde5be
+=======
+  content_hash: sha256:c3d3befd3063186e8a5e0d0305bd192d4a5a227022420d00ab157f87cfd921a1
+>>>>>>> 6fa929ebe (fix: enforce remote ref freshness end to end)
 - kind: project-relative
   target: copilot
   value: .github/instructions/changelog.instructions.md
