@@ -366,6 +366,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger.verbose_detail(f"    Removed {count} deployed {label} file(s)")
 
         # Step 10: MCP cleanup
+        from ...adapters.client.intellij import IntelliJConfigError
+        from ...utils.path_security import PathTraversalError
+
         mcp_cleanup_error = None
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
@@ -380,7 +383,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 scope=scope,
                 persist=False,
             )
-        except Exception as cleanup_error:
+        except (IntelliJConfigError, PathTraversalError) as cleanup_error:
             mcp_cleanup_error = cleanup_error
             logger.error(
                 "Uninstall incomplete: package removal completed, but MCP cleanup failed: "
@@ -388,6 +391,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 "to finish cleanup."
             )
             logger.verbose_detail(traceback.format_exc().rstrip())
+        except Exception:
+            logger.warning("MCP cleanup during uninstall failed")
 
         if lockfile and lockfile_updated and lockfile_ready:
             try:
