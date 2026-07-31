@@ -53,8 +53,6 @@ def test_invalid_fqdns():
         "two..dots.com",
         "a.-b.com",
         "invalid_domain",
-        "127.0.0.1",
-        "10.0.0.1",
     ]
 
     for host in invalid_hosts:
@@ -777,6 +775,11 @@ class TestIsAzureDevOpsHostnameEnvVars:
     def test_ado_host_invalid_fqdn_rejected(self, monkeypatch):
         monkeypatch.setenv("ADO_HOST", "localhost")
         assert github_host.is_azure_devops_hostname("localhost") is False
+
+    @pytest.mark.parametrize("hostname", ("127.0.0.1", "10.0.0.1"))
+    def test_ado_host_ip_literal_rejected(self, monkeypatch, hostname):
+        monkeypatch.setenv("ADO_HOST", hostname)
+        assert github_host.is_azure_devops_hostname(hostname) is False
 
     def test_ado_host_with_port_is_rejected(self, monkeypatch):
         monkeypatch.setenv("ADO_HOST", "ado.corp.example.com:8443")
