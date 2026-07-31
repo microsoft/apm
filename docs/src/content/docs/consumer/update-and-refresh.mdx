@@ -98,6 +98,9 @@ Use `apm install --refresh` when you need both current upstream refs and a
 content re-download. It re-resolves mutable refs and bypasses cached package
 content; `apm update` may reuse content already cached at the fresh SHA.
 
+Use `apm lock --update` when you need the same upstream ref refresh but want to
+rewrite only `apm.lock.yaml`, without deploying or deleting harness files.
+
 See [Promise 1: Portable by manifest](../../concepts/the-three-promises/)
 for why this matters in CI and for new contributors.
 
@@ -149,6 +152,7 @@ your scripts to call `apm self-update --check` directly.
 | See which deps have new versions | `apm outdated` |
 | Preview a dep refresh | `apm update --dry-run` |
 | Bump deps and rewrite the lockfile | `apm update` |
+| Refresh only the lockfile from upstream refs | `apm lock --update` |
 | Reproduce the locked versions exactly | `apm install` |
 | Fail CI on lockfile drift | `apm install --frozen` |
 | Update the `apm` CLI itself | `apm self-update` |

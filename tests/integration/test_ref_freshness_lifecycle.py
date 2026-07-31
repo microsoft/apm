@@ -248,6 +248,9 @@ def test_installed_cli_current_state_commands_bypass_stale_bare_cache(
     assert _deployed_bytes(scenario) == _skill_document("commit-b").encode("utf-8")
     assert "legacy_clone=1" in _combined_output(updated_b)
     assert "bare_rev_parse=" not in _combined_output(updated_b)
+    assert "Requiring upstream ref resolution; local bare-ref cache disabled" in (
+        _combined_output(updated_b)
+    )
 
     converged_b = _capture(scenario)
     _run(
@@ -267,6 +270,9 @@ def test_installed_cli_current_state_commands_bypass_stale_bare_cache(
     assert _deployed_bytes(scenario) == _skill_document("commit-c").encode("utf-8")
     assert "legacy_clone=1" in _combined_output(updated_c)
     assert "bare_rev_parse=" not in _combined_output(updated_c)
+    assert "Requiring upstream ref resolution; local bare-ref cache disabled" in (
+        _combined_output(updated_c)
+    )
 
     commit_d = _advance(scenario, "commit-d")
     before_outdated = _capture(scenario)
