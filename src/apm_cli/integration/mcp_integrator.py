@@ -833,8 +833,7 @@ class MCPIntegrator:
             lockfile.save(lock_path)
         except Exception:
             _log.debug(
-                "Failed to update MCP servers in lockfile at %s",
-                lock_path,
+                "MCP lockfile persistence failed",
                 exc_info=True,
             )
             if creating:

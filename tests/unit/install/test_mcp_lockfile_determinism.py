@@ -301,8 +301,18 @@ def test_unchanged_mcp_target_servers_do_not_rewrite_lockfile(tmp_path: Path) ->
     assert second_lock.generated_at == first_lock.generated_at
     assert second_lock.mcp_target_servers == target_servers
     assert second_bytes == first_bytes
+    deployment_rows = {
+        (record.locator.target, record.locator.runtime, record.locator.value)
+        for record in second_lock.deployment_ledger.records.values()
+    }
+    assert ("mcp", "claude", "atlassian") in deployment_rows
+    assert (
+        "copilot",
+        None,
+        ".github/instructions/dep.instructions.md",
+    ) in deployment_rows
     second_context.logger.verbose_detail.assert_any_call(
-        "MCP state unchanged -- carrying forward 1 server, 1 config, 1 target mapping"
+        "MCP state unchanged -- carrying forward 1 server, 1 config, 1 runtime mapping"
     )
 
 
@@ -489,8 +499,9 @@ def test_lockfile_write_failure_preserves_original_and_reports_error(tmp_path: P
             package_type="skill_bundle",
         )
 
-    context.diagnostics.error.assert_called_once()
-    context.logger.error.assert_called_once()
+    expected_error = "Could not generate apm.lock.yaml: replace blocked"
+    context.diagnostics.error.assert_called_once_with(expected_error)
+    context.logger.error.assert_called_once_with(expected_error)
     assert lock_path.read_bytes() == original_bytes
     assert list(tmp_path.glob("apm-atomic-*")) == []
 
@@ -526,6 +537,12 @@ def test_mcp_persistence_write_failure_is_not_hidden(tmp_path: Path) -> None:
             "generated_at": "2026-01-01T00:00:00+00:00",
             "dependencies": [],
             "mcp_target_servers": {"codex": "atlassian"},
+        },
+        {
+            "lockfile_version": "1",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "dependencies": [],
+            "mcp_target_servers": {"codex": [123]},
         },
         {
             "lockfile_version": "1",

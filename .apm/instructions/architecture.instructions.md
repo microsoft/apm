@@ -79,6 +79,10 @@ The scripts/lint-architecture-boundaries.sh check is wired into CI (the
 Lint job) alongside the auth-signal guard. Treat a new authority the
 same way: give it a guard line.
 
+Static boundary checks use bounded AST inspection and do not trace alias
+dataflow such as `view = lock.field; view.clear()`. Behavioral regression
+tests and code review remain the guard for those indirect mutations.
+
 ## Review lens
 
 When reviewing or authoring a change, ask: "Does this compute or

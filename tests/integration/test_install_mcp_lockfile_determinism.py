@@ -354,9 +354,10 @@ def test_redirected_root_registry_install_converges_without_rewrite(
         environment = isolated.subprocess_env(
             overrides={"MCP_REGISTRY_ALLOW_HTTP": "1"},
         )
-        # This scenario intentionally permits only its process-local registry.
-        # The registry document points at an invalid remote that is never called.
-        environment.pop("PYTHONPATH", None)
+        parsed_registry = urlparse(registry.url)
+        assert parsed_registry.hostname == "127.0.0.1"
+        assert parsed_registry.port is not None
+        environment["APM_TEST_LOOPBACK_PORTS"] = str(parsed_registry.port)
         scenario = _Scenario(
             isolated=isolated,
             packages=LocalPackageFactory(isolated.package_root),
@@ -400,7 +401,4 @@ def test_redirected_root_registry_install_converges_without_rewrite(
         _assert_exact_state(first, second)
         assert _file_identity(lock_path) == first_identity
         assert project.manifest_path.read_bytes() == source_manifest
-        parsed_registry = urlparse(registry.url)
-        assert parsed_registry.hostname == "127.0.0.1"
-        assert parsed_registry.port is not None
         assert registry.request_paths

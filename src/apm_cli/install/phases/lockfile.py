@@ -463,7 +463,7 @@ class LockfileBuilder:
                 if target_servers:
                     mapping_count = len(target_servers)
                     mapping_noun = "mapping" if mapping_count == 1 else "mappings"
-                    detail += f", {mapping_count} target {mapping_noun}"
+                    detail += f", {mapping_count} runtime {mapping_noun}"
                 self.ctx.logger.verbose_detail(detail)
 
     def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:
