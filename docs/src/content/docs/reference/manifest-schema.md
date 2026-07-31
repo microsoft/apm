@@ -921,7 +921,13 @@ A relative `source` may use arbitrary path depth. A value whose leading segments
 
 `sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
 
-Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps -- authenticate via the standard APM token chain -- see the [authentication guide](../../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host (an Azure DevOps `ADO_APM_PAT`, for example, is only ever offered to `dev.azure.com`).
+Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps
+-- authenticate via the standard APM token chain -- see the
+[authentication guide](../../getting-started/authentication/) for the
+per-host-class lookup order. A token resolved for one host class is never
+forwarded to another. `ADO_APM_PAT`, for example, is offered only to Azure
+DevOps Services and to Azure DevOps Server hosts explicitly trusted through
+`ADO_HOST` or `APM_ADO_HOSTS`.
 
 ### 7.6. Complete Marketplace Block
 
