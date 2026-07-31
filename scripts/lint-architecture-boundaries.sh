@@ -847,6 +847,37 @@ if ! grep -q 'getattr(module, "pytestmark"' "$taxonomy_plugin" \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC23: self-update release selection authority"
+self_update_owner="src/apm_cli/commands/self_update.py"
+self_update_owner_defs=$(grep -Ec \
+    '^class _ResolvedSelfUpdateRelease:|^def _resolve_self_update_release\(' \
+    "$self_update_owner" || true)
+self_update_duplicate_defs=$(
+    grep -rEn --include='*.py' \
+        '^class _ResolvedSelfUpdateRelease:|^def _resolve_self_update_release\(' \
+        src/apm_cli \
+        | grep -v "^${self_update_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$self_update_owner_defs" -ne 2 ] \
+    || [ -n "$self_update_duplicate_defs" ] \
+    || ! grep -q \
+        'release = _resolve_self_update_release(latest_version)' \
+        "$self_update_owner" \
+    || ! grep -q \
+        'resolved_ref = release.tag if release is not None else _INSTALL_SCRIPT_REF' \
+        "$self_update_owner" \
+    || ! grep -q 'env\[_ENV_VERSION\] = release.tag' "$self_update_owner" \
+    || ! grep -q '_get_update_installer_url(release)' "$self_update_owner" \
+    || ! grep -q '_build_self_update_installer_env(release)' "$self_update_owner" \
+    || ! grep -q 'return _normalize_release_tag(pinned)' \
+        src/apm_cli/utils/version_checker.py; then
+    echo "[x] Self-update installer URL and VERSION must share _ResolvedSelfUpdateRelease"
+    [ -n "$self_update_duplicate_defs" ] && echo "$self_update_duplicate_defs"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

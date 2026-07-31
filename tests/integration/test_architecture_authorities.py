@@ -14,6 +14,68 @@ from types import ModuleType
 import pytest
 
 
+def test_self_update_release_selection_has_single_owner() -> None:
+    """Installer URL and VERSION must consume one validated release object."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/commands/self_update.py").read_text(encoding="utf-8")
+    version_checker = (root / "src/apm_cli/utils/version_checker.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("class _ResolvedSelfUpdateRelease:") == 1
+    assert owner.count("def _resolve_self_update_release(") == 1
+    assert "release = _resolve_self_update_release(latest_version)" in owner
+    assert "resolved_ref = release.tag if release is not None else _INSTALL_SCRIPT_REF" in owner
+    assert "env[_ENV_VERSION] = release.tag" in owner
+    assert "_get_update_installer_url(release)" in owner
+    assert "_build_self_update_installer_env(release)" in owner
+    assert "return _normalize_release_tag(pinned)" in version_checker
+    assert "Self-update installer URL and VERSION must share" in guard
+
+
+def test_self_update_release_owner_guard_rejects_main_bypass(tmp_path: Path) -> None:
+    """The static boundary must reject restoring main after release selection."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    owner_path = sandbox / "src/apm_cli/commands/self_update.py"
+    owner = owner_path.read_text(encoding="utf-8")
+    owner_path.write_text(
+        owner.replace(
+            "resolved_ref = release.tag if release is not None else _INSTALL_SCRIPT_REF",
+            "resolved_ref = _INSTALL_SCRIPT_REF",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Self-update installer URL and VERSION must share _ResolvedSelfUpdateRelease"
+        in result.stdout
+    )
+
+
 def test_hook_rewrite_scope_has_single_owner() -> None:
     """Native hook paths must consume HookIntegrator's scope decision."""
     root = Path(__file__).parents[2]
