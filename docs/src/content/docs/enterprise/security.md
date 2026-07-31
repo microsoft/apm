@@ -180,7 +180,7 @@ Content scanning extends beyond install:
 `apm audit` scans deployed files or any arbitrary file, independent of the install flow:
 
 ```bash
-apm audit                        # Scan all installed packages
+apm audit                        # Scan installed packages and deployed files
 apm audit --file .cursorrules    # Scan any file
 apm audit --strip                # Remove hidden characters (preserves emoji)
 apm audit --strip --dry-run      # Preview what --strip would remove
@@ -191,9 +191,18 @@ The `--file` flag is useful for inspecting files obtained outside APM — downlo
 `apm audit --ci` also checks membership completeness. If install replay
 produces a governed file whose normalized bytes match the project but no
 `deployed_files` entry claims it, audit reports `unrecorded` drift and fails.
-This prevents the lock-backed hidden-Unicode scan scope from shrinking
-silently. Shared merge-hook targets and sidecars remain exempt because APM
-merges into user-owned files rather than claiming them.
+This prevents lockfile membership from shrinking silently. Shared merge-hook
+targets and sidecars remain exempt because APM merges into user-owned files
+rather than claiming them.
+
+A whole-project scan checks **every regular file under the deploy trees your targets govern** for hidden Unicode, not only files recorded in `apm.lock.yaml`. Hash verification and positional `PACKAGE` scans remain lockfile-scoped because they need recorded ownership. Source content under `.apm/` is not added by the deploy-tree walk; install-time scanning owns that surface, while any `.apm/` path already recorded in the lockfile remains covered.
+
+CI and remediation are separate commands because `--ci` and `--strip` are mutually exclusive:
+
+```bash
+apm audit --strip                 # Remove dangerous characters
+apm audit --ci --no-drift         # Verify the remediated deploy tree
+```
 
 For CI pipelines, `apm audit` supports SARIF, JSON, and Markdown output:
 

@@ -351,7 +351,10 @@ def _check_content_integrity(
 
     Two signals are evaluated:
       * Critical hidden Unicode (steganographic markers) via the file
-        scanner.
+        scanner, over every file under the deploy trees the project's
+        targets govern -- NOT only the files the lockfile records, since
+        this signal needs no recorded baseline (see
+        ``scan_deployed_trees``).
       * SHA-256 drift between the on-disk content and the canonical deployment
         ledger hash recorded at install time.
       * Missing canonical ownership metadata for a legacy deployed-file hash.
@@ -362,10 +365,17 @@ def _check_content_integrity(
     and lockfile entries without a recorded hash (e.g. directories) are
     skipped silently.
     """
-    from ..security.file_scanner import scan_lockfile_packages
+    from ..security.file_scanner import scan_project_files
     from ..utils.content_hash import compute_file_hash
 
-    findings_by_file, _files_scanned = scan_lockfile_packages(project_root)
+    # Reuse the already-parsed lock and union its recorded paths with the
+    # independently governed deploy-tree scope. The scanner owns exact path
+    # accounting and preserves lockfile findings outside resolved targets.
+    findings_by_file, _files_scanned = scan_project_files(
+        project_root,
+        lockfile=lock,
+        include_deployed_trees=True,
+    )
 
     # Only critical findings fail this check
     critical_files: list[str] = []

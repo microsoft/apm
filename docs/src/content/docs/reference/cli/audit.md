@@ -15,7 +15,7 @@ apm audit [PACKAGE] [OPTIONS]
 
 `apm audit` is the explicit security and integrity tool. It runs in two modes:
 
-- **Content scan mode** (default). Scans deployed prompt, instruction, skill, and rules files for hidden Unicode that can embed invisible instructions in agent context, and replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate findings with `--strip` or scan an arbitrary file with `--file`.
+- **Content scan mode** (default). Scans deployed files across the project for hidden Unicode, including governed files absent from the lockfile and lockfile-recorded files outside the current target directories. It replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate findings with `--strip` or scan an arbitrary file with `--file`.
 - **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. When `apm_modules/` is absent but `apm.lock.yaml` is present, CI mode self-hydrates a lock-pinned scratch install for `config-consistency` and drift without mutating the checkout. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
 Both modes also enforce the lockfile's canonical deployment ownership; see
@@ -23,7 +23,7 @@ Both modes also enforce the lockfile's canonical deployment ownership; see
 
 This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
-`PACKAGE`, when supplied, is the lockfile package key (the repo URL) of a single installed dependency to scan. Omit it to scan every installed package plus local `.apm/` content.
+`PACKAGE`, when supplied, scans one installed dependency by its lockfile key (the repo URL), so only files recorded for that package are included. Omit it to scan deployed files across the whole project. See [Baseline CI checks](../../baseline-checks/#content-integrity) for the exact lockfile, target-directory, symlink, and `.apm/` scope boundaries.
 
 ## Options
 
@@ -101,6 +101,10 @@ apm audit --strip --dry-run
 
 # Strip critical and warning severity characters in place
 apm audit --strip
+
+# In CI, remediate first and then rerun the gate
+apm audit --strip
+apm audit --ci --no-drift
 ```
 
 ### Reports
@@ -205,7 +209,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 
 ### CI checks (`--ci`)
 
-`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity (Unicode plus per-file SHA-256 hash drift on every deployed file, including local `.apm/` content via the synthesized self-entry), and an advisory `includes` consent check. A lockfile is required when `apm.yml` declares APM or MCP dependencies. For an MCP-only project, normal [`apm install`](../install/#behavior) creates or repairs the resolved MCP lock state; frozen install fails without writing when that state is missing or stale. Drift detection runs alongside and contributes to the exit code unless `--no-drift` is set. On a cold cache, CI mode self-hydrates a scratch install from the lockfile pins instead of reporting a green skip, so setup-only CI can still catch stale committed deployed files without rewriting the checkout. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so the full-install CI pattern remains the right default there. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
+`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity, and an advisory `includes` consent check. A lockfile is required when `apm.yml` declares APM or MCP dependencies. For an MCP-only project, normal [`apm install`](../install/#behavior) creates or repairs the resolved MCP lock state; frozen install fails without writing when that state is missing or stale. Content integrity scans hidden Unicode across the whole-project deployed-file scope and checks SHA-256 drift only where the lockfile provides a baseline. Drift replay runs alongside and contributes to the exit code unless `--no-drift` is set; `--no-drift` never disables hidden-Unicode scanning. On a cold cache, CI mode self-hydrates a scratch install from the lockfile pins instead of reporting a green skip, so setup-only CI can still catch stale committed deployed files without rewriting the checkout. Audit also reports `unrecorded` drift when replay produces governed files that no lockfile entry claims. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so the full-install CI pattern remains the right default there. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
 
 ### Mutual exclusions
 
