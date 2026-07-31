@@ -336,7 +336,7 @@ def _run_mcp_lsp_integration(
     default=False,
     help=(
         "Overwrite locally-authored files and deploy despite critical security "
-        "findings; does not skip the upstream check"
+        "findings; does not bypass upstream ref resolution"
     ),
 )
 @click.option(

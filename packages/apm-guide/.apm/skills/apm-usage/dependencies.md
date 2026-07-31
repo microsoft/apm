@@ -577,8 +577,8 @@ enterprise security guide for the threat model.
 of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
 `apm install --update`, `apm install --refresh`, `apm update` (including
-`--force`), and `apm outdated` establish mutable refs from upstream instead of
-using a persistent bare-cache ref as current-state evidence.
+`--force`), `apm lock --update`, and `apm outdated` establish mutable refs from
+upstream instead of using a persistent bare-cache ref as current-state evidence.
 
 Lockfile keys keep `github.com` implicit for migration stability while
 non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)

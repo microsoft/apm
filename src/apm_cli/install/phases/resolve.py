@@ -21,9 +21,8 @@ from __future__ import annotations
 import builtins
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from apm_cli.deps.tiered_ref_resolver import ref_freshness_policy_for_install
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -36,6 +35,7 @@ from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
+    from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
     from apm_cli.install.context import InstallContext
     from apm_cli.install.resolution_staging import ResolutionStagingSession
 
@@ -234,9 +234,16 @@ def _setup_downloader(ctx: InstallContext) -> None:
     # every code path that calls downloader.resolve_git_reference():
     # install, update, outdated, publish.
     try:
-        from apm_cli.deps.tiered_ref_resolver import build_tiered_ref_resolver
+        from apm_cli.deps.tiered_ref_resolver import (
+            build_tiered_ref_resolver,
+            ref_freshness_policy_for_install,
+        )
 
         ctx.ref_freshness_policy = ref_freshness_policy_for_install(ctx)
+        if ctx.ref_freshness_policy.requires_remote and ctx.logger:
+            ctx.logger.verbose_detail(
+                "[*] Requiring upstream ref resolution; local bare-ref cache disabled"
+            )
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=getattr(downloader, "persistent_git_cache", None),
@@ -350,7 +357,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
     # --refresh implies re-resolution of all refs (but does NOT discard
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
-    update_refs = ref_freshness_policy_for_install(ctx).requires_remote
+    update_refs = cast("RefFreshnessPolicy", ctx.ref_freshness_policy).requires_remote
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: re-resolving all refs")
     logger = ctx.logger
