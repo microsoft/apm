@@ -1070,6 +1070,140 @@ def test_host_provider_registry_drives_auth_and_backends() -> None:
     assert set(samples).issubset(HOST_PROVIDERS)
 
 
+def test_package_identity_casing_uses_host_classification_owner() -> None:
+    """Package casing must not reclassify GITHUB_HOST independently."""
+    root = Path(__file__).parents[2]
+    identity = (root / "src/apm_cli/models/dependency/identity.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "if is_github_hostname(effective_host):" in identity
+    assert "configured_default_host" not in identity
+    assert "Package identity casing must route through is_github_hostname" in guard
+
+
+def test_package_identity_host_owner_guard_rejects_default_host_shortcut(
+    tmp_path: Path,
+) -> None:
+    """AC20 must reject a parallel GITHUB_HOST casing decision."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    identity_path = sandbox / "src/apm_cli/models/dependency/identity.py"
+    identity_source = identity_path.read_text(encoding="utf-8")
+    identity_path.write_text(
+        identity_source.replace(
+            "if is_github_hostname(effective_host):",
+            "if effective_host.lower() == default_host().lower() "
+            "or is_github_hostname(effective_host):",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Package identity casing must route through is_github_hostname" in result.stdout
+
+
+def test_ado_transport_credentials_route_through_auth_resolver() -> None:
+    """ADO git and REST consumers must use the per-dependency auth context."""
+    root = Path(__file__).parents[2]
+    auth = (root / "src/apm_cli/core/auth.py").read_text()
+    downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text()
+    validation = (root / "src/apm_cli/deps/github_downloader_validation.py").read_text()
+    strategies = (root / "src/apm_cli/deps/download_strategies.py").read_text()
+    pipeline = (root / "src/apm_cli/install/pipeline.py").read_text()
+    ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
+    marketplace = (root / "src/apm_cli/marketplace/client.py").read_text()
+    marketplace_builder = (
+        root / "src/apm_cli/marketplace/builder.py"
+    ).read_text()
+    marketplace_auth = (
+        root / "src/apm_cli/marketplace/auth_helpers.py"
+    ).read_text()
+    marketplace_check = (
+        root / "src/apm_cli/commands/marketplace/check.py"
+    ).read_text()
+    policy = (root / "src/apm_cli/policy/discovery.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "_clear_platform_token_env(env)" in auth
+    assert '"COPILOT_GITHUB_TOKEN"' in auth
+    assert "self.auth_resolver.git_env_for_context(" in downloader
+    assert "downloader.auth_resolver.git_env_for_context(" in validation
+    assert "probe_env = auth_resolver.git_env_for_context(" in pipeline
+    assert "if is_generic or is_azure_devops_hostname(host):" not in pipeline
+    assert "hardened_git_env_for_context" in ref_reuse
+    assert "hardened_git_env_for_context" in marketplace
+    assert "hardened_git_env_for_context" in marketplace_builder
+    assert 'ctx.token or ctx.host_info.kind == "ado"' in marketplace_auth
+    assert "hardened_git_env_for_context" in marketplace_check
+    assert "auth_resolver.try_with_fallback(" in policy
+    assert "key = (host, dep.port, org)" in pipeline
+    assert "self._host.ado_token" not in strategies
+    assert "ADO transport credentials must route through AuthResolver context" in guard
+
+
+def test_ado_transport_auth_owner_guard_rejects_direct_token_read(
+    tmp_path: Path,
+) -> None:
+    """AC21 must reject a transport consumer bypassing AuthResolver."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/download_strategies.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\ndef _reintroduced_ado_token_read(self):\n"
+        + "    return self._host.ado_token\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "ADO transport credentials must route through AuthResolver context" in result.stdout
+
+
 def test_host_type_hint_cannot_override_recognized_provider() -> None:
     """Manifest hints must not redirect credentials across known hosts."""
     from apm_cli.core.auth import AuthResolver

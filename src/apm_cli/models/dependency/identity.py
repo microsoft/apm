@@ -68,11 +68,8 @@ def normalize_package_repo_url(
     if source == "registry" or registry_prefix:
         return repo_url.lower()
 
-    configured_default_host = default_host()
-    effective_host = host or configured_default_host
-    if effective_host.lower() == configured_default_host.lower() or is_github_hostname(
-        effective_host
-    ):
+    effective_host = host or default_host()
+    if is_github_hostname(effective_host):
         return repo_url.lower()
     return repo_url
 

@@ -44,6 +44,7 @@ def fake_host_info():
 def fake_auth_resolver():
     resolver = MagicMock()
     resolver.resolve.return_value = SimpleNamespace(git_env={"GIT_TERMINAL_PROMPT": "0"})
+    resolver.hardened_git_env_for_context.side_effect = lambda auth_ctx: auth_ctx.git_env
     return resolver
 
 

@@ -28,6 +28,7 @@ import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -63,10 +64,21 @@ def _make_host(
     # Shared auth_resolver mock
     auth = MagicMock()
     ctx = MagicMock()
-    ctx.token = github_token
-    ctx.source = "GITHUB_APM_PAT_ORG" if github_token else ""
+    resolved_token = ado_token if ado_token is not None else github_token
+    ctx.token = resolved_token
+    ctx.source = (
+        "ADO_APM_PAT" if ado_token is not None else ("GITHUB_APM_PAT_ORG" if github_token else "")
+    )
+    ctx.auth_scheme = "basic"
+    ctx.git_env = {}
     auth.resolve.return_value = ctx
     auth.resolve_for_dep.return_value = ctx
+    auth.execute_with_bearer_fallback.side_effect = (
+        lambda _dep, primary_op, _bearer_op, _is_auth_failure: SimpleNamespace(
+            outcome=primary_op(),
+            bearer_attempted=False,
+        )
+    )
     auth.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",

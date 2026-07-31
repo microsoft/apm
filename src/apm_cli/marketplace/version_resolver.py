@@ -56,6 +56,8 @@ def resolve_version_constraint(
     token: str | None = None,
     auth_scheme: str = "basic",
     auth_resolver=None,
+    git_env: dict[str, str] | None = None,
+    port: int | None = None,
 ) -> tuple[str, str]:
     """Resolve a semver range to the highest matching git tag.
 
@@ -88,6 +90,10 @@ def resolve_version_constraint(
         "token": token,
         "auth_scheme": auth_scheme,
     }
+    if git_env is not None:
+        resolver_kwargs["git_env"] = git_env
+    if port is not None:
+        resolver_kwargs["port"] = port
     if auth_resolver is not None:
         resolver_kwargs.update(
             auth_resolver=auth_resolver,

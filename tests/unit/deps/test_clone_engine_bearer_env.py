@@ -6,6 +6,7 @@ import subprocess as sp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.clone_engine import CloneEngine
 from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
 from apm_cli.models.dependency.reference import DependencyReference
@@ -23,9 +24,13 @@ def _ado_host(git_env: dict) -> MagicMock:
     )
     host._resolve_dep_token.return_value = "pat-token"
     ctx = MagicMock()
+    ctx.token = "pat-token"
     ctx.auth_scheme = "basic"
     ctx.git_env = {}
+    ctx.host_info.kind = "ado"
     host._resolve_dep_auth_ctx.return_value = ctx
+    host.auth_resolver.git_env_for_context.side_effect = AuthResolver.git_env_for_context
+    host.auth_resolver._build_git_env.side_effect = AuthResolver._build_git_env
     host._build_repo_url = MagicMock(
         side_effect=lambda *a, **kw: (
             "https://bearer-url/o/r" if kw.get("auth_scheme") == "bearer" else "https://pat-url/o/r"

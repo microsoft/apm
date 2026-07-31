@@ -25,12 +25,14 @@ import urllib.parse
 from dataclasses import dataclass
 
 from ..utils.github_host import (
+    build_ado_https_clone_url,
     build_ado_ssh_url,
     build_https_clone_url,
     build_ssh_url,
     default_host,
     is_ado_auth_failure_signal,
     is_azure_devops_hostname,
+    is_visualstudio_legacy_hostname,
     set_ado_bearer_git_env,
     set_authorization_header_git_env,
 )
@@ -83,14 +85,17 @@ def _ado_coordinates_from_owner_repo(
 
 
 def _ado_remote_path_for_coordinates(
+    host: str,
     organization: str,
     project: str,
     repo: str,
 ) -> str:
     """Return the canonical HTTPS path for ADO coordinates."""
-    quoted_org = urllib.parse.quote(organization, safe="")
     quoted_project = urllib.parse.quote(project, safe="")
     quoted_repo = urllib.parse.quote(repo, safe="")
+    if is_visualstudio_legacy_hostname(host):
+        return f"/{quoted_project}/_git/{quoted_repo}"
+    quoted_org = urllib.parse.quote(organization, safe="")
     return f"/{quoted_org}/{quoted_project}/_git/{quoted_repo}"
 
 
@@ -281,7 +286,8 @@ class RefResolver:
             parsed_remote = urllib.parse.urlparse(remote_url)
             expected_ado_path = (
                 _ado_remote_path_for_coordinates(
-                    *_ado_coordinates_from_owner_repo(host=self._host, owner_repo=owner_repo)
+                    self._host,
+                    *_ado_coordinates_from_owner_repo(host=self._host, owner_repo=owner_repo),
                 )
                 if ado_host
                 else None
@@ -291,6 +297,7 @@ class RefResolver:
                 not ado_host
                 or parsed_remote.scheme != "https"
                 or parsed_remote.hostname != self._host.lower()
+                or parsed_remote.port != self._port
                 or parsed_remote.path != expected_ado_path
                 or parsed_remote.username is not None
                 or parsed_remote.password is not None
@@ -312,7 +319,17 @@ class RefResolver:
             # is injected below through git http.extraheader.
             url = remote_url
         elif ado_host:
-            url = f"https://{self._host}/{owner_repo}"
+            org, project, repo = _ado_coordinates_from_owner_repo(
+                host=self._host,
+                owner_repo=owner_repo,
+            )
+            url = build_ado_https_clone_url(
+                org,
+                project,
+                repo,
+                host=self._host,
+                port=self._port,
+            )
         else:
             url = build_https_clone_url(
                 self._host,
@@ -468,13 +485,28 @@ class RefResolver:
         def _bearer_op(bearer: str) -> list[RemoteRef]:
             from apm_cli.core.auth import AuthResolver
 
-            bearer_env = (
-                dict(self._git_env) if self._git_env is not None else AuthResolver._build_git_env()
+            base_env = (
+                dict(self._git_env)
+                if self._git_env is not None
+                else (
+                    self._auth_resolver.hardened_git_base_env()
+                    if self._auth_resolver is not None
+                    and callable(
+                        getattr(
+                            self._auth_resolver,
+                            "hardened_git_base_env",
+                            None,
+                        )
+                    )
+                    else AuthResolver._build_git_env()
+                )
             )
-            AuthResolver._clear_git_auth_env(bearer_env)
-            set_ado_bearer_git_env(bearer_env, bearer)
-            bearer_env["GIT_TERMINAL_PROMPT"] = "0"
-            bearer_env["GIT_ASKPASS"] = "echo"
+            bearer_env = AuthResolver._build_git_env(
+                bearer,
+                scheme="bearer",
+                host_kind="ado",
+                base_env=base_env,
+            )
             resolver = RefResolver(
                 timeout_seconds=self._timeout,
                 offline=self._offline,
@@ -483,6 +515,7 @@ class RefResolver:
                 token=bearer,
                 auth_scheme="bearer",
                 git_env=bearer_env,
+                port=self._port,
             )
             try:
                 return resolver.list_remote_refs(owner_repo, remote_url=remote_url)

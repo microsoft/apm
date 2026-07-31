@@ -92,8 +92,25 @@ class _FakeResolver:
         self.git_env = git_env or {"GIT_TERMINAL_PROMPT": "0"}
         self.calls: list[dict] = []
 
-    def try_with_fallback(self, host, operation, *, org=None, path=None, unauth_first=False):
-        self.calls.append({"host": host, "org": org, "path": path, "unauth_first": unauth_first})
+    def try_with_fallback(
+        self,
+        host,
+        operation,
+        *,
+        org=None,
+        port=None,
+        path=None,
+        unauth_first=False,
+    ):
+        self.calls.append(
+            {
+                "host": host,
+                "org": org,
+                "port": port,
+                "path": path,
+                "unauth_first": unauth_first,
+            }
+        )
         return operation(self.token, self.git_env)
 
 
@@ -224,6 +241,45 @@ def test_fetch_ado_bearer_context_sends_bearer_header() -> None:
 
     assert result == _MANIFEST
     assert captured_headers[0]["Authorization"] == "Bearer jwt-xyz"
+
+
+def test_fetch_ado_server_preserves_explicit_port() -> None:
+    captured_urls: list[str] = []
+    source = _ado_source("https://ado.example.test:8443/DefaultCollection/Platform/_git/tools")
+    resolver = _FakeResolver(token="pat-abc")
+
+    def fake_get(url, headers=None, timeout=None, **kwargs):
+        captured_urls.append(url)
+        return _fake_response(200, text=json.dumps(_MANIFEST))
+
+    with (
+        patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False),
+        patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
+    ):
+        result = _fetch_ado(
+            source,
+            "marketplace.json",
+            host_info=SimpleNamespace(host="ado.example.test", kind="ado"),
+            auth_resolver=resolver,
+        )
+
+    assert result == _MANIFEST
+    parsed = urlparse(captured_urls[0])
+    assert parsed.hostname == "ado.example.test"
+    assert parsed.port == 8443
+    assert resolver.calls[0]["port"] == 8443
+
+
+def test_fetch_ado_server_rejects_tfs_base_path() -> None:
+    source = _ado_source("https://ado.example.test/tfs/DefaultCollection/Platform/_git/tools")
+    with patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False):
+        with pytest.raises(ValueError, match="mounted below '/tfs/'"):
+            _fetch_ado(
+                source,
+                "marketplace.json",
+                host_info=SimpleNamespace(host="ado.example.test", kind="ado"),
+                auth_resolver=_FakeResolver(token="pat-abc"),
+            )
 
 
 def test_fetch_ado_404_returns_none_without_clone() -> None:

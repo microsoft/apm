@@ -26,6 +26,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -60,10 +61,21 @@ def _make_host(
     # Shared auth_resolver mock
     auth = MagicMock()
     ctx = MagicMock()
-    ctx.token = github_token
-    ctx.source = "GITHUB_APM_PAT_ORG" if github_token else ""
+    resolved_token = ado_token if ado_token is not None else github_token
+    ctx.token = resolved_token
+    ctx.source = (
+        "ADO_APM_PAT" if ado_token is not None else ("GITHUB_APM_PAT_ORG" if github_token else "")
+    )
+    ctx.auth_scheme = "basic"
+    ctx.git_env = {}
     auth.resolve.return_value = ctx
     auth.resolve_for_dep.return_value = ctx
+    auth.execute_with_bearer_fallback.side_effect = (
+        lambda _dep, primary_op, _bearer_op, _is_auth_failure: SimpleNamespace(
+            outcome=primary_op(),
+            bearer_attempted=False,
+        )
+    )
     auth.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",
@@ -908,6 +920,25 @@ class TestDownloadAdoFile:
         result = d.download_ado_file(self._dep(), "apm.yml", ref="main")
         assert result == b"fallback content"
 
+    def test_404_fallback_preserves_custom_port(self) -> None:
+        host = _make_host(ado_token="pat")
+        d = DownloadDelegate(host)
+        host._resilient_get.side_effect = [
+            _fake_response(404, b""),
+            _fake_response(200, b"fallback content"),
+        ]
+        result = d.download_ado_file(
+            self._dep(host="ado.example.test", port=8443),
+            "apm.yml",
+            ref="main",
+        )
+        assert result == b"fallback content"
+        parsed_urls = [urlparse(call.args[0]) for call in host._resilient_get.call_args_list]
+        assert [(parsed.hostname, parsed.port) for parsed in parsed_urls] == [
+            ("ado.example.test", 8443),
+            ("ado.example.test", 8443),
+        ]
+
     def test_404_tries_fallback_ref_master_to_main(self) -> None:
         host = _make_host(ado_token="pat")
         d = DownloadDelegate(host)
@@ -1011,6 +1042,32 @@ class TestDownloadAdoFile:
         with pytest.raises(RuntimeError, match="sign-in page"):
             d.download_ado_file(self._dep(), "apm.yml")
 
+    def test_html_203_response_is_rejected(self) -> None:
+        host = _make_host(ado_token=None)
+        host.auth_resolver.resolve.return_value = MagicMock(
+            token=None,
+            auth_scheme="basic",
+            source="none",
+        )
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        host._resilient_get.return_value = _fake_response(
+            203,
+            b"<html>Sign In</html>",
+            headers={"Content-Type": "text/html"},
+        )
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            DownloadDelegate(host).download_ado_file(self._dep(), "apm.yml")
+
+    def test_non_200_success_status_is_rejected(self) -> None:
+        host = _make_host(ado_token="pat")
+        host._resilient_get.return_value = _fake_response(
+            206,
+            b"partial",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        with pytest.raises(RuntimeError, match="Unexpected HTTP 206"):
+            DownloadDelegate(host).download_ado_file(self._dep(), "apm.yml")
+
     def test_html_200_response_writes_no_content(self) -> None:
         """Mutation break: HTML sign-in detection must prevent content from being returned."""
         host = _make_host(ado_token=None)
@@ -1069,17 +1126,55 @@ class TestDownloadAdoFile:
         assert "Authorization" in headers
         expected_auth = base64.b64encode(b":my-secret-pat").decode()
         assert expected_auth in headers["Authorization"]
-        # auth_resolver.resolve() must NOT be called when PAT is present
-        host.auth_resolver.resolve.assert_not_called()
+        host.auth_resolver.resolve.assert_called_once_with(
+            "dev.azure.com",
+            "my-org",
+            port=None,
+        )
 
-    def test_bearer_auth_resolver_not_called_when_pat_present(self) -> None:
-        """Mutation break: resolver.resolve() is bypassed entirely when ado_token is set."""
+    def test_pat_resolution_routes_through_auth_resolver(self) -> None:
+        """The REST PAT path must consume the canonical AuthResolver context."""
         host = _make_host(ado_token="pat-value")
         resp = _fake_response(200, b"data", headers={"Content-Type": "application/json"})
         host._resilient_get.return_value = resp
         d = DownloadDelegate(host)
         d.download_ado_file(self._dep(), "apm.yml")
-        host.auth_resolver.resolve.assert_not_called()
+        host.auth_resolver.resolve.assert_called_once_with(
+            "dev.azure.com",
+            "my-org",
+            port=None,
+        )
+
+    def test_rejected_services_pat_retries_with_bearer(self) -> None:
+        """A REST 401 uses AuthResolver's canonical PAT-to-bearer protocol."""
+        host = _make_host(ado_token="stale-pat")
+        host._resilient_get.side_effect = [
+            _fake_response(401, b""),
+            _fake_response(
+                200,
+                b"file bytes",
+                headers={"Content-Type": "application/octet-stream"},
+            ),
+        ]
+
+        def execute(_dep, primary_op, bearer_op, is_auth_failure):
+            primary = primary_op()
+            assert is_auth_failure(primary)
+            return SimpleNamespace(
+                outcome=bearer_op("fresh-bearer"),
+                bearer_attempted=True,
+            )
+
+        host.auth_resolver.execute_with_bearer_fallback.side_effect = execute
+        result = DownloadDelegate(host).download_ado_file(
+            self._dep(),
+            "apm.yml",
+        )
+        assert result == b"file bytes"
+        retry_headers = host._resilient_get.call_args_list[1].kwargs["headers"]
+        scheme, credential = retry_headers["Authorization"].split(" ", 1)
+        assert scheme == "Bearer"
+        assert credential == "fresh-bearer"
 
     def test_html_detection_on_fallback_ref_response(self) -> None:
         """HTML sign-in detection fires on the main/master fallback response too."""
@@ -1128,11 +1223,12 @@ class TestDownloadAdoFile:
         assert result == b"file-bytes"
         assert host._resilient_get.call_count == 2
 
-    def test_bearer_fallback_skipped_when_scheme_not_bearer(self) -> None:
-        """When auth_resolver returns a non-bearer scheme, no Authorization header is injected."""
+    def test_basic_context_uses_ado_pat_header(self) -> None:
+        """A basic AuthResolver context produces an ADO PAT header."""
         host = _make_host(ado_token=None)
         ctx = MagicMock()
         ctx.token = "some-token"
+        ctx.source = "ADO_APM_PAT"
         ctx.auth_scheme = "basic"  # non-bearer scheme -> must not inject as Bearer
         host.auth_resolver.resolve.return_value = ctx
         resp = _fake_response(200, b"content", headers={"Content-Type": "application/octet-stream"})
@@ -1141,7 +1237,9 @@ class TestDownloadAdoFile:
         d.download_ado_file(self._dep(), "apm.yml")
         call_kwargs = host._resilient_get.call_args[1]
         headers = call_kwargs.get("headers", {})
-        assert "Authorization" not in headers
+        scheme, credential = headers["Authorization"].split(" ", 1)
+        assert scheme == "Basic"
+        assert base64.b64decode(credential).decode() == ":some-token"
 
 
 # ---------------------------------------------------------------------------

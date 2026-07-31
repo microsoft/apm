@@ -8,12 +8,14 @@ Tests that:
 5. PAT regression: auth_scheme="basic" still embeds token in URL.
 """
 
+import base64
 import subprocess  # noqa: F401
 import urllib.parse
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.install.errors import AuthenticationError
 
 # ---------------------------------------------------------------------------
@@ -44,6 +46,8 @@ def _make_auth_ctx(token="test-pat", auth_scheme="basic", git_env=None):  # noqa
     ctx.token = token
     ctx.auth_scheme = auth_scheme
     ctx.git_env = git_env or {}
+    ctx.host_info.kind = "ado"
+    ctx.source = "ADO_APM_PAT" if auth_scheme == "basic" and token else "AAD_BEARER_AZ_CLI"
     return ctx
 
 
@@ -53,6 +57,7 @@ def _make_resolver(auth_ctx=None):
     if auth_ctx is None:
         auth_ctx = _make_auth_ctx()
     resolver.resolve_for_dep.return_value = auth_ctx
+    resolver.git_env_for_context.side_effect = AuthResolver.git_env_for_context
     resolver.build_error_context.return_value = "    Diagnostic payload"
     return resolver
 
@@ -105,7 +110,7 @@ class TestBearerGitEnvMergedIntoSubprocess:
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
 
         bearer_ctx = _make_auth_ctx(
-            token=None,
+            token="test-bearer",
             auth_scheme="bearer",
             git_env={
                 "GIT_CONFIG_COUNT": "1",
@@ -127,7 +132,9 @@ class TestBearerGitEnvMergedIntoSubprocess:
         env = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env", {})
         assert env.get("GIT_CONFIG_COUNT") == "1"
         assert env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
-        assert "Bearer eyJtoken" in env.get("GIT_CONFIG_VALUE_0", "")
+        scheme, credential = env["GIT_CONFIG_VALUE_0"].split(" ", 2)[1:]
+        assert scheme == "Bearer"
+        assert credential == "test-bearer"
 
 
 class TestAdoAuthFailureRaisesAuthenticationError:
@@ -207,10 +214,10 @@ class TestAdoNonAuthFailureReturnsFalse:
 
 
 class TestPatRegressionBasicScheme:
-    """PAT users (auth_scheme='basic') still get token embedded in URL."""
+    """PAT users use a Basic header with a credential-free URL."""
 
     @patch("subprocess.run")
-    def test_basic_scheme_embeds_token_in_url(self, mock_run):
+    def test_basic_scheme_uses_header_not_url(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
 
         pat_ctx = _make_auth_ctx(token="my-pat-token", auth_scheme="basic")
@@ -226,5 +233,14 @@ class TestPatRegressionBasicScheme:
         call_args = mock_run.call_args
         probe_url = call_args[0][0][-1]
         parsed = urllib.parse.urlparse(probe_url)
-        # For basic auth, the PAT should appear in the URL userinfo
-        assert parsed.username is not None or parsed.password is not None
+        assert parsed.username is None
+        assert parsed.password is None
+        env = call_args.kwargs["env"]
+        values = [
+            value
+            for key, value in env.items()
+            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization: Basic ")
+        ]
+        assert len(values) == 1
+        encoded = values[0].split(" ", 2)[2]
+        assert base64.b64decode(encoded).decode() == ":my-pat-token"
