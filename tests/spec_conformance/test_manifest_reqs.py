@@ -360,6 +360,8 @@ def test_host_class_collapse_constrained_to_psl_or_aliases():
         "Public Suffix List",
         "explicit `aliases:` entry",
         "MUST NOT collapse two",
+        "configuration signal exercised",
+        "under [req-sc-013](#req-sc-013) is not subject to this prohibition",
     )
 
 
