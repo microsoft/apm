@@ -16,8 +16,8 @@ apm outdated [OPTIONS]
 ## Description
 
 `apm outdated` reads `apm.lock.yaml` and queries each authenticated upstream to
-detect staleness. It does not accept refs from the persistent bare Git cache as
-current upstream state:
+detect staleness. It does not report locally cached refs as current upstream
+state:
 
 - **Plain tag-pinned deps** (e.g. `v1.2.3` or `1.2.3`): semver compare against the latest matching remote tag.
 - **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref. For virtual subdirectory packages (installed via `path:` in `apm.yml`), `{name}` is derived from the final path segment, so a dep with `path: packages/my-pkg` resolves tags like `my-pkg_v1.2.3`.
