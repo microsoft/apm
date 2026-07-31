@@ -8,9 +8,11 @@ APM works without tokens for public packages on github.com. Authentication is ne
 
 ## How APM resolves authentication
 
-APM resolves tokens per `(host, port, org)` pair. Public `github.com` HTTPS repository operations are a deliberate exception to eager token lookup: APM first tries the repository anonymously. That first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. A 401, 403, 404, or equivalent Git authentication failure then unlocks the credential chain below. DNS, TLS, timeout, and GitHub throttle failures do not trigger credential lookup.
+Public `github.com` packages need no token configuration. APM tries HTTPS repository operations anonymously before resolving credentials.
 
-For private `github.com` fallback and other hosts, APM walks a **host-class-specific** chain until it finds a token:
+The first attempt has no authorization header, GitHub token environment variable, or active Git credential helper. A 401, 403, 404, or equivalent Git authentication failure unlocks the credential chain below; DNS, TLS, timeout, and GitHub throttle failures do not.
+
+APM resolves tokens per `(host, port, org)` pair. For private `github.com` fallback and other hosts, it walks a **host-class-specific** chain until it finds a token:
 
 1. **GitHub-class hosts** (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`): **Per-org env var** `GITHUB_APM_PAT_{ORG}` (when an org slug applies), then **global** `GITHUB_APM_PAT` -> `GITHUB_TOKEN` -> `GH_TOKEN`, then **GitHub CLI active account** (`gh auth token --hostname <host>`, silently skipped if `gh` is not installed or not logged in for the host), then host-specific **git credential helper**.
 2. **GitLab-class hosts** (`gitlab.com`, or FQDNs listed via `GITLAB_HOST` / `APM_GITLAB_HOSTS`): **only** `GITLAB_APM_PAT` -> `GITLAB_TOKEN`, then host-specific **git credential helper**. GitHub token env vars are **not** used for GitLab (including `GITHUB_APM_PAT`, `GITHUB_TOKEN`, and `GH_TOKEN`, and `GITHUB_APM_PAT_{ORG}` for group/namespace paths).

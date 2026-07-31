@@ -20,7 +20,7 @@ When fallback is required, APM checks these sources in order:
 
 APM checks the active `gh` CLI account before invoking OS credential helpers. This reduces ambiguous multi-account prompts on hosts like github.com. If the `gh` CLI is not installed or no account is active, APM skips this step silently and continues to `git credential fill`.
 
-This anonymous-first rule is exact to `github.com` HTTPS. GHE Cloud, GHES, ADO,
+This anonymous-first rule applies only to `github.com` HTTPS. GHE Cloud, GHES, ADO,
 GitLab, SSH, local paths, and generic hosts keep their existing authentication
 and transport behavior.
 

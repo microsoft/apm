@@ -228,6 +228,65 @@ def test_public_github_connectivity_and_throttle_failures_never_resolve(
     resolve.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    (
+        (_HttpStatusError(401), True),
+        (_HttpStatusError(403), True),
+        (_HttpStatusError(404), True),
+        (RuntimeError("Authentication failed"), True),
+        (RuntimeError("Authorization failed"), True),
+        (RuntimeError("Unauthorized"), True),
+        (RuntimeError("could not read Username"), True),
+        (RuntimeError("invalid username or password"), True),
+        (RuntimeError("remote: Repository not found"), True),
+        (RuntimeError("terminal prompts disabled"), True),
+        (RuntimeError("unable to get password from user"), True),
+        (RuntimeError("The requested URL returned error: 404"), True),
+        (RuntimeError("HTTP error 403"), True),
+        (RuntimeError("status code=401"), True),
+        (RuntimeError("GitHub API throttle for github.com (HTTP 403)"), False),
+        (RuntimeError("too many requests: HTTP 403"), False),
+        (RuntimeError("could not resolve host: github.com"), False),
+        (RuntimeError("connection refused"), False),
+        (RuntimeError("connection timed out"), False),
+        (RuntimeError("network is unreachable"), False),
+        (RuntimeError("certificate verify failed"), False),
+        (RuntimeError("CERTIFICATE_VERIFY_FAILED"), False),
+        (RuntimeError("SSL certificate problem"), False),
+        (RuntimeError("TLS verification failed"), False),
+    ),
+)
+def test_public_github_auth_failure_classifier_signal_vocabulary(
+    failure: Exception,
+    expected: bool,
+) -> None:
+    """Every documented auth and non-auth signal stays in its intended bucket."""
+    assert AuthResolver.is_public_github_auth_failure(failure) is expected
+
+
+def test_clear_git_auth_env_only_removes_real_auth_channels() -> None:
+    """Authorization-like path text survives while real headers are stripped."""
+    env = {
+        "GIT_CONFIG_COUNT": "4",
+        "GIT_CONFIG_KEY_0": "http.sslCAInfo",
+        "GIT_CONFIG_VALUE_0": "/authorization/corporate-ca.pem",
+        "GIT_CONFIG_KEY_1": "custom.policy",
+        "GIT_CONFIG_VALUE_1": "X-Custom: authorization=reviewed",
+        "GIT_CONFIG_KEY_2": "custom.header",
+        "GIT_CONFIG_VALUE_2": "Authorization: Bearer secret",
+        "GIT_CONFIG_KEY_3": "http.extraHeader",
+        "GIT_CONFIG_VALUE_3": "X-Harmless: value",
+    }
+
+    AuthResolver._clear_git_auth_env(env)
+
+    assert _indexed_git_config(env) == [
+        ("http.sslCAInfo", "/authorization/corporate-ca.pem"),
+        ("custom.policy", "X-Custom: authorization=reviewed"),
+    ]
+
+
 def _public_downloader(resolver: AuthResolver) -> GitHubPackageDownloader:
     """Build a deterministic HTTPS-only downloader for clone-engine tests."""
     return GitHubPackageDownloader(
@@ -268,6 +327,46 @@ def test_public_github_clone_is_anonymous_before_inherited_pat() -> None:
     assert parsed.username is None
     assert parsed.password is None
     _assert_anonymous_attempt_env(calls[0][1])
+    manager.get_token_for_purpose.assert_not_called()
+    manager.resolve_credential_from_gh_cli.assert_not_called()
+    manager.resolve_credential_from_git.assert_not_called()
+
+
+def test_public_github_clone_connectivity_failure_does_not_resolve() -> None:
+    """Clone error rendering preserves a network failure without auth lookup."""
+    manager = MagicMock(spec=GitHubTokenManager)
+    manager.setup_environment.side_effect = lambda: dict(os.environ)
+    manager.get_token_for_purpose.return_value = None
+    manager.resolve_credential_from_gh_cli.return_value = None
+    manager.resolve_credential_from_git.return_value = None
+    resolver = AuthResolver(token_manager=manager)
+    dep_ref = DependencyReference.parse("https://github.com/acme/widgets.git#main")
+
+    def clone_action(
+        _url: str,
+        _env: dict[str, str],
+        _target: Path,
+    ) -> None:
+        raise subprocess.CalledProcessError(
+            128,
+            ("git", "clone"),
+            stderr="fatal: could not resolve host: github.com",
+        )
+
+    with patch.dict(os.environ, {}, clear=True):
+        downloader = _public_downloader(resolver)
+        manager.reset_mock()
+        with pytest.raises(
+            RuntimeError,
+            match="network error, not an auth failure",
+        ):
+            downloader._execute_transport_plan(
+                dep_ref.repo_url,
+                Path("unused-target"),
+                dep_ref=dep_ref,
+                clone_action=clone_action,
+            )
+
     manager.get_token_for_purpose.assert_not_called()
     manager.resolve_credential_from_gh_cli.assert_not_called()
     manager.resolve_credential_from_git.assert_not_called()

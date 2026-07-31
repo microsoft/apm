@@ -293,7 +293,8 @@ def _validate_virtual_package(
             is True
         ):
             verbose_log(
-                f"Auth deferred: host={host}, org={org}, public github.com probes run anonymously"
+                f"Auth deferred: host={host}, org={org} -- "
+                "anonymous probe before credential resolution"
             )
         else:
             ctx = auth_resolver.resolve_for_dep(dep_ref)
@@ -679,8 +680,8 @@ def _validate_github_package(
     if verbose_log:
         if auth_resolver.uses_public_github_anonymous_first(host, port=port) is True:
             verbose_log(
-                f"Auth deferred: host={host_info.display_name}, org={org}, "
-                "anonymous probe runs before credential resolution"
+                f"Auth deferred: host={host_info.display_name}, org={org} -- "
+                "anonymous probe before credential resolution"
             )
         else:
             ctx = auth_resolver.resolve(host, org=org, port=port)

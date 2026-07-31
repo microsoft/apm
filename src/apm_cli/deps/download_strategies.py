@@ -541,6 +541,9 @@ class DownloadDelegate:
     def try_raw_download(self, owner: str, repo: str, ref: str, file_path: str) -> bytes | None:
         """Attempt to fetch a file via raw.githubusercontent.com (CDN).
 
+        This pre-auth helper must remain token-free: it runs before
+        ``AuthResolver`` has established that credentials may be required.
+
         Returns the raw bytes on success, or ``None`` if the file was not found
         (HTTP 404) or the request failed for any reason.  This is intentionally
         best-effort: callers fall back to the Contents API when ``None`` is

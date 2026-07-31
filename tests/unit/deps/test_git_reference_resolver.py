@@ -306,6 +306,33 @@ class TestListRemoteRefs:
             with pytest.raises(RuntimeError, match=r"Failed to list remote refs"):
                 resolver.list_remote_refs(_dep(host="github.com"))
 
+    def test_public_github_connectivity_error_does_not_render_auth_context(self):
+        """A non-auth ref failure stays a network diagnostic."""
+        host = _ctx()
+        host.auth_resolver.uses_public_github_anonymous_first.return_value = True
+        host.auth_resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: (
+            operation(
+                None,
+                {"GIT_CONFIG_KEY_0": "credential.helper"},
+            )
+        )
+        host.auth_resolver.is_public_github_auth_failure.return_value = False
+        host._build_repo_url.return_value = "https://github.com/owner/repo.git"
+        with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
+            MockGit.return_value.ls_remote.side_effect = GitCommandError(
+                "ls-remote",
+                128,
+                b"fatal: could not resolve host: github.com",
+            )
+            resolver = GitReferenceResolver(host)
+            with pytest.raises(
+                RuntimeError,
+                match="network error, not an auth failure",
+            ):
+                resolver.list_remote_refs(_dep(host="github.com"))
+
+        host.auth_resolver.build_error_context.assert_not_called()
+
     def test_ado_basic_with_token_uses_bearer_fallback(self):
         host = _ctx(token="ado_pat", auth_scheme="basic")
         # Wire bearer fallback to be invoked: primary fails with auth signal,

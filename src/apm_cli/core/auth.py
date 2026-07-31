@@ -485,6 +485,7 @@ class AuthResolver:
             signal in text
             for signal in (
                 "rate limit",
+                "throttle",
                 "too many requests",
                 "could not resolve host",
                 "connection refused",
@@ -548,6 +549,9 @@ class AuthResolver:
             ``git credential fill`` request so helpers configured with
             ``credential.useHttpPath = true`` can disambiguate per-URL
             (notably Git Credential Manager for multi-account users).
+            Primary auth-first resolution stays host-scoped; the path is
+            applied when public github.com anonymous-first fallback proves
+            credentials may be required.
         unauth_first:
             If *True*, try unauthenticated first (saves rate limits, EMU-safe).
         verbose_callback:

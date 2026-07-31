@@ -299,17 +299,17 @@ class GitReferenceResolver:
 
         ref_kind = "remote refs" if include_heads else "remote tags"
         error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
-        if is_generic:
+        if public_github_https_first and not host.auth_resolver.is_public_github_auth_failure(e):
+            error_msg += (
+                f"Could not connect to {dep_host or default_host()} "
+                "(network error, not an auth failure). "
+                "Check your internet connection and proxy settings. "
+                "Run with --verbose for details."
+            )
+        elif is_generic:
             if dep_host:
                 host_info = host.auth_resolver.classify_host(dep_host, port=dep_ref.port)
                 host_name = host_info.display_name
-            elif public_github_https_first and not host.auth_resolver.is_public_github_auth_failure(
-                e
-            ):
-                error_msg += (
-                    f"Unable to reach {dep_host or default_host()} without credentials. "
-                    "Check DNS, TLS, proxy, and network connectivity."
-                )
             else:
                 host_name = "the target host"
             error_msg += (
