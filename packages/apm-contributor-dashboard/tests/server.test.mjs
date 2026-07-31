@@ -826,6 +826,7 @@ describe("Path traversal protection", () => {
     let assetServer;
     let assetBaseUrl;
     let linkSetupError;
+    let mimeLinkSetupError;
 
     before(async () => {
         workDir = await mkdtemp(join(__dir, ".static-assets-"));
@@ -854,6 +855,18 @@ describe("Path traversal protection", () => {
                 throw error;
             }
             linkSetupError = error;
+        }
+        try {
+            await symlink(
+                join(assetsDir, "nested", "app..js"),
+                join(assetsDir, "alias.css"),
+                "file",
+            );
+        } catch (error) {
+            if (process.platform !== "win32" || !["EACCES", "EPERM"].includes(error.code)) {
+                throw error;
+            }
+            mimeLinkSetupError = error;
         }
 
         const state = createMockDeps({ distDir });
@@ -896,6 +909,24 @@ describe("Path traversal protection", () => {
         const response = await rawHttpRequest(assetBaseUrl, "/assets/nonexistent.js");
         assert.equal(response.statusCode, 404);
         assert.equal(response.body.toString("utf8"), "Not found");
+
+        const missingIndex = await rawHttpRequest(assetBaseUrl, "/");
+        assert.equal(missingIndex.statusCode, 404);
+        assert.equal(missingIndex.headers["content-type"], "text/plain; charset=utf-8");
+        assert.equal(missingIndex.body.toString("utf8"), "Not found");
+    });
+
+    it("uses the requested extension for MIME after canonical resolution", async (t) => {
+        if (mimeLinkSetupError) {
+            t.diagnostic(`file symlink setup denied (${mimeLinkSetupError.code}); path seam still runs`);
+            assert.ok(["EACCES", "EPERM"].includes(mimeLinkSetupError.code));
+            return;
+        }
+
+        const response = await rawHttpRequest(assetBaseUrl, "/assets/alias.css");
+        assert.equal(response.statusCode, 200);
+        assert.deepEqual(response.body, SAFE_ASSET);
+        assert.equal(response.headers["content-type"], "text/css");
     });
 
     it("blocks sibling prefix traversal before outside bytes are read", async () => {
@@ -927,6 +958,7 @@ describe("Path traversal protection", () => {
 
     it("rejects mixed, NUL, absolute, drive, UNC, and repeated encodings", async () => {
         const unsafePaths = [
+            "/assets/",
             "/assets/..\\..\\dist-evil\\secret.txt",
             "/assets/..%5c..%5cdist-evil%5csecret.txt",
             "/assets/%00secret.txt",
@@ -980,5 +1012,15 @@ describe("Path traversal protection", () => {
             isPathWithinRoot(root, "C:\\dashboard\\dist\\assets\\app..js", win32),
             true,
         );
+
+        const aliasCandidate = win32.resolve(root, "assets", "alias.css");
+        canonicalPaths.set(aliasCandidate, "C:\\dashboard\\dist\\assets\\nested\\app.js");
+        const alias = resolveStaticRequest("/assets/alias.css", root, {
+            pathApi: win32,
+            realpathSync: (path) => canonicalPaths.get(path),
+        });
+        assert.equal(alias.kind, "asset");
+        assert.equal(alias.filePath, "C:\\dashboard\\dist\\assets\\nested\\app.js");
+        assert.equal(alias.mimePath, aliasCandidate);
     });
 });

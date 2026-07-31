@@ -118,9 +118,13 @@ export function resolveStaticRequest(rawUrl, distDir, options = {}) {
         return { kind: "forbidden" };
     }
 
+    // Read the canonical path so the requested symlink is not followed again.
+    // Concurrent writers to the canonical tree are outside this loopback
+    // server's remote-request threat model.
     return {
         kind: "asset",
         filePath: canonicalCandidate,
+        // MIME follows the requested extension, not the canonical target name.
         mimePath: candidatePath,
     };
 }
@@ -840,8 +844,7 @@ query($owner: String!, $repo: String!, $cursor: String) {
                 res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-cache" });
                 res.end(html);
             } catch {
-                res.writeHead(404);
-                res.end("Not found");
+                sendStaticError(res, 404, "Not found");
             }
         } else {
             serveStatic(res, join(distDir, "index.html"));
