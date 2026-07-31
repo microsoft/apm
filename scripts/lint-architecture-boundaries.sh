@@ -763,11 +763,42 @@ mcp_manifest_adapter=$(
         capture { print }
     ' src/apm_cli/integration/mcp_integrator_install.py
 )
+mcp_target_resolver=$(
+    awk '
+        /^def _resolve_target_runtimes\(/ { capture = 1 }
+        /^def _install_self_defined_deps\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/integration/mcp_integrator_install.py
+)
+mcp_manifest_selection_line=$(
+    grep -n '_declared_manifest_target_runtimes(apm_config)' \
+        <<<"$mcp_target_resolver" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_discovery_line=$(
+    grep -n '_discover_installed_runtimes(' \
+        <<<"$mcp_target_resolver" \
+        | head -1 \
+        | cut -d: -f1
+)
+mcp_package_conflict_parser=$(
+    awk '
+        /if "targets" in data:/ { capture = 1 }
+        capture && /^        else:/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/models/apm_package.py
+)
 if ! grep -q 'parse_targets_field(apm_config)' <<<"$mcp_manifest_adapter" \
     || grep -Eq \
         'TARGET_CAPABILITIES|CANONICAL_TARGETS|KNOWN_TARGETS|\[[^]]*(copilot|claude|cursor|codex|gemini|opencode|windsurf|kiro)' \
-        <<<"$mcp_manifest_adapter"; then
-    echo "[x] MCP manifest target selection must route through parse_targets_field"
+        <<<"$mcp_manifest_adapter" \
+    || [ -z "$mcp_manifest_selection_line" ] \
+    || [ -z "$mcp_discovery_line" ] \
+    || [ "$mcp_manifest_selection_line" -ge "$mcp_discovery_line" ] \
+    || grep -q 'parse_targets_field(' <<<"$mcp_target_resolver" \
+    || ! grep -q 'parse_targets_field(data)' <<<"$mcp_package_conflict_parser"; then
+    echo "[x] MCP target precedence must route through the canonical manifest adapter before discovery"
     violations=$((violations + 1))
 fi
 

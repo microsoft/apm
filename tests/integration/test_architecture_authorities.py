@@ -544,11 +544,27 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "_declared_manifest_target_runtimes"
     )
-    calls = {
+    resolver = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_resolve_target_runtimes"
+    )
+    adapter_calls = {
         node.func.id
         for node in ast.walk(adapter)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
+    resolver_calls = [
+        node
+        for node in ast.walk(resolver)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    manifest_selection_calls = [
+        node for node in resolver_calls if node.func.id == "_declared_manifest_target_runtimes"
+    ]
+    discovery_calls = [
+        node for node in resolver_calls if node.func.id == "_discover_installed_runtimes"
+    ]
     local_string_collections = [
         node
         for node in ast.walk(adapter)
@@ -558,10 +574,23 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
         )
     ]
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    package_source = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
+    target_parse_branch = package_source.split(
+        'if "targets" in data:',
+        maxsplit=1,
+    )[1].split("        else:", maxsplit=1)[0]
 
-    assert "parse_targets_field" in calls
+    assert "parse_targets_field" in adapter_calls
     assert local_string_collections == []
-    assert "MCP manifest target selection must route through parse_targets_field" in guard
+    assert len(manifest_selection_calls) == 1
+    assert len(discovery_calls) == 1
+    assert manifest_selection_calls[0].lineno < discovery_calls[0].lineno
+    assert all(node.func.id != "parse_targets_field" for node in resolver_calls)
+    assert "parse_targets_field(data)" in target_parse_branch
+    assert (
+        "MCP target precedence must route through the canonical manifest adapter before discovery"
+        in guard
+    )
 
 
 @pytest.mark.parametrize(

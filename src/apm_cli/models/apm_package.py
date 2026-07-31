@@ -298,9 +298,9 @@ class APMPackage:
     # project root.
     source_path: Path | None = None
     target: str | list[str] | None = (
-        None  # Singular 'target:' field (legacy/CSV form). May coexist with `targets`
-        # being None in apm.yml, but never both populated -- ConflictingTargetsError
-        # is raised at install time. Read by callers that only need a single value.
+        None  # Singular 'target:' field (legacy/CSV form). It may coexist with
+        # `targets` only for direct compatibility construction; manifest parsing
+        # rejects both fields through parse_targets_field before installation.
     )
     targets: list[str] | None = (
         None  # Plural 'targets:' field (canonical YAML-list form, #1335). Stored raw
@@ -560,19 +560,7 @@ class APMPackage:
         # (see apm_cli.core.target_detection.parse_target_field).
         target_value = None
         targets_value: list[str] | None = None
-        if "targets" in data and "target" in data:
-            target_value = parse_target_field(
-                data.get("target"),
-                source_path=apm_yml_path,
-            )
-            raw_targets = data.get("targets")
-            targets_value = (
-                [str(item).strip() for item in raw_targets if str(item).strip()]
-                if isinstance(raw_targets, list)
-                else [str(raw_targets).strip()]
-            )
-            canonical_targets = ()
-        elif "targets" in data:
+        if "targets" in data:
             parsed_targets = parse_targets_field(data)
             targets_value = parsed_targets or None
             canonical_targets = tuple(parsed_targets)

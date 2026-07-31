@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
   which never removes them. (by @mia106dev, #2069)
+- Teammates with different harnesses installed no longer rewrite each other's
+  `mcp_target_servers`; lockfile ownership now follows declared `apm.yml`
+  `targets:` before local runtime detection. (by @rrazvd, closes #2298, #2307)
 
 ### Security
 
@@ -72,22 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   @sergio-sisternes-epam. (#2294)
 - Narrowing active targets now removes shared-root skill copies owned only by a
   dropped target while preserving user edits and surviving ownership. (#2299)
-- MCP lockfile ownership now follows declared `apm.yml` `targets:` before local runtime detection, so teammates with different harnesses installed stop rewriting `mcp_target_servers` differently -- by @rrazvd (closes #2298) (#2302).
-- MCP lockfile ownership now follows declared `apm.yml` `targets:` before local runtime detection, so teammates with different harnesses installed stop rewriting `mcp_target_servers` differently -- by @rrazvd (closes #2298) (#2307).
-- `apm audit --ci` now surfaces the safe remediation when a lockfile's source
-  identity is tampered. A rewritten dependency `host`/`repo_url` trips both the
-  external `ref-consistency` check (remedy `apm install --update`, which
-  re-resolves from the trusted manifest) and the internal
-  `deployment-ledger-owners` check (remedy `apm prune`, which would reconcile
-  ownership toward the tampered lockfile). Under the default fail-fast the
-  runner now reports `ref-consistency` first, so operators get the
-  manifest-driven fix instead of the attacker-entrenching one. Genuine
-  departed-owner detection is unchanged. (#2300)
-- Project-scope installs for Gemini, Codex, OpenCode, and experimental Hermes now prompt users to run `apm compile` when dependency instructions need root context compilation, instead of silently leaving those instructions unapplied -- by @sergio-sisternes-epam (closes #2057; supersedes #2115) (#2293).
-- Removing a dependency and running `apm prune` now fully cleans its deployment
-  ownership records while preserving shared deployments and user-edited files.
-  `apm audit` now catches leftover ownership instead of reporting a clean bill
-  of health; run `apm prune`, then rerun `apm audit` to repair it.
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

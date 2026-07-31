@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
 from apm_cli.models.dependency.mcp import MCPDependency
@@ -891,21 +892,68 @@ class TestInstallProjectRootDetection:
         assert called_runtimes == {"copilot"}
         logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
 
+    @pytest.mark.parametrize(
+        "apm_config",
+        (
+            {"target": "claude", "targets": ["copilot"]},
+            {"targets": []},
+            {"targets": ["definitely-unknown"]},
+        ),
+        ids=("conflicting-fields", "empty-list", "unknown-target"),
+    )
     @patch("apm_cli.integration.mcp_integrator_install._discover_installed_runtimes")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     def test_invalid_manifest_does_not_fall_through_to_machine_discovery(
-        self, mock_install_rt, mock_discover, tmp_path
+        self,
+        mock_install_rt,
+        mock_discover,
+        tmp_path,
+        apm_config,
     ):
         """Malformed target declarations fail closed before machine discovery."""
         result = MCPIntegrator.install(
             mcp_deps=["test/server"],
             project_root=tmp_path,
-            apm_config={"target": "claude", "targets": ["copilot"]},
+            apm_config=apm_config,
         )
 
         assert result == 0
         mock_discover.assert_not_called()
         mock_install_rt.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "load_error",
+        (yaml.YAMLError("malformed"), OSError("permission denied")),
+        ids=("malformed-yaml", "read-error"),
+    )
+    @patch("apm_cli.integration.mcp_integrator_install._discover_installed_runtimes")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    def test_manifest_load_failure_is_explicit_before_discovery_or_writes(
+        self,
+        mock_install_rt,
+        mock_discover,
+        tmp_path,
+        load_error,
+    ):
+        """A present but unreadable manifest cannot become unrestricted discovery."""
+        (tmp_path / "apm.yml").write_text("targets: [copilot]\n", encoding="utf-8")
+
+        with (
+            patch(
+                "apm_cli.integration.mcp_integrator_install.load_yaml",
+                side_effect=load_error,
+            ),
+            pytest.raises(RuntimeError, match="Unable to load MCP targets"),
+        ):
+            MCPIntegrator.install(
+                mcp_deps=["test/server"],
+                project_root=tmp_path,
+                apm_config=None,
+            )
+
+        mock_discover.assert_not_called()
+        mock_install_rt.assert_not_called()
+        assert tuple(path.name for path in tmp_path.iterdir()) == ("apm.yml",)
 
 
 # ===========================================================================

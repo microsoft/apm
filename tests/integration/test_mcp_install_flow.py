@@ -834,24 +834,11 @@ class TestExcludeRuntime:
         with (
             patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
             patch(
-                "apm_cli.factory.ClientFactory",
-                side_effect=ImportError,
-            ),
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime",
+            ) as install_for_runtime,
             patch(
-                "apm_cli.integration.mcp_integrator_install.find_runtime_binary",
-                side_effect=lambda rt: "/usr/bin/" + rt if rt == "copilot" else None,
-            ),
-            patch(
-                "apm_cli.integration.mcp_integrator._is_vscode_available",
-                return_value=False,
-            ),
-            patch(
-                "apm_cli.integration.mcp_integrator.MCPIntegrator._detect_runtimes",
-                return_value=[],
-            ),
-            patch(
-                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
-                return_value=[],
+                "apm_cli.integration.mcp_integrator_install._discover_installed_runtimes",
+                return_value=["copilot"],
             ),
         ):
             result = run_mcp_install(
@@ -863,6 +850,39 @@ class TestExcludeRuntime:
             )
 
         assert result == 0
+        install_for_runtime.assert_not_called()
+        logger.warning.assert_called_once_with(
+            "All selected MCP runtimes excluded (--exclude copilot), skipping MCP configuration"
+        )
+
+    def test_write_failure_is_explicit_and_does_not_claim_ownership(
+        self,
+        tmp_path,
+    ) -> None:
+        """A failed adapter write emits an error and records no durable owner."""
+        dep = _make_self_defined_dep("write-failure")
+        logger = MagicMock()
+        managed_target_servers: dict[str, set[str]] = {}
+
+        with (
+            patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime",
+                return_value=False,
+            ) as install_for_runtime,
+        ):
+            result = run_mcp_install(
+                [dep],
+                runtime="copilot",
+                logger=logger,
+                project_root=tmp_path,
+                managed_target_servers=managed_target_servers,
+            )
+
+        assert result == 0
+        install_for_runtime.assert_called_once()
+        assert managed_target_servers == {}
+        logger.error.assert_called_once_with("write-failure -- failed for all runtimes")
 
 
 # ---------------------------------------------------------------------------

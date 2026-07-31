@@ -1,6 +1,6 @@
 ---
 title: "Install MCP servers"
-description: "Declare MCP servers in apm.yml and let apm install wire them into every detected harness."
+description: "Declare MCP servers in apm.yml and install them into explicitly selected, declared, or discovered targets."
 ---
 
 `apm install` is the same driver for two artifact kinds: APM packages
@@ -14,9 +14,9 @@ each runtime, and how tokens get injected.
 apm install --mcp io.github.github/github-mcp-server
 ```
 
-This adds one entry under `dependencies.mcp:` in `apm.yml` and writes
-runtime-specific MCP config files for the targets selected by the precedence
-rules below.
+This adds one entry under `dependencies.mcp:` in `apm.yml`. APM then attempts
+runtime-specific MCP config writes for targets that pass selection, scope, and
+adapter prerequisites.
 
 ## The `mcp:` section in apm.yml
 
@@ -89,8 +89,9 @@ for discovery -- see the [CLI reference](../../reference/cli/install/).
 
 ## What `apm install` writes to disk
 
-For every selected target, `apm install` writes a runtime-specific MCP
-config file. The schemas differ; the `apm.yml` source of truth does not.
+For every selected target that passes its scope and adapter prerequisites,
+`apm install` writes a runtime-specific MCP config file. The schemas differ;
+the `apm.yml` source of truth does not.
 
 Registry-declared environment variables honor the registry's
 `required` flag. Servers with optional auth install without token
@@ -121,15 +122,15 @@ MCP install resolves targets in this order:
 2. Canonical `targets:` / `target:` values declared in `apm.yml`.
 3. Machine discovery, only when the manifest does not restrict targets.
 
-`--exclude` narrows whichever set wins. Progress output is emitted after
-exclusion, so it names only runtimes that can receive a write.
+`--exclude` narrows whichever set wins. Progress output names that
+post-exclusion selection; project, scope, and adapter gates can still skip a
+write.
 
-This ordering is a portability boundary. A committed target list produces
-the same deployment-ledger runtime ownership and `mcp_target_servers` on
-machines with different installed harnesses. If `targets:` is omitted (or a
-legacy `all` declaration is folded to omission), machine discovery is
-intentional and the lockfile's MCP runtime ownership can differ between
-machines. Declare targets when teammates or CI must produce identical MCP
+**Portability boundary:** A committed target list makes lockfile MCP ownership
+deterministic across machines with different installed harnesses. If `targets:`
+is omitted (or a legacy `all` declaration is folded to omission), machine
+discovery is intentional and ownership can follow each machine's installed
+harnesses. Declare targets when teammates or CI must produce the same MCP
 ownership.
 
 When a runtime is outside the active target set, APM does NOT write

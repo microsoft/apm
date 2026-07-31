@@ -7,15 +7,37 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from yaml import YAMLError
+
+from apm_cli.core.apm_yml import (
+    ConflictingTargetsError,
+    EmptyTargetsListError,
+    UnknownTargetError,
+    parse_targets_field,
+)
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.target_catalog import accepted_target_values
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
+from apm_cli.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
+
+
+class _TargetSelectionSource(StrEnum):
+    """Source that supplied the MCP target set before compatibility gates."""
+
+    RUNTIME = "runtime"
+    TARGET = "target"
+    MANIFEST = "manifest"
+    DISCOVERY = "discovery"
+    FALLBACK = "fallback"
+    INVALID_MANIFEST = "invalid-manifest"
 
 
 def _install_registry_group(
@@ -355,12 +377,6 @@ def _declared_manifest_target_runtimes(
     """
     if not apm_config:
         return None, True
-    from apm_cli.core.apm_yml import (
-        ConflictingTargetsError,
-        EmptyTargetsListError,
-        UnknownTargetError,
-        parse_targets_field,
-    )
 
     try:
         parsed = parse_targets_field(apm_config)
@@ -389,11 +405,11 @@ def _resolve_target_runtimes(
     """
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-    selection_source = ""
+    selection_source: _TargetSelectionSource
     if runtime:
         # Single runtime mode - skip auto-discovery entirely.
         target_runtimes: list[str] = [runtime]
-        selection_source = "runtime"
+        selection_source = _TargetSelectionSource.RUNTIME
     elif explicit_target is not None:
         # A plural --target value is already parser-normalized. Use that exact
         # runtime set instead of broad discovery so selecting IntelliJ does not
@@ -401,7 +417,7 @@ def _resolve_target_runtimes(
         target_runtimes = (
             [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
         )
-        selection_source = "target"
+        selection_source = _TargetSelectionSource.TARGET
     else:
         # Manifest loading/parsing (and the user-facing warnings
         # parse_targets_field can emit, e.g. legacy `targets: [all]`) is
@@ -410,21 +426,24 @@ def _resolve_target_runtimes(
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
         if apm_config is None:
+            apm_yml = project_root_path / "apm.yml"
             try:
-                apm_yml = project_root_path / "apm.yml"
                 if apm_yml.exists():
-                    from apm_cli.utils.yaml_io import load_yaml
-
                     apm_config = load_yaml(apm_yml)
-            except Exception:
-                apm_config = None
+            except (OSError, UnicodeError, YAMLError) as exc:
+                raise RuntimeError(
+                    f"Unable to load MCP targets from {apm_yml}; fix the manifest before retrying"
+                ) from exc
 
         declared_targets, manifest_valid = _declared_manifest_target_runtimes(apm_config)
         if not manifest_valid:
             # Do not inspect machine-local signals for an invalid declaration.
             # The shared gate below re-parses and renders the canonical error.
             target_runtimes = []
-            selection_source = "invalid-manifest"
+            selection_source = _TargetSelectionSource.INVALID_MANIFEST
+            logger.verbose_detail(
+                "Manifest target declaration is invalid; machine discovery skipped"
+            )
         elif declared_targets is not None:
             # apm.yml declares `targets:` explicitly -- that is the deterministic,
             # committed source of truth for MCP ownership too. Using it instead of
@@ -434,12 +453,11 @@ def _resolve_target_runtimes(
             # `apm install` "stealing" MCP ownership toward whatever the current
             # machine happens to have (issue #2298).
             target_runtimes = declared_targets
-            selection_source = "manifest"
-            if verbose:
-                logger.verbose_detail(
-                    "Resolved MCP targets from apm.yml declaration: "
-                    f"{', '.join(target_runtimes)} (machine discovery skipped)"
-                )
+            selection_source = _TargetSelectionSource.MANIFEST
+            logger.verbose_detail(
+                "Resolved MCP targets from apm.yml declaration: "
+                f"{', '.join(target_runtimes)} (machine discovery skipped)"
+            )
         else:
             # Step 1: Get all installed runtimes on the system
             installed_runtimes = _discover_installed_runtimes(
@@ -494,37 +512,45 @@ def _resolve_target_runtimes(
             # Fall back to VS Code only if no runtimes are installed at all
             if not target_runtimes and not installed_runtimes:
                 target_runtimes = ["vscode"]
-                selection_source = "fallback"
+                selection_source = _TargetSelectionSource.FALLBACK
             else:
-                selection_source = "discovery"
+                selection_source = _TargetSelectionSource.DISCOVERY
 
     # Exclusion narrows every selected source, including explicit CLI choices.
-    # Apply it before progress output so the message names only actual writes.
+    # Apply it before progress output so the message names the narrowed set.
     if exclude:
         target_runtimes = [candidate for candidate in target_runtimes if candidate != exclude]
         # Invalid manifests continue to the shared gate for canonical rendering.
-        if not target_runtimes and selection_source != "invalid-manifest":
+        if not target_runtimes and selection_source is not _TargetSelectionSource.INVALID_MANIFEST:
             logger.warning(
                 f"All selected MCP runtimes excluded (--exclude {exclude}), "
                 "skipping MCP configuration"
             )
             return None
 
-    if selection_source == "runtime":
+    if selection_source is _TargetSelectionSource.RUNTIME:
         logger.progress(f"Targeting specific runtime: {', '.join(target_runtimes)}")
-    elif selection_source == "target":
+    elif selection_source is _TargetSelectionSource.TARGET:
         runtime_label = "runtime" if len(target_runtimes) == 1 else "runtimes"
         logger.progress(f"Targeting specific {runtime_label}: {', '.join(target_runtimes)}")
-    elif selection_source == "manifest":
+    elif selection_source is _TargetSelectionSource.MANIFEST:
         target_label = "target" if len(target_runtimes) == 1 else "targets"
         logger.progress(
             f"Targeting declared {target_label} from apm.yml: {', '.join(target_runtimes)}"
         )
-    elif selection_source == "fallback":
+    elif selection_source is _TargetSelectionSource.FALLBACK:
         logger.progress("No runtimes installed, using VS Code as fallback")
-    elif target_runtimes and not verbose and console is None:
+    elif (
+        selection_source is _TargetSelectionSource.DISCOVERY
+        and target_runtimes
+        and not verbose
+        and console is None
+    ):
         # Machine discovery is intentionally the unrestricted-manifest fallback.
-        logger.progress(f"Detected runtimes: {', '.join(target_runtimes)}")
+        logger.progress(
+            f"Detected runtimes: {', '.join(target_runtimes)} "
+            "(machine-local; declare targets for portable ownership)"
+        )
 
     # Codex MCP is project-scoped: only configure it when Codex is an
     # active project target (silent skip, same as Cursor/OpenCode/Gemini).
@@ -533,10 +559,8 @@ def _resolve_target_runtimes(
     # Preserve direct-call compatibility for unknown legacy runtime strings:
     # the adapter layer owns their warning/error behavior. Known runtime names
     # are equivalent to explicit --target and therefore outrank manifest/signals.
-    from apm_cli.core.target_catalog import accepted_target_values
-
-    runtime_is_known = runtime is None or runtime in accepted_target_values("install")
-    if runtime_is_known:
+    apply_project_gate = runtime is None or runtime in accepted_target_values("install")
+    if apply_project_gate:
         target_runtimes = MCPIntegrator._gate_project_scoped_runtimes(
             target_runtimes,
             user_scope=user_scope,

@@ -849,7 +849,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         "(legacy alias for --target, single value only; prefer --target)"
     ),
 )
-@click.option("--exclude", help="Exclude specific runtime from installation")
+@click.option("--exclude", help="Exclude one runtime from the resolved MCP target set")
 @click.option(
     "--only",
     type=click.Choice(["apm", "mcp"]),
@@ -901,9 +901,11 @@ def _handle_mcp_install(  # noqa: PLR0913
     "IntelliJ-specific integration is MCP-only; file primitives use the Copilot profile. "
     "'all' excludes agent-skills, antigravity, experimental targets, and intellij; combine "
     "explicit-only targets when needed. Experimental targets require their feature flags. "
-    "Resolution order: --target > apm.yml targets: > apm config target > auto-detect. "
-    "With nothing to detect, install exits 2 with a teaching message. For 'apm compile', "
-    "use '--all'; '--target all' is deprecated.",
+    "File-primitive resolution: --target > apm.yml targets: > apm config target > "
+    "auto-detect. MCP resolution: --runtime/--target > apm.yml targets: > machine "
+    "discovery only when the manifest is unrestricted. With nothing to detect, install "
+    "exits 2 with a teaching message. For 'apm compile', use '--all'; '--target all' "
+    "is deprecated.",
 )
 @click.option(
     "--allow-insecure",
@@ -957,9 +959,9 @@ def _handle_mcp_install(  # noqa: PLR0913
     help=(
         "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, "
         "--header, --mcp-version, or a stdio command after `--`. Resolves active "
-        "targets the same way `apm install` does (--target > apm.yml targets: > "
-        "apm config target > "
-        "auto-detect); writes only for active targets, skips others with [i]."
+        "targets as --runtime/--target > apm.yml targets: > machine discovery only "
+        "when the manifest is unrestricted; writes only for active targets and skips "
+        "others with [i]."
     ),
 )
 @click.option(
