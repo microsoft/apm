@@ -37,8 +37,9 @@ def test_uninstall_help_points_to_actionable_dependency_keys() -> None:
     result = CliRunner().invoke(uninstall, ["--help"])
 
     assert result.exit_code == 0
-    assert "keys from 'apm deps list'" in result.output
-    assert "pre-uninstall scripts still run" in result.output
+    normalized_output = " ".join(result.output.split())
+    assert "direct locked keys from 'apm deps list'" in normalized_output
+    assert "pre-uninstall scripts still run" in normalized_output
 
 
 def test_missing_identifier_exits_nonzero_without_scripts_or_writes(

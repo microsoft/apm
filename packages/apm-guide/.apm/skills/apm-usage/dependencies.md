@@ -207,10 +207,12 @@ package's directory, not the project root.
 ```
 
 After install, `apm deps list` presents a local dependency as
-`_local/<directory-name>`. That portable key is accepted verbatim by
+`_local/<directory-name>`. For a direct declaration with matching
+`apm.lock.yaml` metadata, that portable key is accepted verbatim by
 `apm uninstall` and `apm uninstall -g`; user-scope automation does not need to
-discover or print the absolute declared path. The mapping comes from
-`apm.yml` plus `apm.lock.yaml`.
+discover or print the absolute declared path. Without a lockfile, use the exact
+manifest path. Remove transitive local dependencies through their declaring
+parent.
 
 If two declarations end in the same directory name, their portable keys are
 ambiguous. Uninstall exits nonzero without running lifecycle scripts or writing

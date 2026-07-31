@@ -23,7 +23,7 @@ The command only deletes files tracked in the lockfile's `deployed_files` manife
 
 | Argument | Description |
 |---|---|
-| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed by `apm deps list`. Required. |
+| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. |
 
 ## Options
 

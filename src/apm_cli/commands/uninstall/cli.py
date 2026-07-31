@@ -39,7 +39,9 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
     return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]
 
 
-@click.command(help="Remove packages using manifest entries or keys from 'apm deps list'")
+@click.command(
+    help="Remove packages using manifest entries or direct locked keys from 'apm deps list'"
+)
 @click.argument("packages", nargs=-1, required=True)
 @click.option(
     "--dry-run",
