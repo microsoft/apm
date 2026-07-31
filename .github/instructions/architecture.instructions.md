@@ -50,6 +50,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
 | Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
+| Self-update release -> installer ref + VERSION | commands/self_update.py (_ResolvedSelfUpdateRelease) | `src/apm_cli/commands/self_update.py` |
 | Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) | `src/apm_cli/policy/discovery.py` |
 | Post-uninstall dependency reachability | deps/reachability.py (compute_forward_reachable_keys) | `src/apm_cli/deps/reachability.py` |
 | CI audit scratch materialization | install/audit_replay.py (prepare_ci_audit_replay) | `src/apm_cli/install/audit_replay.py` |

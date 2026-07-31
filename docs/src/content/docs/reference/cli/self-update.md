@@ -31,10 +31,10 @@ The command compares the installed version against the latest GitHub release and
 
 Self-update can read two non-secret installer preferences from `apm config`:
 
-- `self-update.channel`: `stable` (default) or `prerelease`. `prerelease` selects the newest non-draft prerelease and pins that version for the installer run.
+- `self-update.channel`: `stable` (default) selects the newest stable release; `prerelease` selects the newest non-draft prerelease.
 - `self-update.install-dir`: default target directory passed to the installer as `APM_INSTALL_DIR`.
 
-Environment variables win over config: `VERSION` pins an exact release, `APM_SELF_UPDATE_CHANNEL` overrides the channel, and `APM_INSTALL_DIR` overrides the install directory.
+`APM_SELF_UPDATE_CHANNEL` and `APM_INSTALL_DIR` override config. An explicit `VERSION` pins the release. Otherwise, either channel passes its selected release to the installer as one normalized `v<version>` value.
 
 Credentials, registry tokens, mirror URLs, commands, and installer arguments are **not** persisted in self-update config. Tokens still resolve through the existing auth path; enterprise mirror URLs remain environment variables.
 
@@ -44,19 +44,19 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 
 ## Enterprise bootstrap mirrors
 
-`apm self-update` uses the same mirror contract as the installer scripts. See the [installation bootstrap mirror section](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode) for the canonical setup; this command-specific table shows the same knobs alongside legacy update settings:
+`apm self-update` uses the same mirror contract as the installer scripts. See the [installation bootstrap mirror section](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode) for the canonical setup. When `APM_INSTALLER_BASE_URL` is set, it stays authoritative and APM appends only the platform script name. Otherwise, a resolved release uses its exact `v<version>` ref on GitHub or GHES; the `aka.ms` or current-ref fallback is used only when no release has been resolved.
 
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `APM_RELEASE_METADATA_URL` | _(unset)_ | Exact URL for mirrored release metadata, usually a static `latest.json` with at least `{"tag_name":"vX.Y.Z"}`. Overrides GitHub release metadata lookup. |
-| `APM_INSTALLER_BASE_URL` | _(unset)_ | Base URL containing `install.sh` and `install.ps1`. `apm self-update` downloads the platform script from this base. |
+| `APM_INSTALLER_BASE_URL` | _(unset)_ | Authoritative base URL containing `install.sh` and `install.ps1`. APM appends only the platform script name, not a GitHub release ref. |
 | `APM_RELEASE_BASE_URL` | _(unset)_ | Base URL containing release assets at `{base}/{tag}/{asset}`. Used when self-update runs the installer to fetch binary archives. |
 | `APM_PYPI_INDEX_URL` | _(unset)_ | PyPI-compatible index used by installer pip fallback. |
 | `APM_NO_DIRECT_FALLBACK` | _(unset)_ | Set to `1` to fail closed instead of using public GitHub, `aka.ms`, or PyPI fallback. |
 | `APM_SELF_UPDATE_CHANNEL` | `stable` | Invocation-scoped channel override: `stable` or `prerelease`. Overrides `apm config set self-update.channel ...`. |
 | `APM_INSTALL_DIR` | installer default | Invocation-scoped install target directory. Overrides `apm config set self-update.install-dir ...`. |
-| `GITHUB_URL` | `https://github.com` | Legacy GitHub/GHES base URL. Still supported when mirror env vars are not set. |
-| `APM_REPO` | `microsoft/apm` | Repository in `owner/repo` form for GitHub/GHES paths. |
+| `GITHUB_URL` | `https://github.com` | Legacy GitHub/GHES base URL. When the installer mirror is unset, a resolved release downloads the raw script from this host at its exact tag. |
+| `APM_REPO` | `microsoft/apm` | Repository in `owner/repo` form for GitHub/GHES metadata and raw installer paths. |
 | `VERSION` | _(unset)_ | Pin a release tag and skip release metadata lookup. |
 
 Example:

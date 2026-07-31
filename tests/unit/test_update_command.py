@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from urllib.parse import urlparse
 
 from click.testing import CliRunner
 
@@ -91,7 +92,9 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Successfully updated to version 0.7.0", result.output)
         mock_get.assert_called_once()
-        self.assertTrue(mock_get.call_args.args[0].endswith("apm-windows"))
+        installer_url = urlparse(mock_get.call_args.args[0])
+        self.assertEqual(installer_url.hostname, "github.com")
+        self.assertEqual(installer_url.path, "/microsoft/apm/raw/v0.7.0/install.ps1")
         mock_run.assert_called_once()
         run_command = mock_run.call_args.args[0]
         self.assertEqual(run_command[:3], ["powershell.exe", "-ExecutionPolicy", "Bypass"])
@@ -102,6 +105,7 @@ class TestUpdateCommand(unittest.TestCase):
         # passing env= unconditionally keeps one code path across platforms.
         self.assertIn("env", mock_run.call_args.kwargs)
         self.assertIsNotNone(mock_run.call_args.kwargs["env"])
+        self.assertEqual(mock_run.call_args.kwargs["env"]["VERSION"], "v0.7.0")
 
     @patch("requests.get")
     @patch("subprocess.run")
@@ -132,7 +136,9 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Successfully updated to version 0.7.0", result.output)
         mock_get.assert_called_once()
-        self.assertTrue(mock_get.call_args.args[0].endswith("apm-unix"))
+        installer_url = urlparse(mock_get.call_args.args[0])
+        self.assertEqual(installer_url.hostname, "github.com")
+        self.assertEqual(installer_url.path, "/microsoft/apm/raw/v0.7.0/install.sh")
         mock_run.assert_called_once()
         run_command = mock_run.call_args.args[0]
         self.assertEqual(run_command[0], "/usr/bin/bash")
@@ -143,6 +149,7 @@ class TestUpdateCommand(unittest.TestCase):
         # LD_LIBRARY_PATH pointing at the bundle's _internal directory.
         self.assertIn("env", mock_run.call_args.kwargs)
         self.assertIsNotNone(mock_run.call_args.kwargs["env"])
+        self.assertEqual(mock_run.call_args.kwargs["env"]["VERSION"], "v0.7.0")
 
 
 class TestUpdatePlatformHelpers(unittest.TestCase):
@@ -359,7 +366,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
     @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_network_error_exits_1(self, mock_latest, mock_chmod, mock_version, mock_get):
-        mock_get.side_effect = Exception("Network error")
+        mock_get.side_effect = OSError("Network error")
 
         with patch.object(update_module.sys, "platform", "linux"):
             result = self.runner.invoke(cli, ["self-update"])

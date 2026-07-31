@@ -594,6 +594,15 @@ class TestAirGappedEnvVars(unittest.TestCase):
         self.assertIsNone(result)
 
     @patch("requests.get")
+    @patch.dict("os.environ", {"VERSION": "vv1.2.3"}, clear=False)
+    def test_multiple_v_prefixes_are_rejected(self, mock_get):
+        """VERSION normalization must add or remove exactly one v prefix."""
+        result = get_latest_version_from_github()
+
+        mock_get.assert_not_called()
+        self.assertIsNone(result)
+
+    @patch("requests.get")
     @patch.dict("os.environ", {"APM_REPO": "corp/apm-fork"}, clear=False)
     def test_apm_repo_env_var_used_in_api_url(self, mock_get):
         """When APM_REPO is set, the API request targets that repository."""

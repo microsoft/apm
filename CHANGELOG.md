@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the authenticated remote even when the local cache is stale; normal installs
   retain lockfile and cache reuse. (by @sergio-sisternes-epam, closes #2342,
   #2364)
+- `apm self-update` now downloads GitHub and GHES installer scripts from the
+  exact selected release tag and passes that same normalized version to the
+  installer, while configured installer mirrors remain authoritative. (by
+  @fallintoplace, #2026)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

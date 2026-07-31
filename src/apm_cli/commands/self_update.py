@@ -12,6 +12,7 @@ in the current directory).
 import os
 import shutil
 import sys
+from dataclasses import dataclass
 
 import click
 
@@ -35,18 +36,44 @@ _ENV_INSTALL_DIR = "APM_INSTALL_DIR"
 _ENV_VERSION = "VERSION"
 
 
+@dataclass(frozen=True)
+class _ResolvedSelfUpdateRelease:
+    """One validated release selection shared by every installer input."""
+
+    version: str
+    tag: str
+
+
+def _resolve_self_update_release(version: str) -> _ResolvedSelfUpdateRelease:
+    """Normalize one release version and reject malformed installer refs."""
+    from ..utils.version_checker import parse_version
+
+    normalized_version = version[1:] if version.startswith("v") else version
+    if version != version.strip() or parse_version(normalized_version) is None:
+        raise ValueError(
+            "Invalid self-update release version; expected X.Y.Z or vX.Y.Z "
+            "with an optional aN, bN, or rcN suffix."
+        )
+    return _ResolvedSelfUpdateRelease(
+        version=normalized_version,
+        tag=f"v{normalized_version}",
+    )
+
+
 def _is_windows_platform() -> bool:
     """Return True when running on native Windows."""
     return sys.platform == "win32"
 
 
-def _get_update_installer_url() -> str:
+def _get_update_installer_url(
+    release: _ResolvedSelfUpdateRelease | None = None,
+) -> str:
     """Return the installer URL for the current platform, respecting mirror env vars.
 
     ``APM_INSTALLER_BASE_URL`` wins when configured, using ``install.sh`` on
-    Unix and ``install.ps1`` on Windows under that base URL. Otherwise existing
-    behaviour is preserved: public GitHub uses the aka.ms shortlinks, and a
-    custom ``GITHUB_URL`` uses the raw repository path.
+    Unix and ``install.ps1`` on Windows under that base URL. A resolved release
+    uses its exact tag on public GitHub or a custom ``GITHUB_URL``. Without a
+    resolved release, existing aka.ms and ``main`` fallbacks are preserved.
     """
     github_url = os.environ.get("GITHUB_URL", _DEFAULT_GITHUB_URL).rstrip("/")
     apm_repo = os.environ.get("APM_REPO", _DEFAULT_APM_REPO)
@@ -62,10 +89,11 @@ def _get_update_installer_url() -> str:
             "Set APM_INSTALLER_BASE_URL to a mirror containing install.sh/install.ps1."
         )
 
-    if github_url == _DEFAULT_GITHUB_URL:
+    if release is None and github_url == _DEFAULT_GITHUB_URL:
         return "https://aka.ms/apm-windows" if _is_windows_platform() else "https://aka.ms/apm-unix"
 
-    return f"{github_url}/{apm_repo}/raw/{_INSTALL_SCRIPT_REF}/{script_name}"
+    resolved_ref = release.tag if release is not None else _INSTALL_SCRIPT_REF
+    return f"{github_url}/{apm_repo}/raw/{resolved_ref}/{script_name}"
 
 
 def _get_update_installer_suffix() -> str:
@@ -73,26 +101,34 @@ def _get_update_installer_suffix() -> str:
     return ".ps1" if _is_windows_platform() else ".sh"
 
 
-def _get_manual_update_command() -> str:
+def _get_manual_update_command(
+    release: _ResolvedSelfUpdateRelease | None = None,
+) -> str:
     """Return the manual update action for the current platform."""
     if _is_windows_platform():
         if get_installer_base_url() is not None:
             installer_url = "$env:APM_INSTALLER_BASE_URL/install.ps1"
         else:
             try:
-                installer_url = _get_update_installer_url()
+                installer_url = _get_update_installer_url(release)
             except RuntimeError:
                 return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
-        return f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
+        command = f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
+        if release is not None:
+            return f"$env:VERSION='{release.tag}'; {command}"
+        return command
 
     if get_installer_base_url() is not None:
         installer_url = "$APM_INSTALLER_BASE_URL/install.sh"
     else:
         try:
-            installer_url = _get_update_installer_url()
+            installer_url = _get_update_installer_url(release)
         except RuntimeError:
             return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
-    return f'curl -sSL "{installer_url}" | sh'
+    command = f'curl -sSL "{installer_url}"'
+    if release is not None:
+        return f"{command} | env VERSION='{release.tag}' sh"
+    return f"{command} | sh"
 
 
 def _log_no_direct_metadata_error(logger: CommandLogger) -> None:
@@ -137,7 +173,9 @@ def get_latest_version_for_self_update(channel: str) -> str | None:
     return get_latest_version_from_github(include_prerelease=(channel == "prerelease"))
 
 
-def _build_self_update_installer_env(latest_version: str) -> dict[str, str]:
+def _build_self_update_installer_env(
+    release: _ResolvedSelfUpdateRelease,
+) -> dict[str, str]:
     """Build the installer subprocess environment from non-secret preferences.
 
     Invocation-scoped environment variables win over persisted config. This
@@ -155,8 +193,7 @@ def _build_self_update_installer_env(latest_version: str) -> dict[str, str]:
     channel = _get_effective_self_update_channel()
     if _ENV_SELF_UPDATE_CHANNEL not in env:
         env[_ENV_SELF_UPDATE_CHANNEL] = channel
-    if channel == "prerelease" and _ENV_VERSION not in env:
-        env[_ENV_VERSION] = f"v{latest_version}"
+    env[_ENV_VERSION] = release.tag
     return env
 
 
@@ -173,7 +210,7 @@ def _build_self_update_installer_env(latest_version: str) -> dict[str, str]:
     ),
 )
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
-def self_update(check):
+def self_update(check: bool) -> None:
     """Update APM CLI to the latest version (like npm update -g npm).
 
     This command fetches and installs the latest version of APM using the
@@ -232,6 +269,12 @@ def self_update(check):
         latest_version = get_latest_version_for_self_update(_channel)
 
         if not latest_version:
+            if _pinned:
+                logger.error(
+                    "Invalid VERSION value; expected X.Y.Z or vX.Y.Z "
+                    "with an optional aN, bN, or rcN suffix."
+                )
+                sys.exit(1)
             if _release_metadata_url:
                 logger.error("Unable to fetch latest version from APM_RELEASE_METADATA_URL mirror")
                 logger.info(
@@ -248,19 +291,25 @@ def self_update(check):
                 logger.info("Check your internet connection or try again later.")
             sys.exit(1)
 
+        try:
+            release = _resolve_self_update_release(latest_version)
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+
         from ..utils.version_checker import is_newer_version
 
-        if not is_newer_version(current_version, latest_version):
+        if not is_newer_version(current_version, release.version):
             logger.success(
                 f"You're already on the latest version: {current_version}",
                 symbol="check",
             )
             return
 
-        logger.progress(f"Latest version available: {latest_version}", symbol="sparkles")
+        logger.progress(f"Latest version available: {release.version}", symbol="sparkles")
 
         if check:
-            logger.warning(f"Update available: {current_version} -> {latest_version}")
+            logger.warning(f"Update available: {current_version} -> {release.version}")
             logger.progress("Run 'apm self-update' (without --check) to install")
             return
 
@@ -272,13 +321,14 @@ def self_update(check):
             import requests
 
             try:
-                install_script_url = _get_update_installer_url()
-            except RuntimeError as e:
-                logger.error(str(e))
+                install_script_url = _get_update_installer_url(release)
+            except RuntimeError as exc:
+                logger.error(str(exc))
                 logger.info(
                     "Unset APM_NO_DIRECT_FALLBACK only if public installer fallback is allowed."
                 )
                 sys.exit(1)
+            logger.progress(f"Installer release: {release.tag}")
             response = requests.get(install_script_url, timeout=10)
             response.raise_for_status()
 
@@ -306,22 +356,22 @@ def self_update(check):
             # bootloader's LD_LIBRARY_PATH / DYLD_* overrides, which would
             # otherwise redirect system linkers at this binary's bundled
             # _internal directory.  See issue #894.
-            result = subprocess.run(
-                _get_installer_run_command(temp_script),
-                check=False,
-                env=_build_self_update_installer_env(latest_version),
-            )
-
-            # Clean up temp file
-            try:  # noqa: SIM105
-                os.unlink(temp_script)
-            except Exception:
-                # Non-fatal: failed to delete temp install script
-                pass
+            try:
+                result = subprocess.run(
+                    _get_installer_run_command(temp_script),
+                    check=False,
+                    env=_build_self_update_installer_env(release),
+                )
+            finally:
+                try:  # noqa: SIM105
+                    os.unlink(temp_script)
+                except OSError:
+                    # Non-fatal: failed to delete temp install script
+                    pass
 
             if result.returncode == 0:
                 logger.success(
-                    f"Successfully updated to version {latest_version}!",
+                    f"Successfully updated to version {release.version}!",
                 )
                 logger.progress("Please restart your terminal or run 'apm --version' to verify")
             else:
@@ -331,15 +381,15 @@ def self_update(check):
         except ImportError:
             logger.error("'requests' library not available")
             logger.info("Update manually using:")
-            click.echo(f"  {_get_manual_update_command()}")
+            click.echo(f"  {_get_manual_update_command(release)}")
             sys.exit(1)
-        except Exception as e:
-            logger.error(f"Update failed: {e}")
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            logger.error(f"Update failed: {exc}")
             logger.info("Update manually using:")
-            click.echo(f"  {_get_manual_update_command()}")
+            click.echo(f"  {_get_manual_update_command(release)}")
             sys.exit(1)
 
-    except Exception as e:
+    except (OSError, ValueError) as exc:
         _logger = CommandLogger("self-update")
-        _logger.error(f"Error during update: {e}")
+        _logger.error(f"Error during update: {exc}")
         sys.exit(1)
