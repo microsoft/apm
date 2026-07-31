@@ -96,6 +96,47 @@ def _patch_mcp_install(
     return mock_integrator_cls, mock_manager
 
 
+def test_self_defined_partial_runtime_failure_is_explicit() -> None:
+    """A selected runtime failure must not be hidden by a sibling success."""
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import _install_self_defined_deps
+
+    dependency = _make_self_defined_dep("managed-server", transport="http")
+    managed: dict[str, set[str]] = {}
+    logger = MagicMock()
+
+    with (
+        patch.object(
+            MCPIntegrator,
+            "_check_self_defined_servers_needing_installation",
+            return_value=["managed-server"],
+        ),
+        patch.object(MCPIntegrator, "_build_self_defined_info", return_value={}),
+        patch.object(
+            MCPIntegrator,
+            "_install_for_runtime",
+            side_effect=lambda runtime, *_args, **_kwargs: runtime == "claude",
+        ) as install_runtime,
+        pytest.raises(RuntimeError, match=r"managed-server \(intellij\)"),
+    ):
+        _install_self_defined_deps(
+            self_defined_deps=[dependency],
+            target_runtimes=["claude", "intellij"],
+            stored_mcp_configs={},
+            servers_to_update=set(),
+            successful_updates=set(),
+            project_root=None,
+            user_scope=False,
+            verbose=False,
+            console=None,
+            logger=logger,
+            managed_target_servers=managed,
+        )
+
+    assert install_runtime.call_count == 2
+    assert managed == {"claude": {"managed-server"}}
+
+
 # ---------------------------------------------------------------------------
 # Empty deps
 # ---------------------------------------------------------------------------

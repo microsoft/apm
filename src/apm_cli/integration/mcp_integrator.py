@@ -666,42 +666,19 @@ class MCPIntegrator:
 
         # Clean JetBrains Copilot user-scope mcp.json
         if "intellij" in target_runtimes:
-            from apm_cli.adapters.client.intellij import _intellij_config_dir
-            from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+            from apm_cli.factory import ClientFactory
 
-            try:
-                intellij_mcp = _intellij_config_dir() / "mcp.json"
-            except PathTraversalError:
-                _log.debug(
-                    "Skipping JetBrains Copilot stale cleanup: config dir unavailable",
-                    exc_info=True,
+            intellij_client = ClientFactory.create_client(
+                "intellij",
+                project_root=project_root_path,
+                user_scope=True,
+            )
+            removed = intellij_client.remove_managed_servers(expanded_stale)
+            for name in sorted(removed):
+                _rich_success(
+                    f"Removed stale MCP server '{name}' from {intellij_client.get_config_path()}",
+                    symbol="check",
                 )
-                intellij_mcp = None
-            if intellij_mcp is not None and intellij_mcp.exists():
-                try:
-                    import json as _json
-
-                    ensure_path_within(intellij_mcp, Path.home())
-                    config = _json.loads(intellij_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("servers")
-                    if not isinstance(servers, dict):
-                        servers = {}
-                        config["servers"] = servers
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        write_text_lf(intellij_mcp, _json.dumps(config, indent=2))
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from {intellij_mcp}",
-                                symbol="check",
-                            )
-                except (OSError, ValueError):
-                    _log.debug(
-                        "Failed to clean stale MCP servers from JetBrains Copilot config",
-                        exc_info=True,
-                    )
 
         # Clean .gemini/settings.json (only if .gemini/ directory exists)
         if "gemini" in target_runtimes:
@@ -933,6 +910,7 @@ class MCPIntegrator:
         project_root=None,
         user_scope: bool = False,
         logger=None,
+        replace_existing: bool = False,
     ) -> bool:
         """Install MCP dependencies for a specific runtime.
 
@@ -955,6 +933,7 @@ class MCPIntegrator:
                         shared_runtime_vars=shared_runtime_vars,
                         project_root=project_root,
                         user_scope=user_scope,
+                        replace_existing=replace_existing,
                     )
                     if result["failed"]:
                         logger.error(f"  Failed to install {dep}")

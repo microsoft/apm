@@ -45,7 +45,13 @@ def adopt_legacy_mcp_target_servers(
                 project_root=project_root,
                 user_scope=user_scope,
             )
-            existing = MCPConflictDetector(client).get_existing_server_configs()
+            existing_configs = [MCPConflictDetector(client).get_existing_server_configs()]
+            legacy_reader = getattr(client, "get_legacy_current_config", None)
+            if callable(legacy_reader):
+                legacy_config = legacy_reader()
+                legacy_servers = legacy_config.get(client.mcp_servers_key)
+                if isinstance(legacy_servers, dict):
+                    existing_configs.append(legacy_servers)
         except Exception:
             logger.debug("Could not inspect legacy MCP target %s", runtime, exc_info=True)
             continue
@@ -63,6 +69,6 @@ def adopt_legacy_mcp_target_servers(
                     exc_info=True,
                 )
                 continue
-            if existing.get(name) == expected:
+            if any(existing.get(name) == expected for existing in existing_configs):
                 adopted.setdefault(runtime, set()).add(name)
     return adopted

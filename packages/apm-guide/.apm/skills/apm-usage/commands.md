@@ -69,6 +69,11 @@ unrestricted, and `--exclude` narrows the selected set. Declare `targets:`
 when committed lockfile ownership must stay deterministic across developer and
 CI machines. Omitting targets deliberately allows `mcp_target_servers` and
 deployment runtime rows to follow local harness availability.
+JetBrains Copilot MCP writes use
+`%LOCALAPPDATA%\github-copilot\intellij\mcp.json` on Windows and
+`$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` on macOS/Linux
+(`XDG_CONFIG_HOME` defaults to `~/.config`). Reinstalling an older APM-managed
+entry migrates only provenance-owned servers from the obsolete data path.
 
 `apm install` prints a one-line provenance summary before any mutation:
 

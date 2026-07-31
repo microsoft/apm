@@ -60,6 +60,18 @@ class TestSafeMCPInstaller(unittest.TestCase):
         # Verify adapter was not called
         self.mock_adapter.configure_mcp_server.assert_not_called()
 
+    def test_replace_existing_server_routes_through_adapter(self):
+        """Drift updates must overwrite instead of being conflict-skipped."""
+        self.mock_conflict_detector.check_server_exists.return_value = True
+        self.mock_adapter.configure_mcp_server.return_value = True
+
+        summary = self.installer.install_servers(["github"], replace_existing=True)
+
+        self.assertEqual(summary.installed, ["github"])
+        self.assertEqual(summary.skipped, [])
+        self.mock_conflict_detector.check_server_exists.assert_not_called()
+        self.mock_adapter.configure_mcp_server.assert_called_once_with("github")
+
     def test_handle_configuration_failure(self):
         """Test handling server configuration failure."""
         # Setup mocks

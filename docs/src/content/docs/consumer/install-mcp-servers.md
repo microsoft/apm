@@ -126,7 +126,7 @@ configuration is needed.
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
-| JetBrains Copilot | OS-specific `mcp.json` under the GitHub Copilot user config directory | global | JSON `servers` |
+| JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config`) | global | JSON `servers` |
 
 ## How `targets:` gates which configs get written
 

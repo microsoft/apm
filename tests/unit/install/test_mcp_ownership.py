@@ -50,3 +50,36 @@ def test_legacy_adoption_requires_exact_native_baseline(
         )
 
     assert adopted == expected
+
+
+def test_legacy_adoption_inspects_intellij_obsolete_config(tmp_path) -> None:
+    """Exact legacy IntelliJ entries may be adopted for path migration."""
+    baseline = {"command": "echo", "args": ["managed"]}
+    client = SimpleNamespace(
+        target_name="intellij",
+        mcp_servers_key="servers",
+        get_current_config=lambda: {"servers": {}},
+        get_legacy_current_config=lambda: {"servers": {"managed": baseline}},
+        render_server_config=lambda _info: baseline,
+    )
+    stored = {
+        "managed": {
+            "name": "managed",
+            "registry": False,
+            "transport": "stdio",
+            "command": "echo",
+            "args": ["managed"],
+        }
+    }
+    with (
+        patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["intellij"]),
+        patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
+    ):
+        adopted = adopt_legacy_mcp_target_servers(
+            server_names={"managed"},
+            stored_configs=stored,
+            project_root=tmp_path,
+            user_scope=False,
+        )
+
+    assert adopted == {"intellij": {"managed"}}

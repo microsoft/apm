@@ -14,6 +14,57 @@ from types import ModuleType
 import pytest
 
 
+def test_intellij_mcp_config_path_has_single_owner() -> None:
+    """JetBrains Copilot path selection must stay in its client adapter."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/adapters/client/intellij.py").read_text(encoding="utf-8")
+    integrator = (root / "src/apm_cli/integration/mcp_integrator.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("def _intellij_config_dir(") == 1
+    assert owner.count("def _legacy_intellij_config_dir(") == 1
+    assert '_xdg_root("XDG_CONFIG_HOME"' in owner
+    assert "_intellij_config_dir" not in integrator
+    assert "JetBrains Copilot MCP paths must come from the IntelliJ adapter" in guard
+
+
+def test_intellij_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """AC28 must reject a second authored JetBrains config path."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/integration/mcp_integrator.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + '\n_PARALLEL_INTELLIJ_PATH = "github-copilot/intellij/mcp.json"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "JetBrains Copilot MCP paths must come from the IntelliJ adapter" in result.stdout
+
+
 def test_self_update_release_selection_has_single_owner() -> None:
     """Installer URL and VERSION must consume one validated release object."""
     root = Path(__file__).parents[2]

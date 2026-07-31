@@ -28,6 +28,11 @@ from apm_cli.utils.yaml_io import load_yaml
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
 
+# IntelliJ owns a fail-closed atomic user-config contract. Other adapters retain
+# their existing best-effort behavior when a composed target set includes an
+# unavailable optional runtime.
+_STRICT_CONFIG_FAILURE_RUNTIMES = frozenset({"intellij"})
+
 
 class _TargetSelectionSource(StrEnum):
     """Source that supplied the MCP target set before compatibility gates."""
@@ -67,6 +72,7 @@ def _install_registry_group(
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
     configured_count = 0
+    failed_installations: list[str] = []
 
     # Early validation: check all servers exist in registry (fail-fast).
     # F4 (#1116): emit a single batch heartbeat so users see the
@@ -169,7 +175,8 @@ def _install_registry_group(
                         f"{dep}: {action_text.lower()} for {', '.join(target_runtimes)}..."
                     )
 
-                any_ok = False
+                successful_runtimes: list[str] = []
+                failed_runtimes: list[str] = []
                 for rt in target_runtimes:
                     if verbose:
                         logger.verbose_detail(f"Configuring {rt}...")
@@ -182,29 +189,40 @@ def _install_registry_group(
                         project_root=project_root,
                         user_scope=user_scope,
                         logger=logger,
+                        replace_existing=is_update,
                     ):
-                        any_ok = True
+                        successful_runtimes.append(rt)
                         _record_managed_server(managed_target_servers, rt, dep)
+                    else:
+                        failed_runtimes.append(rt)
 
-                if any_ok:
+                if successful_runtimes:
                     if console:
                         label = "updated" if is_update else "configured"
                         console.print(
                             f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep} -> "
-                            f"{', '.join([rt.title() for rt in target_runtimes])}"
+                            f"{', '.join([rt.title() for rt in successful_runtimes])}"
                             f" [dim]({label})[/dim]"
                         )
                     configured_count += 1
                     if is_update:
                         successful_updates.add(dep)
-                elif console:
-                    console.print(
-                        f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep}  "
-                        "-- failed for all runtimes"
-                    )
-                else:
-                    logger.error(f"{dep} -- failed for all runtimes")
+                if failed_runtimes:
+                    strict_failures = sorted(set(failed_runtimes) & _STRICT_CONFIG_FAILURE_RUNTIMES)
+                    if strict_failures:
+                        failed_installations.append(f"{dep} ({', '.join(strict_failures)})")
+                    if console:
+                        console.print(
+                            f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep}  "
+                            f"-- failed for {', '.join(sorted(failed_runtimes))}"
+                        )
+                    else:
+                        logger.error(f"{dep} -- failed for {', '.join(sorted(failed_runtimes))}")
 
+    if failed_installations:
+        raise RuntimeError(
+            "MCP configuration failed for selected runtime(s): " + ", ".join(failed_installations)
+        )
     return configured_count
 
 
@@ -216,6 +234,28 @@ def _record_managed_server(
     """Record a server only after APM successfully writes its target config."""
     if managed_target_servers is not None:
         managed_target_servers.setdefault(runtime, set()).add(server_name)
+
+
+def _migrate_intellij_managed_config(
+    target_runtimes: list[str],
+    managed_target_servers: dict[str, set[str]] | None,
+    *,
+    project_root,
+    user_scope: bool,
+) -> None:
+    """Route provenance-owned IntelliJ path migration through its adapter."""
+    if "intellij" not in target_runtimes or managed_target_servers is None:
+        return
+    from apm_cli.factory import ClientFactory
+
+    client = ClientFactory.create_client(
+        "intellij",
+        project_root=project_root,
+        user_scope=user_scope,
+    )
+    client.migrate_legacy_managed_servers(
+        builtins.set(managed_target_servers.get("intellij", set()))
+    )
 
 
 def _hermes_runtime_opted_in() -> bool:
@@ -628,6 +668,7 @@ def _install_self_defined_deps(
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
     configured_count = 0
+    failed_installations: list[str] = []
     self_defined_names = [dep.name for dep in self_defined_deps]
     self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
         self_defined_names,
@@ -694,7 +735,8 @@ def _install_self_defined_deps(
                 f"{dep.name}: {action_text.lower()} for {', '.join(target_runtimes)}..."
             )
 
-        any_ok = False
+        successful_runtimes: list[str] = []
+        failed_runtimes: list[str] = []
         for rt in target_runtimes:
             if verbose:
                 logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
@@ -706,28 +748,40 @@ def _install_self_defined_deps(
                 project_root=project_root,
                 user_scope=user_scope,
                 logger=logger,
+                replace_existing=is_update,
             ):
-                any_ok = True
+                successful_runtimes.append(rt)
                 _record_managed_server(managed_target_servers, rt, dep.name)
+            else:
+                failed_runtimes.append(rt)
 
-        if any_ok:
+        if successful_runtimes:
             if console:
                 label = "updated" if is_update else "configured"
                 console.print(
                     f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
-                    f"{', '.join([rt.title() for rt in target_runtimes])}"
+                    f"{', '.join([rt.title() for rt in successful_runtimes])}"
                     f" [dim]({label})[/dim]"
                 )
             configured_count += 1
             if is_update:
                 successful_updates.add(dep.name)
-        elif console:
-            console.print(
-                f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep.name}  -- failed for all runtimes"
-            )
-        else:
-            logger.error(f"{dep.name} -- failed for all runtimes")
+        if failed_runtimes:
+            strict_failures = sorted(set(failed_runtimes) & _STRICT_CONFIG_FAILURE_RUNTIMES)
+            if strict_failures:
+                failed_installations.append(f"{dep.name} ({', '.join(strict_failures)})")
+            if console:
+                console.print(
+                    f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep.name}  "
+                    f"-- failed for {', '.join(sorted(failed_runtimes))}"
+                )
+            else:
+                logger.error(f"{dep.name} -- failed for {', '.join(sorted(failed_runtimes))}")
 
+    if failed_installations:
+        raise RuntimeError(
+            "MCP configuration failed for selected runtime(s): " + ", ".join(failed_installations)
+        )
     return configured_count
 
 
@@ -867,6 +921,13 @@ def run_mcp_install(
     )
     if target_runtimes is None:
         return 0
+
+    _migrate_intellij_managed_config(
+        target_runtimes,
+        managed_target_servers,
+        project_root=project_root,
+        user_scope=user_scope,
+    )
 
     if managed_target_servers is not None:
         active_targets = set(target_runtimes)

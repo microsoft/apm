@@ -173,7 +173,7 @@ class TestRemoveStaleIntelliJ:
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         home = tmp_path / "home"
-        config_dir = home / ".local" / "share" / "github-copilot" / "intellij"
+        config_dir = home / ".config" / "github-copilot" / "intellij"
         config_dir.mkdir(parents=True)
         mcp_json = config_dir / "mcp.json"
         mcp_json.write_text(
@@ -191,8 +191,12 @@ class TestRemoveStaleIntelliJ:
         logger.verbose = False
         with (
             patch(
-                "apm_cli.adapters.client.intellij._intellij_config_dir",
-                return_value=config_dir,
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_config_path",
+                return_value=str(mcp_json),
+            ),
+            patch(
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_legacy_config_path",
+                return_value=None,
             ),
             patch("pathlib.Path.home", return_value=home),
         ):
@@ -207,20 +211,22 @@ class TestRemoveStaleIntelliJ:
         assert "stale-server" not in data["servers"]
         assert "keep-server" in data["servers"]
 
-    def test_remove_stale_intellij_skips_when_localappdata_unset(self, tmp_path):
-        """A misconfigured env (PathTraversalError) must not crash cleanup."""
+    def test_remove_stale_intellij_fails_when_config_path_is_unavailable(self, tmp_path):
+        """A misconfigured path must fail instead of claiming cleanup success."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
         from apm_cli.utils.path_security import PathTraversalError
 
         logger = MagicMock()
         logger.verbose = False
-        with patch(
-            "apm_cli.adapters.client.intellij._intellij_config_dir",
-            side_effect=PathTraversalError("LOCALAPPDATA unset"),
+        with (
+            patch(
+                "apm_cli.adapters.client.intellij._intellij_config_dir",
+                side_effect=PathTraversalError("LOCALAPPDATA unset"),
+            ),
+            pytest.raises(PathTraversalError, match="LOCALAPPDATA"),
         ):
-            result = MCPIntegrator.remove_stale(
+            MCPIntegrator.remove_stale(
                 stale_names={"stale-server"},
                 runtime="intellij",
                 logger=logger,
             )
-        assert result is None

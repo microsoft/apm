@@ -256,7 +256,8 @@ GitHub Copilot for JetBrains IDEs.
   file-primitive target.
 - **Deploy directory.** User-scope `mcp.json`; see the
   [JetBrains integration guide](../../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
-  for OS-specific paths.
+  for OS-specific paths. macOS and Linux use `XDG_CONFIG_HOME` (default
+  `~/.config`), while Windows uses `LOCALAPPDATA`.
 - **Supported primitives.** The IntelliJ-specific adapter supports MCP.
   Instructions, prompts, agents, and hooks deploy through the Copilot profile
   under `.github/`; skills deploy under `.agents/skills/`.

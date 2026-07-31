@@ -116,8 +116,8 @@ Dependency packages contribute only `dependencies.mcp`; their
 - OS-specific `github-copilot/intellij/mcp.json` (JetBrains Copilot -- uses
   `"servers"` key, user-scope global path):
   - `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows)
-  - `~/Library/Application Support/github-copilot/intellij/mcp.json` (macOS)
-  - `~/.local/share/github-copilot/intellij/mcp.json` (Linux, honouring `XDG_DATA_HOME`)
+  - `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS and Linux;
+    defaults to `~/.config/github-copilot/intellij/mcp.json`)
 
 For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../../consumer/install-mcp-servers/) and [`apm mcp`](../../reference/cli/mcp/).
 
@@ -162,6 +162,9 @@ Notes and limits:
   `${env:VAR}` instead of writing matching host secrets into the config.
 - **Policy evaluation.** APM maps `intellij` to `copilot` for organization
   allow-lists, so a policy that allows `copilot` also covers IntelliJ installs.
+- **Older APM path migration.** Reinstalling projects created by an older APM
+  release moves only lockfile-owned server entries from the obsolete data
+  location. User-authored entries in either file are preserved.
 
 ## Per-tool reference pages
 

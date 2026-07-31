@@ -136,6 +136,7 @@ class TestIntelliJCliE2E:
         assert "Unknown target" not in (result.output or "")
 
     @pytest.mark.requires_apm_binary
+    @pytest.mark.windows_compat
     @pytest.mark.parametrize(
         ("target", "expect_claude"),
         [
@@ -158,13 +159,15 @@ class TestIntelliJCliE2E:
         (project_dir / "apm.yml").write_text(_MINIMAL_APM_YML, encoding="ascii")
         fake_home = tmp_path / "home"
         fake_home.mkdir()
-        xdg_data = fake_home / "xdg"
+        xdg_config = fake_home / "xdg-config"
+        xdg_data = fake_home / "xdg-data"
         local_app_data = fake_home / "local-app-data"
 
         env = os.environ.copy()
         env.update(
             {
                 "HOME": str(fake_home),
+                "XDG_CONFIG_HOME": str(xdg_config),
                 "XDG_DATA_HOME": str(xdg_data),
                 "LOCALAPPDATA": str(local_app_data),
                 "GIT_TERMINAL_PROMPT": "0",
@@ -198,17 +201,8 @@ class TestIntelliJCliE2E:
         )
         if sys.platform == "win32":
             config_path = local_app_data / "github-copilot" / "intellij" / "mcp.json"
-        elif sys.platform == "darwin":
-            config_path = (
-                fake_home
-                / "Library"
-                / "Application Support"
-                / "github-copilot"
-                / "intellij"
-                / "mcp.json"
-            )
         else:
-            config_path = xdg_data / "github-copilot" / "intellij" / "mcp.json"
+            config_path = xdg_config / "github-copilot" / "intellij" / "mcp.json"
 
         assert config_path.exists(), (
             f"Expected IntelliJ MCP config at {config_path}.\n"
@@ -216,6 +210,16 @@ class TestIntelliJCliE2E:
         )
         config = json.loads(config_path.read_text(encoding="utf-8"))
         assert config["servers"]["test-http-server"]["url"] == "https://example.com/mcp"
+        assert not (xdg_data / "github-copilot" / "intellij" / "mcp.json").exists()
+        if sys.platform == "darwin":
+            assert not (
+                fake_home
+                / "Library"
+                / "Application Support"
+                / "github-copilot"
+                / "intellij"
+                / "mcp.json"
+            ).exists()
 
         claude_config = project_dir / ".mcp.json"
         assert claude_config.exists() is expect_claude

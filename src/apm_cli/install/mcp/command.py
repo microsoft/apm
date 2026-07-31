@@ -102,7 +102,6 @@ def run_mcp_install(  # noqa: PLR0913
 
     if status == "skipped":
         logger.progress(f"MCP server '{mcp_name}' unchanged")
-        return
 
     # Build MCPDependency for install.  ``entry`` may be a bare string.
     if isinstance(entry, str):
@@ -132,6 +131,37 @@ def run_mcp_install(  # noqa: PLR0913
                 _existing_lock = LockFile.read(_mcp_lock_path)
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
+                old_provenance = (
+                    dict(_existing_lock.mcp_config_provenance) if _existing_lock else {}
+                )
+                old_target_servers = (
+                    {
+                        target_name: set(server_names)
+                        for target_name, server_names in _existing_lock.mcp_target_servers.items()
+                    }
+                    if _existing_lock
+                    else {}
+                )
+                target_servers_present = (
+                    _existing_lock._mcp_target_servers_present if _existing_lock else True
+                )
+                from ...core.scope import InstallScope
+
+                user_scope = scope is InstallScope.USER
+                if _existing_lock and not target_servers_present and old_servers and old_configs:
+                    from .ownership import adopt_legacy_mcp_target_servers
+
+                    old_target_servers = adopt_legacy_mcp_target_servers(
+                        server_names=old_servers,
+                        stored_configs=old_configs,
+                        project_root=apm_dir,
+                        user_scope=user_scope,
+                    )
+                requested_target_servers = {
+                    target_name: server_names & {mcp_name}
+                    for target_name, server_names in old_target_servers.items()
+                    if server_names & {mcp_name}
+                }
                 # A scalar target selects the runtime directly; explicit_target
                 # also preserves the flag for downstream active-target gating.
                 MCPIntegrator.install(
@@ -142,16 +172,31 @@ def run_mcp_install(  # noqa: PLR0913
                     stored_mcp_configs=old_configs,
                     explicit_target=target,
                     scope=scope,
+                    project_root=apm_dir,
+                    user_scope=user_scope,
+                    managed_target_servers=requested_target_servers,
                 )
                 new_names = MCPIntegrator.get_server_names([dep])
                 new_configs = MCPIntegrator.get_server_configs([dep])
                 merged_names = old_servers | new_names
                 merged_configs = dict(old_configs)
                 merged_configs.update(new_configs)
+                merged_provenance = dict(old_provenance)
+                merged_provenance.pop(mcp_name, None)
+                merged_target_servers = {
+                    target_name: set(server_names)
+                    for target_name, server_names in old_target_servers.items()
+                }
+                for server_names in merged_target_servers.values():
+                    server_names.discard(mcp_name)
+                for target_name, server_names in requested_target_servers.items():
+                    merged_target_servers.setdefault(target_name, set()).update(server_names)
                 MCPIntegrator.update_lockfile(
                     merged_names,
                     _mcp_lock_path,
                     mcp_configs=merged_configs,
+                    mcp_target_servers=merged_target_servers,
+                    mcp_config_provenance=merged_provenance,
                     logger=logger,
                 )
             except Exception as exc:
@@ -168,8 +213,9 @@ def run_mcp_install(  # noqa: PLR0913
                 )
                 raise click.ClickException(f"MCP integration failed for '{mcp_name}'")  # noqa: B904
 
-    verb = "Replaced" if status == "replaced" else "Added"
-    logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")
+    if status != "skipped":
+        verb = "Replaced" if status == "replaced" else "Added"
+        logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")
     if isinstance(entry, dict):
         chosen_transport = entry.get("transport") or "registry"
     else:
