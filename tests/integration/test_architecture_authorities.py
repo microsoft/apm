@@ -241,12 +241,14 @@ def test_effective_install_target_has_single_owner_and_shared_consumers() -> Non
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/core/target_detection.py").read_text()
     install = (root / "src/apm_cli/commands/install.py").read_text()
+    service_integration = (root / "src/apm_cli/install/service_integration.py").read_text()
     update = (root / "src/apm_cli/commands/update.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert owner.count("def resolve_effective_target_decision(") == 1
     assert "ctx.target_decision = install_result.target_decision" in install
-    assert install.count("target_decision=ctx.target_decision") >= 2
+    assert install.count("target_decision=ctx.target_decision") == 1
+    assert service_integration.count("target_decision=target_decision") >= 2
     assert 'target_decision = getattr(result, "target_decision", None)' in update
     assert install.count("explicit_target=ctx.target or ctx.runtime,") == 1
     assert "explicit_target=ctx.target," not in install

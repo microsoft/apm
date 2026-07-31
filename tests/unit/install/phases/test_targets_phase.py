@@ -71,6 +71,7 @@ def _make_ctx(
     ctx.project_root.mkdir(parents=True, exist_ok=True)
     ctx.scope = scope
     ctx.target_override = target_override
+    ctx.target_decision = None
     ctx.apm_package = MagicMock()
     ctx.apm_package.target = None
     ctx.logger = MagicMock()

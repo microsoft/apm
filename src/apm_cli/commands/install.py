@@ -766,18 +766,13 @@ def _handle_mcp_install(  # noqa: PLR0913
     mcp_scope = InstallScope.PROJECT
     mcp_manifest_path = get_manifest_path(mcp_scope)
     mcp_apm_dir = get_apm_dir(mcp_scope)
-    from ..core.errors import TargetResolutionError
     from ..core.target_detection import resolve_manifest_target_decision
 
-    try:
-        target_decision = resolve_manifest_target_decision(
-            Path.cwd(),
-            manifest_path=mcp_manifest_path,
-            explicit_target=target or runtime,
-        )
-    except TargetResolutionError as exc:
-        logger.error(str(exc), symbol="")
-        raise InstallFailureAlreadyRendered("MCP integration target could not be resolved") from exc
+    target_decision = resolve_manifest_target_decision(
+        Path.cwd(),
+        manifest_path=mcp_manifest_path,
+        explicit_target=target or runtime,
+    )
 
     # -- W2-mcp-preflight: policy enforcement before MCP install --
     # Build a lightweight MCPDependency for policy evaluation.
@@ -923,8 +918,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     "IntelliJ-specific integration is MCP-only; file primitives use the Copilot profile. "
     "'all' excludes agent-skills, antigravity, experimental targets, and intellij; combine "
     "explicit-only targets when needed. Experimental targets require their feature flags. "
-    "Target resolution: --runtime/--target > apm.yml targets: > saved config > "
-    "auto-detect (only when apm.yml declares no targets). With nothing to detect, install "
+    "Target resolution: --runtime/--target > apm.yml targets: > apm config set target ... > "
+    "auto-detect (only when no higher-priority selection exists). With nothing to detect, install "
     "exits 2 with a teaching message. For 'apm compile', use '--all'; '--target all' "
     "is deprecated.",
 )
@@ -980,8 +975,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     help=(
         "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, "
         "--header, --mcp-version, or a stdio command after `--`. Resolves active "
-        "targets as --runtime/--target > apm.yml targets: > saved config > auto-detect "
-        "(only when apm.yml declares no targets); writes only for active targets."
+        "targets as --runtime/--target > apm.yml targets: > apm config set target ... > auto-detect "
+        "(only when no higher-priority selection exists); writes only for active targets."
     ),
 )
 @click.option(
@@ -1896,6 +1891,8 @@ def _install_apm_packages(ctx, outcome):
             raise InstallFailureAlreadyRendered(str(e)) from e
         except InstallFailureAlreadyRendered:
             raise
+        except click.UsageError:
+            raise
         except Exception as e:
             # #832: surface PolicyViolationError verbatim (no double-nesting).
             msg = (
@@ -1915,7 +1912,6 @@ def _install_apm_packages(ctx, outcome):
 
         clear_apm_yml_cache()
 
-    from apm_cli.core.errors import TargetResolutionError
     from apm_cli.install.service_integration import run_service_integrations
     from apm_cli.policy.install_preflight import PolicyBlockError
 
@@ -1935,11 +1931,6 @@ def _install_apm_packages(ctx, outcome):
             explicit_target=ctx.target or ctx.runtime,
             target_decision=ctx.target_decision,
         )
-    except TargetResolutionError as exc:
-        logger.error(str(exc), symbol="")
-        raise InstallFailureAlreadyRendered(
-            "MCP/LSP integration target could not be resolved"
-        ) from exc
     except PolicyBlockError:
         logger.error(
             "MCP server(s) blocked by org policy. "

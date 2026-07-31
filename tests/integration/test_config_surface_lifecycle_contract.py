@@ -461,7 +461,7 @@ def test_conflicting_manifest_targets_fail_before_installed_binary_writes(
         env=isolated.subprocess_env(),
     )
 
-    assert result.returncode != 0
+    assert result.returncode == 2
     assert "Cannot use both 'target:' and 'targets:'" in f"{result.stdout}\n{result.stderr}"
     after = _capture_portable_mcp_state(project.root, isolated)
     _assert_exact_lifecycle_state(before, after)
@@ -1312,7 +1312,7 @@ def test_direct_mcp_requires_resolved_target_before_manifest_write(
         env=isolated.subprocess_env(),
     )
 
-    assert result.returncode != 0
+    assert result.returncode == 2
     output = result.stdout + result.stderr
     expected = "Multiple harnesses detected" if ambiguous else "No harness detected"
     assert expected in output
@@ -1348,7 +1348,7 @@ def test_malformed_saved_target_falls_back_to_strict_detection_without_writes(
         env=isolated.subprocess_env(),
     )
 
-    assert result.returncode != 0
+    assert result.returncode == 2
     assert "No harness detected" in result.stdout + result.stderr
     assert manifest.read_bytes() == original
 
@@ -1746,7 +1746,7 @@ def test_unresolved_package_services_fail_before_package_deployment(
         env=fixture.isolated.subprocess_env(),
     )
 
-    assert result.returncode != 0
+    assert result.returncode == 2
     assert "No harness detected" in result.stdout + result.stderr
     assert (fixture.project_root / "apm.yml").read_bytes() == manifest_bytes
     modules = fixture.project_root / "apm_modules"

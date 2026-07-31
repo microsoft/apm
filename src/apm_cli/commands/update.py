@@ -79,6 +79,7 @@ from ..install.errors import (
     DirectDependencyError,
     FrozenInstallError,
     PolicyViolationError,
+    RequiredIntegrationError,
 )
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
@@ -286,7 +287,7 @@ def _run_mcp_lsp_integration(
             scope=scope,
         )
     except PolicyBlockError:
-        _rich_error(
+        logger.error(
             "MCP server(s) blocked by org policy. "
             "APM packages remain installed; MCP configs were NOT written."
         )
@@ -335,7 +336,7 @@ def _handle_service_only_update(
         or (existing_lock and (existing_lock.mcp_servers or existing_lock.lsp_servers))
     )
     if not has_services:
-        logger.success("No APM dependencies declared in apm.yml -- nothing to update.")
+        logger.info("No APM dependencies declared in apm.yml -- nothing to update.")
         return True
     if dry_run:
         logger.dry_run_notice("would reconcile MCP/LSP configuration; no files written")
@@ -348,16 +349,21 @@ def _handle_service_only_update(
         explicit_target=target,
         user_scope=scope is InstallScope.USER,
     )
-    _run_mcp_lsp_integration(
-        scope=scope,
-        project_root=deploy_root,
-        existing_lock=existing_lock,
-        lock_path=lock_path,
-        target_decision=target_decision,
-        diagnostics=None,
-        logger=logger,
-        verbose=verbose,
-    )
+    try:
+        _run_mcp_lsp_integration(
+            scope=scope,
+            project_root=deploy_root,
+            existing_lock=existing_lock,
+            lock_path=lock_path,
+            target_decision=target_decision,
+            diagnostics=None,
+            logger=logger,
+            verbose=verbose,
+        )
+    except RequiredIntegrationError as exc:
+        logger.error(str(exc))
+        logger.render_summary()
+        sys.exit(1)
     logger.success("MCP/LSP configuration reconciled. No APM dependencies to update.")
     return True
 
@@ -426,10 +432,10 @@ def _handle_service_only_update(
     type=TargetParamType(),
     default=None,
     help=(
-        f"Agent target(s) to update for. {target_help_fragment('update')} "
+        f"Agent target(s) to update for. {target_help_fragment('update')} "  # noqa: S608
         "Comma-separated for multiple: --target claude,cursor. "
         "Highest-priority entry in the resolution chain "
-        "(--target > apm.yml targets: > apm config target > auto-detect)."
+        "(--target > apm.yml targets: > apm config set target ... > auto-detect)."
     ),
 )
 @click.pass_context
@@ -817,10 +823,15 @@ def _run_dep_update(
                 logger=logger,
                 verbose=verbose,
             )
+        except RequiredIntegrationError as e:
+            logger.error(str(e))
+            logger.render_summary()
+            sys.exit(1)
         except Exception as e:
-            _rich_error(f"Error reconciling MCP/LSP servers: {e}")
+            logger.error(f"Error reconciling MCP/LSP servers: {e}")
+            logger.render_summary()
             if not verbose:
-                _rich_info("Run with --verbose for detailed diagnostics.")
+                logger.info("Run with --verbose for detailed diagnostics.")
             sys.exit(1)
 
     if plan_state.proceeded:

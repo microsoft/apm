@@ -51,6 +51,9 @@ effective_target_definition_count=$(grep -Ec \
 effective_target_raw_count=$(grep -Ec \
     'explicit_target=ctx\.target( or ctx\.runtime)?([,)]|$)' \
     src/apm_cli/commands/install.py || true)
+effective_target_service_count=$(grep -Fc \
+    'target_decision=target_decision' \
+    src/apm_cli/install/service_integration.py || true)
 effective_target_context_hits=$(grep -En \
     'target_context=\([^)]*ctx\.target' src/apm_cli/commands/install.py 2>/dev/null || true)
 if [ "$effective_target_definition_count" -ne 1 ] \
@@ -60,6 +63,7 @@ if [ "$effective_target_definition_count" -ne 1 ] \
         src/apm_cli/commands/install.py \
     || ! grep -q 'target_decision=ctx.target_decision' \
         src/apm_cli/commands/install.py \
+    || [ "$effective_target_service_count" -lt 2 ] \
     || ! grep -q 'target_decision = getattr(result, "target_decision", None)' \
         src/apm_cli/commands/update.py \
     || [ "$effective_target_raw_count" -ne 1 ] \

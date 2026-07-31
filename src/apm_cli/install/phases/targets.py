@@ -503,7 +503,7 @@ def run(ctx: InstallContext) -> None:
     except _click.UsageError as exc:
         _raise_target_usage_error(ctx, exc)
 
-    target_decision = vars(ctx).get("target_decision")
+    target_decision = ctx.target_decision
     if target_decision is None:
         from apm_cli.core.target_detection import resolve_effective_target_decision
 

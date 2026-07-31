@@ -22,8 +22,11 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands.update import _module_cache_needs_rehydration
+from apm_cli.commands.update import _handle_service_only_update, _module_cache_needs_rehydration
+from apm_cli.core.scope import InstallScope
+from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.install.plan import PlanEntry, UpdatePlan
 
 
@@ -52,6 +55,44 @@ def _make_apm_yml(project_dir: Path) -> None:
     (project_dir / "apm.yml").write_text(
         "name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - microsoft/apm\n"
     )
+
+
+def test_service_only_required_failure_renders_before_exit(tmp_path: Path) -> None:
+    """Service-only updates must not expose an unhandled integration error."""
+    package = MagicMock()
+    package.has_any_apm_dependencies.return_value = False
+    package.get_all_mcp_dependencies.return_value = [MagicMock()]
+    package.get_lsp_dependencies.return_value = []
+    logger = MagicMock()
+    decision = EffectiveTargetDecision("claude", "apm config target")
+
+    with (
+        patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path),
+        patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
+        patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"),
+        patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+        patch(
+            "apm_cli.core.target_detection.resolve_package_target_decision",
+            return_value=decision,
+        ),
+        patch(
+            "apm_cli.commands.update._run_mcp_lsp_integration",
+            side_effect=RequiredIntegrationError("required write failed"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _handle_service_only_update(
+            apm_package=package,
+            scope=InstallScope.PROJECT,
+            target=None,
+            dry_run=False,
+            logger=logger,
+            verbose=False,
+        )
+
+    assert exc_info.value.code == 1
+    logger.error.assert_called_once_with("required write failed")
+    logger.render_summary.assert_called_once_with()
 
 
 # -----------------------------------------------------------------------------
