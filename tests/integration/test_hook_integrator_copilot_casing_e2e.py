@@ -103,6 +103,7 @@ def test_copilot_install_writes_only_camel_case_hook_events(tmp_path: Path) -> N
             "PreToolUse": [_hook_entry("echo pre")],
             "PostToolUse": [_hook_entry("echo post")],
             "UserPromptSubmit": [_hook_entry("echo prompt")],
+            "SessionStart": [_hook_entry("echo start")],
             "Stop": [_hook_entry("echo stop")],
         },
     )
@@ -112,8 +113,21 @@ def test_copilot_install_writes_only_camel_case_hook_events(tmp_path: Path) -> N
     assert result["hooks"] == 1
     config = _read_copilot_hooks_config(project_root, package_info.package.name)
     hooks = config["hooks"]
-    assert set(hooks) == {"preToolUse", "postToolUse", "userPromptSubmit", "stop"}
-    assert {"PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"}.isdisjoint(hooks)
+    assert set(hooks) == {
+        "preToolUse",
+        "postToolUse",
+        "userPromptSubmit",
+        "sessionStart",
+        "agentStop",
+    }
+    assert {
+        "PreToolUse",
+        "PostToolUse",
+        "UserPromptSubmit",
+        "SessionStart",
+        "Stop",
+        "stop",
+    }.isdisjoint(hooks)
 
 
 def test_copilot_install_merges_duplicate_event_aliases(tmp_path: Path) -> None:

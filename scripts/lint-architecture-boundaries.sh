@@ -93,6 +93,21 @@ if [ "$hook_scope_owner_count" -ne 1 ] \
     [ -n "$hook_scope_duplicate_hits" ] && echo "$hook_scope_duplicate_hits"
     violations=$((violations + 1))
 fi
+hook_event_map_owner_count=$(grep -Ec \
+    '^_HOOK_EVENT_MAP[[:space:]]*:' "$hook_file" || true)
+hook_event_map_duplicate_hits=$(
+    grep -REn --include='*.py' \
+        '^_HOOK_EVENT_MAP[[:space:]]*:' \
+        src/apm_cli \
+        | grep -v "^${hook_file}:" \
+        || true
+)
+if [ "$hook_event_map_owner_count" -ne 1 ] \
+    || [ -n "$hook_event_map_duplicate_hits" ]; then
+    echo "[x] Native hook event mapping must have one HookIntegrator owner"
+    [ -n "$hook_event_map_duplicate_hits" ] && echo "$hook_event_map_duplicate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Lockfile supported-version authority belongs in deps/lockfile.py" \
     'SUPPORTED_LOCKFILE_VERSIONS|lockfile_version[[:space:]]+(==|!=|in)' \

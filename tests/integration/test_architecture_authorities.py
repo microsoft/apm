@@ -134,6 +134,57 @@ def test_hook_rewrite_scope_has_single_owner() -> None:
     assert "Hook rewrite scope must route through HookIntegrator" in guard
 
 
+def test_native_hook_event_map_has_single_owner() -> None:
+    """Target-native event names must come from HookIntegrator's map."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
+    kiro = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("_HOOK_EVENT_MAP:") == 1
+    assert "from apm_cli.integration.hook_integrator import" in kiro
+    assert "_HOOK_EVENT_MAP," in kiro
+    assert '_KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]' in kiro
+    assert "Native hook event mapping must have one HookIntegrator owner" in guard
+
+
+def test_native_hook_event_map_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """The boundary lint must reject a second native event map."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/integration/hook_bundle.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n_HOOK_EVENT_MAP: dict[str, dict[str, str]] = {}\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Native hook event mapping must have one HookIntegrator owner" in result.stdout
+
+
 def test_hook_rewrite_scope_guard_rejects_parallel_decision(tmp_path: Path) -> None:
     """The boundary lint must reject scope decisions outside HookIntegrator."""
     root = Path(__file__).parents[2]
