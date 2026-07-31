@@ -919,6 +919,13 @@ describe("Path traversal protection", () => {
         assert.equal(response.statusCode, 404);
         assert.equal(response.body.toString("utf8"), "Not found");
 
+        const fileAsDirectory = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/nested/app..js/child.js",
+        );
+        assert.equal(fileAsDirectory.statusCode, 404);
+        assert.equal(fileAsDirectory.body.toString("utf8"), "Not found");
+
         const missingIndex = await rawHttpRequest(assetBaseUrl, "/");
         assert.equal(missingIndex.statusCode, 404);
         assert.equal(missingIndex.headers["content-type"], "text/plain; charset=utf-8");
