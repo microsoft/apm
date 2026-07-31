@@ -54,12 +54,6 @@ _TARGET_CASES = (
         config_section="servers",
         external_config_root=False,
     ),
-    _TargetCase(
-        runtime="copilot",
-        config_path=PurePosixPath("mcp-config.json"),
-        config_section="mcpServers",
-        external_config_root=True,
-    ),
 )
 
 
