@@ -16,7 +16,6 @@ Security notes
 
 from __future__ import annotations
 
-import base64
 import re
 import subprocess
 import threading
@@ -33,8 +32,6 @@ from ..utils.github_host import (
     is_ado_auth_failure_signal,
     is_azure_devops_hostname,
     is_visualstudio_legacy_hostname,
-    set_ado_bearer_git_env,
-    set_authorization_header_git_env,
 )
 from ._git_utils import redact_token as _redact_token
 from .errors import GitLsRemoteError, OfflineMissError
@@ -266,7 +263,6 @@ class RefResolver:
                 summary=f"Bearer authentication is not supported for host '{self._host}'.",
                 hint="Use bearer authentication only with an Azure DevOps host.",
             )
-        bearer = requested_bearer and ado_host and not use_ssh
         url_token = None if requested_bearer or use_ssh else self._token
         if use_ssh and ado_host:
             org, project, repo = _ado_coordinates_from_owner_repo(
@@ -337,31 +333,30 @@ class RefResolver:
                 token=url_token,
                 port=self._port,
             )
+        from apm_cli.core.auth import AuthResolver
+
         if self._git_env is not None:
             env = dict(self._git_env)
         else:
-            from apm_cli.core.auth import AuthResolver
-
             host_kind = "ado" if ado_host else "github"
             env = AuthResolver._build_git_env(
                 self._token,
                 scheme=self._auth_scheme,
                 host_kind=host_kind,
             )
+        if ado_host and self._token and not use_ssh:
+            env = AuthResolver._build_git_env(
+                self._token,
+                scheme=self._auth_scheme,
+                host_kind="ado",
+                base_env=env,
+            )
         if use_ssh:
-            from apm_cli.core.auth import AuthResolver
-
             AuthResolver._clear_git_auth_env(env)
             env.pop("GIT_ASKPASS", None)
         env["GIT_TERMINAL_PROMPT"] = "0"
         if not use_ssh:
             env["GIT_ASKPASS"] = "echo"
-        if bearer and self._token:
-            env.pop("GIT_TOKEN", None)
-            set_ado_bearer_git_env(env, self._token)
-        elif ado_host and url_token:
-            credential = base64.b64encode(f":{url_token}".encode()).decode()
-            set_authorization_header_git_env(env, "Basic", credential)
         return url, env
 
     def list_remote_refs(
