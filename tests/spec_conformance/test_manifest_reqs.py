@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
-req-tg-001..007, req-cf-001..002.
+req-tg-001..008, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -19,8 +19,11 @@ import jsonschema
 import pytest
 
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
+from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_WARNING,
@@ -625,6 +628,92 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
         "default-visible, actionable\ndiagnostic",
         "follow-up compilation operation",
         "MUST NOT emit this diagnostic for a dry run",
+    )
+
+
+@pytest.mark.req("req-tg-008")
+def test_dependency_package_targets_are_restriction_only() -> None:
+    """Package intent can narrow, but never expand, consumer authorization."""
+    active = [KNOWN_TARGETS["claude"], KNOWN_TARGETS["cursor"]]
+    claude_package = APMPackage(
+        name="claude-hooks",
+        version="1.0.0",
+        target="claude",
+    )
+
+    disjoint = resolve_effective_package_targets(
+        active,
+        ["cursor"],
+        claude_package,
+        DiagnosticCollector(),
+        "owner/claude-hooks",
+    )
+    universal = resolve_effective_package_targets(
+        active,
+        ["cursor"],
+        APMPackage(name="universal-hooks", version="1.0.0"),
+        DiagnosticCollector(),
+        "owner/universal-hooks",
+    )
+
+    assert disjoint.targets == ()
+    assert tuple(target.name for target in universal.targets) == ("cursor",)
+    schema = load_schema("manifest-v0.1.schema.json")
+    jsonschema.Draft202012Validator.check_schema(schema)
+    validate_against(
+        "manifest-v0.1.schema.json",
+        {"name": "claude-hooks", "version": "1.0.0", "targets": ["claude"]},
+    )
+    validate_against(
+        "manifest-v0.1.schema.json",
+        {"name": "legacy-null", "version": "1.0.0", "target": None},
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "manifest-v0.1.schema.json",
+            {
+                "name": "conflicting-hooks",
+                "version": "1.0.0",
+                "target": "claude",
+                "targets": ["cursor"],
+            },
+        )
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "manifest-v0.1.schema.json",
+            {"name": "blank-target", "version": "1.0.0", "targets": [""]},
+        )
+    for malformed_token in ("Cursor", "../cursor"):
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against(
+                "manifest-v0.1.schema.json",
+                {
+                    "name": "malformed-target",
+                    "version": "1.0.0",
+                    "targets": [malformed_token],
+                },
+            )
+    for invalid_fields in (
+        {"target": ""},
+        {"target": []},
+        {"targets": None},
+        {"targets": []},
+    ):
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against(
+                "manifest-v0.1.schema.json",
+                {"name": "invalid-target", "version": "1.0.0", **invalid_fields},
+            )
+    assert_spec_contains(
+        "MUST integrate target-scoped primitives only into the",
+        "mechanism for (b) is implementation-defined",
+        "restriction-only: it MUST NOT activate a target",
+        "literal no-restriction sentinel",
+        "auto-detectable target set during this intersection",
+        "MUST be rejected before target-scoped",
+        "MUST be reconciled under",
+        "[req-lk-021](#req-lk-021)",
+        "[req-tg-008](#req-tg-008),\n[req-sc-001](#req-sc-001),",
     )
 
 

@@ -9,17 +9,29 @@ from types import SimpleNamespace
 
 import pytest
 
+from apm_cli.core.errors import ConflictingTargetsError
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS, HookIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
-from apm_cli.utils.diagnostics import DiagnosticCollector
+from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 
 
-def _package_info(package_path: Path, name: str = "targeted-hooks") -> PackageInfo:
+def _package_info(
+    package_path: Path,
+    name: str = "targeted-hooks",
+    *,
+    target: str | None = None,
+    targets: list[str] | None = None,
+) -> PackageInfo:
     return PackageInfo(
-        package=APMPackage(name=name, version="1.0.0"),
+        package=APMPackage(
+            name=name,
+            version="1.0.0",
+            target=target,
+            targets=targets,
+        ),
         install_path=package_path,
     )
 
@@ -58,14 +70,25 @@ class _NoopSkillIntegrator:
 
 
 class _RecordingHookIntegrator:
-    def __init__(self) -> None:
+    def __init__(self, reconcile_result: dict | None = None) -> None:
         self.seen_targets: list[str] = []
         self.dep_targets_active_values: list[bool] = []
+        self.reconciled_targets: list[str] = []
+        self.reconcile_result = reconcile_result or {"files_removed": 0, "errors": 0}
 
     def integrate_hooks_for_target(self, target, package_info, project_root: Path, **kwargs):
         self.seen_targets.append(target.name)
         self.dep_targets_active_values.append(kwargs["dep_targets_active"])
         return IntegrationResult(0, 0, 0, [])
+
+    def reconcile_package_target_restriction(
+        self,
+        package_info,
+        project_root: Path,
+        excluded_targets,
+    ) -> dict:
+        self.reconciled_targets.extend(target.name for target in excluded_targets)
+        return self.reconcile_result
 
 
 def _bundle(hook_integrator) -> IntegratorBundle:
@@ -85,13 +108,20 @@ def _run_with_targets(
     install_target_names: list[str],
     dep_target_subset: list[str] | None,
     hook_integrator: _RecordingHookIntegrator,
+    *,
+    package_target: str | None = None,
+    package_targets: list[str] | None = None,
 ) -> DiagnosticCollector:
     package_path = tmp_path / "pkg"
     package_path.mkdir()
     diagnostics = DiagnosticCollector()
 
     integrate_package_primitives(
-        _package_info(package_path),
+        _package_info(
+            package_path,
+            target=package_target,
+            targets=package_targets,
+        ),
         tmp_path / "project",
         targets=[_hook_only_target(name) for name in install_target_names],
         integrators=_bundle(hook_integrator),
@@ -143,6 +173,89 @@ def test_disjoint_targets_emits_diagnostic(tmp_path: Path) -> None:
         "Per-dependency targets [codex] do not overlap active install targets; skipping"
     ]
     assert [d.detail for d in diagnostics._diagnostics] == ["active targets: [claude]"]
+
+
+@pytest.mark.parametrize("package_target", ["vscode", "agents"])
+def test_package_alias_restriction_routes_through_services_chokepoint(
+    tmp_path: Path,
+    package_target: str,
+) -> None:
+    """Copilot aliases reach Copilot but cannot leak into Claude."""
+    hook_integrator = _RecordingHookIntegrator()
+
+    _run_with_targets(
+        tmp_path,
+        ["copilot", "claude"],
+        None,
+        hook_integrator,
+        package_target=package_target,
+    )
+
+    assert hook_integrator.seen_targets == ["copilot"]
+    assert hook_integrator.reconciled_targets == ["claude"]
+
+
+def test_package_restriction_cannot_expand_consumer_dependency_targets(
+    tmp_path: Path,
+) -> None:
+    """A Claude package cannot override a consumer that authorizes only Cursor."""
+    hook_integrator = _RecordingHookIntegrator()
+
+    diagnostics = _run_with_targets(
+        tmp_path,
+        ["claude", "cursor"],
+        ["cursor"],
+        hook_integrator,
+        package_target="claude",
+    )
+
+    assert hook_integrator.seen_targets == []
+    assert hook_integrator.reconciled_targets == ["claude", "cursor"]
+    assert diagnostics.has_diagnostics
+
+
+def test_reconcile_failure_diagnostic_names_target_and_config(tmp_path: Path) -> None:
+    """A failed contraction tells users which target config needs attention."""
+    hook_integrator = _RecordingHookIntegrator(
+        {
+            "files_removed": 0,
+            "errors": 1,
+            "failed_targets": ["cursor"],
+            "failed_paths": [".cursor/hooks.json"],
+        }
+    )
+
+    diagnostics = _run_with_targets(
+        tmp_path,
+        ["claude", "cursor"],
+        None,
+        hook_integrator,
+        package_target="claude",
+    )
+
+    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
+    assert warning.message == "Could not fully reconcile hooks excluded by target restrictions"
+    assert warning.detail == (
+        "targets: [cursor]; configs: [.cursor/hooks.json]; run apm install again"
+    )
+
+
+def test_conflicting_package_targets_fail_before_service_dispatch(tmp_path: Path) -> None:
+    """A dependency with both target keys cannot degrade to universal routing."""
+    hook_integrator = _RecordingHookIntegrator()
+
+    with pytest.raises(ConflictingTargetsError):
+        _run_with_targets(
+            tmp_path,
+            ["claude", "cursor"],
+            None,
+            hook_integrator,
+            package_target="claude",
+            package_targets=["all"],
+        )
+
+    assert hook_integrator.seen_targets == []
+    assert hook_integrator.reconciled_targets == []
 
 
 def test_hooks_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> None:

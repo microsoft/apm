@@ -35,6 +35,22 @@ CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
 
 _legacy_all_warned: bool = False
 _LEGACY_ALL_TARGET_NAME = "all"
+_EMPTY_TARGETS_MESSAGE = (
+    "[x] 'targets:' in apm.yml is empty\n"
+    "\n"
+    "The targets list must contain at least one target.\n"
+    "\n"
+    "Fix with one of:\n"
+    "\n"
+    "  apm targets                            # see all supported harnesses\n"
+    "  apm install <pkg> --target claude\n"
+    "  apm init\n"
+    "\n"
+    "Or update apm.yml:\n"
+    "\n"
+    "  targets:\n"
+    "    - claude"
+)
 
 
 def _reset_legacy_all_warning() -> None:
@@ -112,26 +128,13 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
     if has_targets:
         raw = yaml_data["targets"]
         if raw is None or (isinstance(raw, list) and len(raw) == 0):
-            raise EmptyTargetsListError(
-                "[x] 'targets:' in apm.yml is empty\n"
-                "\n"
-                "The targets list must contain at least one target.\n"
-                "\n"
-                "Fix with one of:\n"
-                "\n"
-                "  apm targets                            # see all supported harnesses\n"
-                "  apm install <pkg> --target claude\n"
-                "  apm init\n"
-                "\n"
-                "Or update apm.yml:\n"
-                "\n"
-                "  targets:\n"
-                "    - claude"
-            )
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
         if not isinstance(raw, list):
             # Single value under targets: key, treat as one-element list
             raw = [str(raw)]
         tokens = [str(t).strip() for t in raw if str(t).strip()]
+        if not tokens:
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
         return _validate_and_fold_legacy_all(tokens)
 
     if has_target:

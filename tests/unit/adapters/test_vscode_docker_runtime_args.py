@@ -222,17 +222,15 @@ class TestFormatServerConfigDockerVariables(unittest.TestCase):
         self.assertLess(rm_idx, v_idx)
 
     def test_format_server_config_threads_runtime_vars(self):
-        """Verify runtime_vars passed to _format_server_config reaches _extract_package_args."""
+        """Verify runtime_vars passed to _format_server_config reaches the Docker builder."""
         runtime_vars = {"workspaceFolder": "/some/path"}
         with patch.object(
             VSCodeClientAdapter,
-            "_extract_package_args",
-            wraps=VSCodeClientAdapter._extract_package_args,
-        ) as mock_extract:
+            "_docker_run_args",
+            wraps=VSCodeClientAdapter._docker_run_args,
+        ) as mock_builder:
             self.adapter._format_server_config(self.server_info, runtime_vars=runtime_vars)
-            mock_extract.assert_called_once()
-            _, kwargs = mock_extract.call_args
-            self.assertEqual(kwargs.get("runtime_vars"), runtime_vars)
+            mock_builder.assert_called_once_with(V01_DOCKER_PACKAGE, runtime_vars)
 
 
 # ---------------------------------------------------------------------------

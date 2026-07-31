@@ -24,6 +24,7 @@ from apm_cli.integration.hook_integrator import (
     _filter_hook_files_for_target,
     _reinject_apm_source_from_sidecar,
 )
+from apm_cli.integration.hook_ownership import dependency_hook_sources
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
 
@@ -4183,7 +4184,10 @@ class TestIssue1007Fixes:
             encoding="utf-8",
         )
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+        assert dependency_hook_sources(temp_project) == {
+            "dep-hooks",
+            "owner/repo/collections/dep-hooks",
+        }
 
     def test_dependency_hook_sources_rejects_lockfile_symlink_root(
         self,
@@ -4210,7 +4214,7 @@ class TestIssue1007Fixes:
             encoding="utf-8",
         )
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+        assert dependency_hook_sources(temp_project) == set()
 
     def test_dependency_hook_sources_falls_back_when_lockfile_paths_are_invalid(
         self,
@@ -4234,7 +4238,10 @@ class TestIssue1007Fixes:
             encoding="utf-8",
         )
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+        assert dependency_hook_sources(temp_project) == {
+            "dep-hooks",
+            "owner/dep-hooks",
+        }
 
     def test_bounded_dependency_scan_stops_at_package_root(
         self,
@@ -4289,7 +4296,7 @@ class TestIssue1007Fixes:
         nested.mkdir(parents=True)
         (nested / "SKILL.md").write_text("# Fixture Skill\n", encoding="utf-8")
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+        assert dependency_hook_sources(temp_project) == set()
 
     def test_bounded_dependency_scan_rejects_symlinked_namespace(
         self,
@@ -4306,7 +4313,7 @@ class TestIssue1007Fixes:
         except (NotImplementedError, OSError) as exc:
             pytest.skip(f"symlink unavailable: {exc}")
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+        assert dependency_hook_sources(temp_project) == set()
 
     def test_bounded_dependency_scan_rejects_symlinked_marker(
         self,
@@ -4322,7 +4329,7 @@ class TestIssue1007Fixes:
         except (NotImplementedError, OSError) as exc:
             pytest.skip(f"symlink unavailable: {exc}")
 
-        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+        assert dependency_hook_sources(temp_project) == set()
 
     def test_root_local_source_marker_does_not_collide_with_dependency_name(
         self,

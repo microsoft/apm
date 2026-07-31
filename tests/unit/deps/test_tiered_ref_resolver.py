@@ -24,6 +24,7 @@ from apm_cli.deps.tiered_ref_resolver import (
     L2BareRevParse,
     L3LegacyClone,
     PerRunRefCache,
+    RefFreshnessPolicy,
     TieredRefResolver,
     _repository_cache_identity,
     build_tiered_ref_resolver,
@@ -44,6 +45,27 @@ def _dep(repo: str = "owner/repo", ref: str = "main") -> DependencyReference:
 # ---------------------------------------------------------------------------
 # Feature flag
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("update_refs", "refresh", "expected"),
+    [
+        (False, False, RefFreshnessPolicy.REPRODUCIBLE),
+        (True, False, RefFreshnessPolicy.CURRENT_REMOTE),
+        (False, True, RefFreshnessPolicy.CURRENT_REMOTE),
+        (True, True, RefFreshnessPolicy.CURRENT_REMOTE),
+    ],
+)
+def test_freshness_policy_maps_install_intent_once(update_refs, refresh, expected):
+    policy = RefFreshnessPolicy.for_install_intent(
+        update_refs=update_refs,
+        refresh=refresh,
+    )
+
+    assert policy is expected
+    assert policy.requires_remote is (expected is RefFreshnessPolicy.CURRENT_REMOTE)
+    assert policy.allows_lock_seed is (expected is RefFreshnessPolicy.REPRODUCIBLE)
+    assert policy.allows_bare_cache is (expected is RefFreshnessPolicy.REPRODUCIBLE)
 
 
 @pytest.mark.parametrize(
@@ -482,3 +504,152 @@ def test_factory_builds_full_stack_when_enabled(monkeypatch):
     assert len(resolver._tiers) == 4
     tier_names = [t.name for t in resolver._tiers]
     assert tier_names == ["per_run_cache", "commits_api", "bare_rev_parse", "legacy_clone"]
+
+
+# ---------------------------------------------------------------------------
+# Factory -- update_refs behaviour (#2342)
+# ---------------------------------------------------------------------------
+
+
+def test_factory_excludes_l2_when_update_refs_true(monkeypatch):
+    """update_refs=True must remove L2BareRevParse from the stack (#2342).
+
+    L2 reads the local bare-repo cache without fetching from remote, so
+    during update/outdated runs it would silently return a stale SHA.
+    Excluding it forces resolution through L1 (CommitsAPI) and L3 (legacy
+    clone), both of which contact the network.
+    """
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    downloader = MagicMock()
+    downloader._refs = MagicMock()
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+    )
+    assert isinstance(resolver, TieredRefResolver)
+    tier_names = [t.name for t in resolver._tiers]
+    # bare_rev_parse must NOT be present
+    assert "bare_rev_parse" not in tier_names
+    # L0, L1, L3 remain
+    assert tier_names == ["per_run_cache", "commits_api", "legacy_clone"]
+
+
+def test_factory_includes_l2_when_update_refs_false(monkeypatch):
+    """update_refs=False (default install) must retain L2BareRevParse.
+
+    This is a regression trap: the bare-rev-parse tier is a performance
+    optimisation for non-update runs and must not be accidentally removed.
+    """
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    downloader = MagicMock()
+    downloader._refs = MagicMock()
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        freshness_policy=RefFreshnessPolicy.REPRODUCIBLE,
+    )
+    assert isinstance(resolver, TieredRefResolver)
+    tier_names = [t.name for t in resolver._tiers]
+    assert "bare_rev_parse" in tier_names
+    assert tier_names == ["per_run_cache", "commits_api", "bare_rev_parse", "legacy_clone"]
+
+
+def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
+    """With update_refs=True, a stale local bare SHA is never returned (#2342).
+
+    Scenario:
+    - L2BareRevParse would return SHA_A (stale cached value).
+    - L1 CommitsAPI returns SHA_B (fresh upstream value).
+    - When update_refs=True, L2 is excluded so the resolver returns SHA_B.
+    - When update_refs=False, L2 is in the stack but L1 fires first anyway,
+      so SHA_B is returned and the stale path is never reached in normal flow.
+      The important invariant is that in update mode, L2's stale answer can
+      never surface even if L1 were somehow bypassed.
+    """
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+
+    bare = tmp_path / cache_shard_key(_dep().to_github_url())
+    bare.mkdir(parents=True)
+    git_cache = types.SimpleNamespace(_db_root=tmp_path)
+    downloader = MagicMock()
+    fake_refs = MagicMock()
+    fake_refs.resolve_commit_sha_for_ref.return_value = None
+    fake_refs.resolve.return_value = ResolvedReference(
+        original_ref="owner/repo#main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit=SHA_B,
+        ref_name="main",
+    )
+    downloader._refs = fake_refs
+
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        git_cache=git_cache,
+        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+    )
+    assert isinstance(resolver, TieredRefResolver)
+
+    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2:
+        result = resolver.resolve(_dep(repo="owner/repo", ref="main"))
+
+    assert result.resolved_commit == SHA_B
+    stale_l2.assert_not_called()
+    fake_refs.resolve_commit_sha_for_ref.assert_called_once()
+    fake_refs.resolve.assert_called_once()
+    assert resolver.stats["legacy_clone"] == 1
+    assert "bare_rev_parse" not in resolver.stats
+
+
+def test_normal_policy_uses_l2_when_api_unavailable_without_clone(monkeypatch, tmp_path):
+    """A normal warm install keeps the zero-network L2 performance boundary."""
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    bare = tmp_path / cache_shard_key(_dep().to_github_url())
+    bare.mkdir(parents=True)
+    git_cache = types.SimpleNamespace(_db_root=tmp_path)
+    downloader = MagicMock()
+    fake_refs = MagicMock()
+    fake_refs.resolve_commit_sha_for_ref.return_value = None
+    downloader._refs = fake_refs
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        git_cache=git_cache,
+        freshness_policy=RefFreshnessPolicy.REPRODUCIBLE,
+    )
+    assert isinstance(resolver, TieredRefResolver)
+
+    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as cached_l2:
+        result = resolver.resolve(_dep())
+
+    assert result.resolved_commit == SHA_A
+    cached_l2.assert_called_once_with(bare, "main")
+    fake_refs.resolve_commit_sha_for_ref.assert_called_once()
+    fake_refs.resolve.assert_not_called()
+    assert resolver.stats["bare_rev_parse"] == 1
+    assert resolver.stats["legacy_clone"] == 0
+
+
+def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_path):
+    """Freshness-required resolution never substitutes a stale L2 answer."""
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    bare = tmp_path / cache_shard_key(_dep().to_github_url())
+    bare.mkdir(parents=True)
+    downloader = MagicMock()
+    fake_refs = MagicMock()
+    fake_refs.resolve_commit_sha_for_ref.return_value = None
+    fake_refs.resolve.side_effect = RuntimeError("remote unavailable")
+    downloader._refs = fake_refs
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        git_cache=types.SimpleNamespace(_db_root=tmp_path),
+        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+    )
+    assert isinstance(resolver, TieredRefResolver)
+
+    with (
+        patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2,
+        pytest.raises(RuntimeError, match="remote unavailable"),
+    ):
+        resolver.resolve(_dep())
+
+    stale_l2.assert_not_called()
+    assert resolver._cache.size() == 0
+    assert "bare_rev_parse" not in resolver.stats

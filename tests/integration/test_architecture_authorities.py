@@ -271,6 +271,69 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
+def test_git_ref_freshness_policy_has_single_owner() -> None:
+    """Lock seeding and resolver tiers must consume one freshness policy."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/deps/tiered_ref_resolver.py").read_text()
+    resolve = (root / "src/apm_cli/install/phases/resolve.py").read_text()
+    seed = (root / "src/apm_cli/install/helpers/ref_seed.py").read_text()
+    outdated = (root / "src/apm_cli/commands/outdated.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("class RefFreshnessPolicy(Enum):") == 1
+    assert owner.count("def ref_freshness_policy_for_install(") == 1
+    assert owner.count("if freshness_policy.allows_bare_cache:") == 1
+    assert "ctx.update_refs or ctx.refresh" not in resolve
+    assert "ctx.update_refs or ctx.refresh" not in seed
+    assert resolve.count("ref_freshness_policy_for_install(ctx)") == 1
+    assert "def _requires_remote_ref_resolution(" in resolve
+    assert "update_refs = _requires_remote_ref_resolution(ctx)" in resolve
+    assert seed.count("ref_freshness_policy_for_install(ctx)") == 1
+    assert "freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE" in outdated
+    assert "Git ref freshness must route through RefFreshnessPolicy" in guard
+
+
+def test_git_ref_freshness_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The boundary lint rejects a second update/refresh freshness gate."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    seed_path = sandbox / "src/apm_cli/install/helpers/ref_seed.py"
+    source = seed_path.read_text(encoding="utf-8")
+    seed_path.write_text(
+        source.replace(
+            "if not freshness_policy.allows_lock_seed:",
+            "if ctx.update_refs or ctx.refresh:",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Git ref freshness must route through RefFreshnessPolicy" in result.stdout
+
+
 @pytest.mark.lifecycle_smoke
 def test_ado_lock_coordinates_have_single_owner() -> None:
     """AC14 derives ADO coordinates without provider-specific lock fields."""
@@ -721,6 +784,18 @@ def _load_shared_target_contraction_owner_checker(root: Path) -> ModuleType:
 def _load_target_instruction_contraction_owner_checker(root: Path) -> ModuleType:
     """Import the target-specific instruction contraction owner checker."""
     module_name = "check_target_instruction_contraction_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_package_target_authority_checker(root: Path) -> ModuleType:
+    """Import the restriction-only package target authority checker."""
+    module_name = "check_package_target_authority"
     script_path = root / "scripts" / f"{module_name}.py"
     spec = importlib.util.spec_from_file_location(module_name, script_path)
     assert spec is not None and spec.loader is not None
@@ -1212,6 +1287,129 @@ def test_target_instruction_contraction_uses_manifest_reconciliation() -> None:
         "Target-specific instruction contraction must route through manifest_reconcile.py" in guard
     )
     assert "Target-scoped deployed-file contraction" in architecture
+
+
+def test_effective_package_target_authorization_has_one_owner() -> None:
+    """All runtime consumers must use the restriction-only target selector."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert checker.check(root) == []
+    assert "scripts/check_package_target_authority.py" in guard
+    assert (
+        "Effective package target authorization must route through install/target_filter.py"
+    ) in guard
+    assert (
+        "| Effective package target authorization | install/target_filter.py "
+        "(resolve_effective_package_targets) |"
+    ) in architecture
+
+
+def test_package_target_authority_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The static owner check rejects a package-target read in an integrator."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    parallel = tmp_path / "hook_integrator.py"
+    parallel.write_text(
+        "def bypass(package_info):\n    return package_info.package.canonical_targets\n",
+        encoding="utf-8",
+    )
+
+    violations = checker.find_parallel_target_reads([parallel])
+
+    assert len(violations) == 1
+    assert "package_info.package.canonical_targets" in violations[0]
+
+
+def test_package_target_authority_guard_rejects_aliased_package_read(
+    tmp_path: Path,
+) -> None:
+    """Renaming the package object cannot evade the semantic owner check."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    parallel = tmp_path / "hook_integrator.py"
+    parallel.write_text(
+        "def bypass(package_info):\n"
+        "    package = package_info.package\n"
+        "    return package.targets\n",
+        encoding="utf-8",
+    )
+
+    violations = checker.find_parallel_target_reads([parallel])
+
+    assert len(violations) == 1
+    assert "package.targets" in violations[0]
+
+
+def test_package_target_consumer_requires_live_assigned_selector_result(
+    tmp_path: Path,
+) -> None:
+    """A comment or ignored selector call cannot satisfy the delegation gate."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    consumer = tmp_path / "services.py"
+    consumer.write_text(
+        "def integrate_package_primitives():\n"
+        "    # target_selection = resolve_effective_package_targets()\n"
+        "    resolve_effective_package_targets()\n"
+        "    targets = []\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        checker.consumer_routes_through_selector(
+            consumer,
+            "integrate_package_primitives",
+        )
+        is False
+    )
+
+
+def test_package_target_consumer_rejects_dead_logging_only_read(
+    tmp_path: Path,
+) -> None:
+    """Reading selector output for logging cannot mask unfiltered dispatch."""
+    root = Path(__file__).parents[2]
+    checker = _load_package_target_authority_checker(root)
+    consumer = tmp_path / "services.py"
+    consumer.write_text(
+        "def integrate_package_primitives(original_targets):\n"
+        "    target_selection = resolve_effective_package_targets()\n"
+        "    print(target_selection.targets)\n"
+        "    for target in original_targets:\n"
+        "        integrate(target)\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        checker.consumer_routes_through_selector(
+            consumer,
+            "integrate_package_primitives",
+        )
+        is False
+    )
+
+
+def test_merged_hook_ownership_markers_have_one_owner() -> None:
+    """HookIntegrator must consume the dedicated ownership marker authority."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_ownership.py").read_text(encoding="utf-8")
+    integrator = (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def dependency_hook_source_marker(" in owner
+    assert "def dependency_hook_sources(" in owner
+    assert "from apm_cli.integration.hook_ownership import (" in integrator
+    assert "def _dependency_hook_source_marker(" not in integrator
+    assert "Merged-hook ownership markers must route through integration/hook_ownership.py" in guard
+    assert "`src/apm_cli/integration/hook_ownership.py`" in architecture
 
 
 def test_dependency_winner_selection_has_one_algorithm() -> None:
@@ -2023,3 +2221,31 @@ def test_public_github_auth_owner_guard_rejects_duplicate_owner(
         "Public github.com anonymous-first auth ordering must stay owned by "
         "AuthResolver" in result.stdout
     )
+
+
+def test_mcp_container_launcher_has_one_canonical_owner() -> None:
+    """OCI selection and image placement must stay shared across adapters."""
+    root = Path(__file__).parents[2]
+    owner = root / "src/apm_cli/adapters/client/base.py"
+    consumers = (
+        root / "src/apm_cli/adapters/client/copilot.py",
+        root / "src/apm_cli/adapters/client/codex.py",
+        root / "src/apm_cli/adapters/client/gemini.py",
+        root / "src/apm_cli/adapters/client/vscode.py",
+    )
+    owner_source = owner.read_text(encoding="utf-8")
+    definitions = [
+        node
+        for path in (owner, *consumers)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_ensure_docker_image_arg"
+    ]
+
+    assert '_REGISTRY_TYPE_ALIASES = {"oci": "docker"}' in owner_source
+    assert len(definitions) == 1
+    for consumer in consumers:
+        assert "_ensure_docker_image_arg(" in consumer.read_text(encoding="utf-8")
+
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    assert "MCP container launcher decisions must route through MCPClientAdapter" in guard

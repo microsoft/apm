@@ -16,9 +16,18 @@
     "license": { "type": "string" },
     "default_host": { "type": "string", "minLength": 1 },
     "target": {
+      "description": "Legacy-compatible target restriction spelling; null means omitted. Mutually exclusive with targets. See req-tg-008.",
       "oneOf": [
-        { "type": "string" },
-        { "type": "array", "items": { "type": "string" } }
+        { "type": "string", "minLength": 1 },
+        { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        { "type": "null" }
+      ]
+    },
+    "targets": {
+      "description": "Canonical target restriction set or all sentinel; mutually exclusive with target. See req-tg-008.",
+      "oneOf": [
+        { "type": "string", "minLength": 1, "pattern": "^(all|[a-z][a-z0-9-]*)$" },
+        { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "pattern": "^(all|[a-z][a-z0-9-]*)$" } }
       ]
     },
     "type": { "type": "string", "enum": ["instructions", "skill", "hybrid", "prompts"] },
@@ -66,6 +75,8 @@
   "patternProperties": {
     "^x-[a-z][a-z0-9-]*$": {}
   },
+  "$comment": "Mutual exclusivity: target and targets MUST NOT both appear (req-tg-008).",
+  "not": { "required": ["target", "targets"] },
   "additionalProperties": true,
   "$defs": {
     "depsBlock": {

@@ -31,6 +31,11 @@ and redeploying primitives. If refs are unchanged but the locked
 prompting](../../reference/cli/update/). Pass one or more package names
 (`apm update org/pkg-a org/pkg-b`) to refresh only those.
 
+Mutable Git refs are established from the authenticated upstream. If APM cannot
+reach that source, update exits non-zero instead of silently substituting a
+stale ref from the local bare Git cache. Once the fresh SHA is known, cached
+content for that SHA may still be reused.
+
 Useful flags:
 
 - `--dry-run` -- show the resolution plan and exit; never writes.
@@ -38,7 +43,9 @@ Useful flags:
 - `-v, --verbose` -- show per-dependency resolution detail.
 - `-g, --global` -- refresh user-scope dependencies under `~/.apm/`
   instead of the current project (pairs with `apm outdated -g`).
-- `--force` -- overwrite locally-authored files on collision.
+- `--force` -- overwrite locally-authored files and deploy despite critical
+  security findings. It does not weaken the upstream freshness check. Use only
+  after independent verification.
 - `--parallel-downloads N` -- cap concurrent downloads (default 4;
   `0` disables parallelism).
 
@@ -53,7 +60,8 @@ apm outdated
 
 Compares each entry in `apm.lock.yaml` against its remote source and
 reports which dependencies have new commits or new tags available.
-Read-only.
+Read-only. An unavailable remote reports `unknown`; cached bare refs are not
+reported as current upstream state.
 
 Useful flags:
 
@@ -86,6 +94,13 @@ When the lockfile is already satisfied, install prints:
 That is the nudge: install never silently bumps versions. Use
 `apm update` when you want to.
 
+Use `apm install --refresh` when you need both current upstream refs and a
+content re-download. It re-resolves mutable refs and bypasses cached package
+content; `apm update` may reuse content already cached at the fresh SHA.
+
+Use `apm lock --update` when you need the same upstream ref refresh but want to
+rewrite only `apm.lock.yaml`, without deploying or deleting harness files.
+
 See [Promise 1: Portable by manifest](../../concepts/the-three-promises/)
 for why this matters in CI and for new contributors.
 
@@ -103,9 +118,9 @@ followed by an `apm update`.
 `--frozen` is mutually exclusive with `--update`: one trusts the
 lockfile, the other rewrites it.
 
-Note that `apm install --force` does not refresh remote refs either.
-It only bypasses the security gate for an already-resolved set. If you
-want new commit SHAs, run `apm update`.
+`apm install --force` does not refresh remote refs. It overwrites local
+collisions and may deploy despite critical built-in scan findings; the scan
+still runs. If you want new commit SHAs, run `apm update`.
 
 ## Update the apm CLI binary
 
@@ -137,6 +152,7 @@ your scripts to call `apm self-update --check` directly.
 | See which deps have new versions | `apm outdated` |
 | Preview a dep refresh | `apm update --dry-run` |
 | Bump deps and rewrite the lockfile | `apm update` |
+| Refresh only the lockfile from upstream refs | `apm lock --update` |
 | Reproduce the locked versions exactly | `apm install` |
 | Fail CI on lockfile drift | `apm install --frozen` |
 | Update the `apm` CLI itself | `apm self-update` |

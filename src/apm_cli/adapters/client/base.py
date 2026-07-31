@@ -29,6 +29,153 @@ _ENV_PLACEHOLDER_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 # deprecation warnings across all servers in a single install run.
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
 
+# MCP Registry v0.1 names the container registry type ``oci``; the adapters
+# below key their launcher dispatch on ``docker`` (the vocabulary the legacy
+# registry shape used, and what ``_infer_registry_name`` derives from a
+# ``docker`` runtime hint or an image-shaped package name). Without this
+# mapping an ``oci`` package matches no launcher branch and falls through to
+# the generic ``npx`` default, which hands the image reference to npm as a
+# package name -- a dependency-confusion exposure, not just a broken config
+# (#2376). Keyed on the lowercased registry type; unlisted values pass through
+# untouched.
+_REGISTRY_TYPE_ALIASES = {"oci": "docker"}
+_DOCKER_RUN_OPTIONS_WITH_VALUES = frozenset(
+    {
+        "--add-host",
+        "--annotation",
+        "--attach",
+        "--blkio-weight",
+        "--blkio-weight-device",
+        "--cap-add",
+        "--cap-drop",
+        "--cgroup-parent",
+        "--cgroupns",
+        "--cidfile",
+        "--cpu-count",
+        "--cpu-percent",
+        "--cpu-period",
+        "--cpu-quota",
+        "--cpu-rt-period",
+        "--cpu-rt-runtime",
+        "--cpu-shares",
+        "--cpus",
+        "--cpuset-cpus",
+        "--cpuset-mems",
+        "--detach-keys",
+        "--device",
+        "--device-cgroup-rule",
+        "--device-read-bps",
+        "--device-read-iops",
+        "--device-write-bps",
+        "--device-write-iops",
+        "--dns",
+        "--dns-opt",
+        "--dns-option",
+        "--dns-search",
+        "--domainname",
+        "--entrypoint",
+        "--env",
+        "--env-file",
+        "--expose",
+        "--gpus",
+        "--group-add",
+        "--health-cmd",
+        "--health-interval",
+        "--health-retries",
+        "--health-start-interval",
+        "--health-start-period",
+        "--health-timeout",
+        "--hostname",
+        "--io-maxbandwidth",
+        "--io-maxiops",
+        "--ip",
+        "--ip6",
+        "--ipc",
+        "--isolation",
+        "--kernel-memory",
+        "--label",
+        "--label-file",
+        "--link",
+        "--link-local-ip",
+        "--log-driver",
+        "--log-opt",
+        "--mac-address",
+        "--memory",
+        "--memory-reservation",
+        "--memory-swap",
+        "--memory-swappiness",
+        "--mount",
+        "--name",
+        "--net",
+        "--net-alias",
+        "--network",
+        "--network-alias",
+        "--oom-score-adj",
+        "--pid",
+        "--pids-limit",
+        "--platform",
+        "--publish",
+        "--pull",
+        "--restart",
+        "--runtime",
+        "--security-opt",
+        "--shm-size",
+        "--stop-signal",
+        "--stop-timeout",
+        "--storage-opt",
+        "--sysctl",
+        "--tmpfs",
+        "--ulimit",
+        "--user",
+        "--userns",
+        "--uts",
+        "--volume",
+        "--volume-driver",
+        "--volumes-from",
+        "--workdir",
+        "-a",
+        "-c",
+        "-e",
+        "-h",
+        "-l",
+        "-m",
+        "-p",
+        "-u",
+        "-v",
+        "-w",
+    }
+)
+
+
+def _docker_image_repository(reference: str) -> str:
+    """Return the repository component of a container image reference.
+
+    Drops an ``@sha256:...`` digest and a trailing ``:tag`` so that two
+    references to the same repository compare equal regardless of how each
+    side is pinned. A ``host:port/`` prefix is preserved, since a tag can
+    only appear in the final path segment.
+
+    Docker Hub is also folded to its short form: a registry commonly
+    publishes a fully qualified ``identifier`` while the run arguments it
+    ships use the implicit spelling, and treating those as different
+    repositories would append a second image operand.
+    """
+    repository = reference.split("@", 1)[0]
+    last_segment = repository.rsplit("/", 1)[-1]
+    tag_at = last_segment.find(":")
+    if tag_at != -1:
+        repository = repository[: len(repository) - len(last_segment) + tag_at]
+    for default_registry in ("docker.io/", "index.docker.io/"):
+        if repository.startswith(default_registry):
+            repository = repository[len(default_registry) :]
+            break
+    # Only meaningful once the implicit registry is stripped: ``library/`` is
+    # where Docker Hub keeps official images, so ``library/redis`` is ``redis``.
+    if repository.startswith("library/"):
+        repository = repository[len("library/") :]
+    return repository
+
+
 # Config keys that ``_extra`` passthrough must NEVER set on a rendered harness
 # config. Covers the modeled MCP fields (imported single-source from the model)
 # plus harness-specific aliases that mirror a modeled field under a different
@@ -280,13 +427,25 @@ class MCPClientAdapter(ABC):
 
         Returns:
             str: Inferred registry name (e.g. "npm", "pypi", "docker") or "".
+            Spec spellings that name the same registry as an APM launcher
+            branch are canonicalized via ``_REGISTRY_TYPE_ALIASES`` (v0.1
+            ``oci`` -> ``docker``). Malformed explicit values fail closed
+            before any package-manager launcher is selected.
         """
         if not package:
             return ""
 
         explicit = package.get("registry_name", "")
+        if not isinstance(explicit, str):
+            # Registry payloads are untrusted. A malformed explicit value must
+            # fail closed rather than miss every launcher branch and reach the
+            # generic npx fallback with an untrusted package name.
+            raise ValueError("MCP package registry_name must be a string")
+        if explicit and not explicit.strip():
+            raise ValueError("MCP package registry_name must not be whitespace")
         if explicit:
-            return explicit
+            canonical = explicit.strip().lower()
+            return _REGISTRY_TYPE_ALIASES.get(canonical, canonical)
 
         name = package.get("name", "")
         runtime_hint = package.get("runtime_hint", "")
@@ -313,6 +472,103 @@ class MCPClientAdapter(ABC):
             return "nuget"
 
         return ""
+
+    @staticmethod
+    def _docker_image_references_match(left: Any, right: Any) -> bool:
+        """Return whether two strings name the same image repository."""
+        return (
+            isinstance(left, str)
+            and isinstance(right, str)
+            and _docker_image_repository(left) == _docker_image_repository(right)
+        )
+
+    @staticmethod
+    def _docker_option_requires_value(argument: Any) -> bool:
+        """Return whether a Docker run option needs a separate value."""
+        if not isinstance(argument, str) or "=" in argument:
+            return False
+        if argument.startswith("--"):
+            return argument in _DOCKER_RUN_OPTIONS_WITH_VALUES
+        if not argument.startswith("-") or argument == "-":
+            return False
+        short_options = argument[1:]
+        for index, short_name in enumerate(short_options):
+            if f"-{short_name}" in _DOCKER_RUN_OPTIONS_WITH_VALUES:
+                return index == len(short_options) - 1
+        return False
+
+    @classmethod
+    def _docker_image_arg_index(
+        cls,
+        runtime_args: list[Any],
+        image: str | None,
+    ) -> int | None:
+        """Return the matching Docker image operand index, or None."""
+        if not image or not runtime_args or runtime_args[0] != "run":
+            return None
+        index = 1
+        while index < len(runtime_args):
+            argument = runtime_args[index]
+            if argument == "--":
+                index += 1
+                break
+            if isinstance(argument, str) and argument.startswith("--"):
+                option = argument.split("=", 1)[0]
+                consumes_next = "=" not in argument and option in _DOCKER_RUN_OPTIONS_WITH_VALUES
+                if consumes_next and index + 1 >= len(runtime_args):
+                    raise ValueError(f"Docker run option '{option}' requires a value")
+                index += 2 if consumes_next else 1
+                continue
+            if isinstance(argument, str) and argument.startswith("-") and argument != "-":
+                consumes_next = cls._docker_option_requires_value(argument)
+                if consumes_next and index + 1 >= len(runtime_args):
+                    raise ValueError(f"Docker run option '{argument}' requires a value")
+                index += 2 if consumes_next else 1
+                continue
+            break
+        if index >= len(runtime_args):
+            return None
+        candidate = runtime_args[index]
+        if cls._docker_image_references_match(candidate, image):
+            return index
+        return None
+
+    @classmethod
+    def _ensure_docker_image_arg(
+        cls,
+        runtime_args: list[Any],
+        image: str | None,
+    ) -> list[Any]:
+        """Return *runtime_args* with the container image operand present.
+
+        ``docker run [OPTIONS] IMAGE`` needs the image after the run options.
+        Registries that list it as the last ``runtime_arguments`` entry already
+        satisfy that; registries that expose it only as the package
+        ``identifier`` leave the resolved args ending at the last option, which
+        would render an image-less ``docker run`` that fails on invocation
+        (#2376).
+
+        The image is appended only when no argument already references the same
+        repository. Comparison is on the repository component, so a digest- or
+        tag-pinned identifier still matches a differently-pinned argument
+        instead of being appended a second time -- a duplicate operand would be
+        parsed by Docker as the container command and break a launcher that
+        previously worked.
+
+        Args:
+            runtime_args (list): Resolved registry runtime arguments.
+            image (str): Container image reference from the package entry.
+
+        Returns:
+            list: A new list of ``docker run`` arguments.
+        """
+        runtime_args = list(runtime_args)
+        if not image:
+            return runtime_args
+        if cls._docker_image_arg_index(runtime_args, image) is not None:
+            return runtime_args
+        runtime_args.append(image)
+        return runtime_args
 
     @classmethod
     def _select_best_package(cls, packages):

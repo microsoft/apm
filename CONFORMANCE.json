@@ -1194,6 +1194,17 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_project_compile_guidance_for_dependency_instructions"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-008",
+      "keyword": "MUST",
+      "section": "8.5.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only"
+      ]
     }
   ],
   "spec_version": "v0.1.1",

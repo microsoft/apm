@@ -1,6 +1,6 @@
 lockfile_version: '1'
-generated_at: '2026-07-16T10:55:54.310339+00:00'
-apm_version: 0.25.0
+generated_at: '2026-07-31T12:14:04.210842+00:00'
+apm_version: 0.26.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
   name: apm-issue-autopilot
@@ -275,384 +275,6 @@ dependencies:
 deployments:
 - kind: project-relative
   target: agents
-  value: .agents/skills/apm-issue-autopilot
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: null
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:9872bd7ada9903073c663a5b1d1bfaa15743d4bcb2f450631a4da610b1fd0a6e
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:35d672ce4584fb576b3c16ce4dffbe29de6b3f6711725855b3c6eb0f338d464d
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:2d6eff739cd4ac1eb4533868cbdcf0c44d469ae247447f29595d05858b2d8a97
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/final-report-template.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:8088fe8f5bb9fd1ec93fbe806971465bb7f6850019af5be1a329e252d4818df2
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/ground-truth-table.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:00dd5a35ef0b39ba299e5fcd7f9ca682fc322792ec20440f7861edd39997d40e
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/ideate-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:abab1a5e2a765229d1cdd215b90c57036cdb4b2764866b68399eb81a51362ddc
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/implement-bug.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:4c74c8dfa0f98987ab5beede16d3e8c0e8113fac60955826d2ed61949624bcc5
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/implement-docs.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:81f2f9b617587df4a6f422838b05c63a5e05e0c8afd6d80952a9aa5cdad88b5a
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/implement-feature.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:394b25a0b0b41b0f99b250590af782968c0f25673c156d0b87d4f1f9b205de75
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/implement-refactor.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:5175ea7edefdaaf787d1701ba6f7fce8433d04134718d9a6445ca524ececa3bc
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/model-routing.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:4d1ffaf63fab75a7a7de265ff77d457c0636939d36a373dc9ce485ba76275209
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/plan-panel-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:422daafc8fcdf26f1096787075b2e8c15722df6b51e1d1784ea3b1435809b09f
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/plan-schema.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:812487116b89e66414562312992204dfb3132cc5e9265392b718d78e33cd9973
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/task-implement-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/triage-digest-template.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:78c2e7be93543122e485eb494a2b50ecac6e18d7e077a9e8edde12b478242ca9
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/triage-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:5136ab42be575b58730a8d8a1614394813014ca74e2d6df3e56948e94c419470
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/assets/wave-gate-rubric.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:a8bf5270c8d63c1d9ffcf0b3f18ba22d591b062e7b969982320150986ab211cd
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/.gitignore
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/README.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:79bb6636a89edce40fc24bde9576e351de57a0f828181def37c423a284cd1ef8
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/content/gate-escalate-doubtful.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:20bcabed2b58be8552421f68e9522cea3a1206a1796c26d2f77e65a3982d438f
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/content/gate-proceed-clean-accept.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:f304138fe9aafe48989710bd2c68238342b32e643281f9747c0678b7cb1ae244
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/content/mixed-types-one-review.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:df2b1b66e1ec64743cc8d66e465e5cca931de6fb51974cc51c81908efad58eb5
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/evals.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:a94ed339f171e7ca557df3e7ed10c8e55f9a14befcba940b7263c9d7fe4d8ca1
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/real-task-refinement.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:183d6d7270dc5f865a02d42643ba0afbae9046509f0e3b2481559fc9c1dcb64a
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/evals/triggers.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:59bbb6e937d6de8db69aee4478989fccff561c77e86cc6894e7994eb841defd0
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-issue-autopilot/scripts/run_evals.py
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:8f4580cb2bdb88e7e570e4feb60cbf244d7fbe3e8217a8eadfd9dff2c763b615
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: null
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:c9fee6c311b23b6ea72b06a424c8ba21c5d88bcc833e65259b7e0212aa73abbb
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/apm.yml
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:80c403c4d3c59a91bb27b85650e21a466e9cd0cbc28e92bf0f3e53c6ea71cb2c
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/assets/ceo-return-schema.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:d8707211968efb0471d083f880d5353d66a0eda84635e803a930f60c91837468
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/assets/panelist-return-schema.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:e3cf2ae17e93dd934f2659ed77d2640ea9601fbe8698f63ba800edf046691f99
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/assets/recommendation-template.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:ed973263897671ea04c980cb54c76b33aaa9bb7d1b5b24082df89b388d4329b8
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/evals/README.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:40e7abb1fa15403a71505797e23dde8433f31ca70546657886c3f9760974bfb8
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.rendered.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:ca1fdd3cd24e0fd8ec15b37690c597921ebf1c872270166edb2727d54ee155d8
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.rendered.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/evals/render_eval.py
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-review-panel/evals/trigger-evals.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
-  content_hash: sha256:c715ba52cd2131f294c1cf685a10995a08e4ee6971f97cf5d36e09df28d3af91
-- kind: project-relative
-  target: agents
   value: .agents/skills/apm-spec-guardian
   runtime: null
   scope: project
@@ -686,7 +308,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:4b71113da805c5504b4d74029f3113402044bc7e5c48abd010c0b8df3f18938b
+  content_hash: sha256:63bea701baffd9b2a6769aaf919f2a0ff1d017e4c7426728bb6379b8b8892b03
 - kind: project-relative
   target: agents
   value: .agents/skills/apm-spec-guardian/assets/panelist-return-schema.json
@@ -725,42 +347,6 @@ deployments:
   content_hash: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
 - kind: project-relative
   target: agents
-  value: .agents/skills/apm-triage-panel
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-triage-panel
-  active_owner: local:packages/apm-triage-panel
-  content_hash: null
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-triage-panel/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-triage-panel
-  active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:2ef70329aefd0cbec1302aad3975f6caa0a27654d58005bba622ef1021267d1e
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-triage-panel/apm.yml
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-triage-panel
-  active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:e8b7946f433abdc8342241483963bac2895182916ea66f5aa39497d00c7930a4
-- kind: project-relative
-  target: agents
-  value: .agents/skills/apm-triage-panel/assets/triage-template.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/apm-triage-panel
-  active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:69a027959eaec5335668e087c86babd814ba20cf21662ed524cf285b178e21d1
-- kind: project-relative
-  target: agents
   value: .agents/skills/auth
   runtime: null
   scope: project
@@ -777,204 +363,6 @@ deployments:
   - .
   active_owner: .
   content_hash: sha256:bf1039cb63dbb968d50dbf4a9e4ceec9a4c30e40e8dd666d404f1c39eda55bc0
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: null
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:c5b0f8752e726d123f61491c959681134882dfddbc9f5d15ac5c47e55931375f
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/assets/final-report-template.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/assets/fix-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:ea4fde3d619f12fc7e05f27d6b440b48f3ef66cb9509b2efb85aed66439438f9
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:981ebeee98596beb6a00db6edb35a8e871acdd52a938faa8d8915edfd01ba15b
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/assets/progress-diagram.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:72c4606899f50b0761a7683f6ab17878472bc45b18fe03869aae65e3bd6a7bb2
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/assets/strategic-alignment-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:67db0bb51d6cbdafad4ea8224ab2012f02e6341b2fd4eb7a09b2a24cc9cb4d7e
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/assets/triage-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:51bab548ac85044400b77858c6a1554f59bda197c388d9a8546076d87380b060
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/assets/verdict-schema.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:d82b7ed0791b89617be965097fce1ace9ec6f6b5a33d9a1567cdf4b3651cd83a
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/.gitignore
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/README.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:7d0a5c983612953289a8e34c0b95995ccad7273653c4ab145c3f10b9adafa905
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/content/sweep-bug-queue.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:f865943bbe523d22555d6e69834f47364237ce27388cb7732795a6887f6820ee
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/content/three-issues-mixed.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:9c2b0f108e958fc7d779cb9222339b12310307f7a2a2c87d83c715d0d0c3460b
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/evals.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:0b47a8ea4c49c375a575d0f44d488b65c0d797bff5022ebb79746808495dab26
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/fixtures/sweep-bug-queue.with_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:0dbfab6bc74cb2b92bbf25d08196b1405669a3e6841be41915f00a1ea54ff950
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/fixtures/sweep-bug-queue.without_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:83a2a11ac6dc2a188bb95a92f24dc7f94568f8af30ec4979ae85f52bd3102ee6
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/fixtures/three-issues-mixed.with_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:ab8707f0842af611fe135029a7002356a0bececfbb3abbe442dbc196d48be7ed
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/fixtures/three-issues-mixed.without_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:8bf17d4cdc3c10beb54bcb1348efb4a111846d49d9548ca714e4354b4eccff22
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/evals/triggers.json
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:f195dc4b80b66f23a5fd9cfc6c60cf3fa1bba5b09b97f044d31f8dae27445470
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/references/invariants.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:3af10723afea02e7d4c4cb7ae08cb60eee621da3a3d0ffb1f041b70fb29fb6cd
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/references/strategic-alignment-gate.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:66613a8344411a2f9d5147b4acea798887bed20132ffd27bac9b3f5ba6bb65ed
-- kind: project-relative
-  target: agents
-  value: .agents/skills/batch-bug-shepherd/scripts/run_evals.py
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:ecc003164e65cb002f301a7cdff9c0a2e39eddc35a81ede63da8934519e483c9
 - kind: project-relative
   target: agents
   value: .agents/skills/cli-logging-ux
@@ -2228,204 +1616,6 @@ deployments:
   content_hash: sha256:90b5d0369032de850f2255910f4cf5caafb7d60f07bda8a2146d394bfa459918
 - kind: project-relative
   target: agents
-  value: .agents/skills/pr-description-skill
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: null
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:d07254e9d0b95ea52d1a81d3262ca42da8c4c51d801eac4f11b6bc454cfb01a0
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/apm.yml
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:ee9bb48581e62279708a9a12dc57174c9f5f7d347a384e4ca6b99c050c63879d
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/assets/mermaid-conventions.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:3d9c7adf95d40db00833ec087d699a7d04b3d799e9b9d07271cf2ae7d51524ca
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/assets/pr-body-template.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:aaeb885fbfa87364724f575eb150c9c39dc3cb60ab0459972e76185df9c98f97
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/assets/scenario-evidence-rubric.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:bbb386b6f48974bbb78a380fd4674ed7a3a81810a6c2136e30c80158153596ae
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/assets/section-rubric.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:f07fbbc5c741c4fd30f32edec985d8301d20e3deebb1761dd92b04da51c5e42d
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/.gitignore
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:dc810cf3561d22d2d47b89fd0697de46aff0068819b3514577842cb2a2a1c332
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/README.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:92b4529515917d25cbf5e597d1d46751e602dd4eb80be20a97ac81597f410cd0
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/content/auth-refactor.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:86791ada2f4983fde709237eaae9ef9c5a0f87a28f14e8b0f26b4b7e5b0e73c9
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/content/dep-bump.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:5136278ecf83a6c3a618176810ef62634cc988527dcdb8bd343ae83278f9e1d7
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/content/docs-only.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:78a6f98f939b1b8e0efa1b67a57a4b9008ddffd3b4f02fbde4f9843c4f29b39a
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/evals.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:1d137370f60955469a089a7ef085371aa14bbb74a80675957f4d6e0a694252cc
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/fixtures/auth-refactor__with_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:b5ebacb04c4ace19e0d634e9b9104ef70b72330afb9f29ac0de07a03f1e78628
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/fixtures/auth-refactor__without_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:81c42403d4f1406ba2689106bb6e1cdf0a74f1921681f6e096cefac0c46efd46
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/fixtures/dep-bump__with_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:60df233958541ed42b94c1751a3d2d99324ec83f263fa0becc3abcb4a682ee91
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/fixtures/dep-bump__without_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:1410a89d81b6745d14242181197d2d05ec5aba5078f1ad3ae702e3341a3fc798
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/fixtures/docs-only__with_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:e4ca53c7dc8c8a65f4945e2e4e4cc878b433c5662d13c5b613d957d6d505029c
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/fixtures/docs-only__without_skill.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:7e790d6711b8a33702c6bf0f7486e1928c58c60b4dad0a998c570a07d6a05fec
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/results/.gitkeep
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/evals/triggers.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:6762c7f071195491700cc59ce5329ff185b0493682c93efdcf01db8fb522bbe4
-- kind: project-relative
-  target: agents
-  value: .agents/skills/pr-description-skill/scripts/run_evals.py
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/pr-description-skill
-  active_owner: local:packages/pr-description-skill
-  content_hash: sha256:a1792f8cb95b4fb37a4133af079908e2a3b5643c1a81d97e4dcda399bac069a2
-- kind: project-relative
-  target: agents
   value: .agents/skills/python-architecture
   runtime: null
   scope: project
@@ -2442,114 +1632,6 @@ deployments:
   - .
   active_owner: .
   content_hash: sha256:f06e50b8c40d7e5a732a5405a603efd80da58de2b6f6b293f0f6b58f28eefe7b
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: null
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:71773e1ad047d7f12e9d4f416606e961a35dc7dc1cc92cb02ce4c10d1a33e32d
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/apm.yml
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:d53355a3862fee76c099f99eeb49ed6fd9ce1c24d648451ce9a2efdced9fda4b
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/assets/ci-recovery-checklist.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:21801867a8459d9713e45efe68e612c4d22a2cb577c23eceab55cd855bbd23ef
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/assets/completion-schema.json
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:11dd97df9308cd868ddb3c7c7c398f59f3b07d571d790d2a1ec8537f2feba4ca
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/assets/conflict-resolution-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:453237e56043e4008c37c5a89d9da5e77a1fa46b028ea172321dcc39a737c679
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/assets/copilot-classification-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:71c0ad6c5d2c422dcc7fc0c44e13d8b3b049b37c04418ade7daf9722fe115c1f
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/assets/fold-vs-defer-rubric.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:50ece018b83c70508ca3fc4b3d267e39df2de4497938ce4aa56d3b49c594f75f
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/assets/pr-comment-templates.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:24fe0ec64286c7b39037a5e93acfa607a43dbb4763d653f3955a1c4d65d68882
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:48f5f9276f92984480dba4f0d54ecc5b612b6c72f313fd5222962dffd75ed0ed
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/references/mergeability-gate.md
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:90bf5cd838d1025dd0fa223a0843be926cd509c85c91ef683cc9bfc98b5e8785
-- kind: project-relative
-  target: agents
-  value: .agents/skills/shepherd-driver/scripts/owner_touch_gate.py
-  runtime: null
-  scope: project
-  owners:
-  - local:packages/shepherd-driver
-  active_owner: local:packages/shepherd-driver
-  content_hash: sha256:f78a10e6a972046d212720372a1bf6971fd8cbadd0eb78c06c1a48f333fcd5b5
 - kind: project-relative
   target: agents
   value: .agents/skills/supply-chain-security
@@ -2586,6 +1668,924 @@ deployments:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
   content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:9872bd7ada9903073c663a5b1d1bfaa15743d4bcb2f450631a4da610b1fd0a6e
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:35d672ce4584fb576b3c16ce4dffbe29de6b3f6711725855b3c6eb0f338d464d
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:2d6eff739cd4ac1eb4533868cbdcf0c44d469ae247447f29595d05858b2d8a97
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/final-report-template.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:8088fe8f5bb9fd1ec93fbe806971465bb7f6850019af5be1a329e252d4818df2
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/ground-truth-table.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:00dd5a35ef0b39ba299e5fcd7f9ca682fc322792ec20440f7861edd39997d40e
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/ideate-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:abab1a5e2a765229d1cdd215b90c57036cdb4b2764866b68399eb81a51362ddc
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/implement-bug.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:4c74c8dfa0f98987ab5beede16d3e8c0e8113fac60955826d2ed61949624bcc5
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/implement-docs.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:81f2f9b617587df4a6f422838b05c63a5e05e0c8afd6d80952a9aa5cdad88b5a
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/implement-feature.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:394b25a0b0b41b0f99b250590af782968c0f25673c156d0b87d4f1f9b205de75
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/implement-refactor.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:5175ea7edefdaaf787d1701ba6f7fce8433d04134718d9a6445ca524ececa3bc
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/model-routing.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:4d1ffaf63fab75a7a7de265ff77d457c0636939d36a373dc9ce485ba76275209
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/plan-panel-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:422daafc8fcdf26f1096787075b2e8c15722df6b51e1d1784ea3b1435809b09f
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/plan-schema.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:812487116b89e66414562312992204dfb3132cc5e9265392b718d78e33cd9973
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/task-implement-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/triage-digest-template.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:78c2e7be93543122e485eb494a2b50ecac6e18d7e077a9e8edde12b478242ca9
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/triage-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:5136ab42be575b58730a8d8a1614394813014ca74e2d6df3e56948e94c419470
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/assets/wave-gate-rubric.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:a8bf5270c8d63c1d9ffcf0b3f18ba22d591b062e7b969982320150986ab211cd
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/.gitignore
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/README.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:79bb6636a89edce40fc24bde9576e351de57a0f828181def37c423a284cd1ef8
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/content/gate-escalate-doubtful.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:20bcabed2b58be8552421f68e9522cea3a1206a1796c26d2f77e65a3982d438f
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/content/gate-proceed-clean-accept.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:f304138fe9aafe48989710bd2c68238342b32e643281f9747c0678b7cb1ae244
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/content/mixed-types-one-review.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:df2b1b66e1ec64743cc8d66e465e5cca931de6fb51974cc51c81908efad58eb5
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/evals.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:a94ed339f171e7ca557df3e7ed10c8e55f9a14befcba940b7263c9d7fe4d8ca1
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/real-task-refinement.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:183d6d7270dc5f865a02d42643ba0afbae9046509f0e3b2481559fc9c1dcb64a
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/evals/triggers.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:59bbb6e937d6de8db69aee4478989fccff561c77e86cc6894e7994eb841defd0
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-issue-autopilot/scripts/run_evals.py
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: sha256:8f4580cb2bdb88e7e570e4feb60cbf244d7fbe3e8217a8eadfd9dff2c763b615
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:c9fee6c311b23b6ea72b06a424c8ba21c5d88bcc833e65259b7e0212aa73abbb
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/apm.yml
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:80c403c4d3c59a91bb27b85650e21a466e9cd0cbc28e92bf0f3e53c6ea71cb2c
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/assets/ceo-return-schema.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:d8707211968efb0471d083f880d5353d66a0eda84635e803a930f60c91837468
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/assets/panelist-return-schema.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:e3cf2ae17e93dd934f2659ed77d2640ea9601fbe8698f63ba800edf046691f99
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/assets/recommendation-template.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:ed973263897671ea04c980cb54c76b33aaa9bb7d1b5b24082df89b388d4329b8
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/evals/README.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:40e7abb1fa15403a71505797e23dde8433f31ca70546657886c3f9760974bfb8
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.rendered.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:ca1fdd3cd24e0fd8ec15b37690c597921ebf1c872270166edb2727d54ee155d8
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.rendered.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/evals/render_eval.py
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-review-panel/evals/trigger-evals.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-review-panel
+  active_owner: local:packages/apm-review-panel
+  content_hash: sha256:c715ba52cd2131f294c1cf685a10995a08e4ee6971f97cf5d36e09df28d3af91
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-triage-panel
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-triage-panel
+  active_owner: local:packages/apm-triage-panel
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-triage-panel/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-triage-panel
+  active_owner: local:packages/apm-triage-panel
+  content_hash: sha256:2ef70329aefd0cbec1302aad3975f6caa0a27654d58005bba622ef1021267d1e
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-triage-panel/apm.yml
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-triage-panel
+  active_owner: local:packages/apm-triage-panel
+  content_hash: sha256:e8b7946f433abdc8342241483963bac2895182916ea66f5aa39497d00c7930a4
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-triage-panel/assets/triage-template.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-triage-panel
+  active_owner: local:packages/apm-triage-panel
+  content_hash: sha256:69a027959eaec5335668e087c86babd814ba20cf21662ed524cf285b178e21d1
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:c5b0f8752e726d123f61491c959681134882dfddbc9f5d15ac5c47e55931375f
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/assets/final-report-template.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/assets/fix-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:ea4fde3d619f12fc7e05f27d6b440b48f3ef66cb9509b2efb85aed66439438f9
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:981ebeee98596beb6a00db6edb35a8e871acdd52a938faa8d8915edfd01ba15b
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/assets/progress-diagram.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:72c4606899f50b0761a7683f6ab17878472bc45b18fe03869aae65e3bd6a7bb2
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/assets/strategic-alignment-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:67db0bb51d6cbdafad4ea8224ab2012f02e6341b2fd4eb7a09b2a24cc9cb4d7e
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/assets/triage-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:51bab548ac85044400b77858c6a1554f59bda197c388d9a8546076d87380b060
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/assets/verdict-schema.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:d82b7ed0791b89617be965097fce1ace9ec6f6b5a33d9a1567cdf4b3651cd83a
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/.gitignore
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/README.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:7d0a5c983612953289a8e34c0b95995ccad7273653c4ab145c3f10b9adafa905
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/content/sweep-bug-queue.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:f865943bbe523d22555d6e69834f47364237ce27388cb7732795a6887f6820ee
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/content/three-issues-mixed.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:9c2b0f108e958fc7d779cb9222339b12310307f7a2a2c87d83c715d0d0c3460b
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/evals.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:0b47a8ea4c49c375a575d0f44d488b65c0d797bff5022ebb79746808495dab26
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/fixtures/sweep-bug-queue.with_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:0dbfab6bc74cb2b92bbf25d08196b1405669a3e6841be41915f00a1ea54ff950
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/fixtures/sweep-bug-queue.without_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:83a2a11ac6dc2a188bb95a92f24dc7f94568f8af30ec4979ae85f52bd3102ee6
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/fixtures/three-issues-mixed.with_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:ab8707f0842af611fe135029a7002356a0bececfbb3abbe442dbc196d48be7ed
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/fixtures/three-issues-mixed.without_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:8bf17d4cdc3c10beb54bcb1348efb4a111846d49d9548ca714e4354b4eccff22
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/evals/triggers.json
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:f195dc4b80b66f23a5fd9cfc6c60cf3fa1bba5b09b97f044d31f8dae27445470
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/references/invariants.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:3af10723afea02e7d4c4cb7ae08cb60eee621da3a3d0ffb1f041b70fb29fb6cd
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/references/strategic-alignment-gate.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:66613a8344411a2f9d5147b4acea798887bed20132ffd27bac9b3f5ba6bb65ed
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/batch-bug-shepherd/scripts/run_evals.py
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: sha256:ecc003164e65cb002f301a7cdff9c0a2e39eddc35a81ede63da8934519e483c9
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:d07254e9d0b95ea52d1a81d3262ca42da8c4c51d801eac4f11b6bc454cfb01a0
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/apm.yml
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:ee9bb48581e62279708a9a12dc57174c9f5f7d347a384e4ca6b99c050c63879d
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/assets/mermaid-conventions.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:3d9c7adf95d40db00833ec087d699a7d04b3d799e9b9d07271cf2ae7d51524ca
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/assets/pr-body-template.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:aaeb885fbfa87364724f575eb150c9c39dc3cb60ab0459972e76185df9c98f97
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/assets/scenario-evidence-rubric.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:bbb386b6f48974bbb78a380fd4674ed7a3a81810a6c2136e30c80158153596ae
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/assets/section-rubric.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:f07fbbc5c741c4fd30f32edec985d8301d20e3deebb1761dd92b04da51c5e42d
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/.gitignore
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:dc810cf3561d22d2d47b89fd0697de46aff0068819b3514577842cb2a2a1c332
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/README.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:92b4529515917d25cbf5e597d1d46751e602dd4eb80be20a97ac81597f410cd0
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/content/auth-refactor.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:86791ada2f4983fde709237eaae9ef9c5a0f87a28f14e8b0f26b4b7e5b0e73c9
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/content/dep-bump.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:5136278ecf83a6c3a618176810ef62634cc988527dcdb8bd343ae83278f9e1d7
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/content/docs-only.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:78a6f98f939b1b8e0efa1b67a57a4b9008ddffd3b4f02fbde4f9843c4f29b39a
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/evals.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:1d137370f60955469a089a7ef085371aa14bbb74a80675957f4d6e0a694252cc
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/fixtures/auth-refactor__with_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:b5ebacb04c4ace19e0d634e9b9104ef70b72330afb9f29ac0de07a03f1e78628
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/fixtures/auth-refactor__without_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:81c42403d4f1406ba2689106bb6e1cdf0a74f1921681f6e096cefac0c46efd46
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/fixtures/dep-bump__with_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:60df233958541ed42b94c1751a3d2d99324ec83f263fa0becc3abcb4a682ee91
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/fixtures/dep-bump__without_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:1410a89d81b6745d14242181197d2d05ec5aba5078f1ad3ae702e3341a3fc798
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/fixtures/docs-only__with_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:e4ca53c7dc8c8a65f4945e2e4e4cc878b433c5662d13c5b613d957d6d505029c
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/fixtures/docs-only__without_skill.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:7e790d6711b8a33702c6bf0f7486e1928c58c60b4dad0a998c570a07d6a05fec
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/results/.gitkeep
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/evals/triggers.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:6762c7f071195491700cc59ce5329ff185b0493682c93efdcf01db8fb522bbe4
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pr-description-skill/scripts/run_evals.py
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/pr-description-skill
+  active_owner: local:packages/pr-description-skill
+  content_hash: sha256:a1792f8cb95b4fb37a4133af079908e2a3b5643c1a81d97e4dcda399bac069a2
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:71773e1ad047d7f12e9d4f416606e961a35dc7dc1cc92cb02ce4c10d1a33e32d
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/apm.yml
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:d53355a3862fee76c099f99eeb49ed6fd9ce1c24d648451ce9a2efdced9fda4b
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/assets/ci-recovery-checklist.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:21801867a8459d9713e45efe68e612c4d22a2cb577c23eceab55cd855bbd23ef
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/assets/completion-schema.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:11dd97df9308cd868ddb3c7c7c398f59f3b07d571d790d2a1ec8537f2feba4ca
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/assets/conflict-resolution-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:453237e56043e4008c37c5a89d9da5e77a1fa46b028ea172321dcc39a737c679
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/assets/copilot-classification-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:71c0ad6c5d2c422dcc7fc0c44e13d8b3b049b37c04418ade7daf9722fe115c1f
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/assets/fold-vs-defer-rubric.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:50ece018b83c70508ca3fc4b3d267e39df2de4497938ce4aa56d3b49c594f75f
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/assets/pr-comment-templates.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:24fe0ec64286c7b39037a5e93acfa607a43dbb4763d653f3955a1c4d65d68882
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:48f5f9276f92984480dba4f0d54ecc5b612b6c72f313fd5222962dffd75ed0ed
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/references/mergeability-gate.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:90bf5cd838d1025dd0fa223a0843be926cd509c85c91ef683cc9bfc98b5e8785
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/shepherd-driver/scripts/owner_touch_gate.py
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/shepherd-driver
+  active_owner: local:packages/shepherd-driver
+  content_hash: sha256:f78a10e6a972046d212720372a1bf6971fd8cbadd0eb78c06c1a48f333fcd5b5
 - kind: project-relative
   target: copilot
   value: .github/agents/agentic-workflows.agent.md
@@ -2783,7 +2783,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8743aaf262f1dbc78a64beb932c3bddd9358e8841a3f25e4d7953206b7b4f483
+  content_hash: sha256:e12856cfe010f14aeb4e4f936014ee44f2b03d377d48e444f551a97211679dc4
 - kind: project-relative
   target: copilot
   value: .github/instructions/changelog.instructions.md
@@ -3053,7 +3053,7 @@ local_deployed_files:
 local_deployed_file_hashes:
   .agents/skills/apm-spec-guardian/SKILL.md: sha256:5e2b98792b458ca946d3bfc06a1e0c661f9a0dc05a4606602eb71d7d8afae4dd
   .agents/skills/apm-spec-guardian/assets/comment-template.md: sha256:8f5703aa98d1036d2418ffa45eac9d0270504dac33f3e9b1892884a9d48da1a6
-  .agents/skills/apm-spec-guardian/assets/linter-checklist.md: sha256:4b71113da805c5504b4d74029f3113402044bc7e5c48abd010c0b8df3f18938b
+  .agents/skills/apm-spec-guardian/assets/linter-checklist.md: sha256:63bea701baffd9b2a6769aaf919f2a0ff1d017e4c7426728bb6379b8b8892b03
   .agents/skills/apm-spec-guardian/assets/panelist-return-schema.json: sha256:bb66b270394c386665c6b93d83befe05ce9f8206abf8d656079c29d65729fefd
   .agents/skills/apm-spec-guardian/assets/synthesizer-return-schema.json: sha256:e6e2771f2fe8578e72d12e51edcc3817717f8a0bbef66d8a8a5c556f0dce06d7
   .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
@@ -3290,7 +3290,7 @@ local_deployed_file_hashes:
   .github/agents/spec-tag-architect.agent.md: sha256:82907265c5e7cf1ac61ad96866fa7c5683b69c8f09b7a4c5f3cc241acc9568ca
   .github/agents/supply-chain-security-expert.agent.md: sha256:8fb8cc426d6af17ba084a28b3f026c2b475b62e3ca63ed2f88b83bd823f877af
   .github/agents/test-coverage-expert.agent.md: sha256:48c2172d1f18a394fa83ef9dc2be0b9b921a4e51e976498165250fed66369711
-  .github/instructions/architecture.instructions.md: sha256:8743aaf262f1dbc78a64beb932c3bddd9358e8841a3f25e4d7953206b7b4f483
+  .github/instructions/architecture.instructions.md: sha256:e12856cfe010f14aeb4e4f936014ee44f2b03d377d48e444f551a97211679dc4
   .github/instructions/changelog.instructions.md: sha256:1e51ec4c74e847967962bd279dc4c6e582c5d3578490b3c28d5f3acd3e05f73e
   .github/instructions/cicd.instructions.md: sha256:08d87b7d635761cb41deb8fc71d5d83f54678de463db484afb16d2d4f8713ecb
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a

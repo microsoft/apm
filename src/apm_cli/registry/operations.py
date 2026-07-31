@@ -280,20 +280,25 @@ class MCPServerOperations:
                 if not server_info:
                     continue
 
-                # Extract runtime variables from runtime_arguments
+                # Extract runtime variables from both Docker argument phases.
                 packages = server_info.get("packages", [])
                 for package in packages:
                     if isinstance(package, dict):
-                        runtime_arguments = package.get("runtime_arguments", [])
-                        for arg in runtime_arguments:
-                            if isinstance(arg, dict) and "variables" in arg:
-                                variables = arg.get("variables", {})
-                                for var_name, var_info in variables.items():
-                                    if isinstance(var_info, dict):
-                                        collected_runtime_vars[var_name] = {
-                                            "description": var_info.get("description", ""),
-                                            "required": var_info.get("is_required", True),
-                                        }
+                        for field_name in ("runtime_arguments", "package_arguments"):
+                            for arg in package.get(field_name, []):
+                                if isinstance(arg, dict) and "variables" in arg:
+                                    variables = arg.get("variables", {})
+                                    if not isinstance(variables, dict):
+                                        continue
+                                    for var_name, var_info in variables.items():
+                                        if isinstance(var_info, dict):
+                                            collected_runtime_vars[var_name] = {
+                                                "description": var_info.get("description", ""),
+                                                "required": var_info.get(
+                                                    "is_required",
+                                                    var_info.get("isRequired", True),
+                                                ),
+                                            }
 
             except Exception:  # noqa: S112
                 # Skip servers we can't analyze

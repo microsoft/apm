@@ -35,7 +35,7 @@ import types
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.deps.tiered_ref_resolver import build_tiered_ref_resolver
+from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy, build_tiered_ref_resolver
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
@@ -121,6 +121,10 @@ def _lockfile_with_branch_pin():
 def _ctx(*, resolver, lockfile, update_refs=False, refresh=False):
     return types.SimpleNamespace(
         ref_resolver=resolver,
+        ref_freshness_policy=RefFreshnessPolicy.for_install_intent(
+            update_refs=update_refs,
+            refresh=refresh,
+        ),
         existing_lockfile=lockfile,
         update_refs=update_refs,
         refresh=refresh,
@@ -182,14 +186,93 @@ def test_update_refs_skips_seed_and_reresolves_over_network():
     re-resolves the branch from the network. Proves the optimization does NOT
     degrade the intentional re-resolve paths end-to-end.
     """
-    downloader, resolver, fake_refs = _downloader_with_real_tiered_resolver()
+    downloader, resolver, _fake_refs = _downloader_with_real_tiered_resolver()
     lockfile = _lockfile_with_branch_pin()
 
     seed_ref_resolver_from_lockfile(_ctx(resolver=resolver, lockfile=lockfile, update_refs=True))
 
+    downloader.resolve_git_reference(DependencyReference(repo_url=REPO, reference=BRANCH))
+
+    assert resolver.stats["commits_api"] == 1
+
+
+# ---------------------------------------------------------------------------
+# #2342 regression: update mode must NOT read stale local bare cache
+# ---------------------------------------------------------------------------
+
+# SHA that a stale L2BareRevParse would have returned (old commit in bare).
+STALE_SHA = "c" * 40
+
+
+class _FakeUpdateModeRefs:
+    """Stand-in for ``downloader._refs`` used in the #2342 regression test.
+
+    Makes the L1 commits-API path unavailable and returns NETWORK_SHA from the
+    authenticated L3 legacy-clone path. The test proves the stale L2 answer is
+    bypassed when current remote state is required.
+    """
+
+    def __init__(self) -> None:
+        self.commits_api_calls = 0
+        self.legacy_clone_calls = 0
+
+    def resolve_commit_sha_for_ref(self, dep_ref, ref):
+        self.commits_api_calls += 1
+
+    def resolve(self, repo_ref):
+        self.legacy_clone_calls += 1
+        dep = DependencyReference.parse(repo_ref) if isinstance(repo_ref, str) else repo_ref
+        return ResolvedReference(
+            original_ref=str(dep),
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit=NETWORK_SHA,
+            ref_name=dep.reference or BRANCH,
+        )
+
+
+def test_update_mode_bypasses_stale_bare_cache():
+    """Regression for #2342: update_refs=True must exclude L2BareRevParse.
+
+    Scenario mirrors the bug report:
+    - A bare-repo cache exists locally with refs pointing at STALE_SHA.
+    - The upstream has advanced to NETWORK_SHA.
+    - ``apm update`` (update_refs=True) must return NETWORK_SHA, not STALE_SHA.
+
+    The resolution waterfall is L0 (miss) -> L1 (unavailable) -> L3
+    (authenticated clone = NETWORK_SHA). STALE_SHA is never consulted.
+    """
+    from apm_cli.deps.tiered_ref_resolver import L2BareRevParse
+
+    downloader = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
+    fake_refs = _FakeUpdateModeRefs()
+    downloader._refs = fake_refs
+
+    # Build the resolver in update mode -- L2BareRevParse must be excluded.
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        git_cache=None,
+        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+    )
+    assert resolver is not None, "tiered resolver must be enabled by default"
+    downloader._tiered_resolver = resolver
+
+    # Confirm L2 is absent from the stack (the structural fix).
+    tier_names = [t.name for t in resolver._tiers]
+    assert "bare_rev_parse" not in tier_names, (
+        "L2BareRevParse must not be in the tier stack when update_refs=True (#2342)"
+    )
+    assert not any(isinstance(t, L2BareRevParse) for t in resolver._tiers)
+
+    # Resolve the branch ref -- must return the fresh upstream SHA, not STALE_SHA.
     result = downloader.resolve_git_reference(DependencyReference(repo_url=REPO, reference=BRANCH))
 
-    # Seed was skipped -> commits-API tier re-resolves the ref.
-    assert result.resolved_commit == NETWORK_SHA
+    assert result.resolved_commit == NETWORK_SHA, (
+        f"Expected fresh upstream SHA {NETWORK_SHA[:12]} but got {result.resolved_commit[:12]}. "
+        "L2BareRevParse may be returning a stale cached value (#2342)."
+    )
+    assert result.resolved_commit != STALE_SHA
+    # L1 was unavailable, so the authenticated L3 transport established truth.
     assert fake_refs.commits_api_calls == 1
-    assert resolver.stats["commits_api"] == 1
+    assert fake_refs.legacy_clone_calls == 1
+    assert resolver.stats["commits_api"] == 0
+    assert resolver.stats["legacy_clone"] == 1

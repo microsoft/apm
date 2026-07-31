@@ -345,6 +345,33 @@ class TestCollectRuntimeVariables:
         result = ops.collect_runtime_variables(["server-a"], server_info_cache=cache)
         assert "MY_VAR" in result
 
+    def test_collects_variables_from_package_arguments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("APM_E2E_TESTS", "1")
+        monkeypatch.setenv("PACKAGE_CONFIG", "/config/settings.json")
+        ops = _make_ops()
+        cache = {
+            "server-a": {
+                "packages": [
+                    {
+                        "package_arguments": [
+                            {
+                                "variables": {
+                                    "PACKAGE_CONFIG": {
+                                        "description": "package config",
+                                        "is_required": True,
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        result = ops.collect_runtime_variables(["server-a"], server_info_cache=cache)
+        assert result == {"PACKAGE_CONFIG": "/config/settings.json"}
+
     def test_uses_batch_fetch_when_no_cache(self) -> None:
         ops = _make_ops()
         ops.batch_fetch_server_info = MagicMock(return_value={"server-a": None})

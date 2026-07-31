@@ -49,7 +49,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import yaml
 
@@ -68,12 +68,22 @@ from apm_cli.integration.hook_native_formats import (
     _to_claude_hook_entries,
     _to_gemini_hook_entries,
 )
+from apm_cli.integration.hook_ownership import (
+    dependency_hook_source_marker,
+    dependency_hook_sources,
+    legacy_source_marker_is_unambiguous,
+)
+from apm_cli.integration.hook_ownership import (
+    extract_apm_source_sidecar as _extract_apm_source_sidecar,
+)
+from apm_cli.integration.hook_ownership import (
+    reinject_apm_source_from_sidecar as _reinject_apm_source_from_sidecar,
+)
 from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
-    validate_path_segments,
 )
 from apm_cli.utils.paths import portable_relpath
 
@@ -105,6 +115,15 @@ class HookIntegrationResult(IntegrationResult):
     def hooks_integrated(self):
         """Alias for files_integrated (backward compat)."""
         return self.files_integrated
+
+
+class HookTargetReconcileStats(TypedDict):
+    """Counts and locations produced by package-target hook contraction."""
+
+    files_removed: int
+    errors: int
+    failed_targets: list[str]
+    failed_paths: list[str]
 
 
 @dataclass(frozen=True)
@@ -328,50 +347,6 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
 }
 
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
-
-
-def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
-    """Restore _apm_source markers from sidecar into in-memory hook entries.
-
-    Schema-strict targets (e.g. Claude) do not persist ``_apm_source`` in
-    their settings file.  Instead, ownership metadata is stored in a
-    sidecar file.  This helper re-injects those markers so the rest of
-    the integration logic can work with them as normal.
-
-    Each sidecar entry is consumed at most once to prevent falsely claiming
-    user-owned hooks that happen to have identical content to an APM hook.
-
-    Args:
-        hooks: The ``"hooks"`` dict loaded from the target config file
-            (mutated in-place).
-        sidecar_data: The dict loaded from the sidecar file.
-    """
-    for event_name, sidecar_entries in sidecar_data.items():
-        if event_name not in hooks or not isinstance(sidecar_entries, list):
-            continue
-        # Build a dict keyed by normalised content -> list of sources.
-        # Each source is popped on first match so identical content shared
-        # between APM and the user is only claimed once.
-        import json
-        from collections import deque
-
-        pool: dict[str, deque[str]] = {}
-        for sc_entry in sidecar_entries:
-            if isinstance(sc_entry, dict) and "_apm_source" in sc_entry:
-                cmp = {k: v for k, v in sorted(sc_entry.items()) if k != "_apm_source"}
-                cmp_key = json.dumps(cmp, sort_keys=True)
-                pool.setdefault(cmp_key, deque()).append(sc_entry["_apm_source"])
-
-        for disk_entry in hooks[event_name]:
-            if not isinstance(disk_entry, dict) or "_apm_source" in disk_entry:
-                continue
-            disk_cmp = {k: v for k, v in sorted(disk_entry.items()) if k != "_apm_source"}
-            disk_key = json.dumps(disk_cmp, sort_keys=True)
-            sources = pool.get(disk_key)
-            if sources:
-                disk_entry["_apm_source"] = sources.popleft()
-                if not sources:
-                    del pool[disk_key]
 
 
 def _relative_hook_script_bases(
@@ -927,7 +902,49 @@ class HookIntegrator(BaseIntegrator):
             if package_name == "_local":
                 return "_local"
             return f"_local/{package_name}"
+        try:
+            dependency_ref = vars(package_info).get("dependency_ref")
+        except TypeError:
+            dependency_ref = None
+        if dependency_ref is not None:
+            marker = dependency_hook_source_marker(dependency_ref)
+            if isinstance(marker, str) and marker and marker != "unknown":
+                return marker
         return package_name
+
+    @staticmethod
+    def _get_hook_source_markers(
+        package_info,
+        project_root: Path,
+        package_name: str,
+        dependency_sources: set[str] | None = None,
+    ) -> tuple[str, frozenset[str]]:
+        """Return the canonical marker and any safe legacy marker aliases."""
+        primary = HookIntegrator._get_hook_source_marker(
+            package_info,
+            project_root,
+            package_name,
+        )
+        legacy: set[str] = set()
+        root_local = HookIntegrator._is_root_local_package(package_info, project_root)
+        root_legacy_is_unambiguous = False
+        if root_local:
+            known_dependency_sources = (
+                dependency_sources
+                if dependency_sources is not None
+                else dependency_hook_sources(project_root)
+            )
+            root_legacy_is_unambiguous = package_name not in known_dependency_sources
+        if primary != package_name and (
+            root_legacy_is_unambiguous
+            or legacy_source_marker_is_unambiguous(
+                package_info,
+                project_root,
+                package_name,
+            )
+        ):
+            legacy.add(package_name)
+        return primary, frozenset(legacy)
 
     @staticmethod
     def _hook_entry_content_key(entry: dict) -> str:
@@ -936,182 +953,11 @@ class HookIntegrator(BaseIntegrator):
         return json.dumps(comparable, sort_keys=True, separators=(",", ":"))
 
     @staticmethod
-    def _dependency_hook_sources(project_root: Path) -> set[str]:
-        """Return source markers that correspond to installed dependency dirs."""
-        apm_modules = project_root / "apm_modules"
-        if not apm_modules.is_dir():
-            return set()
-
-        lockfile_paths, lockfile_readable = HookIntegrator._lockfile_dependency_paths(project_root)
-        if lockfile_readable:
-            sources: set[str] = set()
-            for rel_path in lockfile_paths:
-                package_path = HookIntegrator._safe_dependency_path(apm_modules, rel_path)
-                if package_path is None:
-                    continue
-                HookIntegrator._add_dependency_source(sources, package_path)
-            return sources
-
-        return HookIntegrator._bounded_dependency_hook_sources(apm_modules)
-
-    @staticmethod
-    def _lockfile_dependency_paths(project_root: Path) -> tuple[list[str], bool]:
-        """Return installed dependency paths from a readable lockfile, if present."""
-        try:
-            from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, LockFile, get_lockfile_path
-
-            lockfile_path = get_lockfile_path(project_root)
-            if not lockfile_path.exists():
-                legacy_path = project_root / LEGACY_LOCKFILE_NAME
-                if legacy_path.exists():
-                    lockfile_path = legacy_path
-            if not lockfile_path.exists():
-                return [], False
-            lockfile = LockFile.read(lockfile_path)
-            if lockfile is None:
-                return [], False
-            return lockfile.get_installed_paths(project_root / "apm_modules"), True
-        except (AttributeError, OSError, TypeError, ValueError, KeyError):
-            return [], False
-
-    @staticmethod
-    def _safe_dependency_path(apm_modules: Path, rel_path: str) -> Path | None:
-        """Return a lockfile dependency path without escaping apm_modules."""
-        try:
-            validate_path_segments(
-                rel_path,
-                context="lockfile dependency path",
-                reject_empty=True,
-            )
-            package_path = apm_modules / Path(rel_path)
-            ensure_path_within(package_path, apm_modules)
-            if HookIntegrator._has_symlink_component(apm_modules, package_path):
-                return None
-            return package_path
-        except (OSError, PathTraversalError, RuntimeError, TypeError):
-            return None
-
-    @staticmethod
-    def _has_symlink_component(apm_modules: Path, package_path: Path) -> bool:
-        """Return True when any component below apm_modules is a symlink."""
-        try:
-            relative = package_path.relative_to(apm_modules)
-            current = apm_modules
-            for part in relative.parts:
-                current = current / part
-                if current.is_symlink():
-                    return True
-            return False
-        except (OSError, ValueError):
-            return True
-
-    @staticmethod
-    def _is_dependency_package_dir(path: Path) -> bool:
-        """Return True when *path* looks like an installed package root."""
-        try:
-            hooks = path / "hooks"
-            apm_hooks = path / ".apm" / "hooks"
-            apm_yml = path / "apm.yml"
-            skill_md = path / "SKILL.md"
-            return (
-                (hooks.is_dir() and not hooks.is_symlink())
-                or (apm_hooks.is_dir() and not apm_hooks.is_symlink())
-                or (apm_yml.is_file() and not apm_yml.is_symlink())
-                or (skill_md.is_file() and not skill_md.is_symlink())
-            )
-        except OSError:
-            return False
-
-    @staticmethod
-    def _add_dependency_source(sources: set[str], package_path: Path) -> bool:
-        """Add package_path.name to sources when package_path is a package root."""
-        try:
-            if (
-                not package_path.is_dir()
-                or package_path.is_symlink()
-                or not HookIntegrator._is_dependency_package_dir(package_path)
-            ):
-                return False
-        except OSError:
-            return False
-        sources.add(package_path.name)
-        return True
-
-    @staticmethod
-    def _child_dependency_dirs(path: Path) -> list[Path]:
-        """Return direct non-hidden child dirs without following symlink roots."""
-        try:
-            if path.is_symlink() or not path.is_dir():
-                return []
-            return sorted(
-                [
-                    child
-                    for child in path.iterdir()
-                    if not child.is_symlink() and child.is_dir() and not child.name.startswith(".")
-                ],
-                key=lambda child: child.name,
-            )
-        except OSError:
-            return []
-
-    @staticmethod
-    def _collect_known_subdirectory_sources(sources: set[str], repo_root: Path) -> None:
-        """Collect dependency sources from known virtual subdirectory layouts."""
-        for namespace in ("collections", "skills"):
-            for package_path in HookIntegrator._child_dependency_dirs(repo_root / namespace):
-                HookIntegrator._add_dependency_source(sources, package_path)
-
-        apm_dir = repo_root / ".apm"
-        try:
-            if apm_dir.is_symlink() or not apm_dir.is_dir():
-                return
-        except OSError:
-            return
-        for primitive in ("agents", "commands", "hooks", "instructions", "prompts", "skills"):
-            for package_path in HookIntegrator._child_dependency_dirs(apm_dir / primitive):
-                HookIntegrator._add_dependency_source(sources, package_path)
-
-    @staticmethod
-    def _collect_remote_dependency_sources(sources: set[str], namespace: Path) -> None:
-        """Collect fallback sources from explicit remote install layouts."""
-        if HookIntegrator._add_dependency_source(sources, namespace):
-            return
-
-        for repo_or_project in HookIntegrator._child_dependency_dirs(namespace):
-            if HookIntegrator._add_dependency_source(sources, repo_or_project):
-                continue
-
-            HookIntegrator._collect_known_subdirectory_sources(sources, repo_or_project)
-
-            for ado_repo in HookIntegrator._child_dependency_dirs(repo_or_project):
-                if HookIntegrator._add_dependency_source(sources, ado_repo):
-                    continue
-                HookIntegrator._collect_known_subdirectory_sources(sources, ado_repo)
-
-    @staticmethod
-    def _collect_local_dependency_sources(sources: set[str], local_namespace: Path) -> None:
-        """Collect apm_modules/_local/<name> package roots only."""
-        for local_package in HookIntegrator._child_dependency_dirs(local_namespace):
-            HookIntegrator._add_dependency_source(sources, local_package)
-
-    @staticmethod
-    def _bounded_dependency_hook_sources(apm_modules: Path) -> set[str]:
-        """Fallback source scan limited to known apm_modules package layouts."""
-        sources: set[str] = set()
-
-        for package_root in HookIntegrator._child_dependency_dirs(apm_modules):
-            if package_root.name == "_local":
-                HookIntegrator._collect_local_dependency_sources(sources, package_root)
-                continue
-
-            HookIntegrator._collect_remote_dependency_sources(sources, package_root)
-        return sources
-
-    @staticmethod
     def _should_remove_prior_merged_entry(
         entry,
         *,
         source_marker: str,
+        legacy_source_markers: frozenset[str],
         fresh_content_keys: set[str],
         heal_stale_root_source: bool,
         dependency_sources: set[str],
@@ -1122,6 +968,8 @@ class HookIntegrator(BaseIntegrator):
             return False
         source = entry.get("_apm_source")
         if remove_current_source and source == source_marker:
+            return True
+        if remove_current_source and source in legacy_source_markers:
             return True
         if not heal_stale_root_source or not source or source in dependency_sources:
             return False
@@ -1386,10 +1234,15 @@ class HookIntegrator(BaseIntegrator):
         if not hook_files:
             return _empty
 
-        source_marker = self._get_hook_source_marker(package_info, project_root, package_name)
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (
-            self._dependency_hook_sources(project_root) if heal_stale_root_source else set()
+            dependency_hook_sources(project_root) if heal_stale_root_source else set()
+        )
+        source_marker, legacy_source_markers = self._get_hook_source_markers(
+            package_info,
+            project_root,
+            package_name,
+            dependency_sources,
         )
         hooks_integrated = 0
         scripts_copied = 0
@@ -1537,6 +1390,7 @@ class HookIntegrator(BaseIntegrator):
                         if not self._should_remove_prior_merged_entry(
                             e,
                             source_marker=source_marker,
+                            legacy_source_markers=legacy_source_markers,
                             fresh_content_keys=fresh_content_keys,
                             heal_stale_root_source=heal_stale_root_source,
                             dependency_sources=dependency_sources,
@@ -1574,6 +1428,7 @@ class HookIntegrator(BaseIntegrator):
                                 if not self._should_remove_prior_merged_entry(
                                     e,
                                     source_marker=source_marker,
+                                    legacy_source_markers=legacy_source_markers,
                                     fresh_content_keys=fresh_content_keys,
                                     heal_stale_root_source=heal_stale_root_source,
                                     dependency_sources=dependency_sources,
@@ -1668,21 +1523,7 @@ class HookIntegrator(BaseIntegrator):
         json_path.parent.mkdir(parents=True, exist_ok=True)
 
         if config.schema_strict:
-            # Build sidecar from entries that have _apm_source
-            sidecar_out: dict = {}
-            for event_name, entries_list in json_config.get(container, {}).items():
-                if not isinstance(entries_list, list):
-                    continue
-                owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
-                if owned:
-                    sidecar_out[event_name] = [dict(e) for e in owned]
-
-            # Strip _apm_source from entries before writing to disk
-            for entries_list in json_config.get(container, {}).values():
-                if isinstance(entries_list, list):
-                    for entry in entries_list:
-                        if isinstance(entry, dict):
-                            entry.pop("_apm_source", None)
+            sidecar_out = _extract_apm_source_sidecar(json_config.get(container, {}))
 
             # Write sidecar
             sidecar_path = target_dir / _APM_HOOKS_SIDECAR
@@ -1795,10 +1636,6 @@ class HookIntegrator(BaseIntegrator):
             user_scope=user_scope,
         )
 
-    # ------------------------------------------------------------------
-    # Target-driven API
-    # ------------------------------------------------------------------
-
     def integrate_hooks_for_target(
         self,
         target,
@@ -1827,7 +1664,6 @@ class HookIntegrator(BaseIntegrator):
         """
         if dep_targets_active and (not allowed_targets or target.name not in allowed_targets):
             raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
-
         if target.name == "copilot":
             return self.integrate_package_hooks(
                 package_info,
@@ -1872,6 +1708,139 @@ class HookIntegrator(BaseIntegrator):
             files_skipped=0,
             target_paths=[],
         )
+
+    def reconcile_package_target_restriction(
+        self,
+        package_info,
+        project_root: Path,
+        excluded_targets,
+    ) -> HookTargetReconcileStats:
+        """Remove this package's merged hooks from newly excluded targets."""
+        stats: HookTargetReconcileStats = {
+            "files_removed": 0,
+            "errors": 0,
+            "failed_targets": [],
+            "failed_paths": [],
+        }
+        package_name = self._get_package_name(package_info, project_root)
+        source_marker, legacy_source_markers = self._get_hook_source_markers(
+            package_info,
+            project_root,
+            package_name,
+        )
+        source_markers = frozenset({source_marker, *legacy_source_markers})
+        for target in excluded_targets:
+            config = _MERGE_HOOK_TARGETS.get(target.name)
+            if config is None:
+                continue
+            target_dir = project_root / target.root_dir
+            json_path = target_dir / config.config_filename
+            errors_before = stats["errors"]
+            self._clean_apm_source_from_json(
+                json_path,
+                source_markers,
+                stats,
+                container=config.event_container_key,
+                sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+            )
+            if stats["errors"] != errors_before:
+                stats["failed_targets"].append(target.name)
+                stats["failed_paths"].append(portable_relpath(json_path, project_root))
+        return stats
+
+    @staticmethod
+    def _clean_apm_source_from_json(
+        json_path: Path,
+        source_markers: frozenset[str],
+        stats: HookTargetReconcileStats,
+        *,
+        container: str,
+        sidecar_path: Path,
+    ) -> None:
+        """Remove one package owner while preserving user and sibling entries."""
+        if not json_path.exists() and not sidecar_path.exists():
+            return
+        try:
+            data: dict = {}
+            if json_path.exists():
+                with open(json_path, encoding="utf-8") as handle:
+                    raw_data = json.load(handle)
+                if not isinstance(raw_data, dict):
+                    raise TypeError("native hook config must contain an object")
+                data = raw_data
+
+            sidecar_data: dict = {}
+            if sidecar_path.exists():
+                with open(sidecar_path, encoding="utf-8") as handle:
+                    raw_sidecar = json.load(handle)
+                if not isinstance(raw_sidecar, dict):
+                    raise TypeError("hook sidecar must contain an object")
+                sidecar_data = raw_sidecar
+
+            hooks = data.get(container)
+            native_modified = False
+            if isinstance(hooks, dict):
+                if sidecar_data:
+                    _reinject_apm_source_from_sidecar(hooks, sidecar_data)
+                for event_name in list(hooks):
+                    entries = hooks[event_name]
+                    if not isinstance(entries, list):
+                        continue
+                    filtered = [
+                        entry
+                        for entry in entries
+                        if not (
+                            isinstance(entry, dict) and entry.get("_apm_source") in source_markers
+                        )
+                    ]
+                    if len(filtered) == len(entries):
+                        continue
+                    native_modified = True
+                    if filtered:
+                        hooks[event_name] = filtered
+                    else:
+                        del hooks[event_name]
+                if not hooks:
+                    data.pop(container, None)
+
+            sidecar_had_source = any(
+                isinstance(entry, dict) and entry.get("_apm_source") in source_markers
+                for entries in sidecar_data.values()
+                if isinstance(entries, list)
+                for entry in entries
+            )
+            if isinstance(hooks, dict):
+                sidecar_out = _extract_apm_source_sidecar(hooks)
+            else:
+                sidecar_out = {
+                    event_name: [
+                        entry
+                        for entry in entries
+                        if not (
+                            isinstance(entry, dict) and entry.get("_apm_source") in source_markers
+                        )
+                    ]
+                    for event_name, entries in sidecar_data.items()
+                    if isinstance(entries, list)
+                }
+                sidecar_out = {
+                    event_name: entries for event_name, entries in sidecar_out.items() if entries
+                }
+
+            if native_modified:
+                atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
+                stats["files_removed"] += 1
+            if native_modified or sidecar_had_source:
+                if sidecar_out:
+                    atomic_write_text(
+                        sidecar_path,
+                        json.dumps(sidecar_out, indent=2) + "\n",
+                    )
+                elif sidecar_path.exists():
+                    sidecar_path.unlink()
+                stats["files_removed"] += 1
+        except (json.JSONDecodeError, OSError, TypeError):
+            stats["errors"] += 1
 
     def sync_integration(
         self,
@@ -1979,9 +1948,9 @@ class HookIntegrator(BaseIntegrator):
         Re-integration failures are logged and skipped by design.
         Target scope (#2250): wipe and rebuild use the same resolved targets.
         ``reconcile_dropped_targets`` separately owns target contraction.
-        ``reconcile_dropped_targets`` separately owns target contraction.
         """
         from apm_cli.constants import APM_MODULES_DIR
+        from apm_cli.install.target_filter import resolve_effective_package_targets
         from apm_cli.models.apm_package import (
             build_installed_package_info,
             surviving_dependency_refs_for_reintegration,
@@ -2002,6 +1971,26 @@ class HookIntegrator(BaseIntegrator):
         surviving_deps = surviving_dependency_refs_for_reintegration(
             apm_package, project_root, lockfile=lockfile
         )
+        rebuild_plan = []
+        for dep_ref in surviving_deps:
+            modules_root = project_root / APM_MODULES_DIR
+            install_path = dep_ref.get_install_path(modules_root)
+            pkg_info = build_installed_package_info(dep_ref, modules_root)
+            if pkg_info is None:
+                if install_path.exists():
+                    raise ValueError(
+                        "Cannot validate surviving package before hook rebuild: "
+                        f"{dep_ref.get_identity()}"
+                    )
+                continue
+            target_selection = resolve_effective_package_targets(
+                targets,
+                dep_ref.target_subset,
+                pkg_info,
+                None,
+                dep_ref.get_identity(),
+            )
+            rebuild_plan.append((dep_ref, pkg_info, target_selection))
 
         # Empty managed_files (not None) skips file-level deletion while
         # still triggering the merged-hook JSON wipe, scoped to the same
@@ -2010,13 +1999,9 @@ class HookIntegrator(BaseIntegrator):
             apm_package, project_root, managed_files=set(), targets=targets
         )
 
-        for dep_ref in surviving_deps:
-            pkg_info = build_installed_package_info(dep_ref, project_root / APM_MODULES_DIR)
-            if pkg_info is None:
-                continue
-
+        for dep_ref, pkg_info, target_selection in rebuild_plan:
             try:
-                for target in targets:
+                for target in target_selection.targets:
                     self.integrate_hooks_for_target(
                         target, pkg_info, project_root, user_scope=user_scope
                     )

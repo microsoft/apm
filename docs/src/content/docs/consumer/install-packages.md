@@ -145,13 +145,14 @@ top-level entries. Versions and content hashes are pinned in
 same bytes. Commit the lockfile.
 
 :::note[Lockfile replay]
-Your lockfile pins every package your dependencies pull in, including
-transitive packages resolved at lock time. If an upstream package later moves
-one of its own entries between `dependencies.apm` and `devDependencies.apm`, an
-existing lockfile still replays the previously recorded commits. Run
-`apm update` or `apm lock --update`, or delete `apm.lock.yaml` and re-run
-`apm install` after changing `apm.yml`, when you want APM to read the newer
-upstream manifests and produce a new graph. See the
+Plain `apm install` and `apm install --frozen` replay locked commits for
+unchanged dependencies, including transitive packages, and reuse matching
+[cached package content](../../reference/cli/cache/) when available. This keeps
+mutable branches and tags pinned to their recorded commits.
+
+Run [`apm update`](../../reference/cli/update/) or `apm install --refresh` to
+establish current upstream mutable refs. `apm outdated` checks the same current
+state without changing the lockfile. See the
 [lockfile specification](../../reference/lockfile-spec/) for the replay
 contract.
 :::
@@ -184,7 +185,9 @@ apm install --target claude,cursor     # only deploy to these harnesses
 apm install --exclude gemini           # deploy to all targets except gemini
 apm install --only apm                 # skip MCP server integration this run
 apm install --frozen                   # CI: lockfile-only; fail on drift
-apm install --refresh                  # bypass the cache; re-fetch everything
+apm install --update                   # resolve current upstream refs
+apm install --refresh                  # resolve refs and bypass cached content
+apm install --force                    # collision/security override; no ref refresh
 apm install --dev                      # treat positional args as devDependencies
 apm install -g <package>               # install to user scope (~/.apm/)
 apm install -v                         # verbose: show resolution and integration

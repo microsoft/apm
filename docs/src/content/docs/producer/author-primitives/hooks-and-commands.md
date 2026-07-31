@@ -105,9 +105,38 @@ available at runtime:
   Copilot or VS Code, use the `.mjs` file extension -- Node.js
   recognises it without a `package.json`.
 
-For multi-target packages, prefer simple hook filenames plus consumer
-per-dependency `targets:` in `dependencies.apm` to limit reach. If the
-same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
+Use simple hook filenames. APM computes their reach as:
+
+```text
+effective hook targets =
+  project active targets
+  INTERSECT consumer per-dependency targets (when set)
+  INTERSECT package targets (when restrictive)
+```
+
+Every selector is a filter. A package declaration only narrows the
+consumer-authorized active set; it never activates a target or expands
+dependency reach. Omitting package `target:` / `targets:`, or using the
+legacy `all` value, adds no package restriction; `all` is not expanded
+into an additional target set at this gate.
+
+For example, this package can write hooks only to Claude:
+
+```yaml
+name: claude-hooks
+version: "1.0.0"
+target: claude
+```
+
+`target:` accepts scalar, CSV, and list spellings, including aliases such
+as `vscode` (normalized to `copilot`). `targets:` accepts a scalar or list
+of canonical names. Unknown names, both keys together, and an empty
+or null `targets:` value fail validation. A null singular `target:` is
+treated as omission for legacy compatibility; an empty string or list fails
+validation. Both keys conflict even when either value is null. Consumers
+can narrow one dependency further with object-form `targets:`.
+
+If the same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
 integrates the `.apm/hooks/` copy once per target.
 
 :::note
@@ -118,19 +147,16 @@ the target vocabulary in
 :::
 
 :::caution[Deprecated]
-Hook filename routing (`*-<harness>-hooks.json`) is deprecated. Ship one
-hook manifest; consumers scope harness reach with the per-dependency
-`targets:` field. The filename router still works during the deprecation
-window and warns at install time. If both are present, `targets:` narrows the
-active harness set and filename routing still applies within that set.
+Hook filename routing (`*-<harness>-hooks.json`) is deprecated and warns
+at install time. When renaming `my-pkg-codex-hooks.json` to generic
+`hooks.json`, preserve package intent with `target: codex` in the package's
+own `apm.yml`. Consumer per-dependency `targets:` may narrow that scope
+further, but cannot expand it.
 
-Before: name the manifest `my-pkg-codex-hooks.json`. After: keep
-`hooks.json` generic and let the consumer set `targets: [codex]`.
-Combined deprecated stems such as `claude-codex-hooks.json` route to every
-named target token during the migration window.
-Stems with target tokens outside the trailing target suffix (for example
-`codex-launch-hooks.json`) fall back to universal or suffix routing and print a
-warning naming the ignored token.
+During migration, suffix routing still filters within the effective target
+set. Multi-target stems such as `claude-codex-hooks.json` match each named
+target. Ambiguous stems such as `codex-launch-hooks.json` use universal
+fallback and warn that the apparent target token was ignored.
 :::
 
 Supported targets and where the integrator writes:

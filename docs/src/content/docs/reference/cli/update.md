@@ -43,7 +43,7 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 | `--dry-run` | off | Compute and print the plan without prompting and without writing the manifest, lockfile, or filesystem. |
 | `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
 | `--global`, `-g` | off | Refresh user-scope dependencies under `~/.apm/` instead of the current project (mirrors `apm install -g`). |
-| `--force` | off | Overwrite locally-authored files on collision. |
+| `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
 | `--target TARGET`, `-t TARGET` | auto-detect | Agent harness(es) to update for. Accepts a single value (`claude`, `copilot`, `cursor`, `windsurf`, `kiro`, `codex`, `opencode`, `gemini`) or comma-separated list (`--target claude,cursor`). Overrides `apm.yml targets:` and auto-detection. |
 
@@ -91,6 +91,7 @@ apm update
 ## Behavior
 
 - **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
+- **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
 - **Registry deps.** Registry semver deps are re-resolved against their configured registry. Deps already at the latest version satisfying their constraint appear as **unchanged** in the plan.
 - **Structured plan.** Output is grouped into four sections:
   - **added** -- present in the new resolution but not in the previous lockfile.

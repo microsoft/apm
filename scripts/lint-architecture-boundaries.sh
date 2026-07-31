@@ -253,6 +253,35 @@ if ! grep -q '^def should_force_ref_recheck(' "$ref_recheck_owner" \
     echo "[x] Existing-path ref rechecks must use drift.py::should_force_ref_recheck"
     violations=$((violations + 1))
 fi
+ref_freshness_owner="src/apm_cli/deps/tiered_ref_resolver.py"
+ref_freshness_consumers=(
+    src/apm_cli/install/phases/resolve.py
+    src/apm_cli/install/helpers/ref_seed.py
+    src/apm_cli/commands/outdated.py
+)
+ref_freshness_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'ctx\.update_refs[[:space:]]+or[[:space:]]+ctx\.refresh|def [[:alnum:]_]*ref_freshness|class [[:alnum:]_]*RefFreshness' \
+        src/apm_cli \
+        | grep -v "^${ref_freshness_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^class RefFreshnessPolicy(Enum):' "$ref_freshness_owner" \
+    || ! grep -q '^def ref_freshness_policy_for_install(' "$ref_freshness_owner" \
+    || ! grep -q '^    if freshness_policy\.allows_bare_cache:' \
+        "$ref_freshness_owner" \
+    || ! grep -q 'ref_freshness_policy_for_install(ctx)' "${ref_freshness_consumers[0]}" \
+    || ! grep -q 'ref_freshness_policy_for_install(ctx)' "${ref_freshness_consumers[1]}" \
+    || ! grep -q 'freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE' \
+        "${ref_freshness_consumers[2]}" \
+    || grep -rEq --include='*.py' --exclude='tiered_ref_resolver.py' \
+        'L2BareRevParse' src/apm_cli \
+    || [ -n "$ref_freshness_duplicate_hits" ]; then
+    echo "[x] Git ref freshness must route through RefFreshnessPolicy"
+    [ -n "$ref_freshness_duplicate_hits" ] && echo "$ref_freshness_duplicate_hits"
+    violations=$((violations + 1))
+fi
 cleanup_claim_owner="src/apm_cli/install/phases/cleanup.py"
 cleanup_claim_output=$(python3 scripts/check_cleanup_claim_owner.py "$cleanup_claim_owner" 2>&1)
 cleanup_claim_status=$?
@@ -704,6 +733,27 @@ if [ "$target_instruction_contraction_status" -ne 0 ]; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC15b: effective package target authorization authority"
+package_target_output=$(python3 scripts/check_package_target_authority.py --root "$ROOT" 2>&1)
+package_target_status=$?
+if [ "$package_target_status" -ne 0 ]; then
+    echo "[x] Effective package target authorization must route through install/target_filter.py"
+    echo "$package_target_output"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC15c: merged-hook ownership marker authority"
+hook_ownership_owner="src/apm_cli/integration/hook_ownership.py"
+hook_ownership_consumer="src/apm_cli/integration/hook_integrator.py"
+if ! grep -q '^def dependency_hook_source_marker(' "$hook_ownership_owner" \
+    || ! grep -q '^def dependency_hook_sources(' "$hook_ownership_owner" \
+    || ! grep -q 'from apm_cli.integration.hook_ownership import (' \
+        "$hook_ownership_consumer" \
+    || grep -q '^    def _dependency_hook_source' "$hook_ownership_consumer"; then
+    echo "[x] Merged-hook ownership markers must route through integration/hook_ownership.py"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC16: post-uninstall reachability owner authority"
 if ! grep -Eq 'reachability\.compute_forward_reachable_keys|from \.\.\.deps\.reachability import|from apm_cli\.deps\.reachability import' \
     src/apm_cli/commands/uninstall/engine.py; then
@@ -1089,9 +1139,26 @@ if [ "$(printf '%s\n' "$mcp_root_scope_body" \
     violations=$((violations + 1))
 fi
 
-
-
-
+echo "[*] AC26: MCP container launcher authority"
+mcp_container_owner="src/apm_cli/adapters/client/base.py"
+mcp_container_consumers=(
+    src/apm_cli/adapters/client/copilot.py
+    src/apm_cli/adapters/client/codex.py
+    src/apm_cli/adapters/client/gemini.py
+    src/apm_cli/adapters/client/vscode.py
+)
+mcp_image_owner_defs=$(grep -rEc \
+    '^[[:space:]]*def _ensure_docker_image_arg\(' \
+    src/apm_cli/adapters/client --include='*.py' \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+mcp_container_missing_consumers=$(grep -L \
+    '_ensure_docker_image_arg(' "${mcp_container_consumers[@]}" || true)
+if ! grep -q '_REGISTRY_TYPE_ALIASES = {"oci": "docker"}' "$mcp_container_owner" \
+    || [ "$mcp_image_owner_defs" -ne 1 ] \
+    || [ -n "$mcp_container_missing_consumers" ]; then
+    echo "[x] MCP container launcher decisions must route through MCPClientAdapter"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC25: host-classification authority"
 identity_owner="src/apm_cli/models/dependency/identity.py"

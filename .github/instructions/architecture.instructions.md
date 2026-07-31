@@ -37,8 +37,10 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Decision / fact | Canonical owner | Owner path selectors |
 |---|---|---|
 | Accepted target vocabulary | core/target_catalog.py | `src/apm_cli/core/target_catalog.py` |
+| Effective package target authorization | install/target_filter.py (resolve_effective_package_targets) | `src/apm_cli/install/target_filter.py` |
 | MCP target-selection precedence | integration/mcp_integrator_install.py (_resolve_target_runtimes) | `src/apm_cli/integration/mcp_integrator_install.py` |
 | Behavioral test taxonomy classification | module-level pytestmark (taxonomy inventory verifies) | `tests/quality/taxonomy_inventory_plugin.py`; `tests/quality/test_test_taxonomy.py` |
+| Effective package target authorization | install/target_filter.py (resolve_effective_package_targets) | `src/apm_cli/install/target_filter.py` |
 | Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
 | Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
 | User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
@@ -47,7 +49,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Target-scoped deployed-file contraction | install/manifest_reconcile.py (reconcile_target_deployed_files) | `src/apm_cli/install/manifest_reconcile.py` |
 | Install success / failure outcome | the canonical install-outcome path | `src/apm_cli/install/outcome.py` |
 | Frozen install mutation eligibility | install/service.py (InstallService) | `src/apm_cli/install/service.py` |
-| Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators | `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py` |
+| Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators | `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py`; `src/apm_cli/integration/hook_ownership.py` |
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
 | Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
@@ -56,7 +58,9 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Post-uninstall dependency reachability | deps/reachability.py (compute_forward_reachable_keys) | `src/apm_cli/deps/reachability.py` |
 | CI audit scratch materialization | install/audit_replay.py (prepare_ci_audit_replay) | `src/apm_cli/install/audit_replay.py` |
 | GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |
+| Git ref freshness and cache eligibility | deps/tiered_ref_resolver.py (RefFreshnessPolicy) | `src/apm_cli/deps/tiered_ref_resolver.py` |
 | Root vs dependency MCP declaration scope | integration/mcp_config_view.py (CurrentMcpConfigView) | `src/apm_cli/integration/mcp_config_view.py` |
+| MCP container launcher selection and Docker argv shape | adapters/client/base.py (MCPClientAdapter) | `src/apm_cli/adapters/client/base.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.
