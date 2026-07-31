@@ -24,6 +24,15 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 
 
+def _authorization_headers(env: dict[str, str]) -> list[tuple[str, str]]:
+    """Return indexed Authorization header entries regardless of slot."""
+    return [
+        (env[f"GIT_CONFIG_KEY_{index}"], value)
+        for index in range(int(env.get("GIT_CONFIG_COUNT", "0")))
+        if (value := env.get(f"GIT_CONFIG_VALUE_{index}", "")).startswith("Authorization:")
+    ]
+
+
 def _make_subdir_dep(
     repo_url: str = "owner/repo",
     vpath: str = "skills/my-skill",
@@ -234,9 +243,11 @@ class TestAdoBearerHeaderInjection:
         _label, url, env = ado_attempts[0]
 
         assert secret not in url, "ADO PAT must not appear in the URL"
-        # The env must carry the Basic header.
-        assert env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        # The env must carry the Basic header after retained safe config.
+        headers = _authorization_headers(env)
+        assert len(headers) == 1
+        assert headers[0][0] == "http.extraheader"
+        header_value = headers[0][1]
         assert header_value.startswith("Authorization: Basic "), header_value
         # base64(":<PAT>") must contain the expected encoded form.
         import base64
@@ -277,7 +288,9 @@ class TestAdoBearerHeaderInjection:
         assert len(ado_attempts) == 1
         _label, url, env = ado_attempts[0]
         assert secret not in url
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        headers = _authorization_headers(env)
+        assert len(headers) == 1
+        header_value = headers[0][1]
         assert header_value == f"Authorization: Bearer {secret}"
 
     def test_non_ado_token_uses_header_not_url(self) -> None:
@@ -326,7 +339,9 @@ class TestAdoBearerHeaderInjection:
         _label, url, env = auth_attempts[0]
         assert secret not in url
         # Header carries the token.
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        headers = _authorization_headers(env)
+        assert len(headers) == 1
+        header_value = headers[0][1]
         assert header_value == f"Authorization: Bearer {secret}"
 
     def test_gitlab_pat_injected_as_oauth2_basic_header_not_url(self) -> None:
@@ -357,7 +372,9 @@ class TestAdoBearerHeaderInjection:
         assert len(gitlab_attempts) == 1
         _label, url, env = gitlab_attempts[0]
         assert secret not in url
-        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        headers = _authorization_headers(env)
+        assert len(headers) == 1
+        header_value = headers[0][1]
         assert header_value.startswith("Authorization: Basic "), header_value
 
         import base64
@@ -474,8 +491,10 @@ class TestRound3NonAdoTokenNotInProcessArgv:
             assert secret not in attempt.url, f"Token leaked into URL for attempt '{attempt.label}'"
         # Header injection: the auth attempt env must contain a Bearer header.
         auth_attempt = next(a for a in attempts if "header" in a.label)
-        assert auth_attempt.env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
-        assert auth_attempt.env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {secret}"
+        headers = _authorization_headers(auth_attempt.env)
+        assert len(headers) == 1
+        assert headers[0][0] == "http.extraheader"
+        assert headers[0][1] == f"Authorization: Bearer {secret}"
 
 
 class TestRound3SafeRmtreeNotRobustRmtreeDirect:

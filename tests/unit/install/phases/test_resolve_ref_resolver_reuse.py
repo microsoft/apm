@@ -361,7 +361,9 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
     ado_args, ado_kwargs = calls[0]
     github_args, github_kwargs = calls[1]
     ado_auth_values = {
-        value for key, value in ado_kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")
+        value
+        for key, value in ado_kwargs["env"].items()
+        if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization:")
     }
     assert ado_auth_values == {f"Authorization: Bearer {bearer_token}"}
     assert urlparse(ado_args[-1]).username is None
@@ -465,7 +467,11 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
     assert resolution.resolved_tag == "v1.2.0"
     assert len(calls) == 2
     auth_headers = [
-        {value for key, value in call_kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")}
+        {
+            value
+            for key, value in call_kwargs["env"].items()
+            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization:")
+        }
         for _call_args, call_kwargs in calls
     ]
     assert len(auth_headers[0]) == 1

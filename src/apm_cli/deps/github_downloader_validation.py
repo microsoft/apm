@@ -378,7 +378,14 @@ def _build_validation_attempts(
             auth_header = ("Bearer", dep_token)
             label = "authenticated HTTPS (header)"
 
-        token_env = dict(downloader.git_env)
+        token_env = (
+            downloader.auth_resolver.git_env_for_context(
+                dep_auth_ctx,
+                base_env=downloader.git_env,
+            )
+            if dep_auth_ctx is not None
+            else dict(downloader.git_env)
+        )
         set_authorization_header_git_env(token_env, *auth_header)
         token_url = downloader._build_repo_url(
             dep_ref.repo_url,
@@ -390,9 +397,17 @@ def _build_validation_attempts(
         attempts.append(AttemptSpec(label, token_url, token_env))
 
     # Attempt 2: plain HTTPS w/ credential helper (no token, no header).
-    plain_env = downloader._build_noninteractive_git_env(
-        preserve_config_isolation=is_insecure,
-        suppress_credential_helpers=is_insecure,
+    plain_env = (
+        downloader.auth_resolver._build_git_env(
+            None,
+            host_kind="ado",
+            base_env=downloader.git_env,
+        )
+        if is_ado
+        else downloader._build_noninteractive_git_env(
+            preserve_config_isolation=is_insecure,
+            suppress_credential_helpers=is_insecure,
+        )
     )
     plain_url = downloader._build_repo_url(
         dep_ref.repo_url,
@@ -400,7 +415,8 @@ def _build_validation_attempts(
         dep_ref=dep_ref,
         token="",
     )
-    attempts.append(AttemptSpec("plain HTTPS w/ credential helper", plain_url, plain_env))
+    plain_label = "ADO HTTPS without credential" if is_ado else "plain HTTPS w/ credential helper"
+    attempts.append(AttemptSpec(plain_label, plain_url, plain_env))
 
     # Attempt 3 (SSH): only when allowed. StrictHostKeyChecking is
     # intentionally inherited from the user's ssh config; do NOT add

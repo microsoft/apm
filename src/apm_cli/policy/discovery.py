@@ -46,6 +46,7 @@ from ..utils.github_host import (
     build_ado_api_url,
     is_azure_devops_hostname,
     is_visualstudio_legacy_hostname,
+    parse_ado_repo_url,
 )
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.yaml_io import load_yaml_str
@@ -840,6 +841,7 @@ def _auto_discover(
         )
 
     org, host = org_and_host
+    port = _extract_port_from_git_remote(project_root)
     candidates = _policy_repo_candidates(host)
     is_ado = is_azure_devops_hostname(host)
 
@@ -851,6 +853,7 @@ def _auto_discover(
                 project=ADO_POLICY_PROJECT,
                 repo=candidate_repo,
                 host=host,
+                port=port,
                 project_root=project_root,
                 no_cache=no_cache,
                 expected_hash=expected_hash,
@@ -907,6 +910,14 @@ def _extract_org_from_git_remote(
     - git@github.com:contoso/my-project.git -> ("contoso", "github.com")
     - https://github.example.com/contoso/my-project.git -> ("contoso", "github.example.com")
     """
+    identity = _extract_org_host_port_from_git_remote(project_root)
+    return (identity[0], identity[1]) if identity is not None else None
+
+
+def _extract_org_host_port_from_git_remote(
+    project_root: Path,
+) -> tuple[str, str, int | None] | None:
+    """Extract ``(org, host, port)`` from git remote origin."""
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -918,8 +929,36 @@ def _extract_org_from_git_remote(
         )
         if result.returncode != 0:
             return None
-        return _parse_remote_url(result.stdout.strip())
+        remote_url = result.stdout.strip()
+        parsed_identity = _parse_remote_url(remote_url)
+        if parsed_identity is None:
+            return None
+        port = None
+        if "://" in remote_url:
+            try:
+                port = urlparse(remote_url).port
+            except ValueError:
+                return None
+        return parsed_identity[0], parsed_identity[1], port
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def _extract_port_from_git_remote(project_root: Path) -> int | None:
+    """Return the explicit HTTPS port from git remote origin."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=project_root,
+            timeout=5,
+        )
+        if result.returncode != 0 or "://" not in result.stdout:
+            return None
+        return urlparse(result.stdout.strip()).port
+    except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
 
@@ -962,11 +1001,20 @@ def _parse_remote_url(url: str) -> tuple[str, str] | None:
         try:
             parsed = urlparse(url)
             host = parsed.hostname or ""
+            if is_azure_devops_hostname(host):
+                ado_coordinates = parse_ado_repo_url(url)
+                if ado_coordinates is None:
+                    return None
+                return ado_coordinates[0], host
             path_parts = parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
             if is_visualstudio_legacy_hostname(host):
                 return (host[: -len(".visualstudio.com")], host)
             if host and path_parts and path_parts[0]:
                 return (path_parts[0], host)
+        except ValueError as exc:
+            if "mounted below '/tfs/'" in str(exc):
+                raise
+            return None
         except Exception:
             return None
 
@@ -1254,6 +1302,7 @@ def _fetch_from_ado_repo(
     project: str,
     repo: str,
     host: str,
+    port: int | None = None,
     project_root: Path,
     no_cache: bool = False,
     expected_hash: str | None = None,
@@ -1264,7 +1313,8 @@ def _fetch_from_ado_repo(
     Mirrors ``_fetch_from_repo`` but uses ``_fetch_ado_contents`` (ADO
     Items API) instead of ``_fetch_github_contents`` (GitHub Contents API).
     """
-    repo_ref = f"{host}/{org}/{project}/{repo}"
+    host_label = f"{host}:{port}" if port is not None else host
+    repo_ref = f"{host_label}/{org}/{project}/{repo}"
     source_label = f"org:{repo_ref}"
     cache_entry: _CacheEntry | None = None
     cache_entry_persisted = _cache_entry_files_exist(repo_ref, project_root)
@@ -1292,7 +1342,16 @@ def _fetch_from_ado_repo(
             cache_entry_persisted=cache_entry_persisted,
         )
 
-    content, error = _fetch_ado_contents(org, project, repo, "apm-policy.yml", host=host)
+    fetch_kwargs = {"host": host}
+    if port is not None:
+        fetch_kwargs["port"] = port
+    content, error = _fetch_ado_contents(
+        org,
+        project,
+        repo,
+        "apm-policy.yml",
+        **fetch_kwargs,
+    )
 
     if error:
         if "404" in error:
@@ -1349,35 +1408,62 @@ def _fetch_ado_contents(
     file_path: str,
     *,
     host: str = "dev.azure.com",
+    port: int | None = None,
 ) -> tuple[str | None, str | None]:
     """Fetch file contents from Azure DevOps Items API.
 
     Returns ``(content_string, error_string)``. One will be ``None``.
     """
-    api_url = build_ado_api_url(org, project, repo, file_path, host=host)
-    repo_ref = f"{host}/{org}/{project}/{repo}"
+    api_url = build_ado_api_url(
+        org,
+        project,
+        repo,
+        file_path,
+        host=host,
+        port=port,
+    )
+    host_label = f"{host}:{port}" if port is not None else host
+    repo_ref = f"{host_label}/{org}/{project}/{repo}"
 
     # ADO auth is centralized in AuthResolver: ADO_APM_PAT uses Basic auth,
     # and az CLI AAD tokens use Bearer auth. No GitHub PATs are consulted.
     from ..core.auth import AuthResolver
 
-    headers: dict[str, str] = {}
     auth_resolver = AuthResolver()
-    auth_ctx = auth_resolver.resolve(host, org=org)
-    if auth_ctx.token:
-        if auth_ctx.auth_scheme == "bearer":
-            headers["Authorization"] = f"Bearer {auth_ctx.token}"
-        else:
-            basic_cred = base64.b64encode(f":{auth_ctx.token}".encode()).decode()
-            headers["Authorization"] = f"Basic {basic_cred}"
+
+    def _headers(token: str | None, git_env: dict[str, str]) -> dict[str, str]:
+        if not token:
+            return {}
+        count = int(git_env.get("GIT_CONFIG_COUNT", "0") or "0")
+        for index in range(max(0, count)):
+            value = git_env.get(f"GIT_CONFIG_VALUE_{index}", "")
+            if value.lower().startswith("authorization: bearer "):
+                return {"Authorization": f"Bearer {token}"}
+        basic_cred = base64.b64encode(f":{token}".encode()).decode()
+        return {"Authorization": f"Basic {basic_cred}"}
+
+    def _request(token: str | None, git_env: dict[str, str]):
+        response = requests.get(
+            api_url,
+            headers=_headers(token, git_env),
+            timeout=10,
+            allow_redirects=False,
+        )
+        if response.status_code in (401, 403):
+            raise RuntimeError(f"{response.status_code}: unauthorized")
+        return response
 
     try:
-        resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
+        resp = auth_resolver.try_with_fallback(
+            host,
+            _request,
+            org=org,
+            port=port,
+            path=f"{org}/{project}/{repo}",
+            unauth_first=False,
+        )
         if resp.status_code == 404:
             return None, "404: Policy file not found"
-        if resp.status_code in (401, 403):
-            remediation = auth_resolver.build_error_context(host, "fetch org policy", org=org)
-            return None, (f"{resp.status_code}: Access denied to {repo_ref}{remediation}")
         if 300 <= resp.status_code < 400:
             location = resp.headers.get("Location", "<no Location header>")
             return None, (
@@ -1391,6 +1477,16 @@ def _fetch_ado_contents(
         return None, f"Timeout fetching policy from {repo_ref}"
     except requests.exceptions.ConnectionError:
         return None, f"Connection error fetching policy from {repo_ref}"
+    except RuntimeError as exc:
+        error_kwargs = {"org": org}
+        if port is not None:
+            error_kwargs["port"] = port
+        remediation = auth_resolver.build_error_context(
+            host,
+            "fetch org policy",
+            **error_kwargs,
+        )
+        return None, f"{exc}: Access denied to {repo_ref}{remediation}"
     except Exception as e:
         return None, f"Error fetching policy from {repo_ref}: {e}"
 

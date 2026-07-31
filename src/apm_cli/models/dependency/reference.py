@@ -575,6 +575,40 @@ class DependencyReference(ProviderCoordinateMixin):
         )
 
     @staticmethod
+    def _reject_unsupported_ado_server_base_path(dependency_str: str) -> None:
+        """Reject ADO Server URLs mounted below an unsupported path prefix."""
+        source = dependency_str.split("#", 1)[0].strip()
+        if source.lower().startswith(("ssh://", "git@")):
+            return
+        if source.lower().startswith(("https://", "http://")):
+            parsed = urllib.parse.urlsplit(source)
+            host = parsed.hostname or ""
+            segments = [segment for segment in parsed.path.split("/") if segment]
+        else:
+            parts = [segment for segment in source.split("/") if segment]
+            if len(parts) < 2:
+                return
+            try:
+                host, _port = _split_shorthand_host_port(parts[0])
+            except ValueError:
+                return
+            segments = parts[1:]
+        if (
+            not is_azure_devops_hostname(host)
+            or host in {"dev.azure.com", "ssh.dev.azure.com"}
+            or is_visualstudio_legacy_hostname(host)
+            or "_git" not in segments
+        ):
+            return
+        git_index = segments.index("_git")
+        if segments[0].lower() == "tfs" and git_index >= 3:
+            raise ValueError(
+                "Azure DevOps Server URLs mounted below '/tfs/' are not "
+                "currently supported. Use a root-hosted collection URL such as "
+                "'https://server/DefaultCollection/project/_git/repo'."
+            )
+
+    @staticmethod
     def _parse_ssh_protocol_url(url: str):
         """Parse an ``ssh://`` protocol URL using ``urllib.parse.urlparse``.
 
@@ -1915,6 +1949,7 @@ class DependencyReference(ProviderCoordinateMixin):
             )
 
         cls._reject_shorthand_alias(dependency_str)
+        cls._reject_unsupported_ado_server_base_path(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 
@@ -2057,7 +2092,8 @@ class DependencyReference(ProviderCoordinateMixin):
             ado_repo = self.ado_repo
             project = urllib.parse.quote(ado_project, safe="")
             repo = urllib.parse.quote(ado_repo, safe="")
-            return f"https://{netloc}/{organization}/{project}/_git/{repo}"
+            org_path = "" if is_visualstudio_legacy_hostname(host) else f"{organization}/"
+            return f"https://{netloc}/{org_path}{project}/_git/{repo}"
         elif self.artifactory_prefix:
             return f"{scheme}://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
         else:

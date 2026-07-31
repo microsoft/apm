@@ -11,6 +11,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
@@ -81,6 +82,13 @@ class TestParseRemoteUrl(unittest.TestCase):
     def test_https_visualstudio_uses_org_subdomain(self):
         result = _parse_remote_url("https://contoso.visualstudio.com/project/_git/repo")
         self.assertEqual(result, ("contoso", "contoso.visualstudio.com"))
+
+    def test_ado_server_tfs_base_path_is_rejected(self):
+        with patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False):
+            with self.assertRaisesRegex(ValueError, "mounted below '/tfs/'"):
+                _parse_remote_url(
+                    "https://ado.example.test/tfs/DefaultCollection/project/_git/repo"
+                )
 
     def test_ssh_trailing_slash(self):
         result = _parse_remote_url("git@github.com:contoso/my-project/")
@@ -899,6 +907,36 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertTrue(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
+    @patch(
+        "apm_cli.policy.discovery._extract_port_from_git_remote",
+        return_value=8443,
+    )
+    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    def test_ado_server_auto_discovery_preserves_remote_port(
+        self,
+        mock_extract,
+        _mock_port,
+        mock_ado_fetch,
+    ):
+        mock_extract.return_value = (
+            "DefaultCollection",
+            "ado.example.test",
+        )
+        mock_ado_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with (
+            patch.dict(
+                os.environ,
+                {"ADO_HOST": "ado.example.test"},
+                clear=False,
+            ),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(mock_ado_fetch.call_args.kwargs["port"], 8443)
+
+    @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
     @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
     def test_ado_visualstudio_host(self, mock_extract, mock_ado_fetch):
         """*.visualstudio.com hosts also use ADO profile."""
@@ -946,12 +984,27 @@ class TestFetchAdoContents(unittest.TestCase):
         ctx = MagicMock()
         ctx.token = token
         ctx.auth_scheme = scheme
+        ctx.git_env = {}
+        if scheme == "bearer" and token:
+            ctx.git_env = {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_VALUE_0": f"Authorization: Bearer {token}",
+            }
         return ctx
 
     def _resolver(self, mock_resolver_cls, token: str | None, scheme: str = "basic"):
         resolver = mock_resolver_cls.return_value
         resolver.resolve.return_value = self._auth_context(token, scheme)
         resolver.build_error_context.return_value = "\n    auth remediation"
+
+        def try_with_fallback(host, operation, **kwargs):
+            resolve_kwargs = {"org": kwargs.get("org")}
+            if kwargs.get("port") is not None:
+                resolve_kwargs["port"] = kwargs["port"]
+            ctx = resolver.resolve(host, **resolve_kwargs)
+            return operation(ctx.token, ctx.git_env)
+
+        resolver.try_with_fallback.side_effect = try_with_fallback
         return resolver
 
     @patch("apm_cli.core.auth.AuthResolver")
@@ -1045,6 +1098,83 @@ class TestFetchAdoContents(unittest.TestCase):
         call_kwargs = mock_get.call_args
         headers = call_kwargs[1].get("headers", {})
         self.assertEqual(headers.get("Authorization"), "Bearer fallback-token")
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_custom_server_port_reaches_policy_api(
+        self,
+        mock_get,
+        mock_resolver_cls,
+    ):
+        resolver = self._resolver(mock_resolver_cls, "my-ado-pat")
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            text=VALID_POLICY_YAML,
+        )
+
+        with patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False):
+            content, error = _fetch_ado_contents(
+                "DefaultCollection",
+                "_apm",
+                "_apm",
+                "apm-policy.yml",
+                host="ado.example.test",
+                port=8443,
+            )
+
+        self.assertIsNone(error)
+        self.assertEqual(content, VALID_POLICY_YAML)
+        parsed = urlparse(mock_get.call_args.args[0])
+        self.assertEqual(parsed.hostname, "ado.example.test")
+        self.assertEqual(parsed.port, 8443)
+        resolver.resolve.assert_called_once_with(
+            "ado.example.test",
+            org="DefaultCollection",
+            port=8443,
+        )
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_rejected_services_pat_retries_policy_with_bearer(
+        self,
+        mock_get,
+        mock_resolver_cls,
+    ):
+        resolver = self._resolver(mock_resolver_cls, "stale-pat")
+        mock_get.side_effect = [
+            MagicMock(status_code=401),
+            MagicMock(status_code=200, text=VALID_POLICY_YAML),
+        ]
+
+        def fallback(_host, operation, **_kwargs):
+            try:
+                operation("stale-pat", {})
+            except RuntimeError:
+                return operation(
+                    "fresh-bearer",
+                    {
+                        "GIT_CONFIG_COUNT": "1",
+                        "GIT_CONFIG_VALUE_0": ("Authorization: Bearer fresh-bearer"),
+                    },
+                )
+            raise AssertionError("stale PAT unexpectedly succeeded")
+
+        resolver.try_with_fallback.side_effect = fallback
+        content, error = _fetch_ado_contents(
+            "contoso",
+            "_apm",
+            "_apm",
+            "apm-policy.yml",
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(content, VALID_POLICY_YAML)
+        self.assertEqual(mock_get.call_count, 2)
+        scheme, credential = (
+            mock_get.call_args_list[1].kwargs["headers"]["Authorization"].split(" ", 1)
+        )
+        self.assertEqual(scheme, "Bearer")
+        self.assertEqual(credential, "fresh-bearer")
 
 
 class TestFetchFromAdoRepo(unittest.TestCase):
