@@ -16,6 +16,7 @@ from ...utils.github_host import (
     is_visualstudio_legacy_hostname,
     maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
+    reject_unsupported_ado_server_base_path,
     unsupported_host_error,
     validate_ssh_user,
 )
@@ -210,8 +211,6 @@ class DependencyReference(ProviderCoordinateMixin):
 
     def is_azure_devops(self) -> bool:
         """Check if this reference points to Azure DevOps."""
-        from ...utils.github_host import is_azure_devops_hostname
-
         return self.host is not None and is_azure_devops_hostname(self.host)
 
     @classmethod
@@ -573,40 +572,6 @@ class DependencyReference(ProviderCoordinateMixin):
             f"fields to install a dependency under a custom directory name. "
             f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
         )
-
-    @staticmethod
-    def _reject_unsupported_ado_server_base_path(dependency_str: str) -> None:
-        """Reject ADO Server URLs mounted below an unsupported path prefix."""
-        source = dependency_str.split("#", 1)[0].strip()
-        if source.lower().startswith(("ssh://", "git@")):
-            return
-        if source.lower().startswith(("https://", "http://")):
-            parsed = urllib.parse.urlsplit(source)
-            host = parsed.hostname or ""
-            segments = [segment for segment in parsed.path.split("/") if segment]
-        else:
-            parts = [segment for segment in source.split("/") if segment]
-            if len(parts) < 2:
-                return
-            try:
-                host, _port = _split_shorthand_host_port(parts[0])
-            except ValueError:
-                return
-            segments = parts[1:]
-        if (
-            not is_azure_devops_hostname(host)
-            or host in {"dev.azure.com", "ssh.dev.azure.com"}
-            or is_visualstudio_legacy_hostname(host)
-            or "_git" not in segments
-        ):
-            return
-        git_index = segments.index("_git")
-        if segments[0].lower() == "tfs" and git_index >= 3:
-            raise ValueError(
-                "Azure DevOps Server URLs mounted below '/tfs/' are not "
-                "currently supported. Use a root-hosted collection URL such as "
-                "'https://server/DefaultCollection/project/_git/repo'."
-            )
 
     @staticmethod
     def _parse_ssh_protocol_url(url: str):
@@ -1949,7 +1914,7 @@ class DependencyReference(ProviderCoordinateMixin):
             )
 
         cls._reject_shorthand_alias(dependency_str)
-        cls._reject_unsupported_ado_server_base_path(dependency_str)
+        reject_unsupported_ado_server_base_path(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 

@@ -104,6 +104,40 @@ def is_visualstudio_legacy_hostname(hostname: str | None) -> bool:
     return hostname.lower().endswith(".visualstudio.com")
 
 
+def reject_unsupported_ado_server_base_path(dependency_str: str) -> None:
+    """Reject ADO Server URLs mounted below an unsupported path prefix."""
+    source = dependency_str.split("#", 1)[0].strip()
+    if source.lower().startswith(("ssh://", "git@")):
+        return
+    if source.lower().startswith(("https://", "http://")):
+        parsed = urllib.parse.urlsplit(source)
+        host = parsed.hostname or ""
+        segments = [segment for segment in parsed.path.split("/") if segment]
+    else:
+        parts = [segment for segment in source.split("/") if segment]
+        if len(parts) < 2:
+            return
+        try:
+            host = urllib.parse.urlsplit(f"//{parts[0]}").hostname or ""
+        except ValueError:
+            return
+        segments = parts[1:]
+    if (
+        not is_azure_devops_hostname(host)
+        or host in {"dev.azure.com", "ssh.dev.azure.com"}
+        or is_visualstudio_legacy_hostname(host)
+        or "_git" not in segments
+    ):
+        return
+    git_index = segments.index("_git")
+    if segments[0].lower() == "tfs" and git_index >= 3:
+        raise ValueError(
+            "Azure DevOps Server URLs mounted below '/tfs/' are not "
+            "currently supported. Use a root-hosted collection URL such as "
+            "'https://server/DefaultCollection/project/_git/repo'."
+        )
+
+
 def is_gitlab_hostname(hostname: str | None) -> bool:
     """Return True if *hostname* is GitLab SaaS or a GitLab host from env configuration.
 
