@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from apm_cli.core.auth import AuthResolver
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.scope import InstallScope
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.install.plan import UpdatePlan
     from apm_cli.install.transaction import InstallTransaction
     from apm_cli.models.apm_package import APMPackage
@@ -38,7 +39,7 @@ class InstallRequest:
     scope: InstallScope | None = None
     auth_resolver: AuthResolver | None = None
     target: str | list[str] | None = None
-    target_decision: Any = None  # EffectiveTargetDecision
+    target_decision: EffectiveTargetDecision | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
     marketplace_provenance: dict[str, Any] | None = None

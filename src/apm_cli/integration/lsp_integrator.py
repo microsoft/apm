@@ -12,12 +12,16 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import write_text_lf
+
+if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
 
 _log = logging.getLogger(__name__)
 
@@ -223,7 +227,7 @@ class LSPIntegrator:
         exclude: str | None = None,
         apm_config: dict | None = None,
         explicit_target: str | list[str] | None = None,
-        target_decision=None,
+        target_decision: EffectiveTargetDecision | None = None,
         scope=None,
         logger=None,
     ) -> list[str]:

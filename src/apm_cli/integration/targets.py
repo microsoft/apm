@@ -1299,6 +1299,8 @@ def materialize_project_target_profiles(
         profile = KNOWN_TARGETS.get(target_name)
         if profile is None:
             continue
-        profile.deploy_path(project_root).mkdir(parents=True, exist_ok=True)
+        deploy_path = profile.deploy_path(project_root)
+        if not deploy_path.is_dir():
+            deploy_path.mkdir(parents=True, exist_ok=True)
         profiles.append(profile)
     return profiles

@@ -87,6 +87,7 @@ from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_pack
 if TYPE_CHECKING:
     from ..core.command_logger import CommandLogger
     from ..core.scope import InstallScope
+    from ..core.target_detection import EffectiveTargetDecision
     from ..deps.lockfile import LockFile
     from ..models.dependency.reference import DependencyReference
 
@@ -221,7 +222,7 @@ def _run_mcp_lsp_integration(
     project_root: Path,
     existing_lock: LockFile | None,
     lock_path: Path,
-    target_decision: Any,
+    target_decision: EffectiveTargetDecision,
     diagnostics: Any,
     logger: InstallLogger,
     verbose: bool,
@@ -357,7 +358,7 @@ def _handle_service_only_update(
         logger=logger,
         verbose=verbose,
     )
-    logger.success("MCP/LSP configuration reconciled; no APM dependencies to update.")
+    logger.success("MCP/LSP configuration reconciled. No APM dependencies to update.")
     return True
 
 

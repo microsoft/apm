@@ -1,7 +1,13 @@
 """Typed result containers for APM operations."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
 
 
 class InstallDisposition(str, Enum):
@@ -28,7 +34,7 @@ class InstallResult:
     exit_code: int = 0
     committed: bool = False
     error: BaseException | None = field(default=None, repr=False)
-    target_decision: object = None  # EffectiveTargetDecision or None
+    target_decision: EffectiveTargetDecision | None = None
 
 
 @dataclass

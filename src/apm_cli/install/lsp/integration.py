@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.apm_package import APMPackage
 
@@ -29,7 +30,7 @@ def run_lsp_integration(  # noqa: PLR0913
     explicit_target: str | list[str] | None = None,
     scope=None,
     target_context: tuple[dict | None, str | list[str] | None, object] | None = None,
-    target_decision=None,
+    target_decision: "EffectiveTargetDecision | None" = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Run LSP server integration after APM package installation.

@@ -56,6 +56,7 @@ from .transaction import InstallTransaction
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
     from ..core.command_logger import InstallLogger
+    from ..core.target_detection import EffectiveTargetDecision
 
 
 # CRITICAL: Shadow Python builtins that share names with Click commands.
@@ -450,7 +451,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     scope=None,
     auth_resolver: AuthResolver = None,
     target: str | list[str] | None = None,
-    target_decision=None,
+    target_decision: EffectiveTargetDecision | None = None,
     allow_insecure: bool = False,
     allow_insecure_hosts=(),
     marketplace_provenance: dict = None,

@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/src/content/docs/specs/openapm-v0.1.md`.
   (by @sergio-sisternes-epam, #2365)
 - Package-declared targets now restrict dependency primitive deployment without expanding project or consumer authorization, preventing Claude-only hooks from leaking into Cursor and repairing stale owned entries on update; the contract is cited in `docs/src/content/docs/specs/openapm-v0.1.md`. By @sergio-sisternes-epam (#2362)
+- Saved targets from `apm config set target` now drive package, MCP, and LSP
+  phases in `apm install` and `apm update`; unresolved or failed required
+  service writes exit non-zero with a next step instead of silently succeeding.
+  (reported by @ryodocx, #2414, closes #2345)
+
 - Copilot hook packages with JavaScript scripts no longer fail with "hooks: hooks must be an object"; APM keeps generated `package.json` and nested JSON bundle assets out of project `.github/hooks/scripts/` and user `~/.copilot/hooks/scripts/`, where Copilot's recursive hook-loader scan would reject them as descriptors; use `.mjs` for ES module scripts targeting Copilot or VS Code. (#2322)
 - `apm uninstall` now accepts the portable `_local/<name>` key printed by
   `apm deps list` and rejects missing or ambiguous batches with a nonzero status

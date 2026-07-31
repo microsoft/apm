@@ -28,6 +28,7 @@ from apm_cli.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
+    from apm_cli.core.target_detection import EffectiveTargetDecision
 
 # IntelliJ owns a fail-closed atomic user-config contract. Other adapters retain
 # their existing best-effort behavior when a composed target set includes an
@@ -471,7 +472,7 @@ def _resolve_target_runtimes(
     project_root,
     user_scope: bool,
     explicit_target: str | list[str] | None,
-    target_decision,
+    target_decision: EffectiveTargetDecision | None,
     scope: InstallScope | None,
     logger,
     console,
@@ -896,7 +897,7 @@ def run_mcp_install(
     project_root=None,
     user_scope: bool = False,
     explicit_target: str | list[str] | None = None,
-    target_decision=None,
+    target_decision: EffectiveTargetDecision | None = None,
     logger=None,
     diagnostics=None,
     scope: InstallScope | None = None,

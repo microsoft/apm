@@ -22,6 +22,8 @@ are accepted as aliases and map to the same internal value.
 """
 
 import warnings
+from collections.abc import Iterator
+from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
 
@@ -29,6 +31,7 @@ import click
 
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
+    TargetCapability,
     accepted_target_values,
     expand_all,
     get_target_capability,
@@ -795,6 +798,17 @@ class ResolvedTargets:
     auto_create: bool  # always True after resolution (three-guard collapse)
 
 
+def _target_capabilities(
+    value: str | list[str] | None,
+) -> Iterator[tuple[str, TargetCapability]]:
+    """Yield expanded target spellings with their catalog capabilities."""
+    raw_targets = [value] if isinstance(value, str) else list(value or [])
+    for raw_target in raw_targets:
+        expanded = expand_all("install") if raw_target == "all" else (raw_target,)
+        for target in expanded:
+            yield target, get_target_capability(target)
+
+
 @dataclass(frozen=True)
 class EffectiveTargetDecision:
     """One install-time target decision shared by package, MCP, and LSP phases."""
@@ -802,56 +816,46 @@ class EffectiveTargetDecision:
     value: str | list[str] | None
     source: str
 
-    @property
+    @cached_property
     def canonical_targets(self) -> tuple[str, ...] | None:
         """Return the selected native target profiles, or None when unrestricted."""
         if self.value is None:
             return None
 
-        raw_targets = [self.value] if isinstance(self.value, str) else list(self.value)
         canonical: list[str] = []
         seen: set[str] = set()
-        for raw_target in raw_targets:
-            expanded = expand_all("install") if raw_target == "all" else (raw_target,)
-            for target in expanded:
-                capability = get_target_capability(target)
-                name = (
-                    capability.primitive_profile
-                    if capability.mcp_only and capability.primitive_profile is not None
-                    else normalize_target_name(target)
-                )
-                if name not in seen:
-                    seen.add(name)
-                    canonical.append(name)
+        for target, capability in _target_capabilities(self.value):
+            name = (
+                capability.primitive_profile
+                if capability.mcp_only and capability.primitive_profile is not None
+                else normalize_target_name(target)
+            )
+            if name not in seen:
+                seen.add(name)
+                canonical.append(name)
         return tuple(canonical)
 
-    @property
+    @cached_property
     def runtime_targets(self) -> tuple[str, ...] | None:
         """Return MCP runtime identifiers represented by this target decision."""
         if self.value is None:
             return None
 
-        raw_targets = [self.value] if isinstance(self.value, str) else list(self.value)
         runtimes: list[str] = []
         seen: set[str] = set()
-        for raw_target in raw_targets:
-            expanded = expand_all("install") if raw_target == "all" else (raw_target,)
-            for target in expanded:
-                capability = get_target_capability(target)
-                runtime = (
-                    capability.compile_family
-                    if target in capability.aliases
-                    and capability.compile_family in capability.runtimes
-                    else target
-                    if target in capability.runtimes
-                    or (target == capability.name and self.source == "--target flag")
-                    else capability.runtimes[0]
-                    if capability.runtimes
-                    else capability.name
-                )
-                if runtime not in seen:
-                    seen.add(runtime)
-                    runtimes.append(runtime)
+        for target, capability in _target_capabilities(self.value):
+            runtime = (
+                capability.compile_family
+                if target in capability.aliases and capability.compile_family in capability.runtimes
+                else target
+                if target in capability.runtimes or target == capability.name
+                else capability.runtimes[0]
+                if capability.runtimes
+                else capability.name
+            )
+            if runtime not in seen:
+                seen.add(runtime)
+                runtimes.append(runtime)
         return tuple(runtimes)
 
     def runtime_targets_for_scope(self, *, user_scope: bool) -> tuple[str, ...] | None:
@@ -866,25 +870,32 @@ class EffectiveTargetDecision:
             return runtimes
         return tuple("copilot" if target == "vscode" else target for target in runtimes)
 
-    @property
+    @cached_property
+    def runtime_equivalents(self) -> tuple[str, ...] | None:
+        """Return canonical and adapter runtime spellings for exclusions."""
+        if self.value is None:
+            return None
+        equivalents: set[str] = set()
+        for _target, capability in _target_capabilities(self.value):
+            equivalents.add(capability.name)
+            equivalents.update(capability.runtimes)
+        return tuple(sorted(equivalents))
+
+    @cached_property
     def lsp_targets(self) -> tuple[str, ...] | None:
         """Return native target profiles eligible for LSP configuration."""
         if self.value is None:
             return None
 
-        raw_targets = [self.value] if isinstance(self.value, str) else list(self.value)
         targets: list[str] = []
         seen: set[str] = set()
-        for raw_target in raw_targets:
-            expanded = expand_all("install") if raw_target == "all" else (raw_target,)
-            for target in expanded:
-                capability = get_target_capability(target)
-                if capability.mcp_only:
-                    continue
-                canonical = normalize_target_name(target)
-                if canonical not in seen:
-                    seen.add(canonical)
-                    targets.append(canonical)
+        for target, capability in _target_capabilities(self.value):
+            if capability.mcp_only:
+                continue
+            canonical = normalize_target_name(target)
+            if canonical not in seen:
+                seen.add(canonical)
+                targets.append(canonical)
         return tuple(targets)
 
 

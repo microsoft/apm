@@ -12,10 +12,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
 from ..errors import InstallFailureAlreadyRendered
+
+if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
 from .registry import registry_env_override
@@ -53,7 +58,7 @@ def run_mcp_install(  # noqa: PLR0913
     apm_dir: Path,
     scope: str | None,
     target: str | list[str] | None = None,
-    target_decision=None,
+    target_decision: EffectiveTargetDecision | None = None,
     registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated

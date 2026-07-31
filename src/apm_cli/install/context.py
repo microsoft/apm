@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
     from apm_cli.install.helpers.ref_reuse import RefResolverCacheKey
     from apm_cli.security.executables import ExecTrustContext
@@ -59,7 +60,7 @@ class InstallContext:
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
     target_override: str | list[str] | None = None  # effective --target value
-    target_decision: Any = None  # EffectiveTargetDecision
+    target_decision: EffectiveTargetDecision | None = None
     # Provenance label for ``target_override`` when it did NOT come from the CLI.
     # None means an explicit CLI ``--target`` selector. When the value is
     # populated from the configured default (``apm config target``), this is

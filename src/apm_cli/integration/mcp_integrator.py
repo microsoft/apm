@@ -46,6 +46,7 @@ from apm_cli.utils.console import (
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
+    from apm_cli.core.target_detection import EffectiveTargetDecision
 
 _log = logging.getLogger(__name__)
 
@@ -1048,7 +1049,7 @@ class MCPIntegrator:
         project_root,
         apm_config: dict | None,
         explicit_target: str | list[str] | None,
-        target_decision=None,
+        target_decision: EffectiveTargetDecision | None = None,
     ) -> list[str]:
         """Filter *target_runtimes* against the project's active targets.
 
@@ -1256,7 +1257,7 @@ class MCPIntegrator:
         project_root=None,
         user_scope: bool = False,
         explicit_target: str | list[str] | None = None,
-        target_decision=None,
+        target_decision: EffectiveTargetDecision | None = None,
         logger=None,
         diagnostics=None,
         scope=None,

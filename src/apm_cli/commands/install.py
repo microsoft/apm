@@ -24,8 +24,8 @@ from apm_cli.install.errors import (
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 
 if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.install.plan import UpdatePlan
-
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
 # (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
@@ -178,7 +178,7 @@ class InstallContext:
     skill_subset_from_cli: bool = False
     audit_override: str | None = None
     install_result: InstallResult | None = None
-    target_decision: Any = None
+    target_decision: "EffectiveTargetDecision | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -855,7 +855,7 @@ def _handle_mcp_install(  # noqa: PLR0913
 
 
 @click.command(
-    help="Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
+    help="Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
 @click.argument("packages", nargs=-1)
 @click.option(
@@ -865,7 +865,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         "(legacy alias for --target, single value only; prefer --target)"
     ),
 )
-@click.option("--exclude", help="Exclude one runtime from the resolved MCP target set")
+@click.option("--exclude", help="Exclude one runtime from the resolved MCP/LSP target set")
 @click.option(
     "--only",
     type=click.Choice(["apm", "mcp"]),
@@ -922,9 +922,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     "IntelliJ-specific integration is MCP-only; file primitives use the Copilot profile. "
     "'all' excludes agent-skills, antigravity, experimental targets, and intellij; combine "
     "explicit-only targets when needed. Experimental targets require their feature flags. "
-    "File-primitive resolution: --target > apm.yml targets: > apm config target > "
-    "auto-detect. MCP resolution: --runtime/--target > apm.yml targets: > machine "
-    "discovery only when the manifest is unrestricted. With nothing to detect, install "
+    "Target resolution: --runtime/--target > apm.yml targets: > saved config > "
+    "auto-detect (only when apm.yml declares no targets). With nothing to detect, install "
     "exits 2 with a teaching message. For 'apm compile', use '--all'; '--target all' "
     "is deprecated.",
 )
@@ -980,9 +979,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     help=(
         "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, "
         "--header, --mcp-version, or a stdio command after `--`. Resolves active "
-        "targets as --runtime/--target > apm.yml targets: > machine discovery only "
-        "when the manifest is unrestricted; writes only for active targets and skips "
-        "others with [i]."
+        "targets as --runtime/--target > apm.yml targets: > saved config > auto-detect "
+        "(only when apm.yml declares no targets); writes only for active targets."
     ),
 )
 @click.option(
@@ -1983,6 +1981,7 @@ def _install_apm_packages(ctx, outcome):
         raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
+        logger.render_summary()
         raise InstallFailureAlreadyRendered(str(exc)) from exc
 
     from apm_cli.install.lsp import run_lsp_integration
@@ -2010,6 +2009,7 @@ def _install_apm_packages(ctx, outcome):
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
+        logger.render_summary()
         raise InstallFailureAlreadyRendered(str(exc)) from exc
 
     # Local .apm/ integration already ran inside the package pipeline.
@@ -2085,7 +2085,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     scope=None,
     auth_resolver: "AuthResolver" = None,
     target: str | None = None,
-    target_decision=None,
+    target_decision: "EffectiveTargetDecision | None" = None,
     allow_insecure: bool = False,
     allow_insecure_hosts=(),
     marketplace_provenance: dict = None,

@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.models.apm_package import APMPackage
 
 
 def _cleanup_runtimes(
     *,
     runtime: str | None,
-    target_decision,
+    target_decision: "EffectiveTargetDecision | None",
     owned_targets: builtins.dict | None,
     user_scope: bool,
 ) -> list[str | None]:
@@ -54,7 +55,7 @@ def run_mcp_integration(  # noqa: PLR0913
     no_policy: bool = False,
     verbose: bool = False,
     explicit_target: str | list[str] | None = None,
-    target_decision=None,
+    target_decision: "EffectiveTargetDecision | None" = None,
     scope=None,
     trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
 ) -> tuple[int, dict]:
