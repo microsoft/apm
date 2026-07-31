@@ -961,15 +961,9 @@ def test_ado_transport_credentials_route_through_auth_resolver() -> None:
     pipeline = (root / "src/apm_cli/install/pipeline.py").read_text()
     ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
     marketplace = (root / "src/apm_cli/marketplace/client.py").read_text()
-    marketplace_builder = (
-        root / "src/apm_cli/marketplace/builder.py"
-    ).read_text()
-    marketplace_auth = (
-        root / "src/apm_cli/marketplace/auth_helpers.py"
-    ).read_text()
-    marketplace_check = (
-        root / "src/apm_cli/commands/marketplace/check.py"
-    ).read_text()
+    marketplace_builder = (root / "src/apm_cli/marketplace/builder.py").read_text()
+    marketplace_auth = (root / "src/apm_cli/marketplace/auth_helpers.py").read_text()
+    marketplace_check = (root / "src/apm_cli/commands/marketplace/check.py").read_text()
     policy = (root / "src/apm_cli/policy/discovery.py").read_text()
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
