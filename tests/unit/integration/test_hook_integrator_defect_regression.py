@@ -9,6 +9,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.hook_ownership import dependency_hook_source_marker
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.reference import DependencyReference
@@ -447,7 +448,7 @@ def test_transitive_local_hook_markers_include_anchored_parent_identity(
             dependency_ref=dependency,
         )
         packages.append(package)
-        expected_markers.add(HookIntegrator._dependency_hook_source_marker(dependency))
+        expected_markers.add(dependency_hook_source_marker(dependency))
         integrator.integrate_hooks_for_target(
             KNOWN_TARGETS["cursor"],
             package,
