@@ -348,7 +348,10 @@ class TestCoreOperations:
 
         result = ops.install_package("cursor", "my-server")
         assert result["success"] is True
-        mock_installer.install_servers.assert_called_once_with(["my-server"])
+        mock_installer.install_servers.assert_called_once_with(
+            ["my-server"],
+            replace_existing=False,
+        )
 
     def test_install_package_exception_returns_false(self, monkeypatch):
         """install_package returns failure dict on exception."""
