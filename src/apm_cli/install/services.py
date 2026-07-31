@@ -191,14 +191,13 @@ def _warn_target_reconcile_failure(
     package_name: str,
     reconcile_stats: dict,
 ) -> None:
-    """Record actionable target and config details after hook contraction fails."""
     if not reconcile_stats.get("errors", 0):
         return
-    failed_targets = reconcile_stats.get("failed_targets")
-    failed_paths = reconcile_stats.get("failed_paths")
-    if not isinstance(failed_targets, list) or not failed_targets:
+    failed_targets = reconcile_stats.get("failed_targets") or ["unknown"]
+    failed_paths = reconcile_stats.get("failed_paths") or ["unknown"]
+    if not isinstance(failed_targets, list):
         failed_targets = ["unknown"]
-    if not isinstance(failed_paths, list) or not failed_paths:
+    if not isinstance(failed_paths, list):
         failed_paths = ["unknown"]
     diagnostics.warn(
         "Could not fully reconcile hooks excluded by target restrictions",
