@@ -1096,6 +1096,22 @@ class TestBuildGitEnvBearerIsolation:
         assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer fresh-jwt"
         assert not any("inherited-secret" in str(v) for v in env.values())
 
+    def test_clear_git_auth_env_preserves_authorization_substring_value(self):
+        """#2398: ordinary values containing ``authorization`` are not headers."""
+        env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.proxy",
+            "GIT_CONFIG_VALUE_0": "http://authorization-proxy.corp.example:3128",
+        }
+
+        AuthResolver._clear_git_auth_env(env)
+
+        assert env == {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.proxy",
+            "GIT_CONFIG_VALUE_0": "http://authorization-proxy.corp.example:3128",
+        }
+
 
 # ---------------------------------------------------------------------------
 # TestHostInfoPort -- port field + display_name property

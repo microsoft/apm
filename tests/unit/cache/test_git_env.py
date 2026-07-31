@@ -11,6 +11,7 @@ from apm_cli.utils.git_env import (
     get_git_executable,
     git_subprocess_env,
     reset_git_cache,
+    strip_git_auth_config_entries,
 )
 
 # Entire module: this is the canonical owner of resolved,
@@ -143,3 +144,118 @@ class TestGitSubprocessEnv:
         with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/custom/lib"}, clear=True):
             env = git_subprocess_env()
             assert env["LD_LIBRARY_PATH"] == "/custom/lib"
+
+
+class TestStripGitAuthConfigEntries:
+    """Canonical indexed GIT_CONFIG_* retain/reindex policy."""
+
+    def test_strips_auth_entries_and_reindexes_safe_entries_stably(self) -> None:
+        env = {
+            "OTHER": "preserved",
+            "GIT_CONFIG_COUNT": "4",
+            "GIT_CONFIG_KEY_0": "safe.bareRepository",
+            "GIT_CONFIG_VALUE_0": "explicit",
+            "GIT_CONFIG_KEY_1": "http.ExtraHeader",
+            "GIT_CONFIG_VALUE_1": "X-Trace: inherited",
+            "GIT_CONFIG_KEY_2": "credential.helper",
+            "GIT_CONFIG_VALUE_2": "note\r\n\tAUTHORIZATION : Bearer stale-secret",
+            "GIT_CONFIG_KEY_3": "http.sslCAInfo",
+            "GIT_CONFIG_VALUE_3": "/corporate/ca.pem",
+            "GIT_CONFIG_KEY_9": "http.extraheader",
+            "GIT_CONFIG_VALUE_9": "Authorization: Bearer orphan-secret",
+        }
+
+        retained_count = strip_git_auth_config_entries(env)
+
+        assert retained_count == 2
+        assert env == {
+            "OTHER": "preserved",
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "safe.bareRepository",
+            "GIT_CONFIG_VALUE_0": "explicit",
+            "GIT_CONFIG_KEY_1": "http.sslCAInfo",
+            "GIT_CONFIG_VALUE_1": "/corporate/ca.pem",
+        }
+        assert not any("secret" in value for value in env.values())
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "Authorization: Bearer stale",
+            "  authorization:\tBasic stale",
+            "note\nAuthorization: Bearer stale",
+            "note\rAuthorization: Bearer stale",
+            "note\r\n\tAuthorization : Bearer stale",
+        ],
+    )
+    def test_strips_exact_authorization_header_lines(self, value: str) -> None:
+        env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.helper",
+            "GIT_CONFIG_VALUE_0": value,
+        }
+
+        assert strip_git_auth_config_entries(env) == 0
+        assert env == {}
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "http://authorization-proxy.corp.example:3128",
+            "authorization is required",
+            "x=Authorization: example",
+            "X-Authorization: example",
+        ],
+    )
+    def test_preserves_non_header_authorization_text(self, value: str) -> None:
+        env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.proxy",
+            "GIT_CONFIG_VALUE_0": value,
+        }
+
+        assert strip_git_auth_config_entries(env) == 1
+        assert env["GIT_CONFIG_VALUE_0"] == value
+
+    @pytest.mark.parametrize("count", [None, "", " ", "invalid", "-3"])
+    def test_invalid_or_non_positive_count_discards_all_slots(self, count: str | None) -> None:
+        env: dict[str, str] = {
+            "GIT_CONFIG_COUNT": count,  # type: ignore[dict-item]
+            "GIT_CONFIG_KEY_0": "safe.bareRepository",
+            "GIT_CONFIG_VALUE_0": "explicit",
+        }
+
+        assert strip_git_auth_config_entries(env) == 0
+        assert env == {}
+
+    def test_runtime_is_bounded_by_present_slots_not_declared_count(self) -> None:
+        env = {
+            "GIT_CONFIG_COUNT": "999999999999999999999999999999999999",
+            "GIT_CONFIG_KEY_7": "safe.bareRepository",
+            "GIT_CONFIG_VALUE_7": "explicit",
+        }
+
+        assert strip_git_auth_config_entries(env) == 1
+        assert env == {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.bareRepository",
+            "GIT_CONFIG_VALUE_0": "explicit",
+        }
+
+    def test_missing_values_and_noncanonical_slots_are_cleaned(self) -> None:
+        env = {
+            "GIT_CONFIG_COUNT": "4",
+            "GIT_CONFIG_VALUE_0": "value-without-key",
+            "GIT_CONFIG_KEY_1": "credential.interactive",
+            "GIT_CONFIG_KEY_00": "http.extraheader",
+            "GIT_CONFIG_VALUE_00": "Authorization: Bearer stale",
+            "GIT_CONFIG_KEY_bad": "http.extraheader",
+            "GIT_CONFIG_VALUE_bad": "Authorization: Bearer stale",
+        }
+
+        assert strip_git_auth_config_entries(env) == 1
+        assert env == {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.interactive",
+            "GIT_CONFIG_VALUE_0": "",
+        }
