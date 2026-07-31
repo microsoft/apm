@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit target mappings now preserve `generated_at`, deployment ownership,
   and `mcp_target_servers`, leaving `apm.lock.yaml` byte-identical instead of
   rewriting it. (#2306)
+- On-prem Azure DevOps Server hosts configured with `ADO_HOST` or
+  `APM_ADO_HOSTS` are no longer misclassified as GitHub Enterprise Server when
+  `GITHUB_HOST` overlaps, keeping ADO credentials isolated end to end.
+  (by @sergio-sisternes-epam, #2365)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install
