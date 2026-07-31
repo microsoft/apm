@@ -191,7 +191,7 @@ class TestIntelliJClientAdapter(unittest.TestCase):
         self.mcp_json.write_text("not json")
         with (
             self._patch_config_path(),
-            pytest.raises(IntelliJConfigError, match="malformed"),
+            pytest.raises(IntelliJConfigError, match="line 1 column 1"),
         ):
             self.adapter.get_current_config()
 
@@ -264,6 +264,30 @@ class TestIntelliJClientAdapter(unittest.TestCase):
         ):
             self.adapter.update_config({"new-server": {"command": "new"}})
         assert self.mcp_json.read_bytes() == original
+
+    def test_write_config_rejects_path_outside_adapter_owners(self):
+        outside = self.home_root / "outside.json"
+        with (
+            patch.object(self.adapter, "get_config_path", return_value=str(self.mcp_json)),
+            patch.object(self.adapter, "get_legacy_config_path", return_value=None),
+            pytest.raises(IntelliJConfigError, match="outside adapter-owned paths"),
+        ):
+            self.adapter._write_config(outside, {"servers": {}})
+        assert not outside.exists()
+
+    @unittest.skipIf(os.name == "nt", "symlink creation is not reliable on Windows CI")
+    def test_write_config_rejects_symlink_alias_to_owned_file(self):
+        alias = self.home_root / "alias.json"
+        self.mcp_json.write_text('{"servers": {}}\n', encoding="utf-8")
+        alias.symlink_to(self.mcp_json)
+        with (
+            patch.object(self.adapter, "get_config_path", return_value=str(self.mcp_json)),
+            patch.object(self.adapter, "get_legacy_config_path", return_value=None),
+            pytest.raises(IntelliJConfigError, match="outside adapter-owned paths"),
+        ):
+            self.adapter._write_config(alias, {"servers": {"new": {}}})
+        assert alias.is_symlink()
+        assert self.mcp_json.read_text(encoding="utf-8") == '{"servers": {}}\n'
 
     def test_get_current_config_unreadable_is_explicit(self):
         self.mcp_json.write_text('{"servers": {}}', encoding="utf-8")
@@ -626,5 +650,7 @@ def test_cli_atomic_write_failure_is_nonzero_without_partial_config(
 
     assert result.exit_code == 1
     assert "MCP integration failed" in result.output
+    assert "Cannot write JetBrains Copilot MCP config" in result.output
+    assert "Check permissions and free space" in result.output
     assert config_path.read_bytes() == original
     assert not tuple(config_path.parent.glob("apm-atomic-*"))

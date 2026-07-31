@@ -135,6 +135,55 @@ def test_self_defined_partial_runtime_failure_is_explicit() -> None:
 
     assert install_runtime.call_count == 2
     assert managed == {"claude": {"managed-server"}}
+    logger.error.assert_any_call(
+        "MCP configuration failed for selected runtime(s): managed-server (intellij)"
+    )
+
+
+def test_registry_group_partial_runtime_failure_is_explicit() -> None:
+    """Registry installs enforce the same strict IntelliJ failure contract."""
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import _install_registry_group
+
+    operations = MagicMock()
+    operations.validate_servers_exist.return_value = (["managed-server"], [])
+    operations.check_servers_needing_installation.return_value = ["managed-server"]
+    operations.batch_fetch_server_info.return_value = {"managed-server": {}}
+    operations.collect_environment_variables.return_value = {}
+    operations.collect_runtime_variables.return_value = {}
+    managed: dict[str, set[str]] = {}
+    logger = MagicMock()
+
+    with (
+        patch.object(
+            MCPIntegrator,
+            "_install_for_runtime",
+            side_effect=lambda runtime, *_args, **_kwargs: runtime == "claude",
+        ) as install_runtime,
+        pytest.raises(RuntimeError, match=r"managed-server \(intellij\)"),
+    ):
+        _install_registry_group(
+            operations=operations,
+            group_dep_names=["managed-server"],
+            group_dep_map={},
+            group_deps=["managed-server"],
+            target_runtimes=["claude", "intellij"],
+            stored_mcp_configs={},
+            servers_to_update=set(),
+            successful_updates=set(),
+            project_root=None,
+            user_scope=False,
+            verbose=False,
+            console=None,
+            logger=logger,
+            managed_target_servers=managed,
+        )
+
+    assert install_runtime.call_count == 2
+    assert managed == {"claude": {"managed-server"}}
+    logger.error.assert_any_call(
+        "MCP configuration failed for selected runtime(s): managed-server (intellij)"
+    )
 
 
 # ---------------------------------------------------------------------------

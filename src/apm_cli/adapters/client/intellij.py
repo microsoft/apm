@@ -18,7 +18,6 @@ mcp-server/src/com/intellij/mcpserver/clients/impl/GitHubCopilotIdePluginClient.
 
 from __future__ import annotations
 
-import copy
 import json
 import ntpath
 import os
@@ -98,13 +97,17 @@ def _expanded_server_names(names: set[str]) -> set[str]:
     return expanded
 
 
-def _config_without_servers(config: dict, names: set[str]) -> tuple[dict, set[str]]:
-    updated = copy.deepcopy(config)
-    servers = dict(updated.get("servers") or {})
+def _config_without_servers(
+    config: dict,
+    names: set[str],
+    servers_key: str,
+) -> tuple[dict, set[str]]:
+    updated = dict(config)
+    servers = dict(updated.get(servers_key) or {})
     removed = names & servers.keys()
     for name in removed:
         del servers[name]
-    updated["servers"] = servers
+    updated[servers_key] = servers
     return updated, set(removed)
 
 
@@ -125,6 +128,8 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         """Return the canonical JetBrains Copilot ``mcp.json`` path."""
         root = _intellij_config_root()
         config_dir = _intellij_config_dir()
+        # XDG roots may live outside HOME. This containment check guards the
+        # fixed suffix against symlink escapes from the selected platform root.
         ensure_path_within(config_dir, root)
         return str(config_dir / "mcp.json")
 
@@ -154,7 +159,7 @@ class IntelliJClientAdapter(CopilotClientAdapter):
             config = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise IntelliJConfigError(
-                f"JetBrains Copilot MCP config at '{path}' is malformed JSON. "
+                f"JetBrains Copilot MCP config at '{path}' is malformed JSON ({exc}). "
                 "Fix the file, then rerun apm install."
             ) from exc
         if not isinstance(config, dict):
@@ -170,8 +175,22 @@ class IntelliJClientAdapter(CopilotClientAdapter):
             )
         return config
 
+    def _validate_owned_config_path(self, path: Path) -> None:
+        """Reject writes outside the adapter-owned canonical and legacy files."""
+        candidate = os.path.normcase(os.path.abspath(path))
+        canonical = os.path.normcase(os.path.abspath(self.get_config_path()))
+        if candidate == canonical:
+            return
+        legacy_path = self.get_legacy_config_path()
+        if legacy_path is not None and candidate == os.path.normcase(os.path.abspath(legacy_path)):
+            return
+        raise IntelliJConfigError(
+            f"Refusing to write JetBrains Copilot MCP config outside adapter-owned paths: '{path}'."
+        )
+
     def _write_config(self, path: Path, config: dict) -> None:
         try:
+            self._validate_owned_config_path(path)
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(path, json.dumps(config, indent=2) + "\n")
         except OSError as exc:
@@ -196,7 +215,7 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         current = self.get_current_config()
         servers = dict(current.get(self.mcp_servers_key) or {})
         servers.update(config_updates)
-        updated = copy.deepcopy(current)
+        updated = dict(current)
         updated[self.mcp_servers_key] = servers
         self._write_config(Path(self.get_config_path()), updated)
 
@@ -223,14 +242,19 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         canonical_servers = dict(canonical.get(self.mcp_servers_key) or {})
         for name in sorted(migrated):
             if name not in canonical_servers:
-                canonical_servers[name] = copy.deepcopy(legacy_servers[name])
-        canonical_updated = copy.deepcopy(canonical)
+                canonical_servers[name] = legacy_servers[name]
+        canonical_updated = dict(canonical)
         canonical_updated[self.mcp_servers_key] = canonical_servers
-        legacy_updated, _ = _config_without_servers(legacy, set(migrated))
+        legacy_updated, legacy_removed = _config_without_servers(
+            legacy,
+            set(migrated),
+            self.mcp_servers_key,
+        )
 
         if canonical_updated != canonical:
             self._write_config(canonical_path, canonical_updated)
-        self._write_config(legacy_path, legacy_updated)
+        if legacy_removed:
+            self._write_config(legacy_path, legacy_updated)
         return set(migrated)
 
     def remove_managed_servers(self, owned_names: set[str]) -> set[str]:
@@ -242,8 +266,16 @@ class IntelliJClientAdapter(CopilotClientAdapter):
 
         canonical = self._read_config(canonical_path)
         legacy = self._read_config(legacy_path) if legacy_path is not None else {}
-        canonical_updated, canonical_removed = _config_without_servers(canonical, names)
-        legacy_updated, legacy_removed = _config_without_servers(legacy, names)
+        canonical_updated, canonical_removed = _config_without_servers(
+            canonical,
+            names,
+            self.mcp_servers_key,
+        )
+        legacy_updated, legacy_removed = _config_without_servers(
+            legacy,
+            names,
+            self.mcp_servers_key,
+        )
 
         if canonical_removed:
             self._write_config(canonical_path, canonical_updated)

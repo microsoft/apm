@@ -140,12 +140,15 @@ def test_direct_install_uses_config_state_for_full_lifecycle(
         updated_install = tuple(
             _UPDATED_SERVER_URL if value == _SERVER_URL else value for value in install
         )
-        _runner(apm_binary_path).run_sequence(
+        migration_results = _runner(apm_binary_path).run_sequence(
             (updated_install,),
             expected_returncodes=(0,),
             scenario_id="intellij-direct-skipped-migration",
             cwd=project,
             env=environment,
+        )
+        assert "Migrated 1 IntelliJ MCP server to" in (
+            migration_results[0].stdout + migration_results[0].stderr
         )
         assert canonical.read_bytes() == expected
         assert legacy.read_bytes() == _json_bytes(
@@ -386,6 +389,8 @@ def test_malformed_installed_destination_fails_without_rewrite(
 
     assert result.returncode == 1
     assert "MCP integration failed" in result.stderr + result.stdout
+    assert "is malformed JSON" in result.stderr + result.stdout
+    assert "Fix the file, then rerun apm install" in result.stderr + result.stdout
     assert canonical.read_bytes() == original
     assert not data_path.exists()
     if legacy is not None:

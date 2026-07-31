@@ -102,6 +102,8 @@ def run_mcp_install(  # noqa: PLR0913
 
     if status == "skipped":
         logger.progress(f"MCP server '{mcp_name}' unchanged")
+        # Fall through intentionally: unchanged entries still need legacy
+        # IntelliJ migration and per-target ownership repair.
 
     # Build MCPDependency for install.  ``entry`` may be a bare string.
     if isinstance(entry, str):

@@ -164,7 +164,9 @@ Notes and limits:
   allow-lists, so a policy that allows `copilot` also covers IntelliJ installs.
 - **Older APM path migration.** Reinstalling projects created by an older APM
   release moves only lockfile-owned server entries from the obsolete data
-  location. User-authored entries in either file are preserved.
+  location. User-authored entries in either file are preserved. If an MCP
+  server installed before this fix is missing in JetBrains, rerun
+  `apm install --target intellij` to migrate it.
 
 ## Per-tool reference pages
 

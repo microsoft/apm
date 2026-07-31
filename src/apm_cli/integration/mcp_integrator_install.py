@@ -219,10 +219,7 @@ def _install_registry_group(
                     else:
                         logger.error(f"{dep} -- failed for {', '.join(sorted(failed_runtimes))}")
 
-    if failed_installations:
-        raise RuntimeError(
-            "MCP configuration failed for selected runtime(s): " + ", ".join(failed_installations)
-        )
+    _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
 
 
@@ -236,12 +233,30 @@ def _record_managed_server(
         managed_target_servers.setdefault(runtime, set()).add(server_name)
 
 
+def _raise_strict_config_failures(
+    failed_installations: list[str],
+    *,
+    console,
+    logger,
+) -> None:
+    """Render one failure footer, then fail without a success summary."""
+    if not failed_installations:
+        return
+    message = "MCP configuration failed for selected runtime(s): " + ", ".join(failed_installations)
+    if console:
+        console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
+    else:
+        logger.error(message)
+    raise RuntimeError(message)
+
+
 def _migrate_intellij_managed_config(
     target_runtimes: list[str],
     managed_target_servers: dict[str, set[str]] | None,
     *,
     project_root,
     user_scope: bool,
+    logger,
 ) -> None:
     """Route provenance-owned IntelliJ path migration through its adapter."""
     if "intellij" not in target_runtimes or managed_target_servers is None:
@@ -253,9 +268,21 @@ def _migrate_intellij_managed_config(
         project_root=project_root,
         user_scope=user_scope,
     )
-    client.migrate_legacy_managed_servers(
-        builtins.set(managed_target_servers.get("intellij", set()))
-    )
+    from apm_cli.adapters.client.intellij import IntelliJConfigError
+
+    try:
+        migrated = client.migrate_legacy_managed_servers(
+            builtins.set(managed_target_servers.get("intellij", set()))
+        )
+    except IntelliJConfigError as exc:
+        logger.error(str(exc))
+        raise
+    if migrated:
+        count = len(migrated)
+        logger.progress(
+            f"Migrated {count} IntelliJ MCP server{'s' if count != 1 else ''} "
+            f"to {client.get_config_path()}"
+        )
 
 
 def _hermes_runtime_opted_in() -> bool:
@@ -778,10 +805,7 @@ def _install_self_defined_deps(
             else:
                 logger.error(f"{dep.name} -- failed for {', '.join(sorted(failed_runtimes))}")
 
-    if failed_installations:
-        raise RuntimeError(
-            "MCP configuration failed for selected runtime(s): " + ", ".join(failed_installations)
-        )
+    _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
 
 
@@ -927,6 +951,7 @@ def run_mcp_install(
         managed_target_servers,
         project_root=project_root,
         user_scope=user_scope,
+        logger=logger,
     )
 
     if managed_target_servers is not None:
