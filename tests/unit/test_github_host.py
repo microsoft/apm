@@ -53,6 +53,8 @@ def test_invalid_fqdns():
         "two..dots.com",
         "a.-b.com",
         "invalid_domain",
+        "127.0.0.1",
+        "10.0.0.1",
     ]
 
     for host in invalid_hosts:
