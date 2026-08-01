@@ -213,22 +213,17 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── PHASE 2: INTEGRATION TESTS (tag/schedule/dispatch only) ──
-      - name: Run integration tests
+      # ── PHASE 2: FOCUSED INTEGRATION TESTS (tag/schedule/dispatch only) ──
+      - name: Run focused Intel integration tests
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
-          # macOS runners are scarce, so this consolidated job runs the
-          # whole integration suite on one runner instead of sharding it
-          # across four like ci-integration.yml. Run it serially and the
-          # slower Intel runner overruns the step timeout, so parallelise
-          # in-process with xdist. --dist loadgroup is required: it is the
-          # only scheduler that honors pytest.mark.xdist_group, which keeps
-          # the HOME-mutating tests serialized on a single worker. Four
-          # workers remain below the merge gate's aggregate concurrency.
-          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
+          # Intel validates the promoted lifecycle subset against its native
+          # binary. ARM and Linux retain the unfiltered integration corpus.
+          # loadgroup preserves HOME-mutating test serialization.
+          PYTEST_EXTRA_ARGS: "-m=lifecycle_smoke -n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -340,10 +335,10 @@ jobs:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
-          # See the Intel job for the rationale: scarce macOS runners force
-          # the full suite onto one runner, so parallelise in-process with
-          # xdist. --dist loadgroup honors the home_env xdist_group markers
-          # that keep HOME-mutating tests serialized on a single worker.
+          # Scarce ARM runners force the full suite onto one runner, so
+          # parallelise in-process with xdist. --dist loadgroup honors the
+          # home_env xdist_group markers that keep HOME-mutating tests
+          # serialized on a single worker.
           PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh

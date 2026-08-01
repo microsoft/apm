@@ -318,7 +318,7 @@ environment end-to-end; for local iteration prefer the direct
 **On version tag releases:**
 1. Unit tests + Smoke tests
 2. Build binaries (cross-platform)
-3. **E2E golden scenario tests** (using built binaries)
+3. **E2E golden scenario tests** (using built binaries). Linux and macOS Apple Silicon retain the full integration corpus; macOS Intel runs the marker-bounded `lifecycle_smoke` subset plus native startup and isolated release validation.
 4. Create GitHub Release
 5. Publish to PyPI 
 
@@ -360,8 +360,8 @@ The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap up
 Promotion integration tests run on:
 - **Linux**: ubuntu-24.04 (x86_64), ubuntu-24.04-arm (arm64)
 - **Windows**: windows-latest (x86_64)
-- **macOS Intel**: macos-15-intel (x86_64)
-- **macOS Apple Silicon**: macos-latest (arm64)
+- **macOS Intel**: macos-15-intel (x86_64), with marker-bounded `lifecycle_smoke` integration coverage, native binary startup, and isolated release validation
+- **macOS Apple Silicon**: macos-latest (arm64), with the full integration corpus
 
 **Python Version**: 3.12 (standardized across all environments)
 **Package Manager**: uv (for fast dependency management and virtual environments)
