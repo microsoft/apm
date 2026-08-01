@@ -50,7 +50,7 @@ def _make_bundle(
     base: Path,
     *,
     plugin_id: str | None = "test-plugin",
-    pack_target: str = "copilot",
+    pack_target: str | list[str] = "copilot",
     files: dict[str, str] | None = None,
     include_lockfile: bool = True,
 ) -> Path:
@@ -463,6 +463,55 @@ class TestApmYmlNotMutated:
 class TestGrokCloudLocalBundleDeployment:
     """Enabled grok-cloud installs deploy under .grok/."""
 
+    def test_disabled_flag_emits_enable_hint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_home(tmp_path, monkeypatch)
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-cloud",
+            files={".grok/skills/guide/SKILL.md": "# Grok Guide\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "apm experimental enable grok-cloud" in " ".join(result.output.split())
+        assert not (project / ".grok").exists()
+
+    def test_disabled_flag_emits_hint_when_stable_target_resolves(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_home(tmp_path, monkeypatch)
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target=["claude", "grok-cloud"],
+            files={"skills/guide/SKILL.md": "# Shared Guide\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "claude,grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "apm experimental enable grok-cloud" in " ".join(result.output.split())
+        assert (project / ".claude" / "skills" / "guide" / "SKILL.md").exists()
+        assert not (project / ".grok").exists()
+
     def test_project_scope_install_deploys_skill(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -472,7 +521,7 @@ class TestGrokCloudLocalBundleDeployment:
         bundle = _make_bundle(
             tmp_path / "src",
             pack_target="grok-cloud",
-            files={"skills/guide/SKILL.md": "# Grok Guide\n"},
+            files={".grok/skills/guide/SKILL.md": "# Grok Guide\n"},
         )
         project = _make_project(tmp_path / "dst")
 
@@ -489,6 +538,7 @@ class TestGrokCloudLocalBundleDeployment:
         skill_file = project / ".grok" / "skills" / "guide" / "SKILL.md"
         assert skill_file.exists()
         assert skill_file.read_text(encoding="utf-8") == "# Grok Guide\n"
+        assert not (project / ".grok" / ".grok").exists()
 
     def test_global_scope_install_deploys_home_skill(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -500,7 +550,7 @@ class TestGrokCloudLocalBundleDeployment:
         bundle = _make_bundle(
             tmp_path / "src",
             pack_target="grok-cloud",
-            files={"skills/guide/SKILL.md": "# Grok Global\n"},
+            files={".grok/skills/guide/SKILL.md": "# Grok Global\n"},
         )
         project = _make_project(tmp_path / "dst")
 
@@ -518,6 +568,7 @@ class TestGrokCloudLocalBundleDeployment:
         skill_file = home / ".grok" / "skills" / "guide" / "SKILL.md"
         assert skill_file.exists()
         assert skill_file.read_text(encoding="utf-8") == "# Grok Global\n"
+        assert not (home / ".grok" / ".grok").exists()
 
 
 # ---------------------------------------------------------------------------

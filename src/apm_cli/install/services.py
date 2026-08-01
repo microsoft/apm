@@ -940,7 +940,13 @@ def integrate_local_bundle(
             # equivalent.  Deploying them verbatim to ``<root>/instructions/``
             # is a no-op for these clients.
             _rel_norm = rel.replace("\\", "/")
-            _first_seg = _rel_norm.split("/", 1)[0] if "/" in _rel_norm else ""
+            _target_prefix = f"{target.root_dir.strip('/')}/"
+            _deploy_rel = (
+                _rel_norm[len(_target_prefix) :]
+                if _rel_norm.startswith(_target_prefix)
+                else _rel_norm
+            )
+            _first_seg = _deploy_rel.split("/", 1)[0] if "/" in _deploy_rel else ""
             if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
                 # Slug must be safe for filesystem path construction --
                 # ``package_id`` originates from untrusted ``plugin.json``.
@@ -995,7 +1001,9 @@ def integrate_local_bundle(
                 # ``instructions/`` so we strip that prefix before
                 # joining under the stage root (which itself ends in
                 # ``.apm/instructions``).
-                _rel_under_instructions = rel.split("/", 1)[1] if "/" in rel else Path(rel).name
+                _rel_under_instructions = (
+                    _deploy_rel.split("/", 1)[1] if "/" in _deploy_rel else Path(_deploy_rel).name
+                )
                 dest = stage_root / _rel_under_instructions
                 deploy_root = stage_root
             else:
@@ -1013,7 +1021,7 @@ def integrate_local_bundle(
                 # the converged directory.  Otherwise fall back to the
                 # target's default root.
                 deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
-                dest = deploy_root / rel
+                dest = deploy_root / _deploy_rel
             try:
                 ensure_path_within(dest, deploy_root)
             except PathTraversalError as exc:

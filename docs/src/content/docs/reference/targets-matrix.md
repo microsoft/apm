@@ -100,7 +100,7 @@ project's `apm.yml` `targets:` field so contributors running plain `apm
 install` pick them up automatically.
 
 `copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
-experimental targets that require `apm experimental enable <name>` before use.
+experimental targets. Enable their flag before installing or updating them.
 They are selected with `--target` only and cannot be listed in `apm.yml` (the
 canonical targets validator will reject them).
 

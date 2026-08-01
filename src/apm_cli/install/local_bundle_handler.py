@@ -95,7 +95,30 @@ def install_local_bundle(
             user_scope=global_,
             explicit_target=explicit,
         )
+        from ..core.experimental import is_enabled
+        from ..core.target_catalog import get_target_capability
+
+        requested = [explicit] if isinstance(explicit, str) else list(explicit or [])
+        disabled_requested = []
+        resolved_names = {resolved.name for resolved in targets}
+        for requested_target in requested:
+            capability = get_target_capability(requested_target)
+            if (
+                capability.experimental_flag
+                and capability.name not in resolved_names
+                and not is_enabled(capability.experimental_flag)
+            ):
+                disabled_requested.append(capability.name)
+                logger.progress(
+                    f"The '{capability.name}' target requires an experimental flag. "
+                    f"Run: apm experimental enable "
+                    f"{capability.experimental_flag.replace('_', '-')}",
+                    symbol="info",
+                )
+
         if not targets:
+            if disabled_requested:
+                return
             logger.warning(
                 "No active targets resolved -- nothing will be deployed. "
                 "Pass --target to select one explicitly."
