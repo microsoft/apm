@@ -591,6 +591,12 @@ if ! grep -q '_clear_git_auth_env(env)' src/apm_cli/core/auth.py; then
     echo "[x] AuthResolver must scrub inherited Git authorization state"
     violations=$((violations + 1))
 fi
+if ! grep -q '"repo_ref": _redact_policy_ref(repo_ref)' src/apm_cli/policy/discovery.py \
+    || ! grep -q '"chain_refs": \[_redact_policy_ref(ref) for ref in persisted_chain_refs\]' \
+        src/apm_cli/policy/discovery.py; then
+    echo "[x] Policy cache metadata must redact URL credentials at its canonical writer"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "TLS trust injection belongs to canonical owners" \
     'truststore\.inject_into_ssl\(' \

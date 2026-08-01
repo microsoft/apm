@@ -25,6 +25,7 @@ from ..policy.discovery import (
     MAX_STALE_TTL,
     PolicyFetchResult,
     _read_cache_entry,
+    _redact_policy_ref,
     discover_policy_with_chain,
 )
 from ..policy.schema import ApmPolicy
@@ -134,13 +135,18 @@ def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> list[s
         return []
 
     # Try cache lookup first (org / URL paths populate chain_refs in meta).
-    repo_ref = _strip_source_prefix(result.source)
+    repo_ref = result.cache_ref or _strip_source_prefix(result.source)
     if repo_ref and not result.source.startswith("file:"):
         try:
             entry = _read_cache_entry(repo_ref, project_root, ttl=MAX_STALE_TTL)
             if entry is not None and entry.chain_refs:
                 # Drop the leaf itself from the visible chain.
-                tail = [r for r in entry.chain_refs if r != repo_ref]
+                safe_repo_ref = _redact_policy_ref(repo_ref)
+                tail = [
+                    _redact_policy_ref(ref)
+                    for ref in entry.chain_refs
+                    if _redact_policy_ref(ref) != safe_repo_ref
+                ]
                 if tail:
                     return tail
         except Exception:
@@ -148,7 +154,7 @@ def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> list[s
 
     # Fallback: declared extends on the merged/leaf policy.
     if result.policy.extends:
-        return [result.policy.extends]
+        return [_redact_policy_ref(result.policy.extends)]
     return []
 
 
@@ -184,7 +190,7 @@ def _build_report(
     counts: dict[str, int],
 ) -> dict[str, Any]:
     """Assemble the structured report consumed by both renderers."""
-    source_label = result.source if result.source else "n/a"
+    source_label = _redact_policy_ref(result.source) if result.source else "n/a"
     if result.outcome in ("absent", "no_git_remote", "disabled"):
         source_label = source_label or "n/a"
 

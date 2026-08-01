@@ -47,6 +47,11 @@ The `<ref>` accepts:
 - `<owner>/<repo>` shorthand (defaults to `github.com`).
 - `<host>/<owner>/<repo>` for GHES or other hosts.
 
+Do not embed credentials in direct policy URLs. APM strips URL userinfo,
+query strings, and fragments from policy cache metadata and diagnostics; use
+the repository forms above with the normal host authentication chain when
+possible.
+
 ## Top-level fields
 
 | Field              | Type                | Default          | Required | Notes                                                                             |

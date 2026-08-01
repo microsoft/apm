@@ -250,13 +250,18 @@ class TestCacheInvalidation(unittest.TestCase):
     """Cache entries are invalidated on schema or chain mismatch."""
 
     def test_schema_version_mismatch_invalidates(self):
-        """Old cache with wrong schema_version returns None."""
+        """Old cache metadata is removed so legacy secrets do not remain."""
         policy = ApmPolicy(name="old-format")
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _setup_cache("test/.github", root, policy, schema_version="1")
-            entry = _read_cache_entry("test/.github", root)
+            repo_ref = "test/.github"
+            _setup_cache(repo_ref, root, policy, schema_version="5")
+            meta_file = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+
+            entry = _read_cache_entry(repo_ref, root)
+
             self.assertIsNone(entry, "Stale schema_version should invalidate cache")
+            self.assertFalse(meta_file.exists(), "Legacy metadata sidecar was not scrubbed")
 
     def test_current_schema_version_accepted(self):
         """Cache with correct schema_version is accepted."""

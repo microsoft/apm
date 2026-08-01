@@ -14,6 +14,18 @@ from types import ModuleType
 import pytest
 
 
+def test_policy_cache_metadata_redaction_has_single_owner() -> None:
+    """Policy cache refs must be sanitized by the canonical writer."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("def _redact_policy_ref(") == 1
+    assert '"repo_ref": _redact_policy_ref(repo_ref)' in owner
+    assert '"chain_refs": [_redact_policy_ref(ref) for ref in persisted_chain_refs]' in owner
+    assert "Policy cache metadata must redact URL credentials at its canonical writer" in guard
+
+
 def test_intellij_mcp_config_path_has_single_owner() -> None:
     """JetBrains Copilot path selection must stay in its client adapter."""
     root = Path(__file__).parents[2]

@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Public `github.com` dependency installs now preserve caller-owned Git URL
-  rewrites and transport policy across anonymous and authenticated retries.
-  (#2422)
+  rewrites and transport policy across anonymous and authenticated retries;
+  policy cache metadata and diagnostics also omit credentials embedded in
+  direct policy URLs. (#2422)
 
 ## [0.27.0] - 2026-07-31
 

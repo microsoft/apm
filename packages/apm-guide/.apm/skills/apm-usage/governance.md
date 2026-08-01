@@ -10,6 +10,10 @@ CHANGELOG when using policy features.
 - **Repo-level:** `apm-policy.yml` in the repository root
 - **Local override:** `--policy ./path/to/apm-policy.yml`
 
+Do not embed credentials in direct policy URLs. APM omits URL userinfo, query
+strings, and fragments from policy cache metadata and diagnostics; prefer
+repository references with the normal host authentication chain.
+
 ## User config trust boundary
 
 `~/.apm/config.json` is user-scoped state, not org policy. Keep durable config
