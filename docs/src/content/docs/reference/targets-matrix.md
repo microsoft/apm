@@ -21,10 +21,10 @@ see [Primitive types](../primitive-types/).
 |-----------------|------------------------|:------------:|:-------:|:------:|:------:|:--------:|:-----:|:---:|
 | copilot         | `.github/`             |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | claude          | `.claude/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
+| grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
-| grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
@@ -79,12 +79,12 @@ runtime-specific configuration while compile only generates project output. Use
 
 | Target   | Signals (any one activates the target)        |
 |----------|-----------------------------------------------|
-| claude   | `.claude/` directory, or `CLAUDE.md` file     |
 | copilot  | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
+| claude   | `.claude/` directory, or `CLAUDE.md` file     |
+| grok-build | `.grok/` directory                          |
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
-| grok-build | `.grok/` directory                          |
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |

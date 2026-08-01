@@ -78,16 +78,16 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`claude`, `copilot`, `cursor`, `opencode`, `codex`, `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `agent-skills`); `antigravity` remains explicit-only. The output directory is where APM writes deployed primitives.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`); `antigravity` remains explicit-only. The output directory is where APM writes deployed primitives.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
 | `copilot` | `.github/` (project), `~/.copilot/` (user scope) | vscode |
 | `claude` | `.claude/` | claude |
+| `grok-build` | `.grok/` | agents |
 | `cursor` | `.cursor/` | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
-| `grok-build` | `.grok/` | agents |
 | `antigravity` | `.agents/` (project), `~/.gemini/` (user) | agents |
 | `opencode` | `.opencode/` (project), `~/.config/opencode/` (user) | agents |
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
@@ -97,10 +97,10 @@ Notes per target:
 
 - **copilot** -- GitHub Copilot (CLI + IDE). User-scope partial: prompts and instructions are project-scope only.
 - **claude** -- Claude Code. Full user-scope support. Hooks merge into `.claude/settings.json` rather than living as separate files.
+- **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Instructions are not deployable at user scope (Cursor exposes them via the Settings UI only).
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
-- **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
 - **antigravity** -- Google Antigravity CLI (`agy`), successor to Gemini CLI. Explicit-only target (`--target antigravity`); the `.agents/` root is shared, so it is never auto-detected and is not part of `--target all`. Instructions deploy as rules under `.agents/rules/`. Skills use `.agents/skills/`. Hooks use Antigravity's native `.agents/hooks.json` schema. MCP servers write to a dedicated `.agents/mcp_config.json`. No commands primitive (legacy Gemini commands convert to skills upstream).
 - **opencode** -- OpenCode. No hooks support.
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.

@@ -177,9 +177,9 @@ Supported targets and where the integrator writes:
 |----------|---------------------------------------|----------------------|
 | copilot  | `.github/hooks/<pkg>-<name>.json`     | one file per hook    |
 | claude   | `.claude/settings.json`               | merged into settings |
+| grok-build | -- not supported --                 | silently skipped     |
 | cursor   | `.cursor/hooks.json`                  | merged               |
 | gemini   | `.gemini/settings.json`               | merged               |
-| grok-build | -- not supported --                 | silently skipped     |
 | codex    | `.codex/hooks.json`                   | merged               |
 | windsurf | `.windsurf/hooks.json`                | merged               |
 | kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
@@ -243,13 +243,13 @@ Supported targets and output paths:
 
 | Target   | Output                           | Format                |
 |----------|----------------------------------|-----------------------|
+| copilot  | -- not a command --              | ships as a prompt     |
 | claude   | `.claude/commands/<name>.md`     | native markdown       |
+| grok-build | `.grok/commands/<name>.md`      | shared command transform |
 | cursor   | `.cursor/commands/<name>.md`     | claude-format subset  |
 | opencode | `.opencode/commands/<name>.md`   | opencode markdown     |
 | gemini   | `.gemini/commands/<name>.toml`   | TOML                  |
-| grok-build | `.grok/commands/<name>.md`      | shared command transform |
 | windsurf | `.windsurf/workflows/<name>.md`  | called "workflows"    |
-| copilot  | -- not a command --              | ships as a prompt     |
 | codex    | -- not supported --              | silently skipped      |
 
 Verified against `src/apm_cli/integration/targets.py` and

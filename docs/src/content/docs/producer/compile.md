@@ -89,8 +89,8 @@ apm compile --target copilot,cursor          # comma-separated
 apm compile --all                            # default stable target set
 ```
 
-Canonical targets are `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`.
+Canonical targets are `copilot`, `claude`, `grok-build`, `cursor`, `opencode`,
+`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`.
 The `all` selector is not a target; it expands to every canonical target except
 the explicit-only `antigravity` and `agent-skills` targets. Compiling for
 `agent-skills` is a successful no-op because `apm install` deploys skills.
@@ -132,10 +132,10 @@ Per target, with the rules shape on disk after compile:
 |---|---|---|---|
 | `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively; deduplicates with `.github/instructions/` (see [below](#copilot-deduplication)) |
 | `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
+| `grok-build` | `AGENTS.md` (folded) | `.grok/rules/*.md` | Yes -- folded into `AGENTS.md` |
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
-| `grok-build` | `AGENTS.md` (folded) | `.grok/rules/*.md` | Yes -- folded into `AGENTS.md` |
 | `antigravity` | `AGENTS.md` (folded) | `.agents/rules/<name>.md` | Yes -- folded into `AGENTS.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |

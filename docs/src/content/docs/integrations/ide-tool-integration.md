@@ -17,10 +17,10 @@ The full slot-by-slot capability table lives in [Targets matrix](../../reference
 |----------------------|--------------------------------------|----------------------------------------|
 | VS Code + Copilot    | `.github/copilot-instructions.md`    | Native instructions, prompts, agents   |
 | Claude Code          | `.claude/`                           | Skills, agents, commands, MCP          |
+| Grok Build           | `.grok/`                             | Rules, agents, commands, skills        |
 | Cursor               | `.cursor/`                           | Rules, commands, MCP                   |
 | Codex CLI            | `.codex/`                            | Skills, MCP                            |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
-| Grok Build           | `.grok/`                             | Rules, agents, commands, skills        |
 | Antigravity CLI      | explicit `--target antigravity`       | Rules, skills, hooks, MCP              |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |

@@ -98,13 +98,13 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 
 | Target            | Deploy directory                             |
 |-------------------|----------------------------------------------|
-| `claude`          | `.claude/skills/<name>/SKILL.md`             |
-| `kiro`            | `.kiro/skills/<name>/SKILL.md`               |
 | `copilot`         | `.agents/skills/<name>/SKILL.md`             |
+| `claude`          | `.claude/skills/<name>/SKILL.md`             |
+| `grok-build`      | `.grok/skills/<name>/SKILL.md`               |
+| `kiro`            | `.kiro/skills/<name>/SKILL.md`               |
 | `cursor`          | `.agents/skills/<name>/SKILL.md`             |
 | `codex`           | `.agents/skills/<name>/SKILL.md`             |
 | `gemini`          | `.agents/skills/<name>/SKILL.md`             |
-| `grok-build`      | `.grok/skills/<name>/SKILL.md`               |
 | `opencode`        | `.agents/skills/<name>/SKILL.md`             |
 | `windsurf`        | `.agents/skills/<name>/SKILL.md`             |
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |

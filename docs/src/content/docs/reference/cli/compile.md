@@ -272,6 +272,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 |--------|-----------------|
 | `copilot` | `AGENTS.md`, `.github/copilot-instructions.md` |
 | `claude` | `CLAUDE.md` |
+| `grok-build` | `AGENTS.md` |
 | `cursor` | `AGENTS.md` |
 | `codex` | `AGENTS.md` |
 | `opencode` | `AGENTS.md` |
@@ -282,7 +283,6 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `hermes` | `AGENTS.md` |
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
-| `grok-build` | `AGENTS.md` |
 | `grok-cloud` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 

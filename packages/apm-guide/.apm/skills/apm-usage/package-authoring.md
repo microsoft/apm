@@ -233,7 +233,7 @@ as `vscode` and normalizes them. Invalid values fail at parse time -- they do
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
+| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
 | `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
 | `target: vscode` | Legacy alias; normalizes to `copilot` |
 | `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
@@ -243,7 +243,7 @@ as `vscode` and normalizes them. Invalid values fail at parse time -- they do
 | `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |
 | `target: null` | Legacy omission spelling; adds no package restriction |
 | `target: []` or `target: ""` | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`). For MCP, this makes lockfile runtime ownership intentionally machine-dependent; declare targets for portable ownership. |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.claude/`, `CLAUDE.md`, `.grok/`, `.cursor/`, `.cursorrules`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). For MCP, this makes lockfile runtime ownership intentionally machine-dependent; declare targets for portable ownership. |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 

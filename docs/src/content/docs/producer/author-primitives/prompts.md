@@ -88,10 +88,10 @@ and `command_integrator.py`.
 |---|---|---|
 | copilot | `.github/prompts/<name>.prompt.md` | verbatim copy |
 | claude | `.claude/commands/<name>.md` | `/command`, inputs become `$arg` |
+| grok-build | `.grok/commands/<name>.md` | Grok command |
 | cursor | `.cursor/commands/<name>.md` | shared command transform |
 | opencode | `.opencode/commands/<name>.md` | shared command transform |
 | gemini | `.gemini/commands/<name>.toml` | TOML command |
-| grok-build | `.grok/commands/<name>.md` | Grok command |
 | windsurf | `.windsurf/workflows/<name>.md` | workflow |
 | codex | (none) | Codex has no prompts or commands primitive |
 

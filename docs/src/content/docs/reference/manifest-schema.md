@@ -145,7 +145,7 @@ actionable nudge (the authoring path only).
 | **Type** | `target`: `string` or `list<string>`; `targets`: `list<string>` (a scalar is accepted as one-item compatibility input) |
 | **Required** | OPTIONAL |
 | **Default** | Auto-detect from filesystem signals (see below). |
-| **Allowed values** | `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
+| **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
@@ -180,11 +180,11 @@ supported for backward compatibility and accepts legacy CLI aliases such as
 |---|---|
 | `copilot` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode). |
 | `claude` | Emits `CLAUDE.md` at the project root. |
+| `grok-build` | Emits `AGENTS.md` and deploys to `.grok/rules/`, `.grok/agents/`, `.grok/commands/`, `.grok/skills/`. |
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`. |
 | `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
-| `grok-build` | Emits `AGENTS.md` and deploys to `.grok/rules/`, `.grok/agents/`, `.grok/commands/`, `.grok/skills/`. |
 | `antigravity` | Emits `AGENTS.md` and deploys rules, skills, hooks, and MCP config under `.agents/`. |
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.agents/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
@@ -434,7 +434,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
-| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `grok-build`, `antigravity`, `codex`, `windsurf`, `agent-skills`. Experimental: `grok-cloud`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`. Experimental: `grok-cloud`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
 actionable error to use `ref` for a branch, tag, or commit; `version` belongs

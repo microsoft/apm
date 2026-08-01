@@ -103,13 +103,13 @@ expanded to a YAML array under `paths:` / `globs:` /
 |---|---|---|
 | copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
+| grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
 | cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (scalar for single glob, YAML array for comma-lists); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
 | antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> no frontmatter (unconditional rule) |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
-| grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
@@ -206,6 +206,7 @@ offending package and field so you can fix the source.
 |---|---|---|
 | copilot | `.github/agents/<name>.agent.md` | verbatim |
 | claude | `.claude/agents/<name>.md` | verbatim |
+| grok-build | `.grok/agents/<name>.md` | verbatim |
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
 | codex | `.codex/agents/<name>.toml` | `name` and `description` -> TOML; body becomes `developer_instructions`; unsupported `tools` emits a warning |

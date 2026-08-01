@@ -259,7 +259,7 @@ mcp:
 
 compilation:
   target:
-    allow: null           # claude | copilot | cursor | opencode | codex | gemini | grok-build | antigravity | windsurf | kiro | agent-skills
+    allow: null           # copilot | claude | grok-build | cursor | opencode | codex | gemini | antigravity | windsurf | kiro | agent-skills
     enforce: null
   strategy:
     enforce: null         # distributed | single-file

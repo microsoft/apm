@@ -252,8 +252,8 @@ Source: `src/apm_cli/models/apm_package.py`,
 ### target
 
 The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
-compiles for (`copilot`, `claude`, `cursor`, `codex`, `gemini`,
-`grok-build`, `antigravity`, `opencode`, `windsurf`, `kiro`, or
+compiles for (`copilot`, `claude`, `grok-build`, `cursor`, `codex`, `gemini`,
+`antigravity`, `opencode`, `windsurf`, `kiro`, or
 `agent-skills`). `all` is a CLI `--target` value only. Drives which integrator runs and
 which directories receive output during `apm compile`.
 

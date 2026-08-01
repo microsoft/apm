@@ -55,7 +55,7 @@ A normal project install creates or updates `apm.lock.yaml` when the manifest de
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
 2. `apm.yml` `targets:` list (or singular `target:` sugar).
 3. `apm config set target <value>` default.
-4. Auto-detect file-primitive targets from project signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` or legacy `.cursorrules` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.grok/` -> grok-build, `.opencode/` -> opencode, `.windsurf/` -> windsurf, `.kiro/` -> kiro).
+4. Auto-detect file-primitive targets from project signals (`.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.claude/` or `CLAUDE.md` -> claude, `.grok/` -> grok-build, `.cursor/` or legacy `.cursorrules` -> cursor, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf, `.kiro/` -> kiro).
 
 MCP runtime discovery separately recognizes the user-scope JetBrains Copilot
 config directory (`github-copilot/intellij/`). That machine-global signal can

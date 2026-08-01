@@ -40,7 +40,7 @@ devDependencies:                           # optional -- excluded from bundles
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:                               # optional
-  target:      <enum>                      # copilot|claude|codex|opencode|grok-build|all (or list)
+  target:      <enum>                      # copilot|claude|grok-build|codex|opencode|all (or list)
   strategy:    <enum>                      # distributed|single-file
   output:      <string>                    # custom output path
   chatmode:    <string>                    # chatmode to prepend
@@ -69,10 +69,10 @@ targets: [claude, copilot]
 
 CLI equivalent: `--target claude,copilot` (comma-separated).
 
-Signals include `.claude/` or `CLAUDE.md` for `claude`, `.cursor/` or legacy
-`.cursorrules` for `cursor`, recognized `.github/` Copilot files and
-subdirectories for `copilot`, `.codex/` for `codex`, `.gemini/` or `GEMINI.md`
-for `gemini`, and `.grok/` for stable `grok-build`. OpenCode, Windsurf, and
+Signals include recognized `.github/` Copilot files and subdirectories for
+`copilot`, `.claude/` or `CLAUDE.md` for `claude`, `.grok/` for stable
+`grok-build`, `.cursor/` or legacy `.cursorrules` for `cursor`, `.codex/` for
+`codex`, and `.gemini/` or `GEMINI.md` for `gemini`. OpenCode, Windsurf, and
 Kiro use `.opencode/`, `.windsurf/`, and `.kiro/`.
 
 Auto-detection applies only when both manifest fields are omitted. Prefer
