@@ -242,7 +242,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
     AGENTS.md is generated for vscode, cursor, opencode, codex, gemini,
-    windsurf, kiro, antigravity, hermes, all, and minimal targets.
+    windsurf, kiro, antigravity, grok-build, hermes, all, and minimal targets.
     Gemini needs it because GEMINI.md imports AGENTS.md.
 
     Args:
@@ -261,6 +261,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "codex",
         "gemini",
         "antigravity",
+        "grok-build",
         "windsurf",
         "kiro",
         "hermes",
