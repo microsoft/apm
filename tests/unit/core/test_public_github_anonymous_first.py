@@ -292,10 +292,10 @@ def test_ado_bearer_fallback_preserves_caller_git_config(tmp_path: Path) -> None
 
     with (
         patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True),
-        patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as provider_class,
+        patch("apm_cli.core.azure_cli.get_bearer_provider") as get_provider,
     ):
-        provider_class.return_value.is_available.return_value = True
-        provider_class.return_value.get_bearer_token.return_value = "bearer-token"
+        get_provider.return_value.is_available.return_value = True
+        get_provider.return_value.get_bearer_token.return_value = "bearer-token"
         result = resolver.try_with_fallback(
             "dev.azure.com",
             operation,
