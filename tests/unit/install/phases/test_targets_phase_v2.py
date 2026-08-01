@@ -181,6 +181,22 @@ def test_three_guard_collapse_no_skip(tmp_path):
     assert any(d.name == ".claude" for d in dirs), f"No .claude/ deploy dir resolved; got {dirs}"
 
 
+def test_three_guard_collapse_no_skip_for_grok(tmp_path):
+    """Auto-detected grok target is never silently skipped after resolution."""
+    from apm_cli.install.phases.targets import run_targets_phase
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".grok").mkdir()
+
+    ctx = _make_ctx(project)
+    run_targets_phase(ctx)
+
+    assert _target_names(ctx) == ["grok"]
+    dirs = _target_root_dirs(ctx, project)
+    assert any(d.name == ".grok" for d in dirs), f"No .grok/ deploy dir resolved; got {dirs}"
+
+
 def test_explicit_creates_missing_dir(tmp_path):
     """--target claude in greenfield creates .claude/ before phase exits."""
     from apm_cli.install.phases.targets import run_targets_phase

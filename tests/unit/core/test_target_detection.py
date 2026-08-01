@@ -105,6 +105,16 @@ class TestDetectTarget:
         assert target == "kiro"
         assert reason == "explicit --target flag"
 
+    def test_explicit_target_grok_wins(self, tmp_path):
+        """Explicit --target grok always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="grok",
+        )
+
+        assert target == "grok"
+        assert reason == "explicit --target flag"
+
     def test_config_target_copilot(self, tmp_path):
         """Config target copilot maps to vscode."""
         target, reason = detect_target(
@@ -160,6 +170,17 @@ class TestDetectTarget:
         assert target == "all"
         assert reason == "apm.yml target"
 
+    def test_config_target_grok(self, tmp_path):
+        """Config target grok is used when no explicit target."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="grok",
+        )
+
+        assert target == "grok"
+        assert reason == "apm.yml target"
+
     def test_auto_detect_github_only(self, tmp_path):
         """Auto-detect vscode when only .github/ exists."""
         (tmp_path / ".github").mkdir()
@@ -200,6 +221,20 @@ class TestDetectTarget:
         assert target == "all"
         assert ".github/" in reason and ".claude/" in reason
 
+    def test_auto_detect_grok_and_claude(self, tmp_path):
+        """Auto-detect all when .grok/ and .claude/ exist."""
+        (tmp_path / ".grok").mkdir()
+        (tmp_path / ".claude").mkdir()
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "all"
+        assert ".grok/" in reason and ".claude/" in reason
+
     def test_auto_detect_kiro_only(self, tmp_path):
         """Auto-detect kiro when only .kiro/ exists."""
         (tmp_path / ".kiro").mkdir()
@@ -212,6 +247,19 @@ class TestDetectTarget:
 
         assert target == "kiro"
         assert "detected .kiro/ folder" in reason
+
+    def test_auto_detect_grok_only(self, tmp_path):
+        """Auto-detect grok when only .grok/ exists."""
+        (tmp_path / ".grok").mkdir()
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "grok"
+        assert "detected .grok/ folder" in reason
 
     def test_auto_detect_neither_folder(self, tmp_path):
         """Auto-detect minimal when neither folder exists."""
@@ -247,6 +295,10 @@ class TestShouldCompileAgentsMd:
     def test_gemini_target(self):
         """AGENTS.md compiled for gemini target (GEMINI.md imports it)."""
         assert should_compile_agents_md("gemini") is True
+
+    def test_grok_target(self):
+        """AGENTS.md compiled for grok target."""
+        assert should_compile_agents_md("grok") is True
 
     def test_kiro_target(self):
         """AGENTS.md compiled for kiro as a cross-harness fallback."""
@@ -368,6 +420,7 @@ class TestGetTargetDescription:
         assert "AGENTS.md" in desc
         assert "CLAUDE.md" in desc
         assert ".github/copilot-instructions.md" in desc
+        assert ".grok/" in desc
 
     def test_minimal_description(self):
         """Description for minimal target."""
@@ -379,6 +432,12 @@ class TestGetTargetDescription:
         desc = get_target_description("opencode")
         assert "AGENTS.md" in desc
         assert ".opencode/" in desc
+
+    def test_grok_description(self):
+        """Description for grok target."""
+        desc = get_target_description("grok")
+        assert "AGENTS.md" in desc
+        assert "xAI Grok Build CLI native .grok/skills configuration" in desc
 
     def test_kiro_description_includes_mcp_config_path(self):
         """Description for kiro target names its MCP config path."""
@@ -567,7 +626,7 @@ class TestTargetParamType:
 
     def test_valid_target_values_includes_canonical(self):
         """VALID_TARGET_VALUES contains all canonical targets."""
-        for name in ("vscode", "claude", "cursor", "opencode", "codex"):
+        for name in ("vscode", "claude", "cursor", "opencode", "codex", "grok"):
             assert name in VALID_TARGET_VALUES
 
     def test_valid_target_values_includes_aliases(self):

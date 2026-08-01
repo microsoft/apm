@@ -580,6 +580,19 @@ Use type hints in Python code.
                 f"-- resolver returned {resolved!r}"
             )
 
+    def test_resolve_compile_target_grok_routes_agents_family(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import should_compile_agents_md
+
+        resolved = _resolve_compile_target(["grok"])
+        assert resolved == "grok"
+        assert should_compile_agents_md(resolved) is True
+
+    def test_resolve_compile_target_grok_mixed_with_claude_routes_both(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["grok", "claude"]) == frozenset({"agents", "claude"})
+
     def test_skipped_hand_authored_file_records_skipped_stat_not_unchanged(self, temp_project):
         """Round-3 regression: the skip-on-hand-authored-file path must record
         'skipped' in stats and reset 'generated' to 0, not leave it at 1
@@ -1057,6 +1070,43 @@ Use type hints in Python code.
             result = runner.invoke(cli, ["compile", "--target", "all", "--dry-run"])
 
             assert "Invalid value for '--target'" not in result.output
+        finally:
+            os.chdir(original_dir)
+
+    def test_target_flag_accepts_grok(self, runner, temp_project):
+        """Test that --target grok is accepted."""
+        original_dir = os.getcwd()
+        try:
+            os.chdir(temp_project)
+            result = runner.invoke(cli, ["compile", "--target", "grok", "--dry-run"])
+
+            assert "Invalid value for '--target'" not in result.output
+        finally:
+            os.chdir(original_dir)
+
+    def test_target_flag_grok_routes_agents_md(self, runner, temp_project):
+        """Compile routes grok to AGENTS.md generation."""
+        original_dir = os.getcwd()
+        try:
+            os.chdir(temp_project)
+            result = runner.invoke(cli, ["compile", "--target", "grok", "--dry-run"])
+
+            assert result.exit_code == 0, result.output
+            assert "AGENTS.md" in result.output
+        finally:
+            os.chdir(original_dir)
+
+    def test_target_flag_grok_mixed_with_claude_routes_both(self, runner, temp_project):
+        """Mixed grok/claude compile routes both AGENTS.md and CLAUDE.md."""
+        original_dir = os.getcwd()
+        try:
+            os.chdir(temp_project)
+            result = runner.invoke(cli, ["compile", "--target", "grok,claude", "--dry-run"])
+
+            assert result.exit_code == 0, result.output
+            assert "AGENTS.md" in result.output
+            assert "CLAUDE" in result.output
+            assert "produced no output files" not in result.output.lower()
         finally:
             os.chdir(original_dir)
 

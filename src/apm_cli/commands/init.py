@@ -59,6 +59,7 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     "opencode",
     "codex",
     "gemini",
+    "grok",
     "windsurf",
 ]
 

@@ -111,17 +111,13 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["claude"]
 
     def test_explicit_all_returns_every_known_target(self):
-        from apm_cli.core.target_detection import (
-            EXPERIMENTAL_TARGETS,
-            EXPLICIT_ONLY_TARGETS,
-        )
+        from apm_cli.core.target_catalog import normalize_target_name
+        from apm_cli.core.target_detection import ALL_CANONICAL_TARGETS
 
         targets = active_targets(self.root, explicit_target="all")
-        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
-        assert len(targets) == expected
-        names = [t.name for t in targets]
-        assert "copilot-cowork" not in names
-        assert "agent-skills" not in names
+        names = {t.name for t in targets}
+        expected = {normalize_target_name(name) for name in ALL_CANONICAL_TARGETS}
+        assert names == expected
 
     def test_explicit_vscode_alias(self):
         targets = active_targets(self.root, explicit_target="vscode")
@@ -235,25 +231,21 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["copilot"]
 
     def test_explicit_list_with_all_returns_every_known_target(self):
-        from apm_cli.core.target_detection import (
-            EXPERIMENTAL_TARGETS,
-            EXPLICIT_ONLY_TARGETS,
-        )
+        from apm_cli.core.target_catalog import normalize_target_name
+        from apm_cli.core.target_detection import ALL_CANONICAL_TARGETS
 
         targets = active_targets(self.root, explicit_target=["all"])
-        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
-        assert len(targets) == expected
+        expected = {normalize_target_name(name) for name in ALL_CANONICAL_TARGETS}
+        assert {t.name for t in targets} == expected
 
     def test_explicit_list_all_mixed_returns_every_known_target(self):
         """'all' anywhere in the list wins."""
-        from apm_cli.core.target_detection import (
-            EXPERIMENTAL_TARGETS,
-            EXPLICIT_ONLY_TARGETS,
-        )
+        from apm_cli.core.target_catalog import normalize_target_name
+        from apm_cli.core.target_detection import ALL_CANONICAL_TARGETS
 
         targets = active_targets(self.root, explicit_target=["claude", "all"])
-        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
-        assert len(targets) == expected
+        expected = {normalize_target_name(name) for name in ALL_CANONICAL_TARGETS}
+        assert {t.name for t in targets} == expected
 
     def test_explicit_list_all_unknown_returns_empty(self):
         """When the parser is bypassed and all tokens are unknown, the
@@ -313,7 +305,7 @@ class TestDefaultSkillRouting:
     """Assert that the documented clients route skills to .agents/ by default."""
 
     def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
-        """copilot, cursor, opencode, codex, gemini, windsurf all have deploy_root='.agents' on skills."""
+        """copilot, cursor, opencode, codex, gemini, windsurf use .agents; grok stays native."""
         expected = {
             "copilot": ".agents",
             "cursor": ".agents",
@@ -321,6 +313,7 @@ class TestDefaultSkillRouting:
             "codex": ".agents",
             "gemini": ".agents",
             "windsurf": ".agents",
+            "grok": None,
             "claude": None,  # not documented as .agents/-aware
         }
         for name, want_root in expected.items():
@@ -416,6 +409,29 @@ class TestDefaultSkillRouting:
         profiles = [KNOWN_TARGETS["copilot"]]
         apply_legacy_skill_paths(profiles)
         assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root
+
+
+class TestGrokTarget:
+    """Registry invariants for the grok target."""
+
+    def test_grok_in_known_targets(self):
+        assert "grok" in KNOWN_TARGETS
+
+    def test_grok_profile_shape(self):
+        profile = KNOWN_TARGETS["grok"]
+        assert profile.name == "grok"
+        assert profile.root_dir == ".grok"
+        assert profile.user_supported is True
+        assert profile.user_root_dir == ".grok"
+        assert profile.detect_by_dir is True
+        assert profile.auto_create is True
+        assert profile.compile_family == "agents"
+        assert "skills" in profile.primitives
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.subdir == "skills"
+        assert skills_pm.extension == "/SKILL.md"
+        assert skills_pm.format_id == "skill_standard"
+        assert skills_pm.deploy_root is None
 
 
 class TestHermesTarget:

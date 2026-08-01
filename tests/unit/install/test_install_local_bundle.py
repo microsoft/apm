@@ -17,6 +17,8 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+_MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
+
 _LOCAL_BUNDLE_EXISTS = importlib.util.find_spec("apm_cli.bundle.local_bundle") is not None
 _INTEGRATE_EXISTS = False
 try:
@@ -112,11 +114,32 @@ def _make_project(base: Path) -> Path:
     return project
 
 
-def _invoke(project: Path, monkeypatch, *args: str):
+def _make_home(base: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = base / "home"
+    apm_dir = home / ".apm"
+    apm_dir.mkdir(parents=True, exist_ok=True)
+    (apm_dir / "apm.yml").write_text(
+        _MINIMAL_APM_YML,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    import apm_cli.config as _conf
+
+    monkeypatch.setattr(_conf, "CONFIG_DIR", str(apm_dir))
+    monkeypatch.setattr(_conf, "CONFIG_FILE", str(apm_dir / "config.json"))
+    monkeypatch.setattr(_conf, "_config_cache", None)
+    return home
+
+
+def _invoke_cli(project: Path, monkeypatch, command: str, *args: str):
     from apm_cli.cli import cli
 
     monkeypatch.chdir(project)
-    return CliRunner().invoke(cli, ["install", *args], catch_exceptions=False)
+    return CliRunner().invoke(cli, [command, *args], catch_exceptions=False)
+
+
+def _invoke(project: Path, monkeypatch, *args: str):
+    return _invoke_cli(project, monkeypatch, "install", *args)
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +453,96 @@ class TestApmYmlNotMutated:
         assert result.exit_code == 0, f"output={result.output!r}"
         after = (project / "apm.yml").read_bytes()
         assert before == after, "apm.yml mutated by local-bundle install"
+
+
+# ---------------------------------------------------------------------------
+# Grok install / uninstall coverage
+# ---------------------------------------------------------------------------
+
+
+class TestGrokLocalBundleDeployment:
+    """Explicit grok installs deploy and uninstall cleanly under .grok/."""
+
+    @staticmethod
+    def _write_manifest_dependency(manifest_root: Path, bundle: Path) -> None:
+        data = yaml.safe_load((manifest_root / "apm.yml").read_text(encoding="utf-8"))
+        data["dependencies"] = {"apm": [str(bundle)]}
+        (manifest_root / "apm.yml").write_text(
+            yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+        )
+
+    def test_project_scope_install_then_uninstall_cleans_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok",
+            files={"skills/guide/SKILL.md": "# Grok Guide\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        install_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok",
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        skill_file = project / ".grok" / "skills" / "guide" / "SKILL.md"
+        assert skill_file.exists()
+        assert skill_file.read_text(encoding="utf-8") == "# Grok Guide\n"
+
+        self._write_manifest_dependency(project, bundle)
+        uninstall_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "uninstall",
+            str(bundle),
+        )
+        assert uninstall_result.exit_code == 0, uninstall_result.output
+        assert not skill_file.exists()
+        assert not skill_file.parent.exists()
+
+    def test_global_scope_install_then_uninstall_cleans_home_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = _make_home(tmp_path, monkeypatch)
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok",
+            files={"skills/guide/SKILL.md": "# Grok Global\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        install_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--global",
+            "--target",
+            "grok",
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        skill_file = home / ".grok" / "skills" / "guide" / "SKILL.md"
+        assert skill_file.exists()
+        assert skill_file.read_text(encoding="utf-8") == "# Grok Global\n"
+
+        self._write_manifest_dependency(home / ".apm", bundle)
+        uninstall_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "uninstall",
+            str(bundle),
+            "--global",
+        )
+        assert uninstall_result.exit_code == 0, uninstall_result.output
+        assert not skill_file.exists()
+        assert not skill_file.parent.exists()
 
 
 # ---------------------------------------------------------------------------

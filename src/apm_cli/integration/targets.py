@@ -666,6 +666,19 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_dir=".gemini",
         hooks_config_display=".gemini/settings.json",
     ),
+    # Grok -- xAI docs verify project ``./.grok/skills/`` and user
+    # ``~/.grok/skills/``.  Skills are the only deployed primitive.
+    "grok": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok"],
+        root_dir=".grok",
+        primitives={
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        auto_create=True,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".grok",
+    ),
     # Antigravity CLI (agy) -- Google's Gemini-derived agentic CLI.
     # Workspace config lives under the cross-tool .agents/ root (the same
     # shared root used for agent skills); Antigravity has no unique

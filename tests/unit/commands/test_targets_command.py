@@ -70,6 +70,22 @@ class TestTargetsTableOutput:
         assert "active" in result.output
         assert "claude" in result.output
 
+    def test_grok_target_is_listed(self, runner: CliRunner, tmp_path: Path) -> None:
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["grok"])
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_signals",
+                return_value=[_signal("grok", ".grok/")],
+            ),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, [])
+        assert result.exit_code == 0, result.output
+        assert "grok" in result.output
+        assert ".grok/" in result.output
+
     def test_inactive_target_shows_needs(self, runner: CliRunner, tmp_path: Path) -> None:
         """Inactive targets show 'needs <signal>' in the source column."""
         with (

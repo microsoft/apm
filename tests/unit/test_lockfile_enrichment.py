@@ -123,6 +123,28 @@ class TestLockfileEnrichment:
         assert ".claude/skills/my-plugin/SKILL.md" in deployed
         assert all(f.startswith(".claude/") for f in deployed)
 
+    def test_cross_target_mapping_github_to_grok(self):
+        """Skills under .github/ should be remapped to .grok/ in enriched lockfile."""
+        lf = LockFile()
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            resolved_commit="abc123",
+            version="1.0.0",
+            deployed_files=[
+                ".github/skills/my-plugin/",
+                ".github/skills/my-plugin/SKILL.md",
+            ],
+        )
+        lf.add_dependency(dep)
+
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="grok")
+        parsed = yaml.safe_load(result)
+
+        deployed = parsed["dependencies"][0]["deployed_files"]
+        assert ".grok/skills/my-plugin/" in deployed
+        assert ".grok/skills/my-plugin/SKILL.md" in deployed
+        assert all(f.startswith(".grok/") for f in deployed)
+
     @pytest.mark.parametrize("target", ["cursor", "opencode", "windsurf"])
     def test_converged_targets_map_github_skills_to_agents_skills(self, target):
         """Converged targets remap GitHub skills through the shared .agents path."""
@@ -236,6 +258,14 @@ class TestFilterFilesByTarget:
         assert ".claude/skills/x/SKILL.md" in filtered
         assert ".claude/agents/a.md" in filtered
         assert mappings[".claude/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
+
+    def test_cross_map_github_to_grok(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md"]
+        filtered, mappings = _filter_files_by_target(files, "grok")
+        assert ".grok/skills/x/SKILL.md" in filtered
+        assert mappings[".grok/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
 
     def test_dedup_direct_over_mapped(self):
         """If a file exists under both .github/ and .claude/, direct wins."""

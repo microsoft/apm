@@ -1,7 +1,7 @@
 """Target detection for auto-selecting compilation and integration targets.
 
 This module implements the auto-detection pattern for determining which agent
-targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, Kiro) should be used
+targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Grok, Antigravity, Kiro) should be used
 based on existing project structure and configuration.
 
 Detection priority (highest to lowest):
@@ -14,6 +14,7 @@ Detection priority (highest to lowest):
    - .opencode/ only -> opencode
    - .codex/ only -> codex
    - .gemini/ only -> gemini
+   - .grok/ only -> grok
    - Multiple target folders -> all
    - None exist -> minimal (AGENTS.md only, no folder integration)
 
@@ -69,6 +70,7 @@ TargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "grok",
     "antigravity",
     "windsurf",
     "kiro",
@@ -110,6 +112,7 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "grok",
     "antigravity",
     "windsurf",
     "kiro",
@@ -153,6 +156,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
             return "gemini", "explicit --target flag"
+        elif explicit_target == "grok":
+            return "grok", "explicit --target flag"
         elif explicit_target == "antigravity":
             return "antigravity", "explicit --target flag"
         elif explicit_target == "windsurf":
@@ -178,6 +183,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "apm.yml target"
         elif config_target == "gemini":
             return "gemini", "apm.yml target"
+        elif config_target == "grok":
+            return "grok", "apm.yml target"
         elif config_target == "antigravity":
             return "antigravity", "apm.yml target"
         elif config_target == "windsurf":
@@ -196,6 +203,7 @@ def detect_target(  # noqa: PLR0911
     opencode_exists = (project_root / ".opencode").is_dir()
     codex_exists = (project_root / ".codex").is_dir()
     gemini_exists = (project_root / ".gemini").is_dir()
+    grok_exists = (project_root / ".grok").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
     kiro_exists = (project_root / ".kiro").is_dir()
     detected = []
@@ -211,6 +219,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".codex/")
     if gemini_exists:
         detected.append(".gemini/")
+    if grok_exists:
+        detected.append(".grok/")
     if windsurf_exists:
         detected.append(".windsurf/")
     if kiro_exists:
@@ -230,6 +240,8 @@ def detect_target(  # noqa: PLR0911
         return "codex", "detected .codex/ folder"
     elif gemini_exists:
         return "gemini", "detected .gemini/ folder"
+    elif grok_exists:
+        return "grok", "detected .grok/ folder"
     elif windsurf_exists:
         return "windsurf", "detected .windsurf/ folder"
     elif kiro_exists:
@@ -241,8 +253,9 @@ def detect_target(  # noqa: PLR0911
 def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
-    AGENTS.md is generated for vscode, cursor, codex, gemini, all, and minimal
-    targets.  Gemini needs it because GEMINI.md imports AGENTS.md.
+    AGENTS.md is generated for vscode, cursor, opencode, codex, gemini,
+    grok, windsurf, kiro, antigravity, hermes, all, and minimal targets.
+    Gemini needs it because GEMINI.md imports AGENTS.md.
 
     Args:
         target: The detected or configured target. May be a string or a
@@ -259,6 +272,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "opencode",
         "codex",
         "gemini",
+        "grok",
         "antigravity",
         "windsurf",
         "kiro",
@@ -362,8 +376,9 @@ def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
     be omitted from AGENTS.md without losing context for any consumer.
 
     Today Copilot (vscode) and Antigravity support this native rules reading.
-    Codex, OpenCode, Windsurf, and Gemini rely on AGENTS.md as their sole
-    instruction source and must always receive instruction content (issue #1678).
+    Codex, OpenCode, Windsurf, Gemini, Grok, and Kiro rely on AGENTS.md as
+    their sole instruction source and must always receive instruction content
+    (issue #1678).
 
     Args:
         target: The detected or configured target.  May be a string or a
@@ -395,13 +410,14 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "grok": "AGENTS.md + xAI Grok Build CLI native .grok/skills configuration",
         "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .grok/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -487,7 +503,7 @@ def normalize_target_list(
     - ``None`` -> ``None`` (auto-detect)
     - ``"claude"`` -> ``["claude"]``
     - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
-    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "opencode", "vscode"]``
+    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "grok", "kiro", "opencode", "vscode", "windsurf"]``
     - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
     - Deduplicates while preserving first-seen order.
 
@@ -989,6 +1005,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("codex", "dir", ".codex"),
     ("gemini", "dir", ".gemini"),
     ("gemini", "file", "GEMINI.md"),
+    ("grok", "dir", ".grok"),
     ("opencode", "dir", ".opencode"),
     ("windsurf", "dir", ".windsurf"),
     ("kiro", "dir", ".kiro"),
@@ -1001,6 +1018,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "cursor",
     "codex",
     "gemini",
+    "grok",
     "opencode",
     "windsurf",
     "kiro",
@@ -1013,6 +1031,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "cursor": ".cursor/",
     "codex": ".codex/",
     "gemini": ".gemini/",
+    "grok": ".grok/",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
@@ -1026,6 +1045,7 @@ CANONICAL_SIGNAL: dict[str, str] = {
     "cursor": ".cursor/",
     "codex": ".codex/",
     "gemini": "GEMINI.md",
+    "grok": ".grok/",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",

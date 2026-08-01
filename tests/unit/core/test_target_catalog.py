@@ -37,7 +37,19 @@ COMMANDS = ("compile", "install", "update")
 def test_current_target_sets_and_aliases_are_characterized() -> None:
     """Lock the accepted target contract before moving its owner."""
     assert (
-        frozenset({"claude", "codex", "cursor", "gemini", "kiro", "opencode", "vscode", "windsurf"})
+        frozenset(
+            {
+                "claude",
+                "codex",
+                "cursor",
+                "gemini",
+                "grok",
+                "kiro",
+                "opencode",
+                "vscode",
+                "windsurf",
+            }
+        )
         == ALL_CANONICAL_TARGETS
     )
     assert (
@@ -66,6 +78,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "copilot-cowork",
                 "cursor",
                 "gemini",
+                "grok",
                 "hermes",
                 "intellij",
                 "kiro",
@@ -172,6 +185,14 @@ def test_current_native_profiles_are_characterized() -> None:
                 "hooks": ("hooks", ".json", "gemini_hooks", None, False),
             },
             "gemini",
+            None,
+        ),
+        "grok": (
+            ".grok",
+            {
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
+            },
+            "agents",
             None,
         ),
         "antigravity": (
