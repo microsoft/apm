@@ -90,7 +90,7 @@ apm compile --all                            # every canonical target
 ```
 
 Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `agent-skills`,
+`gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `intellij`, `agent-skills`,
 and `all`. The `agent-skills` slug is a no-op for compile (skills are
 deployed by `apm install`); it is accepted in target lists for symmetry
 only. `intellij` uses the Copilot profile for file primitives and produces
@@ -113,8 +113,8 @@ order:
 1. Explicit `--target <slug>` flag.
 2. The `targets:` field in your `apm.yml`.
 3. Auto-detect: any harness root directory (`.github/`, `.claude/`,
-   `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) that
-   already exists.
+   `.cursor/`, `.codex/`, `.gemini/`, `.grok/`, `.opencode/`, `.windsurf/`,
+   `.kiro/`) that already exists.
 4. Fallback: `minimal` -- writes a single `AGENTS.md` and skips per-
    harness rules folders.
 
@@ -133,6 +133,7 @@ Per target, with the rules shape on disk after compile:
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
+| `grok-build` | `AGENTS.md` (folded) | `.grok/rules/*.md` | Yes -- folded into `AGENTS.md` |
 | `antigravity` | `AGENTS.md` (folded) | `.agents/rules/<name>.md` | Yes -- folded into `AGENTS.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |

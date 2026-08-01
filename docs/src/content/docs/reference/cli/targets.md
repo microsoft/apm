@@ -73,6 +73,7 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
   cursor       active     .cursor/                                 .cursor/
   codex        inactive   needs .codex/                            .codex/
   gemini       inactive   needs GEMINI.md                          .gemini/
+  grok-build   inactive   needs .grok/                             .grok/
   opencode     inactive   needs .opencode/                         .opencode/
   windsurf     inactive   needs .windsurf/                         .windsurf/
   kiro         inactive   needs .kiro/                             .kiro/
@@ -97,6 +98,7 @@ match per target is enough to activate it.
 | `cursor` | `.cursor/` directory, or `.cursorrules` file (legacy) | `.cursor/` |
 | `codex` | `.codex/` directory | `.codex/` |
 | `gemini` | `.gemini/` directory, or `GEMINI.md` file | `.gemini/` |
+| `grok-build` | `.grok/` directory | `.grok/` |
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
 | `kiro` | `.kiro/` directory | `.kiro/` |

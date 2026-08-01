@@ -39,7 +39,6 @@ below). Claude and Kiro keep target-native skill directories.
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
-Grok Build uses `.grok/` for rules, agents, commands, and skills.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
 desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
@@ -307,7 +306,7 @@ xAI Grok Cloud skills deployment.
 - **Detection.** Auto-detected when `.grok/` exists.
 - **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
 - **Supported primitives.** instructions, agents, commands, and skills.
-- **File conventions.** `.grok/rules/*.instructions.md`,
+- **File conventions.** `.grok/rules/*.md`,
   `.grok/agents/*.md`, `.grok/commands/*.md`, and
   `.grok/skills/<name>/SKILL.md`.
 - **Compile behavior.** Produces `AGENTS.md`.

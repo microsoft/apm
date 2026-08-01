@@ -13,11 +13,11 @@ cd existing-repo && apm init                   # existing repo
 # 3. Install packages
 apm install microsoft/apm-sample-package#v1.0.0
 
-# 4. Compile (needed for Codex, OpenCode, Gemini, Antigravity, single-file targets)
+# 4. Compile (needed for Codex, OpenCode, Gemini, Grok Build, Antigravity, single-file targets)
 apm compile
 
 # 5. Commit and share
-git add apm.yml apm.lock.yaml .apm/ .github/ .claude/ .cursor/
+git add apm.yml apm.lock.yaml .apm/ .github/ .claude/ .cursor/ .grok/ AGENTS.md
 git commit -m "Add APM dependencies"
 ```
 
@@ -75,6 +75,7 @@ CLI equivalent: `--target claude,copilot` (comma-separated).
 | `.github/` exists only | `vscode` |
 | `.claude/` exists only | `claude` |
 | `.codex/` exists | `codex` |
+| `.grok/` exists | `grok-build` |
 | Multiple target folders | `all` |
 | Neither exists | `minimal` (AGENTS.md only) |
 
@@ -95,7 +96,8 @@ Auto-detection only applies when `target:` is omitted entirely. Invalid `target:
 | `apm.yml` | Yes | Manifest -- declares dependencies |
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits for reproducibility |
 | `.apm/` | Yes | Local primitives (instructions, agents, etc.) |
-| `.github/`, `.claude/`, `.cursor/` | Yes | Deployed files for agent runtimes |
+| `.github/`, `.claude/`, `.cursor/`, `.grok/` | Yes | Deployed files for agent runtimes |
+| `AGENTS.md` | Yes | Compiled root context for agents-family targets |
 | `apm_modules/` | **No** | Downloaded sources -- add to `.gitignore` |
 
 ## Team member setup
@@ -113,4 +115,4 @@ Use `apm install --update` to refresh to latest refs.
 
 ## Local bundle install
 
-`apm install <bundle>` accepts a directory, `.zip` (default), or legacy `.tar.gz` produced by `apm pack` and deploys its contents into the consumer's resolved target. Bundles are target-agnostic; the project decides where files land (same precedence as registry installs: `--target` > `apm.yml` > directory detection). For compile-only targets (OpenCode, Codex, Gemini, Antigravity) instructions stage under `apm_modules/<slug>/.apm/instructions/` and the install prints a hint to run `apm compile` to merge them into the target's single-file format (`AGENTS.md`, `GEMINI.md`).
+`apm install <bundle>` accepts a directory, `.zip` (default), or legacy `.tar.gz` produced by `apm pack` and deploys its contents into the consumer's resolved target. Bundles are target-agnostic; the project decides where files land (same precedence as registry installs: `--target` > `apm.yml` > directory detection). For root-context targets (OpenCode, Codex, Gemini, Grok Build, Antigravity) instructions stage under `apm_modules/<slug>/.apm/instructions/` and the install prints a hint to run `apm compile` to merge them into the target's single-file format (`AGENTS.md`, `GEMINI.md`).
