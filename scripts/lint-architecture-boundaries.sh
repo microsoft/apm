@@ -77,6 +77,22 @@ check_pattern \
     'name == "copilot-(app|cowork)"|name in \{.*copilot-(app|cowork)' \
     src/apm_cli/install/deployed_paths.py \
     src/apm_cli/install/manifest_reconcile.py
+experimental_hint_owner="src/apm_cli/install/target_hints.py"
+experimental_hint_definition_count=$(grep -Ec \
+    '^def emit_disabled_experimental_target_hint\(' "$experimental_hint_owner" || true)
+experimental_hint_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'requires an experimental flag' \
+        src/apm_cli \
+        | grep -v "^${experimental_hint_owner}:" \
+        || true
+)
+if [ "$experimental_hint_definition_count" -ne 1 ] \
+    || [ -n "$experimental_hint_duplicate_hits" ]; then
+    echo "[x] Experimental target hints must route through install/target_hints.py"
+    [ -n "$experimental_hint_duplicate_hits" ] && echo "$experimental_hint_duplicate_hits"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC2: validate-before-mutate boundaries"
 compiled_write_hits=$(

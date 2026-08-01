@@ -39,11 +39,10 @@ below). Claude and Kiro keep target-native skill directories.
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
-`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
-Copilot desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw
-agent runtime), and `hermes` are
-gated behind experimental flags and not listed above. See
-[Experimental](../experimental/).
+`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
+desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
+runtime), and `hermes` are gated behind experimental flags and not listed
+above. See [Experimental](../experimental/).
 
 ## Post-install instruction compilation
 
@@ -100,7 +99,7 @@ project's `apm.yml` `targets:` field so contributors running plain `apm
 install` pick them up automatically.
 
 `copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
-experimental targets. Enable their flag before installing or updating them.
+experimental targets that require `apm experimental enable <name>` before use.
 They are selected with `--target` only and cannot be listed in `apm.yml` (the
 canonical targets validator will reject them).
 
@@ -290,8 +289,8 @@ Cross-client shared skills directory.
 
 xAI Grok Cloud skills deployment.
 
-- **Detection.** Never auto-detected. Select with `--target grok-cloud` after
-  enabling the experimental flag.
+- **Detection.** Never auto-detected. After enabling the experimental flag,
+  selecting `--target grok-cloud` creates the deploy directory when needed.
 - **Enable.** `apm experimental enable grok-cloud`.
 - **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
 - **Supported primitives.** skills only.

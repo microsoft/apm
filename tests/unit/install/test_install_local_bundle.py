@@ -586,6 +586,52 @@ class TestGrokCloudLocalBundleDeployment:
         assert skill_file.read_text(encoding="utf-8") == "# Grok Global\n"
         assert not (home / ".grok" / ".grok").exists()
 
+    def test_multi_target_install_isolates_deploy_roots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli import config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target=["claude", "grok-cloud"],
+            files={
+                ".claude/skills/claude-guide/SKILL.md": "# Claude Guide\n",
+                ".grok/skills/grok-guide/SKILL.md": "# Grok Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "claude,grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".claude/skills/claude-guide/SKILL.md").exists()
+        assert (project / ".grok/skills/grok-guide/SKILL.md").exists()
+        assert not (project / ".claude/.grok").exists()
+        assert not (project / ".grok/.claude").exists()
+
+
+class TestLocalBundlePathRouting:
+    """Direct contracts for untrusted packed bundle paths."""
+
+    def test_rejects_traversal_before_prefix_routing(self) -> None:
+        from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            bundle_deploy_relative_path(
+                ".grok/../outside.txt",
+                frozenset({".grok/"}),
+                frozenset({".grok/"}),
+            )
+
 
 # ---------------------------------------------------------------------------
 # IM7: tarball-but-not-bundle yields targeted UsageError

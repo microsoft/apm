@@ -26,6 +26,24 @@ def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     assert "Policy cache metadata must redact URL credentials at its canonical writer" in guard
 
 
+def test_experimental_target_hints_have_single_owner() -> None:
+    """Experimental target enable hints must route through one helper."""
+    root = Path(__file__).parents[2]
+    owner_path = root / "src/apm_cli/install/target_hints.py"
+    owner = owner_path.read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    duplicate_paths = [
+        path
+        for path in (root / "src/apm_cli").rglob("*.py")
+        if path != owner_path
+        and "requires an experimental flag" in path.read_text(encoding="utf-8")
+    ]
+
+    assert owner.count("def emit_disabled_experimental_target_hint(") == 1
+    assert duplicate_paths == []
+    assert "Experimental target hints must route through install/target_hints.py" in guard
+
+
 def test_intellij_mcp_config_path_has_single_owner() -> None:
     """JetBrains Copilot path selection must stay in its client adapter."""
     root = Path(__file__).parents[2]

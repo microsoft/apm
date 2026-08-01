@@ -305,7 +305,7 @@ class TestDefaultSkillRouting:
     """Assert that the documented clients route skills to .agents/ by default."""
 
     def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
-        """Shared targets use .agents while grok-cloud stays native."""
+        """Shared skill targets use .agents while grok-cloud stays native."""
         expected = {
             "copilot": ".agents",
             "cursor": ".agents",

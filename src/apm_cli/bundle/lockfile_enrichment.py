@@ -134,11 +134,8 @@ def _filter_files_by_target(
                 if p not in seen_prefixes:
                     seen_prefixes.add(p)
                     prefixes.append(p)
-        # Union all cross-target maps
-        # NOTE: dict.update() means the last target's mapping wins when
-        # multiple targets map the same source prefix. In practice this
-        # is benign -- common multi-target combos (e.g. claude+copilot)
-        # match prefixes directly without needing cross-maps.
+        # Preserve every selected target's cross-map so one source path can
+        # intentionally fan out to multiple target-specific destinations.
         cross_maps: list[tuple[str, str]] = []
         for t in target:
             cross_maps.extend(_CROSS_TARGET_MAPS.get(t, {}).items())
@@ -158,8 +155,9 @@ def _filter_files_by_target(
                 if f.startswith(src_prefix):
                     mapped = dst_prefix + f[len(src_prefix) :]
                     # Containment guard: normalise the remapped path and
-                    # reject any result that escapes the destination prefix
-                    # via traversal segments (e.g. "../../etc/passwd").
+                    # reject any result that escapes the destination prefix.
+                    # The ".." check catches root-level escapes; the prefix
+                    # check below is the authoritative containment barrier.
                     normalised = posixpath.normpath(mapped)
                     if ".." in normalised.split("/"):
                         continue
