@@ -51,8 +51,8 @@ Resolution order for which targets to compile:
 
 1. `--target` / `--all` on the command line
 2. `targets:` field in `apm.yml`
-3. Auto-detection from existing folders (`.github/`, `.claude/`, `.cursor/`,
-   `.codex/`, `.gemini/`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`)
+3. Auto-detection from the
+   [documented filesystem signals](../targets/#detection-signals)
 
 Use [`apm targets`](../targets/) to preview what auto-detection
 resolves to before compiling.

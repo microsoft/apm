@@ -48,8 +48,8 @@ above. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, `grok-build`, and
-`opencode`, plus experimental `hermes` when enabled. It emits the
+separate root-context compile for `codex`, `gemini`, and `opencode`, plus
+experimental `hermes` when enabled. It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
@@ -80,7 +80,7 @@ runtime-specific configuration while compile only generates project output. Use
 | Target   | Signals (any one activates the target)        |
 |----------|-----------------------------------------------|
 | claude   | `.claude/` directory, or `CLAUDE.md` file     |
-| copilot  | `.github/copilot-instructions.md` file        |
+| copilot  | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |

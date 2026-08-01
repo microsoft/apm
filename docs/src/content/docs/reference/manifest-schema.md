@@ -138,20 +138,22 @@ SBOM marks the component unknown -- CycloneDX omits the license entry and SPDX
 writes the literal `NOASSERTION` -- and `apm pack` / `apm publish` print an
 actionable nudge (the authoring path only).
 
-### 3.6. `target`
+### 3.6. `target` and `targets`
 
 | | |
 |---|---|
-| **Type** | `string` or `list<string>` |
+| **Type** | `target`: `string` or `list<string>`; `targets`: `list<string>` (a scalar is accepted as one-item compatibility input) |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect from folder presence (see below). |
+| **Default** | Auto-detect from filesystem signals (see below). |
 | **Allowed values** | `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
 
-When `target:` is omitted, APM auto-detects targets from folder presence (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`). Auto-detection applies only when `target:` is unset; once set, the field is authoritative.
+When both fields are omitted, APM auto-detects from the
+[documented filesystem signals](../cli/targets/#detection-signals).
+Once set, the field is authoritative.
 
 ```yaml
 # Single target
@@ -168,7 +170,11 @@ target:
 
 When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets.
 
-A plural alias `targets:` (YAML list only) is also accepted and takes precedence over the legacy CSV form when both are declared. Prefer `targets:` in new manifests; `target:` remains supported for backward compatibility.
+A plural `targets:` form is also accepted; use a YAML list in new manifests.
+A scalar remains accepted as a one-item compatibility input. Declaring both
+fields is a parse error. Prefer `targets:` in new manifests; `target:` remains
+supported for backward compatibility and accepts legacy CLI aliases such as
+`vscode`. The canonical `targets:` form requires canonical names.
 
 | Value | Effect |
 |---|---|
@@ -428,7 +434,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
-| `targets` | `list<string>` | OPTIONAL | Subset of canonical target keys (`copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `grok-build`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`) | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+| `targets` | `list<string>` | OPTIONAL | Subset of canonical target keys (`copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `grok-build`, `grok-cloud`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`) | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
 actionable error to use `ref` for a branch, tag, or commit; `version` belongs

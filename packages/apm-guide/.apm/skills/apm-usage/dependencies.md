@@ -385,7 +385,7 @@ dependency's target-scoped primitives. They compose via intersection. See
 - Type: list of harness keys (`copilot`, `claude`, `cursor`, `codex`,
   `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, plus canonical targets
   such as `opencode`, `agent-skills`, `openclaw`, `hermes`,
-  `copilot-cowork`, and `copilot-app`). Use `copilot`, not the runtime
+  `copilot-cowork`, `copilot-app`, and `grok-cloud`). Use `copilot`, not the runtime
   alias `vscode`, for Copilot-family dependency routing.
 - Default: omitted means all active install targets.
 - Semantics: effective reach is `install_targets INTERSECT dep_targets`.

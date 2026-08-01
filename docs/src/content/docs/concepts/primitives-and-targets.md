@@ -173,14 +173,19 @@ Full pattern, the three pack-time gotchas, and verification steps: [Dev-only pri
 
 ## How a target is selected
 
-`apm install` and `apm compile` resolve active targets in this order:
+`apm install` and `apm compile` use the same first three target sources:
 
 1. Explicit `--target <slug>` flag, when passed.
 2. The `targets:` field in `apm.yml`, when present.
-3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`) already exists in the workspace is selected.
-4. Fallback: `copilot` -- greenfield projects get the default Copilot skills root. Create one of the harness folders above (or set
-   `targets:` explicitly) for full integration.
+3. Auto-detection: recognized
+   [filesystem signals](../../reference/cli/targets/#detection-signals) select
+   the matching harness.
+With no signal, `apm install` exits with a target-selection error. `apm compile`
+retains its legacy `vscode`/minimal fallback.
 
 Unknown target slugs are rejected upstream by the manifest parser; they never silently fall through to the default.
 
-For flag reference and exact resolution semantics, see [`apm compile` and `apm install`](/apm/reference/cli/install/). For policy controls that further restrict which primitives a target may deploy, see [Governance guide](/apm/enterprise/governance-guide/).
+For exact resolution semantics, see [`apm install`](../../reference/cli/install/)
+and [`apm compile`](../../reference/cli/compile/). For policy controls that
+further restrict which primitives a target may deploy, see [Governance
+guide](../../enterprise/governance-guide/).

@@ -216,6 +216,7 @@ repo-relative.
 Two keys control which output runtimes a package compiles and installs to:
 
 - **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
+  A scalar remains accepted as a one-item compatibility input.
 - **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
 
 Setting both keys in the same `apm.yml` is a parse error
@@ -224,18 +225,17 @@ Setting both keys in the same `apm.yml` is a parse error
 treated as omission for legacy compatibility; an empty string or list is a
 parse error.
 
-Both manifest keys validate against the target catalog, with one compatibility
-difference: `target:` accepts aliases such as `vscode` and normalizes them to
-their canonical target (`copilot`), while `targets:` accepts canonical names
-only. Invalid values fail at parse time -- they do **not** silently fall
-through to auto-detect.
+Both manifest keys validate target names. The canonical `targets:` form accepts
+canonical names only. The legacy `target:` form also accepts CLI aliases such
+as `vscode` and normalizes them. Invalid values fail at parse time -- they do
+**not** silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `all` |
+| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
 | `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
-| `target: vscode` | Alias spelling; canonical package restriction is `copilot` |
+| `target: vscode` | Legacy alias; normalizes to `copilot` |
 | `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
 | `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
 | `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
