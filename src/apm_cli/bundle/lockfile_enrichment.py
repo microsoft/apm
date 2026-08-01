@@ -139,22 +139,22 @@ def _filter_files_by_target(
         # multiple targets map the same source prefix. In practice this
         # is benign -- common multi-target combos (e.g. claude+copilot)
         # match prefixes directly without needing cross-maps.
-        cross_map: dict[str, str] = {}
+        cross_maps: list[tuple[str, str]] = []
         for t in target:
-            cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
+            cross_maps.extend(_CROSS_TARGET_MAPS.get(t, {}).items())
     else:
         prefixes = _get_target_prefixes(target)
-        cross_map = _CROSS_TARGET_MAPS.get(target, {})
+        cross_maps = list(_CROSS_TARGET_MAPS.get(target, {}).items())
 
     direct = [f for f in deployed_files if any(f.startswith(p) for p in prefixes)]
 
     path_mappings: dict[str, str] = {}
-    if cross_map:
+    if cross_maps:
         direct_set = set(direct)
         for f in deployed_files:
             if f in direct_set:
                 continue
-            for src_prefix, dst_prefix in cross_map.items():
+            for src_prefix, dst_prefix in cross_maps:
                 if f.startswith(src_prefix):
                     mapped = dst_prefix + f[len(src_prefix) :]
                     # Containment guard: normalise the remapped path and
@@ -173,7 +173,6 @@ def _filter_files_by_target(
                         direct.append(mapped)
                         direct_set.add(mapped)
                         path_mappings[mapped] = f
-                    break
 
     return direct, path_mappings
 

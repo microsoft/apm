@@ -267,6 +267,18 @@ class TestFilterFilesByTarget:
         assert ".grok/skills/x/SKILL.md" in filtered
         assert mappings[".grok/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
 
+    def test_multi_target_cross_map_preserves_each_destination(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md"]
+        filtered, mappings = _filter_files_by_target(files, ["claude", "grok-cloud"])
+
+        assert {".claude/skills/x/SKILL.md", ".grok/skills/x/SKILL.md"} <= set(filtered)
+        assert mappings == {
+            ".claude/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+            ".grok/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
+
     def test_dedup_direct_over_mapped(self):
         """If a file exists under both .github/ and .claude/, direct wins."""
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
@@ -439,16 +451,19 @@ class TestFilterFilesByTargetList:
         assert mappings == {}
 
     def test_list_cross_map_github_to_claude_and_cursor(self):
-        """When both claude and cursor are targets, cross-mapped files go to one dest."""
+        """Each selected target retains its cross-mapped skill destination."""
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 
         files = [".github/skills/x/SKILL.md"]
         filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])
-        # Both claude and cursor have cross-maps from .github/skills/
-        # Dict.update means cursor map overwrites claude map for same key
-        # So the result maps to cursor's destination
-        assert len(filtered) == 1
-        assert len(mappings) == 1
+        assert set(filtered) == {
+            ".claude/skills/x/SKILL.md",
+            ".agents/skills/x/SKILL.md",
+        }
+        assert mappings == {
+            ".claude/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+            ".agents/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
 
 
 class TestEnrichLockfileListTarget:

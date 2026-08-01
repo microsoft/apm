@@ -337,6 +337,18 @@ class TestAllowedFlagsWithLocalBundle:
             f"Allowed flag {flag_args} produced UsageError. output={result.output!r}"
         )
 
+    def test_target_all_does_not_enter_experimental_lookup(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bundle = _make_bundle(tmp_path / "src", pack_target="all")
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke(project, monkeypatch, str(bundle), "--target", "all")
+
+        assert result.exit_code == 0, result.output
+
 
 class TestExceptionHandlerScopeRegression:
     """Regression: exception handlers must not raise UnboundLocalError when
@@ -494,7 +506,10 @@ class TestGrokCloudLocalBundleDeployment:
         bundle = _make_bundle(
             tmp_path / "src",
             pack_target=["claude", "grok-cloud"],
-            files={"skills/guide/SKILL.md": "# Shared Guide\n"},
+            files={
+                ".claude/skills/guide/SKILL.md": "# Shared Guide\n",
+                ".grok/skills/guide/SKILL.md": "# Shared Guide\n",
+            },
         )
         project = _make_project(tmp_path / "dst")
 
@@ -510,6 +525,7 @@ class TestGrokCloudLocalBundleDeployment:
         assert result.exit_code == 0, result.output
         assert "apm experimental enable grok-cloud" in " ".join(result.output.split())
         assert (project / ".claude" / "skills" / "guide" / "SKILL.md").exists()
+        assert not (project / ".claude" / ".grok").exists()
         assert not (project / ".grok").exists()
 
     def test_project_scope_install_deploys_skill(

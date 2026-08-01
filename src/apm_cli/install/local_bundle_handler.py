@@ -102,6 +102,8 @@ def install_local_bundle(
         disabled_requested = []
         resolved_names = {resolved.name for resolved in targets}
         for requested_target in requested:
+            if requested_target == "all":
+                continue
             capability = get_target_capability(requested_target)
             if (
                 capability.experimental_flag

@@ -55,7 +55,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
         frozenset({"copilot-app", "copilot-cowork", "grok-cloud", "hermes", "openclaw"})
         == EXPERIMENTAL_TARGETS
     )
-    assert frozenset({"agent-skills", "antigravity"}) == EXPLICIT_ONLY_TARGETS
+    assert frozenset({"agent-skills", "antigravity", "grok-cloud"}) == EXPLICIT_ONLY_TARGETS
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
         "agy": "antigravity",

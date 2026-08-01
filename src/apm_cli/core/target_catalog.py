@@ -150,6 +150,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
         _capability(
             "grok-cloud",
             "xAI Grok Cloud native .grok/skills configuration",
+            explicit_only=True,
             experimental_flag="grok_cloud",
             primitive_profile="grok-cloud",
         ),
