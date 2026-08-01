@@ -25,6 +25,9 @@ from typing import TYPE_CHECKING, Any
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
+from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
+from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
+from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .target_filter import resolve_effective_package_targets
 
 if TYPE_CHECKING:
@@ -723,38 +726,6 @@ _integrate_local_content = integrate_local_content
 # ---------------------------------------------------------------------------
 
 
-def _bundle_deploy_relative_path(
-    rel_path: str,
-    target: Any,
-    known_deploy_prefixes: set[str],
-) -> str | None:
-    """Return a bundle path relative to a target-owned deployment root."""
-    allowed_prefixes = {
-        f"{root.strip('/')}/"
-        for root in (
-            target.root_dir,
-            *(mapping.deploy_root for mapping in target.primitives.values() if mapping.deploy_root),
-        )
-    }
-    matched_prefixes = {prefix for prefix in known_deploy_prefixes if rel_path.startswith(prefix)}
-    allowed_matches = matched_prefixes & allowed_prefixes
-    if matched_prefixes and not allowed_matches:
-        return None
-    matched_prefix = max(allowed_matches, key=len, default="")
-    return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
-
-
-def _bundle_pack_files(bundle_info: Any) -> dict[str, str]:
-    """Read the packed file manifest from bundle lockfile metadata."""
-    if not bundle_info.lockfile:
-        return {}
-    pack = bundle_info.lockfile.get("pack") or {}
-    bundle_files = pack.get("bundle_files") or {}
-    if not isinstance(bundle_files, dict):
-        return {}
-    return {str(path): str(digest) for path, digest in bundle_files.items()}
-
-
 def integrate_local_bundle(
     bundle_info: Any,
     project_root: Path,
@@ -868,20 +839,7 @@ def integrate_local_bundle(
     pack_files = _filtered_pack_files
 
     slug = alias or bundle_info.package_id
-    from ..integration.targets import KNOWN_TARGETS
-
-    _known_deploy_prefixes = {
-        f"{root.strip('/')}/"
-        for profile in KNOWN_TARGETS.values()
-        for root in (
-            profile.root_dir,
-            *(
-                mapping.deploy_root
-                for mapping in profile.primitives.values()
-                if mapping.deploy_root
-            ),
-        )
-    }
+    _known_deploy_prefixes = _known_bundle_prefixes()
 
     # Security + feature gate: canvas extensions are executable Node bundles
     # (``extension.mjs``).  A local / offline bundle copies its files
@@ -981,11 +939,7 @@ def integrate_local_bundle(
             # equivalent.  Deploying them verbatim to ``<root>/instructions/``
             # is a no-op for these clients.
             _rel_norm = rel.replace("\\", "/")
-            _deploy_rel = _bundle_deploy_relative_path(
-                _rel_norm,
-                target,
-                _known_deploy_prefixes,
-            )
+            _deploy_rel = _bundle_rel(_rel_norm, target, _known_deploy_prefixes)
             if _deploy_rel is None:
                 continue
             _first_seg = _deploy_rel.split("/", 1)[0] if "/" in _deploy_rel else ""
