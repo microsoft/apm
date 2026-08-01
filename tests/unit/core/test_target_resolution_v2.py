@@ -229,9 +229,7 @@ def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
 
 
 def test_manifest_targets_from_target_option_filters_non_manifest_targets():
-    assert (
-        manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) is None
-    )
+    assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) is None
 
 
 def test_schema_targets_list_valid():

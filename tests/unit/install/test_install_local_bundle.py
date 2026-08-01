@@ -466,7 +466,7 @@ class TestGrokCloudLocalBundleDeployment:
     def test_project_scope_install_deploys_skill(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import apm_cli.config as config
+        from apm_cli import config
 
         monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
         bundle = _make_bundle(
@@ -494,7 +494,7 @@ class TestGrokCloudLocalBundleDeployment:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = _make_home(tmp_path, monkeypatch)
-        import apm_cli.config as config
+        from apm_cli import config
 
         monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
         bundle = _make_bundle(
@@ -518,6 +518,7 @@ class TestGrokCloudLocalBundleDeployment:
         skill_file = home / ".grok" / "skills" / "guide" / "SKILL.md"
         assert skill_file.exists()
         assert skill_file.read_text(encoding="utf-8") == "# Grok Global\n"
+
 
 # ---------------------------------------------------------------------------
 # IM7: tarball-but-not-bundle yields targeted UsageError
