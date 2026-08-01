@@ -43,6 +43,12 @@ MACOS_STARTUP_CONTRACTS = (
         "github.event_name == 'workflow_dispatch'",
     ),
 )
+RELEASE_UNIX_INTEGRATION_STEPS = (
+    ("integration-tests", "Run integration tests (Unix)"),
+    ("build-and-validate-macos-intel", "Run integration tests"),
+    ("build-and-validate-macos-arm", "Run integration tests"),
+)
+RELEASE_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
 
 
 def _workflow() -> dict:
@@ -113,6 +119,13 @@ def _assert_standalone_integration_timeouts(workflow: dict) -> None:
     assert windows_step.get("timeout-minutes") == 20
 
 
+def _assert_release_unix_integration_parallelism(workflow: dict) -> None:
+    for job_id, step_name in RELEASE_UNIX_INTEGRATION_STEPS:
+        step = workflow_step(workflow_job(workflow, job_id), step_name)
+        assert step["env"].get("PYTEST_EXTRA_ARGS") == RELEASE_UNIX_PYTEST_ARGS
+        assert step.get("timeout-minutes") == 30
+
+
 def test_macos_jobs_run_non_shell_binary_startup_after_build() -> None:
     """Both macOS jobs execute the exact generated artifact before upload."""
     _assert_macos_startup_steps(_workflow())
@@ -126,6 +139,39 @@ def test_windows_installer_contract_is_windows_only_and_tokenless() -> None:
 def test_standalone_integration_timeouts_are_platform_specific() -> None:
     """Standalone Unix has headroom while Windows retains its proven bound."""
     _assert_standalone_integration_timeouts(_workflow())
+
+
+def test_release_unix_integration_uses_bounded_grouped_parallelism() -> None:
+    """Every full-corpus Unix release node uses the same bounded scheduler."""
+    _assert_release_unix_integration_parallelism(_workflow())
+
+
+@pytest.mark.parametrize(("job_id", "step_name"), RELEASE_UNIX_INTEGRATION_STEPS)
+def test_release_unix_serial_integration_mutation_is_rejected(
+    job_id: str,
+    step_name: str,
+) -> None:
+    """No release node can silently regress to the 30-minute serial path."""
+    workflow = deepcopy(_workflow())
+    step = workflow_step(workflow_job(workflow, job_id), step_name)
+    del step["env"]["PYTEST_EXTRA_ARGS"]
+
+    with pytest.raises(AssertionError):
+        _assert_release_unix_integration_parallelism(workflow)
+
+
+@pytest.mark.parametrize(("job_id", "step_name"), RELEASE_UNIX_INTEGRATION_STEPS)
+def test_release_unix_timeout_mutation_is_rejected(
+    job_id: str,
+    step_name: str,
+) -> None:
+    """Every full-corpus Unix release node remains bounded to 30 minutes."""
+    workflow = deepcopy(_workflow())
+    step = workflow_step(workflow_job(workflow, job_id), step_name)
+    step["timeout-minutes"] = 31
+
+    with pytest.raises(AssertionError):
+        _assert_release_unix_integration_parallelism(workflow)
 
 
 def test_unix_integration_twenty_minute_timeout_mutation_is_rejected() -> None:

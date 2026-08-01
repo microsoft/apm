@@ -840,6 +840,7 @@ class DownloadDelegate:
                 path=dep_ref.repo_url,
                 host_type=dep_ref.host_type,
                 unauth_first=True,
+                base_env=self._host.git_env,
             )
 
         auth_ctx = self._host.auth_resolver.resolve_for_dep(dep_ref)

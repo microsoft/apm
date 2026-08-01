@@ -433,7 +433,9 @@ def _build_validation_attempts(
 
     # Attempt 2: plain HTTPS w/ credential helper (no token, no header).
     plain_env = (
-        downloader.auth_resolver.build_public_github_anonymous_git_env()
+        downloader.auth_resolver.build_public_github_anonymous_git_env(
+            base_env=downloader.git_env,
+        )
         if public_github_anonymous_first
         else (
             downloader.auth_resolver.build_noninteractive_git_env(
@@ -558,6 +560,7 @@ def _ref_exists_via_ls_remote(
                 path=dep_ref.repo_url,
                 host_type=dep_ref.host_type,
                 unauth_first=True,
+                base_env=downloader.git_env,
             )
             if is_sha:
                 matched = bool(

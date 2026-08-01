@@ -290,6 +290,7 @@ class GitReferenceResolver:
                     path=dep_ref.repo_url,
                     host_type=dep_ref.host_type,
                     unauth_first=True,
+                    base_env=host.git_env,
                 )
             except (GitCommandError, OSError) as exc:
                 outcome = ("err", exc)

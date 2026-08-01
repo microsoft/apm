@@ -302,7 +302,9 @@ class GitHubPackageDownloader:
             is True
             and not dep_ref.is_insecure
         ):
-            return self.auth_resolver.build_public_github_anonymous_git_env()
+            return self.auth_resolver.build_public_github_anonymous_git_env(
+                base_env=self.git_env,
+            )
 
         auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
         base_env = (
@@ -1124,7 +1126,9 @@ class GitHubPackageDownloader:
                     dep_ref=dep_ref,
                     token="",
                 )
-                setup_env = self.auth_resolver.build_public_github_anonymous_git_env()
+                setup_env = self.auth_resolver.build_public_github_anonymous_git_env(
+                    base_env=self.git_env,
+                )
                 setup_cmds = [
                     ["git", "init"],
                     ["git", "remote", "add", "origin", anonymous_url],
@@ -1194,6 +1198,7 @@ class GitHubPackageDownloader:
                     path=dep_ref.repo_url,
                     host_type=dep_ref.host_type,
                     unauth_first=True,
+                    base_env=self.git_env,
                 )
                 checkout_result = subprocess.run(
                     ["git", "checkout", "FETCH_HEAD"],

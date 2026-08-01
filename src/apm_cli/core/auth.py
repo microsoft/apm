@@ -557,6 +557,7 @@ class AuthResolver:
         host_type: str | None = None,
         unauth_first: bool = False,
         verbose_callback: Callable[[str], None] | None = None,
+        base_env: dict[str, str] | None = None,
     ) -> T:
         """Execute *operation* with automatic auth/unauth fallback.
 
@@ -583,6 +584,9 @@ class AuthResolver:
             If *True*, try unauthenticated first (saves rate limits, EMU-safe).
         verbose_callback:
             Called with a human-readable step description at each attempt.
+        base_env:
+            Optional caller-owned Git environment. When provided, isolated
+            config and transport policy are retained across every attempt.
 
         When the resolved token comes from a global env var and fails
         (e.g. a github.com PAT tried on ``*.ghe.com``), the method
@@ -609,9 +613,13 @@ class AuthResolver:
             )
             host_info = auth_ctx.host_info
         unauth_env = (
-            self.build_public_github_anonymous_git_env()
+            self.build_public_github_anonymous_git_env(base_env=base_env)
             if lazy_public_github
-            else self._build_git_env(None, host_kind=host_info.kind)
+            else self._build_git_env(
+                None,
+                host_kind=host_info.kind,
+                base_env=base_env,
+            )
         )
 
         def _auth_context() -> AuthContext:
@@ -625,6 +633,11 @@ class AuthResolver:
                     path=path if lazy_public_github else None,
                 )
             return auth_ctx
+
+        def _git_env_for_context(ctx: AuthContext) -> dict[str, str]:
+            if base_env is None:
+                return ctx.git_env
+            return self.git_env_for_context(ctx, base_env=base_env)
 
         def _log(msg: str) -> None:
             if verbose_callback:
@@ -656,7 +669,12 @@ class AuthResolver:
                 _log(f"gh auth token resolved a credential for {host_info.display_name}")
                 return operation(
                     gh_token,
-                    self._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
+                    self._build_git_env(
+                        gh_token,
+                        scheme="basic",
+                        host_kind=host_info.kind,
+                        base_env=base_env,
+                    ),
                 )
             path_suffix = f" (path={path})" if path else ""
             _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
@@ -667,7 +685,12 @@ class AuthResolver:
                 _log(f"git credential fill resolved a credential for {host_info.display_name}")
                 return operation(
                     cred,
-                    self._build_git_env(cred, scheme="basic", host_kind=host_info.kind),
+                    self._build_git_env(
+                        cred,
+                        scheme="basic",
+                        host_kind=host_info.kind,
+                        base_env=base_env,
+                    ),
                 )
             raise exc
 
@@ -694,7 +717,12 @@ class AuthResolver:
                 raise exc
             try:
                 bearer = provider.get_bearer_token()
-                bearer_env = self._build_git_env(bearer, scheme="bearer", host_kind="ado")
+                bearer_env = self._build_git_env(
+                    bearer,
+                    scheme="bearer",
+                    host_kind="ado",
+                    base_env=base_env,
+                )
                 result = operation(bearer, bearer_env)
                 # Success on fallback -- emit deferred diagnostic warning
                 self.emit_stale_pat_diagnostic(auth_ctx.host_info.display_name)
@@ -726,7 +754,7 @@ class AuthResolver:
             ctx = _auth_context()
             _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
             try:
-                return operation(ctx.token, ctx.git_env)
+                return operation(ctx.token, _git_env_for_context(ctx))
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
                 # without restricting the caller API.  Use %r so the type is visible.
@@ -742,7 +770,7 @@ class AuthResolver:
             ctx = _auth_context()
             _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
             try:
-                return operation(ctx.token, ctx.git_env)
+                return operation(ctx.token, _git_env_for_context(ctx))
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
                 # without restricting the caller API.  Use %r so the type is visible.
@@ -776,7 +804,7 @@ class AuthResolver:
                 if ctx.token:
                     _log(f"Unauthenticated failed, retrying with token (source: {ctx.source})")
                     try:
-                        return operation(ctx.token, ctx.git_env)
+                        return operation(ctx.token, _git_env_for_context(ctx))
                     except Exception as retry_exc:
                         # operation is caller-provided; broad catch required.
                         logger.debug(
@@ -794,7 +822,7 @@ class AuthResolver:
                     f"Trying authenticated access to {host_info.display_name} "
                     f"(source: {ctx.source})"
                 )
-                return operation(ctx.token, ctx.git_env)
+                return operation(ctx.token, _git_env_for_context(ctx))
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
                 # without restricting the caller API.  Use %r so the type is visible.

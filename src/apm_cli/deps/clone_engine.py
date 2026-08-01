@@ -296,6 +296,7 @@ class CloneEngine:
                 path=dep_ref.repo_url,
                 host_type=dep_ref.host_type,
                 unauth_first=True,
+                base_env=host.git_env,
                 verbose_callback=verbose_callback,
             )
             return winning_url, winning_token

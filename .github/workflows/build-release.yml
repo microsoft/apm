@@ -226,10 +226,9 @@ jobs:
           # slower Intel runner overruns the step timeout, so parallelise
           # in-process with xdist. --dist loadgroup is required: it is the
           # only scheduler that honors pytest.mark.xdist_group, which keeps
-          # the HOME-mutating tests serialized on a single worker. Kept at
-          # -n 2 (matching ci-integration's per-shard width) to bound the
-          # shared-PAT API concurrency these E2E tests generate.
-          PYTEST_EXTRA_ARGS: "-n 2 --dist loadgroup"
+          # the HOME-mutating tests serialized on a single worker. Four
+          # workers remain below the merge gate's aggregate concurrency.
+          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -345,7 +344,7 @@ jobs:
           # the full suite onto one runner, so parallelise in-process with
           # xdist. --dist loadgroup honors the home_env xdist_group markers
           # that keep HOME-mutating tests serialized on a single worker.
-          PYTEST_EXTRA_ARGS: "-n 2 --dist loadgroup"
+          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -439,6 +438,10 @@ jobs:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}    # Primary: APM module access
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}      # Azure DevOps module access
+          # The tag gate runs the full corpus on one runner. Four workers stay
+          # below the merge gate's aggregate width while loadgroup preserves
+          # xdist_group serialization for HOME-mutating tests.
+          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh

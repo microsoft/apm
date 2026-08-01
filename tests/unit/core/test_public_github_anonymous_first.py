@@ -159,6 +159,158 @@ def test_public_github_preserves_caller_git_config_isolation(tmp_path: Path) -> 
     assert dict(_indexed_git_config(env))["credential.helper"] == ""
 
 
+def test_public_github_fallback_preserves_caller_git_config_isolation(tmp_path: Path) -> None:
+    """Anonymous and authenticated retries retain downloader-owned rewrites."""
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text(
+        '[url "file:///fixture.git/"]\n\tinsteadOf = https://github.com/acme/widgets\n',
+        encoding="ascii",
+    )
+    base_env = {
+        "GIT_CONFIG_GLOBAL": str(git_config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_ALLOW_PROTOCOL": "file",
+    }
+    resolver = AuthResolver()
+    attempts: list[tuple[str | None, dict[str, str]]] = []
+
+    def operation(token: str | None, env: dict[str, str]) -> str:
+        attempts.append((token, env))
+        if token is None:
+            raise _HttpStatusError(404)
+        return "private-ok"
+
+    with patch.dict(
+        os.environ,
+        {"GITHUB_APM_PAT_ACME": "private-token"},
+        clear=True,
+    ):
+        result = resolver.try_with_fallback(
+            "github.com",
+            operation,
+            org="acme",
+            path="acme/widgets",
+            unauth_first=True,
+            base_env=base_env,
+        )
+
+    assert result == "private-ok"
+    assert [token for token, _env in attempts] == [None, "private-token"]
+    for _token, env in attempts:
+        assert env["GIT_CONFIG_GLOBAL"] == str(git_config)
+        assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert env["GIT_ALLOW_PROTOCOL"] == "file"
+        assert "GITHUB_APM_PAT_ACME" not in env
+
+
+@pytest.mark.parametrize("secondary_source", ("gh", "git"))
+def test_public_github_secondary_fallback_preserves_caller_git_config(
+    tmp_path: Path,
+    secondary_source: str,
+) -> None:
+    """Secondary credential retries retain isolated Git transport policy."""
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text(
+        '[url "file:///fixture.git/"]\n\tinsteadOf = https://github.com/acme/widgets\n',
+        encoding="ascii",
+    )
+    base_env = {
+        "GIT_CONFIG_GLOBAL": str(git_config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_ALLOW_PROTOCOL": "file",
+    }
+    resolver = AuthResolver()
+    attempts: list[tuple[str | None, dict[str, str]]] = []
+
+    def operation(token: str | None, env: dict[str, str]) -> str:
+        attempts.append((token, env))
+        if token != "secondary-token":
+            raise _HttpStatusError(404)
+        return "private-ok"
+
+    gh_token = "secondary-token" if secondary_source == "gh" else None
+    git_token = "secondary-token" if secondary_source == "git" else None
+    with (
+        patch.dict(
+            os.environ,
+            {"GITHUB_APM_PAT_ACME": "primary-token"},
+            clear=True,
+        ),
+        patch.object(
+            resolver._token_manager,
+            "resolve_credential_from_gh_cli",
+            return_value=gh_token,
+        ),
+        patch.object(
+            resolver._token_manager,
+            "resolve_credential_from_git",
+            return_value=git_token,
+        ),
+    ):
+        result = resolver.try_with_fallback(
+            "github.com",
+            operation,
+            org="acme",
+            path="acme/widgets",
+            unauth_first=True,
+            base_env=base_env,
+        )
+
+    assert result == "private-ok"
+    assert [token for token, _env in attempts] == [
+        None,
+        "primary-token",
+        "secondary-token",
+    ]
+    for _token, env in attempts:
+        assert env["GIT_CONFIG_GLOBAL"] == str(git_config)
+        assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert env["GIT_ALLOW_PROTOCOL"] == "file"
+        assert "GITHUB_APM_PAT_ACME" not in env
+
+
+def test_ado_bearer_fallback_preserves_caller_git_config(tmp_path: Path) -> None:
+    """ADO PAT and bearer attempts retain caller-owned Git isolation."""
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text(
+        '[url "file:///fixture.git/"]\n\tinsteadOf = https://dev.azure.com/acme/project/_git/repo\n',
+        encoding="ascii",
+    )
+    base_env = {
+        "GIT_CONFIG_GLOBAL": str(git_config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_ALLOW_PROTOCOL": "file",
+    }
+    resolver = AuthResolver()
+    attempts: list[tuple[str | None, dict[str, str]]] = []
+
+    def operation(token: str | None, env: dict[str, str]) -> str:
+        attempts.append((token, env))
+        if token == "stale-pat":
+            raise RuntimeError("401 unauthorized")
+        return "bearer-ok"
+
+    with (
+        patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True),
+        patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as provider_class,
+    ):
+        provider_class.return_value.is_available.return_value = True
+        provider_class.return_value.get_bearer_token.return_value = "bearer-token"
+        result = resolver.try_with_fallback(
+            "dev.azure.com",
+            operation,
+            base_env=base_env,
+        )
+
+    assert result == "bearer-ok"
+    assert [token for token, _env in attempts] == ["stale-pat", "bearer-token"]
+    for _token, env in attempts:
+        assert env["GIT_CONFIG_GLOBAL"] == str(git_config)
+        assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert env["GIT_ALLOW_PROTOCOL"] == "file"
+        assert env.get("ADO_APM_PAT") in {None, ""}
+
+
 def test_public_github_ignores_ambient_git_config_isolation(tmp_path: Path) -> None:
     ambient_config = tmp_path / "ambient-gitconfig"
     ambient_config.write_text(
