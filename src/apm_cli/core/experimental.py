@@ -82,6 +82,12 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "Workflows tab."
         ),
     ),
+    "grok_cloud": ExperimentalFlag(
+        name="grok_cloud",
+        description="Deploy skills to xAI Grok Cloud.",
+        default=False,
+        hint="Use '--target grok-cloud' to deploy skills.",
+    ),
     "marketplace_authoring": ExperimentalFlag(
         name="marketplace_authoring",
         description="Enable marketplace authoring commands (init, build, publish, etc.).",

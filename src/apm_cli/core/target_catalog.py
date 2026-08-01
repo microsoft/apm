@@ -148,11 +148,10 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="gemini",
         ),
         _capability(
-            "grok",
-            "xAI Grok Build CLI native .grok/skills configuration",
-            in_all=True,
-            primitive_profile="grok",
-            compile_family="agents",
+            "grok-cloud",
+            "xAI Grok Cloud native .grok/skills configuration",
+            experimental_flag="grok_cloud",
+            primitive_profile="grok-cloud",
         ),
         _capability(
             "antigravity",

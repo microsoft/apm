@@ -666,16 +666,16 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_dir=".gemini",
         hooks_config_display=".gemini/settings.json",
     ),
-    # Grok -- xAI docs verify project ``./.grok/skills/`` and user
+    # Grok Cloud -- xAI docs verify project ``./.grok/skills/`` and user
     # ``~/.grok/skills/``.  Skills are the only deployed primitive.
-    "grok": TargetProfile(
-        capability=TARGET_CAPABILITIES["grok"],
+    "grok-cloud": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok-cloud"],
         root_dir=".grok",
         primitives={
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
         },
         auto_create=True,
-        detect_by_dir=True,
+        detect_by_dir=False,
         user_supported=True,
         user_root_dir=".grok",
     ),

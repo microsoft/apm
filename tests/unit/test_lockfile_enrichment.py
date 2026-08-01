@@ -123,8 +123,8 @@ class TestLockfileEnrichment:
         assert ".claude/skills/my-plugin/SKILL.md" in deployed
         assert all(f.startswith(".claude/") for f in deployed)
 
-    def test_cross_target_mapping_github_to_grok(self):
-        """Skills under .github/ should be remapped to .grok/ in enriched lockfile."""
+    def test_cross_target_mapping_github_to_grok_cloud(self):
+        """Skills under .github/ are remapped for grok-cloud."""
         lf = LockFile()
         dep = LockedDependency(
             repo_url="owner/repo",
@@ -137,7 +137,7 @@ class TestLockfileEnrichment:
         )
         lf.add_dependency(dep)
 
-        result = enrich_lockfile_for_pack(lf, fmt="apm", target="grok")
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="grok-cloud")
         parsed = yaml.safe_load(result)
 
         deployed = parsed["dependencies"][0]["deployed_files"]
@@ -259,11 +259,11 @@ class TestFilterFilesByTarget:
         assert ".claude/agents/a.md" in filtered
         assert mappings[".claude/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
 
-    def test_cross_map_github_to_grok(self):
+    def test_cross_map_github_to_grok_cloud(self):
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 
         files = [".github/skills/x/SKILL.md"]
-        filtered, mappings = _filter_files_by_target(files, "grok")
+        filtered, mappings = _filter_files_by_target(files, "grok-cloud")
         assert ".grok/skills/x/SKILL.md" in filtered
         assert mappings[".grok/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
 

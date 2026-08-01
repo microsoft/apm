@@ -108,11 +108,6 @@ def test_signal_whitelist_kiro_dir_is_signal(tmp_path):
     assert "kiro" in _signal_targets(tmp_path)
 
 
-def test_signal_whitelist_grok_dir_is_signal(tmp_path):
-    (tmp_path / ".grok").mkdir()
-    assert "grok" in _signal_targets(tmp_path)
-
-
 def test_signal_whitelist_cursorrules_is_signal(tmp_path):
     _touch(tmp_path / ".cursorrules", "# Cursor\n")
     assert "cursor" in _signal_targets(tmp_path)
@@ -199,21 +194,6 @@ def test_resolution_autodetect_single_signal(tmp_path):
     assert "CLAUDE.md" in resolved.source
 
 
-def test_resolution_autodetect_grok_only(tmp_path):
-    (tmp_path / ".grok").mkdir()
-    resolved = resolve_targets(tmp_path)
-    assert resolved.targets == ["grok"]
-    assert "auto-detect" in resolved.source
-    assert ".grok/" in resolved.source
-
-
-def test_resolution_autodetect_grok_and_claude_errors(tmp_path):
-    (tmp_path / ".grok").mkdir()
-    _touch(tmp_path / "CLAUDE.md")
-    with pytest.raises(AmbiguousHarnessError):
-        resolve_targets(tmp_path)
-
-
 def test_resolution_autodetect_zero_signals_error(tmp_path):
     with pytest.raises(NoHarnessError):
         resolve_targets(tmp_path)
@@ -239,22 +219,19 @@ def test_manifest_targets_from_target_option_aliases_to_manifest_names():
     assert manifest_targets_from_target_option(["claude", "vscode"]) == ["claude", "copilot"]
 
 
-def test_manifest_targets_from_target_option_preserves_grok():
-    assert manifest_targets_from_target_option("grok") == ["grok"]
-
-
 def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
     targets = manifest_targets_from_target_option("all")
     assert targets is not None
     assert "all" not in targets
     assert "vscode" not in targets
-    assert "grok" in targets
     assert "copilot" in targets
     assert parse_targets_field({"targets": targets}) == targets
 
 
 def test_manifest_targets_from_target_option_filters_non_manifest_targets():
-    assert manifest_targets_from_target_option(["openclaw", "hermes", "agy"]) is None
+    assert (
+        manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) is None
+    )
 
 
 def test_schema_targets_list_valid():

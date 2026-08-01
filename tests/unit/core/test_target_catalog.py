@@ -43,7 +43,6 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "codex",
                 "cursor",
                 "gemini",
-                "grok",
                 "kiro",
                 "opencode",
                 "vscode",
@@ -53,7 +52,8 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
         == ALL_CANONICAL_TARGETS
     )
     assert (
-        frozenset({"copilot-app", "copilot-cowork", "hermes", "openclaw"}) == EXPERIMENTAL_TARGETS
+        frozenset({"copilot-app", "copilot-cowork", "grok-cloud", "hermes", "openclaw"})
+        == EXPERIMENTAL_TARGETS
     )
     assert frozenset({"agent-skills", "antigravity"}) == EXPLICIT_ONLY_TARGETS
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
@@ -78,7 +78,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "copilot-cowork",
                 "cursor",
                 "gemini",
-                "grok",
+                "grok-cloud",
                 "hermes",
                 "intellij",
                 "kiro",
@@ -187,13 +187,13 @@ def test_current_native_profiles_are_characterized() -> None:
             "gemini",
             None,
         ),
-        "grok": (
+        "grok-cloud": (
             ".grok",
             {
                 "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
             },
-            "agents",
             None,
+            "grok_cloud",
         ),
         "antigravity": (
             ".agents",

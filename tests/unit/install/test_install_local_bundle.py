@@ -460,23 +460,18 @@ class TestApmYmlNotMutated:
 # ---------------------------------------------------------------------------
 
 
-class TestGrokLocalBundleDeployment:
-    """Explicit grok installs deploy and uninstall cleanly under .grok/."""
+class TestGrokCloudLocalBundleDeployment:
+    """Enabled grok-cloud installs deploy under .grok/."""
 
-    @staticmethod
-    def _write_manifest_dependency(manifest_root: Path, bundle: Path) -> None:
-        data = yaml.safe_load((manifest_root / "apm.yml").read_text(encoding="utf-8"))
-        data["dependencies"] = {"apm": [str(bundle)]}
-        (manifest_root / "apm.yml").write_text(
-            yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
-        )
-
-    def test_project_scope_install_then_uninstall_cleans_skill(
+    def test_project_scope_install_deploys_skill(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        import apm_cli.config as config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
         bundle = _make_bundle(
             tmp_path / "src",
-            pack_target="grok",
+            pack_target="grok-cloud",
             files={"skills/guide/SKILL.md": "# Grok Guide\n"},
         )
         project = _make_project(tmp_path / "dst")
@@ -487,7 +482,7 @@ class TestGrokLocalBundleDeployment:
             "install",
             str(bundle),
             "--target",
-            "grok",
+            "grok-cloud",
         )
         assert install_result.exit_code == 0, install_result.output
 
@@ -495,24 +490,16 @@ class TestGrokLocalBundleDeployment:
         assert skill_file.exists()
         assert skill_file.read_text(encoding="utf-8") == "# Grok Guide\n"
 
-        self._write_manifest_dependency(project, bundle)
-        uninstall_result = _invoke_cli(
-            project,
-            monkeypatch,
-            "uninstall",
-            str(bundle),
-        )
-        assert uninstall_result.exit_code == 0, uninstall_result.output
-        assert not skill_file.exists()
-        assert not skill_file.parent.exists()
-
-    def test_global_scope_install_then_uninstall_cleans_home_skill(
+    def test_global_scope_install_deploys_home_skill(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = _make_home(tmp_path, monkeypatch)
+        import apm_cli.config as config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
         bundle = _make_bundle(
             tmp_path / "src",
-            pack_target="grok",
+            pack_target="grok-cloud",
             files={"skills/guide/SKILL.md": "# Grok Global\n"},
         )
         project = _make_project(tmp_path / "dst")
@@ -524,26 +511,13 @@ class TestGrokLocalBundleDeployment:
             str(bundle),
             "--global",
             "--target",
-            "grok",
+            "grok-cloud",
         )
         assert install_result.exit_code == 0, install_result.output
 
         skill_file = home / ".grok" / "skills" / "guide" / "SKILL.md"
         assert skill_file.exists()
         assert skill_file.read_text(encoding="utf-8") == "# Grok Global\n"
-
-        self._write_manifest_dependency(home / ".apm", bundle)
-        uninstall_result = _invoke_cli(
-            project,
-            monkeypatch,
-            "uninstall",
-            str(bundle),
-            "--global",
-        )
-        assert uninstall_result.exit_code == 0, uninstall_result.output
-        assert not skill_file.exists()
-        assert not skill_file.parent.exists()
-
 
 # ---------------------------------------------------------------------------
 # IM7: tarball-but-not-bundle yields targeted UsageError

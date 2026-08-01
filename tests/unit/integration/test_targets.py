@@ -305,7 +305,7 @@ class TestDefaultSkillRouting:
     """Assert that the documented clients route skills to .agents/ by default."""
 
     def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
-        """copilot, cursor, opencode, codex, gemini, windsurf use .agents; grok stays native."""
+        """Shared targets use .agents while grok-cloud stays native."""
         expected = {
             "copilot": ".agents",
             "cursor": ".agents",
@@ -313,7 +313,7 @@ class TestDefaultSkillRouting:
             "codex": ".agents",
             "gemini": ".agents",
             "windsurf": ".agents",
-            "grok": None,
+            "grok-cloud": None,
             "claude": None,  # not documented as .agents/-aware
         }
         for name, want_root in expected.items():
@@ -411,27 +411,46 @@ class TestDefaultSkillRouting:
         assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root
 
 
-class TestGrokTarget:
-    """Registry invariants for the grok target."""
+class TestGrokCloudTarget:
+    """Registry and gating invariants for the grok-cloud target."""
 
-    def test_grok_in_known_targets(self):
-        assert "grok" in KNOWN_TARGETS
+    def test_grok_cloud_in_known_targets(self):
+        assert "grok-cloud" in KNOWN_TARGETS
 
-    def test_grok_profile_shape(self):
-        profile = KNOWN_TARGETS["grok"]
-        assert profile.name == "grok"
+    def test_grok_cloud_profile_shape(self):
+        profile = KNOWN_TARGETS["grok-cloud"]
+        assert profile.name == "grok-cloud"
         assert profile.root_dir == ".grok"
         assert profile.user_supported is True
         assert profile.user_root_dir == ".grok"
-        assert profile.detect_by_dir is True
+        assert profile.detect_by_dir is False
         assert profile.auto_create is True
-        assert profile.compile_family == "agents"
-        assert "skills" in profile.primitives
+        assert profile.requires_flag == "grok_cloud"
+        assert profile.compile_family is None
+        assert set(profile.primitives) == {"skills"}
         skills_pm = profile.primitives["skills"]
         assert skills_pm.subdir == "skills"
         assert skills_pm.extension == "/SKILL.md"
         assert skills_pm.format_id == "skill_standard"
         assert skills_pm.deploy_root is None
+
+    def test_grok_cloud_requires_flag_gate(self, monkeypatch, tmp_path):
+        import apm_cli.integration.targets as tg
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: False)
+        assert active_targets(tmp_path, explicit_target="grok-cloud") == []
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        assert [p.name for p in active_targets(tmp_path, explicit_target="grok-cloud")] == [
+            "grok-cloud"
+        ]
+
+    def test_grok_cloud_is_excluded_from_all(self, monkeypatch, tmp_path):
+        import apm_cli.integration.targets as tg
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        names = {p.name for p in active_targets(tmp_path, explicit_target="all")}
+        assert "grok-cloud" not in names
 
 
 class TestHermesTarget:
