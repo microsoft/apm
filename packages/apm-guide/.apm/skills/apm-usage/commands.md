@@ -55,7 +55,7 @@ A normal project install creates or updates `apm.lock.yaml` when the manifest de
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
 2. `apm.yml` `targets:` list (or singular `target:` sugar).
 3. `apm config set target <value>` default.
-4. Auto-detect file-primitive targets from project signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf, `.kiro/` -> kiro).
+4. Auto-detect file-primitive targets from project signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.grok/` -> grok-build, `.opencode/` -> opencode, `.windsurf/` -> windsurf, `.kiro/` -> kiro).
 
 MCP runtime discovery separately recognizes the user-scope JetBrains Copilot
 config directory (`github-copilot/intellij/`). That machine-global signal can
@@ -294,7 +294,7 @@ Use `--target agent-skills` to deploy skills to `.agents/skills/` -- the cross-t
 
 ### Skill routing convergence
 
-By default, Copilot, Cursor, OpenCode, Codex, Gemini, and Antigravity all deploy skills to `.agents/skills/` (the agentskills.io standard). Claude is the only exception and retains its native per-client routing (`.claude/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
+By default, Copilot, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf deploy skills to `.agents/skills/` (the agentskills.io standard). Claude, Grok Build, and Kiro retain native per-client routing (`.claude/skills/`, `.grok/skills/`, `.kiro/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
 
 Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
 

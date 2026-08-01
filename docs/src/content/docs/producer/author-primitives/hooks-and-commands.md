@@ -179,6 +179,7 @@ Supported targets and where the integrator writes:
 | claude   | `.claude/settings.json`               | merged into settings |
 | cursor   | `.cursor/hooks.json`                  | merged               |
 | gemini   | `.gemini/settings.json`               | merged               |
+| grok-build | -- not supported --                 | silently skipped     |
 | codex    | `.codex/hooks.json`                   | merged               |
 | windsurf | `.windsurf/hooks.json`                | merged               |
 | kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
@@ -246,6 +247,7 @@ Supported targets and output paths:
 | cursor   | `.cursor/commands/<name>.md`     | claude-format subset  |
 | opencode | `.opencode/commands/<name>.md`   | opencode markdown     |
 | gemini   | `.gemini/commands/<name>.toml`   | TOML                  |
+| grok-build | `.grok/commands/<name>.md`      | shared command transform |
 | windsurf | `.windsurf/workflows/<name>.md`  | called "workflows"    |
 | copilot  | -- not a command --              | ships as a prompt     |
 | codex    | -- not supported --              | silently skipped      |

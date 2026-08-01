@@ -289,7 +289,7 @@ at project scope or within a configured, managed target root at global scope.
 All deploy paths are validated before any file operation:
 
 1. **No `..` segments.** Any path containing `..` is rejected outright.
-2. **Allowed prefixes only.** Paths must start with an allowed target-integrator prefix (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`, `.agents/`). In addition, the local-bundle install path stages instructions for compile-only targets under `apm_modules/<slug>/.apm/instructions/` with its own containment check (the resolved path must remain within `apm_modules/`) and `<slug>` validation rejecting traversal sequences and characters outside `[A-Za-z0-9._-]`.
+2. **Allowed prefixes only.** Paths must start with an allowed target-integrator prefix (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.grok/`, `.windsurf/`, `.kiro/`, `.agents/`). In addition, the local-bundle install path stages instructions for compile-only targets under `apm_modules/<slug>/.apm/instructions/` with its own containment check (the resolved path must remain within `apm_modules/`) and `<slug>` validation rejecting traversal sequences and characters outside `[A-Za-z0-9._-]`.
 3. **Resolution containment.** The fully resolved path must remain within the
    project root or the configured managed target root. Symlink escapes from
    either root are rejected.

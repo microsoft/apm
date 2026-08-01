@@ -81,7 +81,7 @@ The pipeline is deterministic. Each phase must pass before the next runs.
    `--force`.
 4. **Integrate.** Write primitives into each target harness's native
    directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`,
-   `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`) and the cross-tool
+   `.codex/`, `.gemini/`, `.grok/`, `.windsurf/`, `.kiro/`) and the cross-tool
    `.agents/skills/` directory.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
@@ -105,7 +105,7 @@ them. Detection priority:
 1. `--target <slug>` flag (highest).
 2. The `targets:` field in `apm.yml`.
 3. Auto-detect: any harness directory (`.github/`, `.claude/`,
-   `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`)
+   `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.grok/`, `.windsurf/`, `.kiro/`)
    that already exists in the workspace.
 4. Fallback: minimal output to `AGENTS.md` only.
 
@@ -127,8 +127,8 @@ Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf
 ## What to commit
 
 Commit `apm.yml`, `apm.lock.yaml`, and every harness directory APM writes to
-(`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`,
-`.kiro/`). Committed deployed files give teammates and cloud Copilot instant agent
+(`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.grok/`,
+`.windsurf/`, `.kiro/`, `.agents/`). Committed deployed files give teammates and cloud Copilot instant agent
 context on clone, before they run `apm install`.
 
 Add `apm_modules/` to `.gitignore` -- it is the package cache and is rebuilt from

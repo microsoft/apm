@@ -194,8 +194,8 @@ Note the split: **agents** are runtime-specific and land under
 `.github/agents/` (Copilot's directory). **Skills** land under
 `.agents/skills/` -- the cross-client universal location that
 Copilot, Cursor, OpenCode, Codex, Gemini, and Windsurf all read.
-Claude Code and Kiro are the exceptions: they read `.claude/skills/`
-and `.kiro/skills/`, respectively.
+Claude Code, Grok Build, and Kiro instead read `.claude/skills/`,
+`.grok/skills/`, and `.kiro/skills/`.
 
 Your tree now has source on the left and runtime-ready output on the right:
 
@@ -219,10 +219,10 @@ team-skills/
 `apm install` resolves which harness directories to populate using a strict
 priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
 filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.github/copilot-instructions.md`,
-`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). The example layout
+`.codex/`, `.gemini/`, `GEMINI.md`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`). The example layout
 above shows `.github/` because `.github/copilot-instructions.md` exists in the
-project; if you also have `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, or
-`.kiro/`, those directories get populated too. With no signal at all, `apm install` exits with
+project; if you also have `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`,
+`.grok/`, or `.kiro/`, those directories get populated too. With no signal at all, `apm install` exits with
 code 2 and a teaching message instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
 `targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects

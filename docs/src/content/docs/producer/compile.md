@@ -17,7 +17,7 @@ aggregated `AGENTS.md` / `copilot-instructions.md` it produces are a
 nice-to-have, not a requirement.
 
 Compile is **recommended for every other target** (`claude`,
-`cursor`, `codex`, `gemini`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
+`cursor`, `codex`, `gemini`, `grok-build`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
 harnesses load instructions through the root context file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
 folder that compile generates. Kiro receives `.kiro/steering/` files;
@@ -35,7 +35,7 @@ Concretely, that command rolls your `instructions/*.instructions.md`
 into the native rules surface each target expects:
 
 - `AGENTS.md` -- the cross-harness root context file. Copilot, Codex,
-  OpenCode, and Windsurf read it directly; Kiro primarily uses the
+  Grok Build, OpenCode, and Windsurf read it directly; Kiro primarily uses the
   `.kiro/steering/` files that compile also emits.
 - `CLAUDE.md` -- Claude Code's root context file.
 - `GEMINI.md` -- Gemini CLI's root context file.

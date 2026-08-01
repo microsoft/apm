@@ -233,7 +233,7 @@ through to auto-detect.
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
+| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `all` |
 | `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
 | `target: vscode` | Alias spelling; canonical package restriction is `copilot` |
 | `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
@@ -243,7 +243,7 @@ through to auto-detect.
 | `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |
 | `target: null` | Legacy omission spelling; adds no package restriction |
 | `target: []` or `target: ""` | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). For MCP, this makes lockfile runtime ownership intentionally machine-dependent; declare targets for portable ownership. |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`). For MCP, this makes lockfile runtime ownership intentionally machine-dependent; declare targets for portable ownership. |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 

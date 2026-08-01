@@ -383,7 +383,7 @@ dependency's target-scoped primitives. They compose via intersection. See
 `package-authoring.md` for author guidance.
 
 - Type: list of harness keys (`copilot`, `claude`, `cursor`, `codex`,
-  `gemini`, `antigravity`, `windsurf`, `kiro`, plus canonical targets
+  `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, plus canonical targets
   such as `opencode`, `agent-skills`, `openclaw`, `hermes`,
   `copilot-cowork`, and `copilot-app`). Use `copilot`, not the runtime
   alias `vscode`, for Copilot-family dependency routing.

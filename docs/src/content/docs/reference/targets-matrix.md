@@ -34,7 +34,7 @@ see [Primitive types](../primitive-types/).
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
-below). Claude and Kiro keep target-native skill directories.
+below). Claude, Grok Build, and Kiro keep target-native skill directories.
 
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
@@ -304,6 +304,7 @@ xAI Grok Cloud skills deployment.
 [Grok Build](https://github.com/xai-org/grok-build) native configuration.
 
 - **Detection.** Auto-detected when `.grok/` exists.
+- **Selection.** Included in `all`; no experimental flag is required.
 - **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
 - **Supported primitives.** instructions, agents, commands, and skills.
 - **File conventions.** `.grok/rules/*.md`,
@@ -330,7 +331,9 @@ xAI Grok Cloud skills deployment.
 
 ## Skills convergence
 
-By default, every target with a `skills` primitive deploys to `.agents/skills/<name>/SKILL.md` rather than under the target root. This matches the cross-tool agent skills convention so a single skill bundle serves every harness.
+Most targets with a `skills` primitive deploy to
+`.agents/skills/<name>/SKILL.md`. Claude, Grok Build, Kiro, and experimental
+Grok Cloud keep target-native skill directories.
 
 To restore the pre-convergence per-target layout (skills land under each target's own root), use the `--legacy-skill-paths` flag on `apm install` or set `APM_LEGACY_SKILL_PATHS=1`.
 

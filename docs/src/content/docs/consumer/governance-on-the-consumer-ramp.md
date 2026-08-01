@@ -49,7 +49,7 @@ your platform team can set, and what each one does to your install:
   dependencies are trusted automatically.
 - **`compilation.target.allow`** -- which harness targets your repo can
   compile to (`claude`, `copilot`, `cursor`, `opencode`, `codex`,
-  `gemini`, `windsurf`, `kiro`, `agent-skills`).
+  `gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `agent-skills`).
 - **`compilation.strategy.enforce`** -- `distributed` or `single-file`.
 - **`manifest.required_fields`** / **`manifest.scripts`** /
   **`manifest.require_explicit_includes`** -- shape constraints on

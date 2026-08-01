@@ -43,7 +43,7 @@ for what those files are) even though compile does not itself *deploy* hooks.
 `.github/instructions/*.instructions.md` (with their `applyTo:`
 frontmatter) that `apm install` already deploys. Compile is
 **recommended for every other context-producing target** (`claude`, `cursor`, `codex`,
-`gemini`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
+`gemini`, `grok-build`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
 root context file or harness-specific rules folder that compile
 generates.
 
@@ -51,8 +51,8 @@ Resolution order for which targets to compile:
 
 1. `--target` / `--all` on the command line
 2. `targets:` field in `apm.yml`
-3. Auto-detection from existing folders (`.github/`, `.claude/`,
-   `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`)
+3. Auto-detection from existing folders (`.github/`, `.claude/`, `.cursor/`,
+   `.codex/`, `.gemini/`, `.grok/`, `.opencode/`, `.windsurf/`, `.kiro/`)
 
 Use [`apm targets`](../targets/) to preview what auto-detection
 resolves to before compiling.

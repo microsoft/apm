@@ -109,6 +109,7 @@ expanded to a YAML array under `paths:` / `globs:` /
 | antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> no frontmatter (unconditional rule) |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
+| grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
@@ -158,7 +159,7 @@ for...
 | `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
-`model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
+`model` and `tools` reach Copilot, Claude, Cursor, Grok Build, and OpenCode
 verbatim. Kiro receives `description`, `model`, and `tools` only;
 unknown frontmatter fields (including `name`) are stripped because
 Kiro derives agent identity from the deployed path, not from a `name`
@@ -209,6 +210,7 @@ offending package and field so you can fix the source.
 | opencode | `.opencode/agents/<name>.md` | verbatim |
 | codex | `.codex/agents/<name>.toml` | `name` and `description` -> TOML; body becomes `developer_instructions`; unsupported `tools` emits a warning |
 | kiro | `.kiro/agents/<relative-stem>.md` | `description`, `model`, `tools` kept; `name` and unknown fields stripped; identity from path; fail closed on unsupported tools (ref: [kiro.dev/docs/custom-agents](https://kiro.dev/docs/custom-agents/), accessed 2026-08-03) |
+| grok-build | `.grok/agents/<name>.md` | verbatim |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
 | gemini | not deployed | Gemini CLI has no agents primitive |
 

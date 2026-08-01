@@ -6,7 +6,7 @@ description: Ship a parameterized, single-purpose AI workflow as a .prompt.md pr
 A prompt is a single-purpose, parameterized AI workflow. Write one
 Markdown file with frontmatter; `apm install` deploys it as a Copilot prompt,
 a Claude `/command`, a Cursor command, an OpenCode command, a Gemini
-TOML command, and a Windsurf workflow.
+TOML command, a Grok Build command, and a Windsurf workflow.
 
 Use a prompt when the consumer invokes the workflow on demand
 ("review this PR", "draft a release note"). Use a
@@ -91,6 +91,7 @@ and `command_integrator.py`.
 | cursor | `.cursor/commands/<name>.md` | shared command transform |
 | opencode | `.opencode/commands/<name>.md` | shared command transform |
 | gemini | `.gemini/commands/<name>.toml` | TOML command |
+| grok-build | `.grok/commands/<name>.md` | Grok command |
 | windsurf | `.windsurf/workflows/<name>.md` | workflow |
 | codex | (none) | Codex has no prompts or commands primitive |
 
@@ -127,7 +128,7 @@ the parameter bound and invokes the harness. See
 
 - **Non-preserved frontmatter is dropped.** Keys like `author`,
   `mcp`, or `parameters` survive on Copilot (verbatim copy) but are
-  stripped on Claude/Cursor/OpenCode/Gemini/Windsurf. APM logs a
+  stripped on Claude/Cursor/OpenCode/Gemini/Grok Build/Windsurf. APM logs a
   diagnostic at install time. Keep authoritative metadata to the
   five preserved keys.
 - **Input names must match `[A-Za-z][\w-]{0,63}`.** Other entries
