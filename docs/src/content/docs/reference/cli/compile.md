@@ -75,7 +75,8 @@ and emit a one-line warning. `--target all` also emits a deprecation
 warning -- prefer `--all`.
 
 Every accepted project target is also accepted by `compile`. Targets without
-root-context output, including `agent-skills`, are successful no-ops.
+root-context output, including `agent-skills` and experimental `grok-cloud`,
+are successful no-ops.
 `antigravity` is explicit-only and `intellij` is MCP-only. Neither is included in `all`.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
@@ -281,6 +282,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `hermes` | `AGENTS.md` |
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
+| `grok-cloud` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 
 `.github/copilot-instructions.md` is only managed by APM when its first

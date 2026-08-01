@@ -40,7 +40,8 @@ instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
-Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
+Copilot desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw
+agent runtime), and `hermes` are
 gated behind experimental flags and not listed above. See
 [Experimental](../experimental/).
 
@@ -98,10 +99,10 @@ auto-detection. Both are available with `--target` and can be listed in a
 project's `apm.yml` `targets:` field so contributors running plain `apm
 install` pick them up automatically.
 
-`copilot-cowork`, `copilot-app`, `openclaw`, and `hermes` are experimental targets
-that require `apm experimental enable <name>` before use. They are selected
-with `--target` only and cannot be listed in `apm.yml` (the canonical
-targets validator will reject them).
+`copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
+experimental targets that require `apm experimental enable <name>` before use.
+They are selected with `--target` only and cannot be listed in `apm.yml` (the
+canonical targets validator will reject them).
 
 ## copilot
 
@@ -284,6 +285,18 @@ Cross-client shared skills directory.
 - **Supported primitives.** skills only.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
+
+## grok-cloud (experimental)
+
+xAI Grok Cloud skills deployment.
+
+- **Detection.** Never auto-detected. Select with `--target grok-cloud` after
+  enabling the experimental flag.
+- **Enable.** `apm experimental enable grok-cloud`.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** skills only.
+- **File conventions.** `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** `apm compile --target grok-cloud` is a successful no-op.
 
 ## openclaw (experimental)
 
