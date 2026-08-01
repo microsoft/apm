@@ -267,6 +267,24 @@ class TestFilterFilesByTarget:
         assert ".grok/skills/x/SKILL.md" in filtered
         assert mappings[".grok/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
 
+    def test_cross_map_github_to_grok_build(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [
+            ".github/agents/reviewer.md",
+            ".github/skills/x/SKILL.md",
+        ]
+        filtered, mappings = _filter_files_by_target(files, "grok-build")
+
+        assert set(filtered) == {
+            ".grok/agents/reviewer.md",
+            ".grok/skills/x/SKILL.md",
+        }
+        assert mappings == {
+            ".grok/agents/reviewer.md": ".github/agents/reviewer.md",
+            ".grok/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
+
     def test_single_target_preserves_distinct_cross_maps(self):
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 

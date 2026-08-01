@@ -174,6 +174,15 @@ class TestActiveTargets:
         targets = active_targets(self.root)
         assert [t.name for t in targets] == ["gemini"]
 
+    def test_only_grok_directory_returns_grok_build(self):
+        (self.root / ".grok").mkdir()
+        targets = active_targets(self.root)
+        assert [t.name for t in targets] == ["grok-build"]
+
+    def test_explicit_grok_build(self):
+        targets = active_targets(self.root, explicit_target="grok-build")
+        assert [t.name for t in targets] == ["grok-build"]
+
     def test_explicit_gemini(self):
         targets = active_targets(self.root, explicit_target="gemini")
         assert [t.name for t in targets] == ["gemini"]
@@ -313,6 +322,7 @@ class TestDefaultSkillRouting:
             "codex": ".agents",
             "gemini": ".agents",
             "windsurf": ".agents",
+            "grok-build": None,
             "grok-cloud": None,
             "claude": None,  # not documented as .agents/-aware
         }
@@ -451,6 +461,26 @@ class TestGrokCloudTarget:
         monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
         names = {p.name for p in active_targets(tmp_path, explicit_target="all")}
         assert "grok-cloud" not in names
+
+
+class TestGrokBuildTarget:
+    """Registry and resolution invariants for the stable Grok Build target."""
+
+    def test_grok_build_profile_shape(self):
+        profile = KNOWN_TARGETS["grok-build"]
+        assert profile.name == "grok-build"
+        assert profile.root_dir == ".grok"
+        assert profile.user_supported is True
+        assert profile.user_root_dir == ".grok"
+        assert profile.detect_by_dir is True
+        assert profile.auto_create is False
+        assert profile.requires_flag is None
+        assert profile.compile_family == "agents"
+        assert set(profile.primitives) == {"instructions", "agents", "commands", "skills"}
+
+    def test_grok_build_is_in_all(self, tmp_path):
+        names = {p.name for p in active_targets(tmp_path, explicit_target="all")}
+        assert "grok-build" in names
 
 
 class TestHermesTarget:

@@ -49,6 +49,10 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "grok-cloud": {
         ".github/skills/": ".grok/skills/",
     },
+    "grok-build": {
+        ".github/skills/": ".grok/skills/",
+        ".github/agents/": ".grok/agents/",
+    },
     "agent-skills": {
         ".github/skills/": ".agents/skills/",
     },

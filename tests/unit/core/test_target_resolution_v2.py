@@ -232,6 +232,11 @@ def test_manifest_targets_from_target_option_filters_non_manifest_targets():
     assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) is None
 
 
+def test_manifest_targets_from_target_option_preserves_grok_build():
+    assert manifest_targets_from_target_option(["grok-build"]) == ["grok-build"]
+    assert parse_targets_field({"targets": ["grok-build"]}) == ["grok-build"]
+
+
 def test_schema_targets_list_valid():
     out = parse_targets_field({"targets": ["claude", "copilot"]})
     assert sorted(out) == ["claude", "copilot"]

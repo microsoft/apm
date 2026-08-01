@@ -24,6 +24,7 @@ see [Primitive types](../primitive-types/).
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
+| grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
@@ -38,6 +39,7 @@ below). Claude and Kiro keep target-native skill directories.
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
+Grok Build uses `.grok/` for rules, agents, commands, and skills.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
 desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
@@ -47,8 +49,8 @@ above. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, and `opencode`, plus
-experimental `hermes` when enabled. It emits the
+separate root-context compile for `codex`, `gemini`, `grok-build`, and
+`opencode`, plus experimental `hermes` when enabled. It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
@@ -83,6 +85,7 @@ runtime-specific configuration while compile only generates project output. Use
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
+| grok-build | `.grok/` directory                          |
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
@@ -296,6 +299,18 @@ xAI Grok Cloud skills deployment.
 - **Supported primitives.** skills only.
 - **File conventions.** `.grok/skills/<name>/SKILL.md`.
 - **Compile behavior.** `apm compile --target grok-cloud` is a successful no-op.
+
+## grok-build
+
+[Grok Build](https://github.com/xai-org/grok-build) native configuration.
+
+- **Detection.** Auto-detected when `.grok/` exists.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** instructions, agents, commands, and skills.
+- **File conventions.** `.grok/rules/*.instructions.md`,
+  `.grok/agents/*.md`, `.grok/commands/*.md`, and
+  `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** Produces `AGENTS.md`.
 
 ## openclaw (experimental)
 

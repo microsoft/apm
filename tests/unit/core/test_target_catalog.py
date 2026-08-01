@@ -43,6 +43,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "codex",
                 "cursor",
                 "gemini",
+                "grok-build",
                 "kiro",
                 "opencode",
                 "vscode",
@@ -78,6 +79,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "copilot-cowork",
                 "cursor",
                 "gemini",
+                "grok-build",
                 "grok-cloud",
                 "hermes",
                 "intellij",
@@ -185,6 +187,17 @@ def test_current_native_profiles_are_characterized() -> None:
                 "hooks": ("hooks", ".json", "gemini_hooks", None, False),
             },
             "gemini",
+            None,
+        ),
+        "grok-build": (
+            ".grok",
+            {
+                "instructions": ("rules", ".md", "grok_rules", None, False),
+                "agents": ("agents", ".md", "grok_agent", None, False),
+                "commands": ("commands", ".md", "claude_command", None, False),
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
+            },
+            "agents",
             None,
         ),
         "grok-cloud": (

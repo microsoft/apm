@@ -16,6 +16,7 @@ TARGET_NAMES = frozenset(
         "copilot-cowork",
         "cursor",
         "gemini",
+        "grok-build",
         "grok-cloud",
         "hermes",
         "intellij",

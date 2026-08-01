@@ -567,7 +567,15 @@ class TestTargetParamType:
 
     def test_valid_target_values_includes_canonical(self):
         """VALID_TARGET_VALUES contains all canonical targets."""
-        for name in ("vscode", "claude", "cursor", "opencode", "codex", "grok-cloud"):
+        for name in (
+            "vscode",
+            "claude",
+            "cursor",
+            "opencode",
+            "codex",
+            "grok-build",
+            "grok-cloud",
+        ):
             assert name in VALID_TARGET_VALUES
 
     def test_valid_target_values_includes_aliases(self):

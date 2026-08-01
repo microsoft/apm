@@ -618,6 +618,41 @@ class TestGrokCloudLocalBundleDeployment:
         assert not (project / ".grok/.claude").exists()
 
 
+class TestGrokBuildLocalBundleDeployment:
+    """Stable Grok Build bundles deploy without an experimental flag."""
+
+    def test_project_scope_install_deploys_native_primitives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-build",
+            files={
+                ".grok/rules/review.instructions.md": "# Review Rules\n",
+                ".grok/agents/reviewer.md": "# Reviewer\n",
+                ".grok/commands/review.md": "# Review\n",
+                ".grok/skills/guide/SKILL.md": "# Grok Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-build",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".grok/rules/review.instructions.md").exists()
+        assert (project / ".grok/agents/reviewer.md").exists()
+        assert (project / ".grok/commands/review.md").exists()
+        assert (project / ".grok/skills/guide/SKILL.md").exists()
+        assert "experimental enable" not in result.output
+
+
 class TestLocalBundlePathRouting:
     """Direct contracts for untrusted packed bundle paths."""
 
