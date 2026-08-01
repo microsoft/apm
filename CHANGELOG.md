@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Release promotions now run marker-bounded lifecycle integration on macOS Intel
+  while retaining the full corpus on macOS ARM and Linux, preventing Intel
+  runner capacity timeouts. (#2423)
 - Public `github.com` dependency installs now preserve caller-owned Git URL
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in
