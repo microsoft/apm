@@ -30,7 +30,10 @@ def emit_disabled_experimental_target_hint(
     if requested_target == "all":
         return False
 
-    capability = get_target_capability(requested_target)
+    try:
+        capability = get_target_capability(requested_target)
+    except KeyError:
+        return False
     if capability.experimental_flag is None:
         return False
     if any(target.name == capability.name for target in resolved_targets):

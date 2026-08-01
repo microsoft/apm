@@ -84,7 +84,7 @@ experimental_hint_duplicate_hits=$(
     grep -rEn --include='*.py' \
         'requires an experimental flag' \
         src/apm_cli \
-        | grep -v "^${experimental_hint_owner}:" \
+        | grep -Fv "${experimental_hint_owner}:" \
         || true
 )
 if [ "$experimental_hint_definition_count" -ne 1 ] \
