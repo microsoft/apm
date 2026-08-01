@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Cursor, Codex, Gemini, Grok Build, OpenCode, Windsurf, and Kiro, with Antigravity available as an explicit CLI-only target. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
+A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Grok Build, Cursor, Codex, Gemini, OpenCode, Windsurf, and Kiro, with Antigravity available as an explicit CLI-only target. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
 
 This page is the canonical reference. Tutorials and how-tos link here; do not duplicate.
 
@@ -115,16 +115,16 @@ Rows are primitives, columns are harnesses. Cell legend:
 - **unsupported** -- APM does not deliver this primitive to this harness.
 - **gated** -- delivered behind an explicit declaration or trust flag.
 
-| Primitive | Copilot | Claude | Cursor | Codex | Gemini | Grok Build | Antigravity | OpenCode | Windsurf | Kiro |
+| Primitive | Copilot | Claude | Grok Build | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro |
 |---|---|---|---|---|---|---|---|---|---|---|
-| instructions | native | native | native | compiled | compiled | native | native | compiled | native | native |
-| prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | compiled | unsupported |
-| agents | native | native | compiled | compiled | unsupported | native | unsupported | native | unsupported | compiled |
+| instructions | native | native | native | native | compiled | compiled | native | compiled | native | native |
+| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported |
+| agents | native | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled |
 | skills | native | native | native | native | native | native | native | native | native | native |
-| hooks | native | native | native | native | native | unsupported | native | unsupported | native | native |
-| commands | unsupported | native | compiled | unsupported | compiled | compiled | unsupported | compiled | compiled | unsupported |
+| hooks | native | native | unsupported | native | native | native | native | unsupported | native | native |
+| commands | unsupported | native | compiled | compiled | unsupported | compiled | unsupported | compiled | compiled | unsupported |
 | plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
-| MCP servers | native | native | native | native | native | unsupported | native | native | native | native |
+| MCP servers | native | native | unsupported | native | native | native | native | native | native | native |
 | canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 
 How to read a cell:

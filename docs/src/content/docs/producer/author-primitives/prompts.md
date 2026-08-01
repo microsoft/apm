@@ -5,8 +5,8 @@ description: Ship a parameterized, single-purpose AI workflow as a .prompt.md pr
 
 A prompt is a single-purpose, parameterized AI workflow. Write one
 Markdown file with frontmatter; `apm install` deploys it as a Copilot prompt,
-a Claude `/command`, a Cursor command, an OpenCode command, a Gemini
-TOML command, a Grok Build command, and a Windsurf workflow.
+a Claude `/command`, a Grok Build command, a Cursor command, an OpenCode
+command, a Gemini TOML command, and a Windsurf workflow.
 
 Use a prompt when the consumer invokes the workflow on demand
 ("review this PR", "draft a release note"). Use a

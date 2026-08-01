@@ -100,7 +100,7 @@ Source: `src/apm_cli/core/auth.py`.
 ### harness
 
 The agent runtime that executes primitives: GitHub Copilot (CLI + IDE),
-Claude Code, Cursor, Codex, Gemini, Grok Build, Antigravity, OpenCode,
+Claude Code, Grok Build, Cursor, Codex, Gemini, Antigravity, OpenCode,
 Windsurf, and Kiro. Each harness has
 its own primitive directory layout and file format.
 

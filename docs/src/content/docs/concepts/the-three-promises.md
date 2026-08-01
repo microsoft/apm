@@ -14,8 +14,8 @@ these three.
 One `apm.yml`. Nine default harnesses. Reproducible AI agent setup.
 
 Every developer who clones the repo runs `apm install` and gets the
-same supported primitives wired into Copilot, Claude, Cursor, OpenCode,
-Codex, Gemini, Grok Build, Windsurf, and Kiro. The
+same supported primitives wired into Copilot, Claude, Grok Build, Cursor,
+OpenCode, Codex, Gemini, Windsurf, and Kiro. The
 lockfile pins exact versions and content hashes. New contributor
 onboarding for AI context goes from "follow this 12-step README" to
 one command.
@@ -32,8 +32,8 @@ git clone <repo> && cd <repo> && apm install
   manifest with `dependencies`, `devDependencies`, `scripts`, `includes`,
   and `targets` / `target` fields consumed by every harness.
 - `src/apm_cli/integration/targets.py` -- the registered harnesses an
-  install fans out to by default (Copilot, Claude, Cursor, Codex, Gemini,
-  Grok Build, OpenCode, Windsurf, and Kiro); Antigravity is registered as
+  install fans out to by default (Copilot, Claude, Grok Build, Cursor, Codex,
+  Gemini, OpenCode, Windsurf, and Kiro); Antigravity is registered as
   an explicit-only target.
 - `src/apm_cli/deps/lockfile.py` -- the `LockEntry.content_hash`
   field (SHA-256 of the package file tree) that makes "same install

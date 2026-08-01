@@ -159,7 +159,7 @@ for...
 | `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
-`model` and `tools` reach Copilot, Claude, Cursor, Grok Build, and OpenCode
+`model` and `tools` reach Copilot, Claude, Grok Build, Cursor, and OpenCode
 verbatim. Kiro receives `description`, `model`, and `tools` only;
 unknown frontmatter fields (including `name`) are stripped because
 Kiro derives agent identity from the deployed path, not from a `name`
