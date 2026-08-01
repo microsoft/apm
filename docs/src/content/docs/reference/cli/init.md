@@ -45,8 +45,8 @@ compile time (used with `--yes` or in non-TTY shells).
 `--target vscode`, and the MCP-only `--target intellij` persist the canonical
 `copilot` identifier, while `--target all` expands to the default stable set.
 Experimental selectors such as `grok-cloud` are accepted by the shared CLI
-target parser but are not persisted in `apm.yml`; enable and select them on the
-install or compile command instead.
+target parser but are not persisted in `apm.yml`; enable them, then select them
+with `apm install --target grok-cloud`.
 
 ## Examples
 

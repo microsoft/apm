@@ -218,11 +218,9 @@ team-skills/
 
 `apm install` resolves which harness directories to populate using a strict
 priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
-[filesystem signals](../../reference/cli/targets/#detection-signals). The example layout
-above shows `.github/` because `.github/copilot-instructions.md` exists in the
-project; if you also have `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`,
-`.grok/`, or `.kiro/`, those directories get populated too. With no signal at all, `apm install` exits with
-code 2 and a teaching message instead of silently picking a target -- declare an
+[filesystem signals](../../reference/cli/targets/#detection-signals). That
+canonical list defines every auto-detection signal. With no signal, `apm
+install` exits with code 2 instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
 `targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects
 in the current directory. To target explicitly, see the

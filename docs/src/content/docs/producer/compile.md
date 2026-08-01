@@ -86,16 +86,19 @@ By default `apm compile` detects targets from your workspace (see
 ```bash
 apm compile --target claude
 apm compile --target copilot,cursor          # comma-separated
-apm compile --all                            # every canonical target
+apm compile --all                            # default stable target set
 ```
 
-Stable canonical values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, `intellij`, `agent-skills`,
-and `all`. The `agent-skills` slug is a no-op for compile (skills are
-deployed by `apm install`); it is accepted in target lists for symmetry
-only. `intellij` uses the Copilot profile for file primitives and produces
-`AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs
-are rejected before any work runs.
+Canonical targets are `copilot`, `claude`, `cursor`, `opencode`, `codex`,
+`gemini`, `grok-build`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`.
+The `all` selector is not a target; it expands to every canonical target except
+the explicit-only `antigravity` and `agent-skills` targets. Compiling for
+`agent-skills` is a successful no-op because `apm install` deploys skills.
+
+The accepted `intellij` entry is MCP-only, not a canonical target, and excluded
+from `all`. Compile uses the Copilot profile for its file primitives and produces
+`AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs are
+rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
 `copilot-app`, `grok-cloud`) are deployment targets for `apm install --target <flag>`

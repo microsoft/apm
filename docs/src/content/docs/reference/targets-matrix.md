@@ -287,18 +287,6 @@ Cross-client shared skills directory.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
 
-## grok-cloud (experimental)
-
-xAI Grok Cloud skills deployment.
-
-- **Detection.** Never auto-detected. After enabling the experimental flag,
-  selecting `--target grok-cloud` creates the deploy directory when needed.
-- **Enable.** `apm experimental enable grok-cloud`.
-- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
-- **Supported primitives.** skills only.
-- **File conventions.** `.grok/skills/<name>/SKILL.md`.
-- **Compile behavior.** `apm compile --target grok-cloud` is a successful no-op.
-
 ## grok-build
 
 [Grok Build](https://github.com/xai-org/grok-build) native configuration.
@@ -311,6 +299,18 @@ xAI Grok Cloud skills deployment.
   `.grok/agents/*.md`, `.grok/commands/*.md`, and
   `.grok/skills/<name>/SKILL.md`.
 - **Compile behavior.** Produces `AGENTS.md`.
+
+## grok-cloud (experimental)
+
+xAI Grok Cloud skills deployment.
+
+- **Detection.** Never auto-detected. After enabling the experimental flag,
+  selecting `--target grok-cloud` creates the deploy directory when needed.
+- **Enable.** `apm experimental enable grok-cloud`.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** skills only.
+- **File conventions.** `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** `apm compile --target grok-cloud` is a successful no-op.
 
 ## openclaw (experimental)
 

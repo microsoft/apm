@@ -373,10 +373,10 @@ This prevents transitive inclusion of development-only packages (test fixtures, 
 
 ## Slash command deployment
 
-Several IDE-style targets read files in their `commands/` directory as
-**slash commands** -- typing `/foo` in the IDE invokes the file's
-content as an LLM prompt with full tool access. Across all supported
-targets (Claude Code, Cursor, OpenCode, Gemini CLI), invocation
+Several IDE-style targets expose deployed files as **slash commands** --
+typing `/foo` in the IDE invokes the file's content as an LLM prompt
+with full tool access. Across all supported
+targets (Claude Code, Cursor, OpenCode, Gemini CLI, Grok Build, Windsurf), invocation
 requires the user to type the command name; commands are not
 auto-invoked at IDE startup or on disk-write.
 
@@ -391,6 +391,8 @@ across targets.
 | **Cursor** | `.cursor/commands/*.md` | Deployed when `.cursor/` exists. Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes. The shared command transformer keeps the Claude-compatible frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. |
 | **OpenCode** | `.opencode/commands/*.md` | Deployed when `.opencode/` exists. |
 | **Gemini CLI** | `.gemini/commands/*.toml` | Deployed when `.gemini/` exists. |
+| **Grok Build** | `.grok/commands/*.md` | Deployed when `.grok/` exists. |
+| **Windsurf** | `.windsurf/workflows/*.md` | Deployed when `.windsurf/` exists. |
 
 ## Executable trust gate
 

@@ -29,7 +29,8 @@ version:       <string>                    # REQUIRED -- semver (e.g. 1.0.0)
 description:   <string>                    # optional
 author:        <string>                    # optional
 license:       <string>                    # optional -- SPDX (e.g. MIT)
-target:        <string | list>              # optional -- vscode|claude|codex|opencode|all (or list: [claude, copilot])
+targets:       <list<enum>>                  # optional -- canonical; includes copilot|claude|grok-build|...
+target:        <string | list>               # legacy compatibility; prefer targets:
 type:          <enum>                      # optional -- instructions|skill|hybrid|prompts
 scripts:       <map<string, string>>       # optional -- named commands
 dependencies:
@@ -39,7 +40,7 @@ devDependencies:                           # optional -- excluded from bundles
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:                               # optional
-  target:      <enum>                      # vscode|claude|codex|opencode|all (or list)
+  target:      <enum>                      # copilot|claude|codex|opencode|grok-build|all (or list)
   strategy:    <enum>                      # distributed|single-file
   output:      <string>                    # custom output path
   chatmode:    <string>                    # chatmode to prepend
