@@ -42,9 +42,9 @@ integration suite runs only at merge time via GitHub Merge Queue
      to `.github/workflows/**`.
 4. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
    - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job). Unit tests run on every push for platform-regression signal; **smoke tests are gated to tag/schedule/dispatch only** (promotion boundaries) to avoid duplicating `ci-integration.yml`'s merge-time smoke and to cut redundant codex-binary downloads.
-   - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; tag/schedule/dispatch promotion runs add marker-bounded `lifecycle_smoke` integration coverage and isolated release validation.
-   - **macOS ARM** uses `build-and-validate-macos-arm` (root node, tag/schedule/dispatch only - ARM runners are extremely scarce with 2-4h+ queue waits). Promotion runs retain the unfiltered integration corpus and isolated release validation.
-   - Secrets always available. Full 5-platform binary output (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64).
+   - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; tag/schedule/dispatch promotion runs add marker-bounded `lifecycle_smoke and not live` integration coverage and isolated release validation.
+   - **macOS ARM** uses `build-and-validate-macos-arm` (root node, tag/schedule/dispatch only - ARM runners are extremely scarce with 2-4h+ queue waits). Promotion runs retain the full non-live integration corpus and isolated release validation.
+   - Publication jobs do not receive `ADO_APM_PAT`; live ADO PAT acceptance is an explicit `ado_pat_e2e` mode in `auth-acceptance.yml`. Full 5-platform binary output (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64).
 5. **`ci-runtime.yml`** - nightly schedule, manual dispatch, path-filtered push
    - **Linux x86_64 only**. Live inference smoke tests (`apm run`) isolated from release pipeline.
    - Uses `GH_MODELS_PAT` for GitHub Models API access.
@@ -82,8 +82,9 @@ integration suite runs only at merge time via GitHub Merge Queue
 - **Merge queue workflow**: ci.yml (Tier 1 against tentative merge ref) + ci-integration.yml (Tier 2: build -> smoke-test -> integration-tests -> release-validation). Queue auto-merges on success; ejects on failure.
 - **Push/Release workflow (Linux + Windows)**: build-and-test -> integration-tests -> release-validation -> create-release -> publish-pypi (gh-aw-compat runs in parallel, informational)
 - **Homebrew distribution**: `microsoft/homebrew-apm` polls the latest public APM release and updates its formula with its own `GITHUB_TOKEN`; this workflow must not send a cross-repository dispatch or hold a tap credential.
-- **Push/Release workflow (macOS Intel)**: build-and-validate-macos-intel (root node: unit tests + build always + conditional `lifecycle_smoke` integration/release-validation) -> create-release
-- **Push/Release workflow (macOS ARM)**: build-and-validate-macos-arm (root node, tag/schedule/dispatch only; full integration corpus and all phases run) -> create-release
+- **Push/Release workflow (macOS Intel)**: build-and-validate-macos-intel (root node: unit tests + build always + conditional `lifecycle_smoke and not live` integration/release-validation) -> create-release
+- **Push/Release workflow (macOS ARM)**: build-and-validate-macos-arm (root node, tag/schedule/dispatch only; full non-live integration corpus and all phases run) -> create-release
+- **Live ADO PAT acceptance**: manual `auth-acceptance.yml` dispatch with `ado_pat_e2e: true` -> exact `live and requires_ado_pat` marker intersection. Invalid credentials fail with production auth diagnostics but do not block publication.
 - **Tag Triggers**: Only `v*.*.*` tags trigger full release pipeline
 - **Artifact Retention**: 30 days for debugging failed releases
 - **Cross-workflow artifacts**: ci-integration.yml builds the binary inline (no cross-workflow artifact transfer); build-release.yml jobs share artifacts within the same workflow run.
@@ -110,8 +111,8 @@ integration suite runs only at merge time via GitHub Merge Queue
 - **macOS as root nodes**: macOS consolidated jobs run their own unit tests and start immediately - no dependency on Linux/Windows test completion.
 - **Native uv caching**: `setup-uv` action with `enable-cache: true` replaces manual `actions/cache@v3` blocks.
 - **Targeted setup-node usage**: Node.js is only installed in `ci-runtime.yml`, macOS consolidated jobs, and integration-tests/release-validation phases (for `apm runtime setup copilot` -> npm install).
-- **macOS runner consolidation**: Each macOS arch has a single consolidated job (build + integration + release-validation). Intel (`build-and-validate-macos-intel`) runs on every push since Intel runners are plentiful and uses marker-bounded lifecycle integration coverage for promotions. ARM (`build-and-validate-macos-arm`) is gated to tag/schedule/dispatch only since ARM runners are extremely scarce (2-4h+ queue waits) and remains the full-corpus macOS authority. This avoids serial re-queuing of runners across multiple jobs and redundant full-corpus replay on Intel.
-- **Unit tests skip macOS**: Python unit tests are platform-agnostic; Linux + Windows coverage is sufficient. macOS-specific validation (binary build, focused Intel integration, full ARM integration, and release validation) still runs via the consolidated jobs.
+- **macOS runner consolidation**: Each macOS arch has a single consolidated job (build + integration + release-validation). Intel (`build-and-validate-macos-intel`) runs on every push since Intel runners are plentiful and uses marker-bounded non-live lifecycle integration coverage for promotions. ARM (`build-and-validate-macos-arm`) is gated to tag/schedule/dispatch only since ARM runners are extremely scarce (2-4h+ queue waits) and remains the full non-live corpus macOS authority. This avoids serial re-queuing of runners across multiple jobs and redundant corpus replay on Intel.
+- **Unit tests skip macOS**: Python unit tests are platform-agnostic; Linux + Windows coverage is sufficient. macOS-specific validation (binary build, focused Intel integration, full non-live ARM integration, and release validation) still runs via the consolidated jobs.
 - **Tier 2 runs once per merged PR**, not per WIP push, since it triggers on `merge_group` only. Saves the bulk of integration minutes that the previous per-push flow burned.
 - UPX compression when available (reduces binary size ~50%)
 - Python optimization level 2 in PyInstaller
