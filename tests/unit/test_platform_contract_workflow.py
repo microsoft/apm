@@ -43,13 +43,14 @@ MACOS_STARTUP_CONTRACTS = (
         "github.event_name == 'workflow_dispatch'",
     ),
 )
-FULL_CORPUS_UNIX_INTEGRATION_STEPS = (
+NON_LIVE_UNIX_INTEGRATION_STEPS = (
     ("integration-tests", "Run integration tests (Unix)"),
     ("build-and-validate-macos-arm", "Run integration tests"),
 )
-FULL_CORPUS_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
+NON_LIVE_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
+NON_LIVE_MARK_EXPRESSION = "not live"
 INTEL_FOCUSED_INTEGRATION_STEP = "Run focused Intel integration tests"
-INTEL_FOCUSED_PYTEST_ARGS = "-m=lifecycle_smoke -n 4 --dist loadgroup"
+INTEL_FOCUSED_MARK_EXPRESSION = "lifecycle_smoke and not live"
 
 
 def _workflow() -> dict:
@@ -121,9 +122,10 @@ def _assert_standalone_integration_timeouts(workflow: dict) -> None:
 
 
 def _assert_full_corpus_unix_integration_parallelism(workflow: dict) -> None:
-    for job_id, step_name in FULL_CORPUS_UNIX_INTEGRATION_STEPS:
+    for job_id, step_name in NON_LIVE_UNIX_INTEGRATION_STEPS:
         step = workflow_step(workflow_job(workflow, job_id), step_name)
-        assert step["env"].get("PYTEST_EXTRA_ARGS") == FULL_CORPUS_UNIX_PYTEST_ARGS
+        assert step["env"].get("PYTEST_MARK_EXPR") == NON_LIVE_MARK_EXPRESSION
+        assert step["env"].get("PYTEST_EXTRA_ARGS") == NON_LIVE_UNIX_PYTEST_ARGS
         assert step.get("timeout-minutes") == 30
 
 
@@ -134,7 +136,8 @@ def _assert_intel_focused_integration(workflow: dict) -> None:
         "github.ref_type == 'tag' || github.event_name == 'schedule' || "
         "github.event_name == 'workflow_dispatch'"
     )
-    assert step["env"].get("PYTEST_EXTRA_ARGS") == INTEL_FOCUSED_PYTEST_ARGS
+    assert step["env"].get("PYTEST_MARK_EXPR") == INTEL_FOCUSED_MARK_EXPRESSION
+    assert step["env"].get("PYTEST_EXTRA_ARGS") == NON_LIVE_UNIX_PYTEST_ARGS
     assert step.get("timeout-minutes") == 30
     assert_exact_command(
         shell_commands(step),
@@ -158,8 +161,8 @@ def test_standalone_integration_timeouts_are_platform_specific() -> None:
     _assert_standalone_integration_timeouts(_workflow())
 
 
-def test_linux_and_arm_retain_full_corpus_grouped_parallelism() -> None:
-    """Linux and macOS ARM keep the unfiltered, bounded integration corpus."""
+def test_linux_and_arm_retain_non_live_corpus_grouped_parallelism() -> None:
+    """Linux and macOS ARM keep the bounded non-live integration corpus."""
     _assert_full_corpus_unix_integration_parallelism(_workflow())
 
 
@@ -170,13 +173,13 @@ def test_intel_integration_is_marker_scoped_and_bounded() -> None:
 
 @pytest.mark.parametrize(
     ("job_id", "step_name"),
-    FULL_CORPUS_UNIX_INTEGRATION_STEPS,
+    NON_LIVE_UNIX_INTEGRATION_STEPS,
 )
-def test_full_corpus_unix_serial_integration_mutation_is_rejected(
+def test_non_live_unix_serial_integration_mutation_is_rejected(
     job_id: str,
     step_name: str,
 ) -> None:
-    """No full-corpus release node can silently regress to the serial path."""
+    """No non-live release node can silently regress to the serial path."""
     workflow = deepcopy(_workflow())
     step = workflow_step(workflow_job(workflow, job_id), step_name)
     del step["env"]["PYTEST_EXTRA_ARGS"]
@@ -187,13 +190,13 @@ def test_full_corpus_unix_serial_integration_mutation_is_rejected(
 
 @pytest.mark.parametrize(
     ("job_id", "step_name"),
-    FULL_CORPUS_UNIX_INTEGRATION_STEPS,
+    NON_LIVE_UNIX_INTEGRATION_STEPS,
 )
-def test_full_corpus_unix_timeout_mutation_is_rejected(
+def test_non_live_unix_timeout_mutation_is_rejected(
     job_id: str,
     step_name: str,
 ) -> None:
-    """Every full-corpus Unix release node remains bounded to 30 minutes."""
+    """Every non-live Unix release node remains bounded to 30 minutes."""
     workflow = deepcopy(_workflow())
     step = workflow_step(workflow_job(workflow, job_id), step_name)
     step["timeout-minutes"] = 31
@@ -202,27 +205,27 @@ def test_full_corpus_unix_timeout_mutation_is_rejected(
         _assert_full_corpus_unix_integration_parallelism(workflow)
 
 
-def test_intel_full_corpus_mutation_is_rejected() -> None:
-    """Intel cannot silently regain the redundant unfiltered corpus."""
+def test_intel_non_live_corpus_mutation_is_rejected() -> None:
+    """Intel cannot silently regain the redundant non-live corpus."""
     workflow = deepcopy(_workflow())
     step = workflow_step(
         workflow_job(workflow, "build-and-validate-macos-intel"),
         INTEL_FOCUSED_INTEGRATION_STEP,
     )
-    step["env"]["PYTEST_EXTRA_ARGS"] = FULL_CORPUS_UNIX_PYTEST_ARGS
+    step["env"]["PYTEST_MARK_EXPR"] = NON_LIVE_MARK_EXPRESSION
 
     with pytest.raises(AssertionError):
         _assert_intel_focused_integration(workflow)
 
 
 def test_arm_focused_subset_mutation_is_rejected() -> None:
-    """ARM remains a full-corpus macOS release authority."""
+    """ARM remains the broad non-live macOS release authority."""
     workflow = deepcopy(_workflow())
     step = workflow_step(
         workflow_job(workflow, "build-and-validate-macos-arm"),
         "Run integration tests",
     )
-    step["env"]["PYTEST_EXTRA_ARGS"] = INTEL_FOCUSED_PYTEST_ARGS
+    step["env"]["PYTEST_MARK_EXPR"] = INTEL_FOCUSED_MARK_EXPRESSION
 
     with pytest.raises(AssertionError):
         _assert_full_corpus_unix_integration_parallelism(workflow)

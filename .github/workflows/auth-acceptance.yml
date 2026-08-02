@@ -26,8 +26,12 @@ on:
         description: 'GHE Cloud test repo (org/repo@host, optional)'
         required: false
       ado_repo:
-        description: 'Azure DevOps test repo (dev.azure.com/org/project/_git/repo, optional)'
+        description: 'ADO package fixture with gdpr-assessment.prompt.md and Copilot instructions'
         required: false
+      ado_pat_e2e:
+        description: 'Run live ADO PAT integration tests (requires ado_repo and AUTH_TEST_ADO_APM_PAT)'
+        type: boolean
+        default: false
       git_url_repo:
         description: 'Private repo for git: URL object format (owner/repo, optional)'
         required: false
@@ -80,13 +84,13 @@ jobs:
           AUTH_TEST_PRIVATE_REPO_2: ${{ inputs.private_repo_2 }}
           AUTH_TEST_EMU_REPO: ${{ inputs.emu_repo }}
           AUTH_TEST_GHE_REPO: ${{ inputs.ghe_repo }}
-          AUTH_TEST_ADO_REPO: ${{ inputs.ado_repo }}
+          AUTH_TEST_ADO_REPO: ${{ inputs.ado_pat_e2e && inputs.ado_repo || '' }}
           AUTH_TEST_GIT_URL_REPO: ${{ inputs.git_url_repo }}
           AUTH_TEST_GIT_URL_PUBLIC_REPO: ${{ inputs.git_url_public_repo }}
           GITHUB_APM_PAT: ${{ secrets.AUTH_TEST_GITHUB_APM_PAT }}
           GITHUB_TOKEN: ${{ secrets.AUTH_TEST_GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.AUTH_TEST_GH_TOKEN }}
-          ADO_APM_PAT: ${{ secrets.AUTH_TEST_ADO_APM_PAT }}
+          ADO_APM_PAT: ${{ inputs.ado_pat_e2e && secrets.AUTH_TEST_ADO_APM_PAT || '' }}
           GITHUB_APM_PAT_MCAPS_MICROSOFT: ${{ secrets.AUTH_TEST_GITHUB_APM_PAT_MCAPS_MICROSOFT }}
           GITHUB_APM_PAT_DEVEXPGBB: ${{ secrets.AUTH_TEST_GITHUB_APM_PAT_DEVEXPGBB }}
         run: |
@@ -95,6 +99,24 @@ jobs:
           else
             ./scripts/test-auth-acceptance.sh
           fi
+
+      - name: Run live ADO PAT integration acceptance
+        if: ${{ inputs.ado_pat_e2e == true }}
+        env:
+          APM_BINARY_PATH: .venv/bin/apm
+          APM_TEST_ADO_REPO: ${{ inputs.ado_repo }}
+          ADO_APM_PAT: ${{ secrets.AUTH_TEST_ADO_APM_PAT }}
+        run: |
+          if [ -z "$APM_TEST_ADO_REPO" ]; then
+            echo "::error::ado_repo is required when ado_pat_e2e is enabled"
+            exit 1
+          fi
+          if [ -z "$ADO_APM_PAT" ]; then
+            echo "::error::AUTH_TEST_ADO_APM_PAT is not configured in the auth-acceptance environment"
+            exit 1
+          fi
+          uv run pytest tests/integration/ \
+            -m "live and requires_ado_pat" -v --tb=short
 
   # ADO AAD bearer-token tests (#852).
   #

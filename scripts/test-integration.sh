@@ -363,7 +363,14 @@ run_e2e_tests() {
     # bare "${arr[@]}" on an empty array raises an unbound-variable error.
     # shellcheck disable=SC2206
     extra_args=(${PYTEST_EXTRA_ARGS:-})
-    if pytest tests/integration/ -v --tb=short ${extra_args[@]+"${extra_args[@]}"}; then
+    marker_args=()
+    if [[ -n "${PYTEST_MARK_EXPR:-}" ]]; then
+        marker_args=(-m "$PYTEST_MARK_EXPR")
+        log_info "Pytest marker selection: $PYTEST_MARK_EXPR"
+    fi
+    if pytest tests/integration/ -v --tb=short \
+        ${extra_args[@]+"${extra_args[@]}"} \
+        ${marker_args[@]+"${marker_args[@]}"}; then
         log_success "Integration test suite passed (collected and ran via pytest discovery)"
     else
         log_error "Integration test suite reported failures"

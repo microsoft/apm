@@ -219,11 +219,11 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
           # Intel validates the promoted lifecycle subset against its native
-          # binary. ARM and Linux retain the unfiltered integration corpus.
+          # binary. Live credential acceptance belongs to auth-acceptance.yml.
           # loadgroup preserves HOME-mutating test serialization.
-          PYTEST_EXTRA_ARGS: "-m=lifecycle_smoke -n 4 --dist loadgroup"
+          PYTEST_MARK_EXPR: "lifecycle_smoke and not live"
+          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -250,7 +250,6 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
         run: |
           cd /tmp/apm-isolated-test
           chmod +x test-release-validation.sh
@@ -334,11 +333,12 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
           # Scarce ARM runners force the full suite onto one runner, so
-          # parallelise in-process with xdist. --dist loadgroup honors the
+          # parallelise the non-live corpus in-process with xdist.
+          # --dist loadgroup honors the
           # home_env xdist_group markers that keep HOME-mutating tests
           # serialized on a single worker.
+          PYTEST_MARK_EXPR: "not live"
           PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
@@ -364,7 +364,6 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
         run: |
           cd /tmp/apm-isolated-test
           chmod +x test-release-validation.sh
@@ -432,10 +431,10 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}    # Primary: APM module access
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}      # Azure DevOps module access
-          # The tag gate runs the full corpus on one runner. Four workers stay
+          # The tag gate runs the non-live corpus on one runner. Four workers stay
           # below the merge gate's aggregate width while loadgroup preserves
           # xdist_group serialization for HOME-mutating tests.
+          PYTEST_MARK_EXPR: "not live"
           PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
@@ -448,7 +447,6 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
         run: |
           uv run pwsh scripts/windows/test-integration.ps1 -SkipBuild
         timeout-minutes: 20
@@ -536,7 +534,6 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
         run: |
           cd /tmp/apm-isolated-test
           chmod +x scripts/test-release-validation.sh
@@ -549,7 +546,6 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
         run: |
           cd D:\apm-isolated-test
           .\scripts\windows\test-release-validation.ps1

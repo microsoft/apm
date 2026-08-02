@@ -81,7 +81,7 @@ what the test family you want actually requires.
 | `requires_runtime_codex` | The `codex` runtime installed under `~/.apm/runtimes/` | `apm runtime setup codex` |
 | `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
 | `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
-| `live` | Tests that hit real GitHub repos via cloning; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
+| `live` | Tests that hit real third-party repositories; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
 
 Without any of those env vars or runtimes a `pytest tests/integration`
 invocation is silent rather than red: every test is collected and
@@ -304,6 +304,22 @@ marker registry described above. New integration tests dropped into
 `requires_*` marker and the registry will skip the test when its
 precondition is missing.
 
+Release promotion sets `PYTEST_MARK_EXPR="not live"`, so an expiring
+third-party credential cannot block publication. Live ADO PAT coverage is
+owned by the **Auth Acceptance Tests** workflow: dispatch it with
+`ado_pat_e2e: true` and an `ado_repo` acceptance fixture. That workflow
+selects `live and requires_ado_pat`, requires
+`AUTH_TEST_ADO_APM_PAT`, and fails with the normal actionable auth
+diagnostic when the PAT is rejected.
+
+Run the same focused acceptance locally with:
+
+```bash
+APM_TEST_ADO_REPO=dev.azure.com/org/project/_git/repo \
+ADO_APM_PAT=... \
+uv run pytest tests/integration/ -m "live and requires_ado_pat" -v
+```
+
 The orchestrator is mainly intended for reproducing the full CI
 environment end-to-end; for local iteration prefer the direct
 `pytest` invocations earlier on this page.
@@ -318,7 +334,7 @@ environment end-to-end; for local iteration prefer the direct
 **On version tag releases:**
 1. Unit tests + Smoke tests
 2. Build binaries (cross-platform)
-3. **E2E golden scenario tests** (using built binaries). Linux and macOS Apple Silicon retain the full integration corpus; macOS Intel runs the marker-bounded `lifecycle_smoke` subset plus native startup and isolated release validation.
+3. **E2E golden scenario tests** (using built binaries). Linux and macOS Apple Silicon retain the full non-live integration corpus; macOS Intel runs the marker-bounded `lifecycle_smoke and not live` subset plus native startup and isolated release validation.
 4. Create GitHub Release
 5. Publish to PyPI 
 
@@ -346,12 +362,14 @@ Runtime setup prefers `GITHUB_TOKEN` for GitHub Models and falls back to `GITHUB
 The workflow ensures quality gates at each step:
 
 1. **build-and-test** jobs - Unit tests plus binary builds
-2. **integration-tests** job - Comprehensive runtime scenarios
+2. **integration-tests** job - Comprehensive non-live runtime scenarios
 3. **release-validation** job - Final shipped-binary validation
 4. **create-release** job - GitHub release creation
 5. **publish-pypi** job - PyPI package publication
 
-Each stage must succeed before proceeding to the next, ensuring only fully validated releases reach users.
+Each publication stage must succeed before proceeding to the next. Live
+third-party credential acceptance remains a failing gate in the opt-in Auth
+Acceptance workflow rather than a dependency of release publication.
 
 The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap updates independently: it polls the latest APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
 
@@ -360,8 +378,8 @@ The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap up
 Promotion integration tests run on:
 - **Linux**: ubuntu-24.04 (x86_64), ubuntu-24.04-arm (arm64)
 - **Windows**: windows-latest (x86_64)
-- **macOS Intel**: macos-15-intel (x86_64), with marker-bounded `lifecycle_smoke` integration coverage, native binary startup, and isolated release validation
-- **macOS Apple Silicon**: macos-latest (arm64), with the full integration corpus
+- **macOS Intel**: macos-15-intel (x86_64), with marker-bounded `lifecycle_smoke and not live` integration coverage, native binary startup, and isolated release validation
+- **macOS Apple Silicon**: macos-latest (arm64), with the full non-live integration corpus
 
 **Python Version**: 3.12 (standardized across all environments)
 **Package Manager**: uv (for fast dependency management and virtual environments)

@@ -12,7 +12,8 @@
 
 param(
     [switch]$SkipBuild,
-    [switch]$SkipRuntimes
+    [switch]$SkipRuntimes,
+    [switch]$IncludeLiveADO
 )
 
 $ErrorActionPreference = "Stop"
@@ -198,17 +199,20 @@ function Invoke-IntegrationTests {
     }
     Write-Success "APM Dependencies integration tests passed!"
 
-    # Azure DevOps E2E tests (conditional)
-    if ($env:ADO_APM_PAT) {
+    # Azure DevOps E2E tests are live acceptance and require explicit opt-in.
+    if ($IncludeLiveADO -and $env:ADO_APM_PAT) {
         Write-Info "Running Azure DevOps E2E tests..."
-        pytest tests/integration/test_ado_e2e.py -v -s --tb=short
+        pytest tests/integration/test_ado_e2e.py -m "live and requires_ado_pat" -v -s --tb=short
         if ($LASTEXITCODE -ne 0) {
             Write-ErrorText "Azure DevOps E2E tests failed!"
             exit 1
         }
         Write-Success "Azure DevOps E2E tests passed!"
+    } elseif ($IncludeLiveADO) {
+        Write-ErrorText "Live Azure DevOps E2E requested but ADO_APM_PAT is not set"
+        exit 1
     } else {
-        Write-Info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
+        Write-Info "Skipping live Azure DevOps E2E tests (pass -IncludeLiveADO to opt in)"
     }
 
     # #1212 anti-regression: ADO --update preflight bearer-fallback.
