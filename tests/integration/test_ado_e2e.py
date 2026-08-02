@@ -1,10 +1,9 @@
 """
 E2E tests for Azure DevOps package support.
 
-These opt-in live tests require the ADO_APM_PAT environment variable
-and make real network calls to an Azure DevOps acceptance fixture.
-
-Skip these tests if ADO_APM_PAT is not available.
+These tests require explicit ``-m live`` selection and the ADO_APM_PAT
+environment variable, then make real network calls to an Azure DevOps
+acceptance fixture.
 """
 
 import os

@@ -121,7 +121,7 @@ def _assert_standalone_integration_timeouts(workflow: dict) -> None:
     assert windows_step.get("timeout-minutes") == 20
 
 
-def _assert_full_corpus_unix_integration_parallelism(workflow: dict) -> None:
+def _assert_non_live_unix_integration_parallelism(workflow: dict) -> None:
     for job_id, step_name in NON_LIVE_UNIX_INTEGRATION_STEPS:
         step = workflow_step(workflow_job(workflow, job_id), step_name)
         assert step["env"].get("PYTEST_MARK_EXPR") == NON_LIVE_MARK_EXPRESSION
@@ -163,7 +163,7 @@ def test_standalone_integration_timeouts_are_platform_specific() -> None:
 
 def test_linux_and_arm_retain_non_live_corpus_grouped_parallelism() -> None:
     """Linux and macOS ARM keep the bounded non-live integration corpus."""
-    _assert_full_corpus_unix_integration_parallelism(_workflow())
+    _assert_non_live_unix_integration_parallelism(_workflow())
 
 
 def test_intel_integration_is_marker_scoped_and_bounded() -> None:
@@ -185,7 +185,7 @@ def test_non_live_unix_serial_integration_mutation_is_rejected(
     del step["env"]["PYTEST_EXTRA_ARGS"]
 
     with pytest.raises(AssertionError):
-        _assert_full_corpus_unix_integration_parallelism(workflow)
+        _assert_non_live_unix_integration_parallelism(workflow)
 
 
 @pytest.mark.parametrize(
@@ -202,7 +202,7 @@ def test_non_live_unix_timeout_mutation_is_rejected(
     step["timeout-minutes"] = 31
 
     with pytest.raises(AssertionError):
-        _assert_full_corpus_unix_integration_parallelism(workflow)
+        _assert_non_live_unix_integration_parallelism(workflow)
 
 
 def test_intel_non_live_corpus_mutation_is_rejected() -> None:
@@ -228,7 +228,7 @@ def test_arm_focused_subset_mutation_is_rejected() -> None:
     step["env"]["PYTEST_MARK_EXPR"] = INTEL_FOCUSED_MARK_EXPRESSION
 
     with pytest.raises(AssertionError):
-        _assert_full_corpus_unix_integration_parallelism(workflow)
+        _assert_non_live_unix_integration_parallelism(workflow)
 
 
 def test_unix_integration_twenty_minute_timeout_mutation_is_rejected() -> None:
