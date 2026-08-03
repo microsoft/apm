@@ -111,6 +111,7 @@ UserTargetType = Literal[
     "codex",
     "gemini",
     "antigravity",
+    "grok-build",
     "windsurf",
     "kiro",
     "agent-skills",
@@ -159,6 +160,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "explicit --target flag"
         elif explicit_target == "kiro":
             return "kiro", "explicit --target flag"
+        elif explicit_target == "grok-build":
+            return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
@@ -184,6 +187,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "apm.yml target"
         elif config_target == "kiro":
             return "kiro", "apm.yml target"
+        elif config_target == "grok-build":
+            return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
         elif config_target == "all":
@@ -198,6 +203,7 @@ def detect_target(  # noqa: PLR0911
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
     kiro_exists = (project_root / ".kiro").is_dir()
+    grok_exists = (project_root / ".grok").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -215,6 +221,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".windsurf/")
     if kiro_exists:
         detected.append(".kiro/")
+    if grok_exists:
+        detected.append(".grok/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -234,6 +242,8 @@ def detect_target(  # noqa: PLR0911
         return "windsurf", "detected .windsurf/ folder"
     elif kiro_exists:
         return "kiro", "detected .kiro/ folder"
+    elif grok_exists:
+        return "grok-build", "detected .grok/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -399,6 +409,7 @@ def get_target_description(target: UserTargetType) -> str:
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
         "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
+        "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
