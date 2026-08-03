@@ -232,8 +232,9 @@ For the release-gate flags (`--check-versions`, `--check-clean`),
 see [Releasing from any CI](../releasing-from-any-ci/).
 
 The same `apm pack` run also produces a bundle to `./build/<name>/`
-when `apm.yml` declares `dependencies:`. Marketplace projects with
-no `dependencies:` block produce only `marketplace.json`. See
+when `apm.yml` declares a `dependencies:` mapping, including an empty
+mapping (`dependencies: {}`). Marketplace projects with an omitted or null
+`dependencies:` value produce only `marketplace.json`. See
 [Pack a bundle](../pack-a-bundle/) for the bundle side.
 
 ## Validate before you ship

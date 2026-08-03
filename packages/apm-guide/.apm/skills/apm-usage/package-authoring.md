@@ -806,9 +806,10 @@ The compiler:
    e.g. microsoft/azure-skills).
 5. Does not emit `versions[]` -- each plugin carries a single resolved ref.
 
-`apm pack` also produces a bundle if `apm.yml` declares `dependencies:`. With
-only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`,
-`--target`, `--force`) are silent no-ops.
+`apm pack` also produces a bundle when `apm.yml` declares a `dependencies:`
+mapping, including an empty mapping (`dependencies: {}`). With an omitted or
+null `dependencies:` value and only a `marketplace:` block present, bundle
+flags (`--archive`, `-o`, `--format`, `--target`, `--force`) are silent no-ops.
 
 Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
 `--include-prerelease`, `--marketplace-path FORMAT=PATH`, `-v`.
