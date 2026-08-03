@@ -49,7 +49,11 @@ def test_marketplace_invalid_plugins_validation(
     )
 
     assert add_result.returncode == 0
-    assert "plugins" in validate_result.stdout + validate_result.stderr
-    assert "expected a list" in validate_result.stdout + validate_result.stderr
+    validation_output = validate_result.stdout + validate_result.stderr
+    assert "plugins" in validation_output
+    assert "expected a list" in validation_output
+    assert "Found 0 plugins" not in validation_output
+    assert "Schema: passed" not in validation_output
+    assert "Names: passed" not in validation_output
     assert manifest_path.read_bytes() == source_bytes
     assert registry_path.read_bytes() == registry_bytes

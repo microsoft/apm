@@ -29,20 +29,25 @@ def validate(name, check_refs, verbose):
         logger.start(f"Validating marketplace '{name}'...", symbol="gear")
 
         manifest = fetch_marketplace(source, force_refresh=True)
-
-        logger.progress(
-            f"Found {len(manifest.plugins)} plugins",
-            symbol="info",
+        results = validate_marketplace(manifest)
+        has_structure_errors = any(
+            result.check_name == "Structure" and result.errors for result in results
         )
 
+        if not has_structure_errors:
+            logger.progress(
+                f"Found {len(manifest.plugins)} plugins",
+                symbol="info",
+            )
+
         # Verbose: per-plugin details
-        if verbose:
+        if verbose and not has_structure_errors:
             for p in manifest.plugins:
                 source_type = "dict" if isinstance(p.source, dict) else "string"
                 logger.verbose_detail(f"    {p.name}: source type: {source_type}")
 
-        # Run validation
-        results = validate_marketplace(manifest)
+        if has_structure_errors:
+            results = [result for result in results if result.check_name == "Structure"]
 
         # Check-refs placeholder
         if check_refs:

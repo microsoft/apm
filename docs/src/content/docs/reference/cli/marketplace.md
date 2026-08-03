@@ -175,7 +175,8 @@ Validate a registered marketplace's raw manifest structure and plugin schema.
 `apm marketplace add` remains tolerant of malformed entries; validation reports
 them by JSON path (for example, `plugins[0].source: expected a string or
 object`) and exits 1 without rewriting the source manifest or its registered
-marketplace entry.
+marketplace entry. A structural failure is reported without downstream plugin
+count, schema, or duplicate-name success lines.
 
 ### `apm marketplace init`
 
