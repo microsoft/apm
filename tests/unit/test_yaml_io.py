@@ -5,6 +5,7 @@ import io
 import pytest
 import yaml
 from ruamel.yaml import YAMLError as RuamelYAMLError
+from yaml.nodes import MappingNode, ScalarNode
 
 from apm_cli.utils.yaml_io import (
     _roundtrip_yaml,
@@ -62,6 +63,17 @@ class TestLoadYaml:
         p = tmp_path / "bad.yml"
         p.write_text(":\n  - :\n  bad: [unmatched", encoding="utf-8")
         with pytest.raises(yaml.YAMLError):
+            load_yaml(p)
+
+    def test_oversize_file_fails_before_reading(self, tmp_path, monkeypatch):
+        """An oversized YAML file fails closed before its content is read."""
+        from apm_cli.utils import yaml_io
+
+        p = tmp_path / "large.yml"
+        p.write_text("key: value\n", encoding="utf-8")
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 1)
+
+        with pytest.raises(yaml.YAMLError, match=r"YAML file .* safe limit"):
             load_yaml(p)
 
 
@@ -206,6 +218,15 @@ class TestLoadYamlStr:
         with pytest.raises(yaml.YAMLError):
             load_yaml_str(bomb)
 
+    def test_oversize_string_fails_closed(self, monkeypatch):
+        """An oversized in-memory YAML string fails before construction."""
+        from apm_cli.utils import yaml_io
+
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+
+        with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte safe limit"):
+            load_yaml_str("key: 1234\n")
+
     def test_benign_reused_anchor_dag_still_parses(self):
         """A benign reused-anchor DAG (shared refs, no expansion) still parses."""
         doc = "base: &b {x: 1}\nuse1: *b\nuse2: *b\n"
@@ -280,6 +301,53 @@ class TestLoadFrontmatter:
         bomb = "---\n" + "\n".join(lines) + "\n---\nbody\n"
         with pytest.raises(yaml.YAMLError):
             load_frontmatter(io.StringIO(bomb))
+
+    def test_oversize_frontmatter_fails_closed(self, monkeypatch):
+        """Oversized untrusted frontmatter cannot reach YAML construction."""
+        from apm_cli.utils import yaml_io
+
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+
+        with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte safe limit"):
+            load_frontmatter(io.StringIO("---\nkey: 1234\n---\nbody\n"))
+
+
+class TestSharedNodeScan:
+    """Deterministic complexity checks for the tree fast path."""
+
+    def test_tree_scan_visits_children_once_at_n_and_ten_n(self):
+        """The identity worklist scales linearly without repeated traversal."""
+        from apm_cli.utils.yaml_io import _BoundedSafeLoader
+
+        class CountingPairs(list[tuple[ScalarNode, ScalarNode]]):
+            def __init__(self, pairs: list[tuple[ScalarNode, ScalarNode]]) -> None:
+                super().__init__(pairs)
+                self.yields = 0
+
+            def __iter__(self):
+                for item in super().__iter__():
+                    self.yields += 1
+                    yield item
+
+        def tree(entries: int) -> tuple[MappingNode, CountingPairs]:
+            pairs = CountingPairs(
+                [
+                    (
+                        ScalarNode("tag:yaml.org,2002:str", f"key-{index}"),
+                        ScalarNode("tag:yaml.org,2002:str", "value"),
+                    )
+                    for index in range(entries)
+                ]
+            )
+            return MappingNode("tag:yaml.org,2002:map", pairs), pairs
+
+        small_root, small_pairs = tree(100)
+        large_root, large_pairs = tree(1_000)
+
+        assert _BoundedSafeLoader._has_shared_nodes(small_root) is False
+        assert _BoundedSafeLoader._has_shared_nodes(large_root) is False
+        assert small_pairs.yields == 100
+        assert large_pairs.yields == 1_000
 
 
 class TestBoundedMergeHappyPath:

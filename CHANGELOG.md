@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Large anchor-free `apm.lock.yaml` files no longer fail with a false
   alias-bomb warning; shared alias graphs still receive bounded expansion
-  accounting. (by @tomatotomata, closes #2389, #2401)
+  accounting. (by @tomatotomata, closes #2389)
 - `apm install --dry-run` no longer lists the project's own `includes: auto`
   self-managed files under "Files that would be removed"; the orphan preview
   now excludes the synthesized lockfile self-entry, matching the real install

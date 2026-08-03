@@ -30,6 +30,7 @@ _DUMP_DEFAULTS: dict[str, Any] = dict(
     sort_keys=False,
     allow_unicode=True,
 )
+_MAX_YAML_INPUT_BYTES = 8 * 1024 * 1024
 
 
 class _BoundedSafeLoader(yaml.SafeLoader):
@@ -124,21 +125,7 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         # the composed graph even for an exponential alias bomb, and never adds
         # Python call-stack pressure for a deeply nested but otherwise valid
         # document.
-        seen: set[int] = set()
-        worklist = [root]
-        while worklist:
-            node = worklist.pop()
-            nid = id(node)
-            if nid in seen:
-                break
-            seen.add(nid)
-            if isinstance(node, yaml.nodes.MappingNode):
-                for key_node, value_node in node.value:
-                    worklist.append(value_node)
-                    worklist.append(key_node)
-            elif isinstance(node, yaml.nodes.SequenceNode):
-                worklist.extend(node.value)
-        else:
+        if not self._has_shared_nodes(root):
             return
 
         weights: dict[int, int] = {}
@@ -171,6 +158,25 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             return total
 
         weight(root)
+
+    @staticmethod
+    def _has_shared_nodes(root: Any) -> bool:
+        """Return whether a composed YAML graph has aliases or a cycle."""
+        seen: set[int] = set()
+        worklist = [root]
+        while worklist:
+            node = worklist.pop()
+            nid = id(node)
+            if nid in seen:
+                return True
+            seen.add(nid)
+            if isinstance(node, yaml.nodes.MappingNode):
+                for key_node, value_node in node.value:
+                    worklist.append(value_node)
+                    worklist.append(key_node)
+            elif isinstance(node, yaml.nodes.SequenceNode):
+                worklist.extend(node.value)
+        return False
 
     @staticmethod
     def _leaf_byte_cost(node: Any) -> int:
@@ -257,7 +263,27 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             self._flatten_depth -= 1
 
 
-def _bounded_load(stream: Any) -> Any:
+def _ensure_yaml_input_size(text: str) -> None:
+    """Reject YAML text that exceeds the raw input cap before parsing."""
+    size = len(text.encode("utf-8"))
+    if size > _MAX_YAML_INPUT_BYTES:
+        raise yaml.YAMLError(
+            f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({size} bytes)"
+        )
+
+
+def _read_yaml_text(path: str | Path) -> str:
+    """Read a YAML file only after checking its raw byte size."""
+    yaml_path = Path(path)
+    size = yaml_path.stat().st_size
+    if size > _MAX_YAML_INPUT_BYTES:
+        raise yaml.YAMLError(
+            f"YAML file {yaml_path} exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({size} bytes)"
+        )
+    return yaml_path.read_text(encoding="utf-8")
+
+
+def _bounded_load(text: str) -> Any:
     """Parse *stream* with the merge-bounded SafeLoader, failing closed.
 
     Centralizes the round-16 bounded-loader entrypoint AND normalizes the
@@ -274,10 +300,11 @@ def _bounded_load(stream: Any) -> Any:
     ``.prompt.md`` -> whole-run DoS) instead of the intended per-file skip.
     """
     try:
-        return yaml.load(stream, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+        _ensure_yaml_input_size(text)
+        return yaml.load(text, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
     except yaml.YAMLError:
         raise
-    except (ValueError, RecursionError) as exc:
+    except (MemoryError, ValueError, RecursionError) as exc:
         raise yaml.YAMLError(f"bounded YAML parse failed: {type(exc).__name__}: {exc}") from exc
 
 
@@ -292,8 +319,7 @@ def load_yaml(path: str | Path) -> dict[str, Any] | None:
     the bomb -- and a huge-int / deep-nest scalar -- fails closed as a
     ``yaml.YAMLError`` (see ``_bounded_load``) instead of hanging or escaping.
     """
-    with open(path, encoding="utf-8") as fh:
-        return _bounded_load(fh)
+    return _bounded_load(_read_yaml_text(path))
 
 
 def load_yaml_str(text: str) -> dict[str, Any] | None:
@@ -354,7 +380,7 @@ def load_yaml_roundtrip(path: str | Path) -> Any:
     round-trip mode so callers can mutate the returned object and write it back
     without stripping comments.
     """
-    text = Path(path).read_text(encoding="utf-8")
+    text = _read_yaml_text(path)
     _bounded_load(text)
     try:
         return _roundtrip_yaml().load(text)
@@ -395,10 +421,11 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     def load(self, fm: str, **kwargs: Any) -> Any:
         kwargs["Loader"] = _BoundedSafeLoader
         try:
+            _ensure_yaml_input_size(fm)
             return yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
         except yaml.YAMLError:
             raise
-        except (ValueError, RecursionError) as exc:
+        except (MemoryError, ValueError, RecursionError) as exc:
             raise yaml.YAMLError(
                 f"bounded frontmatter parse failed: {type(exc).__name__}: {exc}"
             ) from exc
