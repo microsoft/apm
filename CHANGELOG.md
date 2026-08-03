@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --frozen` no longer fails on a cold cache (fresh checkout,
+  empty `apm_modules/`) for a git-hosted `apm_package` dependency when the
+  project also declares MCP state; an absent, not-yet-fetched package
+  directory is no longer treated as lockfile drift. Reported by @rrazvd.
+  (#2457)
 - Windows binary is now Authenticode-signed in the release workflow, eliminating
   the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
   PyInstaller bundles. (#2435)
