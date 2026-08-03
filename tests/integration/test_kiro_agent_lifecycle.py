@@ -403,3 +403,161 @@ def test_kiro_agent_incompatible_tools_fail_closed(
     assert "badtools" in combined_output or "Kiro" in combined_output, (
         "Error diagnostic must identify the agent or target"
     )
+
+
+def test_kiro_agent_update_replacement(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Source revision change replaces deployed agent bytes at .kiro/agents/.
+
+    Workflow:
+    1. Install v1 of the agent (marker 'v1-marker' in body).
+    2. Commit v2 to the same repo (marker 'v2-marker' in body).
+    3. Update consumer apm.yml ref to v2 SHA.
+    4. Reinstall -- deployed agent MUST contain 'v2-marker' and NOT 'v1-marker'.
+    """
+    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "update", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),),
+        scenario_timeout_seconds=_SCENARIO_TIMEOUT_SECONDS,
+    )
+
+    source_factory = LocalPackageFactory(isolated.package_root)
+    pkg_name = "fixture-kiro-agent-update"
+    source = source_factory.create(pkg_name, targets=("kiro",))
+
+    # v1 agent content
+    v1_content = (
+        "---\ndescription: Updatable agent v1\ntools:\n- read\n---\n\n# Agent v1\n\nv1-marker\n"
+    )
+    source_factory.add_agent(source, "updatable", v1_content)
+
+    repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
+    repo = repositories.create(pkg_name, source_tree=source.root)
+    rev1 = repositories.commit(repo, message="kiro agent v1")
+    remote = f"{_REMOTE_PREFIX}/{pkg_name}.git"
+    repositories.install_url_rewrite(repo, remote)
+
+    project_factory = LocalPackageFactory(isolated.work_root)
+    project = project_factory.create(
+        f"consumer-{pkg_name}",
+        dependencies=({"git": remote, "type": "gitlab", "ref": rev1.sha, "alias": pkg_name},),
+        targets=("kiro",),
+    )
+    (project.root / ".kiro").mkdir(exist_ok=True)
+    cwd = project.root
+
+    # Install v1.
+    _run(
+        runner,
+        _install_args(("kiro",)),
+        scenario_id="update-install-v1",
+        cwd=cwd,
+        environment=environment,
+    )
+    deployed = project.root / ".kiro" / "agents" / "updatable.md"
+    assert deployed.exists(), "v1 agent must be deployed"
+    v1_bytes = deployed.read_text(encoding="utf-8")
+    assert "v1-marker" in v1_bytes, "deployed agent must contain v1 marker"
+
+    # Commit v2: update source agent in the repo worktree.
+    v2_content = (
+        "---\ndescription: Updatable agent v2\ntools:\n- read\n- write\n---\n\n"
+        "# Agent v2\n\nv2-marker\n"
+    )
+    agent_src = repo.worktree / ".apm" / "agents" / "updatable.agent.md"
+    agent_src.write_text(v2_content, encoding="utf-8")
+    rev2 = repositories.commit(repo, message="kiro agent v2")
+
+    # Update consumer apm.yml to reference v2 SHA.
+    manifest = load_yaml(project.manifest_path)
+    assert isinstance(manifest, dict)
+    for dep in manifest.get("dependencies", {}).get("apm", []):
+        if isinstance(dep, dict) and dep.get("alias") == pkg_name:
+            dep["ref"] = rev2.sha
+    dump_yaml(manifest, project.manifest_path)
+
+    # Reinstall with updated ref.
+    _run(
+        runner,
+        ("install", "--target", "kiro", "--no-policy", "--parallel-downloads", "0"),
+        scenario_id="update-install-v2",
+        cwd=cwd,
+        environment=environment,
+    )
+    v2_bytes = deployed.read_text(encoding="utf-8")
+    assert "v2-marker" in v2_bytes, "deployed agent must contain v2 marker after update"
+    assert "v1-marker" not in v2_bytes, "v1 marker must be gone after update"
+    assert "description: Updatable agent v2" in v2_bytes
+
+
+def test_kiro_target_autodetection(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Kiro is autodetected via .kiro/ when no explicit --target is passed.
+
+    Verifies KNOWN_TARGETS['kiro'].detect_by_dir = True is honored by the CLI.
+    Consumer apm.yml declares no targets; the presence of .kiro/ in the project
+    root drives target selection, and the package declares targets: [kiro].
+    The agent is deployed without any --target flag.
+
+    Canonical path: resolve_targets() -> detect_signals() sees .kiro/ ->
+    returns ['kiro'] -> intersects with package targets: ['kiro'] ->
+    agent integrator deploys to .kiro/agents/.
+    """
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "autodetect", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),),
+        scenario_timeout_seconds=_SCENARIO_TIMEOUT_SECONDS,
+    )
+
+    source_factory = LocalPackageFactory(isolated.package_root)
+    pkg_name = "fixture-kiro-agent-autodetect"
+    source = source_factory.create(pkg_name, targets=("kiro",))
+    source_factory.add_agent(
+        source,
+        "autodetected",
+        "---\ndescription: Autodetected agent\ntools:\n- read\n---\n\n# Auto\n",
+    )
+
+    repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
+    repo = repositories.create(pkg_name, source_tree=source.root)
+    rev = repositories.commit(repo, message="seed kiro autodetect test")
+    remote = f"{_REMOTE_PREFIX}/{pkg_name}.git"
+    repositories.install_url_rewrite(repo, remote)
+
+    project_factory = LocalPackageFactory(isolated.work_root)
+    # Consumer project: NO explicit targets declaration.
+    project = project_factory.create(
+        f"consumer-{pkg_name}",
+        dependencies=({"git": remote, "type": "gitlab", "ref": rev.sha, "alias": pkg_name},),
+        targets=(),  # <-- no explicit targets: relies on autodetection
+    )
+
+    # Seed .kiro/ to trigger autodetection -- the signal detect_by_dir checks.
+    (project.root / ".kiro").mkdir(exist_ok=True)
+    cwd = project.root
+
+    # Run install with NO --target flag.
+    _run(
+        runner,
+        ("install", "--no-policy", "--parallel-downloads", "0"),
+        scenario_id="autodetect-install",
+        cwd=cwd,
+        environment=environment,
+    )
+
+    deployed = project.root / ".kiro" / "agents" / "autodetected.md"
+    assert deployed.exists(), (
+        ".kiro/ autodetection must route the kiro agent to .kiro/agents/ "
+        "without an explicit --target flag"
+    )
+    content = deployed.read_text(encoding="utf-8")
+    assert "description: Autodetected agent" in content
