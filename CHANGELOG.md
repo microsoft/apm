@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Claude project hooks now run reliably when Claude launches them outside the
   repository while keeping generated settings portable across clones. (#2408)
+- `docs/src/content/docs/specs/openapm-v0.1.md` now requires project-scoped native
+  hooks to use portable project-directory anchors instead of absolute checkout paths,
+  with Claude POSIX and PowerShell command forms covered. (#2408)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
 - Release promotions now run marker-bounded lifecycle integration on macOS Intel
   while retaining the full corpus on macOS ARM and Linux, preventing Intel
