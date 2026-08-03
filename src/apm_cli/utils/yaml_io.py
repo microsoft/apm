@@ -16,6 +16,7 @@ Public API::
 
 import os
 import secrets
+import stat
 from contextlib import suppress
 from io import StringIO
 from pathlib import Path
@@ -268,19 +269,40 @@ def _ensure_yaml_input_size(text: str) -> None:
     size = len(text.encode("utf-8"))
     if size > _MAX_YAML_INPUT_BYTES:
         raise yaml.YAMLError(
-            f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({size} bytes)"
+            f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({size} bytes); "
+            "reduce or regenerate the YAML file before retrying"
         )
 
 
 def _read_yaml_text(path: str | Path) -> str:
-    """Read a YAML file only after checking its raw byte size."""
+    """Read a regular YAML file through a bounded single descriptor."""
     yaml_path = Path(path)
-    size = yaml_path.stat().st_size
-    if size > _MAX_YAML_INPUT_BYTES:
+    with yaml_path.open("rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise yaml.YAMLError(f"YAML source {yaml_path} must be a regular file")
+        raw = stream.read(_MAX_YAML_INPUT_BYTES + 1)
+    if len(raw) > _MAX_YAML_INPUT_BYTES:
         raise yaml.YAMLError(
-            f"YAML file {yaml_path} exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({size} bytes)"
+            f"YAML file {yaml_path} exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit "
+            f"({len(raw)} bytes); reduce or regenerate the YAML file before retrying"
         )
-    return yaml_path.read_text(encoding="utf-8")
+    return raw.decode("utf-8")
+
+
+def _read_frontmatter_text(fd: Any, encoding: str) -> str:
+    """Read frontmatter input under the raw YAML cap."""
+    if isinstance(fd, (str, os.PathLike)):
+        return _read_yaml_text(fd)
+    raw = fd.read(_MAX_YAML_INPUT_BYTES + 1)
+    if isinstance(raw, bytes):
+        if len(raw) > _MAX_YAML_INPUT_BYTES:
+            raise yaml.YAMLError(
+                f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({len(raw)} bytes); "
+                "reduce or regenerate the YAML file before retrying"
+            )
+        return raw.decode(encoding)
+    _ensure_yaml_input_size(raw)
+    return raw
 
 
 def _bounded_load(text: str) -> Any:
@@ -448,7 +470,10 @@ def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
     """
     import frontmatter
 
-    return frontmatter.load(fd, encoding=encoding, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    return frontmatter.loads(
+        _read_frontmatter_text(fd, encoding),
+        handler=_BOUNDED_FRONTMATTER_HANDLER,
+    )
 
 
 def dump_yaml(

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import _BoundedSafeLoader
+from apm_cli.utils.yaml_io import _MAX_YAML_INPUT_BYTES, _BoundedSafeLoader
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -99,4 +99,30 @@ def test_alias_bomb_lockfile_fails_audit_without_writes(
     assert result.returncode != 0
     assert "YAML alias/anchor expansion exceeded the safe budget" in combined_output
     assert PRIVATE_LOCKFILE_MARKER not in combined_output
+    assert_unchanged(before, ArtifactSnapshot.capture(project))
+
+
+def test_oversize_literal_lockfile_fails_audit_without_writes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """An oversized literal lockfile fails safely with a recovery action."""
+    project, environment = _project(tmp_path / "oversize-literal")
+    lockfile = project / "apm.lock.yaml"
+    content = large_anchor_free_lockfile(_MAX_YAML_INPUT_BYTES)
+    assert len(content.encode("utf-8")) > _MAX_YAML_INPUT_BYTES
+    lockfile.write_text(content, encoding="utf-8")
+    before = ArtifactSnapshot.capture(project)
+
+    result = _runner(apm_binary_path).run(
+        _AUDIT_ARGS,
+        scenario_id="oversize-literal-lockfile",
+        cwd=project,
+        env=environment,
+    )
+
+    combined_output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode != 0
+    assert "YAML input exceeds" in combined_output
+    assert "reduce or regenerate the YAML file before retrying" in combined_output
     assert_unchanged(before, ArtifactSnapshot.capture(project))

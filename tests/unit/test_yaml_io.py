@@ -66,7 +66,7 @@ class TestLoadYaml:
             load_yaml(p)
 
     def test_oversize_file_fails_before_reading(self, tmp_path, monkeypatch):
-        """An oversized YAML file fails closed before its content is read."""
+        """An oversized YAML file fails closed through a bounded read."""
         from apm_cli.utils import yaml_io
 
         p = tmp_path / "large.yml"
@@ -310,6 +310,26 @@ class TestLoadFrontmatter:
 
         with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte safe limit"):
             load_frontmatter(io.StringIO("---\nkey: 1234\n---\nbody\n"))
+
+    def test_frontmatter_reads_at_most_the_input_cap(self, monkeypatch):
+        """Untrusted frontmatter reads no more than the configured bound."""
+        from apm_cli.utils import yaml_io
+
+        class BoundedReader:
+            def __init__(self) -> None:
+                self.limit: int | None = None
+
+            def read(self, limit: int) -> str:
+                self.limit = limit
+                return "x: 1\n"
+
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+        reader = BoundedReader()
+
+        post = load_frontmatter(reader)
+
+        assert post.metadata == {}
+        assert reader.limit == 9
 
 
 class TestSharedNodeScan:
