@@ -231,9 +231,9 @@ def _parse_marketplace_filter(
     default=False,
     help=(
         "Release gate: regenerate every configured marketplace output to a "
-        "temp path and diff against the on-disk file. Exits 4 if the working "
-        "tree is dirty (out-of-date marketplace.json). The gate itself "
-        "never writes to disk."
+        "temp representation and diff against the effective on-disk path, "
+        "including --marketplace-path overrides. Exits 4 for drift. Use "
+        "with --dry-run to check without normal pack output generation."
     ),
 )
 @click.option(
