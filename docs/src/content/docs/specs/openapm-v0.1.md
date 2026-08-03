@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **107 normative statements** indexed in
+- OpenAPM v0.1 carries **108 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2387,6 +2387,20 @@ hook entries and their ownership record MUST be reconciled under
 [req-lk-021](#req-lk-021), while entries without the consumer's own
 ownership attribution remain preserved.
 
+#### 8.5.4 Cursor universal instruction intent
+
+<a id="req-tg-009"></a>
+**[req-tg-009]** A conforming **consumer** implementation that deploys an
+instruction primitive for the `cursor` target MUST write the target-native
+rule under `.cursor/rules/<name>.mdc`. When the source instruction's
+normalized `applyTo` value resolves to exactly one universal `**` glob, the
+emitted frontmatter MUST contain `alwaysApply: true` and MUST NOT contain a
+`globs` field. For any other non-empty `applyTo` set, the emitted frontmatter
+MUST NOT contain `alwaysApply: true` and MUST encode the source patterns in
+`globs`; a single pattern MUST be a YAML scalar and two or more patterns MUST
+be a YAML block sequence. When `applyTo` is absent or empty, the emitted
+frontmatter MUST omit both `alwaysApply` and `globs`.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2401,7 +2415,7 @@ without a spec revision. The current matrix is in the companion
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
-  [req-tg-008](#req-tg-008).
+  [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009).
 
 ---
 
@@ -2936,7 +2950,7 @@ conformance statement identifying:
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
-[req-tg-008](#req-tg-008),
+[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -3365,6 +3379,7 @@ renumbering of conformance classes.
 | [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-tg-007](#req-tg-007)                | MUST    | 8.5     | consumer    |
 | [req-tg-008](#req-tg-008)                | MUST    | 8.5.3   | consumer    |
+| [req-tg-009](#req-tg-009)                | MUST    | 8.5.4   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3382,7 +3397,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 107** (102 MUST, 5 SHOULD).
+**Total normative statements: 108** (103 MUST, 5 SHOULD).
 
 ---
 
@@ -3415,6 +3430,7 @@ renumbering of conformance classes.
 | 0.1.21  | 2026-07-31 | Spec-citation fold for package-declared target restrictions (closes #2321 Mode-B silent-extension gate). Added [req-tg-008] (Section 8.5.3, consumer MUST): a consumer MUST treat a package's declared `target:`/`targets:` field as a restriction-only filter on all target-scoped primitive integration; if the field resolves to a non-empty set that does not contain `all`, the consumer MUST NOT deliver that package's primitives to any active integration target not in the declared set; the filter composes by intersection with the consumer-side per-dependency `targets:` filter and can only narrow, never expand. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 | 0.1.22  | 2026-07-31 | Spec-citation fold for deterministic configured-host credential isolation (closes #2338). Added [req-sc-013] (Section 10.3, consumer MUST): a consumer selects one effective host class before credential resolution, applies documented deterministic precedence when configuration signals overlap, exposes only credentials belonging to the selected class to requests and child processes, and preserves an explicit non-default port in both transport and credential scope. Clarified [req-sc-005] so this configured override is not prohibited by its default host-class collapse rule. Section 1.3, Section 10.11, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 105 -> 106 (101 MUST, 5 SHOULD). |
 | 0.1.23  | 2026-07-31 | Spec-citation fold for case-preserving dependency materialization (closes #2347). Added [req-lk-022] (Section 5.2, consumer MUST): a consumer that case-folds repository identity but retains different source spelling records `materialization_repo_url`, validates it maps to the same canonical identity, excludes it from identity/cache/sort/trust decisions, preserves exact virtual-path casing, and either transactionally migrates one stale case variant or fails closed without deleting colliding paths. Defined rollback semantics for case-only rename and preserved interrupted recovery state. Added the field to the lockfile schema and conformance fixture, plus migration and collision conformance oracles. Hardened lockfile schema: `repo_url` now carries `minLength: 1` to match the prose requirement that git-sourced entries provide a non-empty canonical identifier ([req-lk-003](#req-lk-003)). Section 5.7, Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 106 -> 107 (102 MUST, 5 SHOULD). |
+| 0.1.24  | 2026-08-03 | Spec-citation fold for Cursor universal instruction intent (closes #1744). Added [req-tg-009] (Section 8.5.4, consumer MUST): Cursor rules deploy under `.cursor/rules/<name>.mdc`; an explicit universal `applyTo: "**"` emits `alwaysApply: true` with no `globs`, while other non-empty patterns remain `globs`-scoped and absent or empty `applyTo` emits neither key. Section 8.7 and Section 11.3.2 consumer enumerations and Appendix C updated. Statement count: 107 -> 108 (103 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
