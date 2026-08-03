@@ -580,18 +580,20 @@ class ContextOptimizer:
     def _targeted_hidden_tool_roots(
         self, instructions: builtins.list[Instruction]
     ) -> frozenset[str]:
-        """Return supported top-level hidden roots named by applyTo patterns."""
-        targeted_roots = {
-            root
-            for instruction in instructions
-            for pattern in parse_apply_to(instruction.apply_to)
-            for root in PLACEMENT_HIDDEN_TOOL_TREES
-            if root in pattern.split("/")
-        }
+        """Return supported top-level hidden roots named by applyTo patterns.
+
+        A pattern can name the root after a wildcard (for example,
+        ``**/.apm/**/*.md``), but traversal still admits only the top-level
+        root through :meth:`_is_supported_hidden_tool_root`.
+        """
+        targeted_roots: builtins.set[str] = set()
+        for instruction in instructions:
+            for pattern in parse_apply_to(instruction.apply_to):
+                targeted_roots.update(PLACEMENT_HIDDEN_TOOL_TREES.intersection(pattern.split("/")))
         return frozenset(targeted_roots)
 
     def _relative_path(self, path: Path) -> Path | None:
-        """Return a lexical base-relative path without per-directory resolution."""
+        """Return a lexical path for a directory discovered under ``base_dir``."""
         try:
             return path.relative_to(self.base_dir)
         except ValueError:

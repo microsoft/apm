@@ -307,18 +307,20 @@ YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
 Claude, Cursor, Windsurf, Kiro, and Antigravity.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
-normalized to the same comma-separated OR expression. Every non-null sequence
-entry is preserved for placement and target conversion. Use the scalar form
-only when you want Copilot output to use comma-separated scalar syntax; YAML
-sequences remain verbatim in Copilot output.
+normalized to the same comma-separated OR expression for distributed
+placement. Target installers preserve source frontmatter, so prefer the scalar
+form for portable direct target output; use a sequence when its source
+readability matters. To match a literal comma in a filename, escape it as
+`\,`.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
 the value is preserved verbatim.
 
 During distributed compilation, explicitly scoped patterns may match files in
-supported top-level harness directories such as `.github` or `.opencode`.
-Other hidden directories remain excluded.
+supported top-level harness directories: `.agents`, `.apm`, `.claude`,
+`.codex`, `.cursor`, `.gemini`, `.github`, `.kiro`, `.opencode`, and
+`.windsurf`. Other hidden directories remain excluded.
 
 ### 2. Agent (`*.agent.md`)
 

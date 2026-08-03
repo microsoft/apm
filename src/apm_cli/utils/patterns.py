@@ -11,6 +11,8 @@ from __future__ import annotations
 class _ApplyToPattern(str):
     """A parsed pattern that remembers an escaped top-level comma."""
 
+    _escaped_top_level_comma: bool
+
     def __new__(cls, value: str, escaped_top_level_comma: bool):
         instance = super().__new__(cls, value)
         instance._escaped_top_level_comma = escaped_top_level_comma
