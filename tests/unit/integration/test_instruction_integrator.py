@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -1310,6 +1310,23 @@ class TestApplyToCommaSplitting:
     """Verify all three converters split comma-separated applyTo globs."""
 
     # ---- Claude ----
+
+    @pytest.mark.parametrize(
+        ("converter", "target_key"),
+        [
+            ("_convert_to_claude_rules", "paths:"),
+            ("_convert_to_cursor_rules", "globs:"),
+            ("_convert_to_windsurf_rules", "globs:"),
+        ],
+    )
+    def test_yaml_list_emits_all_globs(self, converter, target_key):
+        """YAML-list applyTo inputs keep every path-scoping rule."""
+        content = "---\napplyTo:\n  - '**/*.py'\n  - '**/*.pyi'\n---\n\n# Rules"
+        result = getattr(InstructionIntegrator, converter)(content)
+
+        assert target_key in result
+        assert '  - "**/*.py"' in result
+        assert '  - "**/*.pyi"' in result
 
     def test_claude_comma_list_emits_yaml_list(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Rules"

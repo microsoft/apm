@@ -308,8 +308,7 @@ Claude, Cursor, Windsurf, Kiro, and Antigravity.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression for distributed
-placement. Target installers preserve source frontmatter, so prefer the scalar
-form for portable direct target output; use a sequence when its source
+placement and target-native installation. Use a sequence when its source
 readability matters. To match a literal comma in a filename, escape it as
 `\,`.
 

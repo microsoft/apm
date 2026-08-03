@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- YAML-list `applyTo` entries now preserve every pattern during compilation
+  and target-native instruction conversion, including explicitly targeted
+  supported hidden tool roots. (#2441)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
 - Release promotions now run marker-bounded lifecycle integration on macOS Intel
   while retaining the full corpus on macOS ARM and Linux, preventing Intel

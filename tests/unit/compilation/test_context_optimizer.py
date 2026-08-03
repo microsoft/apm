@@ -1034,6 +1034,43 @@ class TestApplyToCommaInOptimizer:
 
         assert (comma_project / ".github").resolve() not in opt._directory_cache
 
+    def test_unsupported_hidden_root_does_not_receive_fallback_placement(self, comma_project):
+        """A no-match pattern cannot write generated rules into .git."""
+        (comma_project / ".git").mkdir()
+        instruction = Instruction(
+            name="git-rule",
+            file_path=Path("git-rule.instructions.md"),
+            description="git rule",
+            apply_to=".git/**/*.md",
+            content="rules",
+            source="local",
+        )
+
+        placement = ContextOptimizer(str(comma_project)).optimize_instruction_placement(
+            [instruction]
+        )
+
+        assert (comma_project / ".git") not in placement
+
+    def test_backslash_hidden_root_pattern_is_recognized(self, comma_project):
+        """Windows-authored applyTo paths still admit their targeted root."""
+        target = comma_project / ".opencode"
+        target.mkdir()
+        (target / "guide.md").touch()
+        instruction = Instruction(
+            name="windows-hidden-rule",
+            file_path=Path("windows-hidden-rule.instructions.md"),
+            description="windows hidden rule",
+            apply_to=r".opencode\**\*.md",
+            content="rules",
+            source="local",
+        )
+
+        optimizer = ContextOptimizer(str(comma_project))
+        optimizer.optimize_instruction_placement([instruction])
+
+        assert target.resolve() in optimizer._directory_cache
+
     def test_literal_comma_list_pattern_matches_hidden_tool_tree(self, comma_project):
         """YAML-list literal commas remain one pattern during hidden placement."""
         target = comma_project / ".opencode"

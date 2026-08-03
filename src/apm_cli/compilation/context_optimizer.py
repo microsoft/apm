@@ -262,6 +262,8 @@ class ContextOptimizer:
         self._optimization_decisions.clear()
         self._warnings.clear()
         self._errors.clear()
+        # Shared file discovery runs once per compile batch, so traverse the
+        # union of roots explicitly targeted by its instructions.
         self._placement_hidden_tool_trees = self._targeted_hidden_tool_roots(instructions)
         self._file_list_cache = None
         self._glob_cache.clear()
@@ -495,7 +497,7 @@ class ContextOptimizer:
 
             # Only supported agent-tool roots participate in placement. Other
             # hidden paths (including nested caches) stay pruned.
-            if self._contains_unsupported_hidden_directory(current_path):
+            if self._contains_unsupported_hidden_directory(current_path, relative_path):
                 dirs[:] = []
                 continue
 
@@ -567,14 +569,19 @@ class ContextOptimizer:
             and relative_path.parts[0] in self._placement_hidden_tool_trees
         )
 
-    def _contains_unsupported_hidden_directory(self, path: Path) -> bool:
+    def _contains_unsupported_hidden_directory(
+        self, path: Path, relative_path: Path | None = None
+    ) -> bool:
         """Return whether ``path`` enters a hidden tree not targeted this run."""
-        relative_path = self._relative_path(path)
+        relative_path = relative_path or self._relative_path(path)
         if relative_path is None:
             return True
-        return any(
-            part.startswith(".") and not (index == 0 and part in self._placement_hidden_tool_trees)
-            for index, part in enumerate(relative_path.parts)
+        # os.walk reaches a nested directory only after _should_exclude_subdir
+        # admitted its parent, so the top-level component is sufficient here.
+        return bool(
+            relative_path.parts
+            and relative_path.parts[0].startswith(".")
+            and relative_path.parts[0] not in self._placement_hidden_tool_trees
         )
 
     def _targeted_hidden_tool_roots(
@@ -589,7 +596,9 @@ class ContextOptimizer:
         targeted_roots: builtins.set[str] = set()
         for instruction in instructions:
             for pattern in parse_apply_to(instruction.apply_to):
-                targeted_roots.update(PLACEMENT_HIDDEN_TOOL_TREES.intersection(pattern.split("/")))
+                targeted_roots.update(
+                    PLACEMENT_HIDDEN_TOOL_TREES.intersection(pattern.replace("\\", "/").split("/"))
+                )
         return frozenset(targeted_roots)
 
     def _relative_path(self, path: Path) -> Path | None:
@@ -765,7 +774,11 @@ class ContextOptimizer:
             # Skip if it's a wildcard
             if "*" not in first_part and first_part:
                 intended_dir = self.base_dir / first_part
-                if intended_dir.exists() and intended_dir.is_dir():
+                if (
+                    intended_dir.exists()
+                    and intended_dir.is_dir()
+                    and not self._should_exclude_subdir(intended_dir)
+                ):
                     return intended_dir
 
         return None

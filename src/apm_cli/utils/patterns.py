@@ -7,6 +7,10 @@ parse so converters and the placement optimizer behave consistently.
 
 from __future__ import annotations
 
+_APPLY_TO_ESCAPE = "\\"
+_APPLY_TO_SEPARATOR = ","
+_ESCAPABLE_APPLY_TO_CHARS = frozenset({_APPLY_TO_SEPARATOR, _APPLY_TO_ESCAPE})
+
 
 class _ApplyToPattern(str):
     """A parsed pattern that remembers an escaped top-level comma."""
@@ -39,7 +43,11 @@ def has_top_level_comma(pattern: str) -> bool:
     index = 0
     while index < len(pattern):
         ch = pattern[index]
-        if ch == "\\" and index + 1 < len(pattern) and pattern[index + 1] in {",", "\\"}:
+        if (
+            ch == _APPLY_TO_ESCAPE
+            and index + 1 < len(pattern)
+            and pattern[index + 1] in _ESCAPABLE_APPLY_TO_CHARS
+        ):
             index += 2
             continue
         if ch == "{":
@@ -47,7 +55,7 @@ def has_top_level_comma(pattern: str) -> bool:
         elif ch == "}":
             if depth > 0:
                 depth -= 1
-        elif ch == "," and depth == 0:
+        elif ch == _APPLY_TO_SEPARATOR and depth == 0:
             return True
         index += 1
     return False
@@ -105,8 +113,8 @@ def _escape_apply_to_segment(pattern: str) -> str:
     escaped: list[str] = []
     depth = 0
     for char in pattern:
-        if char == "\\":
-            escaped.append("\\\\")
+        if char == _APPLY_TO_ESCAPE:
+            escaped.append(_APPLY_TO_ESCAPE * 2)
         elif char == "{":
             depth += 1
             escaped.append(char)
@@ -114,8 +122,8 @@ def _escape_apply_to_segment(pattern: str) -> str:
             if depth > 0:
                 depth -= 1
             escaped.append(char)
-        elif char == "," and depth == 0:
-            escaped.append("\\,")
+        elif char == _APPLY_TO_SEPARATOR and depth == 0:
+            escaped.append(_APPLY_TO_ESCAPE + _APPLY_TO_SEPARATOR)
         else:
             escaped.append(char)
     return "".join(escaped)
@@ -148,9 +156,15 @@ def parse_apply_to(value: str | None) -> list[str]:
     index = 0
     while index < len(value):
         char = value[index]
-        if char == "\\" and index + 1 < len(value) and value[index + 1] in {",", "\\"}:
+        if (
+            char == _APPLY_TO_ESCAPE
+            and index + 1 < len(value)
+            and value[index + 1] in _ESCAPABLE_APPLY_TO_CHARS
+        ):
             current.append(value[index + 1])
-            escaped_top_level_comma = escaped_top_level_comma or value[index + 1] == ","
+            escaped_top_level_comma = (
+                escaped_top_level_comma or value[index + 1] == _APPLY_TO_SEPARATOR
+            )
             index += 2
             continue
         if char == "{":
@@ -160,7 +174,7 @@ def parse_apply_to(value: str | None) -> list[str]:
             if depth > 0:
                 depth -= 1
             current.append(char)
-        elif char == "," and depth == 0:
+        elif char == _APPLY_TO_SEPARATOR and depth == 0:
             append_current()
             current = []
             escaped_top_level_comma = False

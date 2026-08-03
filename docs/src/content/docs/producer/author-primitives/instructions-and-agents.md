@@ -71,11 +71,10 @@ applyTo:
 ```
 
 When a YAML sequence contains multiple patterns, APM normalizes every
-non-null entry into the same comma-separated OR expression used by distributed
-placement. Target installers preserve source frontmatter, so prefer the scalar
-form for portable direct target output; use a sequence when its source
-readability matters. To match a literal comma in a filename, escape it as
-`\,`.
+non-null entry into the same comma-separated OR expression used by
+[distributed compilation](../compile/) and target-native installation. Use a
+sequence when its source readability matters. To match a literal comma in a
+filename, escape it as `\,`.
 
 ```markdown
 ---
