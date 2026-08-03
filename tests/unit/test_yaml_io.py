@@ -331,40 +331,20 @@ class TestLoadFrontmatter:
 
         monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
 
-        with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte"):
+        with pytest.raises(yaml.YAMLError, match="YAML frontmatter exceeds 8-byte"):
             load_frontmatter(io.StringIO("---\nkey: 1234\n---\nbody\n"))
 
-    def test_frontmatter_reads_at_most_the_input_cap(self, monkeypatch):
-        """Untrusted frontmatter reads no more than the configured bound."""
-        from apm_cli.utils import yaml_io
-
-        class BoundedReader:
-            def __init__(self) -> None:
-                self.limit: int | None = None
-
-            def read(self, limit: int) -> str:
-                self.limit = limit
-                return "x: 1\n"
-
-        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
-        reader = BoundedReader()
-
-        post = load_frontmatter(reader)
-
-        assert post.metadata == {}
-        assert reader.limit == 9
-
-    def test_text_frontmatter_reads_bytes_from_its_buffer(self, monkeypatch):
-        """A text file object uses its byte buffer for the raw cap."""
+    def test_large_markdown_body_with_small_frontmatter_is_accepted(self, monkeypatch):
+        """Only the fenced YAML header, not the Markdown body, has the cap."""
         from apm_cli.utils import yaml_io
 
         monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
-        reader = io.TextIOWrapper(io.BytesIO(b"x: 1\n"), encoding="utf-8")
+        reader = io.StringIO("---\na: ok\n---\n" + ("body\n" * 4))
 
         post = load_frontmatter(reader)
 
-        assert post.metadata == {}
-        assert reader.buffer.tell() == 5
+        assert post.metadata == {"a": "ok"}
+        assert post.content.count("body") == 4
 
 
 class TestSharedNodeScan:

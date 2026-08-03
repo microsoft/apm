@@ -288,7 +288,7 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
     re-resolves, re-hashes, or touches the network.
     """
     from apm_cli.core.scope import InstallScope, get_apm_dir
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
     from apm_cli.export.sbom import export_sbom
 
     if global_:
@@ -302,7 +302,14 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
         _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
         sys.exit(1)
 
-    lockfile = LockFile.from_yaml(lockfile_path.read_text(encoding="utf-8"))
+    try:
+        lockfile = LockFile.read(lockfile_path)
+    except LockfileFormatError as exc:
+        _rich_error(str(exc))
+        sys.exit(1)
+    if lockfile is None:
+        _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
+        sys.exit(1)
     resolved_timestamp = _resolve_export_timestamp(timestamp, lockfile.generated_at)
 
     document = export_sbom(lockfile, fmt, timestamp=resolved_timestamp)

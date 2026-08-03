@@ -114,6 +114,21 @@ def test_export_missing_lockfile_errors(runner, tmp_path):
         assert "No lockfile" in result.stderr
 
 
+def test_export_rejects_oversized_lockfile_before_reading_it(runner, tmp_path, monkeypatch):
+    """Export routes lockfile input through the bounded canonical reader."""
+    from apm_cli.utils import yaml_io
+
+    monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        (Path.cwd() / "apm.yml").write_text("name: test\nversion: 1.0.0\n")
+        (Path.cwd() / "apm.lock.yaml").write_text("x: 123456789\n")
+
+        result = runner.invoke(cli, ["lock", "export"])
+
+        assert result.exit_code != 0
+        assert "safe limit" in result.output
+
+
 def test_export_does_not_resolve(runner, tmp_path, monkeypatch):
     # export must read the lockfile only -- never invoke the resolve pipeline.
     import apm_cli.commands.install as install_mod

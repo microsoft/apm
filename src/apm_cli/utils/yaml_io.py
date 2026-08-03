@@ -264,12 +264,12 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             self._flatten_depth -= 1
 
 
-def _ensure_yaml_input_size(text: str) -> None:
+def _ensure_yaml_input_size(text: str, *, source: str = "YAML input") -> None:
     """Reject YAML text that exceeds the raw input cap before parsing."""
     size = len(text.encode("utf-8"))
     if size > _MAX_YAML_INPUT_BYTES:
         raise yaml.YAMLError(
-            f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit ({size} bytes); "
+            f"{source} exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit ({size} bytes); "
             "reduce or regenerate the YAML file before retrying"
         )
 
@@ -291,19 +291,18 @@ def _read_yaml_text(path: str | Path) -> str:
 
 
 def _read_frontmatter_text(fd: Any, encoding: str) -> str:
-    """Read frontmatter input under the raw YAML cap."""
+    """Read a regular Markdown source for the bounded frontmatter handler."""
     if isinstance(fd, (str, os.PathLike)):
-        return _read_yaml_text(fd)
-    stream = getattr(fd, "buffer", fd)
-    raw = stream.read(_MAX_YAML_INPUT_BYTES + 1)
+        markdown_path = Path(fd)
+        descriptor = os.open(markdown_path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise yaml.YAMLError(f"Markdown source {markdown_path} must be a regular file")
+            raw = stream.read()
+    else:
+        raw = fd.read()
     if isinstance(raw, bytes):
-        if len(raw) > _MAX_YAML_INPUT_BYTES:
-            raise yaml.YAMLError(
-                f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit ({len(raw)} bytes); "
-                "reduce or regenerate the YAML file before retrying"
-            )
         return raw.decode(encoding)
-    _ensure_yaml_input_size(raw)
     return raw
 
 
@@ -445,7 +444,7 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     def load(self, fm: str, **kwargs: Any) -> Any:
         kwargs["Loader"] = _BoundedSafeLoader
         try:
-            _ensure_yaml_input_size(fm)
+            _ensure_yaml_input_size(fm, source="YAML frontmatter")
             return yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
         except yaml.YAMLError:
             raise

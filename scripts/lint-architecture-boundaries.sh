@@ -97,6 +97,12 @@ check_pattern \
     "Lockfile supported-version authority belongs in deps/lockfile.py" \
     'SUPPORTED_LOCKFILE_VERSIONS|lockfile_version[[:space:]]+(==|!=|in)' \
     $(find src/apm_cli -name '*.py' ! -path 'src/apm_cli/deps/lockfile.py')
+lock_export_file="src/apm_cli/commands/lock.py"
+if ! grep -q 'lockfile = LockFile.read(lockfile_path)' "$lock_export_file" \
+    || grep -q 'LockFile.from_yaml(lockfile_path.read_text' "$lock_export_file"; then
+    echo "[x] Lock export must read lockfiles through LockFile.read"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC3: outcome and policy enforcement authorities"
 check_pattern \

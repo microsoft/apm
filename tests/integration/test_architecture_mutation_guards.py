@@ -8,6 +8,14 @@ from pathlib import Path
 import pytest
 
 
+def test_lock_export_routes_filesystem_input_through_lockfile_reader() -> None:
+    """Lock export must not bypass LockFile.read's bounded source policy."""
+    source = Path("src/apm_cli/commands/lock.py").read_text(encoding="utf-8")
+
+    assert "lockfile = LockFile.read(lockfile_path)" in source
+    assert "LockFile.from_yaml(lockfile_path.read_text" not in source
+
+
 def test_compiled_output_batch_scans_once_before_writing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
