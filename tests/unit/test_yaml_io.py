@@ -1,6 +1,8 @@
 """Tests for apm_cli.utils.yaml_io -- cross-platform UTF-8 YAML I/O."""
 
 import io
+import os
+from pathlib import Path
 
 import pytest
 import yaml
@@ -72,6 +74,27 @@ class TestLoadYaml:
         p = tmp_path / "large.yml"
         p.write_text("key: value\n", encoding="utf-8")
         monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 1)
+
+        with pytest.raises(yaml.YAMLError, match=r"YAML file .* safe limit"):
+            load_yaml(p)
+
+    @pytest.mark.skipif(os.name == "nt", reason="os.mkfifo is unavailable on Windows")
+    def test_named_pipe_fails_closed_without_blocking(self, tmp_path):
+        """A FIFO source is rejected before a writer can block the loader."""
+        fifo = tmp_path / "hostile.yml"
+        os.mkfifo(fifo)
+
+        with pytest.raises(yaml.YAMLError, match="must be a regular file"):
+            load_yaml(fifo)
+
+    def test_file_cap_does_not_trust_path_metadata(self, tmp_path, monkeypatch):
+        """The opened descriptor, not stale path metadata, controls the cap."""
+        from apm_cli.utils import yaml_io
+
+        p = tmp_path / "large.yml"
+        p.write_text("key: value\n", encoding="utf-8")
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 1)
+        monkeypatch.setattr(Path, "stat", lambda _path: pytest.fail("path stat must not run"))
 
         with pytest.raises(yaml.YAMLError, match=r"YAML file .* safe limit"):
             load_yaml(p)
@@ -224,7 +247,7 @@ class TestLoadYamlStr:
 
         monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
 
-        with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte safe limit"):
+        with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte"):
             load_yaml_str("key: 1234\n")
 
     def test_benign_reused_anchor_dag_still_parses(self):
@@ -308,7 +331,7 @@ class TestLoadFrontmatter:
 
         monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
 
-        with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte safe limit"):
+        with pytest.raises(yaml.YAMLError, match="YAML input exceeds 8-byte"):
             load_frontmatter(io.StringIO("---\nkey: 1234\n---\nbody\n"))
 
     def test_frontmatter_reads_at_most_the_input_cap(self, monkeypatch):
@@ -330,6 +353,18 @@ class TestLoadFrontmatter:
 
         assert post.metadata == {}
         assert reader.limit == 9
+
+    def test_text_frontmatter_reads_bytes_from_its_buffer(self, monkeypatch):
+        """A text file object uses its byte buffer for the raw cap."""
+        from apm_cli.utils import yaml_io
+
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+        reader = io.TextIOWrapper(io.BytesIO(b"x: 1\n"), encoding="utf-8")
+
+        post = load_frontmatter(reader)
+
+        assert post.metadata == {}
+        assert reader.buffer.tell() == 5
 
 
 class TestSharedNodeScan:

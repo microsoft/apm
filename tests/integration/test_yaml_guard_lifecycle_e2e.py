@@ -123,6 +123,6 @@ def test_oversize_literal_lockfile_fails_audit_without_writes(
 
     combined_output = f"{result.stdout}\n{result.stderr}"
     assert result.returncode != 0
-    assert "YAML input exceeds" in combined_output
+    assert "YAML file" in combined_output
     assert "reduce or regenerate the YAML file before retrying" in combined_output
     assert_unchanged(before, ArtifactSnapshot.capture(project))

@@ -9,6 +9,20 @@ Found a confusing error? Search this page first. Each entry shows the error stri
 
 Errors are grouped by the surface that produces them: install, compile, audit, run, and auth/network.
 
+## Configuration
+
+### `YAML file ... exceeds 8388608-byte (8 MiB) safe limit`
+
+```
+YAML file apm.lock.yaml exceeds 8388608-byte (8 MiB) safe limit (... bytes); reduce or regenerate the YAML file before retrying
+```
+
+Cause: APM rejects YAML sources larger than 8 MiB before parsing them. This includes project manifests and lockfiles.
+
+Fix: reduce the source file. For a generated `apm.lock.yaml`, reduce its inputs, then run `apm install` to regenerate it. Files exactly 8 MiB are accepted.
+
+See also: [Manifest schema](../../reference/manifest-schema/), [Lockfile specification](../../reference/lockfile-spec/)
+
 ## Install
 
 ### `apm.yml not found. Run 'apm init' first.`

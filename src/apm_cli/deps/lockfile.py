@@ -838,7 +838,9 @@ class LockFile:
         if not path.exists():
             return None
         try:
-            return cls.from_yaml(path.read_text(encoding="utf-8"))
+            from ..utils.yaml_io import _read_yaml_text
+
+            return cls.from_yaml(_read_yaml_text(path))
         except (LockfileFormatError, UnsupportedLockfileVersionError):
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:

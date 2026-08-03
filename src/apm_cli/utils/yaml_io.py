@@ -269,7 +269,7 @@ def _ensure_yaml_input_size(text: str) -> None:
     size = len(text.encode("utf-8"))
     if size > _MAX_YAML_INPUT_BYTES:
         raise yaml.YAMLError(
-            f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({size} bytes); "
+            f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit ({size} bytes); "
             "reduce or regenerate the YAML file before retrying"
         )
 
@@ -277,13 +277,14 @@ def _ensure_yaml_input_size(text: str) -> None:
 def _read_yaml_text(path: str | Path) -> str:
     """Read a regular YAML file through a bounded single descriptor."""
     yaml_path = Path(path)
-    with yaml_path.open("rb") as stream:
+    descriptor = os.open(yaml_path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise yaml.YAMLError(f"YAML source {yaml_path} must be a regular file")
         raw = stream.read(_MAX_YAML_INPUT_BYTES + 1)
     if len(raw) > _MAX_YAML_INPUT_BYTES:
         raise yaml.YAMLError(
-            f"YAML file {yaml_path} exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit "
+            f"YAML file {yaml_path} exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit "
             f"({len(raw)} bytes); reduce or regenerate the YAML file before retrying"
         )
     return raw.decode("utf-8")
@@ -293,11 +294,12 @@ def _read_frontmatter_text(fd: Any, encoding: str) -> str:
     """Read frontmatter input under the raw YAML cap."""
     if isinstance(fd, (str, os.PathLike)):
         return _read_yaml_text(fd)
-    raw = fd.read(_MAX_YAML_INPUT_BYTES + 1)
+    stream = getattr(fd, "buffer", fd)
+    raw = stream.read(_MAX_YAML_INPUT_BYTES + 1)
     if isinstance(raw, bytes):
         if len(raw) > _MAX_YAML_INPUT_BYTES:
             raise yaml.YAMLError(
-                f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte safe limit ({len(raw)} bytes); "
+                f"YAML input exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit ({len(raw)} bytes); "
                 "reduce or regenerate the YAML file before retrying"
             )
         return raw.decode(encoding)

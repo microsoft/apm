@@ -9,6 +9,7 @@ import yaml
 from apm_cli.deps.lockfile import (
     LockedDependency,
     LockFile,
+    LockfileFormatError,
     get_lockfile_path,
     migrate_lockfile_if_needed,
 )
@@ -250,6 +251,17 @@ class TestLockFile:
         loaded = LockFile.read(lock_path)
         assert loaded is not None
         assert loaded.has_dependency("owner/repo")
+
+    def test_read_rejects_oversized_lockfile_before_parsing(self, tmp_path, monkeypatch):
+        """Lockfile reads use the canonical bounded YAML file reader."""
+        from apm_cli.utils import yaml_io
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text("x: 123456789\n", encoding="utf-8")
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+
+        with pytest.raises(LockfileFormatError, match=r"YAML file .* safe limit"):
+            LockFile.read(lock_path)
 
     def test_mcp_servers_round_trip(self, tmp_path):
         """mcp_servers must survive a write → read cycle."""
