@@ -171,7 +171,9 @@ Unregister a marketplace.
 
 ### `apm marketplace validate NAME`
 
-Validate the manifest of a registered marketplace against the schema.
+Validate a registered marketplace's raw manifest structure and plugin schema.
+Malformed fields are reported with their JSON path; validation exits 1 without
+rewriting the source manifest.
 
 ### `apm marketplace init`
 

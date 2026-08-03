@@ -32,11 +32,20 @@ def validate_marketplace(
 
     Returns a list of ``ValidationResult`` objects, one per check.
     """
-    plugins = manifest.plugins
     return [
-        validate_plugin_schema(plugins),
-        validate_no_duplicate_names(plugins),
+        validate_marketplace_structure(manifest),
+        validate_plugin_schema(manifest.plugins),
+        validate_no_duplicate_names(manifest.plugins),
     ]
+
+
+def validate_marketplace_structure(manifest: MarketplaceManifest) -> ValidationResult:
+    """Report raw manifest structure errors retained by the tolerant parser."""
+    return ValidationResult(
+        check_name="Structure",
+        passed=not manifest.structural_errors,
+        errors=list(manifest.structural_errors),
+    )
 
 
 def validate_plugin_schema(
