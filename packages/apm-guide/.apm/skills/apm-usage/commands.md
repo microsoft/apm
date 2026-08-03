@@ -51,10 +51,13 @@ A normal project install creates or updates `apm.lock.yaml` when the manifest de
 ### Registry MCP runtime variables
 
 When a required registry runtime variable declares a default, `apm install`
-prompts once with that value as the suggestion. Press Enter to accept it or
-enter an override. The chosen value replaces every matching `{variable}`
-reference across runtime and package arguments before APM writes the target
-config.
+prompts once per variable with that value as the suggestion. Press Enter to
+accept it or enter an override. Secret defaults remain accepted on Enter but
+are never displayed. For OCI/Docker launchers, the chosen value replaces
+every matching `{variable}` reference across runtime and package arguments
+before APM writes the target config. A required variable with neither a
+collected value nor a default declines that target configuration; VS Code
+treats `workspaceFolder` as its built-in `${workspaceFolder}` token.
 
 ### Target resolution chain
 

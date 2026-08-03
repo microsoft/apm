@@ -448,7 +448,7 @@ class MCPServerOperations:
 
                 if existing_value:
                     env_vars[var_name] = existing_value
-                elif default_value and not (prompt_defaults and required):
+                elif default_value:
                     env_vars[var_name] = default_value
                 elif not required:
                     continue
@@ -544,7 +544,7 @@ class MCPServerOperations:
                 if existing_value:
                     click.echo(f"  [+] {var_name}: using existing value")
                     env_vars[var_name] = existing_value
-                elif default_value:
+                elif default_value and not (prompt_defaults and required):
                     if var_info.get("secret", False) is True:
                         _rich_info(f"Using registry default for secret MCP variable '{var_name}'.")
                     env_vars[var_name] = default_value

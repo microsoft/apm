@@ -1,6 +1,6 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
+Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
 req-tg-001..008, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import jsonschema
 import pytest
 
+from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
@@ -218,6 +219,33 @@ def test_consumer_enforces_yaml_safe_subset():
     authoring panel cannot silently delete the requirement.
     """
     assert_spec_contains("YAML safe", "&anchor", "MUST be rejected", "YAML 1.1 octal")
+
+
+@pytest.mark.req("req-mf-023")
+def test_consumer_resolves_runtime_argument_templates_without_secret_leakage():
+    """Runtime templates resolve completely and keep secret bytes target-native."""
+    assert_spec_contains(
+        "every `{name}` occurrence",
+        "MUST NOT\nwrite a literal unresolved `{name}` template",
+        "target-native secret input or reference",
+    )
+    assert (
+        MCPClientAdapter._substitute_runtime_variables(
+            "{workdir}:{workdir}",
+            {"workdir": {"default": "/default"}},
+            {"workdir": "/override"},
+        )
+        == "/override:/override"
+    )
+    assert (
+        MCPClientAdapter._substitute_runtime_variables(
+            "{token}:{token}",
+            {"token": {"isSecret": True}},
+            {"token": "raw-secret"},
+            secret_variable_fallbacks={"token": "${input:token}"},
+        )
+        == "${input:token}:${input:token}"
+    )
 
 
 @pytest.mark.req("req-mf-021")

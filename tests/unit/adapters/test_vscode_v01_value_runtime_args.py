@@ -16,6 +16,7 @@ builder. The tests below pin that dedicated Docker contract.
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -459,6 +460,48 @@ class TestRenderedDockerLauncher(unittest.TestCase):
     def test_launcher_is_no_longer_the_bare_fallback(self):
         config = _config(V01_VALUE_PACKAGE, runtime_vars=RUNTIME_VARS)
         self.assertNotEqual(config.get("args"), FALLBACK_ARGS)
+
+    def test_secret_runtime_value_uses_a_vscode_input_everywhere(self):
+        """Secret values must not be written into target configuration bytes."""
+        secret = "registry-secret"
+        package = _docker_package(
+            {"type": "positional", "value": "run"},
+            {
+                "type": "positional",
+                "value": "--token={access_token}",
+                "variables": {
+                    "access_token": {
+                        "description": "Registry access token",
+                        "isRequired": True,
+                        "isSecret": True,
+                    }
+                },
+            },
+            {"type": "positional", "value": "--again={access_token}"},
+        )
+
+        config, inputs = _make_vscode()._format_server_config(
+            {"id": "team/mcp-server", "name": "team/mcp-server", "packages": [package]},
+            runtime_vars={"access_token": secret},
+        )
+
+        assert config["args"] == [
+            "run",
+            "-i",
+            "--rm",
+            "--token=${input:access-token}",
+            "--again=${input:access-token}",
+            IMAGE,
+        ]
+        assert secret not in json.dumps(config)
+        assert inputs == [
+            {
+                "type": "promptString",
+                "id": "access-token",
+                "description": "Registry access token",
+                "password": True,
+            }
+        ]
 
     def test_unresolvable_package_keeps_the_previous_launcher(self):
         with patch("apm_cli.adapters.client.vscode._rich_warning") as warning:

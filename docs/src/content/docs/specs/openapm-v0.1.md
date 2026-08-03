@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **108 normative statements** indexed in
+- OpenAPM v0.1 carries **109 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -634,7 +634,7 @@ The OPTIONAL `devDependencies` block has the same structure as
 installed locally but excluded from packed plugin bundles produced
 by the producer toolchain.
 
-### 4.5 Variable references in MCP env/headers
+### 4.5 Variable references in MCP env/headers and runtime arguments
 
 Values inside `mcp[].env` and `mcp[].headers` MAY contain three
 placeholder syntaxes:
@@ -655,6 +655,17 @@ in which an unsupported placeholder is silently passed through as
 literal text. When an unsupported placeholder is encountered for the
 active target, the consumer MUST emit a diagnostic and MAY refuse to
 write the generated config.
+
+<a id="req-mf-023"></a>
+**[req-mf-023]** A conforming **consumer** implementation that resolves
+registry-declared MCP runtime-argument templates MUST apply a resolved
+non-secret variable value to every `{name}` occurrence across the
+package's runtime and package arguments, including an occurrence whose
+argument does not repeat the variable metadata. The consumer MUST NOT
+write a literal unresolved `{name}` template to a generated target
+configuration. When a runtime argument variable is declared secret, the
+consumer MUST use the target-native secret input or reference rather
+than write the resolved secret value into generated configuration bytes.
 
 ### 4.6 Manifest extension surfaces
 
@@ -752,6 +763,7 @@ This section's normative statements are:
   [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
+  [req-mf-023](#req-mf-023),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
@@ -2938,6 +2950,7 @@ conformance statement identifying:
 [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
+[req-mf-023](#req-mf-023),
 [req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -3323,6 +3336,7 @@ renumbering of conformance classes.
 | [req-mf-020](#req-mf-020)                | MUST    | 4.1     | consumer    |
 | [req-mf-021](#req-mf-021)                | MUST    | 4.8     | producer    |
 | [req-mf-022](#req-mf-022)                | MUST    | 4.3.2   | consumer    |
+| [req-mf-023](#req-mf-023)                | MUST    | 4.5     | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-lk-001](#req-lk-001)                | MUST    | 5.1     | consumer    |
@@ -3410,7 +3424,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 108** (103 MUST, 5 SHOULD).
+**Total normative statements: 109** (104 MUST, 5 SHOULD).
 
 ---
 
@@ -3444,6 +3458,7 @@ renumbering of conformance classes.
 | 0.1.22  | 2026-07-31 | Spec-citation fold for deterministic configured-host credential isolation (closes #2338). Added [req-sc-013] (Section 10.3, consumer MUST): a consumer selects one effective host class before credential resolution, applies documented deterministic precedence when configuration signals overlap, exposes only credentials belonging to the selected class to requests and child processes, and preserves an explicit non-default port in both transport and credential scope. Clarified [req-sc-005] so this configured override is not prohibited by its default host-class collapse rule. Section 1.3, Section 10.11, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 105 -> 106 (101 MUST, 5 SHOULD). |
 | 0.1.23  | 2026-07-31 | Spec-citation fold for case-preserving dependency materialization (closes #2347). Added [req-lk-022] (Section 5.2, consumer MUST): a consumer that case-folds repository identity but retains different source spelling records `materialization_repo_url`, validates it maps to the same canonical identity, excludes it from identity/cache/sort/trust decisions, preserves exact virtual-path casing, and either transactionally migrates one stale case variant or fails closed without deleting colliding paths. Defined rollback semantics for case-only rename and preserved interrupted recovery state. Added the field to the lockfile schema and conformance fixture, plus migration and collision conformance oracles. Hardened lockfile schema: `repo_url` now carries `minLength: 1` to match the prose requirement that git-sourced entries provide a non-empty canonical identifier ([req-lk-003](#req-lk-003)). Section 5.7, Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 106 -> 107 (102 MUST, 5 SHOULD). |
 | 0.1.24  | 2026-08-03 | Spec-citation fold for fail-closed Kiro agent vocabulary gate (closes #2089 Mode-B silent-extension gate). Added [req-tg-009] (Section 8.5.1, consumer MUST): a consumer deploying an agent primitive into a target with a fixed, enumerable capability vocabulary MUST fail closed -- writing zero bytes and emitting an actionable diagnostic -- if any source-declared tool falls outside the approved set; the gate fires per agent independently and does not block vocabulary-conformant sibling agents; the gate applies only to targets included in the effective intersection under [req-tg-008]; content-identity fast-paths are not exempt. Added editorial note naming the Target Registry companion as the vocabulary authority and mandating version-pinning for conformance testing. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 107 -> 108 (103 MUST, 5 SHOULD). |
+| 0.1.25  | 2026-08-03 | Spec-citation fold for MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and secret values use target-native secret references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 108 -> 109 (104 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

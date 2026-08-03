@@ -342,7 +342,11 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
             # Handle docker packages
             elif is_docker:
-                args = self._docker_run_args(package, runtime_vars)
+                args = self._docker_run_args(
+                    package,
+                    runtime_vars,
+                    secret_variable_fallbacks=secret_fallbacks,
+                )
                 if args is None:
                     if package.get("runtime_arguments") or package.get("package_arguments"):
                         _rich_warning(
@@ -776,7 +780,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
         return extracted
 
     @classmethod
-    def _docker_run_args(cls, package: dict, runtime_vars: dict | None = None) -> list[str] | None:
+    def _docker_run_args(
+        cls,
+        package: dict,
+        runtime_vars: dict | None = None,
+        *,
+        secret_variable_fallbacks: dict[str, str] | None = None,
+    ) -> list[str] | None:
         """Build ``docker run`` arguments from a container package's metadata.
 
         Container packages retain a dedicated assembler because Docker requires
@@ -813,10 +823,18 @@ class VSCodeClientAdapter(MCPClientAdapter):
         """
         if not package:
             return None
-        run_options = cls._docker_arg_values(package.get("runtime_arguments"), runtime_vars)
+        run_options = cls._docker_arg_values(
+            package.get("runtime_arguments"),
+            runtime_vars,
+            secret_variable_fallbacks,
+        )
         if run_options is None:
             return None
-        package_args = cls._docker_arg_values(package.get("package_arguments"), runtime_vars)
+        package_args = cls._docker_arg_values(
+            package.get("package_arguments"),
+            runtime_vars,
+            secret_variable_fallbacks,
+        )
         if package_args is None:
             return None
         if not run_options and package_args and package_args[0] == "run":
@@ -855,7 +873,10 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
     @classmethod
     def _docker_arg_values(
-        cls, entries: list | None, runtime_vars: dict | None
+        cls,
+        entries: list | None,
+        runtime_vars: dict | None,
+        secret_variable_fallbacks: dict[str, str] | None,
     ) -> list[str] | None:
         """Resolve one registry argument list into CLI argument strings.
 
@@ -909,6 +930,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 variables if isinstance(variables, dict) else None,
                 runtime_vars,
                 {"workspaceFolder": "${workspaceFolder}"},
+                secret_variable_fallbacks,
             )
             if substituted is None:
                 if required:

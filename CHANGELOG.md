@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Required MCP runtime defaults are now overrideable prompts, while secret
+  defaults remain hidden and VS Code OCI launchers resolve every runtime
+  placeholder without writing secret values to `mcp.json`. (#2455)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
 - Release promotions now run marker-bounded lifecycle integration on macOS Intel
   while retaining the full corpus on macOS ARM and Linux, preventing Intel

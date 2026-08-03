@@ -663,6 +663,7 @@ class MCPClientAdapter(ABC):
         variables: dict[object, object] | None,
         runtime_vars: dict[str, object] | None,
         runtime_variable_fallbacks: dict[str, str] | None = None,
+        secret_variable_fallbacks: dict[str, str] | None = None,
     ) -> str | None:
         """Resolve every APM runtime variable in one registry argument template.
 
@@ -671,9 +672,15 @@ class MCPClientAdapter(ABC):
         every template, not only the metadata-bearing entry. Target-specific
         fallbacks are used only for declared variables with no collected value.
         """
-        values: dict[str, str] = {}
+        secret_fallbacks = secret_variable_fallbacks or {}
+        values: dict[str, str] = dict(secret_fallbacks)
         for name, value in (runtime_vars or {}).items():
-            if isinstance(name, str) and value is not None and str(value) != "":
+            if (
+                isinstance(name, str)
+                and name not in secret_fallbacks
+                and value is not None
+                and str(value) != ""
+            ):
                 values[name] = str(value)
 
         fallbacks = runtime_variable_fallbacks or {}
@@ -683,6 +690,9 @@ class MCPClientAdapter(ABC):
             placeholder = f"{{{name}}}"
             if placeholder not in template or name in values:
                 continue
+            secret_marker = metadata.get("isSecret", metadata.get("is_secret", False))
+            if secret_marker is True:
+                return None
             fallback = fallbacks.get(name)
             if fallback is not None:
                 values[name] = fallback
