@@ -17,7 +17,13 @@ from . import (
 )
 
 
-@package.command(help="Add a package to marketplace authoring config")
+@package.command(
+    help=(
+        "Add a package to marketplace authoring config. SOURCE accepts "
+        "owner/repo, host.tld/owner/repo, or "
+        "https://host.tld/owner/repo (nested paths allowed)."
+    )
+)
 @click.argument("source")
 @click.option("--name", default=None, help="Package name (default: repo name)")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")

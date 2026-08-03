@@ -459,7 +459,7 @@ def _source_error(ctx: str, source: str, *, source_base: str | None) -> Marketpl
     forms = [
         "'<owner>/<repo>'",
         "'<host.tld>/<owner>/<repo>'",
-        "'https://<host.tld>/<path>/<to>/<repo>[.git]'",
+        "'https://<host.tld>/<owner>/<repo>[.git]' (nested paths allowed)",
         "'./<path>'",
     ]
     if source_base is not None:

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Marketplace package sources now accept full HTTPS repository URLs with nested
+  paths while retaining strict shorthand validation. (#2439)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
 - Release promotions now run marker-bounded lifecycle integration on macOS Intel
   while retaining the full corpus on macOS ARM and Linux, preventing Intel

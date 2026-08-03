@@ -831,7 +831,9 @@ class TestHostPrefixedSource:
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError) as error:
             load_marketplace_yml(yml)
-        assert "'https://<host.tld>/<path>/<to>/<repo>[.git]'" in str(error.value)
+        assert "'https://<host.tld>/<owner>/<repo>[.git]' (nested paths allowed)" in str(
+            error.value
+        )
 
     # -- Security-relevant rejection cases ---------------------------------
 
