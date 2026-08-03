@@ -734,7 +734,7 @@ marketplace:
       source: ghe.corp.example.com/platform/agents   # host.tld/owner/repo
       version: "^0.3.0"
       # Equivalent full URL form (trailing .git is stripped):
-      # source: https://ghe.corp.example.com/platform/team/agents.git
+      # source: https://ghe.corp.example.com/platform/agents.git
 ```
 
 Schema rules:

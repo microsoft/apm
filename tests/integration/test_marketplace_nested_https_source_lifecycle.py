@@ -22,15 +22,11 @@ pytestmark = [
 ]
 
 _NESTED_SOURCE = "https://git.example.invalid/group/subgroup/marketplace-package.git"
+_UNSAFE_NESTED_SOURCE = "https://git.example.invalid/group/%2e%2e/marketplace-package.git"
 
 
-def test_marketplace_check_offline_reaches_nested_https_ref_resolution_without_writes(
-    tmp_path: Path,
-    apm_binary_path: Path,
-) -> None:
-    """A nested HTTPS source reaches offline resolution without project mutation."""
-    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
-    project = isolated.work_root / "nested-marketplace"
+def _write_marketplace_config(project: Path, source: str) -> None:
+    """Write a minimal marketplace manifest with one remote package."""
     project.mkdir()
     (project / "apm.yml").write_text(
         f"""\
@@ -42,11 +38,21 @@ marketplace:
     name: Test Owner
   packages:
     - name: nested-package
-      source: {_NESTED_SOURCE}
+      source: {source}
       ref: v1.0.0
 """,
         encoding="utf-8",
     )
+
+
+def test_marketplace_check_offline_reaches_nested_https_ref_resolution_without_writes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A nested HTTPS source reaches offline resolution without project mutation."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    project = isolated.work_root / "nested-marketplace"
+    _write_marketplace_config(project, _NESTED_SOURCE)
     before = ArtifactSnapshot.capture(project)
     runner = ApmLifecycleRunner((str(apm_binary_path),))
 
@@ -71,4 +77,29 @@ marketplace:
         and url.path == expected_source.path
         for url in diagnostic_urls
     )
+    assert_unchanged(before, ArtifactSnapshot.capture(project))
+
+
+def test_marketplace_check_offline_rejects_unsafe_nested_https_source_before_ref_lookup(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Unsafe nested HTTPS paths fail validation before offline ref resolution."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    project = isolated.work_root / "unsafe-nested-marketplace"
+    _write_marketplace_config(project, _UNSAFE_NESTED_SOURCE)
+    before = ArtifactSnapshot.capture(project)
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    (result,) = runner.run_sequence(
+        (("marketplace", "check", "--offline", "--verbose"),),
+        expected_returncodes=(2,),
+        scenario_id="marketplace-nested-https-check",
+        cwd=project,
+        env=isolated.subprocess_env(overrides={"COLUMNS": "240"}),
+    )
+
+    diagnostics = result.stdout + result.stderr
+    assert "marketplace config error" in diagnostics
+    assert "No cached refs (offline)" not in diagnostics
     assert_unchanged(before, ArtifactSnapshot.capture(project))
