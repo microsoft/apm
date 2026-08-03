@@ -46,6 +46,23 @@ DEFAULT_EXCLUDED_DIRNAMES = frozenset(
     }
 )
 
+# Hidden roots owned by supported agent tools. Placement may examine these
+# trees when an applyTo pattern explicitly targets their non-hidden contents.
+PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
+    {
+        ".agents",
+        ".apm",
+        ".claude",
+        ".codex",
+        ".cursor",
+        ".gemini",
+        ".github",
+        ".kiro",
+        ".opencode",
+        ".windsurf",
+    }
+)
+
 
 @dataclass
 class DirectoryAnalysis:
@@ -204,10 +221,12 @@ class ContextOptimizer:
         if self._file_list_cache is None:
             self._file_list_cache = []
             for root, dirs, files in os.walk(self.base_dir):
-                # Skip hidden and excluded directories for performance
-                # Sort to guarantee deterministic traversal order across filesystems
+                current_path = Path(root)
+                if self._contains_unsupported_hidden_directory(current_path):
+                    dirs[:] = []
+                    continue
                 dirs[:] = sorted(
-                    d for d in dirs if not d.startswith(".") and d not in DEFAULT_EXCLUDED_DIRNAMES
+                    d for d in dirs if not self._should_exclude_subdir(current_path / d)
                 )
                 for file in sorted(files):
                     if not file.startswith("."):
@@ -472,8 +491,10 @@ class ContextOptimizer:
             except ValueError:
                 depth = 0
 
-            # Skip hidden directories and common ignore patterns
-            if any(part.startswith(".") for part in current_path.parts[len(self.base_dir.parts) :]):
+            # Only supported agent-tool roots participate in placement. Other
+            # hidden paths (including nested caches) stay pruned.
+            if self._contains_unsupported_hidden_directory(current_path):
+                dirs[:] = []
                 continue
 
             # Default hardcoded exclusions  -- match on exact path components
@@ -530,11 +551,30 @@ class ContextOptimizer:
         if dir_name in DEFAULT_EXCLUDED_DIRNAMES:
             return True
 
-        # Skip hidden directories
-        if dir_name.startswith("."):  # noqa: SIM103
-            return True
+        # Supported agent-tool roots contain valid applyTo targets. Other
+        # hidden directories remain excluded from placement traversal.
+        return dir_name.startswith(".") and not self._is_supported_hidden_tool_root(path)
 
-        return False
+    def _is_supported_hidden_tool_root(self, path: Path) -> bool:
+        """Return whether ``path`` is a supported top-level hidden tool tree."""
+        try:
+            relative_path = path.resolve().relative_to(self.base_dir.resolve())
+        except (OSError, ValueError):
+            return False
+        return (
+            len(relative_path.parts) == 1 and relative_path.parts[0] in PLACEMENT_HIDDEN_TOOL_TREES
+        )
+
+    def _contains_unsupported_hidden_directory(self, path: Path) -> bool:
+        """Return whether ``path`` enters a hidden tree outside the supported roots."""
+        try:
+            relative_parts = path.resolve().relative_to(self.base_dir.resolve()).parts
+        except (OSError, ValueError):
+            return True
+        return any(
+            part.startswith(".") and not (index == 0 and part in PLACEMENT_HIDDEN_TOOL_TREES)
+            for index, part in enumerate(relative_parts)
+        )
 
     def _should_exclude_path(self, path: Path) -> bool:
         """Check if a path matches any exclusion pattern.

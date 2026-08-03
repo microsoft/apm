@@ -70,10 +70,10 @@ applyTo:
   - "**/*.py"
 ```
 
-When a YAML sequence contains multiple patterns, APM preserves the full
-sequence for targets whose native rule format supports multiple globs.
-Prefer the comma-separated string form when you want identical output
-across every target.
+When a YAML sequence contains multiple patterns, APM normalizes every
+non-null entry into the same comma-separated OR expression used by the
+placement compiler and target converters. The comma-separated scalar remains
+useful when you want that exact source syntax preserved for Copilot.
 
 ```markdown
 ---

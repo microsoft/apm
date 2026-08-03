@@ -984,6 +984,38 @@ class TestApplyToCommaInOptimizer:
         assert placement
         assert not any("matched no files" in w for w in opt._warnings)
 
+    def test_yaml_list_expression_matches_supported_hidden_tool_trees(self, comma_project):
+        """Hidden tool trees remain available to explicitly scoped applyTo patterns."""
+        (comma_project / ".opencode").mkdir()
+        (comma_project / ".github").mkdir()
+        (comma_project / ".apm" / "context").mkdir(parents=True)
+        (comma_project / ".git").mkdir()
+        (comma_project / ".opencode" / "guide.md").touch()
+        (comma_project / ".github" / "guide.md").touch()
+        (comma_project / ".apm" / "context" / "guide.md").touch()
+        (comma_project / ".git" / "ignored.md").touch()
+        expression = ".opencode/**/*.md,.github/**/*.md,**/.apm/**/*.md"
+        opt = ContextOptimizer(str(comma_project))
+        instruction = Instruction(
+            name="hidden-tool-rule",
+            file_path=Path("hidden-tool-rule.instructions.md"),
+            description="hidden tool rule",
+            apply_to=expression,
+            content="rules",
+            source="local",
+        )
+
+        placement = opt.optimize_instruction_placement([instruction])
+
+        assert opt._find_matching_directories(expression) == {
+            (comma_project / ".opencode").resolve(),
+            (comma_project / ".github").resolve(),
+            (comma_project / ".apm" / "context").resolve(),
+        }
+        assert all(".git" not in path.parts for path in opt._directory_cache)
+        assert placement
+        assert not any("matched no files" in warning for warning in opt._warnings)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

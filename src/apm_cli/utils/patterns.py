@@ -55,6 +55,21 @@ def yaml_double_quote(value: str) -> str:
     return f'"{escaped}"'
 
 
+def normalize_apply_to(value: object, default: str = "") -> str:
+    """Normalize scalar or YAML-list ``applyTo`` values into one OR expression.
+
+    Compilation stores ``applyTo`` as a string. YAML sequences therefore use
+    the documented top-level-comma representation consumed by
+    :func:`parse_apply_to`, preserving every non-null list entry.
+    """
+    if isinstance(value, list):
+        patterns = [str(pattern) for pattern in value if pattern is not None]
+        return ",".join(patterns) if patterns else default
+    if value is None:
+        return default
+    return str(value)
+
+
 def parse_apply_to(value: str | None) -> list[str]:
     """Split a primitive ``applyTo`` value into individual glob patterns.
 
