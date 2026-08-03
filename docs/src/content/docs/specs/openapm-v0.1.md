@@ -2317,6 +2317,18 @@ returns.
 > process in [Section 9.3](#93-amendment-process) without weakening the
 > preservation-or-diagnostic contract above.
 
+<a id="req-tg-009"></a>
+**[req-tg-009]** A conforming **consumer** implementation that deploys an
+agent primitive into a target-native format with a fixed, enumerable
+capability vocabulary MUST fail closed: if any source-declared tool falls
+outside the target's approved capability set, the implementation MUST NOT
+write the agent's target artifact (zero bytes, no partial file) and MUST
+emit an actionable diagnostic identifying the unsupported tool value(s) and
+the approved set. This fail-closed evaluation MUST be performed prior to any
+content-identity adoption fast-path; an existing on-disk artifact whose bytes
+match the source MUST NOT cause an agent with unrepresentable capabilities to
+be adopted or retained in the deployed-files record.
+
 #### 8.5.2 Post-install compilation guidance
 
 <a id="req-tg-007"></a>
@@ -3365,6 +3377,7 @@ renumbering of conformance classes.
 | [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-tg-007](#req-tg-007)                | MUST    | 8.5     | consumer    |
 | [req-tg-008](#req-tg-008)                | MUST    | 8.5.3   | consumer    |
+| [req-tg-009](#req-tg-009)                | MUST    | 8.5.1   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |

@@ -15,7 +15,7 @@ import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -133,7 +133,9 @@ class AgentIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         agents_dir = target_root / mapping.subdir
-        agents_dir.mkdir(parents=True, exist_ok=True)
+        # Lazy mkdir: only create the dir when we actually need to write.
+        # This avoids creating .kiro/agents/ when every agent is invalid-tools.
+        agents_dir_created = False
 
         files_integrated = 0
         files_skipped = 0
@@ -168,8 +170,53 @@ class AgentIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
 
-            # Create parent directories for nested kiro agent paths.
-            target_path.parent.mkdir(parents=True, exist_ok=True)
+            if mapping.format_id == "kiro_agent":
+                # req-tg-009: Preflight render+validate MUST run before any
+                # content-identity adoption fast-path or filesystem mutation.
+                # If validation fails, skip without writing or creating dirs.
+                rendered, ok = self._preflight_render_kiro_agent(
+                    source_file,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
+                if not ok:
+                    files_skipped += 1
+                    continue
+
+                # Compare rendered artifact (not raw source) against existing
+                # target so a pre-placed file with invalid tools cannot be
+                # adopted by matching source bytes.
+                rel_path = portable_relpath(target_path, project_root)
+                if target_path.exists() and not target_path.is_symlink():
+                    try:
+                        existing = target_path.read_bytes()
+                        rendered_bytes = normalize_crlf_to_lf(rendered).encode("utf-8")
+                        if existing == rendered_bytes:
+                            target_paths.append(target_path)
+                            files_adopted += 1
+                            continue
+                    except OSError:
+                        pass
+                if self.check_collision(
+                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
+                ):
+                    files_skipped += 1
+                    continue
+
+                # Safe to materialize: ensure parent dirs exist then write.
+                if not agents_dir_created:
+                    agents_dir.mkdir(parents=True, exist_ok=True)
+                    agents_dir_created = True
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                write_text_lf(target_path, rendered)
+                files_integrated += 1
+                target_paths.append(target_path)
+                continue
+
+            # Non-kiro path: eager mkdir (existing behavior preserved).
+            if not agents_dir_created:
+                agents_dir.mkdir(parents=True, exist_ok=True)
+                agents_dir_created = True
 
             rel_path = portable_relpath(target_path, project_root)
 
@@ -190,17 +237,6 @@ class AgentIntegrator(BaseIntegrator):
                     diagnostics=diagnostics,
                     package_name=package_info.package.name,
                 )
-                links_resolved = 0
-            elif mapping.format_id == "kiro_agent":
-                ok = self._write_kiro_agent(
-                    source_file,
-                    target_path,
-                    diagnostics=diagnostics,
-                    package_name=package_info.package.name,
-                )
-                if not ok:
-                    files_skipped += 1
-                    continue
                 links_resolved = 0
             else:
                 if mapping.format_id == "opencode_agent":
@@ -473,25 +509,24 @@ class AgentIntegrator(BaseIntegrator):
         return stem
 
     @staticmethod
-    def _write_kiro_agent(
+    def _preflight_render_kiro_agent(
         source: Path,
-        target: Path,
         *,
         diagnostics=None,
         package_name: str = "",
-    ) -> bool:
-        """Transform an agent file to Kiro .kiro/agents/ Markdown format.
+    ) -> tuple[str | None, bool]:
+        """Validate and render a Kiro agent file; return (rendered, ok).
 
-        Emits only officially-supported Kiro frontmatter fields:
-        ``description``, ``model``, and ``tools``. The ``name`` field is
-        stripped because Kiro derives agent identity from the deployed path.
-        Unknown frontmatter keys are silently omitted. The Markdown body is
-        preserved verbatim.
+        This is the SINGLE OWNER of the Kiro render+validate decision.
+        It MUST be called before any filesystem mutation (adopt check,
+        directory creation, or write) so that req-tg-009 is upheld: the
+        fail-closed evaluation runs prior to any content-identity fast-path.
 
-        Fails closed -- returns ``False`` without writing any bytes -- if
-        ``tools`` contains values outside the Kiro-approved capability set:
-        read, write, shell, web, subagent, knowledge, context, todo_list,
-        @mcp, @builtin, *.
+        Returns (rendered_str, True) on success or (None, False) if the
+        source declares tools outside KIRO_AGENT_ALLOWED_TOOLS or has an
+        unparseable frontmatter. On failure an actionable diagnostic is
+        emitted via diagnostics.error -- the caller MUST skip all target
+        mutations without writing any bytes.
 
         Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
         """
@@ -511,7 +546,7 @@ class AgentIntegrator(BaseIntegrator):
                 fm = {}
 
             if isinstance(fm, dict):
-                # Validate and pass through tools; fail closed on incompatible values.
+                # Validate tools; fail closed on any incompatible value.
                 if "tools" in fm:
                     tools_raw = fm["tools"]
                     if tools_raw is None:
@@ -534,7 +569,7 @@ class AgentIntegrator(BaseIntegrator):
                                     ),
                                     package=printable_ascii_text(package_name),
                                 )
-                            return False
+                            return None, False
                         tools_out = tools_raw
                     elif isinstance(tools_raw, str):
                         tool = tools_raw.strip()
@@ -550,7 +585,7 @@ class AgentIntegrator(BaseIntegrator):
                                     ),
                                     package=printable_ascii_text(package_name),
                                 )
-                            return False
+                            return None, False
                         tools_out = [tool]
                     else:
                         if diagnostics is not None:
@@ -564,7 +599,7 @@ class AgentIntegrator(BaseIntegrator):
                                 ),
                                 package=printable_ascii_text(package_name),
                             )
-                        return False
+                        return None, False
 
                     if tools_out is not None:
                         out_fm["tools"] = tools_out
@@ -585,7 +620,31 @@ class AgentIntegrator(BaseIntegrator):
         else:
             rendered = body
 
-        write_text_lf(target, rendered)
+        return rendered, True
+
+    @staticmethod
+    def _write_kiro_agent(
+        source: Path,
+        target: Path,
+        *,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> bool:
+        """Write a pre-rendered Kiro agent to disk; fail closed on invalid tools.
+
+        Delegates render+validate to _preflight_render_kiro_agent (the single
+        owner). Writes only when validation passes. Callers in the integration
+        loop should prefer calling _preflight_render_kiro_agent directly so
+        the rendered content can be reused for the adopt comparison.
+
+        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+        """
+        rendered, ok = AgentIntegrator._preflight_render_kiro_agent(
+            source, diagnostics=diagnostics, package_name=package_name
+        )
+        if not ok:
+            return False
+        write_text_lf(target, rendered)  # type: ignore[arg-type]
         return True
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.

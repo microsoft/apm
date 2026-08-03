@@ -722,3 +722,63 @@ def test_kiro_agents_sync_removes_managed_file(tmp_path: Path) -> None:
 
     assert result["files_removed"] == 1
     assert not managed_agent.exists()
+
+
+def test_kiro_agents_preflight_before_adopt_bypass(tmp_path: Path) -> None:
+    """reg-tg-009 regression: invalid-tools agent is not adopted via byte-match.
+
+    Pre-place a .kiro/agents/X.md whose bytes match the source (which has
+    an unsupported tool). The adopt fast-path MUST NOT fire; the agent must
+    remain in files_skipped and not appear in target_paths.
+    """
+    from apm_cli.utils.diagnostics import CATEGORY_ERROR
+
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    bad_src_content = "---\ntools:\n- read\n- BANNED_TOOL\n---\n\n# Agent\n"
+    (apm_agents / "agent.agent.md").write_text(bad_src_content, encoding="utf-8")
+
+    # Pre-seed target with the SAME bytes as source (the bypass scenario).
+    kiro_agents = tmp_path / ".kiro" / "agents"
+    kiro_agents.mkdir(parents=True)
+    preset_target = kiro_agents / "agent.md"
+    preset_target.write_text(bad_src_content, encoding="utf-8")
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        managed_files={".kiro/agents/agent.md"},
+        diagnostics=diagnostics,
+    )
+
+    assert result.files_integrated == 0
+    assert result.files_adopted == 0
+    assert preset_target not in result.target_paths
+    errors = [d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR]
+    assert errors, "Expected diagnostics.error for incompatible tools even in adopt path"
+    assert "BANNED_TOOL" in errors[0].message
+
+
+def test_kiro_agents_no_agents_dir_created_for_all_invalid(tmp_path: Path) -> None:
+    """No .kiro/agents/ directory is created when the only agent has invalid tools."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "bad.agent.md").write_text(
+        "---\ntools:\n- INVALID\n---\n\nBad agent.\n",
+        encoding="utf-8",
+    )
+
+    AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    # The .kiro/agents/ directory must NOT be created.
+    assert not (tmp_path / ".kiro" / "agents").exists()

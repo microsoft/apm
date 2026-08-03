@@ -726,6 +726,87 @@ def test_dependency_package_targets_are_restriction_only() -> None:
     )
 
 
+@pytest.mark.req("req-tg-009")
+def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None:
+    """Fail-closed evaluation precedes any content-identity adoption fast-path.
+
+    req-tg-009: An agent with tools outside the target's approved capability
+    set MUST NOT be written or adopted -- even when the on-disk target has
+    byte-identical content to the source.
+    """
+    from datetime import datetime
+
+    from apm_cli.integration.agent_integrator import AgentIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import (
+        APMPackage,
+        GitReferenceType,
+        PackageInfo,
+        ResolvedReference,
+    )
+    from apm_cli.utils.diagnostics import CATEGORY_ERROR, DiagnosticCollector
+
+    project_root = tmp_path
+    (project_root / ".kiro").mkdir()
+
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    # Source agent with an unsupported tool.
+    bad_source = apm_agents / "hacked.agent.md"
+    bad_content = "---\ntools:\n- read\n- execute_arbitrary_code\n---\n\n# Hacked\n"
+    bad_source.write_text(bad_content, encoding="utf-8")
+
+    # Pre-place a target with byte-identical content to the source.
+    kiro_agents = project_root / ".kiro" / "agents"
+    kiro_agents.mkdir(parents=True)
+    target_path = kiro_agents / "hacked.md"
+    target_path.write_text(bad_content, encoding="utf-8")
+
+    package = APMPackage(
+        name="test-pkg",
+        version="1.0.0",
+        package_path=package_dir,
+        source="github.com/test/test-pkg",
+    )
+    resolved_ref = ResolvedReference(
+        original_ref="main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit="abc123",
+        ref_name="main",
+    )
+    pi = PackageInfo(
+        package=package,
+        install_path=package_dir,
+        resolved_reference=resolved_ref,
+        installed_at=datetime.now().isoformat(),
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        pi,
+        project_root,
+        managed_files={".kiro/agents/hacked.md"},
+        diagnostics=diagnostics,
+    )
+
+    # The invalid agent must be skipped, never adopted.
+    assert result.files_integrated == 0
+    assert result.files_adopted == 0
+    assert target_path not in result.target_paths
+    errors = [d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR]
+    assert errors, "Expected an error diagnostic for incompatible tools"
+    assert "execute_arbitrary_code" in errors[0].message
+
+    assert_spec_contains(
+        "MUST fail closed: if any source-declared tool falls",
+        "MUST NOT\nwrite the agent's target artifact (zero bytes, no partial file)",
+        "MUST\nemit an actionable diagnostic identifying the unsupported tool value(s)",
+        "MUST be performed prior to any\ncontent-identity adoption fast-path",
+    )
+
+
 # --- req-cf-001..002 --------------------------------------------------
 
 

@@ -395,6 +395,10 @@ requirements:
     keyword: MUST
     section: "8.5.3"
     conformance_class: consumer
+  - id: req-tg-009
+    keyword: MUST
+    section: "8.5.1"
+    conformance_class: consumer
   - id: req-sc-001
     keyword: MUST
     section: "10.4"
