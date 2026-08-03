@@ -23,7 +23,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../../reference
 | Antigravity CLI      | explicit `--target antigravity`       | Rules, skills, hooks, MCP              |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
-| Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
+| Kiro                 | `.kiro/`                             | Steering + Agents + Skills + Hooks + MCP |
 | JetBrains Copilot    | user-scope config dir (global)       | MCP (user-scope path, `${env:VAR}` substitution); file primitives use the Copilot profile |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
@@ -126,13 +126,21 @@ For server installation patterns, registry resolution, and trust model, see [MCP
 [Kiro](https://kiro.dev) reads project configuration from `.kiro/`. APM maps
 instructions to `.kiro/steering/` and converts `applyTo:` scoping into Kiro
 steering frontmatter (`inclusion: fileMatch`); unscoped instructions become
-`inclusion: always`. Skills are copied verbatim to `.kiro/skills/`, hooks
-become one JSON file per hook action in `.kiro/hooks/`, and MCP servers are
-written to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for
-`--global`.
+`inclusion: always`. Agents are deployed to `.kiro/agents/<relative-stem>.md`
+for Kiro IDE/CLI v3; identity derives from the relative path. Only
+`description`, `model`, and `tools` are emitted -- `name` and unknown
+frontmatter fields are stripped. Tools are permission-bearing: APM fails
+closed if any value outside the Kiro-approved capability set is present
+(`read`, `write`, `shell`, `web`, `subagent`, `knowledge`, `context`,
+`todo_list`, `@mcp`, `@builtin`, `*`). Skills are copied verbatim to
+`.kiro/skills/`, hooks become one JSON file per hook action in `.kiro/hooks/`,
+and MCP servers are written to `.kiro/settings/mcp.json` or
+`~/.kiro/settings/mcp.json` for `--global`.
 
-This target covers the documented Kiro IDE layout. Kiro CLI configuration
-differences are tracked separately; see [the targets matrix](../../reference/targets-matrix/#kiro).
+This target covers the documented Kiro IDE/CLI v3 layout
+(ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/),
+[kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/), accessed 2026-08-03).
+See [the targets matrix](../../reference/targets-matrix/#kiro) for a full primitives list.
 
 ### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
 

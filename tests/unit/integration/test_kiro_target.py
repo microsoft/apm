@@ -1,4 +1,4 @@
-"""Acceptance tests for the Kiro target profile and transforms (#702)."""
+"""Acceptance tests for the Kiro target profile and transforms (#702, #2089)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from apm_cli.integration.agent_integrator import KIRO_AGENT_ALLOWED_TOOLS, AgentIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -18,6 +19,7 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
+from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 def _make_package_info(
@@ -64,7 +66,13 @@ def test_kiro_target_profile_matches_ratified_layout() -> None:
     assert target.detect_by_dir is True
     assert target.user_supported is True
     assert target.user_root_dir == ".kiro"
-    assert set(target.primitives) == {"instructions", "skills", "hooks"}
+    assert set(target.primitives) == {"agents", "instructions", "skills", "hooks"}
+
+    agents = target.primitives["agents"]
+    assert agents.subdir == "agents"
+    assert agents.extension == ".md"
+    assert agents.format_id == "kiro_agent"
+    assert agents.output_compare is False
 
     instructions = target.primitives["instructions"]
     assert instructions.subdir == "steering"
@@ -362,3 +370,355 @@ def test_kiro_hooks_skip_when_project_has_no_kiro_dir(tmp_path: Path) -> None:
 
     assert result.files_integrated == 0
     assert not (tmp_path / ".kiro").exists()
+
+
+# ---------------------------------------------------------------------------
+# Kiro agents (#2089) - .kiro/agents/<relative-stem>.md
+# ---------------------------------------------------------------------------
+
+
+def test_kiro_agents_deploy_plain_body_no_frontmatter(tmp_path: Path) -> None:
+    """Agent with no frontmatter: body preserved verbatim as .md."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "reviewer.agent.md").write_text(
+        "# Reviewer\n\nYou review code.\n",
+        encoding="utf-8",
+    )
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".kiro" / "agents" / "reviewer.md"
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "# Reviewer\n\nYou review code.\n"
+
+
+def test_kiro_agents_preserve_description_model_tools(tmp_path: Path) -> None:
+    """description, model, and tools are preserved in the target frontmatter."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "helper.agent.md").write_text(
+        "---\n"
+        "description: My helpful agent\n"
+        "model: claude-3-5-sonnet-20241022\n"
+        "tools:\n"
+        "- read\n"
+        "- write\n"
+        "---\n\n"
+        "# Helper\n\nHelp the user.\n",
+        encoding="utf-8",
+    )
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".kiro" / "agents" / "helper.md"
+    content = target.read_text(encoding="utf-8")
+    assert "description: My helpful agent" in content
+    assert "model: claude-3-5-sonnet-20241022" in content
+    assert "- read" in content
+    assert "- write" in content
+    assert "# Helper" in content
+    assert "Help the user." in content
+
+
+def test_kiro_agents_strip_name_and_unknown_frontmatter(tmp_path: Path) -> None:
+    """name and unknown fields are stripped; only description/model/tools kept."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "specialist.agent.md").write_text(
+        "---\n"
+        "name: specialist\n"
+        "description: A specialist agent\n"
+        "color: blue\n"
+        "someunknown: ignored\n"
+        "tools:\n"
+        "- shell\n"
+        "---\n\n"
+        "Specialist body.\n",
+        encoding="utf-8",
+    )
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".kiro" / "agents" / "specialist.md"
+    content = target.read_text(encoding="utf-8")
+    assert "name:" not in content
+    assert "color:" not in content
+    assert "someunknown:" not in content
+    assert "description: A specialist agent" in content
+    assert "- shell" in content
+    assert "Specialist body." in content
+
+
+def test_kiro_agents_nested_path_identity_derivation(tmp_path: Path) -> None:
+    """Nested path in .apm/agents/ is preserved under .kiro/agents/."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    nested = package_dir / ".apm" / "agents" / "team"
+    nested.mkdir(parents=True)
+    (nested / "architect.agent.md").write_text(
+        "---\ndescription: Team architect\n---\n\n# Architect\n",
+        encoding="utf-8",
+    )
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".kiro" / "agents" / "team" / "architect.md"
+    assert target.exists()
+    content = target.read_text(encoding="utf-8")
+    assert "description: Team architect" in content
+    assert "# Architect" in content
+
+
+def test_kiro_agents_fail_closed_incompatible_tools(tmp_path: Path) -> None:
+    """Agent with incompatible tools is not deployed and emits an error."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "badtools.agent.md").write_text(
+        "---\n"
+        "description: Agent with bad tools\n"
+        "tools:\n"
+        "- read\n"
+        "- execute_arbitrary_code\n"
+        "---\n\n"
+        "# Bad Tools Agent\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        diagnostics=diagnostics,
+    )
+
+    # Agent must not be deployed (fail closed)
+    assert result.files_integrated == 0
+    assert not (tmp_path / ".kiro" / "agents" / "badtools.md").exists()
+    # Error diagnostic must name the unsupported tool
+    errors = [d for d in diagnostics._diagnostics if d.category == "error"]
+    assert errors, "Expected an error diagnostic for incompatible tools"
+    assert "execute_arbitrary_code" in errors[0].message
+
+
+def test_kiro_agents_no_partial_write_on_incompatible_tools(tmp_path: Path) -> None:
+    """Fail closed: no partial agent file written when tools are invalid."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "partial.agent.md").write_text(
+        "---\ntools:\n- read\n- INVALID_TOOL\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert not (tmp_path / ".kiro" / "agents" / "partial.md").exists()
+
+
+def test_kiro_agents_all_approved_tools_pass(tmp_path: Path) -> None:
+    """Every value in KIRO_AGENT_ALLOWED_TOOLS is accepted without error."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    tools_list = sorted(KIRO_AGENT_ALLOWED_TOOLS - {"*"})
+    tools_yaml = "\n".join(f"- {t}" for t in tools_list)
+    (apm_agents / "alltools.agent.md").write_text(
+        f"---\ndescription: All tools\ntools:\n{tools_yaml}\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        diagnostics=diagnostics,
+    )
+
+    assert result.files_integrated == 1
+    errors = [d for d in diagnostics._diagnostics if d.category == "error"]
+    assert not errors
+
+
+def test_kiro_agents_wildcard_tool_passes(tmp_path: Path) -> None:
+    """The '*' wildcard tool is accepted."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "fullaccess.agent.md").write_text(
+        "---\ntools:\n- '*'\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    assert (tmp_path / ".kiro" / "agents" / "fullaccess.md").exists()
+
+
+def test_kiro_agents_skip_when_no_kiro_dir(tmp_path: Path) -> None:
+    """Agent integration is skipped when .kiro/ does not exist."""
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "agent.agent.md").write_text("# Agent\n", encoding="utf-8")
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 0
+    assert not (tmp_path / ".kiro").exists()
+
+
+def test_kiro_agents_idempotent_second_deploy(tmp_path: Path) -> None:
+    """Second deploy with the same source produces identical output."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker\ntools:\n- read\n---\n\n# Worker\n",
+        encoding="utf-8",
+    )
+
+    integrator = AgentIntegrator()
+    pi = _make_package_info(package_dir)
+
+    result1 = integrator.integrate_agents_for_target(KNOWN_TARGETS["kiro"], pi, tmp_path)
+    assert result1.files_integrated == 1
+    first_content = (tmp_path / ".kiro" / "agents" / "worker.md").read_text(encoding="utf-8")
+
+    # Second deploy (simulate managed_files from lockfile)
+    managed = {".kiro/agents/worker.md"}
+    integrator.integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"], pi, tmp_path, managed_files=managed
+    )
+    second_content = (tmp_path / ".kiro" / "agents" / "worker.md").read_text(encoding="utf-8")
+
+    assert first_content == second_content
+
+
+def test_kiro_agents_update_replaces_stale_file(tmp_path: Path) -> None:
+    """Updated source replaces the stale deployed agent."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    agent_src = apm_agents / "evolving.agent.md"
+    agent_src.write_text("---\ndescription: v1\n---\n\n# v1\n", encoding="utf-8")
+
+    integrator = AgentIntegrator()
+    pi = _make_package_info(package_dir)
+    target = tmp_path / ".kiro" / "agents" / "evolving.md"
+
+    integrator.integrate_agents_for_target(KNOWN_TARGETS["kiro"], pi, tmp_path)
+    assert "v1" in target.read_text(encoding="utf-8")
+
+    agent_src.write_text("---\ndescription: v2\n---\n\n# v2\n", encoding="utf-8")
+    managed = {".kiro/agents/evolving.md"}
+    integrator.integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"], pi, tmp_path, managed_files=managed
+    )
+    assert "v2" in target.read_text(encoding="utf-8")
+    assert "v1" not in target.read_text(encoding="utf-8")
+
+
+def test_kiro_agents_coexist_with_hooks_and_steering(tmp_path: Path) -> None:
+    """Kiro agents coexist with steering and hooks under .kiro/."""
+    kiro_dir = tmp_path / ".kiro"
+    kiro_dir.mkdir()
+    (kiro_dir / "steering").mkdir()
+    (kiro_dir / "steering" / "global.md").write_text(
+        "---\ninclusion: always\n---\n\nGlobal rules.\n",
+        encoding="utf-8",
+    )
+
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    (apm_agents / "helper.agent.md").write_text(
+        "---\ndescription: Helper\n---\n\n# Helper\n",
+        encoding="utf-8",
+    )
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    assert (tmp_path / ".kiro" / "agents" / "helper.md").exists()
+    # Existing steering file is untouched
+    assert (tmp_path / ".kiro" / "steering" / "global.md").exists()
+
+
+def test_kiro_agents_sync_removes_managed_file(tmp_path: Path) -> None:
+    """sync_for_target removes APM-managed Kiro agent files."""
+    from apm_cli.models.apm_package import APMPackage
+
+    (tmp_path / ".kiro" / "agents").mkdir(parents=True)
+    managed_agent = tmp_path / ".kiro" / "agents" / "obsolete.md"
+    managed_agent.write_text("---\ndescription: Old\n---\n\n# Old\n", encoding="utf-8")
+
+    pkg = APMPackage(
+        name="test-pkg",
+        version="1.0.0",
+        package_path=tmp_path,
+        source="github.com/test/test-pkg",
+    )
+    managed_files = {".kiro/agents/obsolete.md"}
+
+    result = AgentIntegrator().sync_for_target(
+        KNOWN_TARGETS["kiro"],
+        pkg,
+        tmp_path,
+        managed_files=managed_files,
+    )
+
+    assert result["files_removed"] == 1
+    assert not managed_agent.exists()

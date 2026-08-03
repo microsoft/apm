@@ -159,15 +159,24 @@ for...
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
-verbatim. Codex translates only `name`, `description`, and the Markdown
-body; APM does not yet generate the complete per-agent MCP transport
-definitions needed to preserve `model` or `tools`. When `tools` is
-present, `apm install` warns that the generated agent may inherit every
-project or session MCP server. Remove `tools` if unrestricted access is
-intentional; otherwise, do not use the generated agent with Codex.
-Windsurf, Kiro, and Gemini do not receive `.agent.md` files at all --
-use skills for Windsurf or Kiro personas; Gemini CLI has no agents
-primitive.
+verbatim. Kiro receives `description`, `model`, and `tools` only;
+unknown frontmatter fields (including `name`) are stripped because
+Kiro derives agent identity from the deployed path, not from a `name`
+field. Tools are permission-bearing for Kiro: each value must be one
+of the supported capability tags (`read`, `write`, `shell`, `web`,
+`subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
+`*`). If any unsupported tag is present, the agent is not deployed at
+all -- APM fails closed. Kiro may warn and fall back if the specified
+`model` is unavailable; APM passes the value through without
+validation. Codex translates only `name`, `description`, and the
+Markdown body; APM does not yet generate the complete per-agent MCP
+transport definitions needed to preserve `model` or `tools`. When
+`tools` is present, `apm install` warns that the generated agent may
+inherit every project or session MCP server. Remove `tools` if
+unrestricted access is intentional; otherwise, do not use the
+generated agent with Codex. Windsurf and Gemini do not receive
+`.agent.md` files at all -- use skills for Windsurf personas; Gemini
+CLI has no agents primitive.
 
 OpenCode is the strictest of the verbatim targets: it requires
 `tools` as a `tool-name: boolean` **mapping** (not a list, not a
@@ -199,8 +208,8 @@ offending package and field so you can fix the source.
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
 | codex | `.codex/agents/<name>.toml` | `name` and `description` -> TOML; body becomes `developer_instructions`; unsupported `tools` emits a warning |
+| kiro | `.kiro/agents/<relative-stem>.md` | `description`, `model`, `tools` kept; `name` and unknown fields stripped; identity from path; fail closed on unsupported tools (ref: [kiro.dev/docs/custom-agents](https://kiro.dev/docs/custom-agents/), accessed 2026-08-03) |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
-| kiro | not deployed | Kiro target v1 ships personas as skills, not `.agent.md` files |
 | gemini | not deployed | Gemini CLI has no agents primitive |
 
 :::caution[Migration]

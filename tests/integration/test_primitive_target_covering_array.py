@@ -68,6 +68,7 @@ _ROWS = (
         narrow_targets=("claude",),
     ),
     _Row("kiro-hook-user", ("hooks",), ("kiro",), True),
+    _Row("kiro-agent-project", ("agents",), ("kiro",), False),
     _Row("opencode-skill-user", ("skills",), ("opencode",), True),
     _Row(
         "copilot-app-unavailable",

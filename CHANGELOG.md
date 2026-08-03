@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Kiro IDE/CLI v3 now receives agents from `.apm/agents/` as Markdown files
+  under `.kiro/agents/<relative-stem>.md`. Agent identity derives from the
+  deployed path. Only `description`, `model`, and `tools` frontmatter fields
+  are emitted; `name` and unknown fields are stripped. Tools are
+  permission-bearing: APM fails closed (no partial write) if any tool value is
+  outside the approved Kiro capability set (`read`, `write`, `shell`, `web`,
+  `subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`, `*`).
+  Nested source paths under `.apm/agents/` are preserved, and the targets
+  matrix is updated to reflect the new `agents` primitive for `kiro`.
+  (ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/),
+  [kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/), accessed 2026-08-03.
+  #2089)
+
 ### Fixed
 
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)

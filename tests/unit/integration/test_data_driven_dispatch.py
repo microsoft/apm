@@ -309,6 +309,7 @@ class TestExhaustivenessChecks:
             "agents_github",  # was agents_copilot, aliased
             "agents_claude",
             "agents_cursor",
+            "agents_kiro",
             "agents_opencode",
             "agents_codex",
             # NOTE: windsurf no longer exposes an 'agents' primitive

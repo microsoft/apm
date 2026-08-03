@@ -27,7 +27,7 @@ see [Primitive types](../primitive-types/).
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
-| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
+| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
@@ -234,18 +234,28 @@ Windsurf / Cascade.
 
 ## kiro
 
-Kiro IDE.
+Kiro IDE/CLI v3 unified agent harness.
 
 - **Detection.** `.kiro/` directory.
 - **Deploy directory.** `.kiro/` (project and user scope).
-- **Supported primitives.** instructions, skills, hooks, mcp.
+- **Supported primitives.** agents, instructions, skills, hooks, mcp.
 - **File conventions.**
+  - agents: `.kiro/agents/<relative-stem>.md` -- identity derives from the
+    relative path. Only `description`, `model`, and `tools` frontmatter are
+    emitted; `name` and unknown fields are stripped. Tools are
+    permission-bearing: APM fails closed (no partial write) if any tool
+    value is outside the approved set (`read`, `write`, `shell`, `web`,
+    `subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
+    `*`). Kiro may warn and fall back if the specified `model` is
+    unavailable; APM passes model values through without validation.
+    Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
+    (accessed 2026-08-03).
   - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
   - skills: `.kiro/skills/<name>/SKILL.md`
   - hooks: one JSON file per hook action under `.kiro/hooks/`
   - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
-- **Scope.** This is the documented Kiro IDE layout only. Kiro CLI differences are tracked separately and are not part of this target.
+- **Scope.** Covers the documented Kiro IDE and CLI v3 layout (unified harness). Ref: [kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/) (accessed 2026-08-03).
 
 ## intellij
 

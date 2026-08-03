@@ -19,15 +19,34 @@ from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.yaml_io import load_yaml_str
+from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
+# Kiro capability tags approved for agent 'tools' frontmatter.
+# Source: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+# Fail closed: any value not in this set blocks deployment of that agent.
+KIRO_AGENT_ALLOWED_TOOLS: frozenset[str] = frozenset(
+    {
+        "read",
+        "write",
+        "shell",
+        "web",
+        "subagent",
+        "knowledge",
+        "context",
+        "todo_list",
+        "@mcp",
+        "@builtin",
+        "*",
+    }
+)
+
 
 class AgentIntegrator(BaseIntegrator):
-    """Handles integration of APM package agents into .github/agents/, .claude/agents/, and .cursor/agents/."""
+    """Handles integration of APM package agents into .github/agents/, .claude/agents/, .cursor/agents/, and .kiro/agents/."""
 
     # Deploys via write_text_lf -> compare adopt candidates in LF mode.
     _LF_NORMALIZED_DEPLOY = True
@@ -123,20 +142,21 @@ class AgentIntegrator(BaseIntegrator):
         total_links_resolved = 0
 
         for source_file in agent_files:
-            target_filename = self.get_target_filename_for_target(
-                source_file,
-                package_info.package.name,
-                target,
-            )
-            target_path = agents_dir / target_filename
-            # Defense-in-depth: target_filename comes from
-            # get_target_filename_for_target which strips path separators,
-            # but assert containment under agents_dir so a future
-            # regression cannot smuggle a traversal sequence past the
-            # adopt branch (which fires *before* check_collision and
-            # would otherwise blindly trust the computed path). Mirrors
-            # the guard already in command_integrator and
-            # instruction_integrator.
+            # kiro_agent uses relative path from .apm/agents/ for identity.
+            if mapping.format_id == "kiro_agent":
+                target_relpath = self._kiro_agent_relpath(source_file, package_info.install_path)
+            else:
+                target_relpath = self.get_target_filename_for_target(
+                    source_file,
+                    package_info.package.name,
+                    target,
+                )
+            target_path = agents_dir / target_relpath
+            # Defense-in-depth: assert containment under agents_dir so a
+            # regression cannot smuggle a traversal sequence past the adopt
+            # branch (which fires *before* check_collision and would otherwise
+            # blindly trust the computed path). Mirrors the guard already in
+            # command_integrator and instruction_integrator.
             try:
                 ensure_path_within(target_path, agents_dir)
             except PathTraversalError as exc:
@@ -147,6 +167,9 @@ class AgentIntegrator(BaseIntegrator):
                     )
                 files_skipped += 1
                 continue
+
+            # Create parent directories for nested kiro agent paths.
+            target_path.parent.mkdir(parents=True, exist_ok=True)
 
             rel_path = portable_relpath(target_path, project_root)
 
@@ -167,6 +190,17 @@ class AgentIntegrator(BaseIntegrator):
                     diagnostics=diagnostics,
                     package_name=package_info.package.name,
                 )
+                links_resolved = 0
+            elif mapping.format_id == "kiro_agent":
+                ok = self._write_kiro_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
+                if not ok:
+                    files_skipped += 1
+                    continue
                 links_resolved = 0
             else:
                 if mapping.format_id == "opencode_agent":
@@ -405,6 +439,154 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         write_text_lf(target, _toml.dumps(doc))
+
+    # ------------------------------------------------------------------
+    # Kiro agent transformer (MD -> filtered MD)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _kiro_agent_relpath(source_file: Path, package_path: Path) -> str:
+        """Compute the relative target path for a Kiro agent file.
+
+        Preserves subdirectory structure from .apm/agents/ so identity
+        derives from the deployed path, not from a 'name' frontmatter
+        field (Kiro CLI v3 / IDE uses relative path as identity).
+
+        Sources under .apm/agents/ keep their relative subpath; root-level
+        sources are flattened to the filename only.
+
+        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+        """
+        apm_agents_root = package_path / ".apm" / "agents"
+        try:
+            rel = source_file.relative_to(apm_agents_root)
+        except ValueError:
+            rel = Path(source_file.name)
+        parts = rel.parts
+        stem = parts[-1]
+        if stem.endswith(".agent.md"):
+            stem = stem[: -len(".agent.md")] + ".md"
+        elif not stem.endswith(".md"):
+            stem = stem + ".md"
+        if len(parts) > 1:
+            return str(Path(*parts[:-1]) / stem)
+        return stem
+
+    @staticmethod
+    def _write_kiro_agent(
+        source: Path,
+        target: Path,
+        *,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> bool:
+        """Transform an agent file to Kiro .kiro/agents/ Markdown format.
+
+        Emits only officially-supported Kiro frontmatter fields:
+        ``description``, ``model``, and ``tools``. The ``name`` field is
+        stripped because Kiro derives agent identity from the deployed path.
+        Unknown frontmatter keys are silently omitted. The Markdown body is
+        preserved verbatim.
+
+        Fails closed -- returns ``False`` without writing any bytes -- if
+        ``tools`` contains values outside the Kiro-approved capability set:
+        read, write, shell, web, subagent, knowledge, context, todo_list,
+        @mcp, @builtin, *.
+
+        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+        """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
+
+        content = source.read_text(encoding="utf-8")
+        body = content
+        out_fm: dict = {}
+
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = load_yaml_str(fm_match.group(1)) or {}
+            except yaml.YAMLError:
+                fm = {}
+
+            if isinstance(fm, dict):
+                # Validate and pass through tools; fail closed on incompatible values.
+                if "tools" in fm:
+                    tools_raw = fm["tools"]
+                    if tools_raw is None:
+                        tools_out = None
+                    elif isinstance(tools_raw, list):
+                        tools_strs = [str(t).strip() for t in tools_raw]
+                        incompatible = set(tools_strs) - KIRO_AGENT_ALLOWED_TOOLS
+                        if incompatible:
+                            if diagnostics is not None:
+                                names = ", ".join(sorted(incompatible))
+                                diagnostics.error(
+                                    message=(
+                                        f"Kiro agent {printable_ascii_text(source.name)}: "
+                                        f"unsupported tool(s) {names!a} -- "
+                                        "agent will not be deployed. "
+                                        "Remove or replace with Kiro-approved capability "
+                                        "tags (read, write, shell, web, subagent, knowledge, "
+                                        "context, todo_list, @mcp, @builtin, *). "
+                                        "Ref: https://kiro.dev/docs/custom-agents/"
+                                    ),
+                                    package=printable_ascii_text(package_name),
+                                )
+                            return False
+                        tools_out = tools_raw
+                    elif isinstance(tools_raw, str):
+                        tool = tools_raw.strip()
+                        if tool not in KIRO_AGENT_ALLOWED_TOOLS:
+                            if diagnostics is not None:
+                                diagnostics.error(
+                                    message=(
+                                        f"Kiro agent {printable_ascii_text(source.name)}: "
+                                        f"unsupported tool {tool!a} -- "
+                                        "agent will not be deployed. "
+                                        "Use a Kiro-approved capability tag. "
+                                        "Ref: https://kiro.dev/docs/custom-agents/"
+                                    ),
+                                    package=printable_ascii_text(package_name),
+                                )
+                            return False
+                        tools_out = [tool]
+                    else:
+                        if diagnostics is not None:
+                            diagnostics.error(
+                                message=(
+                                    f"Kiro agent {printable_ascii_text(source.name)}: "
+                                    "'tools' must be a list of capability tags -- "
+                                    "agent will not be deployed. "
+                                    "Fix: use a YAML list, e.g. 'tools: [read, write]'. "
+                                    "Ref: https://kiro.dev/docs/custom-agents/"
+                                ),
+                                package=printable_ascii_text(package_name),
+                            )
+                        return False
+
+                    if tools_out is not None:
+                        out_fm["tools"] = tools_out
+
+                # Emit approved fields in canonical order: description, model, tools.
+                out_fm_ordered: dict = {}
+                if "description" in fm and fm["description"] is not None:
+                    out_fm_ordered["description"] = fm["description"]
+                if "model" in fm and fm["model"] is not None:
+                    out_fm_ordered["model"] = fm["model"]
+                if "tools" in out_fm:
+                    out_fm_ordered["tools"] = out_fm["tools"]
+                out_fm = out_fm_ordered
+
+        if out_fm:
+            fm_text = yaml_to_str(out_fm)
+            rendered = f"---\n{fm_text}---\n{body}"
+        else:
+            rendered = body
+
+        write_text_lf(target, rendered)
+        return True
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(

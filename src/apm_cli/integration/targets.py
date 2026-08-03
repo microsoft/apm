@@ -589,12 +589,14 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         unsupported_user_primitives=("instructions",),
         hooks_config_display=".cursor/hooks.json",
     ),
-    # Kiro IDE -- spec-driven development editor.
+    # Kiro IDE/CLI v3 -- spec-driven development editor.
+    # Agents are Markdown files under .kiro/agents/; identity derives from
+    # the relative path (no redundant 'name' frontmatter field).
     # Steering files use Kiro frontmatter under .kiro/steering/.
     # Skills use the open Agent Skills SKILL.md layout under .kiro/skills/.
     # Hooks are individual JSON files under .kiro/hooks/.
     # MCP config lives at .kiro/settings/mcp.json and ~/.kiro/settings/mcp.json.
-    # Kiro CLI config divergence is intentionally out of scope for this v1 target.
+    # Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
     # Ref: https://kiro.dev/docs/steering/
     # Ref: https://kiro.dev/docs/skills/
     # Ref: https://kiro.dev/docs/hooks/
@@ -602,6 +604,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         capability=TARGET_CAPABILITIES["kiro"],
         root_dir=".kiro",
         primitives={
+            "agents": PrimitiveMapping("agents", ".md", "kiro_agent"),
             "instructions": PrimitiveMapping(
                 "steering",
                 ".md",
