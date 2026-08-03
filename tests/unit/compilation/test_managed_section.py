@@ -504,7 +504,7 @@ class TestManagedSectionSingleAgents:
 
         writes = {"count": 0}
 
-        def fail_second_write(self, output_path, content):
+        def fail_second_write(self, output_path, content, **kwargs):
             writes["count"] += 1
             if writes["count"] == 2:
                 raise OSError("disk full")
