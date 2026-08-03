@@ -642,6 +642,47 @@ class TestAuditCLI:
         assert "Run 'apm marketplace audit mymarket --strict --verbose'" in result.output
         assert "[+] Summary:" not in result.output
 
+    def test_strict_verbose_does_not_repeat_recovery_command(self, runner):
+        source = _source("mymarket")
+        manifest = _manifest(_gh_plugin("missing-yml"))
+
+        patches = self._stub_registry_and_manifest(manifest, source)
+        try:
+            with patch(
+                "apm_cli.marketplace.audit.fetch_plugin_apm_yml",
+                return_value=(
+                    FetchStatus.NO_MANIFEST,
+                    None,
+                    "no apm.yml at 'apm.yml' @ HEAD",
+                ),
+            ):
+                result = self._invoke(runner, extra_args=("--strict", "--verbose"))
+        finally:
+            self._stop_patches(patches)
+
+        assert result.exit_code == 1, result.output
+        assert "--strict: no plugins were audited" in result.output
+        assert "Run 'apm marketplace audit mymarket --strict --verbose'" not in result.output
+
+    def test_strict_exits_nonzero_when_a_clean_plugin_is_skipped(self, runner):
+        source = _source("mymarket")
+        manifest = _manifest(_gh_plugin("clean"), _gh_plugin("escape"))
+
+        def fetcher(plugin, *_args, **_kwargs):
+            if plugin.name == "clean":
+                return FetchStatus.OK, {"dependencies": {"apm": ["clean@mymarket"]}}, ""
+            return FetchStatus.UNSUPPORTED_SOURCE, None, "source escapes marketplace root"
+
+        patches = self._stub_registry_and_manifest(manifest, source)
+        try:
+            with patch("apm_cli.marketplace.audit.fetch_plugin_apm_yml", side_effect=fetcher):
+                result = self._invoke(runner, extra_args=("--strict",))
+        finally:
+            self._stop_patches(patches)
+
+        assert result.exit_code == 1, result.output
+        assert "Summary: 1 clean, 0 bypass warnings, 1 skipped" in result.output
+
     def test_strict_exits_nonzero_when_marketplace_has_no_plugins(self, runner):
         source = _source("mymarket")
         manifest = _manifest()

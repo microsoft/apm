@@ -222,7 +222,7 @@ or `{ git: ... }` entries instead of `name@marketplace` refs.
 
 | Flag | Description |
 |---|---|
-| `--strict` | Exit 1 on bypasses, verification errors, or when no plugin can be verified. |
+| `--strict` | Exit 1 on bypasses, skipped sources, verification errors, or when no plugin can be verified. |
 | `--verbose`, `-v` | Show clean plugins and skipped reasons. |
 
 For the top-level content/integrity scan, see [`apm audit`](../audit/).
