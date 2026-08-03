@@ -6,6 +6,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def test_apply_to_normalization_and_hidden_placement_have_canonical_owners() -> None:
     """Parser and placement must route through their declared shared owners."""

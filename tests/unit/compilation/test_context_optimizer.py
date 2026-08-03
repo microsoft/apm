@@ -1034,6 +1034,29 @@ class TestApplyToCommaInOptimizer:
 
         assert (comma_project / ".github").resolve() not in opt._directory_cache
 
+    def test_nested_hidden_directories_stay_pruned_inside_supported_tool_tree(self, comma_project):
+        """A permitted tool root does not admit nested hidden directories."""
+        allowed = comma_project / ".apm" / "context"
+        hidden = comma_project / ".apm" / ".cache"
+        allowed.mkdir(parents=True)
+        hidden.mkdir()
+        (allowed / "guide.md").touch()
+        (hidden / "secret.md").touch()
+        opt = ContextOptimizer(str(comma_project))
+        instruction = Instruction(
+            name="apm-rule",
+            file_path=Path("apm-rule.instructions.md"),
+            description="apm rule",
+            apply_to="**/.apm/**/*.md",
+            content="rules",
+            source="local",
+        )
+
+        opt.optimize_instruction_placement([instruction])
+
+        assert allowed.resolve() in opt._directory_cache
+        assert hidden.resolve() not in opt._directory_cache
+
     def test_unsupported_hidden_root_does_not_receive_fallback_placement(self, comma_project):
         """A no-match pattern cannot write generated rules into .git."""
         (comma_project / ".git").mkdir()
