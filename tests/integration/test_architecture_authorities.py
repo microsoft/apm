@@ -610,6 +610,62 @@ def test_packed_marketplace_source_owner_guard_rejects_parallel_parser(
     )
 
 
+def test_local_marketplace_audit_paths_have_single_owner() -> None:
+    """Local audit reads must resolve through the symlink-aware resolver owner."""
+    root = Path(__file__).parents[2]
+    audit = (root / "src/apm_cli/marketplace/audit.py").read_text(encoding="utf-8")
+    resolver = (root / "src/apm_cli/marketplace/resolver.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    helper = resolver.split("def resolve_local_plugin_path(", maxsplit=1)[1].split(
+        "\ndef ", maxsplit=1
+    )[0]
+    assert "resolve_local_plugin_path(" in audit
+    assert "_resolve_local_relative_source" not in audit
+    assert "ensure_path_within(" in helper
+    assert "Local marketplace audit paths must use resolve_local_plugin_path" in guard
+
+
+def test_local_marketplace_audit_path_owner_guard_rejects_bypass(tmp_path: Path) -> None:
+    """AC10b must reject direct use of a private local-path helper."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    audit_path = sandbox / "src/apm_cli/marketplace/audit.py"
+    audit_path.write_text(
+        audit_path.read_text(encoding="utf-8").replace(
+            "resolve_local_plugin_path(",
+            "_resolve_local_relative_source(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Local marketplace audit paths must use resolve_local_plugin_path" in result.stdout
+
+
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
     """Cleanup must route current deployed-file claims through the reconciler."""
     root = Path(__file__).parents[2]

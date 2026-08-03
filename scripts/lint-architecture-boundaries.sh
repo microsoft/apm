@@ -690,6 +690,18 @@ if ! printf '%s\n' "$packed_source_body" \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC10b: local marketplace audit resolution authority"
+if ! grep -Fq 'resolve_local_plugin_path(' src/apm_cli/marketplace/audit.py \
+    || grep -Fq '_resolve_local_relative_source' src/apm_cli/marketplace/audit.py \
+    || ! awk '
+        /^def resolve_local_plugin_path\(/ {flag=1}
+        flag && /^def / && !/^def resolve_local_plugin_path\(/ {exit}
+        flag {print}
+    ' src/apm_cli/marketplace/resolver.py | grep -Fq 'ensure_path_within('; then
+    echo "[x] Local marketplace audit paths must use resolve_local_plugin_path"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC11: Git repository cache identity authority"
 cache_identity_output=$(python3 scripts/check_repository_cache_identity_owner.py \
     --root "$ROOT" 2>&1)

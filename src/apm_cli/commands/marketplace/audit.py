@@ -19,7 +19,7 @@ from . import marketplace
 @click.option(
     "--strict",
     is_flag=True,
-    help="Exit non-zero when any plugin has bypass dependencies or fetch errors",
+    help="Exit non-zero on bypasses, fetch errors, or no verified plugins",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def audit(name, strict, verbose):
@@ -112,6 +112,10 @@ def audit(name, strict, verbose):
                 "https://microsoft.github.io/apm/reference/cli/marketplace/#apm-marketplace-audit-name"
             )
 
+        all_plugins_skipped = bool(reports) and skipped_count == len(reports)
+        if strict and all_plugins_skipped:
+            logger.error("--strict: no plugins were audited; cannot verify supply-chain integrity")
+            sys.exit(1)
         if strict and (bypass_total or fetch_error_count):
             sys.exit(1)
 

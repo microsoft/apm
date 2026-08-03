@@ -211,14 +211,17 @@ registered through `ADO_HOST` or `APM_ADO_HOSTS` use `ADO_APM_PAT` only.
 
 Run after adding or updating a marketplace, or in CI, to verify no
 plugin escapes marketplace pinning. Audit a registered marketplace for
-plugin dependencies that bypass marketplace pinning. The command fetches each plugin's `apm.yml` at
-its pinned ref and warns when `dependencies.apm` uses direct git
-URLs, repo shorthands, or `{ git: ... }` entries instead of
-`name@marketplace` refs.
+plugin dependencies that bypass marketplace pinning. For git-backed sources,
+the command fetches each plugin's `apm.yml` at its pinned ref. For local
+marketplaces, it reads each string-source plugin's `apm.yml` from the
+registered marketplace root. Local plugin paths that traverse outside that
+root, including through symlinks, are skipped without being read. The command
+warns when `dependencies.apm` uses direct git URLs, repo shorthands, or
+`{ git: ... }` entries instead of `name@marketplace` refs.
 
 | Flag | Description |
 |---|---|
-| `--strict` | Exit 1 when bypass warnings or unverifiable plugins are found. |
+| `--strict` | Exit 1 when bypass warnings or fetch errors are found, including when every plugin is skipped and none can be verified. |
 | `--verbose`, `-v` | Show clean plugins and skipped reasons. |
 
 For the top-level content/integrity scan, see [`apm audit`](../audit/).

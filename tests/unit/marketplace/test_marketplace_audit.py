@@ -382,6 +382,63 @@ class TestFetchPluginApmYmlErrorMessage:
         assert "Failed to fetch marketplace" not in detail
 
 
+class TestFetchLocalPluginApmYml:
+    """Audit local marketplace plugins through the canonical resolver."""
+
+    def test_reads_clean_local_plugin_manifest(self, tmp_path):
+        marketplace_root = tmp_path / "marketplace"
+        plugin_root = marketplace_root / "plugins" / "clean"
+        plugin_root.mkdir(parents=True)
+        (plugin_root / "apm.yml").write_text(
+            "dependencies:\n  apm:\n    - clean@local-marketplace\n",
+            encoding="utf-8",
+        )
+        source = MarketplaceSource(name="local-marketplace", url=str(marketplace_root))
+        plugin = MarketplacePlugin(name="clean", source="./plugins/clean")
+
+        status, data, detail = fetch_plugin_apm_yml(plugin, source)
+
+        assert status == FetchStatus.OK
+        assert data == {"dependencies": {"apm": ["clean@local-marketplace"]}}
+        assert detail == ""
+
+    def test_rejects_traversal_before_reading_outside_marketplace(self, tmp_path):
+        marketplace_root = tmp_path / "marketplace"
+        marketplace_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "apm.yml").write_text("invalid: outside\n", encoding="utf-8")
+        source = MarketplaceSource(name="local-marketplace", url=str(marketplace_root))
+        plugin = MarketplacePlugin(name="escape", source="../outside")
+
+        status, data, detail = fetch_plugin_apm_yml(plugin, source)
+
+        assert status == FetchStatus.UNSUPPORTED_SOURCE
+        assert data is None
+        assert "traversal" in detail
+
+    def test_rejects_symlink_escape_before_reading_outside_marketplace(self, tmp_path):
+        marketplace_root = tmp_path / "marketplace"
+        marketplace_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "apm.yml").write_text("invalid: outside\n", encoding="utf-8")
+        plugin_link = marketplace_root / "plugins" / "escape"
+        plugin_link.parent.mkdir()
+        try:
+            plugin_link.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+        source = MarketplaceSource(name="local-marketplace", url=str(marketplace_root))
+        plugin = MarketplacePlugin(name="escape", source="./plugins/escape")
+
+        status, data, detail = fetch_plugin_apm_yml(plugin, source)
+
+        assert status == FetchStatus.UNSUPPORTED_SOURCE
+        assert data is None
+        assert "outside" in detail
+
+
 # ===================================================================
 # run_audit aggregates and isolates failures
 # ===================================================================
@@ -541,6 +598,27 @@ class TestAuditCLI:
         assert result.exit_code == 1, result.output
         assert "could not verify" in result.output
         assert "1 unverifiable error" in result.output
+
+    def test_strict_exits_nonzero_when_every_plugin_is_skipped(self, runner):
+        source = _source("mymarket")
+        manifest = _manifest(_gh_plugin("missing-yml"))
+
+        patches = self._stub_registry_and_manifest(manifest, source)
+        try:
+            with patch(
+                "apm_cli.marketplace.audit.fetch_plugin_apm_yml",
+                return_value=(
+                    FetchStatus.NO_MANIFEST,
+                    None,
+                    "no apm.yml at 'apm.yml' @ HEAD",
+                ),
+            ):
+                result = self._invoke(runner, extra_args=("--strict",))
+        finally:
+            self._stop_patches(patches)
+
+        assert result.exit_code == 1, result.output
+        assert "--strict: no plugins were audited" in result.output
 
     def test_unverifiable_without_strict_exits_zero(self, runner):
         # Default mode is informational: unverifiable plugins surface in
