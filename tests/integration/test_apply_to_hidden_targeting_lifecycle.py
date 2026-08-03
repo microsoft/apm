@@ -18,7 +18,7 @@ pytestmark = [
 
 _SCENARIO_ID = "apply-to-hidden-directory-placement"
 _PATTERNS = (
-    ".opencode/**/*.md",
+    ".opencode/**/project,guide.md",
     ".github/**/*.md",
     "**/.apm/**/*.md",
 )
@@ -41,7 +41,7 @@ def _write_project(project: Path) -> None:
         encoding="utf-8",
     )
     for relative_path in (
-        ".opencode/project.md",
+        ".opencode/project,guide.md",
         ".github/contributing.md",
         ".apm/context/project.md",
     ):

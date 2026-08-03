@@ -22,6 +22,8 @@ def test_apply_to_normalization_and_hidden_placement_have_canonical_owners() -> 
     assert "from apm_cli.utils.patterns import normalize_apply_to" in parser
     assert "def _normalize_apply_to(" not in parser
     assert "PLACEMENT_HIDDEN_TOOL_TREES = frozenset(" in optimizer
+    assert "def _targeted_hidden_tool_roots(" in optimizer
+    assert "self._placement_hidden_tool_trees" in optimizer
     assert "not self._is_supported_hidden_tool_root(path)" in optimizer
     assert "| applyTo normalization and hidden-tool placement |" in owner_table
     assert (

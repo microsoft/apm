@@ -8,6 +8,19 @@ parse so converters and the placement optimizer behave consistently.
 from __future__ import annotations
 
 
+class _ApplyToPattern(str):
+    """A parsed pattern that remembers an escaped top-level comma."""
+
+    def __new__(cls, value: str, escaped_top_level_comma: bool):
+        instance = super().__new__(cls, value)
+        instance._escaped_top_level_comma = escaped_top_level_comma
+        return instance
+
+    def strip(self, chars: str | None = None) -> _ApplyToPattern:
+        """Preserve comma-boundary metadata while trimming a pattern."""
+        return type(self)(super().strip(chars), self._escaped_top_level_comma)
+
+
 def has_top_level_comma(pattern: str) -> bool:
     """Return True if ``pattern`` contains a comma outside any ``{...}`` group.
 
@@ -17,8 +30,16 @@ def has_top_level_comma(pattern: str) -> bool:
     placement optimizer and the integrators both consume this so the
     semantics of ``parse_apply_to`` and its callers stay in lock-step.
     """
+    if getattr(pattern, "_escaped_top_level_comma", False):
+        return False
+
     depth = 0
-    for ch in pattern:
+    index = 0
+    while index < len(pattern):
+        ch = pattern[index]
+        if ch == "\\" and index + 1 < len(pattern) and pattern[index + 1] in {",", "\\"}:
+            index += 2
+            continue
         if ch == "{":
             depth += 1
         elif ch == "}":
@@ -26,6 +47,7 @@ def has_top_level_comma(pattern: str) -> bool:
                 depth -= 1
         elif ch == "," and depth == 0:
             return True
+        index += 1
     return False
 
 
@@ -63,11 +85,38 @@ def normalize_apply_to(value: object, default: str = "") -> str:
     :func:`parse_apply_to`, preserving every non-null list entry.
     """
     if isinstance(value, list):
-        patterns = [str(pattern) for pattern in value if pattern is not None]
+        patterns = []
+        for pattern in value:
+            if pattern is None:
+                continue
+            normalized = str(pattern).strip()
+            if normalized:
+                patterns.append(_escape_apply_to_segment(normalized))
         return ",".join(patterns) if patterns else default
     if value is None:
         return default
     return str(value)
+
+
+def _escape_apply_to_segment(pattern: str) -> str:
+    """Encode one YAML-list pattern so top-level commas retain their boundary."""
+    escaped: list[str] = []
+    depth = 0
+    for char in pattern:
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == "{":
+            depth += 1
+            escaped.append(char)
+        elif char == "}":
+            if depth > 0:
+                depth -= 1
+            escaped.append(char)
+        elif char == "," and depth == 0:
+            escaped.append("\\,")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
 
 
 def parse_apply_to(value: str | None) -> list[str]:
@@ -86,10 +135,22 @@ def parse_apply_to(value: str | None) -> list[str]:
     """
     if not value:
         return []
-    segments: list[str] = []
+    segments: list[_ApplyToPattern] = []
     depth = 0
     current: list[str] = []
-    for char in value:
+    escaped_top_level_comma = False
+
+    def append_current() -> None:
+        segments.append(_ApplyToPattern("".join(current), escaped_top_level_comma))
+
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char == "\\" and index + 1 < len(value) and value[index + 1] in {",", "\\"}:
+            current.append(value[index + 1])
+            escaped_top_level_comma = escaped_top_level_comma or value[index + 1] == ","
+            index += 2
+            continue
         if char == "{":
             depth += 1
             current.append(char)
@@ -98,9 +159,11 @@ def parse_apply_to(value: str | None) -> list[str]:
                 depth -= 1
             current.append(char)
         elif char == "," and depth == 0:
-            segments.append("".join(current))
+            append_current()
             current = []
+            escaped_top_level_comma = False
         else:
             current.append(char)
-    segments.append("".join(current))
+        index += 1
+    append_current()
     return [segment for segment in (s.strip() for s in segments) if segment]

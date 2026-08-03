@@ -152,6 +152,7 @@ class ContextOptimizer:
         self._glob_cache: builtins.dict[str, builtins.list[str]] = {}
         self._glob_set_cache: builtins.dict[str, builtins.set[Path]] = {}
         self._file_list_cache: builtins.list[Path] | None = None
+        self._placement_hidden_tool_trees: frozenset[str] = frozenset()
         self._inheritance_cache: builtins.dict[Path, builtins.list[Path]] = {}  # (#171)
         self._timing_enabled = False
         self._phase_timings: builtins.dict[str, float] = {}
@@ -261,6 +262,10 @@ class ContextOptimizer:
         self._optimization_decisions.clear()
         self._warnings.clear()
         self._errors.clear()
+        self._placement_hidden_tool_trees = self._targeted_hidden_tool_roots(instructions)
+        self._file_list_cache = None
+        self._glob_cache.clear()
+        self._glob_set_cache.clear()
 
         # Phase 1: Analyze project structure
         self._time_phase("Project Analysis", self._analyze_project_structure)
@@ -485,11 +490,8 @@ class ContextOptimizer:
             visited_dirs.add(current_path)
 
             # Calculate depth for analysis
-            try:
-                relative_path = current_path.resolve().relative_to(self.base_dir.resolve())
-                depth = len(relative_path.parts)
-            except ValueError:
-                depth = 0
+            relative_path = self._relative_path(current_path)
+            depth = len(relative_path.parts) if relative_path is not None else 0
 
             # Only supported agent-tool roots participate in placement. Other
             # hidden paths (including nested caches) stay pruned.
@@ -551,30 +553,49 @@ class ContextOptimizer:
         if dir_name in DEFAULT_EXCLUDED_DIRNAMES:
             return True
 
-        # Supported agent-tool roots contain valid applyTo targets. Other
-        # hidden directories remain excluded from placement traversal.
+        # Only roots named by this compile's applyTo expressions participate.
+        # Every other hidden directory remains excluded from placement traversal.
         return dir_name.startswith(".") and not self._is_supported_hidden_tool_root(path)
 
     def _is_supported_hidden_tool_root(self, path: Path) -> bool:
-        """Return whether ``path`` is a supported top-level hidden tool tree."""
-        try:
-            relative_path = path.resolve().relative_to(self.base_dir.resolve())
-        except (OSError, ValueError):
+        """Return whether ``path`` is a top-level hidden root targeted this run."""
+        relative_path = self._relative_path(path)
+        if relative_path is None:
             return False
         return (
-            len(relative_path.parts) == 1 and relative_path.parts[0] in PLACEMENT_HIDDEN_TOOL_TREES
+            len(relative_path.parts) == 1
+            and relative_path.parts[0] in self._placement_hidden_tool_trees
         )
 
     def _contains_unsupported_hidden_directory(self, path: Path) -> bool:
-        """Return whether ``path`` enters a hidden tree outside the supported roots."""
-        try:
-            relative_parts = path.resolve().relative_to(self.base_dir.resolve()).parts
-        except (OSError, ValueError):
+        """Return whether ``path`` enters a hidden tree not targeted this run."""
+        relative_path = self._relative_path(path)
+        if relative_path is None:
             return True
         return any(
-            part.startswith(".") and not (index == 0 and part in PLACEMENT_HIDDEN_TOOL_TREES)
-            for index, part in enumerate(relative_parts)
+            part.startswith(".") and not (index == 0 and part in self._placement_hidden_tool_trees)
+            for index, part in enumerate(relative_path.parts)
         )
+
+    def _targeted_hidden_tool_roots(
+        self, instructions: builtins.list[Instruction]
+    ) -> frozenset[str]:
+        """Return supported top-level hidden roots named by applyTo patterns."""
+        targeted_roots = {
+            root
+            for instruction in instructions
+            for pattern in parse_apply_to(instruction.apply_to)
+            for root in PLACEMENT_HIDDEN_TOOL_TREES
+            if root in pattern.split("/")
+        }
+        return frozenset(targeted_roots)
+
+    def _relative_path(self, path: Path) -> Path | None:
+        """Return a lexical base-relative path without per-directory resolution."""
+        try:
+            return path.relative_to(self.base_dir)
+        except ValueError:
+            return None
 
     def _should_exclude_path(self, path: Path) -> bool:
         """Check if a path matches any exclusion pattern.

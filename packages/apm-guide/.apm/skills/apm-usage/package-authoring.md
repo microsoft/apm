@@ -309,11 +309,16 @@ Claude, Cursor, Windsurf, Kiro, and Antigravity.
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression. Every non-null sequence
 entry is preserved for placement and target conversion. Use the scalar form
-when you need the source file itself to retain comma-separated syntax.
+only when you want Copilot output to use comma-separated scalar syntax; YAML
+sequences remain verbatim in Copilot output.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
 the value is preserved verbatim.
+
+During distributed compilation, explicitly scoped patterns may match files in
+supported top-level harness directories such as `.github` or `.opencode`.
+Other hidden directories remain excluded.
 
 ### 2. Agent (`*.agent.md`)
 

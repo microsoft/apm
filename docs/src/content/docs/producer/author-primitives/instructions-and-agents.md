@@ -72,8 +72,9 @@ applyTo:
 
 When a YAML sequence contains multiple patterns, APM normalizes every
 non-null entry into the same comma-separated OR expression used by the
-placement compiler and target converters. The comma-separated scalar remains
-useful when you want that exact source syntax preserved for Copilot.
+placement compiler and target converters. Use a comma-separated scalar only
+when you want Copilot output to use that scalar syntax; YAML sequences remain
+verbatim in Copilot output.
 
 ```markdown
 ---
@@ -86,6 +87,10 @@ On Copilot the comma-list is preserved verbatim (Copilot splits it
 natively). On Claude, Cursor, Windsurf, Kiro, and Antigravity the list is
 expanded to a YAML array under `paths:` / `globs:` /
 `fileMatchPattern:`.
+
+During distributed compilation, an explicitly scoped pattern may match files
+under supported top-level harness directories such as `.github` or `.opencode`.
+Other hidden directories remain excluded.
 
 ### Body conventions
 

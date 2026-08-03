@@ -1016,6 +1016,44 @@ class TestApplyToCommaInOptimizer:
         assert placement
         assert not any("matched no files" in warning for warning in opt._warnings)
 
+    def test_generic_patterns_do_not_scan_hidden_tool_trees(self, comma_project):
+        """Hidden tool trees require an applyTo segment that names their root."""
+        (comma_project / ".github").mkdir()
+        (comma_project / ".github" / "guide.md").touch()
+        generic = Instruction(
+            name="generic-rule",
+            file_path=Path("generic-rule.instructions.md"),
+            description="generic rule",
+            apply_to="**/*.md",
+            content="rules",
+            source="local",
+        )
+
+        opt = ContextOptimizer(str(comma_project))
+        opt.optimize_instruction_placement([generic])
+
+        assert (comma_project / ".github").resolve() not in opt._directory_cache
+
+    def test_literal_comma_list_pattern_matches_hidden_tool_tree(self, comma_project):
+        """YAML-list literal commas remain one pattern during hidden placement."""
+        target = comma_project / ".opencode"
+        target.mkdir()
+        (target / "guide,example.md").touch()
+        instruction = Instruction(
+            name="literal-comma-rule",
+            file_path=Path("literal-comma-rule.instructions.md"),
+            description="literal comma rule",
+            apply_to=r".opencode/**/guide\,example.md,**/*.nope",
+            content="rules",
+            source="local",
+        )
+
+        opt = ContextOptimizer(str(comma_project))
+        placement = opt.optimize_instruction_placement([instruction])
+
+        assert placement
+        assert not any("matched no files" in warning for warning in opt._warnings)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
