@@ -1413,6 +1413,26 @@ if [ "$mcp_noncontainer_owner_defs" -ne 1 ] \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC30: local marketplace package-version source authority"
+local_version_owner="src/apm_cli/marketplace/version_check.py"
+local_version_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def _read_(local|plugin).*version\(' \
+        src/apm_cli/marketplace \
+        | grep -v "^${local_version_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$(grep -Ec '^def _read_local_version\(|^def _read_plugin_json_version\(' \
+        "$local_version_owner")" -ne 2 ] \
+    || ! grep -q 'return _read_plugin_json_version(package_root)' "$local_version_owner" \
+    || ! grep -q 'plugin_json = find_plugin_json(package_root)' "$local_version_owner" \
+    || [ -n "$local_version_duplicate_hits" ]; then
+    echo "[x] Local marketplace package versions must route through marketplace/version_check.py"
+    [ -n "$local_version_duplicate_hits" ] && echo "$local_version_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

@@ -66,6 +66,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Dependency CLI identifier parsing + uninstall selection | models/dependency/selection.py (via DependencyReference) | `src/apm_cli/models/dependency/selection.py` |
 | JetBrains Copilot MCP config path | adapters/client/intellij.py | `src/apm_cli/adapters/client/intellij.py` |
 | Marketplace tag-pattern validation and expansion | marketplace/tag_pattern.py | `src/apm_cli/marketplace/tag_pattern.py` |
+| Local marketplace package-version manifest precedence | marketplace/version_check.py (_read_local_version) | `src/apm_cli/marketplace/version_check.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

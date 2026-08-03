@@ -7,8 +7,12 @@ sidebar:
 
 `marketplace.versioning.strategy` in `apm.yml` controls how
 `apm pack --check-versions` verifies that local-path packages agree
-on their declared `version` before a release tag goes out. Pick one
-of three strategies. The default is `lockstep`.
+on their declared `version` before a release tag goes out. For each
+local package, APM reads `apm.yml` when present; a Plugin collection
+without `apm.yml` uses its `plugin.json` `version` instead. A malformed
+or versionless manifest fails the check rather than falling back to
+another source. Pick one of three strategies. The default is
+`lockstep`.
 
 ```yaml
 marketplace:
@@ -23,9 +27,8 @@ the local check.
 
 ## lockstep (default)
 
-Every local package's top-level `version` must equal the
-marketplace's top-level `version`. One tag, one bump, all packages
-move together.
+Every local package's manifest `version` must equal the marketplace's
+top-level `version`. One tag, one bump, all packages move together.
 
 ```yaml
 name: acme-monorepo
@@ -37,8 +40,7 @@ marketplace:
     - { name: plugin-b, source: ./packages/plugin-b, version: 1.4.0 }
 ```
 
-`apm pack --check-versions` exits 3 if any local package's
-`apm.yml` (or the inline `version:` on the marketplace entry)
+`apm pack --check-versions` exits 3 if any local package manifest
 disagrees with the root.
 
 Use lockstep when:

@@ -77,6 +77,63 @@ def test_intellij_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path
     assert "JetBrains Copilot MCP paths must come from the IntelliJ adapter" in result.stdout
 
 
+def test_local_marketplace_version_source_has_single_owner() -> None:
+    """The release gate owns local apm.yml and plugin.json version precedence."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/marketplace/version_check.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("def _read_local_version(") == 1
+    assert owner.count("def _read_plugin_json_version(") == 1
+    assert "return _read_plugin_json_version(package_root)" in owner
+    assert "plugin_json = find_plugin_json(package_root)" in owner
+    assert (
+        "Local marketplace package versions must route through marketplace/version_check.py"
+        in guard
+    )
+
+
+def test_local_marketplace_version_source_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """The boundary lint rejects a second local package-version reader."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/marketplace/resolver.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n\ndef _read_local_plugin_version() -> str:\n"
+        + '    return "parallel"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Local marketplace package versions must route through marketplace/version_check.py"
+        in result.stdout
+    )
+
+
 def test_self_update_release_selection_has_single_owner() -> None:
     """Installer URL and VERSION must consume one validated release object."""
     root = Path(__file__).parents[2]
