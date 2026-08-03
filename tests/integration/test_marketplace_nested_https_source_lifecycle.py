@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -60,5 +61,14 @@ marketplace:
     diagnostics = result.stdout + result.stderr
     assert "marketplace config error" not in diagnostics
     assert "No cached refs (offline)" in diagnostics
-    assert _NESTED_SOURCE in diagnostics
+    expected_source = urlparse(_NESTED_SOURCE)
+    diagnostic_urls = [
+        urlparse(token.strip("(),.;'\"")) for token in diagnostics.split() if "://" in token
+    ]
+    assert any(
+        url.scheme == expected_source.scheme
+        and url.hostname == expected_source.hostname
+        and url.path == expected_source.path
+        for url in diagnostic_urls
+    )
     assert_unchanged(before, ArtifactSnapshot.capture(project))

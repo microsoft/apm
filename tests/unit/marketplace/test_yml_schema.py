@@ -818,6 +818,21 @@ class TestHostPrefixedSource:
         assert entry.host == "gitlab.example.com"
         assert entry.source == "group/subgroup/agents"
 
+    def test_invalid_nested_https_source_describes_supported_path_shape(self, tmp_path: Path):
+        """Invalid nested HTTPS paths advertise the accepted full URL form."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: https://gitlab.example.com/group//agents.git\n"
+                "    ref: v0.3.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError) as error:
+            load_marketplace_yml(yml)
+        assert "'https://<host.tld>/<path>/<to>/<repo>[.git]'" in str(error.value)
+
     # -- Security-relevant rejection cases ---------------------------------
 
     @pytest.mark.parametrize(
