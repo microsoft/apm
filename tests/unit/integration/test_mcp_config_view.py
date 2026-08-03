@@ -407,8 +407,53 @@ def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
     assert view.problems == ()
 
 
-def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) -> None:
-    """A Claude-skill filesystem shape does not waive non-virtual manifests."""
+def test_manifestless_repo_root_skill_is_skipped(tmp_path: Path) -> None:
+    """A repo-root skill (`owner/repo` with a root SKILL.md) has no apm.yml (#2443).
+
+    Such a package is declared as a plain slug, so it is not virtual; the
+    installed shape is what makes it a Claude skill, and the strict probe
+    accepts it exactly as it accepts the subdirectory shape.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not (skill_dir / "apm.yml").exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_manifestless_repo_root_skill_skipped_when_modules_not_materialized(
+    tmp_path: Path,
+) -> None:
+    """The cold-cache fallback covers repo-root skills as well (#2443)."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not skill_dir.exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_manifestless_local_claude_skill_is_skipped(tmp_path: Path) -> None:
+    """A local package whose installed shape is a Claude skill ships no apm.yml."""
     root = _write_manifest(tmp_path, name="root")
     skill_dir = tmp_path / "packages" / "skill"
     skill_dir.mkdir(parents=True)
@@ -423,6 +468,113 @@ def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) ->
 
     view = _derive(root, _lock(locked), tmp_path / "apm_modules")
 
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_manifestless_local_claude_skill_is_skipped_when_source_missing(
+    tmp_path: Path,
+) -> None:
+    """A resolvable-but-absent local source is cold-cache-like, not corruption.
+
+    `resolve_local_dep_dir` deliberately leaves existence to the caller, so a
+    local package directory that is not on disk reaches the same fallback the
+    remote cold cache uses: the frozen lockfile classification decides.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    locked = LockedDependency(
+        repo_url="_local/skill",
+        source="local",
+        local_path="./packages/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert not (tmp_path / "packages" / "skill").exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_manifestless_repo_root_package_without_skill_shape_records_problem(
+    tmp_path: Path,
+) -> None:
+    """The shape probe still binds repo-root packages (#2443).
+
+    The waiver widened to non-virtual references, so the installed shape --
+    not the lock bit alone -- must keep deciding once modules exist.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+    locked.to_dependency_ref().get_install_path(modules_root).mkdir(parents=True)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_local_package_without_skill_shape_records_problem(
+    tmp_path: Path,
+) -> None:
+    """The shape probe binds local packages on the same terms (#2443)."""
+    root = _write_manifest(tmp_path, name="root")
+    (tmp_path / "packages" / "skill").mkdir(parents=True)
+    locked = LockedDependency(
+        repo_url="_local/skill",
+        source="local",
+        local_path="./packages/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_repo_root_non_skill_lock_type_records_problem(
+    tmp_path: Path,
+) -> None:
+    """A non-skill package still owes an apm.yml, virtual or not."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/package",
+        package_type="apm_package",
+        depth=1,
+    )
+    locked.to_dependency_ref().get_install_path(modules_root).mkdir(parents=True)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_non_skill_lock_type_records_problem_when_absent(
+    tmp_path: Path,
+) -> None:
+    """The cold-cache fallback trusts the lock type, not the absence itself."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/package",
+        package_type="apm_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not package_dir.exists()
     assert len(view.problems) == 1
     assert "manifest not found" in view.problems[0].message
 

@@ -135,3 +135,52 @@ class TestEnforceFrozen:
             InstallService.enforce_frozen(req)
 
         assert any("stale-mcp" in reason for reason in exc_info.value.reasons)
+
+    def test_mcp_project_accepts_manifestless_repo_root_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A repo-root Claude skill ships no apm.yml and is not lockfile drift (#2443).
+
+        MCP state turns on the config-view check, which walks every locked
+        package manifest. The skill's absent apm.yml must not be reported: no
+        'apm install' could ever produce one.
+        """
+        from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - o/skill\n"
+            "  mcp:\n"
+            "    - name: some-mcp\n"
+            "      registry: false\n"
+            "      transport: stdio\n"
+            "      command: some-mcp\n"
+        )
+        clear_apm_yml_cache()
+        package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+
+        locked_dep = LockedDependency(
+            repo_url="o/skill",
+            resolved_commit="a" * 40,
+            package_type="claude_skill",
+            depth=1,
+        )
+        _write_lockfile(tmp_path, [locked_dep])
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock is not None
+        server = package.get_all_mcp_dependencies()[0]
+        lock.mcp_servers = [server.name]
+        lock.mcp_configs = {server.name: server.to_dict()}
+        lock.save(tmp_path / "apm.lock.yaml")
+
+        skill_dir = locked_dep.to_dependency_ref().get_install_path(tmp_path / "apm_modules")
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Skill\n")
+
+        request = InstallRequest(apm_package=package, frozen=True)
+
+        InstallService.enforce_frozen(request)

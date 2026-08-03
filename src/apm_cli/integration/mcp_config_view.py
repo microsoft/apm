@@ -214,18 +214,15 @@ def _allows_missing_manifest(
     if dependency.package_type == PackageType.SKILL_BUNDLE.value:
         return True
 
-    dependency_ref = dependency.to_dependency_ref()
-    if not dependency_ref.is_virtual_subdirectory():
-        return False
-
     # ``apm audit --ci`` runs without materialising ``apm_modules/``: the drift
     # replay uses a throwaway scratch dir, and a setup-only CI job (install the
     # CLI, then audit -- no ``apm install``) never populates the real modules
     # tree.  When the package directory is absent we cannot probe the on-disk
-    # shape, so fall back to the frozen lockfile classification -- a virtual
-    # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  Once the
-    # modules ARE materialised the strict shape probe below still runs and
-    # guards against a mislabeled or malformed installed package.
+    # shape, so fall back to the frozen lockfile classification -- a
+    # ``claude_skill`` legitimately ships no ``apm.yml`` by design, whether it
+    # was declared as a repository root or as a subdirectory.  Once the modules
+    # ARE materialised the strict shape probe below still runs and guards
+    # against a mislabeled or malformed installed package.
     if not package_dir.exists():
         return dependency.package_type == PackageType.CLAUDE_SKILL.value
 
