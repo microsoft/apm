@@ -482,9 +482,7 @@ def test_cross_row_duplicate_selector_fails_closed(
 
     result = _gate(repo, "detect", base, head)
 
-    assert result.returncode != 0, (
-        "detect must fail closed when two rows share a selector"
-    )
+    assert result.returncode != 0, "detect must fail closed when two rows share a selector"
     assert "duplicate canonical owner selector" in result.stderr, (
         f"Expected 'duplicate canonical owner selector' in stderr, got: {result.stderr!r}"
     )

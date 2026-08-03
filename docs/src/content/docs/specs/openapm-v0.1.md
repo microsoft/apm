@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **107 normative statements** indexed in
+- OpenAPM v0.1 carries **108 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2327,7 +2327,22 @@ emit an actionable diagnostic identifying the unsupported tool value(s) and
 the approved set. This fail-closed evaluation MUST be performed prior to any
 content-identity adoption fast-path; an existing on-disk artifact whose bytes
 match the source MUST NOT cause an agent with unrepresentable capabilities to
-be adopted or retained in the deployed-files record.
+be adopted or retained in the deployed-files record. This gate is evaluated
+per agent primitive independently; failure for one agent MUST NOT prevent
+deployment of other, vocabulary-conformant agent primitives from the same
+dependency or install operation. This evaluation applies only to agents whose
+target is included in the effective intersection computed under
+[req-tg-008](#req-tg-008); agents whose target is already excluded by that
+intersection are not subject to this gate.
+
+> **Editorial note.** The approved capability set for each target is the
+> vocabulary enumerated in the OpenAPM Target Registry companion entry for
+> that target at the spec version the consumer declares conformance to. A
+> conformance test suite MUST pin the exact companion version it validates
+> against. A future revision may promote this pinning to a standalone
+> normative requirement and define a machine-readable vocabulary schema;
+> until then, conformance testing is scoped to the sets published in the
+> companion.
 
 #### 8.5.2 Post-install compilation guidance
 
@@ -2413,7 +2428,7 @@ without a spec revision. The current matrix is in the companion
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
-  [req-tg-008](#req-tg-008).
+  [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009).
 
 ---
 
@@ -2948,7 +2963,7 @@ conformance statement identifying:
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
-[req-tg-008](#req-tg-008),
+[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -3395,7 +3410,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 107** (102 MUST, 5 SHOULD).
+**Total normative statements: 108** (103 MUST, 5 SHOULD).
 
 ---
 
@@ -3428,6 +3443,7 @@ renumbering of conformance classes.
 | 0.1.21  | 2026-07-31 | Spec-citation fold for package-declared target restrictions (closes #2321 Mode-B silent-extension gate). Added [req-tg-008] (Section 8.5.3, consumer MUST): a consumer MUST treat a package's declared `target:`/`targets:` field as a restriction-only filter on all target-scoped primitive integration; if the field resolves to a non-empty set that does not contain `all`, the consumer MUST NOT deliver that package's primitives to any active integration target not in the declared set; the filter composes by intersection with the consumer-side per-dependency `targets:` filter and can only narrow, never expand. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 104 -> 105 (100 MUST, 5 SHOULD). |
 | 0.1.22  | 2026-07-31 | Spec-citation fold for deterministic configured-host credential isolation (closes #2338). Added [req-sc-013] (Section 10.3, consumer MUST): a consumer selects one effective host class before credential resolution, applies documented deterministic precedence when configuration signals overlap, exposes only credentials belonging to the selected class to requests and child processes, and preserves an explicit non-default port in both transport and credential scope. Clarified [req-sc-005] so this configured override is not prohibited by its default host-class collapse rule. Section 1.3, Section 10.11, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 105 -> 106 (101 MUST, 5 SHOULD). |
 | 0.1.23  | 2026-07-31 | Spec-citation fold for case-preserving dependency materialization (closes #2347). Added [req-lk-022] (Section 5.2, consumer MUST): a consumer that case-folds repository identity but retains different source spelling records `materialization_repo_url`, validates it maps to the same canonical identity, excludes it from identity/cache/sort/trust decisions, preserves exact virtual-path casing, and either transactionally migrates one stale case variant or fails closed without deleting colliding paths. Defined rollback semantics for case-only rename and preserved interrupted recovery state. Added the field to the lockfile schema and conformance fixture, plus migration and collision conformance oracles. Hardened lockfile schema: `repo_url` now carries `minLength: 1` to match the prose requirement that git-sourced entries provide a non-empty canonical identifier ([req-lk-003](#req-lk-003)). Section 5.7, Section 10.11, Section 11.3.2, and Appendix C updated. Statement count: 106 -> 107 (102 MUST, 5 SHOULD). |
+| 0.1.24  | 2026-08-03 | Spec-citation fold for fail-closed Kiro agent vocabulary gate (closes #2089 Mode-B silent-extension gate). Added [req-tg-009] (Section 8.5.1, consumer MUST): a consumer deploying an agent primitive into a target with a fixed, enumerable capability vocabulary MUST fail closed -- writing zero bytes and emitting an actionable diagnostic -- if any source-declared tool falls outside the approved set; the gate fires per agent independently and does not block vocabulary-conformant sibling agents; the gate applies only to targets included in the effective intersection under [req-tg-008]; content-identity fast-paths are not exempt. Added editorial note naming the Target Registry companion as the vocabulary authority and mandating version-pinning for conformance testing. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 107 -> 108 (103 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

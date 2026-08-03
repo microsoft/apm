@@ -102,7 +102,7 @@ Notes per target:
 - **antigravity** -- Google Antigravity CLI (`agy`), successor to Gemini CLI. Explicit-only target (`--target antigravity`); the `.agents/` root is shared, so it is never auto-detected and is not part of `--target all`. Instructions deploy as rules under `.agents/rules/`. Skills use `.agents/skills/`. Hooks use Antigravity's native `.agents/hooks.json` schema. MCP servers write to a dedicated `.agents/mcp_config.json`. No commands primitive (legacy Gemini commands convert to skills upstream).
 - **opencode** -- OpenCode. No hooks support.
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
-- **kiro** -- Kiro IDE. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, and MCP lands in `.kiro/settings/mcp.json`.
+- **kiro** -- Kiro IDE/CLI v3. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, MCP lands in `.kiro/settings/mcp.json`, and agents deploy to `.kiro/agents/<stem>.md` with frontmatter filtered to `description`, `model`, and `tools` only.
 
 ## The compatibility matrix
 
@@ -117,7 +117,7 @@ Rows are primitives, columns are harnesses. Cell legend:
 |---|---|---|---|---|---|---|---|---|---|
 | instructions | native | native | native | compiled | compiled | native | compiled | native | native |
 | prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported |
-| agents | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | unsupported |
+| agents | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled |
 | skills | native | native | native | native | native | native | native | native | native |
 | hooks | native | native | native | native | native | native | unsupported | native | native |
 | commands | unsupported | native | compiled | unsupported | compiled | unsupported | compiled | compiled | unsupported |
@@ -131,6 +131,7 @@ How to read a cell:
 - `prompts / claude = compiled` -- APM transforms `.apm/prompts/<n>.prompt.md` into `.claude/commands/<n>.md`. The prompt becomes a `/command`.
 - `agents / gemini = unsupported` -- Gemini CLI has no agents primitive; APM does not deliver `.agent.md` files to it. Their content still reaches Gemini through the compiled `GEMINI.md` if referenced from instructions.
 - `agents / antigravity = unsupported` -- Antigravity CLI has no agents primitive; their content reaches Antigravity through the compiled `AGENTS.md`.
+- `agents / kiro = compiled` -- APM writes `.kiro/agents/<relative-stem>.md`; frontmatter is filtered to `description`, `model`, and `tools` (unsupported tool values fail the deploy). See [targets-matrix](/apm/reference/targets-matrix/#kiro) for the approved tool set.
 - `instructions / antigravity = native` -- APM deploys instructions as plain-markdown rules under `.agents/rules/`.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.

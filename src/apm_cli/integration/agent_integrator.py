@@ -570,7 +570,7 @@ class AgentIntegrator(BaseIntegrator):
                                     package=printable_ascii_text(package_name),
                                 )
                             return None, False
-                        tools_out = tools_raw
+                        tools_out = tools_strs
                     elif isinstance(tools_raw, str):
                         tool = tools_raw.strip()
                         if tool not in KIRO_AGENT_ALLOWED_TOOLS:

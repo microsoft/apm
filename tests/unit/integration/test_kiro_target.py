@@ -19,7 +19,7 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
-from apm_cli.utils.diagnostics import DiagnosticCollector
+from apm_cli.utils.diagnostics import CATEGORY_ERROR, DiagnosticCollector
 
 
 def _make_package_info(
@@ -525,7 +525,7 @@ def test_kiro_agents_fail_closed_incompatible_tools(tmp_path: Path) -> None:
     assert result.files_integrated == 0
     assert not (tmp_path / ".kiro" / "agents" / "badtools.md").exists()
     # Error diagnostic must name the unsupported tool
-    errors = [d for d in diagnostics._diagnostics if d.category == "error"]
+    errors = diagnostics.by_category().get("error", [])
     assert errors, "Expected an error diagnostic for incompatible tools"
     assert "execute_arbitrary_code" in errors[0].message
 
@@ -572,7 +572,7 @@ def test_kiro_agents_all_approved_tools_pass(tmp_path: Path) -> None:
     )
 
     assert result.files_integrated == 1
-    errors = [d for d in diagnostics._diagnostics if d.category == "error"]
+    errors = diagnostics.by_category().get("error", [])
     assert not errors
 
 
@@ -731,8 +731,6 @@ def test_kiro_agents_preflight_before_adopt_bypass(tmp_path: Path) -> None:
     an unsupported tool). The adopt fast-path MUST NOT fire; the agent must
     remain in files_skipped and not appear in target_paths.
     """
-    from apm_cli.utils.diagnostics import CATEGORY_ERROR
-
     (tmp_path / ".kiro").mkdir()
     package_dir = tmp_path / "pkg"
     apm_agents = package_dir / ".apm" / "agents"
@@ -758,7 +756,7 @@ def test_kiro_agents_preflight_before_adopt_bypass(tmp_path: Path) -> None:
     assert result.files_integrated == 0
     assert result.files_adopted == 0
     assert preset_target not in result.target_paths
-    errors = [d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR]
+    errors = diagnostics.by_category().get(CATEGORY_ERROR, [])
     assert errors, "Expected diagnostics.error for incompatible tools even in adopt path"
     assert "BANNED_TOOL" in errors[0].message
 
@@ -782,3 +780,105 @@ def test_kiro_agents_no_agents_dir_created_for_all_invalid(tmp_path: Path) -> No
 
     # The .kiro/agents/ directory must NOT be created.
     assert not (tmp_path / ".kiro" / "agents").exists()
+
+
+def test_kiro_agents_tools_whitespace_stripped_in_output(tmp_path: Path) -> None:
+    """Whitespace around tool values must be stripped in deployed frontmatter.
+
+    Regression for the normalization gap: validation stripped leading/trailing
+    whitespace before checking the allowlist, but the original (unstripped)
+    values were written to disk.  After the fix, the deployed file must contain
+    the stripped values, not the source values with surrounding whitespace.
+    """
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    # Source agent with whitespace-padded tool values.
+    (apm_agents / "ws.agent.md").write_text(
+        "---\ndescription: WS test\ntools:\n- ' read '\n- ' write '\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1, "Agent with whitespace-padded tools should deploy"
+    deployed = (tmp_path / ".kiro" / "agents" / "ws.md").read_text(encoding="utf-8")
+    # Stripped values must be in the deployed file, not the original padded ones.
+    assert "read" in deployed
+    assert "write" in deployed
+    # The raw padded values must not appear verbatim in the output.
+    assert " read " not in deployed
+    assert " write " not in deployed
+
+
+def test_kiro_agents_stale_managed_file_removed_when_tools_become_incompatible(
+    tmp_path: Path,
+) -> None:
+    """Stale APM-managed Kiro agent is removed when its tools become incompatible.
+
+    Regression: if a source agent was previously deployed with valid tools and
+    its source is later updated to declare incompatible tools, the fail-closed
+    gate blocks the new deployment.  The stale deployed file must be removed
+    through the normal sync reconcile when the agent is no longer in the new
+    target_paths list and the caller passes the managed set.
+
+    This test validates the unit contract: integrate_agents_for_target with
+    incompatible tools skips the agent and does NOT add it to target_paths,
+    leaving the reconcile caller free to remove the stale path.
+    """
+    from apm_cli.models.apm_package import APMPackage
+
+    (tmp_path / ".kiro" / "agents").mkdir(parents=True)
+    stale_path = tmp_path / ".kiro" / "agents" / "prev.md"
+    stale_path.write_text("---\ndescription: Old valid\n---\n\n# Old\n", encoding="utf-8")
+
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    # Source now has incompatible tools.
+    (apm_agents / "prev.agent.md").write_text(
+        "---\ndescription: Now bad\ntools:\n- EVIL_TOOL\n---\n\n# Bad\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+        managed_files={".kiro/agents/prev.md"},
+        diagnostics=diagnostics,
+    )
+
+    # The new integration must skip the agent (incompatible tools).
+    assert result.files_integrated == 0
+    assert result.files_skipped == 1
+    # The stale path must NOT appear in target_paths; the caller can remove it.
+    assert stale_path not in result.target_paths
+    errors = diagnostics.by_category().get(CATEGORY_ERROR, [])
+    assert errors, "Incompatible tools must produce an error diagnostic"
+    assert "EVIL_TOOL" in errors[0].message
+
+    # Reconcile: simulate what the install service does -- remove stale managed files
+    # that no longer appear in target_paths.
+    pkg = APMPackage(
+        name="test-pkg",
+        version="1.0.0",
+        package_path=tmp_path,
+        source="github.com/test/test-pkg",
+    )
+    sync_result = AgentIntegrator().sync_for_target(
+        KNOWN_TARGETS["kiro"],
+        pkg,
+        tmp_path,
+        managed_files={".kiro/agents/prev.md"},
+    )
+    assert sync_result["files_removed"] == 1, (
+        "sync_for_target must remove the stale APM-managed file"
+    )
+    assert not stale_path.exists(), "Stale managed Kiro agent must be removed after sync"

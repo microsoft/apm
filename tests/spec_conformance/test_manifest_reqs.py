@@ -722,7 +722,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be rejected before target-scoped",
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
-        "[req-tg-008](#req-tg-008),\n[req-sc-001](#req-sc-001),",
+        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-sc-001](#req-sc-001),",
     )
 
 
