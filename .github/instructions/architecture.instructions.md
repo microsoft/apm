@@ -67,6 +67,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | JetBrains Copilot MCP config path | adapters/client/intellij.py | `src/apm_cli/adapters/client/intellij.py` |
 | Marketplace tag-pattern validation and expansion | marketplace/tag_pattern.py | `src/apm_cli/marketplace/tag_pattern.py` |
 | Local marketplace package-version manifest precedence | marketplace/version_check.py (_read_local_version) | `src/apm_cli/marketplace/version_check.py` |
+| Marketplace raw-structure diagnostics | marketplace/models.py parser; validator.py consumes them | `src/apm_cli/marketplace/models.py`; `src/apm_cli/marketplace/validator.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

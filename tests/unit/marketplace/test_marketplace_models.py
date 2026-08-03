@@ -130,6 +130,14 @@ class TestMarketplacePlugin:
 class TestMarketplaceManifest:
     """Frozen dataclass for parsed marketplace content."""
 
+    def test_positional_optional_fields_remain_compatible(self):
+        """Structural diagnostics append to, rather than reorder, the DTO."""
+        manifest = MarketplaceManifest("test", (), "owner", "description")
+
+        assert manifest.owner_name == "owner"
+        assert manifest.description == "description"
+        assert manifest.structural_errors == ()
+
     def test_find_plugin(self):
         plugins = (
             MarketplacePlugin(name="alpha"),
@@ -351,6 +359,11 @@ class TestParseMarketplaceJson:
         manifest = parse_marketplace_json(data)
         assert len(manifest.plugins) == 1
         assert manifest.plugins[0].name == "valid"
+        assert manifest.structural_errors == (
+            "plugins[1].name: expected a non-empty string",
+            "plugins[2]: expected an object",
+            "plugins[3].source: expected a source or repository field",
+        )
 
     def test_empty_plugins_list(self):
         data = {"name": "Empty"}

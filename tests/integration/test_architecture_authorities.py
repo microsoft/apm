@@ -610,6 +610,61 @@ def test_packed_marketplace_source_owner_guard_rejects_parallel_parser(
     )
 
 
+def test_marketplace_structural_diagnostics_have_single_owner() -> None:
+    """Raw marketplace structure diagnostics must originate in the parser."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/marketplace/models.py").read_text(encoding="utf-8")
+    validator = (root / "src/apm_cli/marketplace/validator.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "structural_errors: tuple[str, ...] = ()" in owner
+    assert 'structural_errors.append("plugins: expected a list")' in owner
+    assert "errors=list(manifest.structural_errors)" in validator
+    assert "Marketplace structural diagnostics must originate in marketplace/models.py" in guard
+
+
+def test_marketplace_structural_diagnostic_guard_rejects_dropped_plugins_error(
+    tmp_path: Path,
+) -> None:
+    """The boundary guard must reject dropping the parser-owned plugins error."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    owner_path = sandbox / "src/apm_cli/marketplace/models.py"
+    source = owner_path.read_text(encoding="utf-8")
+    owner_path.write_text(
+        source.replace('structural_errors.append("plugins: expected a list")\n', "", 1),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Marketplace structural diagnostics must originate in marketplace/models.py"
+        in result.stdout
+    )
+
+
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
     """Cleanup must route current deployed-file claims through the reconciler."""
     root = Path(__file__).parents[2]
