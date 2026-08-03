@@ -438,6 +438,26 @@ class TestFetchLocalPluginApmYml:
         assert data is None
         assert "outside" in detail
 
+    def test_rejects_manifest_symlink_escape_before_reading_outside_marketplace(self, tmp_path):
+        marketplace_root = tmp_path / "marketplace"
+        plugin_root = marketplace_root / "plugins" / "contained"
+        plugin_root.mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "apm.yml").write_text("invalid: outside\n", encoding="utf-8")
+        try:
+            (plugin_root / "apm.yml").symlink_to(outside / "apm.yml")
+        except OSError:
+            pytest.skip("symlinks are unavailable")
+        source = MarketplaceSource(name="local-marketplace", url=str(marketplace_root))
+        plugin = MarketplacePlugin(name="escape", source="./plugins/contained")
+
+        status, data, detail = fetch_plugin_apm_yml(plugin, source)
+
+        assert status == FetchStatus.UNSUPPORTED_SOURCE
+        assert data is None
+        assert "outside" in detail
+
 
 # ===================================================================
 # run_audit aggregates and isolates failures
@@ -614,6 +634,20 @@ class TestAuditCLI:
                 ),
             ):
                 result = self._invoke(runner, extra_args=("--strict",))
+        finally:
+            self._stop_patches(patches)
+
+        assert result.exit_code == 1, result.output
+        assert "--strict: no plugins were audited" in result.output
+        assert "[+] Summary:" not in result.output
+
+    def test_strict_exits_nonzero_when_marketplace_has_no_plugins(self, runner):
+        source = _source("mymarket")
+        manifest = _manifest()
+
+        patches = self._stub_registry_and_manifest(manifest, source)
+        try:
+            result = self._invoke(runner, extra_args=("--strict",))
         finally:
             self._stop_patches(patches)
 

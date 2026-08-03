@@ -693,6 +693,7 @@ fi
 echo "[*] AC10b: local marketplace audit resolution authority"
 if ! grep -Fq 'resolve_local_plugin_path(' src/apm_cli/marketplace/audit.py \
     || grep -Fq '_resolve_local_relative_source' src/apm_cli/marketplace/audit.py \
+    || ! grep -Fq 'relative_target="apm.yml"' src/apm_cli/marketplace/audit.py \
     || ! awk '
         /^def resolve_local_plugin_path\(/ {flag=1}
         flag && /^def / && !/^def resolve_local_plugin_path\(/ {exit}

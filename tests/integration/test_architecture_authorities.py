@@ -621,6 +621,7 @@ def test_local_marketplace_audit_paths_have_single_owner() -> None:
         "\ndef ", maxsplit=1
     )[0]
     assert "resolve_local_plugin_path(" in audit
+    assert 'relative_target="apm.yml"' in audit
     assert "_resolve_local_relative_source" not in audit
     assert "ensure_path_within(" in helper
     assert "Local marketplace audit paths must use resolve_local_plugin_path" in guard
@@ -648,6 +649,46 @@ def test_local_marketplace_audit_path_owner_guard_rejects_bypass(tmp_path: Path)
         audit_path.read_text(encoding="utf-8").replace(
             "resolve_local_plugin_path(",
             "_resolve_local_relative_source(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Local marketplace audit paths must use resolve_local_plugin_path" in result.stdout
+
+
+def test_local_marketplace_audit_manifest_target_guard_rejects_bypass(tmp_path: Path) -> None:
+    """AC10b must reject resolving a manifest after the containment check."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    audit_path = sandbox / "src/apm_cli/marketplace/audit.py"
+    audit_path.write_text(
+        audit_path.read_text(encoding="utf-8").replace(
+            '                relative_target="apm.yml",\n',
+            "",
             1,
         ),
         encoding="utf-8",

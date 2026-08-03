@@ -232,6 +232,7 @@ def fetch_plugin_apm_yml(
                 plugin.source,
                 marketplace_source,
                 plugin_root=plugin_root,
+                relative_target="apm.yml",
             )
         except ValueError as exc:
             return (
@@ -239,11 +240,10 @@ def fetch_plugin_apm_yml(
                 None,
                 f"local plugin source cannot be resolved: {exc}",
             )
-        apm_yml_path = local_plugin_path / "apm.yml"
-        if not apm_yml_path.is_file():
-            return FetchStatus.NO_MANIFEST, None, f"no apm.yml at '{apm_yml_path}'"
+        if not local_plugin_path.is_file():
+            return FetchStatus.NO_MANIFEST, None, f"no apm.yml at '{local_plugin_path}'"
         try:
-            raw = apm_yml_path.read_text(encoding="utf-8")
+            raw = local_plugin_path.read_text(encoding="utf-8")
         except OSError as exc:
             return FetchStatus.NETWORK_ERROR, None, f"failed to read local apm.yml: {exc}"
         try:

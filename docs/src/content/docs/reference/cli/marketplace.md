@@ -221,7 +221,7 @@ warns when `dependencies.apm` uses direct git URLs, repo shorthands, or
 
 | Flag | Description |
 |---|---|
-| `--strict` | Exit 1 when bypass warnings or fetch errors are found, including when every plugin is skipped and none can be verified. |
+| `--strict` | Exit 1 when bypass warnings or fetch errors are found, including when no plugins can be verified. |
 | `--verbose`, `-v` | Show clean plugins and skipped reasons. |
 
 For the top-level content/integrity scan, see [`apm audit`](../audit/).

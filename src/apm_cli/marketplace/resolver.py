@@ -674,8 +674,15 @@ def resolve_local_plugin_path(
     source: str,
     marketplace: MarketplaceSource,
     plugin_root: str = "",
+    *,
+    relative_target: str = "",
 ) -> Path:
-    """Resolve a local plugin source inside its marketplace containment boundary."""
+    """Resolve a local plugin path inside its marketplace containment boundary.
+
+    ``relative_target`` lets a consumer resolve a file within the plugin
+    through the same symlink-aware boundary instead of appending that file
+    after the directory containment check.
+    """
     rel = _normalise_relative_plugin_source(source, plugin_root=plugin_root)
     base = marketplace.local_path
     if not base:
@@ -687,6 +694,12 @@ def resolve_local_plugin_path(
     marketplace_path = Path(base)
     marketplace_root = marketplace_path.parent if marketplace_path.is_file() else marketplace_path
     candidate = marketplace_root if rel in ("", ".") else marketplace_root / rel
+    if relative_target:
+        try:
+            validate_path_segments(relative_target, context="local plugin target")
+        except PathTraversalError as exc:
+            raise ValueError(str(exc)) from exc
+        candidate /= relative_target
     try:
         return ensure_path_within(candidate, marketplace_root)
     except PathTraversalError as exc:

@@ -97,12 +97,14 @@ def audit(name, strict, verbose):
         click.echo()
         warn_noun = "warning" if bypass_total == 1 else "warnings"
         err_noun = "error" if fetch_error_count == 1 else "errors"
-        logger.success(
+        summary = (
             f"Summary: {ok_count} clean, {bypass_total} bypass {warn_noun}, "
-            f"{skipped_count} skipped, "
-            f"{fetch_error_count} unverifiable {err_noun}",
-            symbol="check",
+            f"{skipped_count} skipped, {fetch_error_count} unverifiable {err_noun}"
         )
+        if ok_count and not (bypass_total or skipped_count or fetch_error_count):
+            logger.success(summary, symbol="check")
+        else:
+            logger.info(summary)
         if bypass_total:
             click.echo()
             click.echo(
@@ -112,8 +114,8 @@ def audit(name, strict, verbose):
                 "https://microsoft.github.io/apm/reference/cli/marketplace/#apm-marketplace-audit-name"
             )
 
-        all_plugins_skipped = bool(reports) and skipped_count == len(reports)
-        if strict and all_plugins_skipped:
+        no_plugins_audited = ok_count == 0 and bypass_total == 0
+        if strict and no_plugins_audited:
             logger.error("--strict: no plugins were audited; cannot verify supply-chain integrity")
             sys.exit(1)
         if strict and (bypass_total or fetch_error_count):

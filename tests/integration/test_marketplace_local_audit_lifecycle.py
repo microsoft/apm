@@ -14,21 +14,24 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
 
-def _write_marketplace(root: Path, name: str, plugin_source: str) -> Path:
-    """Write one local marketplace manifest with a single string source."""
+def _write_marketplace(root: Path, name: str, plugin_source: str | None) -> Path:
+    """Write one local marketplace manifest with an optional string source."""
     marketplace = root / name
     marketplace.mkdir()
+    plugins = []
+    if plugin_source is not None:
+        plugins.append(
+            {
+                "name": "local-plugin",
+                "description": "Local audit lifecycle plugin",
+                "source": plugin_source,
+            }
+        )
     (marketplace / "marketplace.json").write_text(
         json.dumps(
             {
                 "name": name,
-                "plugins": [
-                    {
-                        "name": "local-plugin",
-                        "description": "Local audit lifecycle plugin",
-                        "source": plugin_source,
-                    }
-                ],
+                "plugins": plugins,
             }
         ),
         encoding="utf-8",
@@ -54,6 +57,7 @@ def test_local_marketplace_audit_strict_lifecycle(
     )
 
     skipped = _write_marketplace(isolated.work_root, "skipped-local", "./plugins/missing")
+    empty = _write_marketplace(isolated.work_root, "empty-local", None)
 
     outside = isolated.work_root / "outside"
     outside.mkdir()
@@ -73,6 +77,8 @@ def test_local_marketplace_audit_strict_lifecycle(
         ("marketplace", "audit", "clean-local", "--strict", "--verbose"),
         ("marketplace", "add", str(skipped), "--name", "skipped-local"),
         ("marketplace", "audit", "skipped-local", "--strict", "--verbose"),
+        ("marketplace", "add", str(empty), "--name", "empty-local"),
+        ("marketplace", "audit", "empty-local", "--strict", "--verbose"),
         ("marketplace", "add", str(traversal), "--name", "traversal-local"),
         ("marketplace", "audit", "traversal-local", "--strict", "--verbose"),
         ("marketplace", "add", str(symlink), "--name", "symlink-local"),
@@ -80,7 +86,7 @@ def test_local_marketplace_audit_strict_lifecycle(
     )
     results = runner.run_sequence(
         commands,
-        expected_returncodes=(0, 0, 0, 1, 0, 1, 0, 1),
+        expected_returncodes=(0, 0, 0, 1, 0, 1, 0, 1, 0, 1),
         scenario_id="marketplace-local-strict-audit",
         cwd=isolated.work_root,
         env=environment,
@@ -89,5 +95,6 @@ def test_local_marketplace_audit_strict_lifecycle(
     outputs = tuple(result.stdout + result.stderr for result in results)
     assert "Summary: 1 clean, 0 bypass warnings" in outputs[1]
     assert "--strict: no plugins were audited" in outputs[3]
-    assert "traversal" in outputs[5]
-    assert "outside" in outputs[7]
+    assert "--strict: no plugins were audited" in outputs[5]
+    assert "traversal" in outputs[7]
+    assert "outside" in outputs[9]
