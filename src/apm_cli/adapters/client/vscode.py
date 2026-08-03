@@ -342,11 +342,10 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
             # Handle docker packages
             elif is_docker:
-                args = self._docker_run_args(
-                    package,
-                    runtime_vars,
-                    secret_variable_fallbacks=secret_fallbacks,
+                docker_kwargs = (
+                    {"secret_variable_fallbacks": secret_fallbacks} if secret_fallbacks else {}
                 )
+                args = self._docker_run_args(package, runtime_vars, **docker_kwargs)
                 if args is None:
                     if package.get("runtime_arguments") or package.get("package_arguments"):
                         _rich_warning(
@@ -557,6 +556,17 @@ class VSCodeClientAdapter(MCPClientAdapter):
             return {}, []
         fallbacks = {}
         input_vars = []
+        templates = []
+        for field_name in ("runtime_arguments", "package_arguments"):
+            for argument in package.get(field_name) or []:
+                if not isinstance(argument, dict):
+                    continue
+                template = argument.get(
+                    "value",
+                    argument.get("default", argument.get("value_hint", "")),
+                )
+                if isinstance(template, str):
+                    templates.append(template)
         for field_name in ("runtime_arguments", "package_arguments"):
             for argument in package.get(field_name) or []:
                 if not isinstance(argument, dict):
@@ -569,6 +579,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
                         variable_info,
                         dict,
                     ):
+                        continue
+                    if not any(f"{{{variable_name}}}" in template for template in templates):
                         continue
                     is_secret = variable_info.get(
                         "isSecret",
