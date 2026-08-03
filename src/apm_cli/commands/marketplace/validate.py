@@ -11,14 +11,14 @@ from ...core.command_logger import CommandLogger
 from . import marketplace
 
 
-@marketplace.command(help="Validate a marketplace manifest")
+@marketplace.command(help="Validate marketplace structure and plugin schema")
 @click.argument("name", required=True)
 @click.option(
     "--check-refs", is_flag=True, hidden=True, help="Verify version refs are reachable (network)"
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def validate(name, check_refs, verbose):
-    """Validate the manifest of a registered marketplace."""
+    """Report malformed manifest structure and plugin schema errors."""
     logger = CommandLogger("marketplace-validate", verbose=verbose)
     try:
         from ...marketplace.client import fetch_marketplace

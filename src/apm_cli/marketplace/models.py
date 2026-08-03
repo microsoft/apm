@@ -345,12 +345,12 @@ class MarketplaceManifest:
 
     name: str
     plugins: tuple[MarketplacePlugin, ...] = ()
-    structural_errors: tuple[str, ...] = ()
     owner_name: str = ""
     description: str = ""
     plugin_root: str = ""  # metadata.pluginRoot - base path for bare-name sources
     source_url: str = ""
     source_digest: str = ""
+    structural_errors: tuple[str, ...] = ()
 
     def find_plugin(self, plugin_name: str) -> MarketplacePlugin | None:
         """Find a plugin by exact name (case-insensitive)."""
