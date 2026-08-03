@@ -14,8 +14,10 @@ pins every file by SHA-256. Build it with one command from a project that has
 apm pack
 ```
 
-An explicit `dependencies: {}` block also selects bundle output. It is useful
-for packages that distribute only their own local primitives.
+An explicit `dependencies: {}` mapping also selects bundle output. It is useful
+for packages that distribute only their own local primitives. Omit
+`dependencies:` (or leave it null) when the project should not produce a
+bundle.
 
 This is the producer side of [Deploy a local bundle](../../consumer/deploy-a-bundle/).
 Consumers who receive the artifact run `apm install ./your-bundle` and skip
