@@ -25,6 +25,7 @@ try:
     from apm_cli.bundle.local_bundle import (
         LocalBundleInfo,
         _looks_like_legacy_apm_bundle,
+        _read_bundle_lockfile,
         check_target_mismatch,
         detect_local_bundle,
         read_bundle_plugin_json,
@@ -193,6 +194,16 @@ class TestDetectLocalBundle:
         assert result is not None
         assert "copilot" in result.pack_targets
         assert "claude" in result.pack_targets
+
+    def test_oversized_bundle_lockfile_fails_closed(self, tmp_path: Path, monkeypatch) -> None:
+        """Bundle metadata cannot bypass the canonical bounded YAML reader."""
+        from apm_cli.utils import yaml_io
+
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "apm.lock.yaml").write_text("x: 123456789\n", encoding="utf-8")
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+
+        assert _read_bundle_lockfile(bundle) is None
 
     def test_detect_cleans_temp_dir_on_malicious_archive(self, tmp_path: Path) -> None:
         """Reject paths must not leak temp dirs (review #1099 finding)."""

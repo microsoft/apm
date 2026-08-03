@@ -25,6 +25,7 @@ pytestmark = [
 ]
 
 _AUDIT_ARGS = ("audit", "--ci", "--no-policy", "--no-drift", "--format", "json")
+_LOCK_EXPORT_ARGS = ("lock", "export", "--output", "sbom.json")
 
 
 def _project(root: Path) -> tuple[Path, dict[str, str]]:
@@ -125,4 +126,31 @@ def test_oversize_literal_lockfile_fails_audit_without_writes(
     assert result.returncode != 0
     assert "YAML file" in combined_output
     assert "reduce or regenerate the YAML file before retrying" in combined_output
+    assert_unchanged(before, ArtifactSnapshot.capture(project))
+
+
+def test_oversize_literal_lockfile_export_fails_without_writes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """The installed lock export rejects an oversized input before writing output."""
+    project, environment = _project(tmp_path / "oversize-export")
+    lockfile = project / "apm.lock.yaml"
+    lockfile.write_text(
+        large_anchor_free_lockfile(_MAX_YAML_INPUT_BYTES),
+        encoding="utf-8",
+    )
+    before = ArtifactSnapshot.capture(project)
+
+    result = _runner(apm_binary_path).run(
+        _LOCK_EXPORT_ARGS,
+        scenario_id="oversize-literal-lockfile-export",
+        cwd=project,
+        env=environment,
+    )
+
+    combined_output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode != 0
+    assert "safe limit" in combined_output
+    assert "apm install" in combined_output
     assert_unchanged(before, ArtifactSnapshot.capture(project))

@@ -264,13 +264,18 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             self._flatten_depth -= 1
 
 
-def _ensure_yaml_input_size(text: str, *, source: str = "YAML input") -> None:
+def _ensure_yaml_input_size(
+    text: str,
+    *,
+    source: str = "YAML input",
+    recovery: str = "reduce or regenerate the YAML file before retrying",
+) -> None:
     """Reject YAML text that exceeds the raw input cap before parsing."""
     size = len(text.encode("utf-8"))
     if size > _MAX_YAML_INPUT_BYTES:
         raise yaml.YAMLError(
             f"{source} exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit ({size} bytes); "
-            "reduce or regenerate the YAML file before retrying"
+            f"{recovery}"
         )
 
 
@@ -285,7 +290,7 @@ def _read_yaml_text(path: str | Path) -> str:
     if len(raw) > _MAX_YAML_INPUT_BYTES:
         raise yaml.YAMLError(
             f"YAML file {yaml_path} exceeds {_MAX_YAML_INPUT_BYTES}-byte (8 MiB) safe limit "
-            f"({len(raw)} bytes); reduce or regenerate the YAML file before retrying"
+            f"(at least {len(raw)} bytes); reduce or regenerate the YAML file before retrying"
         )
     return raw.decode("utf-8")
 
@@ -444,7 +449,11 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     def load(self, fm: str, **kwargs: Any) -> Any:
         kwargs["Loader"] = _BoundedSafeLoader
         try:
-            _ensure_yaml_input_size(fm, source="YAML frontmatter")
+            _ensure_yaml_input_size(
+                fm,
+                source="YAML frontmatter",
+                recovery="reduce the frontmatter header or update the source package before retrying",
+            )
             return yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
         except yaml.YAMLError:
             raise

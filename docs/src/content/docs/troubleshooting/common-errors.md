@@ -14,7 +14,7 @@ Errors are grouped by the surface that produces them: configuration, install, co
 ### `YAML file ... exceeds 8388608-byte (8 MiB) safe limit`
 
 ```
-YAML file apm.lock.yaml exceeds 8388608-byte (8 MiB) safe limit (... bytes); reduce or regenerate the YAML file before retrying
+YAML file apm.lock.yaml exceeds 8388608-byte (8 MiB) safe limit (at least 8388609 bytes); reduce or regenerate the YAML file before retrying
 ```
 
 Cause: APM rejects YAML sources larger than 8 MiB before parsing them. This includes project manifests and lockfiles.
@@ -22,6 +22,12 @@ Cause: APM rejects YAML sources larger than 8 MiB before parsing them. This incl
 Fix: reduce the source file. For a generated `apm.lock.yaml`, reduce its inputs, then remove the oversized generated lockfile and run `apm install` to create a replacement. Files exactly 8 MiB are accepted.
 
 See also: [Manifest schema](../../reference/manifest-schema/), [Lockfile specification](../../reference/lockfile-spec/)
+
+### `YAML frontmatter exceeds 8388608-byte (8 MiB) safe limit`
+
+Cause: the YAML metadata between a Markdown document's opening `---` fences is larger than 8 MiB.
+
+Fix: reduce the frontmatter header, or update the package that supplies the document.
 
 ## Install
 

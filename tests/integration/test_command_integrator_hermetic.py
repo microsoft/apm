@@ -231,6 +231,23 @@ class TestTransformPromptToCommand:
         assert warnings == []
         assert dropped == []
 
+    def test_large_body_with_small_frontmatter_integrates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A small fenced header does not cap an otherwise large prompt body."""
+        from apm_cli.utils import yaml_io
+
+        monkeypatch.setattr(yaml_io, "_MAX_YAML_INPUT_BYTES", 8)
+        body = "body\n" * 4
+        prompt = _write_prompt(tmp_path / "large.prompt.md", "---\na: ok\n---\n" + body)
+
+        _, post, warnings, dropped = CommandIntegrator()._transform_prompt_to_command(prompt)
+
+        assert post.metadata == {}
+        assert post.content == body.rstrip()
+        assert warnings == []
+        assert dropped == ["a"]
+
     def test_falls_back_to_stem_for_non_prompt_suffix(self, tmp_path: Path) -> None:
         prompt = _write_prompt(
             tmp_path / "feature.md",

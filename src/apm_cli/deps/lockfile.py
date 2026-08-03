@@ -844,7 +844,12 @@ class LockFile:
         except (LockfileFormatError, UnsupportedLockfileVersionError):
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
-            raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
+            recovery = ""
+            if "safe limit" in str(exc):
+                recovery = (
+                    " Remove the oversized lockfile, then run 'apm install' to regenerate it."
+                )
+            raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}{recovery}") from exc
 
     @classmethod
     def load_or_create(cls, path: Path) -> LockFile:
