@@ -146,6 +146,7 @@ def test_current_native_profiles_are_characterized() -> None:
         "kiro": (
             ".kiro",
             {
+                "agents": ("agents", ".md", "kiro_agent", None, False),
                 "instructions": ("steering", ".md", "kiro_steering", None, True),
                 "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
                 "hooks": ("hooks", ".json", "kiro_hooks", None, False),
