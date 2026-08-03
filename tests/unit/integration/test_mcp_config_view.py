@@ -544,6 +544,37 @@ def test_cold_cache_local_dependency_still_records_problem(tmp_path: Path) -> No
     assert "manifest not found" in view.problems[0].message
 
 
+def test_dangling_symlink_apm_package_still_records_problem(tmp_path: Path) -> None:
+    """A broken symlink at the package path is not cold-cache-explainable.
+
+    `Path.exists()` follows symlinks and returns False for a broken one,
+    which would otherwise be indistinguishable from "never fetched". A
+    dangling symlink is a present, corrupted entry and must still fail.
+    """
+    root = _write_manifest(tmp_path, name="root", mcp=[_self_defined("root-mcp", "cmd")])
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="example.com/acme/example-skill",
+        resolved_ref="example-skill-v1.0.0",
+        resolved_commit="a" * 40,
+        package_type="apm_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    package_dir.parent.mkdir(parents=True)
+    # Target stays inside modules_root (unlike a target escaping it entirely)
+    # so this exercises the is_symlink() guard itself, not the separate
+    # path-containment check in _package_manifest_path.
+    package_dir.symlink_to(modules_root / "also-nowhere")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert package_dir.is_symlink()
+    assert not package_dir.exists()
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
 def test_stale_directory_absent_from_lockfile_is_never_scanned(tmp_path: Path) -> None:
     """Only lockfile entries bound package-manifest traversal."""
     root = _write_manifest(tmp_path, name="root", mcp=["root-server"])
