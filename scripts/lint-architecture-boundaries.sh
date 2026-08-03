@@ -120,6 +120,19 @@ if [ "$hook_scope_owner_count" -ne 1 ] \
     [ -n "$hook_scope_duplicate_hits" ] && echo "$hook_scope_duplicate_hits"
     violations=$((violations + 1))
 fi
+hook_project_dir_owner_count=$(grep -Fc '"CLAUDE_PROJECT_DIR"' "$hook_file" || true)
+hook_project_dir_duplicate_hits=$(
+    grep -REn --include='*.py' '"CLAUDE_PROJECT_DIR"' src/apm_cli \
+        | grep -v "^${hook_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$hook_project_dir_owner_count" -ne 1 ] \
+    || [ -n "$hook_project_dir_duplicate_hits" ]; then
+    echo "[x] Claude project hook paths must be owned by HookIntegrator"
+    [ -n "$hook_project_dir_duplicate_hits" ] && echo "$hook_project_dir_duplicate_hits"
+    violations=$((violations + 1))
+fi
 hook_event_map_owner_count=$(grep -Ec \
     '^_HOOK_EVENT_MAP[[:space:]]*[:=]' "$hook_file" || true)
 hook_event_map_duplicate_hits=$(

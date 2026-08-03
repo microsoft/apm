@@ -588,6 +588,24 @@ class HookIntegrator(BaseIntegrator):
         except (json.JSONDecodeError, OSError):
             return None
 
+    @staticmethod
+    def _project_scoped_command_path(
+        command: str,
+        target: str,
+        target_rel: str,
+        deploy_root: Path | None,
+    ) -> str:
+        """Return a target-native script reference without sacrificing portability."""
+        if deploy_root is not None:
+            return str((deploy_root / target_rel).resolve())
+        if target != "claude":
+            return target_rel
+
+        project_dir = "CLAUDE_PROJECT_DIR"
+        if re.match(r"\s*(?:powershell|pwsh)(?:\.exe)?(?:\s|$)", command, re.IGNORECASE):
+            return f"$env:{project_dir}/{target_rel}"
+        return f"${{{project_dir}}}/{target_rel}"
+
     def _rewrite_command_for_target(
         self,
         command: str,
@@ -614,9 +632,9 @@ class HookIntegrator(BaseIntegrator):
             root_dir: Override root directory (e.g. ".copilot" for user scope)
             deploy_root: Absolute root of the deployment directory.  When provided,
                 rewritten script paths are resolved to absolute paths under this
-                root so the target (e.g. Claude Code) can execute them regardless
-                of the working directory.  When *None*, rewritten paths stay
-                relative (backward-compatible behaviour).
+                root so the target can execute them regardless of the working
+                directory. When *None*, Claude uses its portable project-root
+                environment variable and other targets retain relative paths.
 
         Returns:
             Tuple of (rewritten_command, list of (source_file, relative_target_path))
@@ -663,10 +681,11 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                resolved_cmd = (
-                    str((deploy_root / target_rel).resolve())
-                    if deploy_root is not None
-                    else target_rel
+                resolved_cmd = self._project_scoped_command_path(
+                    command,
+                    target,
+                    target_rel,
+                    deploy_root,
                 )
                 new_command = new_command.replace(full_var, resolved_cmd)
             else:
@@ -698,10 +717,11 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                resolved_cmd = (
-                    str((deploy_root / target_rel).resolve())
-                    if deploy_root is not None
-                    else target_rel
+                resolved_cmd = self._project_scoped_command_path(
+                    command,
+                    target,
+                    target_rel,
+                    deploy_root,
                 )
                 new_command = new_command.replace(rel_ref, resolved_cmd)
             else:

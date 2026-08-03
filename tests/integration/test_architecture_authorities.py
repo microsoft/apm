@@ -254,6 +254,55 @@ def test_hook_rewrite_scope_has_single_owner() -> None:
     assert "Hook rewrite scope must route through HookIntegrator" in guard
 
 
+def test_claude_project_hook_path_has_single_owner() -> None:
+    """Claude project hook commands must use HookIntegrator's portable resolver."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("def _project_scoped_command_path(") == 1
+    assert owner.count('"CLAUDE_PROJECT_DIR"') == 1
+    assert owner.count("self._project_scoped_command_path(") == 2
+    assert "Claude project hook paths must be owned by HookIntegrator" in guard
+
+
+def test_claude_project_hook_path_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """AC29 must reject a second Claude project-root path owner."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/integration/hook_bundle.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + '\n_PARALLEL_CLAUDE_PROJECT_DIR = "CLAUDE_PROJECT_DIR"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Claude project hook paths must be owned by HookIntegrator" in result.stdout
+
+
 def test_native_hook_event_map_has_single_owner() -> None:
     """Target-native event names must come from HookIntegrator's map."""
     root = Path(__file__).parents[2]
