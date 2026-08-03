@@ -20,7 +20,7 @@ def test_effective_marketplace_output_path_has_single_owner() -> None:
     assert "resolve_effective_output_path(" in producer
     assert "resolve_effective_output_path(" in builder
     assert "resolve_effective_output_path(" in drift_check
-    assert "Marketplace output paths must route through marketplace/output_profiles.py" in guard
+    assert "check_marketplace_output_path_authority.sh" in guard
 
 
 def test_effective_marketplace_output_path_guard_rejects_parallel_decision(
@@ -29,19 +29,17 @@ def test_effective_marketplace_output_path_guard_rejects_parallel_decision(
     """The boundary lint must reject a second output-path resolution."""
     root = Path(__file__).parents[2]
     sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
-    )
+    for relative_path in (
+        "scripts/check_marketplace_output_path_authority.sh",
+        "src/apm_cli/core/build_orchestrator.py",
+        "src/apm_cli/marketplace/builder.py",
+        "src/apm_cli/marketplace/drift_check.py",
+        "src/apm_cli/marketplace/output_profiles.py",
+    ):
+        source = root / relative_path
+        destination = sandbox / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
     drift_check = sandbox / "src/apm_cli/marketplace/drift_check.py"
     drift_check.write_text(
         drift_check.read_text(encoding="utf-8")
@@ -51,8 +49,7 @@ def test_effective_marketplace_output_path_guard_rejects_parallel_decision(
     )
 
     result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
+        ("bash", "scripts/check_marketplace_output_path_authority.sh", str(sandbox)),
         capture_output=True,
         text=True,
         check=False,
