@@ -418,7 +418,7 @@ def test_claude_project_hook_runs_from_external_cwd(
     package_factory = LocalPackageFactory(isolated.package_root)
     hook_package = package_factory.create("hook-package", targets=("claude",))
     consumer = LocalPackageFactory(isolated.work_root).create(
-        "consumer",
+        "consumer project",
         dependencies=({"path": str(hook_package.root)},),
         targets=("claude",),
     )

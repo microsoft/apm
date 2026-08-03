@@ -1709,6 +1709,19 @@ class TestScriptPathRewriting:
         )
         assert len(scripts) == 1
 
+    def test_rejects_claude_project_path_with_shell_expansion_characters(self):
+        """Claude project paths must not permit shell expansion from filenames."""
+        with pytest.raises(
+            ValueError,
+            match=r"Claude project hook paths cannot contain shell expansion characters",
+        ):
+            HookIntegrator._project_scoped_command_path(
+                "sh ./run.sh",
+                "claude",
+                ".claude/hooks/my-pkg/scripts/$(id).sh",
+                None,
+            )
+
     def test_nonexistent_script_not_rewritten(self, temp_project):
         """Test that references to non-existent scripts are left as-is."""
         pkg_dir = temp_project / "pkg"

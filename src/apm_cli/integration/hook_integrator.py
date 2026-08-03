@@ -603,6 +603,9 @@ class HookIntegrator(BaseIntegrator):
         if target != "claude":
             return target_rel
 
+        if "$" in target_rel or "`" in target_rel:
+            raise ValueError("Claude project hook paths cannot contain shell expansion characters")
+
         project_dir = "CLAUDE_PROJECT_DIR"
         if source_key == "powershell" or re.match(
             r"\s*(?:powershell|pwsh)(?:\.exe)?(?:\s|$)", command, re.IGNORECASE
