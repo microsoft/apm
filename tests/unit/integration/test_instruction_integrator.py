@@ -519,6 +519,26 @@ class TestConvertToCursorRules:
         assert 'globs: "src/**/*.py"' in result
         assert "applyTo" not in result
 
+    def test_maps_universal_apply_to_to_always_apply(self):
+        content = "---\napplyTo: '**'\ndescription: Repository guardrails\n---\n\n# Guardrails"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "alwaysApply: true" in result
+        assert "globs" not in result
+        assert "description: Repository guardrails" in result
+        assert "applyTo" not in result
+
+    def test_padded_universal_apply_to_to_always_apply(self):
+        content = "---\napplyTo: '  **  '\n---\n\n# Global rules"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "alwaysApply: true" in result
+        assert "globs" not in result
+
+    def test_list_valued_universal_apply_to_to_always_apply(self):
+        content = "---\napplyTo:\n  - '**'\n---\n\n# Global rules"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "alwaysApply: true" in result
+        assert "globs" not in result
+
     def test_preserves_description(self):
         content = "---\napplyTo: '**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
@@ -552,6 +572,13 @@ class TestConvertToCursorRules:
     def test_empty_apply_to_omits_globs(self):
         content = "---\ndescription: General rules\n---\n\n# Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs" not in result
+        assert "description: General rules" in result
+
+    def test_null_apply_to_omits_globs(self):
+        content = "---\napplyTo:\ndescription:\n---\n\n# General rules"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "alwaysApply" not in result
         assert "globs" not in result
         assert "description: General rules" in result
 
@@ -772,6 +799,26 @@ class TestCursorRulesIntegration:
         assert "applyTo" not in deployed
         assert "# TypeScript" in deployed
         assert "Use strict mode." in deployed
+
+    def test_universal_apply_to_deploys_always_apply(self):
+        """End-to-end: universal applyTo converts to Cursor alwaysApply."""
+        (self.project_root / ".cursor").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "guardrails.instructions.md").write_text(
+            "---\napplyTo: '**'\ndescription: Repository guardrails\n---\n\n# Guardrails"
+        )
+
+        pkg_info = _make_package_info(pkg)
+        self.integrator.integrate_package_instructions_cursor(pkg_info, self.project_root)
+
+        deployed = (self.project_root / ".cursor" / "rules" / "guardrails.mdc").read_text()
+        assert "alwaysApply: true" in deployed
+        assert "globs" not in deployed
+        assert "description: Repository guardrails" in deployed
+        assert "applyTo" not in deployed
 
 
 class TestCursorRulesSyncIntegration:

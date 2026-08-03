@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..022, req-ext-001..002, req-sc-001..010,
-req-tg-001..008, req-cf-001..002.
+req-tg-001..009, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -21,6 +21,7 @@ import pytest
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage
@@ -673,6 +674,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "manifest-v0.1.schema.json",
         {"name": "claude-hooks", "version": "1.0.0", "targets": ["claude"]},
     )
+
     validate_against(
         "manifest-v0.1.schema.json",
         {"name": "legacy-null", "version": "1.0.0", "target": None},
@@ -722,7 +724,28 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be rejected before target-scoped",
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
-        "[req-tg-008](#req-tg-008),\n[req-sc-001](#req-sc-001),",
+        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-sc-001](#req-sc-001),",
+    )
+
+
+@pytest.mark.req("req-tg-009")
+def test_consumer_preserves_cursor_universal_instruction_intent() -> None:
+    universal = InstructionIntegrator._convert_to_cursor_rules(
+        "---\napplyTo: '**'\n---\n\n# Repository guardrails"
+    )
+    scoped = InstructionIntegrator._convert_to_cursor_rules(
+        "---\napplyTo: 'src/**/*.py'\n---\n\n# Python rules"
+    )
+
+    assert "alwaysApply: true" in universal
+    assert "globs" not in universal
+    assert "alwaysApply" not in scoped
+    assert 'globs: "src/**/*.py"' in scoped
+    assert_spec_contains(
+        "`.cursor/rules/<name>.mdc`",
+        "MUST contain `alwaysApply: true` and MUST NOT contain a",
+        "MUST encode the source patterns in\n`globs`",
+        "MUST omit both `alwaysApply` and `globs`",
     )
 
 
