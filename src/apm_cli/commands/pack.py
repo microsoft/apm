@@ -438,6 +438,8 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                             tag_str = f"  -> tag {row.rendered_tag}" if row.rendered_tag else ""
                             version_str = row.version if row.version is not None else "<none>"
                             logger.info(f"    {row.path}  {version_str}{tag_str}  [{row.reason}]")
+                        for message in v_report.error_messages():
+                            logger.error(f"    {message}")
                     for msg in v_report.error_messages():
                         gate_errors.append({"code": "version_misaligned", "message": msg})
 

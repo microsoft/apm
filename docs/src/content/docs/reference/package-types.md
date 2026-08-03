@@ -212,11 +212,9 @@ to cherry-pick plugin skills by leaf name or manifest path, such as
 `skills/productivity/grill-me`.
 
 **Marketplace version checks:** a local Plugin collection may omit `apm.yml`.
-For `apm pack --check-versions`, APM uses `plugin.json`'s `version` when
-`apm.yml` is absent. If both manifests exist, `apm.yml` takes precedence; an
-invalid or versionless preferred manifest fails the release gate. When
-`plugin.json` is the fallback, malformed or non-object JSON and a missing or
-blank `version` also fail the release gate.
+For `apm pack --check-versions`, APM uses `plugin.json`'s `version` only when
+`apm.yml` is absent. See [Versioning strategies](../../producer/versioning-strategies/)
+for manifest precedence, failure behavior, and a plugin-only example.
 
 Declared component paths are requirements, not hints. If an `agents`,
 `skills`, `commands`, or `hooks` entry is missing or escapes the plugin

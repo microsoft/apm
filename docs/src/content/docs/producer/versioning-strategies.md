@@ -6,8 +6,8 @@ sidebar:
 ---
 
 `marketplace.versioning.strategy` in `apm.yml` controls how
-`apm pack --check-versions` verifies that local-path packages agree
-on their declared `version` before a release tag goes out. For each
+`apm pack --check-versions` validates each local-path package's declared
+`version` according to the selected strategy before a release tag goes out. For each
 local package, APM reads `apm.yml` when present; a Plugin collection
 without `apm.yml` uses its `plugin.json` `version` instead. A malformed
 or versionless manifest fails the check rather than falling back to
@@ -21,6 +21,18 @@ release-gate value. Put it in the local package's `apm.yml`, or in
 ```yaml
 # packages/plugin-a/apm.yml
 version: 1.4.0
+```
+
+`packages/plugin-a/plugin.json` (only when `apm.yml` is absent):
+
+```json
+{"name":"plugin-a","version":"1.4.0"}
+```
+
+Check the configured strategy without writing build output:
+
+```shell
+apm pack --check-versions --dry-run
 ```
 
 ```yaml

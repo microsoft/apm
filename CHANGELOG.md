@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm pack --check-versions` now reads `plugin.json` for local Plugin
+  collections without `apm.yml`; when present, `apm.yml` remains authoritative.
+  (#2454)
 - Kiro IDE/CLI v3 now receives agents from `.apm/agents/` as Markdown files
   under `.kiro/agents/<relative-stem>.md`. Only `description`, `model`, and
   `tools` frontmatter fields are forwarded; `name` and unknown fields are

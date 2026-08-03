@@ -21,6 +21,9 @@ import yaml
 
 from apm_cli.marketplace.tag_pattern import render_tag
 from apm_cli.marketplace.yml_schema import MarketplaceConfig, PackageEntry
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+_MAX_PLUGIN_JSON_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -69,12 +72,20 @@ class VersionAlignmentReport:
                 msgs.append(f"{row.path}: missing 'version' in apm.yml")
             elif row.reason == "invalid_yaml":
                 msgs.append(f"{row.path}: malformed YAML in apm.yml (failed to parse)")
+            elif row.reason == "invalid_yaml_manifest":
+                msgs.append(
+                    f"{row.path}: invalid apm.yml (must be a regular file within the project)"
+                )
             elif row.reason == "no_apm_yml":
                 msgs.append(f"{row.path}: no apm.yml or plugin.json found")
             elif row.reason == "invalid_plugin_json":
                 msgs.append(f"{row.path}: malformed JSON in plugin.json (failed to parse)")
             elif row.reason == "missing_plugin_version":
                 msgs.append(f"{row.path}: missing 'version' in plugin.json")
+            elif row.reason == "invalid_plugin_version":
+                msgs.append(
+                    f"{row.path}: invalid 'version' in plugin.json (must use printable ASCII)"
+                )
             elif row.reason.startswith("drift:expected="):
                 expected = row.reason.split("=", 1)[1]
                 msgs.append(f"{row.path}: expected {expected}, found {row.version}")
@@ -110,6 +121,8 @@ def _read_local_version(project_root: Path, rel_source: str) -> tuple[str | None
     * ``"ok"`` when a non-empty string version was found
     * ``"no_apm_yml"`` when neither supported manifest exists
     * ``"invalid_yaml"`` when the file exists but does not parse as YAML
+    * ``"invalid_yaml_manifest"`` when the preferred manifest is not a regular
+      file within the project
     * ``"missing_version"`` when the file parses as a mapping but has no
       usable ``version`` scalar
     * ``"invalid_plugin_json"`` when the fallback plugin manifest does not
@@ -124,16 +137,22 @@ def _read_local_version(project_root: Path, rel_source: str) -> tuple[str | None
     """
     package_root = project_root / rel_source
     pkg_yml = package_root / "apm.yml"
-    if not pkg_yml.is_file():
+    try:
+        resolved_pkg_yml = ensure_path_within(pkg_yml, project_root)
+    except PathTraversalError:
+        return None, "invalid_yaml_manifest"
+    if not pkg_yml.exists() and not pkg_yml.is_symlink():
         return _read_plugin_json_version(package_root)
+    if pkg_yml.is_symlink() or not pkg_yml.is_file():
+        return None, "invalid_yaml_manifest"
     try:
         # Bounded loader: a malicious dependency's apm.yml cannot wedge the
         # version check with a merge/alias expansion bomb (fails closed as
         # yaml.YAMLError -> invalid_yaml).
         from apm_cli.utils.yaml_io import load_yaml
 
-        raw = load_yaml(pkg_yml)
-    except yaml.YAMLError:
+        raw = load_yaml(resolved_pkg_yml)
+    except (OSError, yaml.YAMLError):
         return None, "invalid_yaml"
     if not isinstance(raw, dict):
         return None, "invalid_yaml"
@@ -150,15 +169,22 @@ def _read_plugin_json_version(package_root: Path) -> tuple[str | None, str]:
     plugin_json = find_plugin_json(package_root)
     if plugin_json is None:
         return None, "no_apm_yml"
+    if plugin_json.is_symlink() or not plugin_json.is_file():
+        return None, "invalid_plugin_json"
     try:
-        raw = json.loads(plugin_json.read_text(encoding="utf-8"))
-    except (OSError, ValueError, RecursionError):
+        resolved_plugin_json = ensure_path_within(plugin_json, package_root)
+        if resolved_plugin_json.stat().st_size > _MAX_PLUGIN_JSON_BYTES:
+            return None, "invalid_plugin_json"
+        raw = json.loads(resolved_plugin_json.read_text(encoding="utf-8"))
+    except (OSError, PathTraversalError, ValueError, RecursionError):
         return None, "invalid_plugin_json"
     if not isinstance(raw, dict):
         return None, "invalid_plugin_json"
     version = raw.get("version")
     if not isinstance(version, str) or not version.strip():
         return None, "missing_plugin_version"
+    if not version.isascii() or not version.isprintable():
+        return None, "invalid_plugin_version"
     return version.strip(), "ok"
 
 
@@ -193,6 +219,11 @@ def check_version_alignment(
         if status == "invalid_yaml":
             rows.append(PackageVersionRow(path=rel, version=None, ok=False, reason="invalid_yaml"))
             continue
+        if status == "invalid_yaml_manifest":
+            rows.append(
+                PackageVersionRow(path=rel, version=None, ok=False, reason="invalid_yaml_manifest")
+            )
+            continue
         if status == "missing_version":
             rows.append(
                 PackageVersionRow(path=rel, version=None, ok=False, reason="missing_version")
@@ -206,6 +237,11 @@ def check_version_alignment(
         if status == "missing_plugin_version":
             rows.append(
                 PackageVersionRow(path=rel, version=None, ok=False, reason="missing_plugin_version")
+            )
+            continue
+        if status == "invalid_plugin_version":
+            rows.append(
+                PackageVersionRow(path=rel, version=None, ok=False, reason="invalid_plugin_version")
             )
             continue
 

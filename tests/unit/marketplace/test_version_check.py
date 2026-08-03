@@ -254,6 +254,49 @@ class TestLocalVersionSource:
         assert not report.ok
         assert report.packages[0].reason == "missing_plugin_version"
 
+    def test_plugin_version_with_control_characters_fails_closed(self, tmp_path: Path):
+        _write_plugin_pkg(tmp_path, "plugins/my-plugin", "1.2.3\n")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_plugin_version"
+        assert report.error_messages() == [
+            "plugins/my-plugin: invalid 'version' in plugin.json (must use printable ASCII)"
+        ]
+
+    def test_non_file_plugin_json_fails_closed(self, tmp_path: Path):
+        package_dir = tmp_path / "plugins" / "my-plugin"
+        package_dir.mkdir(parents=True)
+        (package_dir / "plugin.json").mkdir()
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_plugin_json"
+
+    def test_oversized_plugin_json_fails_closed(self, tmp_path: Path):
+        package_dir = tmp_path / "plugins" / "my-plugin"
+        package_dir.mkdir(parents=True)
+        (package_dir / "plugin.json").write_bytes(b" " * (1024 * 1024 + 1))
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(packages=[{"name": "my-plugin", "source": "./plugins/my-plugin"}]),
+        )
+
+        report = _load(tmp_path)
+
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_plugin_json"
+
 
 # ---------------------------------------------------------------------------
 # Tag pattern strategy
