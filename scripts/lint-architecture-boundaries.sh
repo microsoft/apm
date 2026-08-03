@@ -173,6 +173,23 @@ if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
     violations=$((violations + 1))
 fi
 policy_file="src/apm_cli/policy/discovery.py"
+ado_policy_project_owner_count=$(grep -Ec '^ADO_POLICY_PROJECT = "apm"$' "$policy_file" || true)
+ado_policy_project_consumers=$(grep -Ec \
+    'project=ADO_POLICY_PROJECT|ADO_POLICY_PROJECT, "_apm"' "$policy_file" || true)
+ado_policy_project_duplicates=$(
+    grep -rEn --include='*.py' '^[[:space:]]*ADO_POLICY_PROJECT[[:space:]]*=' \
+        src/apm_cli \
+        | grep -v "^${policy_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$ado_policy_project_owner_count" -ne 1 ] \
+    || [ "$ado_policy_project_consumers" -ne 2 ] \
+    || [ -n "$ado_policy_project_duplicates" ]; then
+    echo "[x] ADO policy project coordinate must come from discovery.py::ADO_POLICY_PROJECT"
+    [ -n "$ado_policy_project_duplicates" ] && echo "$ado_policy_project_duplicates"
+    violations=$((violations + 1))
+fi
 policy_named_defs=$(grep -Ec \
     '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
     "$policy_file" || true)

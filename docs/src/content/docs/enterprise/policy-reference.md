@@ -613,7 +613,7 @@ Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-re
 ### 2. Discovery and applicability
 
 APM auto-discovers policy from `<org>/.github/apm-policy.yml` for GitHub and
-GitHub Enterprise remotes. Azure DevOps remotes use the org `_apm` project and
+GitHub Enterprise remotes. Azure DevOps remotes use the org `apm` project and
 `_apm` repository. GitLab and plain git remotes currently fall through with no
 policy applied. Repositories with no detectable git remote emit an explicit
 "could not determine org" line and skip discovery.

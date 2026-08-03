@@ -895,7 +895,7 @@ class TestAutoDiscover(unittest.TestCase):
         """ADO host profile skips .github and .apm, only tries _apm."""
         mock_extract.return_value = ("contoso", "dev.azure.com")
         mock_ado_fetch.return_value = PolicyFetchResult(
-            policy=ApmPolicy(), source="org:dev.azure.com/contoso/_apm/_apm", outcome="found"
+            policy=ApmPolicy(), source="org:dev.azure.com/contoso/apm/_apm", outcome="found"
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -903,7 +903,7 @@ class TestAutoDiscover(unittest.TestCase):
             mock_ado_fetch.assert_called_once()
             call_kwargs = mock_ado_fetch.call_args
             self.assertEqual(call_kwargs[1]["repo"], "_apm")
-            self.assertEqual(call_kwargs[1]["project"], "_apm")
+            self.assertEqual(call_kwargs[1]["project"], "apm")
             self.assertTrue(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
@@ -1016,7 +1016,7 @@ class TestFetchAdoContents(unittest.TestCase):
         mock_resp.text = VALID_POLICY_YAML
         mock_get.return_value = mock_resp
 
-        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        content, error = _fetch_ado_contents("contoso", "apm", "_apm", "apm-policy.yml")
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
         # Verify Basic auth header was sent with ADO_APM_PAT
@@ -1033,7 +1033,7 @@ class TestFetchAdoContents(unittest.TestCase):
         mock_resp.status_code = 404
         mock_get.return_value = mock_resp
 
-        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        content, error = _fetch_ado_contents("contoso", "apm", "_apm", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("404", error)
 
@@ -1045,7 +1045,7 @@ class TestFetchAdoContents(unittest.TestCase):
         mock_resp.status_code = 401
         mock_get.return_value = mock_resp
 
-        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        content, error = _fetch_ado_contents("contoso", "apm", "_apm", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("401", error)
         self.assertIn("auth remediation", error)
@@ -1062,7 +1062,7 @@ class TestFetchAdoContents(unittest.TestCase):
         mock_resp.headers = {"Location": "https://evil.example.com"}
         mock_get.return_value = mock_resp
 
-        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        content, error = _fetch_ado_contents("contoso", "apm", "_apm", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("redirect", error.lower())
 
@@ -1076,7 +1076,7 @@ class TestFetchAdoContents(unittest.TestCase):
         mock_resp.text = VALID_POLICY_YAML
         mock_get.return_value = mock_resp
 
-        _content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        _content, error = _fetch_ado_contents("contoso", "apm", "_apm", "apm-policy.yml")
         self.assertIsNone(error)
         # Verify no Authorization header was sent
         call_kwargs = mock_get.call_args
@@ -1093,7 +1093,7 @@ class TestFetchAdoContents(unittest.TestCase):
         mock_resp.text = VALID_POLICY_YAML
         mock_get.return_value = mock_resp
 
-        _content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        _content, error = _fetch_ado_contents("contoso", "apm", "_apm", "apm-policy.yml")
         self.assertIsNone(error)
         call_kwargs = mock_get.call_args
         headers = call_kwargs[1].get("headers", {})
@@ -1115,7 +1115,7 @@ class TestFetchAdoContents(unittest.TestCase):
         with patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False):
             content, error = _fetch_ado_contents(
                 "DefaultCollection",
-                "_apm",
+                "apm",
                 "_apm",
                 "apm-policy.yml",
                 host="ado.example.test",
@@ -1162,7 +1162,7 @@ class TestFetchAdoContents(unittest.TestCase):
         resolver.try_with_fallback.side_effect = fallback
         content, error = _fetch_ado_contents(
             "contoso",
-            "_apm",
+            "apm",
             "_apm",
             "apm-policy.yml",
         )
@@ -1188,14 +1188,14 @@ class TestFetchFromAdoRepo(unittest.TestCase):
             root = Path(tmpdir)
             result = _fetch_from_ado_repo(
                 org="contoso",
-                project="_apm",
+                project="apm",
                 repo="_apm",
                 host="dev.azure.com",
                 project_root=root,
                 no_cache=True,
             )
             self.assertTrue(result.found)
-            self.assertEqual(result.source, "org:dev.azure.com/contoso/_apm/_apm")
+            self.assertEqual(result.source, "org:dev.azure.com/contoso/apm/_apm")
             self.assertFalse(result.cached)
 
     @patch("apm_cli.policy.discovery._fetch_ado_contents")
@@ -1208,10 +1208,10 @@ class TestFetchFromAdoRepo(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            repo_ref = "dev.azure.com/contoso/_apm/_apm"
+            repo_ref = "dev.azure.com/contoso/apm/_apm"
             result = _fetch_from_ado_repo(
                 org="contoso",
-                project="_apm",
+                project="apm",
                 repo="_apm",
                 host="dev.azure.com",
                 project_root=root,
@@ -1228,7 +1228,7 @@ class TestFetchFromAdoRepo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_ado_repo(
                 org="contoso",
-                project="_apm",
+                project="apm",
                 repo="_apm",
                 host="dev.azure.com",
                 project_root=Path(tmpdir),
@@ -1244,7 +1244,7 @@ class TestFetchFromAdoRepo(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            repo_ref = "dev.azure.com/contoso/_apm/_apm"
+            repo_ref = "dev.azure.com/contoso/apm/_apm"
             _write_cache(repo_ref, _make_test_policy(), root)
             cache_dir = _get_cache_dir(root)
             key = _cache_key(repo_ref)
@@ -1255,7 +1255,7 @@ class TestFetchFromAdoRepo(unittest.TestCase):
 
             result = _fetch_from_ado_repo(
                 org="contoso",
-                project="_apm",
+                project="apm",
                 repo="_apm",
                 host="dev.azure.com",
                 project_root=root,
@@ -1271,7 +1271,7 @@ class TestFetchFromAdoRepo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_ado_repo(
                 org="contoso",
-                project="_apm",
+                project="apm",
                 repo="_apm",
                 host="dev.azure.com",
                 project_root=Path(tmpdir),
@@ -1287,7 +1287,7 @@ class TestFetchFromAdoRepo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _fetch_from_ado_repo(
                 org="contoso",
-                project="_apm",
+                project="apm",
                 repo="_apm",
                 host="dev.azure.com",
                 project_root=Path(tmpdir),
