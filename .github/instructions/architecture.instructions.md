@@ -68,6 +68,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Marketplace tag-pattern validation and expansion | marketplace/tag_pattern.py | `src/apm_cli/marketplace/tag_pattern.py` |
 | Local marketplace package-version manifest precedence | marketplace/version_check.py (_read_local_version) | `src/apm_cli/marketplace/version_check.py` |
 | applyTo normalization and hidden-tool placement | utils/patterns.py (normalize_apply_to); compilation/context_optimizer.py (ContextOptimizer) | `src/apm_cli/utils/patterns.py`; `src/apm_cli/compilation/context_optimizer.py` |
+| Effective marketplace output path | marketplace/output_profiles.py (resolve_effective_output_path) | `src/apm_cli/marketplace/output_profiles.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

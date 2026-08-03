@@ -454,7 +454,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                 drift_builder = MarketplaceBuilder.from_config(
                     gate_config, project_root=project_root, options=mkt_opts
                 )
-                d_report = check_marketplace_drift(drift_builder, gate_config, project_root)
+                d_report = check_marketplace_drift(
+                    drift_builder,
+                    gate_config,
+                    project_root,
+                    options.marketplace_path_overrides,
+                )
                 drift_payload = d_report.to_json_dict()
                 if d_report.ok:
                     if not json_output:

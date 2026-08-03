@@ -19,12 +19,16 @@ See ``.apm/skills/wave-4-design.md`` section 4.3 for the flow.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from apm_cli.marketplace.builder import MarketplaceBuilder, ResolveResult
-from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS, MarketplaceOutputProfile
+from apm_cli.marketplace.output_profiles import (
+    MARKETPLACE_OUTPUTS,
+    resolve_effective_output_path,
+)
 from apm_cli.marketplace.yml_schema import MarketplaceConfig
 from apm_cli.utils.paths import portable_relpath
 
@@ -134,22 +138,6 @@ def json_key_diff(old: Any, new: Any, *, prefix: str = "") -> list[DriftDifferen
     return diffs
 
 
-def _output_path_for_profile(
-    config: MarketplaceConfig, profile: MarketplaceOutputProfile, project_root: Path
-) -> Path:
-    """Return the on-disk path this profile writes to."""
-    # Prefer the explicit output_specs mapping if present, else fall back
-    # to the per-profile config attribute (claude.output / codex.output).
-    for spec in config.output_specs:
-        if spec.name == profile.name and spec.path:
-            return project_root / spec.path
-    cfg_obj = getattr(config, profile.config_attr, None)
-    output_attr = getattr(cfg_obj, "output", None) if cfg_obj is not None else None
-    if isinstance(output_attr, str) and output_attr:
-        return project_root / output_attr
-    return project_root / profile.default_output
-
-
 def _load_on_disk(path: Path) -> tuple[dict[str, Any] | None, bool]:
     """Return (parsed_json_or_none, exists)."""
     if not path.exists():
@@ -164,6 +152,7 @@ def check_marketplace_drift(
     builder: MarketplaceBuilder,
     config: MarketplaceConfig,
     project_root: Path,
+    output_overrides: Mapping[str, str | Path] | None = None,
 ) -> DriftReport:
     """Run the drift gate using *builder* (must be dry-run) and compare
     its composed output for each configured profile against the on-disk
@@ -179,7 +168,12 @@ def check_marketplace_drift(
         profile = MARKETPLACE_OUTPUTS.get(name)
         if profile is None:  # pragma: no cover - schema rejects unknown names
             continue
-        out_path = _output_path_for_profile(config, profile, project_root)
+        out_path = resolve_effective_output_path(
+            config,
+            profile,
+            project_root,
+            output_overrides,
+        )
         rel_display = (
             portable_relpath(out_path, project_root)
             if out_path.is_relative_to(project_root)

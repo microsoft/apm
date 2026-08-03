@@ -206,16 +206,14 @@ class MarketplaceProducer:
                     resolve_result = builder.resolve()
                 resolved = resolve_result.entries
 
-                configured_output_value = getattr(config, profile.config_attr).output
-                configured_output = Path(configured_output_value)
-                output_path = project_root / configured_output
+                from ..marketplace.output_profiles import resolve_effective_output_path
 
-                # Apply --marketplace-path override
-                if (
-                    options.marketplace_path_overrides
-                    and output_name in options.marketplace_path_overrides
-                ):
-                    output_path = project_root / options.marketplace_path_overrides[output_name]
+                output_path = resolve_effective_output_path(
+                    config,
+                    profile,
+                    project_root,
+                    options.marketplace_path_overrides,
+                )
 
                 output_report = builder.write_output(
                     profile,

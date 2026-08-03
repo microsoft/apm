@@ -58,6 +58,7 @@ from .output_profiles import (
     CODEX_MARKETPLACE_OUTPUT,
     DEFAULT_MARKETPLACE_OUTPUT,
     MarketplaceOutputProfile,
+    resolve_effective_output_path,
 )
 from .ref_resolver import RefResolver
 from .semver import SemVer, parse_semver, satisfies_range
@@ -532,13 +533,18 @@ class MarketplaceBuilder:
     # -- output path --------------------------------------------------------
 
     def _output_path(self) -> Path:
-        if self._options.output_override is not None:
-            return self._options.output_override
         yml = self._load_yml()
-        output_path = self._project_root / yml.claude.output
-        # Containment guard -- reject output paths that escape the project root.
-        ensure_path_within(output_path, self._project_root)
-        return output_path
+        overrides = (
+            {DEFAULT_MARKETPLACE_OUTPUT.name: self._options.output_override}
+            if self._options.output_override is not None
+            else None
+        )
+        return resolve_effective_output_path(
+            yml,
+            DEFAULT_MARKETPLACE_OUTPUT,
+            self._project_root,
+            overrides,
+        )
 
     def _mapper_for_profile(self, profile: MarketplaceOutputProfile):
         mapper = MARKETPLACE_OUTPUT_MAPPERS.get(profile.mapper)
@@ -1190,8 +1196,11 @@ class MarketplaceBuilder:
     ) -> tuple[Path, tuple[str, ...]]:
         """Write the configured Codex marketplace output using resolved packages."""
         yml = self._load_yml()
-        output_path = self._project_root / yml.codex.output
-        ensure_path_within(output_path, self._project_root)
+        output_path = resolve_effective_output_path(
+            yml,
+            CODEX_MARKETPLACE_OUTPUT,
+            self._project_root,
+        )
         output = self.write_output(CODEX_MARKETPLACE_OUTPUT, resolved, output_path)
         return output.output_path, output.warnings
 
