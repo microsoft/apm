@@ -59,7 +59,7 @@ def validate(name, check_refs, verbose):
         logger.progress("Validation Results:", symbol="info")
         for r in results:
             if r.passed and not r.warnings:
-                logger.success(f"  {r.check_name}: all plugins valid", symbol="check")
+                logger.success(f"  {r.check_name}: passed", symbol="check")
                 passed += 1
             elif r.warnings and not r.errors:
                 for w in r.warnings:

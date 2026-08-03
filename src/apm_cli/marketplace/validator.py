@@ -3,10 +3,9 @@
 Provides validation functions for marketplace.json integrity checking.
 Used by ``apm marketplace validate``.
 
-All validators operate on parsed ``MarketplaceManifest`` / ``MarketplacePlugin``
-objects. The JSON parser (``models.py``) already drops entries that are
-structurally unrecognizable; these validators enforce additional business
-rules on the successfully parsed entries.
+The tolerant JSON parser (``models.py``) retains structural diagnostics for
+this module to surface. The remaining validators enforce business rules on
+successfully parsed ``MarketplacePlugin`` entries.
 """
 
 from collections.abc import Sequence

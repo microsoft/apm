@@ -359,6 +359,11 @@ class TestParseMarketplaceJson:
         manifest = parse_marketplace_json(data)
         assert len(manifest.plugins) == 1
         assert manifest.plugins[0].name == "valid"
+        assert manifest.structural_errors == (
+            "plugins[1].name: expected a non-empty string",
+            "plugins[2]: expected an object",
+            "plugins[3].source: expected a source or repository field",
+        )
 
     def test_empty_plugins_list(self):
         data = {"name": "Empty"}
