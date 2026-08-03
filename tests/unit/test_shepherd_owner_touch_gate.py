@@ -438,6 +438,57 @@ def test_unknown_completion_status_fails_closed(
 
 
 # ---------------------------------------------------------------------------
+# Cross-row duplicate selector regression (architecture integrity gate)
+#
+# The canonical owner table must have a unique selector per row; a selector
+# that appears in two DISTINCT rows is an ambiguous ownership claim that the
+# gate must reject fail-closed.  This test constructs that exact scenario
+# -- two rows with different decisions but the same path selector -- and
+# asserts that the gate emits the exact diagnostic text
+# "duplicate canonical owner selector".
+# ---------------------------------------------------------------------------
+
+
+def _table_with_cross_row_dup(selector: str = OWNER_PATH) -> str:
+    """Return a canonical table with TWO distinct rows sharing one selector."""
+    return (
+        "# Architecture\n\n"
+        "<!-- canonical-owner-table:v1 -->\n"
+        "| Decision / fact | Canonical owner | Owner path selectors |\n"
+        "|---|---|---|\n"
+        f"| First distinct decision | `owner-a` | `{selector}` |\n"
+        f"| Second distinct decision | `owner-b` | `{selector}` |\n"
+        "<!-- /canonical-owner-table -->\n"
+    )
+
+
+def test_cross_row_duplicate_selector_fails_closed(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Two distinct rows sharing a selector MUST be rejected fail-closed.
+
+    Regression for the architecture instruction integrity rule: every row
+    in the canonical owner table must carry a unique set of path selectors.
+    A selector shared across two different decision rows is ambiguous
+    (neither row is the unambiguous canonical owner) and MUST produce
+    fail-closed output containing 'duplicate canonical owner selector'.
+    """
+    repo, base = owner_repo
+
+    # Overwrite the owner table with two rows that share OWNER_PATH.
+    _write(repo, OWNER_TABLE, _table_with_cross_row_dup(OWNER_PATH))
+    _write(repo, OWNER_PATH, 'FACT = "dup"\n')
+    head = _commit(repo, "introduce cross-row duplicate selector")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode != 0, "detect must fail closed when two rows share a selector"
+    assert "duplicate canonical owner selector" in result.stderr, (
+        f"Expected 'duplicate canonical owner selector' in stderr, got: {result.stderr!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Windows bare-argv git resolution regression (microsoft/apm#2233)
 #
 # subprocess.run(["git", ...]) does not reliably resolve on Windows with
