@@ -214,21 +214,27 @@ def _allows_missing_manifest(
     if dependency.package_type == PackageType.SKILL_BUNDLE.value:
         return True
 
+    # Cold cache: the package directory itself was never materialised (a
+    # fresh CI checkout with an empty apm_modules/, or a setup-only job that
+    # never ran a plain `apm install`). That is distinct from a *present*
+    # directory missing its manifest, which is genuinely suspicious. A
+    # locked non-local dependency simply hasn't been fetched yet -- the
+    # lockfile pin is intact and a plain `apm install` would restore it
+    # without changing apm.lock.yaml, regardless of package_type (#2456).
+    # `apm audit --ci` already tolerates the equivalent state (#2329) for
+    # the same reason. A local dependency's directory not existing has no
+    # such explanation -- nothing fetches it -- so the tolerance excludes it.
+    if not package_dir.exists():
+        return dependency.source != "local"
+
     dependency_ref = dependency.to_dependency_ref()
     if not dependency_ref.is_virtual_subdirectory():
         return False
 
-    # ``apm audit --ci`` runs without materialising ``apm_modules/``: the drift
-    # replay uses a throwaway scratch dir, and a setup-only CI job (install the
-    # CLI, then audit -- no ``apm install``) never populates the real modules
-    # tree.  When the package directory is absent we cannot probe the on-disk
-    # shape, so fall back to the frozen lockfile classification -- a virtual
-    # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  Once the
-    # modules ARE materialised the strict shape probe below still runs and
-    # guards against a mislabeled or malformed installed package.
-    if not package_dir.exists():
-        return dependency.package_type == PackageType.CLAUDE_SKILL.value
-
+    # Once modules ARE materialised, the strict shape probe guards against a
+    # mislabeled or malformed installed package: a virtual `claude_skill`
+    # legitimately ships no `apm.yml` by design, but only when both the
+    # on-disk shape and the lockfile classification agree.
     package_type, _ = detect_package_type(package_dir)
     return (
         package_type is PackageType.CLAUDE_SKILL

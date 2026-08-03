@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --frozen` no longer fails on a cold cache (fresh checkout,
+  empty `apm_modules/`) for a git-hosted `apm_package` dependency when the
+  project also declares MCP state; an absent, not-yet-fetched package
+  directory is no longer treated as lockfile drift. Reported by @rrazvd.
+  (#2457)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
 - Release promotions now run marker-bounded lifecycle integration on macOS Intel
   while retaining the full corpus on macOS ARM and Linux, preventing Intel

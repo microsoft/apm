@@ -471,6 +471,79 @@ def test_manifestless_virtual_package_with_wrong_lock_type_records_problem(
     assert "manifest not found" in view.problems[0].message
 
 
+def test_cold_cache_nonvirtual_apm_package_is_tolerated(tmp_path: Path) -> None:
+    """Regression for #2456: a fresh checkout's absent apm_modules/ is not drift.
+
+    A plain, non-virtual git `apm_package` dependency (repo root ships its own
+    apm.yml) on a cold cache -- apm_modules/ never materialised -- must not be
+    reported as an out-of-sync manifest. It simply hasn't been fetched yet;
+    the lockfile pin is intact and a plain `apm install` would restore it.
+    """
+    root = _write_manifest(tmp_path, name="root", mcp=[_self_defined("root-mcp", "cmd")])
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="example.com/acme/example-skill",
+        resolved_ref="example-skill-v1.0.0",
+        resolved_commit="a" * 40,
+        package_type="apm_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not package_dir.exists()
+    assert view.problems == ()
+
+
+def test_materialized_but_manifestless_apm_package_still_records_problem(
+    tmp_path: Path,
+) -> None:
+    """A present-but-broken apm_package install is still a real problem.
+
+    Distinguishes the #2456 cold-cache tolerance (directory absent) from a
+    genuinely corrupt install (directory present, apm.yml missing inside it),
+    which must keep failing.
+    """
+    root = _write_manifest(tmp_path, name="root", mcp=[_self_defined("root-mcp", "cmd")])
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="example.com/acme/example-skill",
+        resolved_ref="example-skill-v1.0.0",
+        resolved_commit="a" * 40,
+        package_type="apm_package",
+        depth=1,
+    )
+    locked.to_dependency_ref().get_install_path(modules_root).mkdir(parents=True)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_cold_cache_local_dependency_still_records_problem(tmp_path: Path) -> None:
+    """A missing local dependency directory is not cold-cache-explainable.
+
+    Nothing fetches a local path, so an absent directory there is a genuine
+    problem -- unlike a remote dependency's apm_modules/ entry, which a plain
+    `apm install` would restore.
+    """
+    root = _write_manifest(tmp_path, name="root", mcp=[_self_defined("root-mcp", "cmd")])
+    locked = LockedDependency(
+        repo_url="_local/missing",
+        source="local",
+        local_path="./packages/missing",
+        package_type="apm_package",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
 def test_stale_directory_absent_from_lockfile_is_never_scanned(tmp_path: Path) -> None:
     """Only lockfile entries bound package-manifest traversal."""
     root = _write_manifest(tmp_path, name="root", mcp=["root-server"])
