@@ -115,6 +115,10 @@ requirements:
     keyword: MUST
     section: "4.5"
     conformance_class: consumer
+  - id: req-mf-024
+    keyword: MUST
+    section: "4.3.2"
+    conformance_class: consumer
   - id: req-ext-001
     keyword: MUST
     section: "4.1"
