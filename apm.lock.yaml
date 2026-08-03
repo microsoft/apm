@@ -2783,7 +2783,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:da86b8597b4f46953d1f80853db268b7dae1e7099db094566dd6a8b003d405b6
+  content_hash: sha256:0fcc203d0daf2d1227a2cea61482009a50a9eff27292fab3b7a06dd7fda2b1e6
 - kind: project-relative
   target: copilot
   value: .github/instructions/changelog.instructions.md
@@ -3290,7 +3290,7 @@ local_deployed_file_hashes:
   .github/agents/spec-tag-architect.agent.md: sha256:82907265c5e7cf1ac61ad96866fa7c5683b69c8f09b7a4c5f3cc241acc9568ca
   .github/agents/supply-chain-security-expert.agent.md: sha256:8fb8cc426d6af17ba084a28b3f026c2b475b62e3ca63ed2f88b83bd823f877af
   .github/agents/test-coverage-expert.agent.md: sha256:48c2172d1f18a394fa83ef9dc2be0b9b921a4e51e976498165250fed66369711
-  .github/instructions/architecture.instructions.md: sha256:da86b8597b4f46953d1f80853db268b7dae1e7099db094566dd6a8b003d405b6
+  .github/instructions/architecture.instructions.md: sha256:0fcc203d0daf2d1227a2cea61482009a50a9eff27292fab3b7a06dd7fda2b1e6
   .github/instructions/changelog.instructions.md: sha256:1e51ec4c74e847967962bd279dc4c6e582c5d3578490b3c28d5f3acd3e05f73e
   .github/instructions/cicd.instructions.md: sha256:33201cb88ea2f34b4950a9b52f87dc8dfb682796aaf53068ba7ae406c0c5e2c2
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a

@@ -14,6 +14,15 @@ or versionless manifest fails the check rather than falling back to
 another source. Pick one of three strategies. The default is
 `lockstep`.
 
+The `version` beside a `marketplace.packages` entry does not supply this
+release-gate value. Put it in the local package's `apm.yml`, or in
+`plugin.json` only when that package has no `apm.yml`:
+
+```yaml
+# packages/plugin-a/apm.yml
+version: 1.4.0
+```
+
 ```yaml
 marketplace:
   versioning:

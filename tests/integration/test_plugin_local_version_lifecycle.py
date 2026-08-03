@@ -75,3 +75,28 @@ def test_plugin_local_version_check_dry_run_is_aligned_without_build_output(
     assert payload["bundle"] is None
     assert payload["plugin_manifests"]["written"] == []
     assert not (tmp_path / "build").exists()
+
+
+def test_plugin_local_version_check_malformed_manifest_fails_release_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed fallback metadata fails the JSON release gate without output."""
+    _write_plugin_only_marketplace(tmp_path)
+    plugin_json = tmp_path / "plugins" / "my-plugin" / "plugin.json"
+    plugin_json.write_text("{not-json", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["pack", "--check-versions", "--dry-run", "--json"])
+
+    assert result.exit_code == 3, result.output
+    payload = json.loads(result.output)
+    assert payload["ok"] is False
+    assert payload["errors"] == [
+        {
+            "code": "version_misaligned",
+            "message": "plugins/my-plugin: malformed JSON in plugin.json (failed to parse)",
+        }
+    ]
+    assert payload["bundle"] is None
+    assert payload["plugin_manifests"]["written"] == []
+    assert not (tmp_path / "build").exists()
