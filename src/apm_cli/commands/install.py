@@ -53,10 +53,10 @@ from apm_cli.install.package_resolution import (
     apply_cli_skill_pin,
     cli_skill_subset,
     dependency_reference_to_yaml_entry,
-    get_existing_dep_ref_for_identity,
     persist_dependency_list_if_changed,
+    propagate_existing_registry_source,
     resolve_parsed_dependency_reference,
-    update_existing_dependency_entry_if_needed,
+    try_update_existing_dependency_entry,
     user_scope_rejection_reason,
 )
 from apm_cli.install.package_selection import only_packages_from_validation
@@ -414,22 +414,9 @@ def _resolve_package_references(
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
-            # A bare CLI positional (e.g. "owner/repo#1.0.0") always parses with
-            # source=None/"git" -- DependencyReference.parse() has no registry
-            # awareness. When this identity is already declared as a registry
-            # dependency in apm.yml, propagate that so downstream serialization
-            # (to_apm_yml_entry) and probe routing don't silently convert it to
-            # a git dependency (see #2166 review discussion).
-            existing_ref_for_identity = get_existing_dep_ref_for_identity(
-                current_deps, identity, dependency_reference_cls=DependencyReference
+            existing_source_is_registry = propagate_existing_registry_source(
+                dep_ref, current_deps, identity, dependency_reference_cls=DependencyReference
             )
-            existing_source_is_registry = (
-                existing_ref_for_identity is not None
-                and getattr(existing_ref_for_identity, "source", None) == "registry"
-            )
-            if existing_source_is_registry:
-                dep_ref.source = "registry"
-                dep_ref.registry_name = existing_ref_for_identity.registry_name
             apply_cli_skill_pin(
                 dep_ref,
                 skill_subset,
@@ -482,11 +469,7 @@ def _resolve_package_references(
         already_in_deps = identity in existing_identities
 
         verbose = bool(logger and logger.verbose)
-        # existing_source_is_registry short-circuits the probe-skip decision
-        # the same way should_skip_github_probe_for_dep does for a freshly
-        # ambiguous ref -- otherwise routes_unscoped_to_registry (which treats
-        # source == "registry" as already-decided, not ambiguous) would send
-        # this already-known registry identity through the GitHub probe.
+        # An already-known registry identity also skips the probe.
         if existing_source_is_registry or should_skip_github_probe_for_dep(
             dep_ref, default_registry
         ):
@@ -506,22 +489,20 @@ def _resolve_package_references(
                 dep_ref=dep_ref,
             )
         if package_accessible:
-            try:
-                updates_existing_entry = update_existing_dependency_entry_if_needed(
-                    current_deps,
-                    already_in_deps=identity in manifest_identities,
-                    apm_yml_entries=_apm_yml_entries,
-                    canonical=canonical,
-                    dep_ref=dep_ref,
-                    identity=identity,
-                    dependency_reference_cls=DependencyReference,
-                    logger=logger,
-                )
-            except ValueError as e:
-                reason = str(e)
-                invalid_outcomes.append((package, reason))
+            updates_existing_entry, update_error = try_update_existing_dependency_entry(
+                current_deps,
+                already_in_deps=identity in manifest_identities,
+                apm_yml_entries=_apm_yml_entries,
+                canonical=canonical,
+                dep_ref=dep_ref,
+                identity=identity,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
+            )
+            if update_error:
+                invalid_outcomes.append((package, update_error))
                 if logger:
-                    logger.validation_fail(package, reason)
+                    logger.validation_fail(package, update_error)
                 continue
             valid_outcomes.append((canonical, already_in_deps))
             if logger:

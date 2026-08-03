@@ -160,6 +160,35 @@ def get_existing_dep_ref_for_identity(
     return None
 
 
+def propagate_existing_registry_source(
+    dep_ref: Any,
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> bool:
+    """Carry an existing registry-sourced entry's source onto a fresh dep_ref.
+
+    A bare CLI positional (e.g. ``owner/repo#1.0.0``) always parses with
+    ``source=None``/``"git"`` -- the string parser has no registry
+    awareness. When *identity* is already declared as a registry
+    dependency in apm.yml, propagate that onto *dep_ref* in place so
+    downstream serialization (``to_apm_yml_entry``) doesn't silently
+    convert it to a git dependency.
+
+    Returns True when the existing entry was registry-sourced, so the
+    caller can also short-circuit its probe-skip decision the same way.
+    """
+    existing_ref = get_existing_dep_ref_for_identity(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    is_registry = existing_ref is not None and getattr(existing_ref, "source", None) == "registry"
+    if is_registry:
+        dep_ref.source = "registry"
+        dep_ref.registry_name = existing_ref.registry_name
+    return is_registry
+
+
 def get_existing_skill_subset(
     current_deps: builtins.list,
     identity: str,
@@ -342,6 +371,36 @@ def update_existing_dependency_entry_if_needed(
             logger=logger,
         )
     return should_update
+
+
+def try_update_existing_dependency_entry(
+    current_deps: builtins.list,
+    *,
+    already_in_deps: bool,
+    apm_yml_entries: dict,
+    canonical: str,
+    dep_ref: Any,
+    identity: str,
+    dependency_reference_cls: Any,
+    logger: Any = None,
+) -> tuple[bool, str | None]:
+    """Like update_existing_dependency_entry_if_needed, but returns
+    (updated, error) instead of raising, so callers can report a refused
+    registry-to-git conversion as an ordinary invalid-package outcome."""
+    try:
+        updated = update_existing_dependency_entry_if_needed(
+            current_deps,
+            already_in_deps=already_in_deps,
+            apm_yml_entries=apm_yml_entries,
+            canonical=canonical,
+            dep_ref=dep_ref,
+            identity=identity,
+            dependency_reference_cls=dependency_reference_cls,
+            logger=logger,
+        )
+    except ValueError as e:
+        return False, str(e)
+    return updated, None
 
 
 def merge_structured_entry_into_current_deps(
