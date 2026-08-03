@@ -78,7 +78,7 @@ _SEMVER_RE = re.compile(
 # Source field accepts:
 #   - ``owner/repo`` (remote, default host)
 #   - ``host.tld/owner/repo`` (remote on a non-default host, shorthand)
-#   - ``https://host.tld/path/to/repo`` (remote on a non-default host, full URL)
+#   - ``https://host.tld/path/to/repo`` (remote full URL)
 #   - ``https://host.tld/path/to/repo.git`` (same, with optional ``.git`` suffix)
 #   - ``./...`` (local path within the same repo)
 #
