@@ -46,9 +46,6 @@ def validate(name, check_refs, verbose):
                 source_type = "dict" if isinstance(p.source, dict) else "string"
                 logger.verbose_detail(f"    {p.name}: source type: {source_type}")
 
-        if has_structure_errors:
-            results = [result for result in results if result.check_name == "Structure"]
-
         # Check-refs placeholder
         if check_refs:
             logger.warning(
@@ -64,6 +61,8 @@ def validate(name, check_refs, verbose):
         logger.progress("Validation Results:", symbol="info")
         for r in results:
             if r.passed and not r.warnings:
+                if has_structure_errors:
+                    continue
                 logger.success(f"  {r.check_name}: passed", symbol="check")
                 passed += 1
             elif r.warnings and not r.errors:
