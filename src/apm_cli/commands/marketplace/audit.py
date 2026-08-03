@@ -117,13 +117,24 @@ def audit(name, strict, verbose):
         no_plugins_audited = ok_count == 0 and bypass_total == 0
         if strict and no_plugins_audited:
             logger.error("--strict: no plugins were audited; cannot verify supply-chain integrity")
+            if skipped_count and not verbose:
+                logger.info(
+                    f"Run 'apm marketplace audit {name} --strict --verbose' "
+                    "to see skipped plugin reasons."
+                )
+            sys.exit(1)
+        if strict and skipped_count:
+            logger.error(
+                f"--strict: {skipped_count} plugin source(s) skipped; "
+                "cannot verify a complete marketplace audit"
+            )
             if not verbose:
                 logger.info(
                     f"Run 'apm marketplace audit {name} --strict --verbose' "
                     "to see skipped plugin reasons."
                 )
             sys.exit(1)
-        if strict and (bypass_total or skipped_count or fetch_error_count):
+        if strict and (bypass_total or fetch_error_count):
             sys.exit(1)
 
     except Exception as e:
