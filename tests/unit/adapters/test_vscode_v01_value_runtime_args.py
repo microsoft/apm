@@ -474,15 +474,21 @@ class TestRenderedDockerLauncher(unittest.TestCase):
                         "description": "Registry access token",
                         "isRequired": True,
                         "isSecret": True,
-                    }
+                    },
+                    "secondary_token": {
+                        "description": "Secondary registry access token",
+                        "isRequired": True,
+                        "isSecret": True,
+                    },
                 },
             },
             {"type": "positional", "value": "--again={access_token}"},
+            {"type": "positional", "value": "--secondary={secondary_token}"},
         )
 
         config, inputs = _make_vscode()._format_server_config(
             {"id": "team/mcp-server", "name": "team/mcp-server", "packages": [package]},
-            runtime_vars={"access_token": secret},
+            runtime_vars={"access_token": secret, "secondary_token": "secondary-secret"},
         )
 
         assert config["args"] == [
@@ -491,16 +497,24 @@ class TestRenderedDockerLauncher(unittest.TestCase):
             "--rm",
             "--token=${input:access-token}",
             "--again=${input:access-token}",
+            "--secondary=${input:secondary-token}",
             IMAGE,
         ]
         assert secret not in json.dumps(config)
+        assert "secondary-secret" not in json.dumps(config)
         assert inputs == [
             {
                 "type": "promptString",
                 "id": "access-token",
                 "description": "Registry access token",
                 "password": True,
-            }
+            },
+            {
+                "type": "promptString",
+                "id": "secondary-token",
+                "description": "Secondary registry access token",
+                "password": True,
+            },
         ]
 
     def test_unresolvable_package_keeps_the_previous_launcher(self):

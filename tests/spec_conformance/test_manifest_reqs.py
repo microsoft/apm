@@ -226,8 +226,9 @@ def test_consumer_resolves_runtime_argument_templates_without_secret_leakage():
     """Runtime templates resolve completely and keep secret bytes target-native."""
     assert_spec_contains(
         "every `{name}` occurrence",
-        "MUST NOT\nwrite a literal unresolved `{name}` template",
-        "target-native secret input or reference",
+        "MUST NOT write a literal unresolved `{name}` template",
+        "Secret\nclassification is package-scoped",
+        "VS Code secret input\nreference",
     )
     assert (
         MCPClientAdapter._substitute_runtime_variables(

@@ -564,17 +564,11 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 variables = argument.get("variables")
                 if not isinstance(variables, dict):
                     continue
-                template = argument.get(
-                    "value",
-                    argument.get("default", argument.get("value_hint", "")),
-                )
                 for variable_name, variable_info in variables.items():
                     if not isinstance(variable_name, str) or not isinstance(
                         variable_info,
                         dict,
                     ):
-                        continue
-                    if not isinstance(template, str) or f"{{{variable_name}}}" not in template:
                         continue
                     is_secret = variable_info.get(
                         "isSecret",
