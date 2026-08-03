@@ -15,7 +15,7 @@ apm pack [OPTIONS]
 
 `apm pack` produces distributable artifacts from the current APM project. It reads `apm.yml` to decide what to emit:
 
-- `dependencies:` block present -> a bundle (directory by default, or archive with `--archive`; see `--archive-format`).
+- `dependencies:` block present -> a bundle (directory by default, or archive with `--archive`; see `--archive-format`). An explicit empty mapping (`dependencies: {}`) is still a present block and produces a bundle of the package's local content.
 - `marketplace:` block present -> selected marketplace artifacts.
 - `target:` (or `targets:`) field containing `claude` or `copilot` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
