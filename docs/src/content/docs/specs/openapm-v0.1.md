@@ -656,13 +656,13 @@ literal text. When an unsupported placeholder is encountered for the
 active target, the consumer MUST emit a diagnostic and MAY refuse to
 write the generated config.
 
-<a id="req-mf-023"></a>
 Registry OCI/Docker package `runtime_arguments` and `package_arguments`
 entries MAY contain bare `{name}` templates in their `value` or `default`
 fields. An entry's `variables` map declares metadata for variable names
 across the package; `isSecret: true` marks a name secret. This syntax is
 distinct from the `${...}` env/header forms above.
 
+<a id="req-mf-023"></a>
 **[req-mf-023]** A conforming **consumer** implementation that renders
 a registry OCI/Docker MCP package to VS Code configuration MUST apply a
 resolved non-secret variable value to every `{name}` occurrence across
