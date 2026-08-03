@@ -567,7 +567,8 @@ marketplace:
 
 Relative `packages[].source` values compose onto the base, including
 `owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
-URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+URLs with nested repository paths, and local `./` paths remain per-entry
+overrides. Without `sourceBase`,
 existing `owner/repo` source behavior is unchanged. The manifest schema
 Section 7.5 is canonical for the full validation and override rules.
 
@@ -733,7 +734,7 @@ marketplace:
       source: ghe.corp.example.com/platform/agents   # host.tld/owner/repo
       version: "^0.3.0"
       # Equivalent full URL form (trailing .git is stripped):
-      # source: https://ghe.corp.example.com/platform/agents.git
+      # source: https://ghe.corp.example.com/platform/team/agents.git
 ```
 
 Schema rules:
@@ -745,7 +746,8 @@ Schema rules:
   emits the path verbatim into `marketplace.json`.
 - `source` accepts three remote forms: `owner/repo` (default host),
   `host.tld/owner/repo` (non-default host shorthand), or
-  `https://host.tld/owner/repo[.git]` (full URL).  Non-default hosts
+  `https://host.tld/path/to/repo[.git]` (full URL with two or more path
+  segments). Non-default hosts
   resolve auth via the standard APM token chain
   (`docs/getting-started/authentication.md`); the default-host token is
   never forwarded.
