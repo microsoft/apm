@@ -594,6 +594,8 @@ class HookIntegrator(BaseIntegrator):
         target: str,
         target_rel: str,
         deploy_root: Path | None,
+        source_key: str | None = None,
+        path_is_quoted: bool = False,
     ) -> str:
         """Return a target-native script reference without sacrificing portability."""
         if deploy_root is not None:
@@ -602,9 +604,12 @@ class HookIntegrator(BaseIntegrator):
             return target_rel
 
         project_dir = "CLAUDE_PROJECT_DIR"
-        if re.match(r"\s*(?:powershell|pwsh)(?:\.exe)?(?:\s|$)", command, re.IGNORECASE):
+        if source_key == "powershell" or re.match(
+            r"\s*(?:powershell|pwsh)(?:\.exe)?(?:\s|$)", command, re.IGNORECASE
+        ):
             return f"$env:{project_dir}/{target_rel}"
-        return f"${{{project_dir}}}/{target_rel}"
+        path = f"${{{project_dir}}}/{target_rel}"
+        return path if path_is_quoted else f'"{path}"'
 
     def _rewrite_command_for_target(
         self,
@@ -615,30 +620,9 @@ class HookIntegrator(BaseIntegrator):
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
         deploy_root: Path | None = None,
+        source_key: str | None = None,
     ) -> tuple[str, list[tuple[Path, str]]]:
-        """Rewrite a hook command to use installed script paths.
-
-        Handles:
-        - ${CLAUDE_PLUGIN_ROOT}/path references (resolved from package root)
-        - ./path relative references (resolved from hook file's parent directory)
-        - Windows backslash variants of both (.\\ and ${CLAUDE_PLUGIN_ROOT}\\)
-
-        Args:
-            command: Original command string
-            package_path: Root path of the source package
-            package_name: Name used for the scripts subdirectory
-            target: "vscode" or "claude"
-            hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
-            root_dir: Override root directory (e.g. ".copilot" for user scope)
-            deploy_root: Absolute root of the deployment directory.  When provided,
-                rewritten script paths are resolved to absolute paths under this
-                root so the target can execute them regardless of the working
-                directory. When *None*, Claude uses its portable project-root
-                environment variable and other targets retain relative paths.
-
-        Returns:
-            Tuple of (rewritten_command, list of (source_file, relative_target_path))
-        """
+        """Rewrite plugin-root and relative script references for a target."""
         scripts_to_copy = []
         new_command = command
 
@@ -661,9 +645,7 @@ class HookIntegrator(BaseIntegrator):
             base_root = root_dir or ".claude"
             scripts_base = f"{base_root}/hooks/{package_name}"
 
-        # Handle plugin root variable references (always relative to package root)
-        # Match both forward-slash and backslash separators (Windows hook JSON
-        # may use backslashes: ${CLAUDE_PLUGIN_ROOT}\scripts\scan.ps1)
+        # Match plugin-root references with forward or Windows-style separators.
         plugin_root_pattern = (
             r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|KIRO_PLUGIN_ROOT|PLUGIN_ROOT)\}"
             r"([\\/][^\s\"']+)"
@@ -686,6 +668,11 @@ class HookIntegrator(BaseIntegrator):
                     target,
                     target_rel,
                     deploy_root,
+                    source_key,
+                    match.start() > 0
+                    and match.end() < len(command)
+                    and command[match.start() - 1] in "\"'"
+                    and command[match.end()] == command[match.start() - 1],
                 )
                 new_command = new_command.replace(full_var, resolved_cmd)
             else:
@@ -700,11 +687,7 @@ class HookIntegrator(BaseIntegrator):
                 if deploy_root is not None:
                     new_command = new_command.replace(full_var, str(source_file))
 
-        # Handle relative ./path and .\path references (safe to run after
-        # ${CLAUDE_PLUGIN_ROOT} substitution since replacements produce paths
-        # like ".github/..." not "./" or ".\")
-        # Match both forward-slash and backslash separators (Windows hook JSON
-        # may use backslashes: .\scripts\scan.ps1)
+        # Replacements above cannot match this relative-path pattern.
         rel_pattern = r"(\.[\\/][^\s\"']+)"
         for match in re.finditer(rel_pattern, new_command):
             rel_ref = match.group(1)
@@ -722,6 +705,11 @@ class HookIntegrator(BaseIntegrator):
                     target,
                     target_rel,
                     deploy_root,
+                    source_key,
+                    match.start() > 0
+                    and match.end() < len(command)
+                    and command[match.start() - 1] in "\"'"
+                    and command[match.end()] == command[match.start() - 1],
                 )
                 new_command = new_command.replace(rel_ref, resolved_cmd)
             else:
@@ -786,6 +774,7 @@ class HookIntegrator(BaseIntegrator):
                             hook_file_dir=hook_file_dir,
                             root_dir=root_dir,
                             deploy_root=deploy_root,
+                            source_key=key,
                         )
                         if scripts:
                             _log.debug(
@@ -813,6 +802,7 @@ class HookIntegrator(BaseIntegrator):
                                 hook_file_dir=hook_file_dir,
                                 root_dir=root_dir,
                                 deploy_root=deploy_root,
+                                source_key=key if key != "command" else hook.get("shell"),
                             )
                             if scripts:
                                 _log.debug(

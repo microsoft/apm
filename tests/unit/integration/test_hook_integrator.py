@@ -795,8 +795,8 @@ class TestClaudeIntegration:
         # Project scope uses Claude's runtime project root rather than a
         # checkout-specific absolute path; user scope still absolutizes.
         assert extract_commands(first) == {
-            "${CLAUDE_PROJECT_DIR}/.claude/hooks/multi-stop-pkg/hooks/stop-a.sh",
-            "${CLAUDE_PROJECT_DIR}/.claude/hooks/multi-stop-pkg/hooks/stop-b.sh",
+            '"${CLAUDE_PROJECT_DIR}/.claude/hooks/multi-stop-pkg/hooks/stop-a.sh"',
+            '"${CLAUDE_PROJECT_DIR}/.claude/hooks/multi-stop-pkg/hooks/stop-b.sh"',
         }
 
         # Verify sidecar has the ownership info
@@ -841,7 +841,7 @@ class TestClaudeIntegration:
 
         settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
         cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
-        assert cmd == "${CLAUDE_PROJECT_DIR}/.claude/hooks/scope-pkg/hooks/stop.sh"
+        assert cmd == '"${CLAUDE_PROJECT_DIR}/.claude/hooks/scope-pkg/hooks/stop.sh"'
         assert not Path(cmd).is_absolute(), (
             f"Project-scope command must not be absolute; got {cmd!r}"
         )
@@ -1688,6 +1688,24 @@ class TestScriptPathRewriting:
 
         assert cmd == (
             'pwsh -NoProfile -File "$env:CLAUDE_PROJECT_DIR/.claude/hooks/my-pkg/scripts/run.ps1"'
+        )
+        assert len(scripts) == 1
+
+    def test_rewrite_claude_project_powershell_key_uses_env_syntax(self, temp_project):
+        """Claude conversion must preserve a flat PowerShell handler's shell syntax."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "scripts" / "run.ps1").write_text("Write-Host 'ok'", encoding="utf-8")
+
+        rewritten, scripts = HookIntegrator()._rewrite_hooks_data(
+            {"hooks": {"Stop": [{"powershell": '& "./scripts/run.ps1"'}]}},
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert rewritten["hooks"]["Stop"][0]["powershell"] == (
+            '& "$env:CLAUDE_PROJECT_DIR/.claude/hooks/my-pkg/scripts/run.ps1"'
         )
         assert len(scripts) == 1
 
@@ -3671,7 +3689,7 @@ class TestIssue1007Fixes:
 
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
         assert len(scripts) == 1, "Script copy entry must be produced"
-        assert cmd == "${CLAUDE_PROJECT_DIR}/.claude/hooks/my-pkg/hooks/run.sh"
+        assert cmd == '"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-pkg/hooks/run.sh"'
         assert not cmd.startswith("/"), "Command must not be absolute without deploy_root"
 
     def test_rewrite_command_deploy_root_relative_path_handler(self, tmp_path: Path) -> None:

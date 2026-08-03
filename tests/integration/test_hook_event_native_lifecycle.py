@@ -432,11 +432,9 @@ def test_claude_project_hook_runs_from_external_cwd(
                         "matcher": "*",
                         "hooks": [
                             {
-                                "type": "command",
-                                "command": (
-                                    "pwsh -NoProfile -ExecutionPolicy Bypass -File "
-                                    '"${CLAUDE_PLUGIN_ROOT}/.apm/hooks/write-marker/write-marker.ps1"'
-                                ),
+                                "powershell": (
+                                    '& "${CLAUDE_PLUGIN_ROOT}/.apm/hooks/write-marker/write-marker.ps1"'
+                                )
                             }
                         ],
                     }
@@ -466,8 +464,8 @@ def test_claude_project_hook_runs_from_external_cwd(
     settings_text = settings_path.read_text(encoding="utf-8")
     command = _commands(_read_hooks(settings_path)["PreToolUse"])[0]
     assert command == (
-        'pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:CLAUDE_PROJECT_DIR/'
-        '.claude/hooks/hook-package/.apm/hooks/write-marker/write-marker.ps1"'
+        '& "$env:CLAUDE_PROJECT_DIR/.claude/hooks/hook-package/.apm/hooks/'
+        'write-marker/write-marker.ps1"'
     )
     assert str(consumer.root) not in settings_text
 
@@ -481,6 +479,85 @@ def test_claude_project_hook_runs_from_external_cwd(
         ("pwsh", "-NoProfile", "-Command", command),
         cwd=outside,
         env=hook_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert hook_result.returncode == 0, hook_result.stdout + hook_result.stderr
+    assert (consumer.root / "hook-marker.txt").read_text(encoding="utf-8") == "hook-ran"
+
+
+def test_claude_project_posix_hook_runs_from_external_cwd(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A project Claude POSIX hook must execute from a spaced external project root."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "claude project hook external cwd posix",
+        base_env=dict(os.environ),
+    )
+    environment = isolated.subprocess_env()
+    package_factory = LocalPackageFactory(isolated.package_root)
+    hook_package = package_factory.create("hook-package", targets=("claude",))
+    consumer = LocalPackageFactory(isolated.work_root).create(
+        "consumer project",
+        dependencies=({"path": str(hook_package.root)},),
+        targets=("claude",),
+    )
+    package_factory.add_hook(
+        hook_package,
+        "write-marker",
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "sh ${CLAUDE_PLUGIN_ROOT}/.apm/hooks/write-marker/"
+                                    "write-marker.sh"
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+    package_factory.add_hook_asset(
+        hook_package,
+        "write-marker",
+        PurePosixPath("write-marker.sh"),
+        'printf hook-ran > "$CLAUDE_PROJECT_DIR/hook-marker.txt"\n',
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    results = runner.run_sequence(
+        (("install", "--target", "claude", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="claude-project-posix-hook-external-cwd",
+        cwd=consumer.root,
+        env=environment,
+    )
+    assert results[0].returncode == 0
+
+    settings_path = consumer.root / _CLAUDE_SETTINGS
+    settings_text = settings_path.read_text(encoding="utf-8")
+    command = _commands(_read_hooks(settings_path)["PreToolUse"])[0]
+    assert command == (
+        'sh "${CLAUDE_PROJECT_DIR}/.claude/hooks/hook-package/.apm/hooks/'
+        'write-marker/write-marker.sh"'
+    )
+    assert str(consumer.root) not in settings_text
+
+    outside = isolated.work_root / "outside"
+    outside.mkdir()
+    hook_result = subprocess.run(
+        ("sh", "-c", command),
+        cwd=outside,
+        env={**environment, "CLAUDE_PROJECT_DIR": str(consumer.root)},
         capture_output=True,
         text=True,
         check=False,
