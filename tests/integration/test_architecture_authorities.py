@@ -733,6 +733,21 @@ def test_experimental_target_hints_have_single_owner() -> None:
     assert "Experimental target hints must route through install/target_hints.py" in guard
 
 
+def test_ado_policy_project_coordinate_has_single_owner() -> None:
+    """ADO discovery and inheritance must share the valid project coordinate."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    owner_row = "| ADO policy project coordinate | policy/discovery.py (ADO_POLICY_PROJECT) |"
+
+    assert owner.count('ADO_POLICY_PROJECT = "apm"') == 1
+    assert owner.count("ADO_POLICY_PROJECT") == 3
+    assert "ADO policy project coordinate must come from discovery.py::ADO_POLICY_PROJECT" in guard
+    assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_intellij_mcp_config_path_has_single_owner() -> None:
     """JetBrains Copilot path selection must stay in its client adapter."""
     root = Path(__file__).parents[2]

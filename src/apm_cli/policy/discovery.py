@@ -74,7 +74,8 @@ _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", 
 _ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
 
 # ADO project name for the policy repo (ADO requires a project container).
-ADO_POLICY_PROJECT = "_apm"
+# The repository remains ``_apm``; ADO project names cannot begin with ``_``.
+ADO_POLICY_PROJECT = "apm"
 
 
 def _policy_repo_candidates(host: str) -> tuple[str, ...]:
