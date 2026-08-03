@@ -48,6 +48,14 @@ A normal project install creates or updates `apm.lock.yaml` when the manifest de
 
 `apm install --frozen` validates package and MCP lock state before lockfile, target config, deployment, or cache mutation. A missing or stale MCP-only lock exits nonzero without writing; run normal `apm install` to repair it. `--only=mcp` follows the same guard. Add-style `--mcp NAME` is incompatible with `--frozen` because it mutates `apm.yml`.
 
+### Registry MCP runtime variables
+
+When a required registry runtime variable declares a default, `apm install`
+prompts once with that value as the suggestion. Press Enter to accept it or
+enter an override. The chosen value replaces every matching `{variable}`
+reference across runtime and package arguments before APM writes the target
+config.
+
 ### Target resolution chain
 
 `apm install` resolves harness targets in strict priority order:

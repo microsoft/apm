@@ -99,6 +99,26 @@ class TestDockerRunArgs(unittest.TestCase):
         args = VSCodeClientAdapter._docker_run_args(V01_VALUE_PACKAGE, RUNTIME_VARS)
         self.assertIn(f"{WORKDIR}:{WORKDIR}", args)
 
+    def test_collected_variable_substitutes_later_entry_without_metadata(self):
+        """One declaration must resolve every later reference to the variable (#2438)."""
+        package = _docker_package(
+            {"type": "positional", "value": "run"},
+            {
+                "type": "positional",
+                "value": "{workdir}:{workdir}",
+                "variables": _WORKDIR_VAR,
+            },
+            {"type": "positional", "value": "-w"},
+            {"type": "positional", "value": "{workdir}"},
+        )
+
+        args = VSCodeClientAdapter._docker_run_args(package, RUNTIME_VARS)
+
+        self.assertEqual(
+            args,
+            ["run", "-i", "--rm", f"{WORKDIR}:{WORKDIR}", "-w", WORKDIR, IMAGE],
+        )
+
     def test_typed_entries_read_value_not_the_display_hint(self):
         """`value_hint` is the schema's display hint for a typed argument.
 

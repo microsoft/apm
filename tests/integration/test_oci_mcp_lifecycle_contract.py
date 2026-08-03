@@ -137,21 +137,27 @@ def _vscode_value_server_document() -> dict[str, object]:
                     },
                     {"type": "named", "name": "--read-only"},
                     {
-                        "type": "named",
-                        "name": "--mount",
-                        "value": f"type=bind,src={{{_WORKDIR_VARIABLE}}},dst=/workspace",
-                        "valueHint": "mount_spec",
+                        "type": "positional",
+                        "value": "-v",
+                    },
+                    {
+                        "type": "positional",
+                        "value": f"{{{_WORKDIR_VARIABLE}}}:{{{_WORKDIR_VARIABLE}}}",
                         "variables": {
                             _WORKDIR_VARIABLE: {
                                 "description": "Workspace path mounted into the container",
                                 "isRequired": True,
+                                "default": "${workspaceFolder}",
                             }
                         },
                     },
                     {
-                        "type": "named",
-                        "name": "--workdir",
-                        "default": "/workspace",
+                        "type": "positional",
+                        "value": "-w",
+                    },
+                    {
+                        "type": "positional",
+                        "value": f"{{{_WORKDIR_VARIABLE}}}",
                     },
                 ],
                 "packageArguments": [
@@ -340,7 +346,7 @@ def test_oci_mcp_install_lifecycle_is_cross_adapter_and_idempotent(
     assert audit_payload["passed"] is True
 
 
-def test_vscode_typed_value_mount_survives_install_update_and_offline_audit(
+def test_mcp_runtime_variable_default_override_lifecycle(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
@@ -387,10 +393,10 @@ def test_vscode_typed_value_mount_survives_install_update_and_offline_audit(
         "-i",
         "--rm",
         "--read-only",
-        "--mount",
-        f"type=bind,src={_WORKDIR_VALUE},dst=/workspace",
-        "--workdir",
-        "/workspace",
+        "-v",
+        f"{_WORKDIR_VALUE}:{_WORKDIR_VALUE}",
+        "-w",
+        _WORKDIR_VALUE,
         _VALUE_SERVER_IMAGE,
         "--transport",
         "stdio",
@@ -421,7 +427,7 @@ def test_vscode_typed_value_mount_survives_install_update_and_offline_audit(
         runner.run_sequence(
             (initial_install,),
             expected_returncodes=(0,),
-            scenario_id="vscode-value-initial-install",
+            scenario_id="mcp-runtime-variable-default-override-initial-install",
             cwd=project,
             env=install_env,
         )
@@ -441,7 +447,7 @@ def test_vscode_typed_value_mount_survives_install_update_and_offline_audit(
         runner.run_sequence(
             (reinstall, update),
             expected_returncodes=(0, 0),
-            scenario_id="vscode-value-reinstall-update",
+            scenario_id="mcp-runtime-variable-default-override-reinstall-update",
             cwd=project,
             env=install_env,
         )
@@ -454,7 +460,7 @@ def test_vscode_typed_value_mount_survives_install_update_and_offline_audit(
     before_audit = LifecycleStateSnapshot.capture(project, config_paths=(config_path,))
     audit = runner.run(
         ("audit", "--ci", "--no-policy", "--format", "json"),
-        scenario_id="vscode-value-offline-audit",
+        scenario_id="mcp-runtime-variable-default-override-offline-audit",
         cwd=project,
         env=audit_env,
     )

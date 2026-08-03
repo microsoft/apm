@@ -389,7 +389,8 @@ class TestCollectRuntimeVariables:
                     "value": "registry-default",
                     "secret": True,
                 }
-            }
+            },
+            prompt_defaults=True,
         )
 
     def test_skips_non_string_runtime_variable_default(self) -> None:
@@ -425,6 +426,99 @@ class TestCollectRuntimeVariables:
 
         prompt.assert_not_called()
         assert result == {}
+
+    def test_prompts_for_required_runtime_default_as_an_overrideable_suggestion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Required runtime defaults must remain an interactive suggestion."""
+        for variable in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "workdir",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        ops = _make_ops()
+        cache = {
+            "server-a": {
+                "packages": [
+                    {
+                        "runtime_arguments": [
+                            {
+                                "variables": {
+                                    "workdir": {
+                                        "description": "Working directory",
+                                        "isRequired": True,
+                                        "default": "${workspaceFolder}",
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        prompt = MagicMock(return_value="/workspace/override")
+
+        with (
+            patch("rich.console.Console"),
+            patch("rich.prompt.Prompt.ask", prompt),
+        ):
+            result = ops.collect_runtime_variables(["server-a"], server_info_cache=cache)
+
+        assert result == {"workdir": "/workspace/override"}
+        prompt.assert_called_once_with(
+            "  workdir (Working directory)",
+            default="${workspaceFolder}",
+            show_default=True,
+            password=False,
+        )
+
+    def test_hides_required_secret_runtime_default_while_allowing_override(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Secret defaults must never be shown in the interactive prompt."""
+        for variable in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "ACCESS_CODE",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        ops = _make_ops()
+        prompt = MagicMock(return_value="override")
+
+        with (
+            patch("rich.console.Console"),
+            patch("rich.prompt.Prompt.ask", prompt),
+        ):
+            result = ops._prompt_for_environment_variables(
+                {
+                    "ACCESS_CODE": {
+                        "description": "Access code",
+                        "required": True,
+                        "value": "registry-secret",
+                        "secret": True,
+                    }
+                },
+                prompt_defaults=True,
+            )
+
+        assert result == {"ACCESS_CODE": "override"}
+        prompt.assert_called_once_with(
+            "  ACCESS_CODE (Access code)",
+            default="",
+            show_default=False,
+            password=True,
+        )
 
     def test_skips_exception_servers(self) -> None:
         ops = _make_ops()

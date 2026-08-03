@@ -2715,3 +2715,64 @@ def test_mcp_noncontainer_launcher_guard_rejects_retired_extractor(
 
     assert result.returncode == 1
     assert "MCP non-container launcher argv must route through MCPClientAdapter" in result.stdout
+
+
+def test_mcp_runtime_argument_variables_have_one_canonical_owner() -> None:
+    """Runtime substitutions must stay in the shared MCP client adapter."""
+    root = Path(__file__).parents[2]
+    owner = root / "src/apm_cli/adapters/client/base.py"
+    consumer = root / "src/apm_cli/adapters/client/vscode.py"
+    definitions = [
+        node
+        for path in (owner, consumer)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_substitute_runtime_variables"
+    ]
+
+    assert len(definitions) == 1
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_substitute_runtime_variables"
+        for node in ast.walk(ast.parse(consumer.read_text(encoding="utf-8")))
+    )
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    assert "MCP runtime argument variables must route through MCPClientAdapter" in guard
+
+
+def test_mcp_runtime_argument_variable_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """AC31 rejects a second adapter-local runtime variable resolver."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    vscode_path = sandbox / "src/apm_cli/adapters/client/vscode.py"
+    vscode_path.write_text(
+        vscode_path.read_text(encoding="utf-8")
+        + "\n    def _substitute_runtime_variables(self):\n        pass\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "MCP runtime argument variables must route through MCPClientAdapter" in result.stdout

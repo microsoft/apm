@@ -904,45 +904,21 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
             template = str(raw)
             variables = arg.get("variables")
-            if isinstance(variables, dict) and variables:
-                substituted = cls._substitute_runtime_variables(template, variables, runtime_vars)
-                if substituted is None:
-                    if required:
-                        return None
-                    continue
-                template = substituted
+            substituted = cls._substitute_runtime_variables(
+                template,
+                variables if isinstance(variables, dict) else None,
+                runtime_vars,
+                {"workspaceFolder": "${workspaceFolder}"},
+            )
+            if substituted is None:
+                if required:
+                    return None
+                continue
+            template = substituted
             if arg_type == "named" and arg.get("name"):
                 args.append(str(arg["name"]))
             args.append(template)
         return args
-
-    @staticmethod
-    def _substitute_runtime_variables(
-        template: str, variables: dict, runtime_vars: dict | None
-    ) -> str | None:
-        """Substitute ``{var}`` placeholders, or return None if unresolvable.
-
-        ``workspaceFolder`` resolves to VS Code's own ``${workspaceFolder}``
-        token, which the editor expands at server start. Any other name that
-        this install did not collect a value for has no such fallback, so the
-        caller is told to decline rather than write a literal ``${name}`` into
-        a mount path.
-        """
-        for var_name in variables:
-            placeholder = f"{{{var_name}}}"
-            # A descriptor the template never references cannot make it
-            # unresolvable; declining on one would drop a usable argument.
-            if placeholder not in template:
-                continue
-            supplied = (runtime_vars or {}).get(var_name)
-            if supplied is not None and str(supplied) != "":
-                replacement = str(supplied)
-            elif var_name == "workspaceFolder":
-                replacement = "${workspaceFolder}"
-            else:
-                return None
-            template = template.replace(placeholder, replacement)
-        return template
 
     @staticmethod
     def _select_remote_with_url(remotes):

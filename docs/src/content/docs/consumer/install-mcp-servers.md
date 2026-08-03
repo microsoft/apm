@@ -114,6 +114,12 @@ VS Code prefers `npm`, PyPI, then OCI. OCI packages require Docker to be
 available when the harness starts the server; no per-target launcher
 configuration is needed.
 
+When a required registry runtime variable has a default, APM prompts once
+and displays that default as the suggested answer. Press Enter to accept it
+or provide an override. The selected value replaces every `{variable}`
+reference across the package's runtime and package arguments before the
+native config is written.
+
 For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package
