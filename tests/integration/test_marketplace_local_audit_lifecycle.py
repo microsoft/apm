@@ -14,7 +14,13 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
 
-def _write_marketplace(root: Path, name: str, plugin_source: str | None) -> Path:
+def _write_marketplace(
+    root: Path,
+    name: str,
+    plugin_source: str | None,
+    *,
+    plugin_root: str = "",
+) -> Path:
     """Write one local marketplace manifest with an optional string source."""
     marketplace = root / name
     marketplace.mkdir()
@@ -27,15 +33,10 @@ def _write_marketplace(root: Path, name: str, plugin_source: str | None) -> Path
                 "source": plugin_source,
             }
         )
-    (marketplace / "marketplace.json").write_text(
-        json.dumps(
-            {
-                "name": name,
-                "plugins": plugins,
-            }
-        ),
-        encoding="utf-8",
-    )
+    manifest = {"name": name, "plugins": plugins}
+    if plugin_root:
+        manifest["metadata"] = {"pluginRoot": plugin_root}
+    (marketplace / "marketplace.json").write_text(json.dumps(manifest), encoding="utf-8")
     return marketplace
 
 
@@ -98,3 +99,36 @@ def test_local_marketplace_audit_strict_lifecycle(
     assert "--strict: no plugins were audited" in outputs[5]
     assert "traversal" in outputs[7]
     assert "outside" in outputs[9]
+
+
+def test_local_marketplace_audit_strict_with_plugin_root(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Strict audit resolves bare local sources through metadata.pluginRoot."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    marketplace = _write_marketplace(
+        isolated.work_root,
+        "rooted-local",
+        "hello",
+        plugin_root="plugins",
+    )
+    plugin = marketplace / "plugins" / "hello"
+    plugin.mkdir(parents=True)
+    (plugin / "apm.yml").write_text(
+        "dependencies:\n  apm:\n    - hello@rooted-local\n",
+        encoding="utf-8",
+    )
+
+    results = ApmLifecycleRunner((str(apm_binary_path),)).run_sequence(
+        (
+            ("marketplace", "add", str(marketplace), "--name", "rooted-local"),
+            ("marketplace", "audit", "rooted-local", "--strict", "--verbose"),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="marketplace-local-plugin-root-audit",
+        cwd=isolated.work_root,
+        env=isolated.subprocess_env(),
+    )
+
+    assert "Summary: 1 clean, 0 bypass warnings" in results[1].stdout + results[1].stderr

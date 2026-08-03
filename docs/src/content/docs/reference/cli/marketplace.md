@@ -215,13 +215,14 @@ plugin dependencies that bypass marketplace pinning. For git-backed sources,
 the command fetches each plugin's `apm.yml` at its pinned ref. For local
 marketplaces, it reads each string-source plugin's `apm.yml` from the
 registered marketplace root. Local plugin paths that traverse outside that
-root, including through symlinks, are skipped without being read. The command
-warns when `dependencies.apm` uses direct git URLs, repo shorthands, or
-`{ git: ... }` entries instead of `name@marketplace` refs.
+root, including through symlinks, and missing manifests are skipped without
+being read. Malformed or unreadable manifests are verification errors. The
+command warns when `dependencies.apm` uses direct git URLs, repo shorthands,
+or `{ git: ... }` entries instead of `name@marketplace` refs.
 
 | Flag | Description |
 |---|---|
-| `--strict` | Exit 1 when bypass warnings or fetch errors are found, including when no plugins can be verified. |
+| `--strict` | Exit 1 on bypasses, verification errors, or when no plugin can be verified. |
 | `--verbose`, `-v` | Show clean plugins and skipped reasons. |
 
 For the top-level content/integrity scan, see [`apm audit`](../audit/).
@@ -229,6 +230,8 @@ For the top-level content/integrity scan, see [`apm audit`](../audit/).
 ```bash
 apm marketplace audit my-marketplace
 apm marketplace audit my-marketplace --strict
+apm marketplace add ./local-marketplace --name local
+apm marketplace audit local --strict
 ```
 
 ### `apm marketplace outdated`

@@ -639,6 +639,7 @@ class TestAuditCLI:
 
         assert result.exit_code == 1, result.output
         assert "--strict: no plugins were audited" in result.output
+        assert "Run 'apm marketplace audit mymarket --strict --verbose'" in result.output
         assert "[+] Summary:" not in result.output
 
     def test_strict_exits_nonzero_when_marketplace_has_no_plugins(self, runner):
