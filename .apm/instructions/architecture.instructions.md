@@ -37,12 +37,11 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Decision / fact | Canonical owner | Owner path selectors |
 |---|---|---|
 | Accepted target vocabulary | core/target_catalog.py | `src/apm_cli/core/target_catalog.py` |
-| Effective install target selection | core/target_detection.py (EffectiveTargetDecision); MCP compatibility adapter consumes the manifest parser | `src/apm_cli/core/target_detection.py`; `src/apm_cli/integration/mcp_integrator_install.py` |
+| Effective install target selection | core/target_detection.py (EffectiveTargetDecision) | `src/apm_cli/core/target_detection.py` |
 | Effective package target authorization | install/target_filter.py (resolve_effective_package_targets) | `src/apm_cli/install/target_filter.py` |
 | MCP target-selection precedence | integration/mcp_integrator_install.py (_resolve_target_runtimes) | `src/apm_cli/integration/mcp_integrator_install.py` |
 | Legacy MCP runtime ownership-key migration | install/mcp/ownership.py (migrate_legacy_project_target_servers) | `src/apm_cli/install/mcp/ownership.py` |
 | Behavioral test taxonomy classification | module-level pytestmark (taxonomy inventory verifies) | `tests/quality/taxonomy_inventory_plugin.py`; `tests/quality/test_test_taxonomy.py` |
-| Effective package target authorization | install/target_filter.py (resolve_effective_package_targets) | `src/apm_cli/install/target_filter.py` |
 | Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
 | Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
 | User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
