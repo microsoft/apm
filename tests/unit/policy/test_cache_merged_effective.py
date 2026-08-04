@@ -1273,8 +1273,8 @@ def test_ado_chain_preserves_backend_for_explicit_and_same_org_parent(
 
     with (
         patch(
-            "apm_cli.policy.discovery._extract_org_from_git_remote",
-            return_value=("contoso", "dev.azure.com"),
+            "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
+            return_value=("contoso", "dev.azure.com", None),
         ),
         patch("apm_cli.policy.discovery._fetch_ado_contents", side_effect=fetch_ado) as ado,
         patch(

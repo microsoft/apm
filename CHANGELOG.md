@@ -24,9 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   https://kiro.dev/docs/cli/v3/ (accessed 2026-08-03). (#2089)
 - Stable Grok Build target support for native `.grok/` rules, agents, commands,
   and skills, plus compiled `AGENTS.md` context.
+- Registry object-form dependencies (`- id: owner/repo`) now accept a `skills:` subset
+  and a `targets:` subset, matching git-longhand parity. `to_apm_yml_entry()` also
+  correctly round-trips registry deps as dict form instead of collapsing them to a
+- Registry object-form dependencies (`- id: owner/repo`) now support `skills:` and
+  `targets:` subset installs, matching git-longhand parity -- no need to switch to
+  verbose git-longhand form just to narrow what gets deployed. Registry deps also now
+  serialize correctly as object-form entries in `apm.yml` instead of collapsing to a
+  plain git string. (by @nadav-y, #2166)
 
 ### Fixed
 
+- `apm compile --clean` preserves APM-generated `AGENTS.md` files tracked by nested Git worktrees. (#2473)
 - Required MCP runtime defaults are now overrideable prompts, while secret
   defaults remain hidden and VS Code OCI launchers resolve every runtime
   placeholder without writing secret values to `mcp.json`. (#2455)
@@ -49,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in
   direct policy URLs. (#2422)
+
+### Performance
+
+- Policy discovery now performs one remote lookup per discovery, compilation
+  uses one project traversal plus in-memory directory indexes, and uninstall
+  pre-indexes lockfile entries for marketplace lookup. (#2472)
 
 ## [0.27.0] - 2026-07-31
 
@@ -183,6 +198,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   @sergio-sisternes-epam. (#2294)
 - Narrowing active targets now removes shared-root skill copies owned only by a
   dropped target while preserving user edits and surviving ownership. (#2299)
+- `apm install <pkg>` now works at a filesystem root (e.g. Docker containers
+  with `WORKDIR /`) by falling back to `my-project` as the manifest name;
+  explicit empty or whitespace-only names are rejected early with a clear error
+  -- by @nadav-y (#2200).
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

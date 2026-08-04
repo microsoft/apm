@@ -767,6 +767,242 @@ class TestResolveMarketplacePackages:
 
 
 # ===========================================================================
+# _resolve_marketplace_packages -- multi-entry first-match regression
+# ===========================================================================
+
+
+class TestResolveMarketplacePackagesMultiEntry:
+    """Regression contract for first-match / provenance behavior with multiple same-plugin entries.
+
+    These tests encode the observable ordering semantics that any optimisation
+    of _resolve_marketplace_packages must preserve:
+    - Exact-match (discovered_via == marketplace_name AND marketplace_plugin_name
+      == plugin_name) takes priority over a provenance-mismatch entry regardless
+      of insertion order.
+    - When no exact match exists, the *first* insertion-order same-plugin entry
+      whose discovered_via != marketplace_name is used.
+    - The warning text for the provenance-mismatch path is stable and includes
+      the plugin name, the requested marketplace, the actual marketplace, and
+      the canonical that will be uninstalled.
+    """
+
+    def test_first_exact_match_wins_among_multiple_entries(self):
+        """When multiple entries share the same plugin+marketplace, first one wins."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep_first = LockedDependency(
+            repo_url="acme/plugin-v1",
+            resolved_commit="aaa",
+            discovered_via="official",
+            marketplace_plugin_name="multi-plugin",
+        )
+        dep_second = LockedDependency(
+            repo_url="acme/plugin-v2",
+            resolved_commit="bbb",
+            discovered_via="official",
+            marketplace_plugin_name="multi-plugin",
+        )
+        lockfile.add_dependency(dep_first)
+        lockfile.add_dependency(dep_second)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["multi-plugin@official"], lockfile, logger)
+
+        # First insertion-order exact match must win; second entry is never consulted
+        assert result["multi-plugin@official"] == dep_first.get_unique_key()
+        logger.warning.assert_not_called()
+        logger.error.assert_not_called()
+
+    def test_first_provenance_mismatch_entry_wins_among_multiple(self):
+        """When no exact match exists, first insertion-order mismatch entry wins."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep_first = LockedDependency(
+            repo_url="acme/mismatch-first",
+            resolved_commit="c11",
+            discovered_via="other-marketplace",
+            marketplace_plugin_name="shared-plugin",
+        )
+        dep_second = LockedDependency(
+            repo_url="acme/mismatch-second",
+            resolved_commit="d22",
+            discovered_via="another-marketplace",
+            marketplace_plugin_name="shared-plugin",
+        )
+        lockfile.add_dependency(dep_first)
+        lockfile.add_dependency(dep_second)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["shared-plugin@official"], lockfile, logger)
+
+        # First insertion-order mismatch entry must win
+        assert result["shared-plugin@official"] == dep_first.get_unique_key()
+        logger.warning.assert_called_once()
+
+    def test_exact_match_priority_over_earlier_mismatch_entry(self):
+        """Exact match wins even when a mismatch entry appears earlier in insertion order."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        # Mismatch entry inserted first
+        dep_mismatch = LockedDependency(
+            repo_url="acme/via-other",
+            resolved_commit="e33",
+            discovered_via="other-marketplace",
+            marketplace_plugin_name="ordered-plugin",
+        )
+        # Exact match inserted second
+        dep_exact = LockedDependency(
+            repo_url="acme/via-official",
+            resolved_commit="f44",
+            discovered_via="official",
+            marketplace_plugin_name="ordered-plugin",
+        )
+        lockfile.add_dependency(dep_mismatch)
+        lockfile.add_dependency(dep_exact)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["ordered-plugin@official"], lockfile, logger)
+
+        # Exact match must always win over any mismatch entry, regardless of order
+        assert result["ordered-plugin@official"] == dep_exact.get_unique_key()
+        logger.warning.assert_not_called()
+        logger.error.assert_not_called()
+
+    def test_provenance_mismatch_warning_text_exact(self):
+        """Warning text for provenance mismatch must contain plugin, marketplace, and canonical."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="org/warned-plugin",
+            resolved_commit="g55",
+            discovered_via="source-marketplace",
+            marketplace_plugin_name="warned-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(
+            ["warned-plugin@target-marketplace"], lockfile, logger
+        )
+
+        assert result["warned-plugin@target-marketplace"] == dep.get_unique_key()
+        logger.warning.assert_called_once()
+        warn_text = logger.warning.call_args[0][0]
+        assert "warned-plugin@target-marketplace" in warn_text
+        assert "installed via source-marketplace" in warn_text
+        assert "Proceeding with uninstall of" in warn_text
+        assert dep.get_unique_key() in warn_text
+
+
+# ===========================================================================
+# _resolve_marketplace_packages -- single-values-call performance contract
+# ===========================================================================
+
+
+class _IterationCountingDepsView:
+    """Wrap a dict to count calls to ``values()``.
+
+    Assigned to ``lockfile.dependencies`` so _resolve_marketplace_packages
+    can be audited without touching its internals.
+    """
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+        self.values_call_count = 0
+
+    def values(self):
+        """Count each call and delegate to the real dict."""
+        self.values_call_count += 1
+        return self._data.values()
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._data
+
+    def get(self, key: object, default: object = None) -> object:
+        return self._data.get(key, default)
+
+    def __getitem__(self, key: object) -> object:
+        return self._data[key]
+
+    def __setitem__(self, key: object, value: object) -> None:
+        self._data[key] = value
+
+
+class TestResolveMarketplacePackagesSingleTraversal:
+    """Call-count guard: lockfile.dependencies.values() must be called
+    exactly once for the whole batch, not once or twice per package.
+
+    This test FAILS with the pre-optimisation code (which calls .values() twice
+    per package) and PASSES after the pre-index optimisation is applied.
+    """
+
+    def _make_lockfile_with_counter(self, deps: list) -> tuple:
+        """Return (lockfile, counter) where counter tracks .values() calls."""
+        lockfile = LockFile()
+        for dep in deps:
+            lockfile.add_dependency(dep)
+        counter = _IterationCountingDepsView(lockfile.dependencies)
+        lockfile.dependencies = counter
+        return lockfile, counter
+
+    def test_values_called_once_for_three_package_batch(self):
+        """For a batch of 3 packages, .values() must be called exactly once."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        dep_a = LockedDependency(
+            repo_url="acme/alpha",
+            resolved_commit="a1",
+            discovered_via="official",
+            marketplace_plugin_name="alpha",
+        )
+        dep_b = LockedDependency(
+            repo_url="acme/beta",
+            resolved_commit="b2",
+            discovered_via="official",
+            marketplace_plugin_name="beta",
+        )
+        lockfile, counter = self._make_lockfile_with_counter([dep_a, dep_b])
+        logger = _make_logger()
+
+        _resolve_marketplace_packages(
+            ["alpha@official", "beta@official", "gamma@official"],
+            lockfile,
+            logger,
+        )
+
+        # Pre-index path: one values() call for the whole batch regardless of N.
+        assert counter.values_call_count == 1, (
+            f"Expected exactly 1 call to lockfile.dependencies.values() "
+            f"for a 3-package batch, got {counter.values_call_count}. "
+            "The optimisation must call values() once before the package loop."
+        )
+
+    def test_values_called_once_even_when_all_packages_need_fallback(self):
+        """Fallback for every package still requires only one values() call."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile, counter = self._make_lockfile_with_counter([])
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_reg:
+            mock_reg.side_effect = RuntimeError("no network in test")
+            _resolve_marketplace_packages(
+                ["p1@mkt", "p2@mkt", "p3@mkt"],
+                lockfile,
+                logger,
+            )
+
+        assert counter.values_call_count == 1, (
+            f"Expected 1 values() call when all packages fall through to registry, "
+            f"got {counter.values_call_count}."
+        )
+
+
+# ===========================================================================
 # _validate_uninstall_packages -- marketplace ref extensions
 # ===========================================================================
 

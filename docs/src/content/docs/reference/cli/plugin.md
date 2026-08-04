@@ -36,7 +36,7 @@ apm plugin init my-skill --target copilot,claude --yes
 
 | Flag | Description |
 |---|---|
-| `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. |
+| `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. Must be non-empty kebab-case without path separators and must not be `..`. If a filesystem root has no directory name, APM uses `my-project`. |
 | `--yes`, `-y` | Skip interactive prompts and use auto-detected defaults. |
 | `--target` | Comma-separated target list (e.g. `copilot,claude,codex`). Skips the target prompt and writes selections directly. |
 | `--verbose`, `-v` | Show detailed output. |

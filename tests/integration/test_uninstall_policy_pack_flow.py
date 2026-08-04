@@ -1218,7 +1218,7 @@ class TestAutoDiscover:
         from apm_cli.policy.discovery import _auto_discover
 
         with patch(
-            "apm_cli.policy.discovery._extract_org_from_git_remote",
+            "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
             return_value=None,
         ):
             result = _auto_discover(tmp_path)
@@ -1230,8 +1230,8 @@ class TestAutoDiscover:
         from apm_cli.policy.discovery import _auto_discover
 
         with patch(
-            "apm_cli.policy.discovery._extract_org_from_git_remote",
-            return_value=("contoso", "ghe.corp.com"),
+            "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
+            return_value=("contoso", "ghe.corp.com", None),
         ):
             with patch(
                 "apm_cli.policy.discovery._fetch_from_repo",

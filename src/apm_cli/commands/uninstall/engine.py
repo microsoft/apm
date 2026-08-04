@@ -469,6 +469,23 @@ def _resolve_marketplace_packages(
 
     resolved: dict[str, str | None] = {}
 
+    # Pre-index lockfile dependencies once for the entire batch.
+    # Exact matches preserve the first canonical entry for each provenance pair.
+    # Plugin matches retain every entry in insertion order so fallback can select
+    # the first entry whose provenance differs from the requested marketplace.
+    exact_index: dict[tuple[str, str], str] = {}
+    plugin_index: dict[str, list[tuple[str, str]]] = {}
+    if lockfile is not None:
+        for dep in lockfile.dependencies.values():
+            mp = dep.marketplace_plugin_name
+            via = dep.discovered_via
+            if not mp or not via:
+                continue
+            canonical_key = dep.get_unique_key()
+            exact_key = (via, mp)
+            exact_index.setdefault(exact_key, canonical_key)
+            plugin_index.setdefault(mp, []).append((via, canonical_key))
+
     for package in packages:
         parsed = parse_marketplace_ref(package)
         if parsed is None:
@@ -479,26 +496,17 @@ def _resolve_marketplace_packages(
 
         # Stage 1: Lockfile-first lookup (offline, zero network calls)
         if lockfile is not None:
-            # First pass: exact match (both discovered_via AND marketplace_plugin_name)
-            for dep in lockfile.dependencies.values():
-                if (
-                    dep.discovered_via == marketplace_name
-                    and dep.marketplace_plugin_name == plugin_name
-                ):
-                    canonical = dep.get_unique_key()
-                    break
+            # Exact match: both discovered_via and marketplace_plugin_name match
+            canonical = exact_index.get((marketplace_name, plugin_name))
 
-            # Second pass: plugin_name match with different marketplace (provenance mismatch)
+            # Provenance-mismatch fallback: first same-plugin entry via a different marketplace
             if canonical is None:
-                for dep in lockfile.dependencies.values():
-                    if (
-                        dep.marketplace_plugin_name == plugin_name
-                        and dep.discovered_via != marketplace_name
-                    ):
-                        canonical = dep.get_unique_key()
+                for via, candidate_key in plugin_index.get(plugin_name, []):
+                    if via != marketplace_name:
+                        canonical = candidate_key
                         logger.warning(
                             f"{plugin_name}@{marketplace_name} not found; "
-                            f"package was installed via {dep.discovered_via}. "
+                            f"package was installed via {via}. "
                             f"Proceeding with uninstall of {canonical}."
                         )
                         break

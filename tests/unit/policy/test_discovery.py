@@ -21,6 +21,7 @@ from apm_cli.policy.discovery import (
     _auto_discover,
     _cache_key,
     _extract_org_from_git_remote,
+    _extract_org_host_port_from_git_remote,
     _fetch_ado_contents,
     _fetch_from_ado_repo,
     _fetch_from_repo,
@@ -173,6 +174,34 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5)
         result = _extract_org_from_git_remote(Path("/fake"))
+        self.assertIsNone(result)
+
+    @patch("apm_cli.policy.discovery._parse_remote_url")
+    @patch("apm_cli.policy.discovery.subprocess.run")
+    def test_remote_parser_value_error_returns_none(self, mock_run, mock_parse):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="https://dev.azure.com/contoso/project/_git/repo\n",
+        )
+        mock_parse.side_effect = ValueError("invalid remote coordinates")
+
+        result = _extract_org_host_port_from_git_remote(Path("/fake"))
+
+        self.assertIsNone(result)
+
+    @patch("apm_cli.policy.discovery.urlparse")
+    @patch("apm_cli.policy.discovery._parse_remote_url")
+    @patch("apm_cli.policy.discovery.subprocess.run")
+    def test_remote_port_value_error_returns_none(self, mock_run, mock_parse, mock_urlparse):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="https://ghe.example.com:invalid/contoso/repo.git\n",
+        )
+        mock_parse.return_value = ("contoso", "ghe.example.com")
+        mock_urlparse.side_effect = ValueError("invalid port")
+
+        result = _extract_org_host_port_from_git_remote(Path("/fake"))
+
         self.assertIsNone(result)
 
 
@@ -728,10 +757,10 @@ class TestAutoDiscover(unittest.TestCase):
     """Test _auto_discover logic with cascading candidate repos."""
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_com_first_candidate_found(self, mock_extract, mock_fetch):
         """When .github-private has a policy, it wins immediately."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.return_value = PolicyFetchResult(
             policy=ApmPolicy(), source="org:contoso/.github-private", outcome="found"
         )
@@ -744,10 +773,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertTrue(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_com_cascades_to_dot_apm(self, mock_extract, mock_fetch):
         """.github-private and .github absent -> falls back to .apm."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.side_effect = [
             PolicyFetchResult(outcome="absent"),  # .github-private 404
             PolicyFetchResult(outcome="absent"),  # .github 404
@@ -765,10 +794,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertTrue(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_com_cascades_to_underscore_apm(self, mock_extract, mock_fetch):
         """All dot-prefixed repos absent -> falls back to _apm."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.side_effect = [
             PolicyFetchResult(outcome="absent"),  # .github-private 404
             PolicyFetchResult(outcome="absent"),  # .github 404
@@ -784,10 +813,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertTrue(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_com_all_absent(self, mock_extract, mock_fetch):
         """All candidates return absent -> outcome is absent."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.return_value = PolicyFetchResult(outcome="absent")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -797,10 +826,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertFalse(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_com_error_fail_closed(self, mock_extract, mock_fetch):
         """Auth error on first candidate -> fail-closed, no fallback."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.return_value = PolicyFetchResult(
             error="401: Unauthorized", outcome="cache_miss_fetch_fail"
         )
@@ -814,10 +843,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertIn("401", result.error)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_403_is_error_not_absent(self, mock_extract, mock_fetch):
         """HTTP 403 -> fail-closed (cache_miss_fetch_fail), not absent."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.return_value = PolicyFetchResult(
             error="403: Access denied to contoso/.github-private",
             outcome="cache_miss_fetch_fail",
@@ -831,10 +860,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertFalse(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_private_auth_error_does_not_fall_through(self, mock_extract, mock_fetch):
         """.github-private auth error -> fail-closed, .github NOT tried."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.side_effect = [
             PolicyFetchResult(error="403: Access denied", outcome="cache_miss_fetch_fail"),
             PolicyFetchResult(policy=ApmPolicy(), outcome="found"),
@@ -847,10 +876,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertFalse(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_private_absent_falls_back_to_github(self, mock_extract, mock_fetch):
         """.github-private absent (404) -> cascade to .github."""
-        mock_extract.return_value = ("contoso", "github.com")
+        mock_extract.return_value = ("contoso", "github.com", None)
         mock_fetch.side_effect = [
             PolicyFetchResult(outcome="absent"),  # .github-private 404
             PolicyFetchResult(
@@ -866,9 +895,9 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertTrue(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_ghe_repo_ref_includes_host(self, mock_extract, mock_fetch):
-        mock_extract.return_value = ("contoso", "ghe.example.com")
+        mock_extract.return_value = ("contoso", "ghe.example.com", None)
         mock_fetch.return_value = PolicyFetchResult(
             policy=ApmPolicy(),
             source="org:ghe.example.com/contoso/.github-private",
@@ -880,7 +909,7 @@ class TestAutoDiscover(unittest.TestCase):
             first_call = mock_fetch.call_args_list[0]
             self.assertEqual(first_call[0][0], "ghe.example.com/contoso/.github-private")
 
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_no_remote_returns_error(self, mock_extract):
         mock_extract.return_value = None
 
@@ -890,10 +919,10 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertIn("Could not determine org", result.error)
 
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_ado_host_only_tries_underscore_apm(self, mock_extract, mock_ado_fetch):
         """ADO host profile skips .github and .apm, only tries _apm."""
-        mock_extract.return_value = ("contoso", "dev.azure.com")
+        mock_extract.return_value = ("contoso", "dev.azure.com", None)
         mock_ado_fetch.return_value = PolicyFetchResult(
             policy=ApmPolicy(), source="org:dev.azure.com/contoso/_apm/_apm", outcome="found"
         )
@@ -907,20 +936,16 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertTrue(result.found)
 
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
-    @patch(
-        "apm_cli.policy.discovery._extract_port_from_git_remote",
-        return_value=8443,
-    )
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_ado_server_auto_discovery_preserves_remote_port(
         self,
         mock_extract,
-        _mock_port,
         mock_ado_fetch,
     ):
         mock_extract.return_value = (
             "DefaultCollection",
             "ado.example.test",
+            8443,
         )
         mock_ado_fetch.return_value = PolicyFetchResult(outcome="absent")
 
@@ -937,16 +962,56 @@ class TestAutoDiscover(unittest.TestCase):
         self.assertEqual(mock_ado_fetch.call_args.kwargs["port"], 8443)
 
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
-    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_ado_visualstudio_host(self, mock_extract, mock_ado_fetch):
         """*.visualstudio.com hosts also use ADO profile."""
-        mock_extract.return_value = ("contoso", "contoso.visualstudio.com")
+        mock_extract.return_value = ("contoso", "contoso.visualstudio.com", None)
         mock_ado_fetch.return_value = PolicyFetchResult(outcome="absent")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _auto_discover(Path(tmpdir), no_cache=True)
             mock_ado_fetch.assert_called_once()
             self.assertEqual(result.outcome, "absent")
+
+    @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
+    @patch("apm_cli.policy.discovery._policy_repo_candidates")
+    def test_auto_discover_ado_git_subprocess_invoked_exactly_once(
+        self,
+        mock_candidates,
+        mock_ado_fetch,
+    ):
+        """_auto_discover must invoke the git remote subprocess exactly once.
+
+        Before the A1 fix, separate org/host and port callers in _auto_discover
+        each ran git remote. This guard asserts one subprocess call and verifies
+        that the parsed host and explicit port reach their routing consumers.
+        """
+        ado_url = "https://ado.example.test:8443/DefaultCollection/project/_git/repo"
+
+        def fake_run(cmd, **kwargs):
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.stdout = ado_url + "\n"
+            return proc
+
+        mock_ado_fetch.return_value = PolicyFetchResult(outcome="absent")
+        mock_candidates.return_value = ("_apm",)
+
+        with (
+            patch("apm_cli.policy.discovery.subprocess.run", side_effect=fake_run) as mock_run,
+            patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(
+            mock_run.call_count,
+            1,
+            f"Expected exactly 1 git subprocess call, got {mock_run.call_count}. "
+            "_auto_discover must not invoke git remote multiple times.",
+        )
+        mock_candidates.assert_called_once_with("ado.example.test")
+        self.assertEqual(mock_ado_fetch.call_args.kwargs["port"], 8443)
 
 
 class TestPolicyRepoCandidates(unittest.TestCase):

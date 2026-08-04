@@ -542,6 +542,13 @@ Registry dependency (whole package or virtual sub-path):
   path: prompts/review.prompt.md   # OPTIONAL - omit to install the whole package
   version: 1.4.0
   alias: review                    # OPTIONAL
+
+# Skill and target subset install from a registry package
+- id: acme/toolkit
+  registry: jf-skills
+  version: ^2.0.0
+  skills: [deploy, lint]           # OPTIONAL - install only named skills (same as git-longhand)
+  targets: [docker]                # OPTIONAL - restrict deployment targets
 ```
 
 `id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string - opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. When `registry:` is omitted, a default registry MUST be configured - in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.

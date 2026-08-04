@@ -863,15 +863,14 @@ def _auto_discover(
        - Found -> return (first match wins)
     5. All candidates exhausted -> outcome="absent"
     """
-    org_and_host = _extract_org_from_git_remote(project_root)
-    if org_and_host is None:
+    identity = _extract_org_host_port_from_git_remote(project_root)
+    if identity is None:
         return PolicyFetchResult(
             error="Could not determine org from git remote",
             outcome="no_git_remote",
         )
 
-    org, host = org_and_host
-    port = _extract_port_from_git_remote(project_root)
+    org, host, port = identity
     candidates = _policy_repo_candidates(host)
     is_ado = is_azure_devops_hostname(host)
 
@@ -970,24 +969,6 @@ def _extract_org_host_port_from_git_remote(
             except ValueError:
                 return None
         return parsed_identity[0], parsed_identity[1], port
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-
-
-def _extract_port_from_git_remote(project_root: Path) -> int | None:
-    """Return the explicit HTTPS port from git remote origin."""
-    try:
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=project_root,
-            timeout=5,
-        )
-        if result.returncode != 0 or "://" not in result.stdout:
-            return None
-        return urlparse(result.stdout.strip()).port
     except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):
         return None
 

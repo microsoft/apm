@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **109 normative statements** indexed in
+- OpenAPM v0.1 carries **110 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -571,6 +571,20 @@ package's `host`, `repo_url`, and resolved `ref`, with `virtual_path`
 taken from `path`. The literal `parent` MUST NOT appear in the
 lockfile as durable identity (`repo_url` or `source`).
 
+<a id="req-mf-024"></a>
+**[req-mf-024]** A conforming **consumer** implementation MUST NOT
+silently rewrite an existing `id:`-form (registry-sourced) manifest
+entry into a `git:`-form entry when persisting a subsequent CLI-driven
+manifest update (e.g. an additive `--skill` pin) for the same
+dependency identity. When a CLI-parsed reference is ambiguous about
+its source (git vs. registry) but an existing manifest entry for the
+same identity already resolves to the `registry` source, the
+implementation MUST honor the existing entry's source when
+serializing the updated entry. If an update would otherwise replace a
+registry-sourced entry with a non-registry-shaped entry, the
+implementation MUST reject the update with a diagnostic naming the
+identity, rather than silently converting it.
+
 #### 4.3.3 Virtual packages
 
 A dependency MAY target a subdirectory or a file within a repository
@@ -773,7 +787,7 @@ This section's normative statements are:
   [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
-  [req-mf-023](#req-mf-023),
+  [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
@@ -2979,7 +2993,7 @@ conformance statement identifying:
 [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
-[req-mf-023](#req-mf-023),
+[req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
 [req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -3366,6 +3380,7 @@ renumbering of conformance classes.
 | [req-mf-021](#req-mf-021)                | MUST    | 4.8     | producer    |
 | [req-mf-022](#req-mf-022)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-023](#req-mf-023)                | MUST    | 4.5     | consumer    |
+| [req-mf-024](#req-mf-024)                | MUST    | 4.3.2   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-lk-001](#req-lk-001)                | MUST    | 5.1     | consumer    |
@@ -3454,7 +3469,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 110** (105 MUST, 5 SHOULD).
+**Total normative statements: 111** (106 MUST, 5 SHOULD).
 
 ---
 
@@ -3490,6 +3505,7 @@ renumbering of conformance classes.
 | 0.1.24  | 2026-08-03 | Spec-citation fold for fail-closed Kiro agent vocabulary gate (closes #2089 Mode-B silent-extension gate). Added [req-tg-009] (Section 8.5.1, consumer MUST): a consumer deploying an agent primitive into a target with a fixed, enumerable capability vocabulary MUST fail closed -- writing zero bytes and emitting an actionable diagnostic -- if any source-declared tool falls outside the approved set; the gate fires per agent independently and does not block vocabulary-conformant sibling agents; the gate applies only to targets included in the effective intersection under [req-tg-008]; content-identity fast-paths are not exempt. Added editorial note naming the Target Registry companion as the vocabulary authority and mandating version-pinning for conformance testing. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 107 -> 108 (103 MUST, 5 SHOULD). |
 | 0.1.25  | 2026-08-03 | Spec-citation fold for portable project-scoped Claude hooks (closes #2408 Mode-B silent-extension gate). Added [req-tg-010] (Section 8.5.4, consumer MUST): a project-scoped native hook that may launch outside the consumer project anchors its generated command through the target portable project-directory environment variable, preserves the relative hook path, executes successfully when the variable identifies the consumer project, and never embeds an absolute checkout path; shell-expansion path syntax is rejected. Claude uses `CLAUDE_PROJECT_DIR` in POSIX and `$env:CLAUDE_PROJECT_DIR` in PowerShell. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 108 -> 109 (104 MUST, 5 SHOULD). |
 | 0.1.26  | 2026-08-03 | Spec-citation fold for VS Code OCI/Docker MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and package-scoped secret metadata uses VS Code secret-input references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 109 -> 110 (105 MUST, 5 SHOULD). |
+| 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

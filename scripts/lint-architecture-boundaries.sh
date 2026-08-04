@@ -108,6 +108,23 @@ if [ -n "$compiled_write_hits" ]; then
     echo "$compiled_write_hits"
     violations=$((violations + 1))
 fi
+distributed_compiler="src/apm_cli/compilation/distributed_compiler.py"
+nested_worktree_walk_count=$(grep -Fc \
+    'for directory, child_dirs, files in os.walk(self.base_dir, followlinks=False):' \
+    "$distributed_compiler" || true)
+nested_worktree_boundary_count=$(grep -Fc \
+    '(directory_path / ".git").is_file()' \
+    "$distributed_compiler" || true)
+nested_worktree_prune_count=$(grep -Fc 'child_dirs.clear()' "$distributed_compiler" || true)
+nested_worktree_rglob_hits=$(grep -En 'rglob\("AGENTS\.md"\)' "$distributed_compiler" || true)
+if [ "$nested_worktree_walk_count" -ne 1 ] \
+    || [ "$nested_worktree_boundary_count" -ne 1 ] \
+    || [ "$nested_worktree_prune_count" -ne 1 ] \
+    || [ -n "$nested_worktree_rglob_hits" ]; then
+    echo "[x] Nested worktree cleanup must prune .git-file roots"
+    [ -n "$nested_worktree_rglob_hits" ] && echo "$nested_worktree_rglob_hits"
+    violations=$((violations + 1))
+fi
 hook_file="src/apm_cli/integration/hook_integrator.py"
 validation_line=$(grep -n 'if not validation\.valid:' "$hook_file" | tail -1 | cut -d: -f1)
 continue_line=$(awk -v start="$validation_line" 'NR > start && /continue/ {print NR; exit}' "$hook_file")
@@ -1511,6 +1528,12 @@ if [ "$mcp_runtime_variable_owner_defs" -ne 1 ] \
     || ! grep -q '^    def _substitute_runtime_variables(' "$mcp_container_owner" \
     || ! grep -q 'cls\._substitute_runtime_variables(' src/apm_cli/adapters/client/vscode.py; then
     echo "[x] MCP runtime argument variables must route through MCPClientAdapter"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC18: bootstrap project-name authority"
+if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
+    echo "[x] Manifest bootstrap names must route through core/project_name.py"
     violations=$((violations + 1))
 fi
 

@@ -20,8 +20,11 @@ Targets uncovered branches in DistributedAgentsCompiler:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from apm_cli.compilation.distributed_compiler import (
     AGENTS_MD_GENERATED_MARKER,
@@ -621,6 +624,23 @@ class TestFindOrphanedAgentsFiles:
         agents_in_git.write_text(_GENERATED_CONTENT)
         orphans: list[Path] = compiler._find_orphaned_agents_files([])
         assert agents_in_git not in orphans
+
+    def test_skips_nested_linked_worktree_file(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A linked worktree .git file prunes its AGENTS.md from cleanup."""
+        compiler = _make_compiler_in_tmp(tmp_path)
+        nested_worktree = tmp_path / "nested"
+        nested_worktree.mkdir()
+        (nested_worktree / ".git").write_text("gitdir: /outside/worktrees/nested\n")
+        nested_agents = nested_worktree / "AGENTS.md"
+        nested_agents.write_text(_GENERATED_CONTENT)
+
+        with caplog.at_level(logging.DEBUG, logger="apm_cli.compilation.distributed_compiler"):
+            orphans: list[Path] = compiler._find_orphaned_agents_files([])
+
+        assert nested_agents not in orphans
+        assert "Skipping nested Git worktree during orphan cleanup: nested" in caplog.text
 
     def test_skips_files_in_node_modules(self, tmp_path: Path) -> None:
         """AGENTS.md inside node_modules/ is skipped."""
