@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   https://kiro.dev/docs/cli/v3/ (accessed 2026-08-03). (#2089)
 - Stable Grok Build target support for native `.grok/` rules, agents, commands,
   and skills, plus compiled `AGENTS.md` context.
+- Registry object-form dependencies (`- id: owner/repo`) now accept a `skills:` subset
+  and a `targets:` subset, matching git-longhand parity. `to_apm_yml_entry()` also
+  correctly round-trips registry deps as dict form instead of collapsing them to a
+  plain git string. (by @nadav-y, #2166)
 
 ### Fixed
 
