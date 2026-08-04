@@ -470,9 +470,9 @@ def _resolve_marketplace_packages(
     resolved: dict[str, str | None] = {}
 
     # Pre-index lockfile dependencies once for the entire batch.
-    # exact_index[(via, plugin)] = canonical  -- first insertion-order exact match wins.
-    # plugin_index[plugin] = [(via, canonical), ...]  -- insertion-order list for
-    #   provenance-mismatch fallback (first entry whose via != requested marketplace wins).
+    # Exact matches preserve the first canonical entry for each provenance pair.
+    # Plugin matches retain every entry in insertion order so fallback can select
+    # the first entry whose provenance differs from the requested marketplace.
     exact_index: dict[tuple[str, str], str] = {}
     plugin_index: dict[str, list[tuple[str, str]]] = {}
     if lockfile is not None:
@@ -483,11 +483,8 @@ def _resolve_marketplace_packages(
                 continue
             canonical_key = dep.get_unique_key()
             exact_key = (via, mp)
-            if exact_key not in exact_index:
-                exact_index[exact_key] = canonical_key
-            if mp not in plugin_index:
-                plugin_index[mp] = []
-            plugin_index[mp].append((via, canonical_key))
+            exact_index.setdefault(exact_key, canonical_key)
+            plugin_index.setdefault(mp, []).append((via, canonical_key))
 
     for package in packages:
         parsed = parse_marketplace_ref(package)

@@ -106,6 +106,22 @@ class TestIndexesPopulatedByCanonicalWalk:
         child_names = [p.name for p in children]
         assert child_names == sorted(child_names)
 
+    def test_empty_directory_absent_from_file_index_but_retained_as_child(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Empty directories stay in the child index but not the file index."""
+        empty_dir = tmp_path / "src/empty"
+        empty_dir.mkdir(parents=True)
+        _touch(tmp_path, "src/app.py")
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        optimizer.optimize_instruction_placement([_make_instruction(apply_to="**/*.py")])
+
+        assert empty_dir in optimizer._children_by_directory[tmp_path / "src"]
+        assert empty_dir not in optimizer._files_by_directory
+        assert empty_dir not in optimizer._directory_cache
+
 
 class TestNoIterdirCalls:
     """Optimized paths must not call Path.iterdir()."""

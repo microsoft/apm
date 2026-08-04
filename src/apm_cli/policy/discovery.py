@@ -969,7 +969,7 @@ def _extract_org_host_port_from_git_remote(
             except ValueError:
                 return None
         return parsed_identity[0], parsed_identity[1], port
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
 

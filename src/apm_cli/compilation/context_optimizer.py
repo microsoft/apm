@@ -273,6 +273,8 @@ class ContextOptimizer:
         self._file_list_cache = None
         self._glob_cache.clear()
         self._glob_set_cache.clear()
+        # Clear before the timed phase; analysis also clears so direct callers
+        # receive the same deterministic rebuild.
         self._files_by_directory.clear()
         self._children_by_directory.clear()
 
@@ -494,6 +496,7 @@ class ContextOptimizer:
         are sorted within each directory, so ``_file_list_cache`` is
         deterministic regardless of OS-level readdir order.
         """
+        # Rebuild from scratch for both direct calls and optimize orchestration.
         self._directory_cache.clear()
         self._pattern_cache.clear()
         self._file_list_cache = []
@@ -522,10 +525,12 @@ class ContextOptimizer:
 
             # Safety net: skip if a default-excluded component snuck through.
             if any(part in DEFAULT_EXCLUDED_DIRNAMES for part in relative_path.parts):
+                dirs[:] = []
                 continue
 
             # Skip paths matching configurable exclusion patterns.
             if self._should_exclude_path(current_path):
+                dirs[:] = []
                 continue
 
             # Prune and sort subdirectories.  Sorting ensures that
@@ -536,9 +541,9 @@ class ContextOptimizer:
             # Populate the children-by-directory index with admitted child dirs.
             self._children_by_directory[current_path] = [current_path / d for d in dirs]
 
-            # Build the project-file cache from os.walk's file entries.  The
-            # matching index retains the old Path.is_file() semantics so
-            # broken symlinks and other non-regular entries cannot match.
+            # project_files preserves os.walk entries for project accounting;
+            # matching_files keeps the old is_file() filter, excluding broken
+            # symlinks and other non-regular entries from pattern matching.
             project_files: builtins.list[Path] = []
             matching_files: builtins.list[Path] = []
             for file in sorted(files):
@@ -549,14 +554,13 @@ class ContextOptimizer:
                     if file_path.is_file():
                         matching_files.append(file_path)
 
-            # Populate the files-by-directory index.
-            self._files_by_directory[current_path] = matching_files
-
             # Build the directory cache (only for directories that contain
             # at least one non-hidden file; empty directories are skipped).
             total_files = len(project_files)
             if total_files == 0:
                 continue
+
+            self._files_by_directory[current_path] = matching_files
 
             analysis = DirectoryAnalysis(
                 directory=current_path, depth=depth, total_files=total_files
@@ -919,8 +923,7 @@ class ContextOptimizer:
 
         matching_dirs: builtins.set[Path] = set()
 
-        # Use the in-memory files-by-directory index populated by the
-        # canonical os.walk, eliminating per-pattern iterdir() calls.
+        # This lookup is entirely in memory; no filesystem error path remains.
         for directory, analysis in sorted(self._directory_cache.items()):
             files = self._files_by_directory.get(directory, [])
 

@@ -9,6 +9,7 @@ ordering, and cache lifecycle.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +38,25 @@ def _touch(base: Path, rel: str) -> None:
     p = base / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.touch()
+
+
+def _walk_with_nested_subtree(
+    base: Path,
+    subtree_name: str,
+    descended: list[Path],
+) -> Iterator[tuple[str, list[str], list[str]]]:
+    root_dirs = [subtree_name]
+    yield str(base), root_dirs, ["app.py"]
+    if subtree_name not in root_dirs:
+        return
+
+    subtree = base / subtree_name
+    child_dirs = ["deep"]
+    yield str(subtree), child_dirs, []
+    if child_dirs:
+        deep = subtree / "deep"
+        descended.append(deep)
+        yield str(deep), [], ["ignored.py"]
 
 
 class TestSingleWalkPopulatesBothCaches:
@@ -191,6 +211,51 @@ class TestExclusionInUnifiedWalk:
 
         assert "vendor" not in dir_names
         assert "lib.py" not in file_names
+
+    def test_default_exclusion_safety_net_prunes_nested_subtree(self, tmp_path: Path) -> None:
+        """The safety net stops descent when parent pruning is bypassed."""
+        _touch(tmp_path, "app.py")
+        descended: list[Path] = []
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+        with (
+            patch(
+                "apm_cli.compilation.context_optimizer.os.walk",
+                side_effect=lambda _top: _walk_with_nested_subtree(
+                    tmp_path,
+                    "node_modules",
+                    descended,
+                ),
+            ),
+            patch.object(optimizer, "_should_exclude_subdir", return_value=False),
+        ):
+            optimizer._analyze_project_structure()
+
+        assert descended == []
+
+    def test_configurable_exclusion_safety_net_prunes_nested_subtree(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A current-path exclusion stops descent when parent pruning is bypassed."""
+        _touch(tmp_path, "app.py")
+        descended: list[Path] = []
+        optimizer = ContextOptimizer(base_dir=str(tmp_path), exclude_patterns=["vendor"])
+
+        with (
+            patch(
+                "apm_cli.compilation.context_optimizer.os.walk",
+                side_effect=lambda _top: _walk_with_nested_subtree(
+                    tmp_path,
+                    "vendor",
+                    descended,
+                ),
+            ),
+            patch.object(optimizer, "_should_exclude_subdir", return_value=False),
+        ):
+            optimizer._analyze_project_structure()
+
+        assert descended == []
 
 
 class TestHiddenToolRootsInUnifiedWalk:

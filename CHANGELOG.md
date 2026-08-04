@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy cache metadata and diagnostics also omit credentials embedded in
   direct policy URLs. (#2422)
 
+### Performance
+
+- Policy discovery now performs one remote lookup per discovery, compilation
+  uses one project traversal plus in-memory directory indexes, and uninstall
+  pre-indexes lockfile entries for marketplace lookup. (#2472)
+
 ## [0.27.0] - 2026-07-31
 
 ### Added

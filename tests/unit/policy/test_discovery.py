@@ -21,6 +21,7 @@ from apm_cli.policy.discovery import (
     _auto_discover,
     _cache_key,
     _extract_org_from_git_remote,
+    _extract_org_host_port_from_git_remote,
     _fetch_ado_contents,
     _fetch_from_ado_repo,
     _fetch_from_repo,
@@ -173,6 +174,34 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5)
         result = _extract_org_from_git_remote(Path("/fake"))
+        self.assertIsNone(result)
+
+    @patch("apm_cli.policy.discovery._parse_remote_url")
+    @patch("apm_cli.policy.discovery.subprocess.run")
+    def test_remote_parser_value_error_returns_none(self, mock_run, mock_parse):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="https://dev.azure.com/contoso/project/_git/repo\n",
+        )
+        mock_parse.side_effect = ValueError("invalid remote coordinates")
+
+        result = _extract_org_host_port_from_git_remote(Path("/fake"))
+
+        self.assertIsNone(result)
+
+    @patch("apm_cli.policy.discovery.urlparse")
+    @patch("apm_cli.policy.discovery._parse_remote_url")
+    @patch("apm_cli.policy.discovery.subprocess.run")
+    def test_remote_port_value_error_returns_none(self, mock_run, mock_parse, mock_urlparse):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="https://ghe.example.com:invalid/contoso/repo.git\n",
+        )
+        mock_parse.return_value = ("contoso", "ghe.example.com")
+        mock_urlparse.side_effect = ValueError("invalid port")
+
+        result = _extract_org_host_port_from_git_remote(Path("/fake"))
+
         self.assertIsNone(result)
 
 
@@ -945,14 +974,17 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertEqual(result.outcome, "absent")
 
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
-    def test_auto_discover_ado_git_subprocess_invoked_exactly_once(self, mock_ado_fetch):
+    @patch("apm_cli.policy.discovery._policy_repo_candidates")
+    def test_auto_discover_ado_git_subprocess_invoked_exactly_once(
+        self,
+        mock_candidates,
+        mock_ado_fetch,
+    ):
         """_auto_discover must invoke the git remote subprocess exactly once.
 
-        Before the A1 fix, _auto_discover ran git remote twice: once via
-        _extract_org_from_git_remote (which delegates to
-        _extract_org_host_port_from_git_remote) and again via the now-removed
-        _extract_port_from_git_remote. This regression guard asserts exactly one
-        subprocess call and that the parsed explicit port reaches the ADO fetch path.
+        Before the A1 fix, separate org/host and port callers in _auto_discover
+        each ran git remote. This guard asserts one subprocess call and verifies
+        that the parsed host and explicit port reach their routing consumers.
         """
         ado_url = "https://ado.example.test:8443/DefaultCollection/project/_git/repo"
 
@@ -963,6 +995,7 @@ class TestAutoDiscover(unittest.TestCase):
             return proc
 
         mock_ado_fetch.return_value = PolicyFetchResult(outcome="absent")
+        mock_candidates.return_value = ("_apm",)
 
         with (
             patch("apm_cli.policy.discovery.subprocess.run", side_effect=fake_run) as mock_run,
@@ -977,6 +1010,7 @@ class TestAutoDiscover(unittest.TestCase):
             f"Expected exactly 1 git subprocess call, got {mock_run.call_count}. "
             "_auto_discover must not invoke git remote multiple times.",
         )
+        mock_candidates.assert_called_once_with("ado.example.test")
         self.assertEqual(mock_ado_fetch.call_args.kwargs["port"], 8443)
 
 

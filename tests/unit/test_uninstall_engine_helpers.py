@@ -899,12 +899,12 @@ class TestResolveMarketplacePackagesMultiEntry:
 
 
 # ===========================================================================
-# _resolve_marketplace_packages -- single-traversal performance contract
+# _resolve_marketplace_packages -- single-values-call performance contract
 # ===========================================================================
 
 
 class _IterationCountingDepsView:
-    """Wraps a dict to count how many times .values() is iterated.
+    """Wrap a dict to count calls to ``values()``.
 
     Assigned to ``lockfile.dependencies`` so _resolve_marketplace_packages
     can be audited without touching its internals.
@@ -933,7 +933,7 @@ class _IterationCountingDepsView:
 
 
 class TestResolveMarketplacePackagesSingleTraversal:
-    """Iteration-count guard: lockfile.dependencies.values() must be called
+    """Call-count guard: lockfile.dependencies.values() must be called
     exactly once for the whole batch, not once or twice per package.
 
     This test FAILS with the pre-optimisation code (which calls .values() twice
@@ -974,15 +974,15 @@ class TestResolveMarketplacePackagesSingleTraversal:
             logger,
         )
 
-        # Pre-index path: one traversal for the whole batch regardless of N
+        # Pre-index path: one values() call for the whole batch regardless of N.
         assert counter.values_call_count == 1, (
-            f"Expected exactly 1 traversal of lockfile.dependencies.values() "
+            f"Expected exactly 1 call to lockfile.dependencies.values() "
             f"for a 3-package batch, got {counter.values_call_count}. "
-            "The optimisation must pre-index deps once before the package loop."
+            "The optimisation must call values() once before the package loop."
         )
 
     def test_values_called_once_even_when_all_packages_need_fallback(self):
-        """Even when no exact match exists for any package, one traversal suffices."""
+        """Fallback for every package still requires only one values() call."""
         from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
 
         lockfile, counter = self._make_lockfile_with_counter([])
@@ -997,7 +997,7 @@ class TestResolveMarketplacePackagesSingleTraversal:
             )
 
         assert counter.values_call_count == 1, (
-            f"Expected 1 traversal even when all packages fall through to registry, "
+            f"Expected 1 values() call when all packages fall through to registry, "
             f"got {counter.values_call_count}."
         )
 
