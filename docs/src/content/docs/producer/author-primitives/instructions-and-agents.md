@@ -70,10 +70,11 @@ applyTo:
   - "**/*.py"
 ```
 
-When a YAML sequence contains multiple patterns, APM preserves the full
-sequence for targets whose native rule format supports multiple globs.
-Prefer the comma-separated string form when you want identical output
-across every target.
+When a YAML sequence contains multiple patterns, APM normalizes every
+non-null entry into the same comma-separated OR expression used by
+[distributed compilation](../../compile/) and target-native installation. Use a
+sequence when its source readability matters. To match a literal comma in a
+filename, escape it as `\,`.
 
 ```markdown
 ---
@@ -83,9 +84,13 @@ applyTo: "**/*.{css,scss},**/*.tsx"
 ```
 
 On Copilot the comma-list is preserved verbatim (Copilot splits it
-natively). On Claude, Cursor, Windsurf, Kiro, and Antigravity the list is
-expanded to a YAML array under `paths:` / `globs:` /
-`fileMatchPattern:`.
+natively). Other targets use their own native instruction format; the target
+matrix below records the generated shape.
+
+During distributed compilation, an explicitly scoped pattern may match files
+under supported top-level harness directories: `.agents`, `.apm`, `.claude`,
+`.codex`, `.cursor`, `.gemini`, `.github`, `.kiro`, `.opencode`, and
+`.windsurf`. Other hidden directories remain excluded.
 
 ### Body conventions
 

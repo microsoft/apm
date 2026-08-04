@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from apm_cli.utils.patterns import normalize_apply_to
 from apm_cli.utils.yaml_io import load_frontmatter
 
 from .models import Chatmode, Context, Instruction, Primitive, Skill
@@ -92,33 +93,6 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
         raise ValueError(f"Failed to parse primitive file {file_path}: {e}")  # noqa: B904
 
 
-def _normalize_apply_to(value: object, default: str = "") -> str:
-    """Normalize an applyTo frontmatter value to a string.
-
-    YAML allows list-valued applyTo (e.g. ``applyTo: ['**/*.py']``).
-    The rest of the compilation pipeline expects a plain string and treats
-    apply_to as a single glob pattern -- it has no mechanism to split a
-    comma-joined multi-pattern string back into individual globs.
-
-    When a list is encountered, only the first non-null element is used.
-    Multi-pattern support (``list[str]`` migration across all consumers)
-    is tracked separately.
-
-    Args:
-        value: The raw value returned by the YAML parser (str, list, or None).
-        default: Fallback when value is None or an empty list.
-
-    Returns:
-        str: Normalized glob pattern string.
-    """
-    if isinstance(value, list):
-        non_null = [str(v) for v in value if v is not None]
-        return non_null[0] if non_null else default
-    if value is None:
-        return default
-    return str(value)
-
-
 def _parse_chatmode(
     name: str,
     file_path: Path,
@@ -139,7 +113,7 @@ def _parse_chatmode(
         Chatmode: Parsed chatmode primitive.
     """
     raw_apply_to = metadata.get("applyTo")
-    normalized_apply_to = _normalize_apply_to(raw_apply_to, default="") or None
+    normalized_apply_to = normalize_apply_to(raw_apply_to, default="") or None
     raw_handoffs = metadata.get("handoffs")
     handoffs: list[str | dict] | None = None
     if isinstance(raw_handoffs, list):
@@ -183,7 +157,7 @@ def _parse_instruction(
         name=name,
         file_path=file_path,
         description=metadata.get("description", ""),
-        apply_to=_normalize_apply_to(metadata.get("applyTo"), default=""),
+        apply_to=normalize_apply_to(metadata.get("applyTo"), default=""),
         content=content,
         author=metadata.get("author"),
         version=metadata.get("version"),
