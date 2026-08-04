@@ -482,7 +482,12 @@ class MCPServerOperations:
             from rich.prompt import Prompt
 
             console = Console()
-            console.print("Environment variables needed:", style="cyan")
+            console.print(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:",
+                style="cyan",
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
@@ -531,7 +536,11 @@ class MCPServerOperations:
             # Fallback to simple input
             import click
 
-            click.echo("Environment variables needed:")
+            click.echo(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:"
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]

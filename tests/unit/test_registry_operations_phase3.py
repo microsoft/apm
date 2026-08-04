@@ -520,6 +520,44 @@ class TestCollectRuntimeVariables:
             password=True,
         )
 
+    def test_empty_secret_response_retains_hidden_registry_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Accepting a concealed default must retain its configured secret value."""
+        for variable in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "ACCESS_CODE",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        ops = _make_ops()
+        prompt = MagicMock(return_value="")
+
+        with (
+            patch("rich.console.Console"),
+            patch("rich.prompt.Prompt.ask", prompt),
+        ):
+            result = ops._prompt_for_environment_variables(
+                {
+                    "ACCESS_CODE": {
+                        "description": "Access code",
+                        "required": True,
+                        "value": "registry-secret",
+                        "secret": True,
+                    }
+                },
+                prompt_defaults=True,
+            )
+
+        assert result == {"ACCESS_CODE": "registry-secret"}
+        assert prompt.call_args.kwargs["default"] == ""
+        assert prompt.call_args.kwargs["show_default"] is False
+
     def test_ci_keeps_required_runtime_defaults_without_prompting(
         self,
         monkeypatch: pytest.MonkeyPatch,

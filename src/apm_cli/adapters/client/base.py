@@ -658,6 +658,39 @@ class MCPClientAdapter(ABC):
         )
 
     @staticmethod
+    def _package_runtime_variable_metadata(
+        package: dict[str, Any] | None,
+    ) -> dict[str, dict] | None:
+        """Return one validated runtime-variable declaration map for a package.
+
+        Registry metadata may declare a variable on one argument and reference it
+        later without repeating the declaration. Keeping this map package-scoped
+        makes those references resolve consistently while rejecting malformed
+        secret metadata before an adapter can render a collected value.
+        """
+        metadata_by_name: dict[str, dict] = {}
+        for field_name in ("runtime_arguments", "package_arguments"):
+            for argument in (package or {}).get(field_name) or []:
+                if not isinstance(argument, dict):
+                    continue
+                variables = argument.get("variables")
+                if variables is None:
+                    continue
+                if not isinstance(variables, dict):
+                    return None
+                for name, metadata in variables.items():
+                    if not isinstance(name, str) or not isinstance(metadata, dict):
+                        return None
+                    secret_marker = metadata.get("isSecret", metadata.get("is_secret", False))
+                    if not isinstance(secret_marker, bool):
+                        return None
+                    existing = metadata_by_name.get(name)
+                    if existing is not None and existing != metadata:
+                        return None
+                    metadata_by_name[name] = metadata
+        return metadata_by_name
+
+    @staticmethod
     def _substitute_runtime_variables(
         template: str,
         variables: dict[object, object] | None,
@@ -691,6 +724,8 @@ class MCPClientAdapter(ABC):
             if placeholder not in template or name in values:
                 continue
             secret_marker = metadata.get("isSecret", metadata.get("is_secret", False))
+            if not isinstance(secret_marker, bool):
+                return None
             if secret_marker is True:
                 return None
             fallback = fallbacks.get(name)
