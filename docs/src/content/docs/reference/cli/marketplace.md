@@ -257,8 +257,10 @@ layout.
 
 ### `apm marketplace package add SOURCE`
 
-Add a package entry to the authoring config. `SOURCE` is a git repo
-reference. Mutable refs (`HEAD`, branches) are auto-resolved to a
+Add a package entry to the authoring config. `SOURCE` may be an
+`owner/repo` shorthand, a `host.tld/owner/repo` shorthand, or a full
+`https://host.tld/path/to/repo[.git]` URL with two or more repository
+path segments. Mutable refs (`HEAD`, branches) are auto-resolved to a
 concrete SHA at write time.
 
 | Flag | Description |
