@@ -571,8 +571,8 @@ package's `host`, `repo_url`, and resolved `ref`, with `virtual_path`
 taken from `path`. The literal `parent` MUST NOT appear in the
 lockfile as durable identity (`repo_url` or `source`).
 
-<a id="req-mf-023"></a>
-**[req-mf-023]** A conforming **consumer** implementation MUST NOT
+<a id="req-mf-024"></a>
+**[req-mf-024]** A conforming **consumer** implementation MUST NOT
 silently rewrite an existing `id:`-form (registry-sourced) manifest
 entry into a `git:`-form entry when persisting a subsequent CLI-driven
 manifest update (e.g. an additive `--skill` pin) for the same
@@ -787,7 +787,7 @@ This section's normative statements are:
   [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
-  [req-mf-023](#req-mf-023),
+  [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
@@ -2993,7 +2993,7 @@ conformance statement identifying:
 [req-mf-016](#req-mf-016), [req-mf-018](#req-mf-018),
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
-[req-mf-023](#req-mf-023),
+[req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
 [req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
