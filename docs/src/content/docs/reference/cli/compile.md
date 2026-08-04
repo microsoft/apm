@@ -43,7 +43,7 @@ for what those files are) even though compile does not itself *deploy* hooks.
 `.github/instructions/*.instructions.md` (with their `applyTo:`
 frontmatter) that `apm install` already deploys. Compile is
 **recommended for every other context-producing target** (`claude`, `cursor`, `codex`,
-`gemini`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
+`gemini`, `grok-build`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
 root context file or harness-specific rules folder that compile
 generates.
 
@@ -51,8 +51,8 @@ Resolution order for which targets to compile:
 
 1. `--target` / `--all` on the command line
 2. `targets:` field in `apm.yml`
-3. Auto-detection from existing folders (`.github/`, `.claude/`,
-   `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`)
+3. Auto-detection from the
+   [documented filesystem signals](../targets/#detection-signals)
 
 Use [`apm targets`](../targets/) to preview what auto-detection
 resolves to before compiling.
@@ -74,8 +74,9 @@ written. Critical findings cause the command to exit non-zero. See
 and emit a one-line warning. `--target all` also emits a deprecation
 warning -- prefer `--all`.
 
-Every accepted project target is also accepted by `compile`. Targets without
-root-context output, including `agent-skills`, are successful no-ops.
+Every accepted project target is also accepted by `compile`. `grok-build`
+produces `AGENTS.md`. Targets without root-context output, including
+`agent-skills` and the experimental `grok-cloud` target, are successful no-ops.
 `antigravity` is explicit-only and `intellij` is MCP-only. Neither is included in `all`.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
@@ -271,6 +272,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 |--------|-----------------|
 | `copilot` | `AGENTS.md`, `.github/copilot-instructions.md` |
 | `claude` | `CLAUDE.md` |
+| `grok-build` | `AGENTS.md` |
 | `cursor` | `AGENTS.md` |
 | `codex` | `AGENTS.md` |
 | `opencode` | `AGENTS.md` |
@@ -281,6 +283,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `hermes` | `AGENTS.md` |
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
+| `grok-cloud` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 
 `.github/copilot-instructions.md` is only managed by APM when its first

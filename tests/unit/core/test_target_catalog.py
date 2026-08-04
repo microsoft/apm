@@ -37,13 +37,26 @@ COMMANDS = ("compile", "install", "update")
 def test_current_target_sets_and_aliases_are_characterized() -> None:
     """Lock the accepted target contract before moving its owner."""
     assert (
-        frozenset({"claude", "codex", "cursor", "gemini", "kiro", "opencode", "vscode", "windsurf"})
+        frozenset(
+            {
+                "claude",
+                "codex",
+                "cursor",
+                "gemini",
+                "grok-build",
+                "kiro",
+                "opencode",
+                "vscode",
+                "windsurf",
+            }
+        )
         == ALL_CANONICAL_TARGETS
     )
     assert (
-        frozenset({"copilot-app", "copilot-cowork", "hermes", "openclaw"}) == EXPERIMENTAL_TARGETS
+        frozenset({"copilot-app", "copilot-cowork", "grok-cloud", "hermes", "openclaw"})
+        == EXPERIMENTAL_TARGETS
     )
-    assert frozenset({"agent-skills", "antigravity"}) == EXPLICIT_ONLY_TARGETS
+    assert frozenset({"agent-skills", "antigravity", "grok-cloud"}) == EXPLICIT_ONLY_TARGETS
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
         "agy": "antigravity",
@@ -66,6 +79,8 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "copilot-cowork",
                 "cursor",
                 "gemini",
+                "grok-build",
+                "grok-cloud",
                 "hermes",
                 "intellij",
                 "kiro",
@@ -173,6 +188,25 @@ def test_current_native_profiles_are_characterized() -> None:
             },
             "gemini",
             None,
+        ),
+        "grok-build": (
+            ".grok",
+            {
+                "instructions": ("rules", ".md", "grok_rules", None, False),
+                "agents": ("agents", ".md", "grok_agent", None, False),
+                "commands": ("commands", ".md", "claude_command", None, False),
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
+            },
+            "agents",
+            None,
+        ),
+        "grok-cloud": (
+            ".grok",
+            {
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
+            },
+            None,
+            "grok_cloud",
         ),
         "antigravity": (
             ".agents",

@@ -406,3 +406,46 @@ class TestCheckCleanDriftRecipe:
         # Verify the git add -- <path> line embeds the path so producers can copy-paste.
         assert "git add" in result.output
         assert "marketplace.json" in result.output
+
+    def test_drift_recipe_preserves_marketplace_path_override(self, runner, tmp_path, monkeypatch):
+        """The recovery command must regenerate the same overridden path it stages."""
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        override = "claude=.github/plugin/marketplace.json"
+
+        result = runner.invoke(
+            pack_cmd,
+            ["--check-clean", "--dry-run", "--offline", "--marketplace-path", override],
+        )
+
+        assert result.exit_code == 4, result.output
+        assert f"apm pack --marketplace-path {override}" in result.output
+        assert "git add -- .github/plugin/marketplace.json" in result.output
+
+
+class TestCheckCleanEffectiveOutputPath:
+    """Integration tests: --check-clean uses pack's effective output path."""
+
+    def test_check_clean_uses_marketplace_path_override(self, runner, tmp_path, monkeypatch):
+        """The clean gate must compare the artifact selected by the CLI override."""
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        artifact = tmp_path / ".github" / "plugin" / "marketplace.json"
+        override = "claude=.github/plugin/marketplace.json"
+
+        packed = runner.invoke(pack_cmd, ["--offline", "--marketplace-path", override])
+
+        assert packed.exit_code == 0, packed.output
+        assert artifact.is_file()
+        initial_bytes = artifact.read_bytes()
+        assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+
+        checked = runner.invoke(
+            pack_cmd,
+            ["--offline", "--marketplace-path", override, "--check-clean"],
+        )
+
+        assert checked.exit_code == 0, checked.output
+        assert ".github/plugin/marketplace.json  [unchanged]" in checked.output
+        assert artifact.read_bytes() == initial_bytes
+        assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()

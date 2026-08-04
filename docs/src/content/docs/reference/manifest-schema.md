@@ -138,20 +138,22 @@ SBOM marks the component unknown -- CycloneDX omits the license entry and SPDX
 writes the literal `NOASSERTION` -- and `apm pack` / `apm publish` print an
 actionable nudge (the authoring path only).
 
-### 3.6. `target`
+### 3.6. `target` and `targets`
 
 | | |
 |---|---|
-| **Type** | `string` or `list<string>` |
+| **Type** | `target`: `string` or `list<string>`; `targets`: `list<string>` (a scalar is accepted as one-item compatibility input) |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect from folder presence (see below). |
-| **Allowed values** | `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `agent-skills` |
+| **Default** | Auto-detect from filesystem signals (see below). |
+| **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
 
-When `target:` is omitted, APM auto-detects targets from folder presence (`.github/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`). Auto-detection applies only when `target:` is unset; once set, the field is authoritative.
+When both fields are omitted, APM auto-detects from the
+[documented filesystem signals](../cli/targets/#detection-signals).
+Once set, the field is authoritative.
 
 ```yaml
 # Single target
@@ -168,16 +170,22 @@ target:
 
 When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets.
 
-A plural alias `targets:` (YAML list only) is also accepted and takes precedence over the legacy CSV form when both are declared. Prefer `targets:` in new manifests; `target:` remains supported for backward compatibility.
+A plural `targets:` form is also accepted; use a YAML list in new manifests.
+A scalar remains accepted as a one-item compatibility input. Declaring both
+fields is a parse error. Prefer `targets:` in new manifests; `target:` remains
+supported for backward compatibility and accepts legacy CLI aliases such as
+`vscode`. The canonical `targets:` form requires canonical names.
 
 | Value | Effect |
 |---|---|
 | `copilot` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode). |
 | `claude` | Emits `CLAUDE.md` at the project root. |
+| `grok-build` | Emits `AGENTS.md` and deploys to `.grok/rules/`, `.grok/agents/`, `.grok/commands/`, `.grok/skills/`. |
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`. |
 | `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
+| `antigravity` | Emits `AGENTS.md` and deploys rules, skills, hooks, and MCP config under `.agents/`. |
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.agents/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
 | `agent-skills` | Deploys Agent Skills under `.agents/skills/`. |
@@ -426,7 +434,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
-| `targets` | `list<string>` | OPTIONAL | Subset of canonical target keys (`copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`) | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`. Experimental: `grok-cloud`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
 actionable error to use `ref` for a branch, tag, or commit; `version` belongs
@@ -907,7 +915,7 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | REQUIRED | Package identifier as it appears in the marketplace. |
-| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), `./<path>` (local), or a relative path when `marketplace.sourceBase` is set. Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
+| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<path>/<to>/<repo>[.git]` (full URL form with two or more repository path segments on any supported host, including `github.com`; a trailing `.git` is stripped), `./<path>` (local), or a relative path when `marketplace.sourceBase` is set. Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
 | `subdir` | `string` | OPTIONAL | Subdirectory inside the source repo. Path-traversal-validated. Ignored for local sources. |
 | `version` | `string` | Conditional | Semver range (e.g. `^1.0.0`, `~2.1.0`, `>=3.0`). Stored as a string; resolution happens at pack time. REQUIRED for remote packages unless `ref` is given; when omitted in that case, the displayed version can fall back to the package's own `apm.yml` (see note below). |
 | `ref` | `string` | Conditional | Explicit git ref (SHA, tag, or branch). Overrides `version` range when both are present. REQUIRED for remote packages unless `version` is given. |
@@ -926,7 +934,7 @@ Remote packages MUST declare at least one of `version` or `ref`. Local packages 
 
 When `description` is omitted, or when a remote entry has no displayable `version`, `apm pack` reads the matching field from the referenced package's own `apm.yml` and uses it in the generated `marketplace.json`. Remote GitHub-class packages (`github.com`, GHES, or authenticated GHE Cloud) are fetched over HTTPS (skipped under `--offline` and for other hosts); local packages are read from disk under the project root. A `description` or display `version` set on the `packages[]` entry still wins. For remote packages, semver ranges such as `^1.0.0` are used for resolution, not emitted as the displayed version, so the package `apm.yml` version is emitted when available.
 
-The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
+The first three `source` forms target a remote git host. The second names a non-default host (e.g. GitHub Enterprise or self-hosted GitLab) as a shorthand; the third is a full HTTPS URL on any supported host, including `github.com`, with an optional `.git` suffix normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
 
 When `sourceBase` is set, relative package sources compose onto that base. For example, `sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace` plus `source: review` emits `https://gitlab.corp.example.com/platform/agent-marketplace/review`. This includes two-segment `owner/repo` values and deeper relative paths; only host-prefixed sources, full HTTPS URLs, and local `./` sources are overrides that ignore `sourceBase`. Without `sourceBase`, existing `owner/repo` behavior is unchanged and single-segment relative sources are rejected.
 

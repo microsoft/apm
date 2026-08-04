@@ -377,16 +377,16 @@ GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
 receive that dependency's target-scoped primitives.
 
 Package-level `targets:` (top-level) selects the package's own
-compile/install runtimes; per-dependency `targets:` (inside a
-`dependencies.apm` entry) selects which active harnesses receive that
+compile/install targets; per-dependency `targets:` (inside a
+`dependencies.apm` entry) selects which active targets receive that
 dependency's target-scoped primitives. They compose via intersection. See
 `package-authoring.md` for author guidance.
 
-- Type: list of harness keys (`copilot`, `claude`, `cursor`, `codex`,
-  `gemini`, `antigravity`, `windsurf`, `kiro`, plus canonical targets
-  such as `opencode`, `agent-skills`, `openclaw`, `hermes`,
-  `copilot-cowork`, and `copilot-app`). Use `copilot`, not the runtime
-  alias `vscode`, for Copilot-family dependency routing.
+- Type: list of target keys. Stable targets are `copilot`, `claude`, `grok-build`,
+  `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`,
+  `opencode`, and `agent-skills`. Experimental targets are `openclaw`, `hermes`,
+  `copilot-cowork`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
+  target alias `vscode`, for Copilot-family dependency routing.
 - Default: omitted means all active install targets.
 - Semantics: effective reach is `install_targets INTERSECT dep_targets`.
   A non-empty list narrows reach; it never widens beyond what the install

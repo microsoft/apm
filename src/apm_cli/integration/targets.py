@@ -666,6 +666,37 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_dir=".gemini",
         hooks_config_display=".gemini/settings.json",
     ),
+    # Grok Build -- project and user configuration live under .grok/.
+    # Grok reads AGENTS.md for compiled project context and supports native
+    # rules, agents, legacy command markdown, and Agent Skills.
+    # Ref: https://github.com/xai-org/grok-build/tree/main/crates/codegen/xai-grok-pager/docs/user-guide
+    "grok-build": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok-build"],
+        root_dir=".grok",
+        primitives={
+            "instructions": PrimitiveMapping("rules", ".md", "grok_rules"),
+            "agents": PrimitiveMapping("agents", ".md", "grok_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".grok",
+    ),
+    # Grok Cloud -- xAI docs verify project ``./.grok/skills/`` and user
+    # ``~/.grok/skills/``.  Skills are the only deployed primitive.
+    "grok-cloud": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok-cloud"],
+        root_dir=".grok",
+        primitives={
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".grok",
+    ),
     # Antigravity CLI (agy) -- Google's Gemini-derived agentic CLI.
     # Workspace config lives under the cross-tool .agents/ root (the same
     # shared root used for agent skills); Antigravity has no unique

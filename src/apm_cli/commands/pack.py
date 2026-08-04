@@ -1,6 +1,7 @@
 """Click commands for ``apm pack`` and ``apm unpack``."""
 
 import json as json_mod
+import shlex
 import sys
 from pathlib import Path
 
@@ -231,9 +232,9 @@ def _parse_marketplace_filter(
     default=False,
     help=(
         "Release gate: regenerate every configured marketplace output to a "
-        "temp path and diff against the on-disk file. Exits 4 if the working "
-        "tree is dirty (out-of-date marketplace.json). The gate itself "
-        "never writes to disk."
+        "temp representation and diff against the effective on-disk path, "
+        "including --marketplace-path overrides. Exits 4 for drift. Use "
+        "with --dry-run to check without normal pack output generation."
     ),
 )
 @click.option(
@@ -438,6 +439,8 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                             tag_str = f"  -> tag {row.rendered_tag}" if row.rendered_tag else ""
                             version_str = row.version if row.version is not None else "<none>"
                             logger.info(f"    {row.path}  {version_str}{tag_str}  [{row.reason}]")
+                        for message in v_report.error_messages():
+                            logger.error(f"    {message}")
                     for msg in v_report.error_messages():
                         gate_errors.append({"code": "version_misaligned", "message": msg})
 
@@ -452,7 +455,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                 drift_builder = MarketplaceBuilder.from_config(
                     gate_config, project_root=project_root, options=mkt_opts
                 )
-                d_report = check_marketplace_drift(drift_builder, gate_config, project_root)
+                d_report = check_marketplace_drift(
+                    drift_builder,
+                    gate_config,
+                    project_root,
+                    options.marketplace_path_overrides,
+                )
                 drift_payload = d_report.to_json_dict()
                 if d_report.ok:
                     if not json_output:
@@ -472,13 +480,23 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                                 logger.info(f"    {out.path}  [unchanged]")
                             elif out.status == "missing":
                                 logger.info(f"    {out.path}  [missing on disk; would be created]")
-                                _emit_drift_recipe(logger, out.path)
+                                _emit_drift_recipe(
+                                    logger,
+                                    out.path,
+                                    out.format,
+                                    (options.marketplace_path_overrides or {}).get(out.format),
+                                )
                             else:
                                 count = len(out.differences)
                                 logger.info(f"    {out.path}  [drift: {count} differences]")
                                 for line in render_diff_lines(out):
                                     logger.info(line)
-                                _emit_drift_recipe(logger, out.path)
+                                _emit_drift_recipe(
+                                    logger,
+                                    out.path,
+                                    out.format,
+                                    (options.marketplace_path_overrides or {}).get(out.format),
+                                )
                     for msg in d_report.error_messages():
                         gate_errors.append({"code": "marketplace_drift", "message": msg})
 
@@ -537,23 +555,33 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         ctx.exit(4)
 
 
-def _emit_drift_recipe(logger, out_path: str) -> None:
+def _emit_drift_recipe(
+    logger,
+    out_path: str,
+    output_format: str,
+    output_override: str | None,
+) -> None:
     """Emit the canonical recovery recipe when marketplace.json drift is detected.
 
     Teaches producers the amend+force-with-lease pattern so they can fix the
     drift without a noisy follow-up commit.
     """
+    pack_command = "apm pack"
+    if output_override is not None:
+        pack_command += f" --marketplace-path {shlex.quote(f'{output_format}={output_override}')}"
+    stage_command = f"git add -- {shlex.quote(out_path)}"
+
     logger.info("")
     logger.info("    To recover cleanly (fold into the current commit):")
     logger.info("")
-    logger.info("      apm pack                       # regenerate locally")
-    logger.info(f"      git add -- {out_path}")
+    logger.info(f"      {pack_command}                       # regenerate locally")
+    logger.info(f"      {stage_command}")
     logger.info("      git commit --amend --no-edit   # fold into the current commit")
     logger.info("      git push --force-with-lease    # safe re-push")
     logger.info("")
     logger.info("    Or as a follow-up commit:")
     logger.info("")
-    logger.info(f"      apm pack && git add -- {out_path}")
+    logger.info(f"      {pack_command} && {stage_command}")
     logger.info("      git commit -m 'chore(marketplace): regen'")
     logger.info("")
     logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")

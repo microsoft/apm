@@ -389,7 +389,8 @@ class TestCollectRuntimeVariables:
                     "value": "registry-default",
                     "secret": True,
                 }
-            }
+            },
+            prompt_defaults=True,
         )
 
     def test_skips_non_string_runtime_variable_default(self) -> None:
@@ -425,6 +426,160 @@ class TestCollectRuntimeVariables:
 
         prompt.assert_not_called()
         assert result == {}
+
+    def test_prompts_for_required_runtime_default_as_an_overrideable_suggestion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Required runtime defaults must remain an interactive suggestion."""
+        for variable in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "workdir",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        ops = _make_ops()
+        cache = {
+            "server-a": {
+                "packages": [
+                    {
+                        "runtime_arguments": [
+                            {
+                                "variables": {
+                                    "workdir": {
+                                        "description": "Working directory",
+                                        "isRequired": True,
+                                        "default": "${workspaceFolder}",
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        prompt = MagicMock(return_value="/workspace/override")
+
+        with (
+            patch("rich.console.Console"),
+            patch("rich.prompt.Prompt.ask", prompt),
+        ):
+            result = ops.collect_runtime_variables(["server-a"], server_info_cache=cache)
+
+        assert result == {"workdir": "/workspace/override"}
+        prompt.assert_called_once_with(
+            "  workdir (Working directory)",
+            default="${workspaceFolder}",
+            show_default=True,
+            password=False,
+        )
+
+    def test_hides_required_secret_runtime_default_while_allowing_override(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Secret defaults must never be shown in the interactive prompt."""
+        for variable in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "ACCESS_CODE",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        ops = _make_ops()
+        prompt = MagicMock(return_value="override")
+
+        with (
+            patch("rich.console.Console"),
+            patch("rich.prompt.Prompt.ask", prompt),
+        ):
+            result = ops._prompt_for_environment_variables(
+                {
+                    "ACCESS_CODE": {
+                        "description": "Access code",
+                        "required": True,
+                        "value": "registry-secret",
+                        "secret": True,
+                    }
+                },
+                prompt_defaults=True,
+            )
+
+        assert result == {"ACCESS_CODE": "override"}
+        prompt.assert_called_once_with(
+            "  ACCESS_CODE (Access code)",
+            default="",
+            show_default=False,
+            password=True,
+        )
+
+    def test_empty_secret_response_retains_hidden_registry_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Accepting a concealed default must retain its configured secret value."""
+        for variable in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "ACCESS_CODE",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        ops = _make_ops()
+        prompt = MagicMock(return_value="")
+
+        with (
+            patch("rich.console.Console"),
+            patch("rich.prompt.Prompt.ask", prompt),
+        ):
+            result = ops._prompt_for_environment_variables(
+                {
+                    "ACCESS_CODE": {
+                        "description": "Access code",
+                        "required": True,
+                        "value": "registry-secret",
+                        "secret": True,
+                    }
+                },
+                prompt_defaults=True,
+            )
+
+        assert result == {"ACCESS_CODE": "registry-secret"}
+        assert prompt.call_args.kwargs["default"] == ""
+        assert prompt.call_args.kwargs["show_default"] is False
+
+    def test_ci_keeps_required_runtime_defaults_without_prompting(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Non-interactive installs retain registry defaults for resolution."""
+        monkeypatch.delenv("APM_E2E_TESTS", raising=False)
+        monkeypatch.setenv("CI", "1")
+        monkeypatch.delenv("workdir", raising=False)
+        ops = _make_ops()
+
+        result = ops._prompt_for_environment_variables(
+            {
+                "workdir": {
+                    "description": "Working directory",
+                    "required": True,
+                    "value": "/registry/default",
+                }
+            },
+            prompt_defaults=True,
+        )
+
+        assert result == {"workdir": "/registry/default"}
 
     def test_skips_exception_servers(self) -> None:
         ops = _make_ops()
@@ -679,6 +834,47 @@ class TestPromptForEnvironmentVariables:
                 {"CLICK_VAR": {"description": "desc", "required": True}}
             )
         assert result.get("CLICK_VAR") == "click-value"
+
+    def test_click_fallback_prompts_for_required_default_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fallback preserves the Rich prompt's editable default contract."""
+        for variable in (
+            "APM_E2E_TESTS",
+            "CI",
+            "GITHUB_ACTIONS",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "CLICK_DEFAULT",
+        ):
+            monkeypatch.delenv(variable, raising=False)
+        ops = _make_ops()
+        prompt = MagicMock(return_value="click-override")
+
+        with (
+            patch.dict("sys.modules", {"rich": None, "rich.console": None, "rich.prompt": None}),
+            patch("click.prompt", prompt),
+            patch("click.echo"),
+        ):
+            result = ops._prompt_for_environment_variables(
+                {
+                    "CLICK_DEFAULT": {
+                        "description": "desc",
+                        "required": True,
+                        "value": "registry-default",
+                    }
+                },
+                prompt_defaults=True,
+            )
+
+        assert result == {"CLICK_DEFAULT": "click-override"}
+        prompt.assert_called_once_with(
+            "  CLICK_DEFAULT (desc)",
+            hide_input=False,
+            default="registry-default",
+            show_default=True,
+        )
 
     def test_rich_uses_existing_env_var_without_prompting(
         self, monkeypatch: pytest.MonkeyPatch

@@ -95,7 +95,19 @@ def install_local_bundle(
             user_scope=global_,
             explicit_target=explicit,
         )
+        from .target_hints import emit_disabled_experimental_target_hint
+
+        requested = [explicit] if isinstance(explicit, str) else list(explicit or [])
+        disabled_requested = [
+            requested_target
+            for requested_target in requested
+            if emit_disabled_experimental_target_hint(requested_target, targets, logger)
+        ]
+
         if not targets:
+            if disabled_requested:
+                logger.info("No files were installed. Enable the experimental flag and retry.")
+                return
             logger.warning(
                 "No active targets resolved -- nothing will be deployed. "
                 "Pass --target to select one explicitly."

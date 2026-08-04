@@ -16,6 +16,7 @@ builder. The tests below pin that dedicated Docker contract.
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -98,6 +99,26 @@ class TestDockerRunArgs(unittest.TestCase):
         """The value APM prompted for must not be silently discarded (#2377)."""
         args = VSCodeClientAdapter._docker_run_args(V01_VALUE_PACKAGE, RUNTIME_VARS)
         self.assertIn(f"{WORKDIR}:{WORKDIR}", args)
+
+    def test_collected_variable_substitutes_later_entry_without_metadata(self):
+        """One declaration must resolve every later reference to the variable (#2438)."""
+        package = _docker_package(
+            {"type": "positional", "value": "run"},
+            {
+                "type": "positional",
+                "value": "{workdir}:{workdir}",
+                "variables": _WORKDIR_VAR,
+            },
+            {"type": "positional", "value": "-w"},
+            {"type": "positional", "value": "{workdir}"},
+        )
+
+        args = VSCodeClientAdapter._docker_run_args(package, RUNTIME_VARS)
+
+        self.assertEqual(
+            args,
+            ["run", "-i", "--rm", f"{WORKDIR}:{WORKDIR}", "-w", WORKDIR, IMAGE],
+        )
 
     def test_typed_entries_read_value_not_the_display_hint(self):
         """`value_hint` is the schema's display hint for a typed argument.
@@ -266,6 +287,28 @@ class TestDockerRunArgs(unittest.TestCase):
         self.assertIn(
             "${workspaceFolder}:/workspace", VSCodeClientAdapter._docker_run_args(package)
         )
+
+    def test_workspace_folder_fallback_reaches_later_metadata_free_argument(self):
+        package = _docker_package(
+            {"value": "run", "type": "positional"},
+            {
+                "value": "{workspaceFolder}:/workspace",
+                "type": "positional",
+                "variables": {"workspaceFolder": {"description": "ws"}},
+            },
+            {"value": "-w", "type": "positional"},
+            {"value": "{workspaceFolder}", "type": "positional"},
+        )
+
+        assert VSCodeClientAdapter._docker_run_args(package) == [
+            "run",
+            "-i",
+            "--rm",
+            "${workspaceFolder}:/workspace",
+            "-w",
+            "${workspaceFolder}",
+            IMAGE,
+        ]
 
     def test_optional_entry_with_a_collected_value_is_kept(self):
         """An optional mount whose variable the user filled in must survive --
@@ -440,15 +483,114 @@ class TestRenderedDockerLauncher(unittest.TestCase):
         config = _config(V01_VALUE_PACKAGE, runtime_vars=RUNTIME_VARS)
         self.assertNotEqual(config.get("args"), FALLBACK_ARGS)
 
-    def test_unresolvable_package_keeps_the_previous_launcher(self):
+    def test_secret_runtime_value_uses_a_vscode_input_everywhere(self):
+        """Secret values must not be written into target configuration bytes."""
+        secret = "registry-secret"
+        package = _docker_package(
+            {"type": "positional", "value": "run"},
+            {
+                "type": "positional",
+                "value": "--token={access_token}",
+                "variables": {
+                    "access_token": {
+                        "description": "Registry access token",
+                        "isRequired": True,
+                        "isSecret": True,
+                    },
+                    "secondary_token": {
+                        "description": "Secondary registry access token",
+                        "isRequired": True,
+                        "isSecret": True,
+                    },
+                },
+            },
+            {"type": "positional", "value": "--again={access_token}"},
+            {"type": "positional", "value": "--secondary={secondary_token}"},
+        )
+
+        config, inputs = _make_vscode()._format_server_config(
+            {"id": "team/mcp-server", "name": "team/mcp-server", "packages": [package]},
+            runtime_vars={"access_token": secret, "secondary_token": "secondary-secret"},
+        )
+        access_input_id = VSCodeClientAdapter._vscode_argument_secret_input_id(
+            "team/mcp-server", "access_token"
+        )
+        secondary_input_id = VSCodeClientAdapter._vscode_argument_secret_input_id(
+            "team/mcp-server", "secondary_token"
+        )
+
+        assert config["args"] == [
+            "run",
+            "-i",
+            "--rm",
+            f"--token=${{input:{access_input_id}}}",
+            f"--again=${{input:{access_input_id}}}",
+            f"--secondary=${{input:{secondary_input_id}}}",
+            IMAGE,
+        ]
+        assert secret not in json.dumps(config)
+        assert "secondary-secret" not in json.dumps(config)
+        assert inputs == [
+            {
+                "type": "promptString",
+                "id": access_input_id,
+                "description": "Registry access token",
+                "password": True,
+            },
+            {
+                "type": "promptString",
+                "id": secondary_input_id,
+                "description": "Secondary registry access token",
+                "password": True,
+            },
+        ]
+
+    def test_unresolvable_package_declines_target_configuration(self):
         with patch("apm_cli.adapters.client.vscode._rich_warning") as warning:
             config = _config(V01_VALUE_PACKAGE)
-        self.assertEqual(config.get("args"), FALLBACK_ARGS)
+        self.assertEqual(config, {})
         warning.assert_called_once_with(
-            "Could not resolve container run options for "
-            f"'{IMAGE}'; using the default launcher. "
+            "Could not resolve required container run option "
+            f"'workdir' for '{IMAGE}'; target configuration was not changed. "
             "Set the required registry runtime variables and rerun 'apm install'."
         )
+
+    def test_secret_runtime_input_ids_do_not_collapse_distinct_variable_names(self):
+        package = _docker_package(
+            {"type": "positional", "value": "run"},
+            {
+                "type": "positional",
+                "value": "--first={ACCESS_TOKEN}",
+                "variables": {
+                    "ACCESS_TOKEN": {"description": "First", "isSecret": True},
+                    "access_token": {"description": "Second", "isSecret": True},
+                },
+            },
+            {"type": "positional", "value": "--second={access_token}"},
+        )
+
+        config, inputs = _make_vscode()._format_server_config(
+            {"id": "team/mcp-server", "name": "team/mcp-server", "packages": [package]},
+            runtime_vars={"ACCESS_TOKEN": "first-secret", "access_token": "second-secret"},
+        )
+
+        assert inputs[0]["id"] != inputs[1]["id"]
+        assert config["args"][3] != config["args"][4]
+        assert "first-secret" not in json.dumps(config)
+        assert "second-secret" not in json.dumps(config)
+
+    def test_malformed_secret_marker_declines_before_rendering_a_secret(self):
+        package = _docker_package(
+            {"type": "positional", "value": "run"},
+            {
+                "type": "positional",
+                "value": "--token={access_token}",
+                "variables": {"access_token": {"isSecret": "true"}},
+            },
+        )
+
+        with pytest.raises(ValueError, match="variable metadata must be valid"):
+            _config(package, runtime_vars={"access_token": "registry-secret"})
 
     def test_package_without_runtime_args_keeps_the_synthesized_launcher(self):
         with patch("apm_cli.adapters.client.vscode._rich_warning") as warning:

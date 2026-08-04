@@ -18,11 +18,11 @@ hero:
 
 import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
-APM is a dependency manager for AI agents. Declare the skills, prompts, instructions, plugins, and MCP servers your project needs in one `apm.yml`, then any developer runs `apm install` and gets the same agent context across GitHub Copilot, Claude Code, Cursor, OpenCode, Codex, Gemini, Windsurf, and Kiro.
+APM is a dependency manager for AI agents. Declare the skills, prompts, instructions, plugins, and MCP servers your project needs in one `apm.yml`, then any developer runs `apm install` to deploy each primitive to the harnesses that support it. See the [targets matrix](./reference/targets-matrix/) for support across GitHub Copilot, Claude Code, Grok Build, Cursor, OpenCode, Codex, Gemini, Windsurf, and Kiro.
 
 <CardGrid>
   <Card title="Portable by manifest" icon="document">
-    One `apm.yml`, every harness, every machine. The lockfile pins exact versions and content hashes so a fresh clone reproduces the same agent setup byte-for-byte.
+    One `apm.yml` across supported harnesses and machines. The lockfile pins exact versions and content hashes so a fresh clone resolves the same package content byte-for-byte.
   </Card>
   <Card title="Secure by default" icon="approve-check-circle">
     Every install scans for hidden Unicode, pins content hashes, and blocks transitive MCP servers unless they are explicitly declared or trusted. No opt-in required.
@@ -82,7 +82,7 @@ dependencies:
 git clone <repo> && cd <repo> && apm install
 ```
 
-That's it. Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf, Kiro -- every harness configured in one command, every dependency pinned, every MCP server policy-checked before it touches disk.
+That's it. Each selected harness receives the primitives it supports in one command; every dependency is pinned, and every MCP server is policy-checked before it touches disk.
 
 ## Pick your path
 

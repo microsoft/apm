@@ -25,6 +25,11 @@ from typing import TYPE_CHECKING, Any
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
+from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
+from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
+from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
+from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
+from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .target_filter import resolve_effective_package_targets
 
 if TYPE_CHECKING:
@@ -789,12 +794,7 @@ def integrate_local_bundle(
     )
 
     bundle_dir: Path = bundle_info.source_dir
-    pack_files: dict[str, str] = {}
-    if bundle_info.lockfile:
-        pack = bundle_info.lockfile.get("pack") or {}
-        bf = pack.get("bundle_files") or {}
-        if isinstance(bf, dict):
-            pack_files = {str(k): str(v) for k, v in bf.items()}
+    pack_files = _bundle_pack_files(bundle_info)
 
     if not pack_files:
         # Fallback: walk bundle and hash everything except apm.lock.yaml
@@ -841,6 +841,7 @@ def integrate_local_bundle(
     pack_files = _filtered_pack_files
 
     slug = alias or bundle_info.package_id
+    _known_deploy_prefixes = _known_bundle_prefixes()
 
     # Security + feature gate: canvas extensions are executable Node bundles
     # (``extension.mjs``).  A local / offline bundle copies its files
@@ -897,6 +898,7 @@ def integrate_local_bundle(
     # TODO(#1098-v0.13): unify with integrate_package_primitives if/when
     # the bundle format grows primitive-typed transforms.
     for target in targets:
+        _allowed_deploy_prefixes = _target_bundle_prefixes(target)
         # Resolve deploy root for this target.  Cowork targets can return
         # a dynamically-resolved path; fall back to root_dir under
         # project_root otherwise.
@@ -940,46 +942,25 @@ def integrate_local_bundle(
             # equivalent.  Deploying them verbatim to ``<root>/instructions/``
             # is a no-op for these clients.
             _rel_norm = rel.replace("\\", "/")
-            _first_seg = _rel_norm.split("/", 1)[0] if "/" in _rel_norm else ""
+            _deploy_rel = _bundle_rel(
+                _rel_norm,
+                _allowed_deploy_prefixes,
+                _known_deploy_prefixes,
+            )
+            if _deploy_rel is None:
+                continue
+            _first_seg = _deploy_rel.split("/", 1)[0] if "/" in _deploy_rel else ""
             if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
-                # Slug must be safe for filesystem path construction --
-                # ``package_id`` originates from untrusted ``plugin.json``.
-                # Enforce a strict character whitelist documented in
-                # docs/src/content/docs/enterprise/security.md so
-                # forward slashes, null bytes, spaces, and other
-                # filesystem-significant characters are rejected before
-                # any path construction or resolution.
                 _slug_str = str(slug)
-                # CR1.5 (#1217 review): use ASCII-only validation, not
-                # ``str.isalnum`` (which accepts Unicode letters/digits
-                # like accented or non-Latin chars and would slip past
-                # the documented [A-Za-z0-9._-] whitelist).
-                _ALLOWED = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
-                _slug_ok = (
-                    bool(_slug_str)
-                    and all(c in _ALLOWED for c in _slug_str)
-                    and not _slug_str.startswith(".")
-                    and not _slug_str.endswith(".")
-                    and ".." not in _slug_str
-                )
-                if not _slug_ok:
+                if _slug_error := _bundle_slug_error(_slug_str):
                     if logger is not None:
                         logger.warning(
-                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: "
-                            "slug must match [A-Za-z0-9._-]+ with no leading/trailing dot, no '..'"
+                            f"Skipped instruction staging for unsafe slug "
+                            f"{_slug_str!r}: {_slug_error}"
                         )
                     skipped += 1
                     continue
-                try:
-                    validate_path_segments(_slug_str, context="bundle slug")
-                except PathTraversalError as exc:
-                    if logger is not None:
-                        logger.warning(
-                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: {exc}"
-                        )
-                    skipped += 1
-                    continue
-                stage_root = project_root / "apm_modules" / slug / ".apm" / "instructions"
+                stage_root = project_root / "apm_modules" / _slug_str / ".apm" / "instructions"
                 try:
                     ensure_path_within(stage_root, project_root / "apm_modules")
                 except PathTraversalError as exc:
@@ -995,7 +976,9 @@ def integrate_local_bundle(
                 # ``instructions/`` so we strip that prefix before
                 # joining under the stage root (which itself ends in
                 # ``.apm/instructions``).
-                _rel_under_instructions = rel.split("/", 1)[1] if "/" in rel else Path(rel).name
+                _rel_under_instructions = (
+                    _deploy_rel.split("/", 1)[1] if "/" in _deploy_rel else Path(_deploy_rel).name
+                )
                 dest = stage_root / _rel_under_instructions
                 deploy_root = stage_root
             else:
@@ -1013,7 +996,7 @@ def integrate_local_bundle(
                 # the converged directory.  Otherwise fall back to the
                 # target's default root.
                 deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
-                dest = deploy_root / rel
+                dest = deploy_root / _deploy_rel
             try:
                 ensure_path_within(dest, deploy_root)
             except PathTraversalError as exc:

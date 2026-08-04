@@ -93,8 +93,8 @@ apm install microsoft/apm-sample-package#v1.0.0 --target copilot
 ```
 
 `--target copilot` is shown explicitly because a fresh project has no
-harness markers yet. Once any `.github/` content exists, APM detects it
-and the flag becomes optional.
+harness markers yet. Once a recognized Copilot marker such as
+`.github/copilot-instructions.md` exists, the flag becomes optional.
 
 Output (abridged):
 
@@ -158,7 +158,7 @@ After `apm install` runs, three categories of files land in your project:
 |------|---------|-----|
 | `apm.yml` | Yes | Manifest -- declares dependencies, shared with the team |
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits and content hashes for reproducible installs |
-| `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`, `.kiro/`, `.agents/` | Yes | Deployed agent context -- gives every contributor and cloud Copilot instant access on clone, before they run `apm install` |
+| Target-owned deployment directories (for example `.github/`, `.claude/`, `.grok/`, and `.agents/`) | Yes | Deployed agent context -- gives contributors access on clone, before they run `apm install` |
 | `apm_modules/` | No | Package cache -- rebuilt from the lockfile on `apm install`. Add to `.gitignore` (APM does this automatically) |
 
 :::tip[Keeping deployed files in sync]

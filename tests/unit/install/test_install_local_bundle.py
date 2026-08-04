@@ -17,6 +17,8 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+_MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
+
 _LOCAL_BUNDLE_EXISTS = importlib.util.find_spec("apm_cli.bundle.local_bundle") is not None
 _INTEGRATE_EXISTS = False
 try:
@@ -48,7 +50,7 @@ def _make_bundle(
     base: Path,
     *,
     plugin_id: str | None = "test-plugin",
-    pack_target: str = "copilot",
+    pack_target: str | list[str] = "copilot",
     files: dict[str, str] | None = None,
     include_lockfile: bool = True,
 ) -> Path:
@@ -112,11 +114,32 @@ def _make_project(base: Path) -> Path:
     return project
 
 
-def _invoke(project: Path, monkeypatch, *args: str):
+def _make_home(base: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = base / "home"
+    apm_dir = home / ".apm"
+    apm_dir.mkdir(parents=True, exist_ok=True)
+    (apm_dir / "apm.yml").write_text(
+        _MINIMAL_APM_YML,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    import apm_cli.config as _conf
+
+    monkeypatch.setattr(_conf, "CONFIG_DIR", str(apm_dir))
+    monkeypatch.setattr(_conf, "CONFIG_FILE", str(apm_dir / "config.json"))
+    monkeypatch.setattr(_conf, "_config_cache", None)
+    return home
+
+
+def _invoke_cli(project: Path, monkeypatch, command: str, *args: str):
     from apm_cli.cli import cli
 
     monkeypatch.chdir(project)
-    return CliRunner().invoke(cli, ["install", *args], catch_exceptions=False)
+    return CliRunner().invoke(cli, [command, *args], catch_exceptions=False)
+
+
+def _invoke(project: Path, monkeypatch, *args: str):
+    return _invoke_cli(project, monkeypatch, "install", *args)
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +337,18 @@ class TestAllowedFlagsWithLocalBundle:
             f"Allowed flag {flag_args} produced UsageError. output={result.output!r}"
         )
 
+    def test_target_all_does_not_enter_experimental_lookup(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bundle = _make_bundle(tmp_path / "src", pack_target="all")
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke(project, monkeypatch, str(bundle), "--target", "all")
+
+        assert result.exit_code == 0, result.output
+
 
 class TestExceptionHandlerScopeRegression:
     """Regression: exception handlers must not raise UnboundLocalError when
@@ -430,6 +465,207 @@ class TestApmYmlNotMutated:
         assert result.exit_code == 0, f"output={result.output!r}"
         after = (project / "apm.yml").read_bytes()
         assert before == after, "apm.yml mutated by local-bundle install"
+
+
+# ---------------------------------------------------------------------------
+# Grok install / uninstall coverage
+# ---------------------------------------------------------------------------
+
+
+class TestGrokCloudLocalBundleDeployment:
+    """Enabled grok-cloud installs deploy under .grok/."""
+
+    def test_disabled_flag_emits_enable_hint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_home(tmp_path, monkeypatch)
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-cloud",
+            files={".grok/skills/guide/SKILL.md": "# Grok Guide\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "apm experimental enable grok-cloud" in " ".join(result.output.split())
+        assert not (project / ".grok").exists()
+
+    def test_disabled_flag_emits_hint_when_stable_target_resolves(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_home(tmp_path, monkeypatch)
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target=["claude", "grok-cloud"],
+            files={
+                ".claude/skills/guide/SKILL.md": "# Shared Guide\n",
+                ".grok/skills/guide/SKILL.md": "# Shared Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "claude,grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "apm experimental enable grok-cloud" in " ".join(result.output.split())
+        assert (project / ".claude" / "skills" / "guide" / "SKILL.md").exists()
+        assert not (project / ".claude" / ".grok").exists()
+        assert not (project / ".grok").exists()
+
+    def test_project_scope_install_deploys_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli import config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-cloud",
+            files={".grok/skills/guide/SKILL.md": "# Grok Guide\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        install_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-cloud",
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        skill_file = project / ".grok" / "skills" / "guide" / "SKILL.md"
+        assert skill_file.exists()
+        assert skill_file.read_text(encoding="utf-8") == "# Grok Guide\n"
+        assert not (project / ".grok" / ".grok").exists()
+
+    def test_global_scope_install_deploys_home_skill(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = _make_home(tmp_path, monkeypatch)
+        from apm_cli import config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-cloud",
+            files={".grok/skills/guide/SKILL.md": "# Grok Global\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        install_result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--global",
+            "--target",
+            "grok-cloud",
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        skill_file = home / ".grok" / "skills" / "guide" / "SKILL.md"
+        assert skill_file.exists()
+        assert skill_file.read_text(encoding="utf-8") == "# Grok Global\n"
+        assert not (home / ".grok" / ".grok").exists()
+
+    def test_multi_target_install_isolates_deploy_roots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli import config
+
+        monkeypatch.setattr(config, "_config_cache", {"experimental": {"grok_cloud": True}})
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target=["claude", "grok-cloud"],
+            files={
+                ".claude/skills/claude-guide/SKILL.md": "# Claude Guide\n",
+                ".grok/skills/grok-guide/SKILL.md": "# Grok Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "claude,grok-cloud",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".claude/skills/claude-guide/SKILL.md").exists()
+        assert (project / ".grok/skills/grok-guide/SKILL.md").exists()
+        assert not (project / ".claude/.grok").exists()
+        assert not (project / ".grok/.claude").exists()
+
+
+class TestGrokBuildLocalBundleDeployment:
+    """Stable Grok Build bundles deploy without an experimental flag."""
+
+    def test_project_scope_install_deploys_native_primitives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="grok-build",
+            files={
+                ".grok/rules/review.instructions.md": "# Review Rules\n",
+                ".grok/agents/reviewer.md": "# Reviewer\n",
+                ".grok/commands/review.md": "# Review\n",
+                ".grok/skills/guide/SKILL.md": "# Grok Guide\n",
+            },
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_cli(
+            project,
+            monkeypatch,
+            "install",
+            str(bundle),
+            "--target",
+            "grok-build",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".grok/rules/review.instructions.md").exists()
+        assert (project / ".grok/agents/reviewer.md").exists()
+        assert (project / ".grok/commands/review.md").exists()
+        assert (project / ".grok/skills/guide/SKILL.md").exists()
+        assert "experimental enable" not in result.output
+
+
+class TestLocalBundlePathRouting:
+    """Direct contracts for untrusted packed bundle paths."""
+
+    def test_rejects_traversal_before_prefix_routing(self) -> None:
+        from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            bundle_deploy_relative_path(
+                ".grok/../outside.txt",
+                frozenset({".grok/"}),
+                frozenset({".grok/"}),
+            )
 
 
 # ---------------------------------------------------------------------------

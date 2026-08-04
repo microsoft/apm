@@ -3,7 +3,7 @@
 The :class:`BuildOrchestrator` inspects ``apm.yml`` and runs whichever
 producers are applicable:
 
-* ``dependencies:`` block  -> :class:`BundleProducer`  -> ``./build/<name>/``
+* ``dependencies:`` block (including ``{}``) -> :class:`BundleProducer`  -> ``./build/<name>/``
 * ``marketplace:`` block   -> :class:`MarketplaceProducer` -> ``.claude-plugin/marketplace.json``
 
 Producers are thin adapters around the existing
@@ -206,16 +206,14 @@ class MarketplaceProducer:
                     resolve_result = builder.resolve()
                 resolved = resolve_result.entries
 
-                configured_output_value = getattr(config, profile.config_attr).output
-                configured_output = Path(configured_output_value)
-                output_path = project_root / configured_output
+                from ..marketplace.output_profiles import resolve_effective_output_path
 
-                # Apply --marketplace-path override
-                if (
-                    options.marketplace_path_overrides
-                    and output_name in options.marketplace_path_overrides
-                ):
-                    output_path = project_root / options.marketplace_path_overrides[output_name]
+                output_path = resolve_effective_output_path(
+                    config,
+                    profile,
+                    project_root,
+                    options.marketplace_path_overrides,
+                )
 
                 output_report = builder.write_output(
                     profile,
@@ -360,7 +358,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
             raise BuildError(f"{apm_yml_path} must be a YAML mapping at the top level.")
         data = loaded or {}
 
-    if data and data.get("dependencies"):
+    if data and data.get("dependencies") is not None:
         out.add(OutputKind.BUNDLE)
     if data and data.get("marketplace"):
         out.add(OutputKind.MARKETPLACE)

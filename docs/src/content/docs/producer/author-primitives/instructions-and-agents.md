@@ -70,10 +70,11 @@ applyTo:
   - "**/*.py"
 ```
 
-When a YAML sequence contains multiple patterns, APM preserves the full
-sequence for targets whose native rule format supports multiple globs.
-Prefer the comma-separated string form when you want identical output
-across every target.
+When a YAML sequence contains multiple patterns, APM normalizes every
+non-null entry into the same comma-separated OR expression used by
+[distributed compilation](../../compile/) and target-native installation. Use a
+sequence when its source readability matters. To match a literal comma in a
+filename, escape it as `\,`.
 
 ```markdown
 ---
@@ -83,9 +84,13 @@ applyTo: "**/*.{css,scss},**/*.tsx"
 ```
 
 On Copilot the comma-list is preserved verbatim (Copilot splits it
-natively). On Claude, Cursor, Windsurf, Kiro, and Antigravity the list is
-expanded to a YAML array under `paths:` / `globs:` /
-`fileMatchPattern:`.
+natively). Other targets use their own native instruction format; the target
+matrix below records the generated shape.
+
+During distributed compilation, an explicitly scoped pattern may match files
+under supported top-level harness directories: `.agents`, `.apm`, `.claude`,
+`.codex`, `.cursor`, `.gemini`, `.github`, `.kiro`, `.opencode`, and
+`.windsurf`. Other hidden directories remain excluded.
 
 ### Body conventions
 
@@ -103,6 +108,7 @@ expanded to a YAML array under `paths:` / `globs:` /
 |---|---|---|
 | copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
+| grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
 | cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (scalar for single glob, YAML array for comma-lists); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
@@ -158,7 +164,7 @@ for...
 | `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
-`model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
+`model` and `tools` reach Copilot, Claude, Grok Build, Cursor, and OpenCode
 verbatim. Kiro receives `description`, `model`, and `tools` only;
 unknown frontmatter fields (including `name`) are stripped because
 Kiro derives agent identity from the deployed path, not from a `name`
@@ -205,10 +211,12 @@ offending package and field so you can fix the source.
 |---|---|---|
 | copilot | `.github/agents/<name>.agent.md` | verbatim |
 | claude | `.claude/agents/<name>.md` | verbatim |
+| grok-build | `.grok/agents/<name>.md` | verbatim |
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
 | codex | `.codex/agents/<name>.toml` | `name` and `description` -> TOML; body becomes `developer_instructions`; unsupported `tools` emits a warning |
 | kiro | `.kiro/agents/<relative-stem>.md` | `description`, `model`, `tools` kept; `name` and unknown fields stripped; identity from path; fail closed on unsupported tools (ref: [kiro.dev/docs/custom-agents](https://kiro.dev/docs/custom-agents/), accessed 2026-08-03) |
+| grok-build | `.grok/agents/<name>.md` | verbatim |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
 | gemini | not deployed | Gemini CLI has no agents primitive |
 

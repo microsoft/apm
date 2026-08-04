@@ -187,7 +187,7 @@ def test_claude_hook_script_path_no_doubling(tmp_path: Path) -> None:
 
     settings = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))
     command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert command == ".claude/hooks/superpowers/hooks/run-hook.cmd start"
+    assert command == '"${CLAUDE_PROJECT_DIR}/.claude/hooks/superpowers/hooks/run-hook.cmd" start'
     assert (project / ".claude" / "hooks" / "superpowers" / "hooks" / "run-hook.cmd").exists()
 
 

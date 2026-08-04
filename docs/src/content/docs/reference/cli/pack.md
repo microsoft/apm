@@ -15,7 +15,7 @@ apm pack [OPTIONS]
 
 `apm pack` produces distributable artifacts from the current APM project. It reads `apm.yml` to decide what to emit:
 
-- `dependencies:` block present -> a bundle (directory by default, or archive with `--archive`; see `--archive-format`).
+- `dependencies:` mapping present -> a bundle (directory by default, or archive with `--archive`; see `--archive-format`). An explicit empty mapping (`dependencies: {}`) produces a bundle of the package's local content; an omitted or null `dependencies:` value does not.
 - `marketplace:` block present -> selected marketplace artifacts.
 - `target:` (or `targets:`) field containing `claude` or `copilot` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
@@ -42,7 +42,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
-| `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp path and diff against the on-disk file. Exits `4` if the working tree is dirty (out-of-date `marketplace.json`). The gate itself never writes to disk. |
+| `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp representation and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. Exits `4` for drift. Combine with `--dry-run` to compare without normal pack output generation. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
 :::caution[Migrating automation from `.tar.gz`?]

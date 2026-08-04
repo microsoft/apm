@@ -111,17 +111,13 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["claude"]
 
     def test_explicit_all_returns_every_known_target(self):
-        from apm_cli.core.target_detection import (
-            EXPERIMENTAL_TARGETS,
-            EXPLICIT_ONLY_TARGETS,
-        )
+        from apm_cli.core.target_catalog import normalize_target_name
+        from apm_cli.core.target_detection import ALL_CANONICAL_TARGETS
 
         targets = active_targets(self.root, explicit_target="all")
-        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
-        assert len(targets) == expected
-        names = [t.name for t in targets]
-        assert "copilot-cowork" not in names
-        assert "agent-skills" not in names
+        names = {t.name for t in targets}
+        expected = {normalize_target_name(name) for name in ALL_CANONICAL_TARGETS}
+        assert names == expected
 
     def test_explicit_vscode_alias(self):
         targets = active_targets(self.root, explicit_target="vscode")
@@ -177,6 +173,15 @@ class TestActiveTargets:
         (self.root / ".gemini").mkdir()
         targets = active_targets(self.root)
         assert [t.name for t in targets] == ["gemini"]
+
+    def test_only_grok_directory_returns_grok_build(self):
+        (self.root / ".grok").mkdir()
+        targets = active_targets(self.root)
+        assert [t.name for t in targets] == ["grok-build"]
+
+    def test_explicit_grok_build(self):
+        targets = active_targets(self.root, explicit_target="grok-build")
+        assert [t.name for t in targets] == ["grok-build"]
 
     def test_explicit_gemini(self):
         targets = active_targets(self.root, explicit_target="gemini")
@@ -235,25 +240,21 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["copilot"]
 
     def test_explicit_list_with_all_returns_every_known_target(self):
-        from apm_cli.core.target_detection import (
-            EXPERIMENTAL_TARGETS,
-            EXPLICIT_ONLY_TARGETS,
-        )
+        from apm_cli.core.target_catalog import normalize_target_name
+        from apm_cli.core.target_detection import ALL_CANONICAL_TARGETS
 
         targets = active_targets(self.root, explicit_target=["all"])
-        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
-        assert len(targets) == expected
+        expected = {normalize_target_name(name) for name in ALL_CANONICAL_TARGETS}
+        assert {t.name for t in targets} == expected
 
     def test_explicit_list_all_mixed_returns_every_known_target(self):
         """'all' anywhere in the list wins."""
-        from apm_cli.core.target_detection import (
-            EXPERIMENTAL_TARGETS,
-            EXPLICIT_ONLY_TARGETS,
-        )
+        from apm_cli.core.target_catalog import normalize_target_name
+        from apm_cli.core.target_detection import ALL_CANONICAL_TARGETS
 
         targets = active_targets(self.root, explicit_target=["claude", "all"])
-        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
-        assert len(targets) == expected
+        expected = {normalize_target_name(name) for name in ALL_CANONICAL_TARGETS}
+        assert {t.name for t in targets} == expected
 
     def test_explicit_list_all_unknown_returns_empty(self):
         """When the parser is bypassed and all tokens are unknown, the
@@ -313,7 +314,7 @@ class TestDefaultSkillRouting:
     """Assert that the documented clients route skills to .agents/ by default."""
 
     def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
-        """copilot, cursor, opencode, codex, gemini, windsurf all have deploy_root='.agents' on skills."""
+        """Shared skill targets use .agents while grok-cloud stays native."""
         expected = {
             "copilot": ".agents",
             "cursor": ".agents",
@@ -321,6 +322,8 @@ class TestDefaultSkillRouting:
             "codex": ".agents",
             "gemini": ".agents",
             "windsurf": ".agents",
+            "grok-build": None,
+            "grok-cloud": None,
             "claude": None,  # not documented as .agents/-aware
         }
         for name, want_root in expected.items():
@@ -416,6 +419,68 @@ class TestDefaultSkillRouting:
         profiles = [KNOWN_TARGETS["copilot"]]
         apply_legacy_skill_paths(profiles)
         assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root
+
+
+class TestGrokCloudTarget:
+    """Registry and gating invariants for the grok-cloud target."""
+
+    def test_grok_cloud_in_known_targets(self):
+        assert "grok-cloud" in KNOWN_TARGETS
+
+    def test_grok_cloud_profile_shape(self):
+        profile = KNOWN_TARGETS["grok-cloud"]
+        assert profile.name == "grok-cloud"
+        assert profile.root_dir == ".grok"
+        assert profile.user_supported is True
+        assert profile.user_root_dir == ".grok"
+        assert profile.detect_by_dir is False
+        assert profile.auto_create is True
+        assert profile.requires_flag == "grok_cloud"
+        assert profile.compile_family is None
+        assert set(profile.primitives) == {"skills"}
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.subdir == "skills"
+        assert skills_pm.extension == "/SKILL.md"
+        assert skills_pm.format_id == "skill_standard"
+        assert skills_pm.deploy_root is None
+
+    def test_grok_cloud_requires_flag_gate(self, monkeypatch, tmp_path):
+        import apm_cli.integration.targets as tg
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: False)
+        assert active_targets(tmp_path, explicit_target="grok-cloud") == []
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        assert [p.name for p in active_targets(tmp_path, explicit_target="grok-cloud")] == [
+            "grok-cloud"
+        ]
+
+    def test_grok_cloud_is_excluded_from_all(self, monkeypatch, tmp_path):
+        import apm_cli.integration.targets as tg
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        names = {p.name for p in active_targets(tmp_path, explicit_target="all")}
+        assert "grok-cloud" not in names
+
+
+class TestGrokBuildTarget:
+    """Registry and resolution invariants for the stable Grok Build target."""
+
+    def test_grok_build_profile_shape(self):
+        profile = KNOWN_TARGETS["grok-build"]
+        assert profile.name == "grok-build"
+        assert profile.root_dir == ".grok"
+        assert profile.user_supported is True
+        assert profile.user_root_dir == ".grok"
+        assert profile.detect_by_dir is True
+        assert profile.auto_create is False
+        assert profile.requires_flag is None
+        assert profile.compile_family == "agents"
+        assert set(profile.primitives) == {"instructions", "agents", "commands", "skills"}
+
+    def test_grok_build_is_in_all(self, tmp_path):
+        names = {p.name for p in active_targets(tmp_path, explicit_target="all")}
+        assert "grok-build" in names
 
 
 class TestHermesTarget:

@@ -198,9 +198,7 @@ def _check_openclaw_flag_gate(
     ctx: InstallContext,
 ) -> None:
     """Emit an enable-hint when the user asks for openclaw but the flag is OFF."""
-    _check_experimental_target_hint(
-        explicit, targets, ctx, target_name="openclaw", flag_name="openclaw"
-    )
+    _check_experimental_target_hint(explicit, targets, ctx, target_name="openclaw")
 
 
 def _check_hermes_flag_gate(
@@ -209,8 +207,20 @@ def _check_hermes_flag_gate(
     ctx: InstallContext,
 ) -> None:
     """Emit an enable-hint when the user asks for hermes but the flag is OFF."""
+    _check_experimental_target_hint(explicit, targets, ctx, target_name="hermes")
+
+
+def _check_grok_cloud_flag_gate(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+) -> None:
+    """Emit an enable hint when grok-cloud is requested while disabled."""
     _check_experimental_target_hint(
-        explicit, targets, ctx, target_name="hermes", flag_name="hermes"
+        explicit,
+        targets,
+        ctx,
+        target_name="grok-cloud",
     )
 
 
@@ -220,9 +230,8 @@ def _check_experimental_target_hint(
     ctx: InstallContext,
     *,
     target_name: str,
-    flag_name: str,
 ) -> None:
-    """Emit an enable-hint when *target_name* is requested but its flag is OFF.
+    """Emit an enable hint when *target_name* is requested but its flag is disabled.
 
     Shared by the simple experimental targets whose only gate is the
     experimental flag (no extra environment requirement).
@@ -236,19 +245,9 @@ def _check_experimental_target_hint(
     if not user_asked:
         return
 
-    resolved = any(t.name == target_name for t in targets)
-    if resolved:
-        return
+    from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    from apm_cli.core.experimental import is_enabled
-
-    if not is_enabled(flag_name):
-        if ctx.logger:
-            ctx.logger.progress(
-                f"The '{target_name}' target requires an experimental flag. "
-                f"Run: apm experimental enable {flag_name}",
-                symbol="info",
-            )
+    emit_disabled_experimental_target_hint(target_name, targets, ctx.logger)
 
 
 def _gate_cowork_target(
@@ -274,16 +273,9 @@ def _gate_cowork_target(
     if user_asked_cowork:
         _cowork_resolved = any(t.name == "copilot-cowork" for t in targets)
         if not _cowork_resolved:
-            from apm_cli.core.experimental import is_enabled as _is_flag_on
+            from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-            if not _is_flag_on("copilot_cowork"):
-                if ctx.logger:
-                    ctx.logger.progress(
-                        "The 'copilot-cowork' target requires an experimental flag. "
-                        "Run: apm experimental enable copilot-cowork",
-                        symbol="info",
-                    )
-            else:
+            if not emit_disabled_experimental_target_hint("copilot-cowork", targets, ctx.logger):
                 import sys as _sys
 
                 if _sys.platform.startswith("linux"):
@@ -339,16 +331,9 @@ def _gate_copilot_app_target(
     if _copilot_app_resolved:
         return
 
-    from apm_cli.core.experimental import is_enabled as _is_flag_on
+    from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    if not _is_flag_on("copilot_app"):
-        if ctx.logger:
-            ctx.logger.progress(
-                "The 'copilot-app' target requires an experimental flag. "
-                "Run: apm experimental enable copilot-app",
-                symbol="info",
-            )
-    else:
+    if not emit_disabled_experimental_target_hint("copilot-app", targets, ctx.logger):
         _app_msg = (
             "GitHub Copilot desktop App not detected.\n"
             "Expected ~/.copilot/data.db but the file is missing.\n"
@@ -554,11 +539,12 @@ def run(ctx: InstallContext) -> None:
             ctx.logger.error(str(exc), symbol="cross")
         raise SystemExit(1) from exc
 
-    # Target gating: cowork, copilot-app, openclaw.
+    # Target gating: cowork, copilot-app, openclaw, hermes, grok-cloud.
     _gate_cowork_target(ctx, _targets, _explicit, _is_user)
     _gate_copilot_app_target(ctx, _targets, _explicit)
     _check_openclaw_flag_gate(_explicit, _targets, ctx)
     _check_hermes_flag_gate(_explicit, _targets, ctx)
+    _check_grok_cloud_flag_gate(_explicit, _targets, ctx)
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.
     _targets = _resolve_targets_by_scope(ctx, _targets, _explicit, _is_user)

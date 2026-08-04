@@ -5,6 +5,7 @@ following the official documentation at:
 https://code.visualstudio.com/docs/copilot/chat/mcp-servers
 """
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -13,7 +14,13 @@ from ...core.docker_args import DockerArgsProcessor
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
-from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter, registry_field_is_required
+from .base import (
+    _ENV_VAR_RE,
+    _INPUT_VAR_RE,
+    _RUNTIME_TEMPLATE_VARIABLE_RE,
+    MCPClientAdapter,
+    registry_field_is_required,
+)
 
 # Legacy ``<VAR>`` placeholder (Copilot CLI / Codex only). VS Code does not
 # resolve angle-bracket placeholders, so emitting them produces literal
@@ -298,7 +305,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 existing_server_config=existing_server_config,
             )
             secret_fallbacks, argument_inputs = self._declared_vscode_argument_secret_inputs(
-                package
+                package,
+                server_name=server_info.get("name", ""),
             )
             seen_input_ids = {item.get("id") for item in input_vars}
             for input_definition in (*declared_inputs, *argument_inputs):
@@ -342,19 +350,29 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
             # Handle docker packages
             elif is_docker:
-                args = self._docker_run_args(package, runtime_vars)
+                docker_kwargs = (
+                    {"secret_variable_fallbacks": secret_fallbacks} if secret_fallbacks else {}
+                )
+                unresolved_variables: list[str] = []
+                args = self._docker_run_args(
+                    package,
+                    runtime_vars,
+                    unresolved_variables=unresolved_variables,
+                    **docker_kwargs,
+                )
                 if args is None:
                     if package.get("runtime_arguments") or package.get("package_arguments"):
-                        _rich_warning(
-                            "Could not resolve container run options for "
-                            f"'{package.get('name', '')}'; using the default launcher. "
-                            "Set the required registry runtime variables and rerun "
-                            "'apm install'."
+                        variable_name = (
+                            unresolved_variables[0] if unresolved_variables else "unknown"
                         )
-                    args = self._ensure_docker_image_arg(
-                        ["run", "-i", "--rm"],
-                        package.get("name"),
-                    )
+                        _rich_warning(
+                            "Could not resolve required container run option "
+                            f"'{variable_name}' for '{package.get('name', '')}'; "
+                            "target configuration was not changed. Set the required "
+                            "registry runtime variables and rerun 'apm install'."
+                        )
+                        return {}, []
+                    args = self._ensure_docker_image_arg(["run", "-i", "--rm"], package.get("name"))
 
                 server_config = {"type": "stdio", "command": "docker", "args": args}
 
@@ -547,50 +565,50 @@ class VSCodeClientAdapter(MCPClientAdapter):
         return env_config, input_vars
 
     @staticmethod
-    def _declared_vscode_argument_secret_inputs(package):
+    def _vscode_argument_secret_input_id(server_name: str, variable_name: str) -> str:
+        """Return a collision-safe VS Code input ID for one server variable."""
+        server_digest = hashlib.sha256(server_name.encode("utf-8")).hexdigest()[:12]
+        return f"mcp-{server_digest}-{variable_name.encode('utf-8').hex()}"
+
+    @classmethod
+    def _declared_vscode_argument_secret_inputs(cls, package, *, server_name: str):
         """Return VS Code input indirections for secret argument variables."""
         if not package:
             return {}, []
+        package_variables = cls._package_runtime_variable_metadata(package)
+        if package_variables is None:
+            raise ValueError("MCP package argument variable metadata must be valid")
         fallbacks = {}
         input_vars = []
+        templates = []
         for field_name in ("runtime_arguments", "package_arguments"):
             for argument in package.get(field_name) or []:
                 if not isinstance(argument, dict):
-                    continue
-                variables = argument.get("variables")
-                if not isinstance(variables, dict):
                     continue
                 template = argument.get(
                     "value",
                     argument.get("default", argument.get("value_hint", "")),
                 )
-                for variable_name, variable_info in variables.items():
-                    if not isinstance(variable_name, str) or not isinstance(
-                        variable_info,
-                        dict,
-                    ):
-                        continue
-                    if not isinstance(template, str) or f"{{{variable_name}}}" not in template:
-                        continue
-                    is_secret = variable_info.get(
-                        "isSecret",
-                        variable_info.get("is_secret", False),
-                    )
-                    if is_secret is not True or variable_name in fallbacks:
-                        continue
-                    input_id = variable_name.lower().replace("_", "-")
-                    fallbacks[variable_name] = f"${{input:{input_id}}}"
-                    input_vars.append(
-                        {
-                            "type": "promptString",
-                            "id": input_id,
-                            "description": variable_info.get(
-                                "description",
-                                f"{variable_name} for MCP server",
-                            ),
-                            "password": True,
-                        }
-                    )
+                if isinstance(template, str):
+                    templates.append(template)
+        for variable_name, variable_info in package_variables.items():
+            if not any(f"{{{variable_name}}}" in template for template in templates):
+                continue
+            if not variable_info.get("isSecret", variable_info.get("is_secret", False)):
+                continue
+            input_id = cls._vscode_argument_secret_input_id(server_name, variable_name)
+            fallbacks[variable_name] = f"${{input:{input_id}}}"
+            input_vars.append(
+                {
+                    "type": "promptString",
+                    "id": input_id,
+                    "description": variable_info.get(
+                        "description",
+                        f"{variable_name} for MCP server",
+                    ),
+                    "password": True,
+                }
+            )
         return fallbacks, input_vars
 
     @staticmethod
@@ -776,7 +794,14 @@ class VSCodeClientAdapter(MCPClientAdapter):
         return extracted
 
     @classmethod
-    def _docker_run_args(cls, package: dict, runtime_vars: dict | None = None) -> list[str] | None:
+    def _docker_run_args(
+        cls,
+        package: dict,
+        runtime_vars: dict | None = None,
+        *,
+        secret_variable_fallbacks: dict[str, str] | None = None,
+        unresolved_variables: list[str] | None = None,
+    ) -> list[str] | None:
         """Build ``docker run`` arguments from a container package's metadata.
 
         Container packages retain a dedicated assembler because Docker requires
@@ -813,10 +838,27 @@ class VSCodeClientAdapter(MCPClientAdapter):
         """
         if not package:
             return None
-        run_options = cls._docker_arg_values(package.get("runtime_arguments"), runtime_vars)
+        package_variables = cls._package_runtime_variable_metadata(package)
+        if package_variables is None:
+            if unresolved_variables is not None:
+                unresolved_variables.append("invalid metadata")
+            return None
+        run_options = cls._docker_arg_values(
+            package.get("runtime_arguments"),
+            runtime_vars,
+            secret_variable_fallbacks,
+            package_variables,
+            unresolved_variables,
+        )
         if run_options is None:
             return None
-        package_args = cls._docker_arg_values(package.get("package_arguments"), runtime_vars)
+        package_args = cls._docker_arg_values(
+            package.get("package_arguments"),
+            runtime_vars,
+            secret_variable_fallbacks,
+            package_variables,
+            unresolved_variables,
+        )
         if package_args is None:
             return None
         if not run_options and package_args and package_args[0] == "run":
@@ -855,7 +897,12 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
     @classmethod
     def _docker_arg_values(
-        cls, entries: list | None, runtime_vars: dict | None
+        cls,
+        entries: list | None,
+        runtime_vars: dict | None,
+        secret_variable_fallbacks: dict[str, str] | None,
+        package_variables: dict[str, dict],
+        unresolved_variables: list[str] | None,
     ) -> list[str] | None:
         """Resolve one registry argument list into CLI argument strings.
 
@@ -903,46 +950,25 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 continue
 
             template = str(raw)
-            variables = arg.get("variables")
-            if isinstance(variables, dict) and variables:
-                substituted = cls._substitute_runtime_variables(template, variables, runtime_vars)
-                if substituted is None:
-                    if required:
-                        return None
-                    continue
-                template = substituted
+            substituted = cls._substitute_runtime_variables(
+                template,
+                package_variables,
+                runtime_vars,
+                {"workspaceFolder": "${workspaceFolder}"},
+                secret_variable_fallbacks,
+            )
+            if substituted is None:
+                if required:
+                    if unresolved_variables is not None:
+                        match = _RUNTIME_TEMPLATE_VARIABLE_RE.search(template)
+                        unresolved_variables.append(match.group(1) if match else "unknown")
+                    return None
+                continue
+            template = substituted
             if arg_type == "named" and arg.get("name"):
                 args.append(str(arg["name"]))
             args.append(template)
         return args
-
-    @staticmethod
-    def _substitute_runtime_variables(
-        template: str, variables: dict, runtime_vars: dict | None
-    ) -> str | None:
-        """Substitute ``{var}`` placeholders, or return None if unresolvable.
-
-        ``workspaceFolder`` resolves to VS Code's own ``${workspaceFolder}``
-        token, which the editor expands at server start. Any other name that
-        this install did not collect a value for has no such fallback, so the
-        caller is told to decline rather than write a literal ``${name}`` into
-        a mount path.
-        """
-        for var_name in variables:
-            placeholder = f"{{{var_name}}}"
-            # A descriptor the template never references cannot make it
-            # unresolvable; declining on one would drop a usable argument.
-            if placeholder not in template:
-                continue
-            supplied = (runtime_vars or {}).get(var_name)
-            if supplied is not None and str(supplied) != "":
-                replacement = str(supplied)
-            elif var_name == "workspaceFolder":
-                replacement = "${workspaceFolder}"
-            else:
-                return None
-            template = template.replace(placeholder, replacement)
-        return template
 
     @staticmethod
     def _select_remote_with_url(remotes):

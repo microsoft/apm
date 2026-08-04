@@ -216,6 +216,7 @@ repo-relative.
 Two keys control which output runtimes a package compiles and installs to:
 
 - **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
+  A scalar remains accepted as a one-item compatibility input.
 - **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
 
 Setting both keys in the same `apm.yml` is a parse error
@@ -224,18 +225,17 @@ Setting both keys in the same `apm.yml` is a parse error
 treated as omission for legacy compatibility; an empty string or list is a
 parse error.
 
-Both manifest keys validate against the target catalog, with one compatibility
-difference: `target:` accepts aliases such as `vscode` and normalizes them to
-their canonical target (`copilot`), while `targets:` accepts canonical names
-only. Invalid values fail at parse time -- they do **not** silently fall
-through to auto-detect.
+Both manifest keys validate target names. The canonical `targets:` form accepts
+canonical names only. The legacy `target:` form also accepts CLI aliases such
+as `vscode` and normalizes them. Invalid values fail at parse time -- they do
+**not** silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
+| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
 | `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
-| `target: vscode` | Alias spelling; canonical package restriction is `copilot` |
+| `target: vscode` | Legacy alias; normalizes to `copilot` |
 | `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
 | `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
 | `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
@@ -243,7 +243,7 @@ through to auto-detect.
 | `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |
 | `target: null` | Legacy omission spelling; adds no package restriction |
 | `target: []` or `target: ""` | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). For MCP, this makes lockfile runtime ownership intentionally machine-dependent; declare targets for portable ownership. |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.claude/`, `CLAUDE.md`, `.grok/`, `.cursor/`, `.cursorrules`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). For MCP, this makes lockfile runtime ownership intentionally machine-dependent; declare targets for portable ownership. |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
@@ -306,15 +306,20 @@ way to specify multiple patterns, as it is portably expanded into target-specifi
 YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
 Claude, Cursor, Windsurf, Kiro, and Antigravity.
 
-A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) may work
-for some targets, but it is not portable: some converters ignore sequences or
-treat them as a string, while others (like Antigravity and Kiro) parse and
-expand them. For maximum portability, use a comma-separated string for multiple
-globs.
+A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
+normalized to the same comma-separated OR expression for distributed
+placement and target-native installation. Use a sequence when its source
+readability matters. To match a literal comma in a filename, escape it as
+`\,`.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
 the value is preserved verbatim.
+
+During distributed compilation, explicitly scoped patterns may match files in
+supported top-level harness directories: `.agents`, `.apm`, `.claude`,
+`.codex`, `.cursor`, `.gemini`, `.github`, `.kiro`, `.opencode`, and
+`.windsurf`. Other hidden directories remain excluded.
 
 ### 2. Agent (`*.agent.md`)
 
@@ -567,7 +572,8 @@ marketplace:
 
 Relative `packages[].source` values compose onto the base, including
 `owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
-URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+URLs with nested repository paths, and local `./` paths remain per-entry
+overrides. Without `sourceBase`,
 existing `owner/repo` source behavior is unchanged. The manifest schema
 Section 7.5 is canonical for the full validation and override rules.
 
@@ -745,7 +751,8 @@ Schema rules:
   emits the path verbatim into `marketplace.json`.
 - `source` accepts three remote forms: `owner/repo` (default host),
   `host.tld/owner/repo` (non-default host shorthand), or
-  `https://host.tld/owner/repo[.git]` (full URL).  Non-default hosts
+  `https://host.tld/path/to/repo[.git]` (full URL with two or more path
+  segments). Non-default hosts
   resolve auth via the standard APM token chain
   (`docs/getting-started/authentication.md`); the default-host token is
   never forwarded.
@@ -806,9 +813,10 @@ The compiler:
    e.g. microsoft/azure-skills).
 5. Does not emit `versions[]` -- each plugin carries a single resolved ref.
 
-`apm pack` also produces a bundle if `apm.yml` declares `dependencies:`. With
-only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`,
-`--target`, `--force`) are silent no-ops.
+`apm pack` also produces a bundle when `apm.yml` declares a `dependencies:`
+mapping, including an empty mapping (`dependencies: {}`). With an omitted or
+null `dependencies:` value and only a `marketplace:` block present, bundle
+flags (`--archive`, `-o`, `--format`, `--target`, `--force`) are silent no-ops.
 
 Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
 `--include-prerelease`, `--marketplace-path FORMAT=PATH`, `-v`.

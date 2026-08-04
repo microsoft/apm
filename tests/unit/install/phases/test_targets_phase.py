@@ -81,6 +81,24 @@ def _make_ctx(
     return ctx
 
 
+def test_grok_cloud_disabled_flag_emits_enable_hint(
+    tmp_path: Path,
+    inject_config: Any,
+) -> None:
+    from apm_cli.install.phases.targets import _check_grok_cloud_flag_gate
+
+    inject_config({"experimental": {"grok_cloud": False}})
+    ctx = _make_ctx(tmp_path, target_override="grok-cloud")
+
+    _check_grok_cloud_flag_gate("grok-cloud", [], ctx)
+
+    ctx.logger.progress.assert_called_once_with(
+        "The 'grok-cloud' target requires an experimental flag. "
+        "Run: apm experimental enable grok-cloud",
+        symbol="info",
+    )
+
+
 def test_plural_targets_without_singular_does_not_keep_legacy_copilot_fallback(
     tmp_path: Path,
 ) -> None:

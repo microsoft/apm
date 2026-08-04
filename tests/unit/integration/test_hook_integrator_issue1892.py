@@ -91,7 +91,9 @@ def test_claude_and_codex_do_not_merge_foreign_or_base_manifests(
     claude_commands = [
         hook["command"] for entry in claude["hooks"]["SessionStart"] for hook in entry["hooks"]
     ]
-    assert claude_commands == [".claude/hooks/superpowers/hooks/run-hook.cmd session-start"]
+    assert claude_commands == [
+        '"${CLAUDE_PROJECT_DIR}/.claude/hooks/superpowers/hooks/run-hook.cmd" session-start'
+    ]
 
     codex = json.loads((project / ".codex" / "hooks.json").read_text(encoding="utf-8"))
     assert set(codex["hooks"]) == {"SessionStart"}

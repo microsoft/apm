@@ -211,6 +211,11 @@ the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
 to cherry-pick plugin skills by leaf name or manifest path, such as
 `skills/productivity/grill-me`.
 
+**Marketplace version checks:** a local Plugin collection may omit `apm.yml`.
+For `apm pack --check-versions`, APM uses `plugin.json`'s `version` only when
+`apm.yml` is absent. See [Versioning strategies](../../producer/versioning-strategies/)
+for manifest precedence, failure behavior, and a plugin-only example.
+
 Declared component paths are requirements, not hints. If an `agents`,
 `skills`, `commands`, or `hooks` entry is missing or escapes the plugin
 root, install exits non-zero before deployment or lockfile commit. Likewise,

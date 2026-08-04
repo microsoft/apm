@@ -177,6 +177,7 @@ Supported targets and where the integrator writes:
 |----------|---------------------------------------|----------------------|
 | copilot  | `.github/hooks/<pkg>-<name>.json`     | one file per hook    |
 | claude   | `.claude/settings.json`               | merged into settings |
+| grok-build | -- not supported --                 | silently skipped     |
 | cursor   | `.cursor/hooks.json`                  | merged               |
 | gemini   | `.gemini/settings.json`               | merged               |
 | codex    | `.codex/hooks.json`                   | merged               |
@@ -242,12 +243,13 @@ Supported targets and output paths:
 
 | Target   | Output                           | Format                |
 |----------|----------------------------------|-----------------------|
+| copilot  | -- not a command --              | ships as a prompt     |
 | claude   | `.claude/commands/<name>.md`     | native markdown       |
+| grok-build | `.grok/commands/<name>.md`      | shared command transform |
 | cursor   | `.cursor/commands/<name>.md`     | claude-format subset  |
 | opencode | `.opencode/commands/<name>.md`   | opencode markdown     |
 | gemini   | `.gemini/commands/<name>.toml`   | TOML                  |
 | windsurf | `.windsurf/workflows/<name>.md`  | called "workflows"    |
-| copilot  | -- not a command --              | ships as a prompt     |
 | codex    | -- not supported --              | silently skipped      |
 
 Verified against `src/apm_cli/integration/targets.py` and
@@ -278,9 +280,11 @@ agent a procedure" fits a skill -- and reaches every harness.
 - **Hook script path resolution.** `apm install -g` (user-scope)
   rewrites `${PLUGIN_ROOT}` and relative `./` references to absolute
   paths so Claude Code and Copilot CLI can execute scripts regardless
-  of the working directory. Project-scope `apm install` (no `-g`)
-  keeps `command` paths repo-relative so checked-in configs stay portable
-  across clones, contributors, and CI. Either way, if a referenced script
+  of the working directory. Project-scope `apm install` (no `-g`) keeps
+  non-Claude command paths repo-relative. Claude project hooks use
+  `CLAUDE_PROJECT_DIR` (or `$env:CLAUDE_PROJECT_DIR` for PowerShell) so
+  checked-in settings remain portable while hooks can run from outside the
+  project directory. Either way, if a referenced script
   is missing at install time the installer emits a warning -- in
   user-scope the unexpanded variable is rewritten to the absolute
   source path so the hook fails loudly at runtime; in project-scope

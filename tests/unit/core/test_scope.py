@@ -171,6 +171,8 @@ class TestTargetProfileUserScope:
             "opencode",
             "codex",
             "gemini",
+            "grok-build",
+            "grok-cloud",
             "antigravity",
             "windsurf",
             "kiro",

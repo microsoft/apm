@@ -46,6 +46,13 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".github/skills/": ".agents/skills/",
         ".github/agents/": ".windsurf/skills/",
     },
+    "grok-cloud": {
+        ".github/skills/": ".grok/skills/",
+    },
+    "grok-build": {
+        ".github/skills/": ".grok/skills/",
+        ".github/agents/": ".grok/agents/",
+    },
     "agent-skills": {
         ".github/skills/": ".agents/skills/",
     },
@@ -131,32 +138,30 @@ def _filter_files_by_target(
                 if p not in seen_prefixes:
                     seen_prefixes.add(p)
                     prefixes.append(p)
-        # Union all cross-target maps
-        # NOTE: dict.update() means the last target's mapping wins when
-        # multiple targets map the same source prefix. In practice this
-        # is benign -- common multi-target combos (e.g. claude+copilot)
-        # match prefixes directly without needing cross-maps.
-        cross_map: dict[str, str] = {}
+        # Preserve every selected target's cross-map so one source path can
+        # intentionally fan out to multiple target-specific destinations.
+        cross_maps: list[tuple[str, str]] = []
         for t in target:
-            cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
+            cross_maps.extend(_CROSS_TARGET_MAPS.get(t, {}).items())
     else:
         prefixes = _get_target_prefixes(target)
-        cross_map = _CROSS_TARGET_MAPS.get(target, {})
+        cross_maps = list(_CROSS_TARGET_MAPS.get(target, {}).items())
 
     direct = [f for f in deployed_files if any(f.startswith(p) for p in prefixes)]
 
     path_mappings: dict[str, str] = {}
-    if cross_map:
+    if cross_maps:
         direct_set = set(direct)
         for f in deployed_files:
             if f in direct_set:
                 continue
-            for src_prefix, dst_prefix in cross_map.items():
+            for src_prefix, dst_prefix in cross_maps:
                 if f.startswith(src_prefix):
                     mapped = dst_prefix + f[len(src_prefix) :]
                     # Containment guard: normalise the remapped path and
-                    # reject any result that escapes the destination prefix
-                    # via traversal segments (e.g. "../../etc/passwd").
+                    # reject any result that escapes the destination prefix.
+                    # The ".." check catches root-level escapes; the prefix
+                    # check below is the authoritative containment barrier.
                     normalised = posixpath.normpath(mapped)
                     if ".." in normalised.split("/"):
                         continue
@@ -170,7 +175,6 @@ def _filter_files_by_target(
                         direct.append(mapped)
                         direct_set.add(mapped)
                         path_mappings[mapped] = f
-                    break
 
     return direct, path_mappings
 

@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Cursor, Codex, Gemini, OpenCode, Windsurf, and Kiro, with Antigravity available as an explicit CLI-only target. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
+A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Grok Build, Cursor, Codex, Gemini, OpenCode, Windsurf, and Kiro, with Antigravity available as an explicit CLI-only target. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
 
 This page is the canonical reference. Tutorials and how-tos link here; do not duplicate.
 
@@ -78,12 +78,13 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`claude`, `copilot`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `agent-skills`); `antigravity` is `--target`-only and explicit-only. The output directory is where APM writes deployed primitives.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`); `antigravity` remains explicit-only. The output directory is where APM writes deployed primitives.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
 | `copilot` | `.github/` (project), `~/.copilot/` (user scope) | vscode |
 | `claude` | `.claude/` | claude |
+| `grok-build` | `.grok/` | agents |
 | `cursor` | `.cursor/` | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
@@ -96,6 +97,7 @@ Notes per target:
 
 - **copilot** -- GitHub Copilot (CLI + IDE). User-scope partial: prompts and instructions are project-scope only.
 - **claude** -- Claude Code. Full user-scope support. Hooks merge into `.claude/settings.json` rather than living as separate files.
+- **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Instructions are not deployable at user scope (Cursor exposes them via the Settings UI only).
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
@@ -113,17 +115,17 @@ Rows are primitives, columns are harnesses. Cell legend:
 - **unsupported** -- APM does not deliver this primitive to this harness.
 - **gated** -- delivered behind an explicit declaration or trust flag.
 
-| Primitive | Copilot | Claude | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro |
-|---|---|---|---|---|---|---|---|---|---|
-| instructions | native | native | native | compiled | compiled | native | compiled | native | native |
-| prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported |
-| agents | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled |
-| skills | native | native | native | native | native | native | native | native | native |
-| hooks | native | native | native | native | native | native | unsupported | native | native |
-| commands | unsupported | native | compiled | unsupported | compiled | unsupported | compiled | compiled | unsupported |
-| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
-| MCP servers | native | native | native | native | native | native | native | native | native |
-| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| Primitive | Copilot | Claude | Grok Build | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro |
+|---|---|---|---|---|---|---|---|---|---|---|
+| instructions | native | native | native | native | compiled | compiled | native | compiled | native | native |
+| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported |
+| agents | native | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled |
+| skills | native | native | native | native | native | native | native | native | native | native |
+| hooks | native | native | unsupported | native | native | native | native | unsupported | native | native |
+| commands | unsupported | native | compiled | compiled | unsupported | compiled | unsupported | compiled | compiled | unsupported |
+| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
+| MCP servers | native | native | unsupported | native | native | native | native | native | native | native |
+| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 
 How to read a cell:
 
@@ -171,14 +173,19 @@ Full pattern, the three pack-time gotchas, and verification steps: [Dev-only pri
 
 ## How a target is selected
 
-`apm install` and `apm compile` resolve active targets in this order:
+`apm install` and `apm compile` use the same first three target sources:
 
 1. Explicit `--target <slug>` flag, when passed.
 2. The `targets:` field in `apm.yml`, when present.
-3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) already exists in the workspace is selected.
-4. Fallback: `copilot` -- greenfield projects get the default Copilot skills root. Create one of the harness folders above (or set
-   `targets:` explicitly) for full integration.
+3. Auto-detection: recognized
+   [filesystem signals](../../reference/cli/targets/#detection-signals) select
+   the matching harness.
+With no signal, `apm install` exits with a target-selection error. `apm compile`
+retains its legacy `vscode`/minimal fallback.
 
 Unknown target slugs are rejected upstream by the manifest parser; they never silently fall through to the default.
 
-For flag reference and exact resolution semantics, see [`apm compile` and `apm install`](/apm/reference/cli/install/). For policy controls that further restrict which primitives a target may deploy, see [Governance guide](/apm/enterprise/governance-guide/).
+For exact resolution semantics, see [`apm install`](../../reference/cli/install/)
+and [`apm compile`](../../reference/cli/compile/). For policy controls that
+further restrict which primitives a target may deploy, see [Governance
+guide](../../enterprise/governance-guide/).

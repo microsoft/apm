@@ -21,6 +21,7 @@ see [Primitive types](../primitive-types/).
 |-----------------|------------------------|:------------:|:-------:|:------:|:------:|:--------:|:-----:|:---:|
 | copilot         | `.github/`             |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | claude          | `.claude/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
+| grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
@@ -33,16 +34,16 @@ see [Primitive types](../primitive-types/).
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
-below). Claude and Kiro keep target-native skill directories.
+below). Claude, Grok Build, and Kiro keep target-native skill directories.
 
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
-`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
-Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
-gated behind experimental flags and not listed above. See
-[Experimental](../experimental/).
+`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
+desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
+runtime), and `hermes` are gated behind experimental flags and not listed
+above. See [Experimental](../experimental/).
 
 ## Post-install instruction compilation
 
@@ -78,8 +79,9 @@ runtime-specific configuration while compile only generates project output. Use
 
 | Target   | Signals (any one activates the target)        |
 |----------|-----------------------------------------------|
+| copilot  | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
 | claude   | `.claude/` directory, or `CLAUDE.md` file     |
-| copilot  | `.github/copilot-instructions.md` file        |
+| grok-build | `.grok/` directory                          |
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
@@ -98,10 +100,10 @@ auto-detection. Both are available with `--target` and can be listed in a
 project's `apm.yml` `targets:` field so contributors running plain `apm
 install` pick them up automatically.
 
-`copilot-cowork`, `copilot-app`, `openclaw`, and `hermes` are experimental targets
-that require `apm experimental enable <name>` before use. They are selected
-with `--target` only and cannot be listed in `apm.yml` (the canonical
-targets validator will reject them).
+`copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
+experimental targets that require `apm experimental enable <name>` before use.
+They are selected with `--target` only and cannot be listed in `apm.yml` (the
+canonical targets validator will reject them).
 
 ## copilot
 
@@ -285,6 +287,31 @@ Cross-client shared skills directory.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
 
+## grok-build
+
+[Grok Build](https://github.com/xai-org/grok-build) native configuration.
+
+- **Detection.** Auto-detected when `.grok/` exists.
+- **Selection.** Included in `all`; no experimental flag is required.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** instructions, agents, commands, and skills.
+- **File conventions.** `.grok/rules/*.md`,
+  `.grok/agents/*.md`, `.grok/commands/*.md`, and
+  `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** Produces `AGENTS.md`.
+
+## grok-cloud (experimental)
+
+xAI Grok Cloud skills deployment.
+
+- **Detection.** Never auto-detected. After enabling the experimental flag,
+  selecting `--target grok-cloud` creates the deploy directory when needed.
+- **Enable.** `apm experimental enable grok-cloud`.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** skills only.
+- **File conventions.** `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** `apm compile --target grok-cloud` is a successful no-op.
+
 ## openclaw (experimental)
 
 [OpenClaw](https://github.com/openclaw/openclaw) agent runtime.
@@ -304,7 +331,9 @@ Cross-client shared skills directory.
 
 ## Skills convergence
 
-By default, every target with a `skills` primitive deploys to `.agents/skills/<name>/SKILL.md` rather than under the target root. This matches the cross-tool agent skills convention so a single skill bundle serves every harness.
+Most targets with a `skills` primitive deploy to
+`.agents/skills/<name>/SKILL.md`. Claude, Grok Build, Kiro, and experimental
+Grok Cloud keep target-native skill directories.
 
 To restore the pre-convergence per-target layout (skills land under each target's own root), use the `--legacy-skill-paths` flag on `apm install` or set `APM_LEGACY_SKILL_PATHS=1`.
 

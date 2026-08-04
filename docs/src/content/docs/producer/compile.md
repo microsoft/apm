@@ -17,7 +17,7 @@ aggregated `AGENTS.md` / `copilot-instructions.md` it produces are a
 nice-to-have, not a requirement.
 
 Compile is **recommended for every other target** (`claude`,
-`cursor`, `codex`, `gemini`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
+`cursor`, `codex`, `gemini`, `grok-build`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
 harnesses load instructions through the root context file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
 folder that compile generates. Kiro receives `.kiro/steering/` files;
@@ -35,7 +35,7 @@ Concretely, that command rolls your `instructions/*.instructions.md`
 into the native rules surface each target expects:
 
 - `AGENTS.md` -- the cross-harness root context file. Copilot, Codex,
-  OpenCode, and Windsurf read it directly; Kiro primarily uses the
+  Grok Build, OpenCode, and Windsurf read it directly; Kiro primarily uses the
   `.kiro/steering/` files that compile also emits.
 - `CLAUDE.md` -- Claude Code's root context file.
 - `GEMINI.md` -- Gemini CLI's root context file.
@@ -86,19 +86,22 @@ By default `apm compile` detects targets from your workspace (see
 ```bash
 apm compile --target claude
 apm compile --target copilot,cursor          # comma-separated
-apm compile --all                            # every canonical target
+apm compile --all                            # default stable target set
 ```
 
-Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `agent-skills`,
-and `all`. The `agent-skills` slug is a no-op for compile (skills are
-deployed by `apm install`); it is accepted in target lists for symmetry
-only. `intellij` uses the Copilot profile for file primitives and produces
-`AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs
-are rejected before any work runs.
+Canonical targets are `copilot`, `claude`, `grok-build`, `cursor`, `opencode`,
+`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`.
+The `all` selector is not a target; it expands to every canonical target except
+the explicit-only `antigravity` and `agent-skills` targets. Compiling for
+`agent-skills` is a successful no-op because `apm install` deploys skills.
+
+The accepted `intellij` entry is MCP-only, not a canonical target, and excluded
+from `all`. Compile uses the Copilot profile for its file primitives and produces
+`AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs are
+rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
-`copilot-app`) are deployment targets for `apm install --target <flag>`
+`copilot-app`, `grok-cloud`) are deployment targets for `apm install --target <flag>`
 once enabled via `apm experimental enable <flag>`, and are excluded
 from `--all`. `apm compile` does not emit harness-specific output for
 them: Hermes and the other agents-family harnesses read the standard
@@ -112,9 +115,8 @@ order:
 
 1. Explicit `--target <slug>` flag.
 2. The `targets:` field in your `apm.yml`.
-3. Auto-detect: any harness root directory (`.github/`, `.claude/`,
-   `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) that
-   already exists.
+3. Auto-detect from the
+   [documented filesystem signals](../../reference/cli/targets/#detection-signals).
 4. Fallback: `minimal` -- writes a single `AGENTS.md` and skips per-
    harness rules folders.
 
@@ -130,6 +132,7 @@ Per target, with the rules shape on disk after compile:
 |---|---|---|---|
 | `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively; deduplicates with `.github/instructions/` (see [below](#copilot-deduplication)) |
 | `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
+| `grok-build` | `AGENTS.md` (folded) | `.grok/rules/*.md` | Yes -- folded into `AGENTS.md` |
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |

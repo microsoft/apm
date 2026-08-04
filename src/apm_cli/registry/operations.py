@@ -324,7 +324,10 @@ class MCPServerOperations:
 
         # Prompt user for collected runtime variables.
         if collected_runtime_vars:
-            return self._prompt_for_environment_variables(collected_runtime_vars)
+            return self._prompt_for_environment_variables(
+                collected_runtime_vars,
+                prompt_defaults=True,
+            )
 
         return {}
 
@@ -410,11 +413,19 @@ class MCPServerOperations:
 
         return shared_env_vars
 
-    def _prompt_for_environment_variables(self, required_vars: dict[str, dict]) -> dict[str, str]:
-        """Prompt user for environment variables.
+    def _prompt_for_environment_variables(
+        self,
+        required_vars: dict[str, dict],
+        *,
+        prompt_defaults: bool = False,
+    ) -> dict[str, str]:
+        """Prompt user for registry-provided variables.
 
         Args:
             required_vars: Dictionary mapping var names to their metadata
+            prompt_defaults: Prompt for required defaults instead of applying
+                them silently. Runtime argument variables use this so a registry
+                default remains an overrideable suggestion.
 
         Returns:
             Dictionary mapping variable names to their values
@@ -471,7 +482,12 @@ class MCPServerOperations:
             from rich.prompt import Prompt
 
             console = Console()
-            console.print("Environment variables needed:", style="cyan")
+            console.print(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:",
+                style="cyan",
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
@@ -485,7 +501,7 @@ class MCPServerOperations:
                 if existing_value:
                     console.print(f"  [+] {var_name}: [dim]using existing value[/dim]")
                     env_vars[var_name] = existing_value
-                elif default_value:
+                elif default_value and not (prompt_defaults and required):
                     if var_info.get("secret", False) is True:
                         _rich_info(f"Using registry default for secret MCP variable '{var_name}'.")
                     env_vars[var_name] = default_value
@@ -502,7 +518,15 @@ class MCPServerOperations:
                     if description:
                         prompt_text += f" ({description})"
 
-                    value = Prompt.ask(prompt_text, password=is_sensitive)
+                    prompt_default = "" if is_sensitive else default_value
+                    value = Prompt.ask(
+                        prompt_text,
+                        default=prompt_default,
+                        show_default=bool(prompt_default),
+                        password=is_sensitive,
+                    )
+                    if not value and is_sensitive:
+                        value = default_value
 
                     env_vars[var_name] = value
 
@@ -512,7 +536,11 @@ class MCPServerOperations:
             # Fallback to simple input
             import click
 
-            click.echo("Environment variables needed:")
+            click.echo(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:"
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
@@ -525,7 +553,7 @@ class MCPServerOperations:
                 if existing_value:
                     click.echo(f"  [+] {var_name}: using existing value")
                     env_vars[var_name] = existing_value
-                elif default_value:
+                elif default_value and not (prompt_defaults and required):
                     if var_info.get("secret", False) is True:
                         _rich_info(f"Using registry default for secret MCP variable '{var_name}'.")
                     env_vars[var_name] = default_value
@@ -541,10 +569,16 @@ class MCPServerOperations:
                         keyword in var_name.lower()
                         for keyword in ["password", "secret", "key", "token", "api"]
                     )
+                    prompt_default = "" if is_sensitive else default_value
 
                     value = click.prompt(
-                        prompt_text, hide_input=is_sensitive, default="", show_default=False
+                        prompt_text,
+                        hide_input=is_sensitive,
+                        default=prompt_default,
+                        show_default=bool(prompt_default),
                     )
+                    if not value and is_sensitive:
+                        value = default_value
                     env_vars[var_name] = value
 
             click.echo()

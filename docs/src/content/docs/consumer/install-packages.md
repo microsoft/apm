@@ -79,10 +79,9 @@ The pipeline is deterministic. Each phase must pass before the next runs.
    for hidden Unicode (zero-width characters, bidi controls, tag
    characters). Critical findings block the install. Override with
    `--force`.
-4. **Integrate.** Write primitives into each target harness's native
-   directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`,
-   `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`) and the cross-tool
-   `.agents/skills/` directory.
+4. **Integrate.** Write primitives into each selected target's owned
+   directories, such as `.github/`, `.claude/`, `.grok/`, and the cross-tool
+   `.agents/skills/`.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
 
@@ -104,10 +103,10 @@ them. Detection priority:
 
 1. `--target <slug>` flag (highest).
 2. The `targets:` field in `apm.yml`.
-3. Auto-detect: any harness directory (`.github/`, `.claude/`,
-   `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`)
-   that already exists in the workspace.
-4. Fallback: minimal output to `AGENTS.md` only.
+3. Auto-detect from the
+   [documented filesystem signals](../../reference/cli/targets/#detection-signals).
+
+With no signal, install exits with a target-selection error.
 
 Pin targets explicitly when you want reproducibility across machines:
 
@@ -126,10 +125,10 @@ Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf
 
 ## What to commit
 
-Commit `apm.yml`, `apm.lock.yaml`, and every harness directory APM writes to
-(`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`,
-`.kiro/`). Committed deployed files give teammates and cloud Copilot instant agent
-context on clone, before they run `apm install`.
+Commit `apm.yml`, `apm.lock.yaml`, and every target-owned directory APM writes
+to. These can include `.github/`, `.claude/`, `.grok/`, and `.agents/`.
+Committed deployed files give teammates agent context on clone, before they
+run `apm install`.
 
 Add `apm_modules/` to `.gitignore` -- it is the package cache and is rebuilt from
 the lockfile on every `apm install`. APM adds the entry automatically on first install.

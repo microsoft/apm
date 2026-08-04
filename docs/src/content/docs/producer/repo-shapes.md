@@ -97,8 +97,8 @@ marketplace:
 ```
 
 `apm pack` resolves every remote entry against `git ls-remote` and
-writes `marketplace.json` only. No bundle is produced because there
-is no `dependencies:` block.
+writes `marketplace.json` only. No bundle is produced because
+`dependencies:` is omitted.
 
 ## Monorepo-hybrid
 

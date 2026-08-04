@@ -5,7 +5,9 @@ sidebar:
   order: 0
 ---
 
-A package's `.apm/` directory contains primitives. Each primitive type is an opinion about how a piece of agent context should be authored once and projected onto every supported target (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf, Kiro, and Agent Skills).
+A package's `.apm/` directory contains primitives. Author each piece of agent
+context once; APM projects it onto the targets that support that primitive.
+See the [targets matrix](../../reference/targets-matrix/) for the full map.
 
 ## Primitive types
 

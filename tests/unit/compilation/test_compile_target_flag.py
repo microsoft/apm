@@ -238,6 +238,20 @@ Use type hints in Python code.
         assert result.success
         assert "AGENTS.md" in result.output_path
 
+    def test_target_grok_build_generates_agents_md(self, temp_project, sample_primitives):
+        """Stable Grok Build compilation produces root project instructions."""
+        config = CompilationConfig(
+            target="grok-build",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert "AGENTS.md" in result.output_path
+
     def test_target_gemini_generates_gemini_md(self, temp_project, sample_primitives):
         """target='gemini' must produce GEMINI.md, not a silent no-op."""
         config = CompilationConfig(
@@ -1617,6 +1631,10 @@ class TestResolveCompileTarget:
             ["intellij"],
             "hermes",
             ["hermes"],
+            "grok-build",
+            ["grok-build"],
+            "grok-cloud",
+            ["grok-cloud"],
         ],
     )
     def test_accepted_target_scalar_and_list_forms_resolve_identically(self, target):

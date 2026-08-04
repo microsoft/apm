@@ -77,6 +77,22 @@ check_pattern \
     'name == "copilot-(app|cowork)"|name in \{.*copilot-(app|cowork)' \
     src/apm_cli/install/deployed_paths.py \
     src/apm_cli/install/manifest_reconcile.py
+experimental_hint_owner="src/apm_cli/install/target_hints.py"
+experimental_hint_definition_count=$(grep -Ec \
+    '^def emit_disabled_experimental_target_hint\(' "$experimental_hint_owner" || true)
+experimental_hint_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        'requires an experimental flag' \
+        src/apm_cli \
+        | grep -Fv "${experimental_hint_owner}:" \
+        || true
+)
+if [ "$experimental_hint_definition_count" -ne 1 ] \
+    || [ -n "$experimental_hint_duplicate_hits" ]; then
+    echo "[x] Experimental target hints must route through install/target_hints.py"
+    [ -n "$experimental_hint_duplicate_hits" ] && echo "$experimental_hint_duplicate_hits"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC2: validate-before-mutate boundaries"
 compiled_write_hits=$(
@@ -135,6 +151,19 @@ if [ "$hook_scope_owner_count" -ne 1 ] \
     || [ -n "$hook_scope_duplicate_hits" ]; then
     echo "[x] Hook rewrite scope must route through HookIntegrator"
     [ -n "$hook_scope_duplicate_hits" ] && echo "$hook_scope_duplicate_hits"
+    violations=$((violations + 1))
+fi
+hook_project_dir_owner_count=$(grep -Fc '"CLAUDE_PROJECT_DIR"' "$hook_file" || true)
+hook_project_dir_duplicate_hits=$(
+    grep -REn --include='*.py' '"CLAUDE_PROJECT_DIR"' src/apm_cli \
+        | grep -v "^${hook_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$hook_project_dir_owner_count" -ne 1 ] \
+    || [ -n "$hook_project_dir_duplicate_hits" ]; then
+    echo "[x] Claude project hook paths must be owned by HookIntegrator"
+    [ -n "$hook_project_dir_duplicate_hits" ] && echo "$hook_project_dir_duplicate_hits"
     violations=$((violations + 1))
 fi
 hook_event_map_owner_count=$(grep -Ec \
@@ -704,6 +733,19 @@ if ! printf '%s\n' "$packed_source_body" \
     || [ -n "$packed_source_parallel_hits" ]; then
     echo "[x] Packed marketplace sources must use DependencyReference.parse_from_dict"
     [ -n "$packed_source_parallel_hits" ] && echo "$packed_source_parallel_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC10b: local marketplace audit resolution authority"
+if ! grep -Fq 'resolve_local_plugin_path(' src/apm_cli/marketplace/audit.py \
+    || grep -Fq '_resolve_local_relative_source' src/apm_cli/marketplace/audit.py \
+    || ! grep -Fq 'relative_target="apm.yml"' src/apm_cli/marketplace/audit.py \
+    || ! awk '
+        /^def resolve_local_plugin_path\(/ {flag=1}
+        flag && /^def / && !/^def resolve_local_plugin_path\(/ {exit}
+        flag {print}
+    ' src/apm_cli/marketplace/resolver.py | grep -Fq 'ensure_path_within('; then
+    echo "[x] Local marketplace audit paths must use resolve_local_plugin_path"
     violations=$((violations + 1))
 fi
 
@@ -1370,6 +1412,11 @@ if ! grep -q '^def validate_tag_pattern(' "$tag_pattern_owner" \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC31: marketplace effective-output-path authority"
+if ! bash scripts/check_marketplace_output_path_authority.sh; then
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC29: dependency identity and materialization path authority"
 identity_owner="src/apm_cli/models/dependency/identity.py"
 materialization_owner="src/apm_cli/models/dependency/materialization.py"
@@ -1427,6 +1474,60 @@ if [ "$mcp_noncontainer_owner_defs" -ne 1 ] \
     || [ -n "$mcp_legacy_extractor_calls" ]; then
     echo "[x] MCP non-container launcher argv must route through MCPClientAdapter"
     [ -n "$mcp_legacy_extractor_calls" ] && echo "$mcp_legacy_extractor_calls"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC30: local marketplace package-version source authority"
+local_version_owner="src/apm_cli/marketplace/version_check.py"
+local_version_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*def _read_(local|plugin).*version\(' \
+        src/apm_cli/marketplace \
+        | grep -v "^${local_version_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$(grep -Ec '^def _read_local_version\(|^def _read_plugin_json_version\(' \
+        "$local_version_owner")" -ne 2 ] \
+    || ! grep -q 'return _read_plugin_json_version(package_root)' "$local_version_owner" \
+    || ! grep -q 'plugin_json = find_plugin_json(package_root)' "$local_version_owner" \
+    || [ -n "$local_version_duplicate_hits" ]; then
+    echo "[x] Local marketplace package versions must route through marketplace/version_check.py"
+    [ -n "$local_version_duplicate_hits" ] && echo "$local_version_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC31: applyTo normalization and hidden-tool placement authority"
+apply_to_owner="src/apm_cli/utils/patterns.py"
+apply_to_normalizer_defs=$(grep -rEc --include='*.py' \
+    '^def _?normalize_apply_to\(' src/apm_cli \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+apply_to_parser="src/apm_cli/primitives/parser.py"
+hidden_tool_placement_owner="src/apm_cli/compilation/context_optimizer.py"
+hidden_tool_tree_defs=$(grep -rEc --include='*.py' \
+    '^PLACEMENT_HIDDEN_TOOL_TREES[[:space:]]*=' src/apm_cli \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+if [ "$apply_to_normalizer_defs" -ne 1 ] \
+    || ! grep -q '^def normalize_apply_to(' "$apply_to_owner" \
+    || ! grep -q 'from apm_cli.utils.patterns import normalize_apply_to' "$apply_to_parser" \
+    || grep -Eq '^def _?normalize_apply_to\(' "$apply_to_parser" \
+    || ! grep -q 'normalize_apply_to(metadata.get("applyTo"), default="")' "$apply_to_parser" \
+    || [ "$hidden_tool_tree_defs" -ne 1 ] \
+    || ! grep -q '^PLACEMENT_HIDDEN_TOOL_TREES = frozenset(' "$hidden_tool_placement_owner" \
+    || ! grep -q 'not self._is_supported_hidden_tool_root(path)' "$hidden_tool_placement_owner"; then
+    echo "[x] applyTo normalization must use utils/patterns.py and hidden placement ContextOptimizer"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC32: MCP runtime argument variable authority"
+mcp_runtime_variable_owner_defs=$(grep -rEc \
+    '^[[:space:]]*def _substitute_runtime_variables\(' \
+    src/apm_cli/adapters/client --include='*.py' \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+if [ "$mcp_runtime_variable_owner_defs" -ne 1 ] \
+    || ! grep -q '^    def _substitute_runtime_variables(' "$mcp_container_owner" \
+    || ! grep -q 'cls\._substitute_runtime_variables(' src/apm_cli/adapters/client/vscode.py; then
+    echo "[x] MCP runtime argument variables must route through MCPClientAdapter"
     violations=$((violations + 1))
 fi
 

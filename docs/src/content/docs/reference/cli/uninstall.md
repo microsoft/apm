@@ -15,7 +15,7 @@ apm uninstall [OPTIONS] PACKAGES...
 
 ## Description
 
-`apm uninstall` is the inverse of `apm install <package>`. It strips a package from the manifest, deletes its source from `apm_modules/`, prunes any transitive dependencies that nothing else depends on, and removes every file the package deployed into harness folders (Copilot, Claude, Cursor, Codex, Gemini, OpenCode, Windsurf).
+`apm uninstall` is the inverse of `apm install <package>`. It strips a package from the manifest, deletes its source from `apm_modules/`, prunes any transitive dependencies that nothing else depends on, and removes every tracked file the package deployed to configured targets.
 
 The command only deletes files tracked in the lockfile's `deployed_files` manifest, so hand-authored content in the same harness folders is left alone.
 
@@ -93,7 +93,7 @@ What gets removed, in order:
 1. The package entry in `apm.yml` under `dependencies.apm` or `devDependencies.apm`.
 2. The package folder under `apm_modules/owner/repo/`.
 3. Transitive dependencies that no remaining package depends on (npm-style pruning, computed from `apm.lock.yaml`). A transitive dependency still declared by any surviving package is preserved, even when two packages share it (a diamond-shaped install). If a surviving package's manifest can't be read, APM keeps every remaining candidate for that run rather than guessing -- re-run with `--verbose` to see which manifest failed, then fix or restore it and re-run to complete cleanup.
-4. Every file in the lockfile's `deployed_files` for the removed packages and pruned orphans, across all harness folders (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.codex/`, `.windsurf/`, `.kiro/`).
+4. Every file in the lockfile's `deployed_files` for the removed packages and pruned orphans, across configured target-owned folders such as `.github/`, `.claude/`, `.grok/`, and `.agents/`.
 5. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`, `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages contributed. Remaining packages -- including transitive dependencies still required by another package -- have their hook entries rebuilt from the post-removal lockfile.
 6. MCP servers contributed only by the removed packages.
 7. The lockfile entries themselves. If no dependencies remain, `apm.lock.yaml` is deleted.

@@ -29,6 +29,7 @@ _ENV_PLACEHOLDER_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 # Detects the legacy ``<VAR>`` placeholder syntax only. Used to aggregate
 # deprecation warnings across all servers in a single install run.
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
+_RUNTIME_TEMPLATE_VARIABLE_RE = re.compile(r"(?<!\$)\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 # MCP Registry v0.1 names the container registry type ``oci``; the adapters
 # below key their launcher dispatch on ``docker`` (the vocabulary the legacy
@@ -655,6 +656,94 @@ class MCPClientAdapter(ABC):
             ),
             None,
         )
+
+    @staticmethod
+    def _package_runtime_variable_metadata(
+        package: dict[str, Any] | None,
+    ) -> dict[str, dict] | None:
+        """Return one validated runtime-variable declaration map for a package.
+
+        Registry metadata may declare a variable on one argument and reference it
+        later without repeating the declaration. Keeping this map package-scoped
+        makes those references resolve consistently while rejecting malformed
+        secret metadata before an adapter can render a collected value.
+        """
+        metadata_by_name: dict[str, dict] = {}
+        for field_name in ("runtime_arguments", "package_arguments"):
+            for argument in (package or {}).get(field_name) or []:
+                if not isinstance(argument, dict):
+                    continue
+                variables = argument.get("variables")
+                if variables is None:
+                    continue
+                if not isinstance(variables, dict):
+                    return None
+                for name, metadata in variables.items():
+                    if not isinstance(name, str) or not isinstance(metadata, dict):
+                        return None
+                    secret_marker = metadata.get("isSecret", metadata.get("is_secret", False))
+                    if not isinstance(secret_marker, bool):
+                        return None
+                    existing = metadata_by_name.get(name)
+                    if existing is not None and existing != metadata:
+                        return None
+                    metadata_by_name[name] = metadata
+        return metadata_by_name
+
+    @staticmethod
+    def _substitute_runtime_variables(
+        template: str,
+        variables: dict[object, object] | None,
+        runtime_vars: dict[str, object] | None,
+        runtime_variable_fallbacks: dict[str, str] | None = None,
+        secret_variable_fallbacks: dict[str, str] | None = None,
+    ) -> str | None:
+        """Resolve every APM runtime variable in one registry argument template.
+
+        Variable metadata may appear on an earlier argument while later
+        arguments reference the same value. Collected values therefore apply to
+        every template, not only the metadata-bearing entry. Target-specific
+        fallbacks are used only for declared variables with no collected value.
+        """
+        secret_fallbacks = secret_variable_fallbacks or {}
+        values: dict[str, str] = dict(secret_fallbacks)
+        for name, value in (runtime_vars or {}).items():
+            if (
+                isinstance(name, str)
+                and name not in secret_fallbacks
+                and value is not None
+                and str(value) != ""
+            ):
+                values[name] = str(value)
+
+        fallbacks = runtime_variable_fallbacks or {}
+        for name, metadata in (variables or {}).items():
+            if not isinstance(name, str) or not isinstance(metadata, dict):
+                return None
+            placeholder = f"{{{name}}}"
+            if placeholder not in template or name in values:
+                continue
+            secret_marker = metadata.get("isSecret", metadata.get("is_secret", False))
+            if not isinstance(secret_marker, bool):
+                return None
+            if secret_marker is True:
+                return None
+            fallback = fallbacks.get(name)
+            if fallback is not None:
+                values[name] = fallback
+                continue
+            configured = metadata.get("value", metadata.get("default"))
+            if isinstance(configured, str) and configured:
+                values[name] = configured
+            elif configured is not None:
+                return None
+
+        for name, value in values.items():
+            template = template.replace(f"{{{name}}}", value)
+
+        if _RUNTIME_TEMPLATE_VARIABLE_RE.search(template):
+            return None
+        return template
 
     @staticmethod
     def _processed_non_container_argument_groups(

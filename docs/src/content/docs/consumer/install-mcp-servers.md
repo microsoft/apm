@@ -114,6 +114,17 @@ VS Code prefers `npm`, PyPI, then OCI. OCI packages require Docker to be
 available when the harness starts the server; no per-target launcher
 configuration is needed.
 
+When a required registry runtime variable has a default, APM prompts once
+per variable and displays that default as the suggested answer. Press Enter
+to accept it or provide an override. Secret defaults remain accepted on
+Enter but are never displayed. For OCI/Docker launchers, non-secret selected
+values replace every `{variable}` reference across the package's runtime and
+package arguments before the native config is written. VS Code renders secret
+variables as target-native secret-input references instead, so secret bytes
+never enter `mcp.json`. A required variable without a collected value or
+default declines that target configuration; VS Code treats `workspaceFolder`
+as its built-in `${workspaceFolder}` token.
+
 For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package

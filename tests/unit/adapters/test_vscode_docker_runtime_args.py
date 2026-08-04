@@ -4,7 +4,7 @@ Issue #1391: VS Code adapter drops Docker `runtimeArguments` with `variables`.
 """
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 
@@ -230,7 +230,11 @@ class TestFormatServerConfigDockerVariables(unittest.TestCase):
             wraps=VSCodeClientAdapter._docker_run_args,
         ) as mock_builder:
             self.adapter._format_server_config(self.server_info, runtime_vars=runtime_vars)
-            mock_builder.assert_called_once_with(V01_DOCKER_PACKAGE, runtime_vars)
+            mock_builder.assert_called_once_with(
+                V01_DOCKER_PACKAGE,
+                runtime_vars,
+                unresolved_variables=ANY,
+            )
 
 
 # ---------------------------------------------------------------------------
