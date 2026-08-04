@@ -75,9 +75,13 @@ def test_compile_clean_preserves_nested_git_worktree_agents_file(
     _run_git(parent, environment, "worktree", "add", "-b", "nested", str(nested))
     nested_agents = nested / "AGENTS.md"
     nested_agents.write_bytes(_GENERATED_AGENTS)
-    _run_git(nested, environment, "add", "AGENTS.md")
+    nested_descendant_agents = nested / "subdir" / "AGENTS.md"
+    nested_descendant_agents.parent.mkdir()
+    nested_descendant_agents.write_bytes(_GENERATED_AGENTS)
+    _run_git(nested, environment, "add", "AGENTS.md", "subdir/AGENTS.md")
     _run_git(nested, environment, "commit", "-m", "seed nested agents")
     nested_agents_before = nested_agents.read_bytes()
+    nested_descendant_agents_before = nested_descendant_agents.read_bytes()
 
     parent_orphan = parent / "stale" / "AGENTS.md"
     parent_orphan.parent.mkdir()
@@ -93,4 +97,5 @@ def test_compile_clean_preserves_nested_git_worktree_agents_file(
     assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
     assert not parent_orphan.exists()
     assert nested_agents.read_bytes() == nested_agents_before
+    assert nested_descendant_agents.read_bytes() == nested_descendant_agents_before
     assert _run_git(nested, environment, "status", "--porcelain").stdout == ""

@@ -26,10 +26,17 @@ def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     assert "Policy cache metadata must redact URL credentials at its canonical writer" in guard
 
 
+@pytest.mark.parametrize(
+    ("guard", "replacement"),
+    [
+        ('(directory_path / ".git").is_file()', "False"),
+        ("child_dirs.clear()", "pass"),
+    ],
+)
 def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
-    tmp_path: Path,
+    tmp_path: Path, guard: str, replacement: str
 ) -> None:
-    """The cleanup boundary guard requires pruning nested .git-file roots."""
+    """The cleanup boundary guard requires detection and pruning."""
     root = Path(__file__).parents[2]
     sandbox = tmp_path / "repo"
     shutil.copytree(
@@ -48,7 +55,7 @@ def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
     compiler_path = sandbox / "src/apm_cli/compilation/distributed_compiler.py"
     source = compiler_path.read_text(encoding="utf-8")
     compiler_path.write_text(
-        source.replace('(directory_path / ".git").is_file()', "False", 1),
+        source.replace(guard, replacement, 1),
         encoding="utf-8",
     )
 

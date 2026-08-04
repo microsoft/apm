@@ -829,7 +829,11 @@ class DistributedAgentsCompiler:
 
         for directory, child_dirs, files in os.walk(self.base_dir, followlinks=False):
             directory_path = Path(directory)
-            if directory_path != self.base_dir and (directory_path / ".git").is_file():
+            if (
+                directory_path != self.base_dir
+                and ".git" in files
+                and (directory_path / ".git").is_file()
+            ):
                 _logger.debug(
                     "Skipping nested Git worktree during orphan cleanup: %s",
                     portable_relpath(directory_path, self.base_dir),
