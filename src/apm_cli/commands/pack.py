@@ -1,6 +1,7 @@
 """Click commands for ``apm pack`` and ``apm unpack``."""
 
 import json as json_mod
+import shlex
 import sys
 from pathlib import Path
 
@@ -479,13 +480,23 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                                 logger.info(f"    {out.path}  [unchanged]")
                             elif out.status == "missing":
                                 logger.info(f"    {out.path}  [missing on disk; would be created]")
-                                _emit_drift_recipe(logger, out.path)
+                                _emit_drift_recipe(
+                                    logger,
+                                    out.path,
+                                    out.format,
+                                    (options.marketplace_path_overrides or {}).get(out.format),
+                                )
                             else:
                                 count = len(out.differences)
                                 logger.info(f"    {out.path}  [drift: {count} differences]")
                                 for line in render_diff_lines(out):
                                     logger.info(line)
-                                _emit_drift_recipe(logger, out.path)
+                                _emit_drift_recipe(
+                                    logger,
+                                    out.path,
+                                    out.format,
+                                    (options.marketplace_path_overrides or {}).get(out.format),
+                                )
                     for msg in d_report.error_messages():
                         gate_errors.append({"code": "marketplace_drift", "message": msg})
 
@@ -544,23 +555,33 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         ctx.exit(4)
 
 
-def _emit_drift_recipe(logger, out_path: str) -> None:
+def _emit_drift_recipe(
+    logger,
+    out_path: str,
+    output_format: str,
+    output_override: str | None,
+) -> None:
     """Emit the canonical recovery recipe when marketplace.json drift is detected.
 
     Teaches producers the amend+force-with-lease pattern so they can fix the
     drift without a noisy follow-up commit.
     """
+    pack_command = "apm pack"
+    if output_override is not None:
+        pack_command += f" --marketplace-path {shlex.quote(f'{output_format}={output_override}')}"
+    stage_command = f"git add -- {shlex.quote(out_path)}"
+
     logger.info("")
     logger.info("    To recover cleanly (fold into the current commit):")
     logger.info("")
-    logger.info("      apm pack                       # regenerate locally")
-    logger.info(f"      git add -- {out_path}")
+    logger.info(f"      {pack_command}                       # regenerate locally")
+    logger.info(f"      {stage_command}")
     logger.info("      git commit --amend --no-edit   # fold into the current commit")
     logger.info("      git push --force-with-lease    # safe re-push")
     logger.info("")
     logger.info("    Or as a follow-up commit:")
     logger.info("")
-    logger.info(f"      apm pack && git add -- {out_path}")
+    logger.info(f"      {pack_command} && {stage_command}")
     logger.info("      git commit -m 'chore(marketplace): regen'")
     logger.info("")
     logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")
