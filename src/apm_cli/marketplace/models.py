@@ -196,16 +196,22 @@ class MarketplaceSource:
         Classification:
         - Local filesystem path or ``file://`` URI -> ``local``
         - Direct remote marketplace.json URL (``path == ""``) -> ``url``
+        - Explicit ``ssh://`` URL -> ``git`` (preserves the selected SSH transport)
         - Host classified by AuthResolver as github/ghe_cloud/ghes -> ``github``
         - Host classified as gitlab -> ``gitlab``
         - Host classified as Azure DevOps -> ``ado`` (REST items fast path with
           generic-git fallback; see ``marketplace.client._fetch_ado``)
-        - Anything else (generic, ssh to non-classified host) -> ``git``
+        - Anything else (generic or SCP-like SSH to a non-classified host) -> ``git``
         """
         if not self.url or _looks_like_local_path(self.url):
             return "local"
         if self.is_remote_manifest_url:
             return "url"
+        try:
+            if urlsplit(self.url).scheme.lower() == "ssh":
+                return "git"
+        except ValueError:
+            pass
         host = _extract_host_from_url(self.url)
         if not host:
             return "git"

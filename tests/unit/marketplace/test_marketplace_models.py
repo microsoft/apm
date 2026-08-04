@@ -30,6 +30,15 @@ class TestMarketplaceSource:
         assert src.host == "ado.example.test"
         assert src.port == 8443
 
+    def test_explicit_ssh_url_uses_git_fetcher_for_known_host(self):
+        src = MarketplaceSource(
+            name="private-marketplace",
+            url="ssh://git@github.com:2222/acme/private-marketplace.git",
+        )
+
+        assert src.kind == "git"
+        assert src.port == 2222
+
     def test_frozen(self):
         src = MarketplaceSource(name="x", owner="o", repo="r")
         with pytest.raises(AttributeError):
