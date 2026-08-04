@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Registry object-form dependencies (`- id: owner/repo`) now accept a `skills:` subset
   and a `targets:` subset, matching git-longhand parity. `to_apm_yml_entry()` also
   correctly round-trips registry deps as dict form instead of collapsing them to a
+- Registry object-form dependencies (`- id: owner/repo`) now support `skills:` and
+  `targets:` subset installs, matching git-longhand parity -- no need to switch to
+  verbose git-longhand form just to narrow what gets deployed. Registry deps also now
+  serialize correctly as object-form entries in `apm.yml` instead of collapsing to a
   plain git string. (by @nadav-y, #2166)
 
 ### Fixed

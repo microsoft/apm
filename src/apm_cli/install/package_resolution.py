@@ -166,6 +166,7 @@ def propagate_existing_registry_source(
     identity: str,
     *,
     dependency_reference_cls: Any,
+    logger: Any | None = None,
 ) -> bool:
     """Carry an existing registry-sourced entry's source onto a fresh dep_ref.
 
@@ -186,6 +187,10 @@ def propagate_existing_registry_source(
     if is_registry:
         dep_ref.source = "registry"
         dep_ref.registry_name = existing_ref.registry_name
+        if logger:
+            logger.verbose_detail(
+                f"[i] {identity}: registry source propagated from existing manifest entry"
+            )
     return is_registry
 
 

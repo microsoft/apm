@@ -415,7 +415,11 @@ def _resolve_package_references(
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
             existing_source_is_registry = propagate_existing_registry_source(
-                dep_ref, current_deps, identity, dependency_reference_cls=DependencyReference
+                dep_ref,
+                current_deps,
+                identity,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
             )
             apply_cli_skill_pin(
                 dep_ref,
@@ -457,10 +461,6 @@ def _resolve_package_references(
                 logger.validation_fail(package, scope_reject)
             continue
 
-        # Ensure structured entry is used for apm.yml persistence when skill
-        # filter is active (normal non-marketplace/non-insecure path doesn't
-        # set _apm_yml_entries; _merge_packages_into_yml falls back to the
-        # plain canonical string without this).
         if skill_subset and canonical not in _apm_yml_entries:
             _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
         _apm_yml_entries.setdefault(canonical, dep_ref.to_apm_yml_entry())
