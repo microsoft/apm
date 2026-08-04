@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.install.argv import (
+    _get_invocation_argv,
+    _split_argv_at_double_dash,
+)
 from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
 from apm_cli.install.errors import (
     AuthenticationError,
@@ -184,41 +188,6 @@ class InstallContext:
     audit_override: str | None = None
     install_result: InstallResult | None = None
     target_decision: "EffectiveTargetDecision | None" = None
-
-
-# ---------------------------------------------------------------------------
-# Argv `--` boundary helpers (W3 --mcp flag)
-# ---------------------------------------------------------------------------
-#
-# Click's ``nargs=-1`` silently swallows the ``--`` separator and merges
-# everything after it into the positional argument tuple.  For
-# ``apm install --mcp foo -- npx -y srv`` we cannot distinguish that from
-# ``apm install --mcp foo npx -y srv`` once Click is done parsing.
-#
-# We therefore inspect ``sys.argv`` ourselves to detect the boundary and
-# extract the post-``--`` portion as the stdio command argv.  ``--`` IS
-# present in ``sys.argv`` even though Click strips it from the parsed
-# arguments.  The pre-``--`` portion is used to flag conflicts (E1).
-#
-# ``_get_invocation_argv`` exists as a tiny seam so tests using
-# ``CliRunner`` (which does not modify ``sys.argv``) can patch it without
-# resorting to ``monkeypatch.setattr('sys.argv', ...)``.
-
-
-def _get_invocation_argv():
-    """Return the process invocation argv. Wrapped for test injection."""
-    return sys.argv
-
-
-def _split_argv_at_double_dash(argv):
-    """Return ``(clean_argv, command_argv_tuple)``.
-
-    If ``--`` is not present, ``command_argv_tuple`` is ``()``.
-    """
-    if "--" not in argv:
-        return argv, ()
-    idx = argv.index("--")
-    return argv[:idx], builtins.tuple(argv[idx + 1 :])
 
 
 # APM Dependencies (conditional import for graceful degradation)
