@@ -874,6 +874,7 @@ def test_local_marketplace_audit_manifest_target_guard_rejects_bypass(tmp_path: 
     assert result.returncode == 1
     assert "Local marketplace audit paths must use resolve_local_plugin_path" in result.stdout
 
+
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
     """Cleanup must route current deployed-file claims through the reconciler."""
     root = Path(__file__).parents[2]
