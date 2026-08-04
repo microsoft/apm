@@ -333,13 +333,17 @@ def test_vscode_argument_secret_uses_existing_input_contract(tmp_path: Path) -> 
         tmp_path,
         runtime_vars={"MCP_TEST_SECRET": "must-not-be-written"},
     )
+    input_id = VSCodeClientAdapter._vscode_argument_secret_input_id(
+        "com.example/noncontainer",
+        "MCP_TEST_SECRET",
+    )
 
-    assert config["args"] == ["mcp-server-secret", "${input:mcp-test-secret}"]
+    assert config["args"] == ["mcp-server-secret", f"${{input:{input_id}}}"]
     assert "must-not-be-written" not in repr(config)
     assert inputs == [
         {
             "type": "promptString",
-            "id": "mcp-test-secret",
+            "id": input_id,
             "description": "Secret used by the launcher",
             "password": True,
         }

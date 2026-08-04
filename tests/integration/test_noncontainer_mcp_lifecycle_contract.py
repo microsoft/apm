@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
@@ -241,7 +242,11 @@ def _assert_idempotent_state(
 def _expected_args(case: _TargetCase) -> dict[str, list[str]]:
     """Return exact typed argv for all registry packages on one target."""
     secret = (
-        "${input:mcp-lifecycle-secret}" if case.runtime == "vscode" else f"${{{_SECRET_VARIABLE}}}"
+        "${input:"
+        f"{VSCodeClientAdapter._vscode_argument_secret_input_id(_GENERIC_SERVER, _SECRET_VARIABLE)}"
+        "}"
+        if case.runtime == "vscode"
+        else f"${{{_SECRET_VARIABLE}}}"
     )
     return {
         _NPM_SERVER: [
