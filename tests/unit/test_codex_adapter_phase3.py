@@ -12,8 +12,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import tomlkit
 
-from apm_cli.adapters.client.codex import CodexClientAdapter, _is_loopback_host
+from apm_cli.adapters.client.codex import CodexClientAdapter
+from apm_cli.utils.net import is_loopback_host
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -276,7 +278,7 @@ class TestIsLoopbackHost:
         ],
     )
     def test_loopback_hosts_detected(self, host: str) -> None:
-        assert _is_loopback_host(host) is True
+        assert is_loopback_host(host) is True
 
     @pytest.mark.parametrize(
         "host",
@@ -284,14 +286,14 @@ class TestIsLoopbackHost:
             None,
             "",
             "example.com",
-            "192.168.1.10",  # private but not loopback — still requires https
+            "192.168.1.10",  # private but not loopback -- still requires https
             "10.0.0.1",
-            "169.254.169.254",  # link-local / metadata — still requires https
+            "169.254.169.254",  # link-local / metadata -- still requires https
             "8.8.8.8",
         ],
     )
     def test_non_loopback_hosts_rejected(self, host: str | None) -> None:
-        assert _is_loopback_host(host) is False
+        assert is_loopback_host(host) is False
 
 
 class TestConfigureMcpServer:
@@ -350,7 +352,8 @@ class TestConfigureMcpServer:
             result = adapter.configure_mcp_server("owner/local-server")
         assert result is True
         config_text = (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
-        assert url in config_text
+        servers = tomlkit.parse(config_text)["mcp_servers"]
+        assert url in [server.get("url") for server in servers.values()]
 
     def test_uses_explicit_server_name_as_key(self, tmp_path: Path, capsys) -> None:
         adapter = _make_adapter(project_root=tmp_path)
