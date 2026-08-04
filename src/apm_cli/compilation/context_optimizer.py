@@ -218,20 +218,18 @@ class ContextOptimizer:
         return results
 
     def _get_all_files(self) -> builtins.list[Path]:
-        """Get cached list of all files in project."""
+        """Get cached list of all files in project.
+
+        Routes through :meth:`_analyze_project_structure` when the cache is
+        empty so the single canonical walk builds both ``_file_list_cache``
+        and ``_directory_cache`` in one pass.  Callers that invoke this method
+        directly (before :meth:`optimize_instruction_placement`) are handled
+        correctly: the walk runs once and the result is reused.  Triggering
+        that walk clears and rebuilds ``_directory_cache`` and
+        ``_pattern_cache`` as part of the canonical analysis lifecycle.
+        """
         if self._file_list_cache is None:
-            self._file_list_cache = []
-            for root, dirs, files in os.walk(self.base_dir):
-                current_path = Path(root)
-                if self._contains_unsupported_hidden_directory(current_path):
-                    dirs[:] = []
-                    continue
-                dirs[:] = sorted(
-                    d for d in dirs if not self._should_exclude_subdir(current_path / d)
-                )
-                for file in sorted(files):
-                    if not file.startswith("."):
-                        self._file_list_cache.append(Path(root) / file)
+            self._analyze_project_structure()
         return self._file_list_cache
 
     def optimize_instruction_placement(
@@ -476,61 +474,72 @@ class ContextOptimizer:
         )
 
     def _analyze_project_structure(self) -> None:
-        """Analyze the project structure and cache results."""
-        self._directory_cache.clear()
-        self._pattern_cache.clear()  # Also clear pattern cache for deterministic behavior
+        """Analyze the project structure; populate both ``_directory_cache`` and ``_file_list_cache``.
 
-        # Track visited directories to prevent infinite loops
-        visited_dirs = set()
+        This is the single canonical ``os.walk`` traversal for the entire
+        optimization pipeline.  Both caches are built in one pass so that
+        :meth:`_get_all_files` (used by :meth:`_cached_glob` / the symlink-safe
+        glob replacement) never needs a separate walk.
+
+        Ordering guarantee: subdirectories are sorted before descent and files
+        are sorted within each directory, so ``_file_list_cache`` is
+        deterministic regardless of OS-level readdir order.
+        """
+        self._directory_cache.clear()
+        self._pattern_cache.clear()
+        self._file_list_cache = []
+
+        visited_dirs: builtins.set[Path] = set()
 
         for root, dirs, files in os.walk(self.base_dir):
             current_path = Path(root)
 
-            # Safety check for infinite loops
+            # Guard against symlink-induced infinite loops.
             if current_path in visited_dirs:
+                dirs[:] = []
                 continue
             visited_dirs.add(current_path)
 
-            # Calculate depth for analysis
             relative_path = self._relative_path(current_path)
             depth = len(relative_path.parts) if relative_path is not None else 0
 
-            # Only supported agent-tool roots participate in placement. Other
-            # hidden paths (including nested caches) stay pruned.
+            # Only supported agent-tool roots participate in placement.  Other
+            # hidden paths (including nested caches) stay pruned entirely.
             if self._contains_unsupported_hidden_directory(current_path, relative_path):
                 dirs[:] = []
                 continue
 
-            # Default hardcoded exclusions  -- match on exact path components
+            # Safety net: skip if a default-excluded component snuck through.
             if any(part in DEFAULT_EXCLUDED_DIRNAMES for part in relative_path.parts):
                 continue
 
-            # Apply configurable exclusion patterns
+            # Skip paths matching configurable exclusion patterns.
             if self._should_exclude_path(current_path):
                 continue
 
-            # Prune subdirectories from os.walk to avoid descending into excluded paths
-            # This significantly improves performance by avoiding expensive traversal
-            # Note: Modifying dirs[:] (slice assignment) is the standard Python idiom
-            # to control which subdirectories os.walk will descend into
-            dirs[:] = [d for d in dirs if not self._should_exclude_subdir(current_path / d)]
+            # Prune and sort subdirectories.  Sorting ensures that
+            # ``_file_list_cache`` has a stable, deterministic order across
+            # platforms (the OS-level readdir order is not guaranteed).
+            dirs[:] = sorted(d for d in dirs if not self._should_exclude_subdir(current_path / d))
 
-            # Analyze files in this directory
-            total_files = len([f for f in files if not f.startswith(".")])
+            # Build the file-list cache (non-hidden files, sorted for stability).
+            for file in sorted(files):
+                if not file.startswith("."):
+                    self._file_list_cache.append(current_path / file)
+
+            # Build the directory cache (only for directories that contain
+            # at least one non-hidden file; empty directories are skipped).
+            total_files = sum(1 for f in files if not f.startswith("."))
             if total_files == 0:
                 continue
 
             analysis = DirectoryAnalysis(
                 directory=current_path, depth=depth, total_files=total_files
             )
-
-            # Analyze file types
             for file in files:
                 if file.startswith("."):
                     continue
-
-                file_path = current_path / file
-                analysis.file_types.add(file_path.suffix)
+                analysis.file_types.add((current_path / file).suffix)
 
             self._directory_cache[current_path] = analysis
 
