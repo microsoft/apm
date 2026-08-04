@@ -164,6 +164,26 @@ class TestValidateMarketplace:
         assert manifest.plugins == ()
         assert manifest.structural_errors == ("plugins[0].source: unsupported source type 'npm'",)
 
+    def test_identity_less_dict_source_is_retained_for_validation(self):
+        """Validation must surface sources that would fail during resolution."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "test-marketplace",
+                "plugins": [{"name": "invalid", "source": {}}],
+            },
+            source_name="test-marketplace",
+        )
+
+        assert manifest.plugins == ()
+        assert manifest.structural_errors == (
+            "plugins[0].source: expected a supported source type or an owner/repository field",
+        )
+        assert validate_marketplace(manifest)[0] == ValidationResult(
+            check_name="Structure",
+            passed=False,
+            errors=list(manifest.structural_errors),
+        )
+
 
 # ===================================================================
 # CLI command tests -- apm marketplace validate

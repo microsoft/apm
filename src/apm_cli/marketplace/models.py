@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 def _looks_like_local_path(value: str) -> bool:
     """Heuristic for local filesystem paths and file:// URIs."""
+    value = value.strip()
     if not value:
         return False
     if value.startswith("file://"):
@@ -32,6 +33,35 @@ def _looks_like_local_path(value: str) -> bool:
         return True
     # Windows drive letter: C:\ or C:/
     return bool(len(value) >= 3 and value[1:3] in (":\\", ":/") and value[0].isalpha())
+
+
+def _dict_source_error(source_type: str, repo: object, url: object) -> str | None:
+    """Return a structural diagnostic for an unsupported dict plugin source."""
+    has_repo = isinstance(repo, str) and "/" in repo.strip()
+    has_url = isinstance(url, str) and bool(url.strip())
+    if source_type == "npm":
+        return "source: unsupported source type 'npm'"
+    if not source_type and not has_repo:
+        return "source: expected a supported source type or an owner/repository field"
+    if source_type not in {"", "github", "url", "git-subdir", "gitlab"}:
+        return f"source: unsupported source type '{source_type}'"
+    if source_type == "github":
+        if not has_repo:
+            return "source: github requires an owner/repository field"
+        if _looks_like_local_path(repo):
+            return "source: github requires a non-local owner/repository field"
+    if source_type == "url":
+        if not has_url:
+            return "source: url requires a non-empty url field"
+        if _looks_like_local_path(url):
+            return "source: url requires a non-local url field"
+    if source_type in {"git-subdir", "gitlab"}:
+        locator = repo if has_repo else url
+        if not locator:
+            return f"source: {source_type} requires an owner/repository or url field"
+        if _looks_like_local_path(locator):
+            return f"source: {source_type} requires a non-local owner/repository or url field"
+    return None
 
 
 def _extract_host_from_url(url: str) -> str:
@@ -400,11 +430,24 @@ def _parse_plugin_entry(
             # Relative path source (Claude shorthand)
             source = raw
         elif isinstance(raw, dict):
-            # Type discriminator: Copilot CLI uses "source" key, Claude uses "type"
-            source_type = raw.get("type", "") or raw.get("source", "")
-            if source_type == "npm":
-                logger.debug("Skipping npm source type for plugin '%s' (unsupported)", name)
-                return None, "source: unsupported source type 'npm'"
+            # Copilot CLI uses "source", while other manifests use "type" or "kind".
+            source_type = next(
+                (
+                    value.strip().lower()
+                    for key in ("type", "source", "kind")
+                    if isinstance(value := raw.get(key), str) and value.strip()
+                ),
+                "",
+            )
+            error = _dict_source_error(
+                source_type,
+                raw.get("repo", "") or raw.get("repository", ""),
+                raw.get("url", ""),
+            )
+            if error is not None:
+                if source_type == "npm":
+                    logger.debug("Skipping npm source type for plugin '%s' (unsupported)", name)
+                return None, error
             # Normalize: ensure "type" key is set for downstream resolvers
             if source_type and "type" not in raw:
                 raw = {**raw, "type": source_type}

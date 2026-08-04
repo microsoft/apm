@@ -19,22 +19,54 @@ pytestmark = [
 ]
 
 
+@pytest.mark.parametrize(
+    ("case_name", "source_bytes", "expected_error"),
+    [
+        (
+            "plugins-not-list",
+            b'{\n  "name": "malformed",\n  "plugins": "not-an-array"\n}\n',
+            "plugins: expected a list",
+        ),
+        (
+            "empty-source",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {}}]\n}\n',
+            "plugins[0].source: expected a supported source type or an owner/repository field",
+        ),
+        (
+            "unsupported-source",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "bogus"}}]\n}\n',
+            "plugins[0].source: unsupported source type 'bogus'",
+        ),
+        (
+            "github-without-repo",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "github"}}]\n}\n',
+            "plugins[0].source: github requires an owner/repository field",
+        ),
+        (
+            "local-github-source",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "github", "repo": "/tmp/local-plugin"}}]\n}\n',
+            "plugins[0].source: github requires a non-local owner/repository field",
+        ),
+    ],
+)
 def test_marketplace_invalid_plugins_validation(
     tmp_path: Path,
     apm_binary_path: Path,
+    case_name: str,
+    source_bytes: bytes,
+    expected_error: str,
 ) -> None:
     """Registration tolerates malformed plugins while validation reports its path."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     source = isolated.work_root / "malformed-marketplace"
     source.mkdir()
     manifest_path = source / "marketplace.json"
-    source_bytes = b'{\n  "name": "malformed",\n  "plugins": "not-an-array"\n}\n'
     manifest_path.write_bytes(source_bytes)
     runner = ApmLifecycleRunner((str(apm_binary_path),))
 
     add_result = runner.run(
         ("marketplace", "add", str(source), "--name", "malformed"),
-        scenario_id="marketplace-invalid-plugins-validation",
+        scenario_id=f"marketplace-invalid-plugins-validation-{case_name}",
         cwd=isolated.work_root,
         env=isolated.subprocess_env(),
     )
@@ -43,15 +75,16 @@ def test_marketplace_invalid_plugins_validation(
     (validate_result,) = runner.run_sequence(
         (("marketplace", "validate", "malformed"),),
         expected_returncodes=(1,),
-        scenario_id="marketplace-invalid-plugins-validation",
+        scenario_id=f"marketplace-invalid-plugins-validation-{case_name}",
         cwd=isolated.work_root,
         env=isolated.subprocess_env(),
     )
 
     assert add_result.returncode == 0
+    add_output = add_result.stdout + add_result.stderr
+    assert "contains 1 unsupported or malformed plugin entry" in add_output
     validation_output = validate_result.stdout + validate_result.stderr
-    assert "plugins" in validation_output
-    assert "expected a list" in validation_output
+    assert " ".join(expected_error.split()) in " ".join(validation_output.split())
     assert "Found 0 plugins" not in validation_output
     assert "Schema: passed" not in validation_output
     assert "Names: passed" not in validation_output
