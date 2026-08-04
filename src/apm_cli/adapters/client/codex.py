@@ -1,6 +1,5 @@
 """OpenAI Codex CLI implementation of MCP client adapter."""
 
-import ipaddress
 import logging
 import os
 from pathlib import Path
@@ -13,37 +12,12 @@ from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_success, _rich_warning
+from ...utils.net import is_loopback_host
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import MCPClientAdapter
 
 _log = logging.getLogger(__name__)
-
-
-def _is_loopback_host(host: str | None) -> bool:
-    """Return True when *host* is a loopback address (localhost, 127.0.0.0/8, ::1).
-
-    Deliberately narrower than the private/metadata detection used for
-    registry URLs (``install.mcp.registry._is_local_or_metadata_host``):
-    only loopback is exempt from the https requirement in
-    ``_format_server_config``, since plain http to any non-local host can
-    leak bearer tokens in transit.
-    """
-    if not host:
-        return False
-    lowered = host.lower()
-    if lowered in ("localhost", "ip6-localhost", "ip6-loopback"):
-        return True
-    try:
-        addr = ipaddress.ip_address(lowered)
-    except ValueError:
-        # urlparse keeps decimal-encoded forms like '2130706433' (== 127.0.0.1)
-        # as the hostname string. Try int parse to catch that obfuscation.
-        try:
-            addr = ipaddress.ip_address(int(lowered))
-        except (ValueError, TypeError):
-            return False
-    return addr.is_loopback
 
 
 class CodexClientAdapter(MCPClientAdapter):
@@ -297,9 +271,9 @@ class CodexClientAdapter(MCPClientAdapter):
             scheme = parsed_remote.scheme.lower()
             # Codex CLI itself accepts plain-http loopback URLs (its docs use
             # http://localhost examples), and local dev servers rarely carry
-            # certs — so loopback http is allowed. Any other non-https host is
+            # certs -- so loopback http is allowed. Any other non-https host is
             # still rejected to avoid cleartext bearer tokens in transit.
-            insecure_loopback = scheme == "http" and _is_loopback_host(parsed_remote.hostname)
+            insecure_loopback = scheme == "http" and is_loopback_host(parsed_remote.hostname)
             if scheme != "https" and not insecure_loopback:
                 _rich_warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
