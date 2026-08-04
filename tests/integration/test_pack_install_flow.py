@@ -785,6 +785,112 @@ class TestValidateAndAddPackagesToApmYml:
         )
         assert result == []
 
+    def test_github_blob_skill_url_persists_skill_subset(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        self._write_apm_yml(tmp_path / "apm.yml")
+        url = (
+            "https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md#L1"
+        )
+
+        with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+            result, outcome = _validate_and_add_packages_to_apm_yml(
+                packages=[url],
+                manifest_path=tmp_path / "apm.yml",
+            )
+
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(tmp_path / "apm.yml")
+        assert result == ["mattpocock/skills#main"]
+        assert outcome.invalid == []
+        assert data["dependencies"]["apm"] == [
+            {
+                "git": "mattpocock/skills",
+                "ref": "main",
+                "skills": ["productivity/handoff"],
+            }
+        ]
+
+    def test_raw_github_skill_url_updates_existing_manifest(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "description: t\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - mattpocock/skills\n",
+            encoding="utf-8",
+        )
+        url = (
+            "https://raw.githubusercontent.com/mattpocock/skills/main/"
+            "skills/productivity/handoff/SKILL.md?plain=1#L1"
+        )
+
+        with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+            result, outcome = _validate_and_add_packages_to_apm_yml(
+                packages=[url],
+                manifest_path=tmp_path / "apm.yml",
+            )
+
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(tmp_path / "apm.yml")
+        assert result == []
+        assert outcome.valid == [("mattpocock/skills#main", True)]
+        assert data["dependencies"]["apm"] == [
+            {
+                "git": "mattpocock/skills",
+                "ref": "main",
+                "skills": ["productivity/handoff"],
+            }
+        ]
+
+    def test_github_skill_url_pin_does_not_leak_to_other_packages(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        self._write_apm_yml(tmp_path / "apm.yml")
+        url = "https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md"
+
+        with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+            result, outcome = _validate_and_add_packages_to_apm_yml(
+                packages=[url, "owner/regular-package"],
+                manifest_path=tmp_path / "apm.yml",
+            )
+
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(tmp_path / "apm.yml")
+        assert result == ["mattpocock/skills#main", "owner/regular-package"]
+        assert outcome.invalid == []
+        assert data["dependencies"]["apm"] == [
+            {
+                "git": "mattpocock/skills",
+                "ref": "main",
+                "skills": ["productivity/handoff"],
+            },
+            "owner/regular-package",
+        ]
+
+    def test_github_skill_url_outside_skills_directory_is_invalid(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        self._write_apm_yml(tmp_path / "apm.yml")
+        url = "https://github.com/owner/repo/blob/main/docs/SKILL.md"
+
+        result, outcome = _validate_and_add_packages_to_apm_yml(
+            packages=[url],
+            manifest_path=tmp_path / "apm.yml",
+        )
+
+        assert result == []
+        assert outcome.valid == []
+        assert outcome.invalid == [
+            (
+                url,
+                "GitHub SKILL.md install URLs must point inside a `skills/` directory. "
+                f"Got: `{url}`.",
+            )
+        ]
+
 
 class TestInstallCmd:
     def test_install_no_apm_yml_creates_minimal(self, runner, tmp_path, monkeypatch):
