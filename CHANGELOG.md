@@ -27,8 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm compile --clean` no longer removes APM-generated `AGENTS.md` files
-  tracked by nested Git worktrees. (#2436)
+- `apm compile --clean` preserves APM-generated `AGENTS.md` files tracked by nested Git worktrees. (#2473)
 - Required MCP runtime defaults are now overrideable prompts, while secret
   defaults remain hidden and VS Code OCI launchers resolve every runtime
   placeholder without writing secret values to `mcp.json`. (#2455)
