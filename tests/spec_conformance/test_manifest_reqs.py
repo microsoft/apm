@@ -722,7 +722,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be rejected before target-scoped",
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
-        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-sc-001](#req-sc-001),",
+        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-tg-010](#req-tg-010), [req-sc-001](#req-sc-001),",
     )
 
 
@@ -841,4 +841,16 @@ def test_implementations_publish_conformance_statement():
     assert_spec_contains(
         "publish a conformance statement",
         "MUST\nlist, for each `req-XXX` in scope",
+    )
+
+
+@pytest.mark.req("req-tg-010")
+def test_project_scoped_native_hook_command_is_portably_anchored() -> None:
+    """Claude project hooks retain project-relative paths outside the project CWD."""
+    assert_spec_contains(
+        "anchor\nthe generated command to the consumer project",
+        "`CLAUDE_PROJECT_DIR` in POSIX commands",
+        "`$env:CLAUDE_PROJECT_DIR` in\n> PowerShell commands",
+        "MUST NOT embed an absolute consumer",
+        "MUST reject a\nhook path containing a dollar sign or backtick",
     )

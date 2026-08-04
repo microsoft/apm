@@ -132,7 +132,8 @@ self-hosted GitLab, or Azure DevOps. The host is preserved end to end, so a
 consumer installs from the same host you authored on. Any relative source
 composes onto the base, including two-segment values like
 `acme-org/pinned-package`. Host-prefixed sources like `github.com/acme/tool`,
-full HTTPS URLs, and local `./` paths remain per-entry overrides. If
+full HTTPS URLs (including nested paths such as
+`https://gitlab.example.com/group/subgroup/package.git`), and local `./` paths remain per-entry overrides. If
 `sourceBase` is absent, existing `owner/repo` source behavior is unchanged.
 See the [manifest schema](../../reference/manifest-schema/#75-marketplacepackages)
 for the full validation and override rules.

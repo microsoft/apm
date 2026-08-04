@@ -120,6 +120,19 @@ if [ "$hook_scope_owner_count" -ne 1 ] \
     [ -n "$hook_scope_duplicate_hits" ] && echo "$hook_scope_duplicate_hits"
     violations=$((violations + 1))
 fi
+hook_project_dir_owner_count=$(grep -Fc '"CLAUDE_PROJECT_DIR"' "$hook_file" || true)
+hook_project_dir_duplicate_hits=$(
+    grep -REn --include='*.py' '"CLAUDE_PROJECT_DIR"' src/apm_cli \
+        | grep -v "^${hook_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$hook_project_dir_owner_count" -ne 1 ] \
+    || [ -n "$hook_project_dir_duplicate_hits" ]; then
+    echo "[x] Claude project hook paths must be owned by HookIntegrator"
+    [ -n "$hook_project_dir_duplicate_hits" ] && echo "$hook_project_dir_duplicate_hits"
+    violations=$((violations + 1))
+fi
 hook_event_map_owner_count=$(grep -Ec \
     '^_HOOK_EVENT_MAP[[:space:]]*[:=]' "$hook_file" || true)
 hook_event_map_duplicate_hits=$(
@@ -1443,6 +1456,28 @@ if [ "$(grep -Ec '^def _read_local_version\(|^def _read_plugin_json_version\(' \
     || [ -n "$local_version_duplicate_hits" ]; then
     echo "[x] Local marketplace package versions must route through marketplace/version_check.py"
     [ -n "$local_version_duplicate_hits" ] && echo "$local_version_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC31: applyTo normalization and hidden-tool placement authority"
+apply_to_owner="src/apm_cli/utils/patterns.py"
+apply_to_normalizer_defs=$(grep -rEc --include='*.py' \
+    '^def _?normalize_apply_to\(' src/apm_cli \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+apply_to_parser="src/apm_cli/primitives/parser.py"
+hidden_tool_placement_owner="src/apm_cli/compilation/context_optimizer.py"
+hidden_tool_tree_defs=$(grep -rEc --include='*.py' \
+    '^PLACEMENT_HIDDEN_TOOL_TREES[[:space:]]*=' src/apm_cli \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+if [ "$apply_to_normalizer_defs" -ne 1 ] \
+    || ! grep -q '^def normalize_apply_to(' "$apply_to_owner" \
+    || ! grep -q 'from apm_cli.utils.patterns import normalize_apply_to' "$apply_to_parser" \
+    || grep -Eq '^def _?normalize_apply_to\(' "$apply_to_parser" \
+    || ! grep -q 'normalize_apply_to(metadata.get("applyTo"), default="")' "$apply_to_parser" \
+    || [ "$hidden_tool_tree_defs" -ne 1 ] \
+    || ! grep -q '^PLACEMENT_HIDDEN_TOOL_TREES = frozenset(' "$hidden_tool_placement_owner" \
+    || ! grep -q 'not self._is_supported_hidden_tool_root(path)' "$hidden_tool_placement_owner"; then
+    echo "[x] applyTo normalization must use utils/patterns.py and hidden placement ContextOptimizer"
     violations=$((violations + 1))
 fi
 

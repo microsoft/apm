@@ -67,6 +67,11 @@ mcp: in apm.yml      ->   per target: .mcp.json / settings.json / equivalent
 
 Not every target supports every primitive type. When a primitive can't land on a target, APM emits a warning at install time. Skim [Targets matrix](../../reference/targets-matrix/) to set expectations before adding a primitive.
 
+When APM rewrites a Claude project hook script path, it references
+`CLAUDE_PROJECT_DIR` at runtime rather than an absolute checkout path. The
+generated path remains portable across clones and works when Claude starts a
+hook outside the project directory.
+
 > **Deduplication**: When `.github/instructions/` already contains `.instructions.md` files (deployed by `apm install --target copilot`), `apm compile --target copilot` omits `AGENTS.md` entirely when its only content would be the duplicated instructions section. When `.claude/rules/` already contains `.md` files (deployed by `apm install --target claude`), `apm compile --target claude` omits the instructions section from `CLAUDE.md` for the same reason. The context file is still generated when it carries non-instruction content such as a constitution. See [Copilot deduplication](../../producer/compile/#copilot-deduplication) for details.
 
 ## Common workflows

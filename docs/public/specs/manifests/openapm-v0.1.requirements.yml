@@ -399,6 +399,11 @@ requirements:
     keyword: MUST
     section: "8.5.1"
     conformance_class: consumer
+  - id: req-tg-010
+    keyword: MUST
+    section: "8.5.4"
+    conformance_class: consumer
+    notes: "project-scoped native hooks use a portable project-directory environment anchor and reject shell-expansion path syntax"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"

@@ -792,13 +792,11 @@ class TestClaudeIntegration:
             assert all("_apm_source" not in e for e in stop)
             return {h["command"] for entry in stop for h in entry["hooks"]}
 
-        # Project-scope writes repo-relative paths so checked-in
-        # settings.json stays portable across clones / CI (#1394).
-        # User-scope deploys (project_root == ~) still absolutize via
-        # _rewrite_command_for_target's deploy_root branch -- see #1354.
+        # Project scope uses Claude's runtime project root rather than a
+        # checkout-specific absolute path; user scope still absolutizes.
         assert extract_commands(first) == {
-            ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh",
-            ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh",
+            '"${CLAUDE_PROJECT_DIR}/.claude/hooks/multi-stop-pkg/hooks/stop-a.sh"',
+            '"${CLAUDE_PROJECT_DIR}/.claude/hooks/multi-stop-pkg/hooks/stop-b.sh"',
         }
 
         # Verify sidecar has the ownership info
@@ -812,16 +810,8 @@ class TestClaudeIntegration:
 
         assert settings_path.read_text() == first
 
-    def test_project_scope_writes_relative_hook_paths(self, temp_project):
-        """Project-scope (.claude/settings.json checked into the repo) must keep
-        repo-relative hook commands so the generated config is portable across
-        clones / contributors / CI runners (#1394).
-
-        Regression: #1354 unconditionally threaded deploy_root=project_root to
-        absolutize commands -- correct for user-scope (~/.claude/settings.json,
-        which #1310 was about) but wrong for project-scope, where it baked the
-        installer's machine-local absolute prefix into the committed JSON.
-        """
+    def test_project_scope_writes_portable_hook_paths(self, temp_project):
+        """Project Claude hooks must stay portable without depending on process cwd."""
         pkg_dir = temp_project / "scope-pkg"
         hooks_dir = pkg_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -851,9 +841,7 @@ class TestClaudeIntegration:
 
         settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
         cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
-        assert cmd == ".claude/hooks/scope-pkg/hooks/stop.sh", (
-            f"Project-scope command must be repo-relative; got {cmd!r}"
-        )
+        assert cmd == '"${CLAUDE_PROJECT_DIR}/.claude/hooks/scope-pkg/hooks/stop.sh"'
         assert not Path(cmd).is_absolute(), (
             f"Project-scope command must not be absolute; got {cmd!r}"
         )
@@ -1684,6 +1672,55 @@ class TestScriptPathRewriting:
 
         assert ".claude/hooks/my-pkg/hooks/run.sh" in cmd
         assert len(scripts) == 1
+
+    def test_rewrite_claude_project_powershell_path_is_cwd_independent(self, temp_project):
+        """Claude project PowerShell hooks must use Claude's project-root variable."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "scripts" / "run.ps1").write_text("Write-Host 'ok'", encoding="utf-8")
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            'pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/run.ps1"',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert cmd == (
+            'pwsh -NoProfile -File "$env:CLAUDE_PROJECT_DIR/.claude/hooks/my-pkg/scripts/run.ps1"'
+        )
+        assert len(scripts) == 1
+
+    def test_rewrite_claude_project_powershell_key_uses_env_syntax(self, temp_project):
+        """Claude conversion must preserve a flat PowerShell handler's shell syntax."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "scripts" / "run.ps1").write_text("Write-Host 'ok'", encoding="utf-8")
+
+        rewritten, scripts = HookIntegrator()._rewrite_hooks_data(
+            {"hooks": {"Stop": [{"powershell": '& "./scripts/run.ps1"'}]}},
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert rewritten["hooks"]["Stop"][0]["powershell"] == (
+            '& "$env:CLAUDE_PROJECT_DIR/.claude/hooks/my-pkg/scripts/run.ps1"'
+        )
+        assert len(scripts) == 1
+
+    def test_rejects_claude_project_path_with_shell_expansion_characters(self):
+        """Claude project paths must not permit shell expansion from filenames."""
+        with pytest.raises(
+            ValueError,
+            match=r"Claude project hook paths cannot contain shell expansion characters",
+        ):
+            HookIntegrator._project_scoped_command_path(
+                "sh ./run.sh",
+                "claude",
+                ".claude/hooks/my-pkg/scripts/$(id).sh",
+                None,
+            )
 
     def test_nonexistent_script_not_rewritten(self, temp_project):
         """Test that references to non-existent scripts are left as-is."""
@@ -3647,8 +3684,8 @@ class TestIssue1007Fixes:
         assert "run.sh" in cmd, "Command must contain the script name"
         # Command should resolve to the source path (even if file doesn't exist)
 
-    def test_rewrite_command_no_deploy_root_stays_relative(self, tmp_path: Path) -> None:
-        """Without deploy_root, command must stay relative (backward compatibility)."""
+    def test_rewrite_claude_command_no_deploy_root_uses_project_root(self, tmp_path: Path) -> None:
+        """Claude project hooks use the runtime project-root variable."""
         pkg_dir = tmp_path / "pkg"
         script = pkg_dir / "hooks" / "run.sh"
         script.parent.mkdir(parents=True, exist_ok=True)
@@ -3665,9 +3702,7 @@ class TestIssue1007Fixes:
 
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
         assert len(scripts) == 1, "Script copy entry must be produced"
-        assert cmd.startswith(".claude/hooks/my-pkg/"), (
-            f"Command must be relative (start with .claude/); got {cmd}"
-        )
+        assert cmd == '"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-pkg/hooks/run.sh"'
         assert not cmd.startswith("/"), "Command must not be absolute without deploy_root"
 
     def test_rewrite_command_deploy_root_relative_path_handler(self, tmp_path: Path) -> None:
