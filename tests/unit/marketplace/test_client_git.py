@@ -109,8 +109,15 @@ def test_fetch_git_preserves_ssh_protocol_url_with_port(tmp_path: Path, fake_aut
     fake_auth_resolver.hardened_git_base_env.assert_called_once_with()
 
 
-def test_fetch_git_ssh_does_not_forward_http_credentials(tmp_path: Path) -> None:
-    source = _git_source("ssh://git@github.com:2222/org/repo.git")
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ssh://git@github.com:2222/org/repo.git",
+        "git@gitea.example.com:org/repo.git",
+    ],
+)
+def test_fetch_git_ssh_does_not_forward_http_credentials(tmp_path: Path, raw: str) -> None:
+    source = _git_source(raw)
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     (checkout / "marketplace.json").write_text("{}", encoding="utf-8")
@@ -141,7 +148,9 @@ def test_fetch_git_ssh_does_not_forward_http_credentials(tmp_path: Path) -> None
         result = _fetch_git(
             source,
             "marketplace.json",
-            host_info=SimpleNamespace(host="github.com"),
+            host_info=SimpleNamespace(
+                host="github.com" if raw.startswith("ssh://") else "gitea.example.com"
+            ),
             auth_resolver=auth_resolver,
         )
 
