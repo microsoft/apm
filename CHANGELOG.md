@@ -183,9 +183,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   @sergio-sisternes-epam. (#2294)
 - Narrowing active targets now removes shared-root skill copies owned only by a
   dropped target while preserving user edits and surviving ownership. (#2299)
-- Manifest auto-bootstrap now rejects empty project names, falls back to
-  `my-project` at filesystem roots, and routes `init`, `install`, and zero-config
-  script execution through one validator -- by @nadav-y (#2200).
+- `apm install <pkg>` now works at a filesystem root (e.g. Docker containers
+  with `WORKDIR /`) by falling back to `my-project` as the manifest name;
+  explicit empty or whitespace-only names are rejected early with a clear error
+  -- by @nadav-y (#2200).
 - Installing packages that share `.agents/skills` no longer leaves duplicate
   lockfile state or drops prior integrity information when APM must keep a file
   for a later retry. (#2283)

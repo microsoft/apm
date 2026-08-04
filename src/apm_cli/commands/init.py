@@ -152,7 +152,7 @@ def _perform_init(
         if project_name is not None and not _validate_project_name(project_name):
             logger.error(
                 f"Invalid project name '{project_name}': "
-                "project names must be non-empty and must not contain "
+                "project names must not be empty or whitespace-only and must not contain "
                 "path separators ('/' or '\\\\') or be '..'."
             )
             sys.exit(1)
@@ -406,7 +406,7 @@ def _interactive_project_setup(default_name, logger):
                 break
             console.print(
                 f"[error]Invalid project name '{name}': "
-                "project names must be non-empty and must not contain "
+                "project names must not be empty or whitespace-only and must not contain "
                 "path separators ('/' or '\\\\') or be '..'.[/error]"
             )
 
@@ -424,7 +424,7 @@ def _interactive_project_setup(default_name, logger):
                 break
             click.echo(
                 f"{ERROR}Invalid project name '{name}': "
-                f"project names must be non-empty and must not contain "
+                f"project names must not be empty or whitespace-only and must not contain "
                 f"path separators ('/' or '\\\\') or be '..'.{RESET}"
             )
 
