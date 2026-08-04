@@ -2784,6 +2784,9 @@ deployments:
   - .
   active_owner: .
   content_hash: sha256:7a5aac9c6c4153c76e6a6bc6cbd1918e677a79a845b0c23f860f85264eca7d0b
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/changelog.instructions.md
   runtime: null
   scope: project
   owners:
