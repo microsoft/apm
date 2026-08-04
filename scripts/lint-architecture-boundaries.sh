@@ -1400,6 +1400,27 @@ if ! bash scripts/check_marketplace_output_path_authority.sh; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC33: marketplace structural-diagnostic authority"
+marketplace_structure_owner="src/apm_cli/marketplace/models.py"
+marketplace_structure_validator="src/apm_cli/marketplace/validator.py"
+marketplace_structure_parallel_hits=$(
+    grep -rEn --include='*.py' \
+        'structural_errors[[:space:]]*=' \
+        src/apm_cli/marketplace \
+        | grep -v "^${marketplace_structure_owner}:" \
+        || true
+)
+if ! grep -q 'structural_errors: tuple\[str, \.\.\.\] = ()' "$marketplace_structure_owner" \
+    || ! grep -q 'structural_errors.append("plugins: expected a list")' \
+        "$marketplace_structure_owner" \
+    || ! grep -q '^def validate_marketplace_structure(' "$marketplace_structure_validator" \
+    || ! grep -q 'errors=list(manifest.structural_errors)' "$marketplace_structure_validator" \
+    || [ -n "$marketplace_structure_parallel_hits" ]; then
+    echo "[x] Marketplace structural diagnostics must originate in marketplace/models.py"
+    [ -n "$marketplace_structure_parallel_hits" ] && echo "$marketplace_structure_parallel_hits"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC29: dependency identity and materialization path authority"
 identity_owner="src/apm_cli/models/dependency/identity.py"
 materialization_owner="src/apm_cli/models/dependency/materialization.py"

@@ -130,6 +130,14 @@ class TestMarketplacePlugin:
 class TestMarketplaceManifest:
     """Frozen dataclass for parsed marketplace content."""
 
+    def test_positional_optional_fields_remain_compatible(self):
+        """Structural diagnostics append to, rather than reorder, the DTO."""
+        manifest = MarketplaceManifest("test", (), "owner", "description")
+
+        assert manifest.owner_name == "owner"
+        assert manifest.description == "description"
+        assert manifest.structural_errors == ()
+
     def test_find_plugin(self):
         plugins = (
             MarketplacePlugin(name="alpha"),
@@ -286,6 +294,28 @@ class TestParseMarketplaceJson:
         assert len(manifest.plugins) == 1
         assert manifest.plugins[0].source["type"] == "git-subdir"
 
+    def test_packed_git_subdir_url_is_preserved(self):
+        """Pack-emitted git-subdir URL sources remain valid parser input."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "Test",
+                "plugins": [
+                    {
+                        "name": "subdir-plugin",
+                        "source": {
+                            "source": "git-subdir",
+                            "url": "https://git.example.invalid/team/monorepo",
+                            "path": "packages/plugin-a",
+                        },
+                    }
+                ],
+            }
+        )
+
+        assert manifest.structural_errors == ()
+        assert manifest.plugins[0].source["type"] == "git-subdir"
+        assert manifest.plugins[0].source["url"] == "https://git.example.invalid/team/monorepo"
+
     def test_npm_source_skipped(self):
         data = {
             "name": "Test",
@@ -351,6 +381,43 @@ class TestParseMarketplaceJson:
         manifest = parse_marketplace_json(data)
         assert len(manifest.plugins) == 1
         assert manifest.plugins[0].name == "valid"
+        assert manifest.structural_errors == (
+            "plugins[1].name: expected a non-empty string",
+            "plugins[2]: expected an object",
+            "plugins[3].source: expected a source or repository field",
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "error"),
+        [
+            ({}, "source: expected a supported source type or an owner/repository field"),
+            ({"type": "bogus"}, "source: unsupported source type 'bogus'"),
+            ({"type": "github"}, "source: github requires an owner/repository field"),
+            ({"type": "url"}, "source: url requires a non-empty url field"),
+            (
+                {"type": "github", "repo": "/tmp/local-plugin"},
+                "source: github requires a non-local owner/repository field",
+            ),
+            (
+                {"type": "url", "url": "../local-plugin"},
+                "source: url requires a non-local url field",
+            ),
+            (
+                {"type": "git-subdir", "url": "~/local-monorepo"},
+                "source: git-subdir requires a non-local owner/repository or url field",
+            ),
+        ],
+    )
+    def test_malformed_dict_sources_are_retained_as_diagnostics(
+        self, source: dict[str, str], error: str
+    ) -> None:
+        """Dict sources that resolution would reject must not validate as clean."""
+        manifest = parse_marketplace_json(
+            {"name": "Test", "plugins": [{"name": "invalid", "source": source}]}
+        )
+
+        assert manifest.plugins == ()
+        assert manifest.structural_errors == (f"plugins[0].{error}",)
 
     def test_empty_plugins_list(self):
         data = {"name": "Empty"}
