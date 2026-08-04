@@ -574,8 +574,12 @@ def _fetch_git(
 
     from ..cache.git_cache import GitCache, _sanitize_url
     from ..cache.paths import get_cache_root
+    from ..cache.url_normalize import SCP_LIKE_RE
 
-    if urlsplit(source.url).scheme.lower() == "ssh":
+    is_ssh_source = urlsplit(source.url).scheme.lower() == "ssh" or bool(
+        SCP_LIKE_RE.match(source.url)
+    )
+    if is_ssh_source:
         from ..core.auth import AuthResolver
 
         git_env = AuthResolver.build_noninteractive_git_env(

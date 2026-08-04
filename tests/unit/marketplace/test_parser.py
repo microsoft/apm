@@ -125,13 +125,13 @@ def test_invalid_ssh_protocol_url_rejected(raw: str) -> None:
 
 
 def test_password_bearing_ssh_protocol_url_rejected_without_echoing_secret() -> None:
-    raw = "ssh://git:secret-value@gitea.example.com:2222/org/repo.git"
+    raw = "ssh://git:placeholder-password@gitea.example.com:2222/org/repo.git"
 
     with pytest.raises(ValueError) as exc_info:
         _parse_marketplace_source(raw, host_flag=None)
 
     assert "password" in str(exc_info.value).lower()
-    assert "secret-value" not in str(exc_info.value)
+    assert "placeholder-password" not in str(exc_info.value)
 
 
 def test_https_untrusted_host_classified_as_git() -> None:
