@@ -1241,6 +1241,17 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-010",
+      "keyword": "MUST",
+      "section": "8.5.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_project_scoped_native_hook_command_is_portably_anchored"
+      ]
     }
   ],
   "spec_version": "v0.1.1",

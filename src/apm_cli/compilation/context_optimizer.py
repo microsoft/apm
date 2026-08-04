@@ -46,6 +46,23 @@ DEFAULT_EXCLUDED_DIRNAMES = frozenset(
     }
 )
 
+# Hidden roots owned by supported agent tools. Placement may examine these
+# trees when an applyTo pattern explicitly targets their non-hidden contents.
+PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
+    {
+        ".agents",
+        ".apm",
+        ".claude",
+        ".codex",
+        ".cursor",
+        ".gemini",
+        ".github",
+        ".kiro",
+        ".opencode",
+        ".windsurf",
+    }
+)
+
 
 @dataclass
 class DirectoryAnalysis:
@@ -135,6 +152,7 @@ class ContextOptimizer:
         self._glob_cache: builtins.dict[str, builtins.list[str]] = {}
         self._glob_set_cache: builtins.dict[str, builtins.set[Path]] = {}
         self._file_list_cache: builtins.list[Path] | None = None
+        self._placement_hidden_tool_trees: frozenset[str] = frozenset()
         self._inheritance_cache: builtins.dict[Path, builtins.list[Path]] = {}  # (#171)
         self._timing_enabled = False
         self._phase_timings: builtins.dict[str, float] = {}
@@ -204,10 +222,12 @@ class ContextOptimizer:
         if self._file_list_cache is None:
             self._file_list_cache = []
             for root, dirs, files in os.walk(self.base_dir):
-                # Skip hidden and excluded directories for performance
-                # Sort to guarantee deterministic traversal order across filesystems
+                current_path = Path(root)
+                if self._contains_unsupported_hidden_directory(current_path):
+                    dirs[:] = []
+                    continue
                 dirs[:] = sorted(
-                    d for d in dirs if not d.startswith(".") and d not in DEFAULT_EXCLUDED_DIRNAMES
+                    d for d in dirs if not self._should_exclude_subdir(current_path / d)
                 )
                 for file in sorted(files):
                     if not file.startswith("."):
@@ -242,6 +262,12 @@ class ContextOptimizer:
         self._optimization_decisions.clear()
         self._warnings.clear()
         self._errors.clear()
+        # Shared file discovery runs once per compile batch, so traverse the
+        # union of roots explicitly targeted by its instructions.
+        self._placement_hidden_tool_trees = self._targeted_hidden_tool_roots(instructions)
+        self._file_list_cache = None
+        self._glob_cache.clear()
+        self._glob_set_cache.clear()
 
         # Phase 1: Analyze project structure
         self._time_phase("Project Analysis", self._analyze_project_structure)
@@ -466,14 +492,13 @@ class ContextOptimizer:
             visited_dirs.add(current_path)
 
             # Calculate depth for analysis
-            try:
-                relative_path = current_path.resolve().relative_to(self.base_dir.resolve())
-                depth = len(relative_path.parts)
-            except ValueError:
-                depth = 0
+            relative_path = self._relative_path(current_path)
+            depth = len(relative_path.parts) if relative_path is not None else 0
 
-            # Skip hidden directories and common ignore patterns
-            if any(part.startswith(".") for part in current_path.parts[len(self.base_dir.parts) :]):
+            # Only supported agent-tool roots participate in placement. Other
+            # hidden paths (including nested caches) stay pruned.
+            if self._contains_unsupported_hidden_directory(current_path, relative_path):
+                dirs[:] = []
                 continue
 
             # Default hardcoded exclusions  -- match on exact path components
@@ -530,11 +555,58 @@ class ContextOptimizer:
         if dir_name in DEFAULT_EXCLUDED_DIRNAMES:
             return True
 
-        # Skip hidden directories
-        if dir_name.startswith("."):  # noqa: SIM103
-            return True
+        # Only roots named by this compile's applyTo expressions participate.
+        # Every other hidden directory remains excluded from placement traversal.
+        return dir_name.startswith(".") and not self._is_supported_hidden_tool_root(path)
 
-        return False
+    def _is_supported_hidden_tool_root(self, path: Path) -> bool:
+        """Return whether ``path`` is a top-level hidden root targeted this run."""
+        relative_path = self._relative_path(path)
+        if relative_path is None:
+            return False
+        return (
+            len(relative_path.parts) == 1
+            and relative_path.parts[0] in self._placement_hidden_tool_trees
+        )
+
+    def _contains_unsupported_hidden_directory(
+        self, path: Path, relative_path: Path | None = None
+    ) -> bool:
+        """Return whether ``path`` enters a hidden tree not targeted this run."""
+        relative_path = relative_path or self._relative_path(path)
+        if relative_path is None:
+            return True
+        # os.walk reaches a nested directory only after _should_exclude_subdir
+        # admitted its parent, so the top-level component is sufficient here.
+        return bool(
+            relative_path.parts
+            and relative_path.parts[0].startswith(".")
+            and relative_path.parts[0] not in self._placement_hidden_tool_trees
+        )
+
+    def _targeted_hidden_tool_roots(
+        self, instructions: builtins.list[Instruction]
+    ) -> frozenset[str]:
+        """Return supported top-level hidden roots named by applyTo patterns.
+
+        A pattern can name the root after a wildcard (for example,
+        ``**/.apm/**/*.md``), but traversal still admits only the top-level
+        root through :meth:`_is_supported_hidden_tool_root`.
+        """
+        targeted_roots: builtins.set[str] = set()
+        for instruction in instructions:
+            for pattern in parse_apply_to(instruction.apply_to):
+                targeted_roots.update(
+                    PLACEMENT_HIDDEN_TOOL_TREES.intersection(pattern.replace("\\", "/").split("/"))
+                )
+        return frozenset(targeted_roots)
+
+    def _relative_path(self, path: Path) -> Path | None:
+        """Return a lexical path for a directory discovered under ``base_dir``."""
+        try:
+            return path.relative_to(self.base_dir)
+        except ValueError:
+            return None
 
     def _should_exclude_path(self, path: Path) -> bool:
         """Check if a path matches any exclusion pattern.
@@ -702,7 +774,11 @@ class ContextOptimizer:
             # Skip if it's a wildcard
             if "*" not in first_part and first_part:
                 intended_dir = self.base_dir / first_part
-                if intended_dir.exists() and intended_dir.is_dir():
+                if (
+                    intended_dir.exists()
+                    and intended_dir.is_dir()
+                    and not self._should_exclude_subdir(intended_dir)
+                ):
                     return intended_dir
 
         return None

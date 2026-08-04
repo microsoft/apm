@@ -19,7 +19,7 @@ from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.patterns import parse_apply_to, yaml_double_quote
+from apm_cli.utils.patterns import normalize_apply_to, parse_apply_to, yaml_double_quote
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -48,6 +48,17 @@ class InstructionIntegrator(BaseIntegrator):
         "kiro_steering": "_convert_to_kiro_steering",
         "antigravity_rules": "_convert_to_antigravity_rules",
     }
+
+    @staticmethod
+    def _normalize_frontmatter_apply_to(frontmatter: str) -> str:
+        """Return canonical applyTo text from a bounded YAML frontmatter block."""
+        from apm_cli.utils.yaml_io import load_yaml_str
+
+        try:
+            metadata = load_yaml_str(frontmatter) or {}
+        except Exception:
+            return ""
+        return normalize_apply_to(metadata.get("applyTo"), default="")
 
     def find_instruction_files(self, package_path: Path) -> list[Path]:
         """Find all .instructions.md files in a package.
@@ -488,12 +499,11 @@ class InstructionIntegrator(BaseIntegrator):
         if fm_match:
             fm_block = fm_match.group(1)
             body = content[fm_match.end() :]
+            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
 
             for line in fm_block.splitlines():
                 line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
-                elif line_stripped.startswith("description:"):
+                if line_stripped.startswith("description:"):
                     description = line_stripped[len("description:") :].strip().strip("'\"")
 
         # Generate description from first content sentence if missing
@@ -580,8 +590,6 @@ class InstructionIntegrator(BaseIntegrator):
 
         Ref: https://docs.windsurf.com/windsurf/cascade/memories
         """
-        from ..utils.yaml_io import load_yaml_str
-
         body = content
         apply_to = ""
 
@@ -590,11 +598,7 @@ class InstructionIntegrator(BaseIntegrator):
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
             body = content[fm_match.end() :]
-            try:
-                fm = load_yaml_str(fm_match.group(1)) or {}
-            except Exception:
-                fm = {}
-            apply_to = str(fm.get("applyTo", "")).strip()
+            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_match.group(1))
 
         # Build Windsurf rules frontmatter
         parts = ["---"]
@@ -698,11 +702,7 @@ class InstructionIntegrator(BaseIntegrator):
         if fm_match:
             fm_block = fm_match.group(1)
             body = content[fm_match.end() :]
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
+            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
 
         # Build Claude rules frontmatter (only when path-scoped)
         globs = parse_apply_to(apply_to)

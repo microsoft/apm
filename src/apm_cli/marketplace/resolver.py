@@ -29,6 +29,7 @@ import logging
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from ..models.dependency.reference import DependencyReference
@@ -37,7 +38,7 @@ from ..utils.github_host import (
     is_github_hostname,
     is_supported_git_host,
 )
-from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .client import fetch_or_cache
 from .errors import PluginNotFoundError
 from .models import MarketplacePlugin, MarketplaceSource
@@ -669,16 +670,18 @@ def _normalise_relative_plugin_source(source: str, plugin_root: str = "") -> str
     return rel
 
 
-def _resolve_local_relative_source(
+def resolve_local_plugin_path(
     source: str,
     marketplace: MarketplaceSource,
     plugin_root: str = "",
-) -> str:
-    """Resolve a relative source inside a local marketplace to a local-path canonical.
+    *,
+    relative_target: str = "",
+) -> Path:
+    """Resolve a local plugin path inside its marketplace containment boundary.
 
-    The returned string starts with ``/`` (or ``~`` / drive letter on supported
-    platforms) so :meth:`DependencyReference.is_local_path` recognises it and
-    install routes it through ``LocalDependencySource``.
+    ``relative_target`` lets a consumer resolve a file within the plugin
+    through the same symlink-aware boundary instead of appending that file
+    after the directory containment check.
     """
     rel = _normalise_relative_plugin_source(source, plugin_root=plugin_root)
     base = marketplace.local_path
@@ -688,9 +691,28 @@ def _resolve_local_relative_source(
             f"filesystem path (url={marketplace.url!r}); cannot resolve relative "
             f"plugin source '{source}'."
         )
-    if rel and rel != ".":
-        return f"{base.rstrip('/')}/{rel}"
-    return base
+    marketplace_path = Path(base)
+    marketplace_root = marketplace_path.parent if marketplace_path.is_file() else marketplace_path
+    candidate = marketplace_root if rel in ("", ".") else marketplace_root / rel
+    if relative_target:
+        try:
+            validate_path_segments(relative_target, context="local plugin target")
+        except PathTraversalError as exc:
+            raise ValueError(str(exc)) from exc
+        candidate /= relative_target
+    try:
+        return ensure_path_within(candidate, marketplace_root)
+    except PathTraversalError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _resolve_local_relative_source(
+    source: str,
+    marketplace: MarketplaceSource,
+    plugin_root: str = "",
+) -> str:
+    """Resolve a relative source to the canonical local dependency path."""
+    return str(resolve_local_plugin_path(source, marketplace, plugin_root=plugin_root))
 
 
 def resolve_plugin_source(

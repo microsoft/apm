@@ -132,7 +132,8 @@ self-hosted GitLab, or Azure DevOps. The host is preserved end to end, so a
 consumer installs from the same host you authored on. Any relative source
 composes onto the base, including two-segment values like
 `acme-org/pinned-package`. Host-prefixed sources like `github.com/acme/tool`,
-full HTTPS URLs, and local `./` paths remain per-entry overrides. If
+full HTTPS URLs (including nested paths such as
+`https://gitlab.example.com/group/subgroup/package.git`), and local `./` paths remain per-entry overrides. If
 `sourceBase` is absent, existing `owner/repo` source behavior is unchanged.
 See the [manifest schema](../../reference/manifest-schema/#75-marketplacepackages)
 for the full validation and override rules.
@@ -232,8 +233,9 @@ For the release-gate flags (`--check-versions`, `--check-clean`),
 see [Releasing from any CI](../releasing-from-any-ci/).
 
 The same `apm pack` run also produces a bundle to `./build/<name>/`
-when `apm.yml` declares `dependencies:`. Marketplace projects with
-no `dependencies:` block produce only `marketplace.json`. See
+when `apm.yml` declares a `dependencies:` mapping, including an empty
+mapping (`dependencies: {}`). Marketplace projects with an omitted or null
+`dependencies:` value produce only `marketplace.json`. See
 [Pack a bundle](../pack-a-bundle/) for the bundle side.
 
 ## Validate before you ship

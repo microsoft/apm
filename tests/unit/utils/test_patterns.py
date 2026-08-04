@@ -1,6 +1,11 @@
 """Tests for the applyTo pattern parser."""
 
-from apm_cli.utils.patterns import has_top_level_comma, parse_apply_to, yaml_double_quote
+from apm_cli.utils.patterns import (
+    has_top_level_comma,
+    normalize_apply_to,
+    parse_apply_to,
+    yaml_double_quote,
+)
 
 
 class TestParseApplyTo:
@@ -56,6 +61,12 @@ class TestParseApplyTo:
             "**/*.py",
         ]
 
+    def test_escaped_comma_is_not_split(self):
+        assert parse_apply_to(r"src/foo\,bar/*.py,**/*.pyi") == [
+            "src/foo,bar/*.py",
+            "**/*.pyi",
+        ]
+
 
 class TestHasTopLevelComma:
     """Unit tests for has_top_level_comma()."""
@@ -78,6 +89,23 @@ class TestHasTopLevelComma:
 
     def test_empty(self):
         assert has_top_level_comma("") is False
+
+    def test_escaped_comma_is_not_top_level(self):
+        assert has_top_level_comma(r"src/foo\,bar/*.py") is False
+
+
+class TestNormalizeApplyTo:
+    """Unit tests for YAML-list applyTo normalization."""
+
+    def test_list_trims_entries_and_discards_empty_values(self):
+        normalized = normalize_apply_to(["  **/*.py  ", None, "", "  ", "**/*.md"])
+
+        assert normalized == "**/*.py,**/*.md"
+
+    def test_list_literal_comma_preserves_pattern_boundary(self):
+        normalized = normalize_apply_to(["src/foo,bar/*.py", "**/*.pyi"])
+
+        assert parse_apply_to(normalized) == ["src/foo,bar/*.py", "**/*.pyi"]
 
 
 class TestYamlDoubleQuote:

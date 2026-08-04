@@ -306,15 +306,20 @@ way to specify multiple patterns, as it is portably expanded into target-specifi
 YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
 Claude, Cursor, Windsurf, Kiro, and Antigravity.
 
-A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) may work
-for some targets, but it is not portable: some converters ignore sequences or
-treat them as a string, while others (like Antigravity and Kiro) parse and
-expand them. For maximum portability, use a comma-separated string for multiple
-globs.
+A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
+normalized to the same comma-separated OR expression for distributed
+placement and target-native installation. Use a sequence when its source
+readability matters. To match a literal comma in a filename, escape it as
+`\,`.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
 the value is preserved verbatim.
+
+During distributed compilation, explicitly scoped patterns may match files in
+supported top-level harness directories: `.agents`, `.apm`, `.claude`,
+`.codex`, `.cursor`, `.gemini`, `.github`, `.kiro`, `.opencode`, and
+`.windsurf`. Other hidden directories remain excluded.
 
 ### 2. Agent (`*.agent.md`)
 
@@ -567,7 +572,8 @@ marketplace:
 
 Relative `packages[].source` values compose onto the base, including
 `owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
-URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+URLs with nested repository paths, and local `./` paths remain per-entry
+overrides. Without `sourceBase`,
 existing `owner/repo` source behavior is unchanged. The manifest schema
 Section 7.5 is canonical for the full validation and override rules.
 
@@ -745,7 +751,8 @@ Schema rules:
   emits the path verbatim into `marketplace.json`.
 - `source` accepts three remote forms: `owner/repo` (default host),
   `host.tld/owner/repo` (non-default host shorthand), or
-  `https://host.tld/owner/repo[.git]` (full URL).  Non-default hosts
+  `https://host.tld/path/to/repo[.git]` (full URL with two or more path
+  segments). Non-default hosts
   resolve auth via the standard APM token chain
   (`docs/getting-started/authentication.md`); the default-host token is
   never forwarded.
@@ -806,9 +813,10 @@ The compiler:
    e.g. microsoft/azure-skills).
 5. Does not emit `versions[]` -- each plugin carries a single resolved ref.
 
-`apm pack` also produces a bundle if `apm.yml` declares `dependencies:`. With
-only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`,
-`--target`, `--force`) are silent no-ops.
+`apm pack` also produces a bundle when `apm.yml` declares a `dependencies:`
+mapping, including an empty mapping (`dependencies: {}`). With an omitted or
+null `dependencies:` value and only a `marketplace:` block present, bundle
+flags (`--archive`, `-o`, `--format`, `--target`, `--force`) are silent no-ops.
 
 Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
 `--include-prerelease`, `--marketplace-path FORMAT=PATH`, `-v`.

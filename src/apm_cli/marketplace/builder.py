@@ -107,7 +107,7 @@ class ResolvedPackage:
     """A package entry after ref resolution."""
 
     name: str
-    source_repo: str  # "owner/repo" only
+    source_repo: str  # repository path without an optional host
     subdir: str | None  # APM-only (used to compose the output ``source`` object)
     ref: str  # resolved tag name, e.g. "v1.2.0"
     sha: str  # 40-char git SHA

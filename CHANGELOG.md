@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required MCP runtime defaults are now overrideable prompts, while secret
   defaults remain hidden and VS Code OCI launchers resolve every runtime
   placeholder without writing secret values to `mcp.json`. (#2455)
+- `apm marketplace audit --strict` now fails when a local marketplace source
+  is skipped, so CI cannot report success after an incomplete local audit.
+  (#2460)
+- Claude project hooks now run reliably when Claude launches them outside the
+  repository while keeping generated settings portable across clones. (#2408)
+- Marketplace package sources now accept full HTTPS repository URLs with nested
+  paths while retaining strict shorthand validation. (#2439)
+- YAML-list `applyTo` entries now preserve every pattern during compilation
+  and target-native instruction conversion, including explicitly targeted
+  supported hidden tool roots. (#2441)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
 - Release promotions now run marker-bounded lifecycle integration on macOS Intel
   while retaining the full corpus on macOS ARM and Linux, preventing Intel

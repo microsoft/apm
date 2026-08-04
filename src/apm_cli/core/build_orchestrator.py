@@ -3,7 +3,7 @@
 The :class:`BuildOrchestrator` inspects ``apm.yml`` and runs whichever
 producers are applicable:
 
-* ``dependencies:`` block  -> :class:`BundleProducer`  -> ``./build/<name>/``
+* ``dependencies:`` block (including ``{}``) -> :class:`BundleProducer`  -> ``./build/<name>/``
 * ``marketplace:`` block   -> :class:`MarketplaceProducer` -> ``.claude-plugin/marketplace.json``
 
 Producers are thin adapters around the existing
@@ -360,7 +360,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
             raise BuildError(f"{apm_yml_path} must be a YAML mapping at the top level.")
         data = loaded or {}
 
-    if data and data.get("dependencies"):
+    if data and data.get("dependencies") is not None:
         out.add(OutputKind.BUNDLE)
     if data and data.get("marketplace"):
         out.add(OutputKind.MARKETPLACE)

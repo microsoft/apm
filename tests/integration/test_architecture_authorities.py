@@ -254,6 +254,55 @@ def test_hook_rewrite_scope_has_single_owner() -> None:
     assert "Hook rewrite scope must route through HookIntegrator" in guard
 
 
+def test_claude_project_hook_path_has_single_owner() -> None:
+    """Claude project hook commands must use HookIntegrator's portable resolver."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert owner.count("def _project_scoped_command_path(") == 1
+    assert owner.count('"CLAUDE_PROJECT_DIR"') == 1
+    assert owner.count("self._project_scoped_command_path(") == 2
+    assert "Claude project hook paths must be owned by HookIntegrator" in guard
+
+
+def test_claude_project_hook_path_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """AC29 must reject a second Claude project-root path owner."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/integration/hook_bundle.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + '\n_PARALLEL_CLAUDE_PROJECT_DIR = "CLAUDE_PROJECT_DIR"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Claude project hook paths must be owned by HookIntegrator" in result.stdout
+
+
 def test_native_hook_event_map_has_single_owner() -> None:
     """Target-native event names must come from HookIntegrator's map."""
     root = Path(__file__).parents[2]
@@ -608,6 +657,103 @@ def test_packed_marketplace_source_owner_guard_rejects_parallel_parser(
     assert "Packed marketplace sources must use DependencyReference.parse_from_dict" in (
         result.stdout
     )
+
+
+def test_local_marketplace_audit_paths_have_single_owner() -> None:
+    """Local audit reads must resolve through the symlink-aware resolver owner."""
+    root = Path(__file__).parents[2]
+    audit = (root / "src/apm_cli/marketplace/audit.py").read_text(encoding="utf-8")
+    resolver = (root / "src/apm_cli/marketplace/resolver.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    helper = resolver.split("def resolve_local_plugin_path(", maxsplit=1)[1].split(
+        "\ndef ", maxsplit=1
+    )[0]
+    assert "resolve_local_plugin_path(" in audit
+    assert 'relative_target="apm.yml"' in audit
+    assert "_resolve_local_relative_source" not in audit
+    assert "ensure_path_within(" in helper
+    assert "Local marketplace audit paths must use resolve_local_plugin_path" in guard
+
+
+def test_local_marketplace_audit_path_owner_guard_rejects_bypass(tmp_path: Path) -> None:
+    """AC10b must reject direct use of a private local-path helper."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    audit_path = sandbox / "src/apm_cli/marketplace/audit.py"
+    audit_path.write_text(
+        audit_path.read_text(encoding="utf-8").replace(
+            "resolve_local_plugin_path(",
+            "_resolve_local_relative_source(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Local marketplace audit paths must use resolve_local_plugin_path" in result.stdout
+
+
+def test_local_marketplace_audit_manifest_target_guard_rejects_bypass(tmp_path: Path) -> None:
+    """AC10b must reject resolving a manifest after the containment check."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    audit_path = sandbox / "src/apm_cli/marketplace/audit.py"
+    audit_path.write_text(
+        audit_path.read_text(encoding="utf-8").replace(
+            '                relative_target="apm.yml",\n',
+            "",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Local marketplace audit paths must use resolve_local_plugin_path" in result.stdout
 
 
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
@@ -2742,7 +2888,7 @@ def test_mcp_runtime_argument_variables_have_one_canonical_owner() -> None:
 
 
 def test_mcp_runtime_argument_variable_guard_rejects_parallel_owner(tmp_path: Path) -> None:
-    """AC31 rejects a second adapter-local runtime variable resolver."""
+    """AC32 rejects a second adapter-local runtime variable resolver."""
     root = Path(__file__).parents[2]
     sandbox = tmp_path / "repo"
     shutil.copytree(
