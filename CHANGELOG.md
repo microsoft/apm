@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fully qualified `ssh://` marketplace URLs now retain their SSH username,
+  host, and custom port through registration and Git fetching without
+  forwarding HTTP credentials. (by @donglrd, #2466)
 - Required MCP runtime defaults are now overrideable prompts, while secret
   defaults remain hidden and VS Code OCI launchers resolve every runtime
   placeholder without writing secret values to `mcp.json`. (#2455)

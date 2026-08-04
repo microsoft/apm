@@ -258,6 +258,10 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
         from the host via ``AuthResolver.classify_host``, ``url`` rewritten
         to the SCP form (subprocess git understands it natively),
         ``embedded_host=<host>``.
+      * Full SSH URL (``ssh://git@host:2222/org/repo.git``). Normalises the
+        scheme and otherwise preserves the URL so the username and optional
+        port reach subprocess git, with ``embedded_host`` extracted and
+        ``kind="git"``.
       * Full HTTPS URL. Returns the URL untouched, ``embedded_host``
         extracted, ``kind`` classified by host. Hosts that ``AuthResolver``
         does not recognise as github/gitlab fall through as ``kind="git"``
@@ -269,10 +273,10 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
     Raises ``ValueError`` on malformed input (single-segment, HTTP, empty,
     or path-traversal sequences in any segment).
     """
-    from urllib.parse import urlparse
+    from urllib.parse import unquote, urlparse
 
     from ...core.auth import AuthResolver
-    from ...utils.github_host import is_valid_fqdn
+    from ...utils.github_host import is_valid_fqdn, validate_ssh_user
 
     raw = (source or "").strip()
     if not raw:
@@ -305,6 +309,38 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
         host_info = AuthResolver.classify_host(host)
         kind = _host_kind_to_fetcher_kind(host_info.kind)
         return raw, kind, host
+
+    # --- SSH protocol URL -------------------------------------------------
+    if lowered.startswith("ssh://"):
+        normalized_url = f"ssh://{raw[len('ssh://') :]}"
+        parsed = urlparse(normalized_url)
+        embedded_host = (parsed.hostname or "").strip().lower()
+        if not embedded_host:
+            raise ValueError("SSH URL is missing a host")
+        if parsed.password is not None:
+            raise ValueError(
+                "SSH URL must not include a password; configure SSH authentication instead."
+            )
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("SSH URL has an invalid port") from exc
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("SSH URL has an invalid port")
+        if parsed.username:
+            validate_ssh_user(parsed.username)
+        decoded_path = parsed.path or ""
+        for _ in range(8):
+            next_path = unquote(decoded_path)
+            if next_path == decoded_path:
+                break
+            decoded_path = next_path
+        path_segments = [s for s in decoded_path.split("/") if s]
+        for seg in path_segments:
+            validate_path_segments(seg, context="marketplace SSH URL path", reject_empty=True)
+        if not path_segments:
+            raise ValueError("SSH URL is missing a repo path")
+        return normalized_url, "git", embedded_host
 
     # --- HTTPS URL --------------------------------------------------------
     if lowered.startswith("https://"):
@@ -494,6 +530,7 @@ Examples:
   apm marketplace add https://gitlab.com/group/repo
   apm marketplace add https://dev.azure.com/org/proj/_git/repo --name apm-mkt
   apm marketplace add git@gitea.example.com:org/repo.git --name custom
+  apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
   apm marketplace add /srv/marketplaces/agent-forge --name agent-forge
 """
 
@@ -520,7 +557,8 @@ def add(source, name, ref, branch, host, verbose):
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
     HTTPS git URL with optional ``#ref`` (GitHub, GitLab, Azure DevOps,
     Gitea, Bitbucket Server, or any self-hosted git server), a hosted
-    ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git``),
+    ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git`` or
+    ``ssh://git@host:2222/org/repo.git``),
     a local filesystem path, or a ``file://`` URI.
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
@@ -588,7 +626,7 @@ def add(source, name, ref, branch, host, verbose):
             host is not None
             and host.strip().lower() != (resolved_host or "").lower()
             and kind in ("git", "github", "gitlab")
-            and (source_arg.startswith(("https://", "git@", "file://")))
+            and (source_arg.lower().startswith(("https://", "ssh://", "git@", "file://")))
         ):
             logger.warning(
                 "--host is ignored when SOURCE is a full URL.",

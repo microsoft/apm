@@ -90,8 +90,10 @@ browse / install / update workflow works against:
   GitHub or GitLab family flows through subprocess `git` and
   `GitCache`. Includes Azure DevOps (auth via `ADO_APM_PAT`),
   Gitea, Bitbucket Server, and self-hosted git servers.
-- **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
-  is extracted, classified, and routed through the matching fetcher.
+- **SSH URLs** -- `git@gitea.example.com:org/repo.git`, or
+  `ssh://git@gitea.example.com:2222/org/repo.git` when the server uses a
+  non-default port. The fully qualified form is passed unchanged to subprocess
+  `git`, retaining its username and port.
   For in-repository plugins from GitLab and generic git marketplaces, APM
   keeps this consumer-selected SSH transport when it writes their concrete
   `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain

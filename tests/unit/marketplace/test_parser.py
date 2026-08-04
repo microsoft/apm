@@ -3,7 +3,7 @@
 Covers:
 - local absolute / relative / ``file://`` / ``~/`` paths
 - Windows local-path cases (drive letter, .\\, ~\\)
-- SCP-like ``git@host:org/repo.git`` SSH
+- SCP-like ``git@host:org/repo.git`` and full ``ssh://`` URLs
 - HTTPS to untrusted host classified as kind=git (was: rejected pre-PR)
 - single-segment input -> ValueError
 - existing GitHub/GitLab cases still pass
@@ -59,6 +59,79 @@ def test_scp_ssh_url_classified_as_git() -> None:
     # arbitrary-substring matches CodeQL flags as URL-sanitization weakness.
     assert url == "git@gitea.example.com:org/repo.git"
     assert host == "gitea.example.com"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_port"),
+    [
+        ("ssh://git@gitea.example.com/org/repo.git", None),
+        ("ssh://git@gitea.example.com:2222/org/repo.git", 2222),
+    ],
+)
+def test_ssh_protocol_url_classified_as_git(raw: str, expected_port: int | None) -> None:
+    url, kind, host = _parse_marketplace_source(raw, host_flag=None)
+
+    parsed = urlsplit(url)
+    assert kind == "git"
+    assert url == raw
+    assert parsed.scheme == "ssh"
+    assert parsed.hostname == "gitea.example.com"
+    assert parsed.port == expected_port
+    assert parsed.path == "/org/repo.git"
+    assert host == "gitea.example.com"
+
+
+def test_ssh_protocol_url_normalizes_mixed_case_scheme() -> None:
+    url, kind, host = _parse_marketplace_source(
+        "SSH://git@gitea.example.com:2222/org/repo.git", host_flag=None
+    )
+
+    parsed = urlsplit(url)
+    assert kind == "git"
+    assert url == "ssh://git@gitea.example.com:2222/org/repo.git"
+    assert parsed.scheme == "ssh"
+    assert parsed.hostname == "gitea.example.com"
+    assert parsed.port == 2222
+    assert host == "gitea.example.com"
+
+
+def test_ssh_protocol_url_on_known_host_uses_git_fetcher() -> None:
+    url, kind, host = _parse_marketplace_source(
+        "ssh://git@github.com:2222/org/repo.git", host_flag=None
+    )
+
+    assert kind == "git"
+    assert url == "ssh://git@github.com:2222/org/repo.git"
+    assert host == "github.com"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ssh://git@/org/repo.git",
+        "ssh://git@gitea.example.com",
+        "ssh://git@gitea.example.com:not-a-port/org/repo.git",
+        "ssh://git@gitea.example.com:0/org/repo.git",
+        "ssh://git@gitea.example.com:65536/org/repo.git",
+        "ssh://%2Doption@gitea.example.com/org/repo.git",
+        "ssh://git@gitea.example.com/org/%2e%2e/repo.git",
+        "ssh://git@gitea.example.com/org/%2e%2e%2frepo.git",
+        "ssh://git@gitea.example.com/org/%252e%252e%252frepo.git",
+    ],
+)
+def test_invalid_ssh_protocol_url_rejected(raw: str) -> None:
+    with pytest.raises(ValueError):
+        _parse_marketplace_source(raw, host_flag=None)
+
+
+def test_password_bearing_ssh_protocol_url_rejected_without_echoing_secret() -> None:
+    raw = "ssh://git:placeholder-password@gitea.example.com:2222/org/repo.git"
+
+    with pytest.raises(ValueError) as exc_info:
+        _parse_marketplace_source(raw, host_flag=None)
+
+    assert "password" in str(exc_info.value).lower()
+    assert "placeholder-password" not in str(exc_info.value)
 
 
 def test_https_untrusted_host_classified_as_git() -> None:

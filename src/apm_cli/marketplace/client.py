@@ -565,23 +565,34 @@ def _fetch_git(
 ) -> dict | None:
     """Fetch marketplace.json from a generic git URL via subprocess + GitCache.
 
-    Sparse-cone clones only the requested manifest path. Uses
-    ``AuthResolver.resolve(host, org).git_env`` to build the git env; for
-    hosts APM doesn't recognise, the env passes through to the user's
-    credential helpers (matches ``apm install`` posture).
+    Sparse-cone clones only the requested manifest path. HTTPS sources use a
+    resolved auth context; explicit SSH sources use a credential-free Git
+    environment so HTTP PATs and authorization headers cannot reach SSH
+    commands or wrappers.
     """
     _validate_ref(source.ref, source.name)
 
     from ..cache.git_cache import GitCache, _sanitize_url
     from ..cache.paths import get_cache_root
+    from ..cache.url_normalize import SCP_LIKE_RE
 
-    org = source.owner or None
-    auth_ctx = (
-        auth_resolver.resolve(host_info.host, org, port=source.port)
-        if source.port is not None
-        else auth_resolver.resolve(host_info.host, org)
+    is_ssh_source = urlsplit(source.url).scheme.lower() == "ssh" or bool(
+        SCP_LIKE_RE.match(source.url)
     )
-    git_env = auth_resolver.hardened_git_env_for_context(auth_ctx)
+    if is_ssh_source:
+        from ..core.auth import AuthResolver
+
+        git_env = AuthResolver.build_noninteractive_git_env(
+            base_env=auth_resolver.hardened_git_base_env(),
+        )
+    else:
+        org = source.owner or None
+        auth_ctx = (
+            auth_resolver.resolve(host_info.host, org, port=source.port)
+            if source.port is not None
+            else auth_resolver.resolve(host_info.host, org)
+        )
+        git_env = auth_resolver.hardened_git_env_for_context(auth_ctx)
 
     cache = GitCache(get_cache_root(), refresh=False)
     try:
