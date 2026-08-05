@@ -627,7 +627,12 @@ def _resolve_target_runtimes(
             target_runtimes = [rt for rt in target_runtimes if rt in mcp_capable]
             logger.progress(f"Skipped targets without MCP support: {', '.join(sorted(non_mcp))}")
         if not target_runtimes and non_mcp:
-            logger.warning("No selected target supports MCP, skipping MCP configuration")
+            logger.warning(
+                "No selected target supports MCP -- skipping MCP configuration. "
+                f"Targets without an MCP client: {', '.join(sorted(non_mcp))}. "
+                "Re-run with an MCP-capable target (for example "
+                "`--target copilot`) to install MCP servers."
+            )
             return None
 
     # Exclusion narrows every selected source, including explicit CLI choices.
