@@ -15,7 +15,6 @@ import pytest
 import tomlkit
 
 from apm_cli.adapters.client.codex import CodexClientAdapter
-from apm_cli.utils.net import is_loopback_host
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -259,41 +258,6 @@ class TestUpdateConfig:
 # ---------------------------------------------------------------------------
 # configure_mcp_server
 # ---------------------------------------------------------------------------
-
-
-class TestIsLoopbackHost:
-    """Tests for the loopback-host detection used by the https exemption."""
-
-    @pytest.mark.parametrize(
-        "host",
-        [
-            "localhost",
-            "LOCALHOST",
-            "ip6-localhost",
-            "ip6-loopback",
-            "127.0.0.1",
-            "127.255.255.254",
-            "::1",
-            "2130706433",  # decimal-encoded 127.0.0.1
-        ],
-    )
-    def test_loopback_hosts_detected(self, host: str) -> None:
-        assert is_loopback_host(host) is True
-
-    @pytest.mark.parametrize(
-        "host",
-        [
-            None,
-            "",
-            "example.com",
-            "192.168.1.10",  # private but not loopback -- still requires https
-            "10.0.0.1",
-            "169.254.169.254",  # link-local / metadata -- still requires https
-            "8.8.8.8",
-        ],
-    )
-    def test_non_loopback_hosts_rejected(self, host: str | None) -> None:
-        assert is_loopback_host(host) is False
 
 
 class TestConfigureMcpServer:

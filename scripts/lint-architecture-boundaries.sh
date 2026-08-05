@@ -136,6 +136,27 @@ if [ "$experimental_hint_definition_count" -ne 1 ] \
     [ -n "$experimental_hint_duplicate_hits" ] && echo "$experimental_hint_duplicate_hits"
     violations=$((violations + 1))
 fi
+network_host_owner="src/apm_cli/utils/net.py"
+network_host_definition_count=$(grep -Ec \
+    '^def (parse_host_address|is_loopback_host)\(' "$network_host_owner" || true)
+network_host_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        '^def (_host_to_ip_literal|parse_host_address|is_loopback_host)\(' \
+        src/apm_cli \
+        | grep -v "^${network_host_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$network_host_definition_count" -ne 2 ] \
+    || ! grep -q 'from ..utils.net import parse_host_address' \
+        src/apm_cli/core/script_executors.py \
+    || ! grep -q 'literal = parse_host_address(host)' \
+        src/apm_cli/core/script_executors.py \
+    || [ -n "$network_host_duplicate_hits" ]; then
+    echo "[x] Network host parsing and loopback classification must use utils/net.py"
+    [ -n "$network_host_duplicate_hits" ] && echo "$network_host_duplicate_hits"
+    violations=$((violations + 1))
+fi
 agent_plugin_loader="src/apm_cli/agent_plugins/loader.py"
 agent_plugin_component_output=$(python3 scripts/check_agent_plugin_component_ir.py 2>&1)
 agent_plugin_component_status=$?

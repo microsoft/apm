@@ -241,6 +241,11 @@ MCP defines two transport families. APM exposes both:
   and `file://` are rejected). Use `--header KEY=VALUE` (repeatable)
   for HTTP headers such as `Authorization`.
 
+Codex requires HTTPS for non-loopback remote endpoints. Plain HTTP is
+accepted only for loopback addresses such as `localhost`, `127.x.x.x`,
+and `::1`, which keeps local development servers usable without sending
+cleartext traffic off the machine.
+
 `--transport` is inferred when omitted: a `--url` implies a remote
 transport, a post-`--` command implies `stdio`. The mutually-exclusive
 combinations (`--url` plus stdio command, `--header` without `--url`,

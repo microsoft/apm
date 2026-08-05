@@ -733,6 +733,76 @@ def test_experimental_target_hints_have_single_owner() -> None:
     assert "Experimental target hints must route through install/target_hints.py" in guard
 
 
+def test_network_host_parsing_has_single_owner() -> None:
+    """Host literal parsing and loopback classification must use utils/net.py."""
+    root = Path(__file__).parents[2]
+    owner_path = root / "src/apm_cli/utils/net.py"
+    owner = owner_path.read_text(encoding="utf-8")
+    script_executors = (root / "src/apm_cli/core/script_executors.py").read_text(encoding="utf-8")
+    mcp_warnings = (root / "src/apm_cli/install/mcp/warnings.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    duplicate_paths = [
+        path
+        for path in (root / "src/apm_cli").rglob("*.py")
+        if path != owner_path
+        and any(
+            definition in path.read_text(encoding="utf-8")
+            for definition in (
+                "def _host_to_ip_literal(",
+                "def parse_host_address(",
+                "def is_loopback_host(",
+            )
+        )
+    ]
+
+    assert owner.count("def parse_host_address(") == 1
+    assert owner.count("def is_loopback_host(") == 1
+    assert "from ..utils.net import parse_host_address" in script_executors
+    assert "literal = parse_host_address(host)" in script_executors
+    assert "from ...utils.net import parse_host_address" in mcp_warnings
+    assert "ip = parse_host_address(bare)" in mcp_warnings
+    assert duplicate_paths == []
+    assert "Network host parsing and loopback classification must use utils/net.py" in guard
+
+
+def test_network_host_parsing_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """The boundary lint rejects a second host-literal parser."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/install/mcp/registry.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n\ndef parse_host_address(host: str | None) -> None:\n"
+        + "    return None\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Network host parsing and loopback classification must use utils/net.py" in result.stdout
+
+
 def test_ado_policy_coordinate_has_single_owner() -> None:
     """ADO discovery and inheritance must share the valid ADO coordinate."""
     root = Path(__file__).parents[2]

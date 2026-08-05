@@ -78,6 +78,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Agent Plugin producer portable-surface admission | bundle/agent_plugin_exporter.py (_require_portable_agent_plugin) | `src/apm_cli/bundle/agent_plugin_exporter.py` |
 | APMPackage interpreted-manifest construction | models/apm_package.py (APMPackage.from_mapping) | `src/apm_cli/models/apm_package.py` |
 | Agent Plugin compatibility package projection | agent_plugins/projection.py (project_agent_plugin_package) | `src/apm_cli/agent_plugins/projection.py`; `src/apm_cli/models/validation.py` |
+| Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

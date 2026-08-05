@@ -8,19 +8,31 @@ _LOOPBACK_HOSTNAMES = frozenset({"localhost", "ip6-localhost", "ip6-loopback"})
 def parse_host_address(host: str | None) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     """Return the IP address for *host*, or None when it is not an IP literal.
 
-    urlparse keeps decimal-encoded forms like '2130706433' (== 127.0.0.1) as
-    the hostname string, so an int parse is attempted to catch that
-    obfuscation.
+    Handles dotted IPv4/IPv6, bracket-stripped IPv6, trailing-dot forms,
+    and decimal or hexadecimal IPv4 integer encodings that defeat a naive
+    ``ipaddress.ip_address(hostname)`` check.
     """
     if not host:
         return None
+    normalized = host.strip().rstrip(".")
+    if not normalized:
+        return None
     try:
-        return ipaddress.ip_address(host)
+        return ipaddress.ip_address(normalized)
     except ValueError:
-        try:
-            return ipaddress.ip_address(int(host))
-        except (ValueError, TypeError):
+        if normalized.lower().startswith("0x"):
+            base = 16
+        elif normalized.isdigit():
+            base = 10
+        else:
             return None
+        try:
+            value = int(normalized, base)
+        except ValueError:
+            return None
+        if not 0 <= value <= 0xFFFFFFFF:
+            return None
+        return ipaddress.ip_address(value)
 
 
 def is_loopback_host(host: str | None) -> bool:
