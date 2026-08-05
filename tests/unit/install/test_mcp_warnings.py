@@ -38,6 +38,15 @@ class TestIsInternalOrMetadataHost:
     def test_ipv6_loopback_returns_true(self):
         assert _is_internal_or_metadata_host("::1") is True
 
+    def test_decimal_encoded_loopback_returns_true(self):
+        assert _is_internal_or_metadata_host("2130706433") is True
+
+    def test_hex_encoded_loopback_returns_true(self):
+        assert _is_internal_or_metadata_host("0x7f000001") is True
+
+    def test_trailing_dot_loopback_returns_true(self):
+        assert _is_internal_or_metadata_host("127.0.0.1.") is True
+
     # -- cloud metadata endpoints --
 
     def test_aws_imds_returns_true(self):

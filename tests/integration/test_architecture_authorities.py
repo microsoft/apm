@@ -96,6 +96,7 @@ def test_network_host_parsing_has_single_owner() -> None:
     owner_path = root / "src/apm_cli/utils/net.py"
     owner = owner_path.read_text(encoding="utf-8")
     script_executors = (root / "src/apm_cli/core/script_executors.py").read_text(encoding="utf-8")
+    mcp_warnings = (root / "src/apm_cli/install/mcp/warnings.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     duplicate_paths = [
         path
@@ -115,6 +116,8 @@ def test_network_host_parsing_has_single_owner() -> None:
     assert owner.count("def is_loopback_host(") == 1
     assert "from ..utils.net import parse_host_address" in script_executors
     assert "literal = parse_host_address(host)" in script_executors
+    assert "from ...utils.net import parse_host_address" in mcp_warnings
+    assert "ip = parse_host_address(bare)" in mcp_warnings
     assert duplicate_paths == []
     assert "Network host parsing and loopback classification must use utils/net.py" in guard
 

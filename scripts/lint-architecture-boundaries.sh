@@ -109,6 +109,10 @@ if [ "$network_host_definition_count" -ne 2 ] \
         src/apm_cli/core/script_executors.py \
     || ! grep -q 'literal = parse_host_address(host)' \
         src/apm_cli/core/script_executors.py \
+    || ! grep -q 'from ...utils.net import parse_host_address' \
+        src/apm_cli/install/mcp/warnings.py \
+    || ! grep -q 'ip = parse_host_address(bare)' \
+        src/apm_cli/install/mcp/warnings.py \
     || [ -n "$network_host_duplicate_hits" ]; then
     echo "[x] Network host parsing and loopback classification must use utils/net.py"
     [ -n "$network_host_duplicate_hits" ] && echo "$network_host_duplicate_hits"

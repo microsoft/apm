@@ -239,7 +239,7 @@ MCP defines two transport families. APM exposes both:
   for HTTP headers such as `Authorization`.
 
 Codex requires HTTPS for non-loopback remote endpoints. Plain HTTP is
-accepted only for loopback addresses such as `localhost`, `127.x.x.x`,
+accepted only for loopback addresses such as `localhost`, `127.0.0.0/8`,
 and `::1`, which keeps local development servers usable without sending
 cleartext traffic off the machine.
 
