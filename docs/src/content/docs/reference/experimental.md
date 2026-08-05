@@ -199,6 +199,6 @@ When a flag's behaviour is considered stable, it graduates: the gated code becom
 ## Troubleshooting
 
 - **"... is no longer an experimental flag"** - the flag graduated to GA. The error prints what to run instead; see [Graduated flags](#graduated-flags).
-- **"Unknown experimental feature"** - the name is not in the registry. Run `apm experimental list` to see the current set. Suggestions printed below the error use fuzzy matching on registered and graduated names.
+- **"Unknown experimental feature"** - the name is not in the registry. Run `apm experimental list` to see the current set. Graduated names are matched first: a near-miss on one prints `Did you mean 'copilot-cowork'? It is no longer an experimental flag.` followed by the migration hint. Only if no graduated name is close does the `Did you mean:` / `Similar features:` list appear, and it is drawn solely from currently registered flags -- a graduated name never shows up there.
 - **Unknown keys in config** - a flag that was enabled on a previous APM version may have been removed or renamed. `apm experimental list` surfaces a note when stale keys are present; `apm experimental reset` clears them.
 - **Malformed values in config** - if a registered flag has a non-boolean override in `~/.apm/config.json`, `apm experimental reset --yes` removes the bad value and restores the default.

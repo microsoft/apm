@@ -594,6 +594,26 @@ class TestGraduatedFlags:
         assert "verbose-version" in args[1]
         assert len(args) == 2 or args[2] is None
 
+    def test_closer_live_flag_beats_graduated_near_miss(self) -> None:
+        """Regression trap: the graduated check must not shadow a better live match.
+
+        'copilot-ap' is a typo for the LIVE 'copilot-app' flag, but it also
+        scores above the difflib cutoff against the graduated
+        'copilot-cowork'. Taking the graduated branch unconditionally sent
+        the caller to a completely different target -- the same wrong-answer
+        failure GRADUATED_FLAGS exists to prevent, inverted.
+        """
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-ap")
+
+        args = excinfo.value.args
+        # Live-suggestion path: guidance/graduated slots must stay empty.
+        assert "copilot-app" in args[1]
+        assert len(args) == 2 or args[2] is None
+        assert "copilot-cowork" not in str(args[1:])
+
     def test_unknown_name_yields_no_guidance(self) -> None:
         from apm_cli.core.experimental import validate_flag_name
 

@@ -157,6 +157,12 @@ harmful here: the nearest registered name is usually an unrelated feature
 silently enables the wrong behaviour.  Entries stay here permanently so
 stale scripts get a correct answer rather than a plausible wrong one.
 
+The precedence is closest-match, not graduated-first: an exact graduated
+name always wins, but a graduated *near-miss* only wins when it scores
+above the best live-flag match.  Otherwise ``copilot-ap`` -- a typo for
+the live ``copilot-app`` -- would route to the graduated ``copilot-cowork``
+hint and reintroduce the wrong-answer failure from the other direction.
+
 Add an entry whenever a flag is removed from :data:`FLAGS` because its
 behaviour became the default.  Keys MUST NOT overlap :data:`FLAGS` -- a
 live flag would shadow the entry and render it dead code.
@@ -240,6 +246,15 @@ def is_enabled(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _match_ratio(probe: str, candidate: str) -> float:
+    """Similarity of ``probe`` to ``candidate`` on difflib's 0..1 scale.
+
+    Used to compare a graduated-flag near-miss against the best live-flag
+    near-miss so the closer of the two wins.
+    """
+    return difflib.SequenceMatcher(None, probe, candidate).ratio()
+
+
 def validate_flag_name(name: str) -> str:
     """Validate and normalise a flag name from CLI input.
 
@@ -260,18 +275,6 @@ def validate_flag_name(name: str) -> str:
 
     guidance = GRADUATED_FLAGS.get(normalised)
     graduated_name = normalised if guidance is not None else None
-    if guidance is None:
-        # A near-miss on a graduated name ('copilot-cowrk') must not fall
-        # through to FLAGS matching, which would suggest an unrelated target.
-        graduated_match = difflib.get_close_matches(
-            normalised, GRADUATED_FLAGS.keys(), n=1, cutoff=0.6
-        )
-        if graduated_match:
-            graduated_name = graduated_match[0]
-            guidance = GRADUATED_FLAGS[graduated_name]
-
-    if guidance is not None:
-        raise ValueError(msg, [], guidance, display_name(graduated_name))
 
     suggestions = difflib.get_close_matches(
         normalised,
@@ -279,6 +282,31 @@ def validate_flag_name(name: str) -> str:
         n=3,
         cutoff=0.6,
     )
+
+    if guidance is None:
+        # A near-miss on a graduated name ('copilot-cowrk') must not fall
+        # through to FLAGS matching, which would suggest an unrelated target.
+        # It must not shadow a *better* live match either: 'copilot-ap' is a
+        # typo for the live 'copilot-app', not for the graduated
+        # 'copilot-cowork', and routing it to the graduated hint would send
+        # the caller to a different feature entirely -- the same wrong-answer
+        # failure this registry exists to prevent. Prefer whichever side
+        # actually matches more closely.
+        graduated_match = difflib.get_close_matches(
+            normalised, GRADUATED_FLAGS.keys(), n=1, cutoff=0.6
+        )
+        if graduated_match:
+            best_live = max(
+                (_match_ratio(normalised, name) for name in suggestions),
+                default=0.0,
+            )
+            if _match_ratio(normalised, graduated_match[0]) > best_live:
+                graduated_name = graduated_match[0]
+                guidance = GRADUATED_FLAGS[graduated_name]
+
+    if guidance is not None:
+        raise ValueError(msg, [], guidance, display_name(graduated_name))
+
     raise ValueError(msg, [display_name(s) for s in suggestions], None)
 
 
