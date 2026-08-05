@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Multi-target `apm compile` now computes target-independent instruction
+  placement once per invocation and reuses the canonical project file index
+  instead of rescanning directories per pattern. (closes #2482)
 - `apm init` and install-time auto-bootstrap now reject empty or
   whitespace-only project names, falling back to `my-project` at a filesystem
   root. APM no longer writes an `apm.yml` that every later install, lock, or
