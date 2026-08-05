@@ -185,6 +185,59 @@ class TestAlreadyResolvedSkipLogic:
             is True
         )
 
+    # --- ref_changed veto (#2481) ---
+
+    def test_ref_changed_vetoes_cacheable_skip(self):
+        """Manifest ref drift beats the pinned-ref cache-reuse clause.
+
+        A commit-pinned dep is ``is_cacheable``, so before #2481 a plain
+        install reused whatever bytes already sat at ``install_path`` even
+        after the user bumped ``ref:`` in apm.yml.
+        """
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=True,
+                update_refs=False,
+                already_resolved=False,
+                lockfile_match=False,
+                ref_changed=True,
+            )
+            is False
+        )
+
+    def test_ref_changed_vetoes_already_resolved_skip(self):
+        """Manifest ref drift beats the BFS-callback cache-reuse clause.
+
+        The callback materialises to the canonical ``<org>/<repo>`` path, so
+        for an aliased dep ``already_resolved`` says nothing about the bytes at
+        ``apm_modules/<alias>`` that the integration loop actually reads.
+        """
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=False,
+                already_resolved=True,
+                lockfile_match=False,
+                ref_changed=True,
+            )
+            is False
+        )
+
+    def test_ref_changed_defaults_false_preserving_legacy_calls(self):
+        """Omitting ``ref_changed`` keeps the pre-#2481 skip behaviour."""
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=True,
+                update_refs=False,
+                already_resolved=False,
+                lockfile_match=False,
+            )
+            is True
+        )
+
     # --- is_cacheable gate ---
 
     def test_cacheable_skips_normal_install(self):

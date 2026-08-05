@@ -611,6 +611,30 @@ def _resolve_target_runtimes(
             else:
                 selection_source = _TargetSelectionSource.DISCOVERY
 
+    # Not every accepted target can host MCP servers: `grok-build` writes
+    # native .grok configuration but has no MCP client adapter.  Drop
+    # non-MCP-capable runtimes here so that expanding `--target all` does
+    # not hard-fail the install on a runtime that cannot take MCP config.
+    # ClientFactory is the single source of truth for MCP capability.
+    # Direct `--runtime` calls bypass this: the adapter layer owns the
+    # warning/error behavior for legacy runtime strings.
+    if selection_source is not _TargetSelectionSource.RUNTIME:
+        from apm_cli.factory import ClientFactory as _McpCF
+
+        mcp_capable = _McpCF.supported_clients()
+        non_mcp = [rt for rt in target_runtimes if rt not in mcp_capable]
+        if non_mcp:
+            target_runtimes = [rt for rt in target_runtimes if rt in mcp_capable]
+            logger.progress(f"Skipped targets without MCP support: {', '.join(sorted(non_mcp))}")
+        if not target_runtimes and non_mcp:
+            logger.warning(
+                "No selected target supports MCP -- skipping MCP configuration. "
+                f"Targets without an MCP client: {', '.join(sorted(non_mcp))}. "
+                "Re-run with an MCP-capable target (for example "
+                "`--target copilot`) to install MCP servers."
+            )
+            return None
+
     # Exclusion narrows every selected source, including explicit CLI choices.
     # Apply it before progress output so the message names the narrowed set.
     if exclude:
