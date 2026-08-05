@@ -244,12 +244,18 @@ def test_install_py_under_legacy_budget():
     recording block between the registry bypass path and the normal GitHub
     probe path, eliminating duplicated ``update_existing_dependency_entry_if_needed``
     + ``valid_outcomes.append`` + provenance blocks.
+
+    Argv-boundary extraction reduced 2111 -> 2080 by moving
+    ``_get_invocation_argv`` / ``_split_argv_at_double_dash`` (and their
+    explanatory block comment) into ``apm_cli/install/argv.py``, which
+    ``commands/mcp.py`` already consumed through this module.  Budget
+    tightened 2150 -> 2100 to match the CI file-length guardrail.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2150, (
-        f"commands/install.py grew to {n} LOC (budget 2150). "
+    assert n <= 2100, (
+        f"commands/install.py grew to {n} LOC (budget 2100). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.apm/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

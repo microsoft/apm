@@ -7,35 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-04
+
 ### Added
 
+- New xAI Grok targets: `grok-build` deploys native `.grok/` rules, agents,
+  commands, and skills alongside compiled `AGENTS.md` context, and the
+  explicit-only experimental `grok-cloud` target deploys skills to project or
+  user `.grok/skills/`. (closes #2419, #2420)
+- Kiro IDE/CLI v3 now receives agents from `.apm/agents/` as Markdown files
+  under `.kiro/agents/<relative-stem>.md`, forwarding only `description`,
+  `model`, and `tools` frontmatter. Tools are permission-bearing, so APM fails
+  closed with no partial write when a tool value falls outside Kiro's approved
+  capability set. (closes #2089, #2440)
+- Registry object-form dependencies (`- id: owner/repo`) now support `skills:`
+  and `targets:` subset installs, matching git-longhand parity -- no need to
+  switch to verbose git-longhand form just to narrow what gets deployed.
+  Registry deps also serialize back to `apm.yml` as object-form entries instead
+  of collapsing to a plain git string. (by @nadav-y, #2166)
 - `apm pack --check-versions` now reads `plugin.json` for local Plugin
   collections without `apm.yml`; when present, `apm.yml` remains authoritative.
   (#2454)
-- Kiro IDE/CLI v3 now receives agents from `.apm/agents/` as Markdown files
-  under `.kiro/agents/<relative-stem>.md`. Only `description`, `model`, and
-  `tools` frontmatter fields are forwarded; `name` and unknown fields are
-  stripped. Tools are permission-bearing: APM fails closed (no partial write)
-  if any tool value is outside the approved Kiro capability set (`read`,
-  `write`, `shell`, `web`, `subagent`, `knowledge`, `context`, `todo_list`,
-  `@mcp`, `@builtin`, `*`). Nested source paths under `.apm/agents/` are
-  preserved, and the targets matrix is updated to reflect the new `agents`
-  primitive for `kiro`. Sources: https://kiro.dev/docs/custom-agents/ and
-  https://kiro.dev/docs/cli/v3/ (accessed 2026-08-03). (#2089)
-- Stable Grok Build target support for native `.grok/` rules, agents, commands,
-  and skills, plus compiled `AGENTS.md` context.
-- Registry object-form dependencies (`- id: owner/repo`) now accept a `skills:` subset
-  and a `targets:` subset, matching git-longhand parity. `to_apm_yml_entry()` also
-  correctly round-trips registry deps as dict form instead of collapsing them to a
-- Registry object-form dependencies (`- id: owner/repo`) now support `skills:` and
-  `targets:` subset installs, matching git-longhand parity -- no need to switch to
-  verbose git-longhand form just to narrow what gets deployed. Registry deps also now
-  serialize correctly as object-form entries in `apm.yml` instead of collapsing to a
-  plain git string. (by @nadav-y, #2166)
 
 ### Fixed
 
-- `apm compile --clean` preserves APM-generated `AGENTS.md` files tracked by nested Git worktrees. (#2473)
+- `apm init` and install-time auto-bootstrap now reject empty or
+  whitespace-only project names, falling back to `my-project` at a filesystem
+  root. APM no longer writes an `apm.yml` that every later install, lock, or
+  compile command rejects. (by @nadav-y, #2200)
+- `apm pack` now treats `dependencies: {}` as a declared mapping and emits the
+  local bundle; omitted or null `dependencies:` still produce no bundle.
+  (closes #2431, #2458)
+- `apm compile --clean` preserves APM-generated `AGENTS.md` files tracked by
+  nested Git worktrees. (#2473)
 - Required MCP runtime defaults are now overrideable prompts, while secret
   defaults remain hidden and VS Code OCI launchers resolve every runtime
   placeholder without writing secret values to `mcp.json`. (#2455)
@@ -43,17 +47,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is skipped, so CI cannot report success after an incomplete local audit.
   (#2460)
 - Claude project hooks now run reliably when Claude launches them outside the
-  repository while keeping generated settings portable across clones. (#2408)
+  repository while keeping generated settings portable across clones.
+  (closes #2408, #2442)
 - Marketplace package sources now accept full HTTPS repository URLs with nested
   paths while retaining strict shorthand validation. (#2439)
 - YAML-list `applyTo` entries now preserve every pattern during compilation
   and target-native instruction conversion, including explicitly targeted
   supported hidden tool roots. (#2441)
-- `apm pack --check-clean` now honors `--marketplace-path` overrides. (#2427)
-- Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
-- Release promotions now run marker-bounded lifecycle integration on macOS Intel
-  while retaining the full corpus on macOS ARM and Linux, preventing Intel
-  runner capacity timeouts. (#2423)
+- `apm pack --check-clean` now honors `--marketplace-path` overrides.
+  (closes #2427, #2461)
 - Public `github.com` dependency installs now preserve caller-owned Git URL
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in
