@@ -70,6 +70,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | applyTo normalization and hidden-tool placement | utils/patterns.py (normalize_apply_to); compilation/context_optimizer.py (ContextOptimizer) | `src/apm_cli/utils/patterns.py`; `src/apm_cli/compilation/context_optimizer.py` |
 | Effective marketplace output path | marketplace/output_profiles.py (resolve_effective_output_path) | `src/apm_cli/marketplace/output_profiles.py` |
 | Bootstrap project-name validation and fallback | core/project_name.py (resolve_bootstrap_project_name) | `src/apm_cli/core/project_name.py` |
+| Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.
