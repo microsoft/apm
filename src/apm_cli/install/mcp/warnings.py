@@ -20,8 +20,9 @@ exist (e.g. a private homelab MCP server bound to a loopback address).
 
 from __future__ import annotations
 
-import ipaddress
 import socket
+
+from ...utils.net import parse_host_address
 
 # F7: tokens that would be evaluated by a real shell but are NOT evaluated
 # when an MCP stdio server runs through ``execve``-style spawning.
@@ -46,28 +47,19 @@ def _is_internal_or_metadata_host(host: str) -> bool:
         return False
     if host in _METADATA_HOSTS:
         return True
-    candidates: list = [host]
     # Strip brackets from IPv6 literals.
     bare = host.strip("[]")
-    if bare != host:
-        candidates.append(bare)
-    # Resolve hostname when it is not already an IP literal.
-    try:
-        ipaddress.ip_address(bare)
-    except ValueError:
+    ip = parse_host_address(bare)
+    if ip is None:
         try:
             resolved = socket.gethostbyname(bare)
-            candidates.append(resolved)
+            ip = parse_host_address(resolved)
         except (OSError, UnicodeError):
-            pass
-    for c in candidates:
-        try:
-            ip = ipaddress.ip_address(c)
-        except ValueError:
-            continue
+            return False
+    if ip is not None:
         if ip.is_loopback or ip.is_link_local or ip.is_private:
             return True
-        if c in _METADATA_HOSTS:
+        if str(ip) in _METADATA_HOSTS:
             return True
     return False
 
