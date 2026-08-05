@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **BREAKING:** `apm experimental enable copilot-cowork` (and `disable` /
-  `reset` for that name) now fail with an unknown-feature error. The flag has
+  `reset` for that name) now exit 1 with "'copilot-cowork' is no longer an
+  experimental flag" plus the GA command to run instead. The flag has
   graduated; no action is needed beyond dropping it from any scripts. A stale
   `copilot_cowork` key in `~/.apm/config.json` is reported by
   `apm experimental list` and cleaned by `apm experimental reset`.
@@ -41,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cowork. Previously, with the experimental flag enabled, `all` at user scope
   included `copilot-cowork`. Name the target explicitly instead:
   `apm install --target copilot-cowork --global`.
+  Both breaking changes are covered in
+  [Target migration](https://microsoft.github.io/apm/troubleshooting/migration/#copilot-cowork-graduated-out-of-experimental).
 
 ### Fixed
 

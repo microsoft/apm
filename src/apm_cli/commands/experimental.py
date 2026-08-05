@@ -119,6 +119,10 @@ def _build_table(flags_to_show, logger):
 def _handle_unknown_flag(name: str, logger: CommandLogger) -> None:
     """Handle an unknown flag name: print error, suggestions, and exit.
 
+    Graduated flags get migration guidance instead of typo suggestions --
+    the nearest registered name is usually an unrelated feature, so a
+    ``Did you mean`` hint would send the caller to the wrong behaviour.
+
     Callers are responsible for passing a normalised (snake_case) name.
     """
     try:
@@ -126,6 +130,21 @@ def _handle_unknown_flag(name: str, logger: CommandLogger) -> None:
     except ValueError as exc:
         args = exc.args
         display = display_name(name)
+        guidance = args[2] if len(args) > 2 else None
+        graduated = args[3] if len(args) > 3 else None
+
+        if guidance:
+            if graduated == display:
+                logger.error(f"'{display}' is no longer an experimental flag.")
+            else:
+                logger.error(f"Unknown experimental feature: {display}")
+                logger.progress(
+                    f"Did you mean '{graduated}'? It is no longer an experimental flag."
+                )
+            for line in guidance.splitlines():
+                logger.progress(line)
+            sys.exit(1)
+
         logger.error(f"Unknown experimental feature: {display}")
 
         suggestions = args[1] if len(args) > 1 else []

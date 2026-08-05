@@ -140,6 +140,30 @@ FLAGS: dict[str, ExperimentalFlag] = {
 
 
 # ---------------------------------------------------------------------------
+# Graduated flags
+# ---------------------------------------------------------------------------
+
+GRADUATED_FLAGS: dict[str, str] = {
+    "copilot_cowork": (
+        "The 'copilot-cowork' target is now generally available -- no flag is "
+        "needed.\nRun: apm install --target copilot-cowork --global"
+    ),
+}
+"""Flags that graduated to GA, mapped to migration guidance.
+
+A graduated flag is NOT a typo, so ``difflib`` suggestions are actively
+harmful here: the nearest registered name is usually an unrelated feature
+(``copilot-cowork`` -> ``copilot-app``), and following that suggestion
+silently enables the wrong behaviour.  Entries stay here permanently so
+stale scripts get a correct answer rather than a plausible wrong one.
+
+Add an entry whenever a flag is removed from :data:`FLAGS` because its
+behaviour became the default.  Keys MUST NOT overlap :data:`FLAGS` -- a
+live flag would shadow the entry and render it dead code.
+"""
+
+
+# ---------------------------------------------------------------------------
 # Name normalisation
 # ---------------------------------------------------------------------------
 
@@ -222,22 +246,40 @@ def validate_flag_name(name: str) -> str:
     Returns the normalised snake_case name on success.
 
     Raises:
-        ValueError: If the flag is not registered.  The exception message
-            includes ``difflib``-based suggestions when available.
+        ValueError: If the flag is not registered.  ``args[1]`` carries
+            ``difflib``-based suggestions; ``args[2]`` carries migration
+            guidance when the name resolves to a graduated flag rather
+            than a typo, and ``args[3]`` the graduated flag's display name.
     """
     normalised = normalise_flag_name(name)
     if normalised in FLAGS:
         return normalised
 
     display = display_name(normalised)
+    msg = f"Unknown experimental feature: {display}"
+
+    guidance = GRADUATED_FLAGS.get(normalised)
+    graduated_name = normalised if guidance is not None else None
+    if guidance is None:
+        # A near-miss on a graduated name ('copilot-cowrk') must not fall
+        # through to FLAGS matching, which would suggest an unrelated target.
+        graduated_match = difflib.get_close_matches(
+            normalised, GRADUATED_FLAGS.keys(), n=1, cutoff=0.6
+        )
+        if graduated_match:
+            graduated_name = graduated_match[0]
+            guidance = GRADUATED_FLAGS[graduated_name]
+
+    if guidance is not None:
+        raise ValueError(msg, [], guidance, display_name(graduated_name))
+
     suggestions = difflib.get_close_matches(
         normalised,
         FLAGS.keys(),
         n=3,
         cutoff=0.6,
     )
-    msg = f"Unknown experimental feature: {display}"
-    raise ValueError(msg, [display_name(s) for s in suggestions])
+    raise ValueError(msg, [display_name(s) for s in suggestions], None)
 
 
 def _set_flag(name: str, value: bool) -> ExperimentalFlag:

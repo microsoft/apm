@@ -112,6 +112,10 @@ apm install --target copilot-cowork --global
 
 Because it is explicit-only, `apm install --global` and `apm install --target all --global` do **not** deploy to Cowork.
 
+:::note[Upgrading from the experimental flag?]
+Cowork used to require `apm experimental enable copilot-cowork`, and `--target all --global` used to reach it. Both changed when the target went GA -- see [Target migration](../../troubleshooting/migration/#copilot-cowork-graduated-out-of-experimental).
+:::
+
 Cowork deployments are skills only:
 
 ```text

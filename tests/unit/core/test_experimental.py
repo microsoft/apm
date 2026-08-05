@@ -539,6 +539,72 @@ class TestCoworkFlagRemoved:
         assert "copilot_cowork" in get_stale_config_keys()
 
 
+class TestGraduatedFlags:
+    """Graduated flags teach migration instead of suggesting a wrong target."""
+
+    def test_graduated_flags_never_overlap_live_flags(self) -> None:
+        """A live flag would shadow the entry, making the guidance dead code."""
+        from apm_cli.core.experimental import FLAGS, GRADUATED_FLAGS
+
+        assert not (set(GRADUATED_FLAGS) & set(FLAGS))
+
+    def test_cowork_is_registered_as_graduated(self) -> None:
+        from apm_cli.core.experimental import GRADUATED_FLAGS
+
+        assert "copilot_cowork" in GRADUATED_FLAGS
+
+    def test_graduated_flag_carries_guidance_not_suggestions(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowork")
+
+        args = excinfo.value.args
+        assert args[1] == [], "typo suggestions must be suppressed"
+        assert "generally available" in args[2]
+        assert "--target copilot-cowork --global" in args[2]
+        assert args[3] == "copilot-cowork"
+
+    def test_graduated_guidance_never_suggests_copilot_app(self) -> None:
+        """Regression trap: 'copilot-app' is a different target entirely."""
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowork")
+
+        assert "copilot-app" not in str(excinfo.value.args[1:])
+
+    def test_near_miss_on_graduated_name_resolves_to_guidance(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowrk")
+
+        args = excinfo.value.args
+        assert args[3] == "copilot-cowork"
+        assert "copilot-app" not in str(args[1:])
+
+    def test_unrelated_typo_still_gets_flag_suggestions(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("verbose-vers")
+
+        args = excinfo.value.args
+        assert "verbose-version" in args[1]
+        assert len(args) == 2 or args[2] is None
+
+    def test_unknown_name_yields_no_guidance(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("totally-bogus")
+
+        args = excinfo.value.args
+        assert args[1] == []
+        assert len(args) == 2 or args[2] is None
+
+
 # ---------------------------------------------------------------------------
 # Package registry flag registration
 # ---------------------------------------------------------------------------
