@@ -21,6 +21,29 @@ apm install --target copilot-cowork --global
 
 No experimental flag is required.
 
+## First-run setup on macOS
+
+Corporate macOS machines very often mount more than one OneDrive root --
+for example a personal tenant mount plus a shared-libraries mount:
+
+```text
+~/Library/CloudStorage/OneDrive-Contoso
+~/Library/CloudStorage/OneDrive-SharedLibraries-Contoso
+```
+
+APM cannot guess which one holds your Cowork folder, so it refuses to
+choose and lists the candidates. Check which root actually contains
+`Documents/Cowork`, then persist it once:
+
+```bash
+ls -d ~/Library/CloudStorage/OneDrive*/Documents/Cowork
+apm config set copilot-cowork-skills-dir \
+  "$HOME/Library/CloudStorage/OneDrive-Contoso/Documents/Cowork/skills"
+```
+
+Treat this as normal setup rather than troubleshooting: if you have two
+mounts, you will need it before your first install.
+
 ## OneDrive auto-detection
 
 Resolution is first match wins:
@@ -31,7 +54,7 @@ Resolution is first match wins:
 
 | Platform | Resolution |
 |----------|------------|
-| macOS | Search `~/Library/CloudStorage/OneDrive*`. One match is used. No matches means Cowork is unavailable. Two or more matches fail with an actionable error that lists the candidates and recommends `APM_COPILOT_COWORK_SKILLS_DIR`. |
+| macOS | Search `~/Library/CloudStorage/OneDrive*`. One match is used. No matches means Cowork is unavailable. Two or more matches fail with an actionable error that lists the candidates and recommends `APM_COPILOT_COWORK_SKILLS_DIR` -- see [First-run setup on macOS](#first-run-setup-on-macos). |
 | Windows | Use `%ONEDRIVECOMMERCIAL%`, then `%ONEDRIVE%`. |
 | Linux | No default lookup. Set `APM_COPILOT_COWORK_SKILLS_DIR` or persist the path with `apm config set copilot-cowork-skills-dir ...`. |
 
@@ -103,6 +126,24 @@ Project-scope behaviour depends on how Cowork was selected:
 
 This means you can list `copilot-cowork` in `apm.yml` alongside project targets: project-scope installs quietly skip it, and `apm install --global` picks it up.
 
+## Verifying the delivery path
+
+Getting a skill into `Documents/Cowork/skills/` does not by itself prove
+that Cowork loaded it. The repository ships a package that closes that
+gap: `packages/cowork-smoke-test/` contains a single skill whose only job
+is to return a fixed sentinel token.
+
+Install it at user scope, wait for OneDrive to finish syncing, then ask
+Cowork to "run the APM Cowork smoke test". A reply containing
+`APM-SENTINEL-7Q4X-COWORK-2F91` proves the skill was read, because that
+token appears nowhere except in that file -- a model that never loaded it
+cannot invent it.
+
+For the negative control, remove the dependency, re-run the install (APM
+cleans the orphaned file), and ask again **in a fresh conversation**. The
+sentinel must now be unavailable. Re-using the old conversation is not a
+valid check: the token is already in that history.
+
 ## Skills-only behaviour
 
 Cowork deploys only `SKILL.md` content. Instructions, agents, prompts, hooks, commands, and MCP material are skipped for this target.
@@ -129,7 +170,7 @@ This keeps the lockfile portable across machines, users, and OneDrive tenants. A
 ## Troubleshooting
 
 - Cowork unavailable or no OneDrive detected: confirm OneDrive is installed and synchronising, then set `APM_COPILOT_COWORK_SKILLS_DIR`.
-- macOS multi-tenant error: set `APM_COPILOT_COWORK_SKILLS_DIR` to the account you want to use.
+- macOS multi-tenant error: expected on machines with more than one OneDrive mount. See [First-run setup on macOS](#first-run-setup-on-macos).
 - Linux: set `APM_COPILOT_COWORK_SKILLS_DIR` or persist the path with `apm config set copilot-cowork-skills-dir ...`.
 - Path no longer wanted: run `apm config unset copilot-cowork-skills-dir` to remove the stored value.
 - Project-scope error: rerun with `--global`, or let APM skip Cowork by selecting it through `apm.yml` instead of the CLI.
