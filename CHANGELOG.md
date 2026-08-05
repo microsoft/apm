@@ -251,6 +251,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conventional `skills/` discovery; conventional containers deploy at the
   expected depth, while `"skills": []` deploys no skills.
   (by @edenfunf, closes #2530, #2537, #2540)
+- `apm install` now emits a trust-posture warning (via `[!]`) when a marketplace
+  plugin deploys executables to Claude Code's PATH without an explicit `--trust-bin`
+  flag. In non-interactive (non-TTY) contexts the default is `--no-trust-bin`.
+  Pass `--trust-bin` to suppress the warning and deploy, or `apm approve` for
+  persistent per-package approval.
+
+### Removed
+
+- **BREAKING:** `apm experimental enable copilot-cowork` (and `disable` /
+  `reset` for that name) now exit 1 with "'copilot-cowork' is no longer an
+  experimental flag" plus the GA command to run instead. The flag has
+  graduated; no action is needed beyond dropping it from any scripts. A stale
+  `copilot_cowork` key in `~/.apm/config.json` is reported by
+  `apm experimental list` and cleaned by `apm experimental reset`.
+- **BREAKING:** `apm install --target all --global` no longer deploys to
+  Cowork. Previously, with the experimental flag enabled, `all` at user scope
+  included `copilot-cowork`. Name the target explicitly instead:
+  `apm install --target copilot-cowork --global`.
+  Both breaking changes are covered in
+  [Target migration](https://microsoft.github.io/apm/troubleshooting/migration/#copilot-cowork-graduated-out-of-experimental).
+- Retired the credential-dependent roadmap project sync. Release commitments
+  now live solely in the active milestone. (#2672)
 
 ### Fixed
 
