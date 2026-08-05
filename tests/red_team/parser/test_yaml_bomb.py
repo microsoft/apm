@@ -153,8 +153,8 @@ def test_large_anchor_free_lockfile_loads_successfully(tmp_path: Path):
     positive "billion-laughs expansion bomb" error.  After the fix, anchor-free
     documents bypass the tight expansion cap entirely.
 
-    The generated document contains approximately 200,000 scalar bytes across
-    20,000 mapping entries (no anchors, no aliases) -- well above the 5M weight
+    The generated document contains approximately 6,000,000 scalar bytes across
+    150,000 mapping entries (no anchors, no aliases) -- well above the 5M weight
     threshold -- and must load without error.
     """
     from apm_cli.utils.yaml_io import load_yaml

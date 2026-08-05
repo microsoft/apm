@@ -68,7 +68,7 @@ class _BoundedSafeLoader(yaml.SafeLoader):
     **Two-budget strategy (fix for issue #2389):** ``_guard_expansion`` now
     pre-scans for aliases via ``_has_aliases`` before computing expansion
     weights. Anchor-free documents (no shared node objects in the composed
-    graph) cannot amplify -- their weight equals O(1) of input size -- so the
+    graph) cannot amplify -- their weight scales linearly with input size -- so the
     tight expansion budget is skipped entirely for them. Only documents that
     contain aliases are subjected to the 5M weight cap. The merge-entry and
     depth guards are orthogonal and unaffected.
@@ -144,7 +144,7 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         #
         # Anchor-free documents (no shared node objects in the composed graph)
         # cannot produce alias-expansion amplification -- their total weight
-        # equals O(1) of literal input size.  Applying the tight 5M cap to
+        # scales linearly with literal input size (O(N)).  Applying the tight 5M cap to
         # them produces false-positive rejections of legitimate large lockfiles
         # (APM's own generated output).  We therefore pre-scan with
         # _has_aliases: if the graph is alias-free, return immediately.
