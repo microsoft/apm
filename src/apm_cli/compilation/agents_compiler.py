@@ -36,6 +36,7 @@ from .template_builder import (
 )
 
 if TYPE_CHECKING:
+    from .context_optimizer import ContextOptimizer
     from .distributed_compiler import DistributedAgentsCompiler
 
 _logger = logging.getLogger(__name__)
@@ -341,6 +342,7 @@ class AgentsCompiler:
         self.errors: list[str] = []
         self._logger = None
         self._distributed_placement: dict[Path, tuple[Instruction, ...]] | None = None
+        self._distributed_context_optimizer: ContextOptimizer | None = None
 
     def _log(self, method: str, message: str, **kwargs):
         """Delegate to logger if available, else no-op."""
@@ -365,6 +367,11 @@ class AgentsCompiler:
             self._distributed_placement = {
                 path: tuple(instructions) for path, instructions in placement.items()
             }
+            self._distributed_context_optimizer = compiler.context_optimizer
+        elif self._distributed_context_optimizer is not None:
+            # Reporting for every target must use the analysis that produced
+            # the shared placement, even though each target has its own compiler.
+            compiler.context_optimizer = self._distributed_context_optimizer
 
         return {
             path: list(instructions) for path, instructions in self._distributed_placement.items()
@@ -395,6 +402,7 @@ class AgentsCompiler:
         self._logger = logger
         # Placement is valid only for this invocation's primitive snapshot.
         self._distributed_placement = None
+        self._distributed_context_optimizer = None
 
         try:
             # Use provided primitives or discover them (with dependency support)

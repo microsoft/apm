@@ -226,8 +226,9 @@ class DistributedAgentsCompiler:
                     min_instructions=min_instructions,
                     debug=debug,
                 )
-            elif self._placement_map is None:
-                # Direct callers may provide target-independent placement.
+            else:
+                # Reporting must describe the placement used by this invocation,
+                # including when a caller reuses this compiler with a new map.
                 self._placement_map = placement_map
 
             # Phase 3: Generate distributed AGENTS.md files
