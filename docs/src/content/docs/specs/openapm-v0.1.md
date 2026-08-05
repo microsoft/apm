@@ -351,7 +351,7 @@ The canonical set of `target` identifiers registered by this
 specification at v0.1 is:
 
 ```
-copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all
+copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, kiro, grok-build, copilot-cowork, all
 ```
 
 The legacy aliases `vscode` and `agents` MAY appear in input manifests
@@ -366,8 +366,8 @@ registered **auto-detectable** target (see
 **auto-detectable** when the OpenAPM Target Registry publishes at
 least one detection predicate for it; a target registered without a
 detection predicate is **explicit-only** and MUST be selected
-explicitly. At v0.1 the explicit-only targets are `agent-skills` and
-`antigravity`, so `all` excludes them.
+explicitly. At v0.1 the explicit-only targets are `agent-skills`,
+`antigravity`, and `copilot-cowork`, so `all` excludes them.
 
 Concrete per-target detection signals and deploy roots are documented
 in the non-normative companion **"OpenAPM Target Registry v0.1"**
@@ -2253,7 +2253,8 @@ A target registered without a detection predicate
 MUST NOT be auto-detected and MUST be excluded from the expansion of
 `all`; such an **explicit-only** target MUST be selected explicitly
 via `--target <name>` or via the manifest's `target:` field. At v0.1
-the explicit-only targets are `agent-skills` and `antigravity`. When
+the explicit-only targets are `agent-skills`, `antigravity`, and
+`copilot-cowork`. When
 no detection signal fires, the consumer MAY fall back to a `minimal`
 profile that emits `AGENTS.md` only.
 
@@ -3506,6 +3507,7 @@ renumbering of conformance classes.
 | 0.1.25  | 2026-08-03 | Spec-citation fold for portable project-scoped Claude hooks (closes #2408 Mode-B silent-extension gate). Added [req-tg-010] (Section 8.5.4, consumer MUST): a project-scoped native hook that may launch outside the consumer project anchors its generated command through the target portable project-directory environment variable, preserves the relative hook path, executes successfully when the variable identifies the consumer project, and never embeds an absolute checkout path; shell-expansion path syntax is rejected. Claude uses `CLAUDE_PROJECT_DIR` in POSIX and `$env:CLAUDE_PROJECT_DIR` in PowerShell. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 108 -> 109 (104 MUST, 5 SHOULD). |
 | 0.1.26  | 2026-08-03 | Spec-citation fold for VS Code OCI/Docker MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and package-scoped secret metadata uses VS Code secret-input references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 109 -> 110 (105 MUST, 5 SHOULD). |
 | 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
+| 0.1.28  | 2026-08-05 | Canonical target-set reconciliation (no new normative statements; statement count remains 111 (106 MUST, 5 SHOULD)). Section 4.2.1: added `kiro`, `grok-build`, and `copilot-cowork` to the canonical `target` set, which had drifted from the OpenAPM Target Registry -- [req-mf-005] obliges a producer to reject any target outside that set, so the omission made three shipped, registered targets nominally non-conforming. Sections 4.2.1 and 8.4: added `copilot-cowork` to the v0.1 explicit-only set alongside `agent-skills` and `antigravity`, so [req-tg-001] excludes it from the expansion of `all`. The drift was invisible because the [req-mf-005] conformance test only grepped the spec for its own list; it now compares Section 4.2.1 against the registered target set directly, and a companion [req-tg-001] test pins both explicit-only prose lists, so a future target cannot ship without a spec amendment. No normative count change. |
 
 Errata (none at publication).
 
