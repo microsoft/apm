@@ -103,7 +103,7 @@ in `apm.yml`, then run `apm install` again.
 |---|---|---|
 | `--mcp NAME` | unset | Add an MCP server entry to `apm.yml` and install it. Pair with the flags below or pass an executable after `--`. |
 | `--transport stdio\|http\|sse\|streamable-http` | inferred | Inferred from `--url` or the post-`--` argv when omitted. |
-| `--url URL` | unset | Endpoint for `http`, `sse`, or `streamable-http` transports. Scheme must be `http` or `https`. |
+| `--url URL` | unset | Endpoint for `http`, `sse`, or `streamable-http` transports. Scheme must be `http` or `https`. Codex requires HTTPS for non-loopback endpoints; plain HTTP is accepted only for `localhost`, `127.0.0.0/8`, or `::1`. |
 | `--env KEY=VALUE` | unset | Environment variable for stdio MCP servers. Repeatable. |
 | `--header KEY=VALUE` | unset | HTTP header for remote MCP servers. Repeatable. Requires `--url`. |
 | `--mcp-version VER` | unset | Pin a registry MCP entry to a specific version. |
