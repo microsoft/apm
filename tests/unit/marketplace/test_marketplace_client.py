@@ -407,6 +407,47 @@ class TestFetchMarketplace:
             client_mod._fetch_url_direct(source_url)
 
 
+class TestFetchMarketplaceRaw:
+    """fetch_marketplace_raw returns the raw dict without parsing."""
+
+    def test_returns_dict_not_manifest(self, tmp_path):
+        """fetch_marketplace_raw must return the raw dict, not a MarketplaceManifest."""
+        from apm_cli.marketplace.models import MarketplaceManifest
+
+        source = _make_source()
+        raw_data = {
+            "name": "Acme Plugins",
+            "plugins": [{"name": "tool-a", "repository": "acme-org/tool-a"}],
+        }
+        mock_resolver = MagicMock()
+        mock_resolver.try_with_fallback.return_value = raw_data
+        mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
+
+        result = client_mod.fetch_marketplace_raw(
+            source, force_refresh=True, auth_resolver=mock_resolver
+        )
+
+        assert isinstance(result, dict), "fetch_marketplace_raw must return a dict"
+        assert not isinstance(result, MarketplaceManifest)
+        assert result == raw_data
+
+    def test_returns_raw_dict_for_malformed_plugins(self, tmp_path):
+        """fetch_marketplace_raw must not parse or coerce the plugins field."""
+        source = _make_source()
+        raw_data = {"name": "Acme", "plugins": "not-an-array"}
+        mock_resolver = MagicMock()
+        mock_resolver.try_with_fallback.return_value = raw_data
+        mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
+
+        result = client_mod.fetch_marketplace_raw(
+            source, force_refresh=True, auth_resolver=mock_resolver
+        )
+
+        # Must return the raw value without coercion -- the caller (validate) must
+        # detect the malformed field via validate_raw_marketplace_structure.
+        assert result["plugins"] == "not-an-array"
+
+
 class TestAutoDetectPath:
     """Auto-detect marketplace.json location in a repo."""
 

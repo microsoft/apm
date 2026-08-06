@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm marketplace validate` now rejects structurally invalid `marketplace.json` files (e.g. `plugins` is not an array, or the root is not an object) instead of silently reporting a false-positive clean result. (#2424)
 - `apm install` now re-downloads an aliased dependency after its `ref:` changes
   in `apm.yml`. Previously the pinned-ref and already-resolved cache-reuse
   shortcuts skipped the fetch, so `apm_modules/<alias>/` and every primitive

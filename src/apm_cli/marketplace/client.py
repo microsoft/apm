@@ -58,6 +58,15 @@ class FetchResult:
     last_modified: str = ""
 
 
+@dataclass(frozen=True)
+class _RawAcquireResult:
+    """Internal DTO: raw marketplace.json dict plus parse-time metadata."""
+
+    data: dict
+    source_url: str = ""
+    source_digest: str = ""
+
+
 _CACHE_TTL_SECONDS = 3600  # 1 hour
 _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
 _HTTP_CHUNK_BYTES = 1024 * 1024
@@ -1116,6 +1125,106 @@ def _auto_detect_path(
 
 
 # ---------------------------------------------------------------------------
+# Internal: raw data acquisition (shared by fetch_marketplace and fetch_marketplace_raw)
+# ---------------------------------------------------------------------------
+
+
+def _acquire_raw_data(
+    source: MarketplaceSource,
+    *,
+    force_refresh: bool = False,
+    auth_resolver: object | None = None,
+) -> _RawAcquireResult:
+    """Acquire the raw marketplace.json dict with full cache/fetch logic.
+
+    Handles the sidecar JSON cache, stale-while-revalidate, URL ETag/Last-Modified
+    negotiation, and all source kinds.  Returns the raw dict alongside the
+    metadata needed by ``parse_marketplace_json`` (source_url, source_digest).
+
+    Raises:
+        MarketplaceFetchError: If fetch fails and no cache is available.
+    """
+    cache_name = _cache_key(source)
+    use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
+    is_url = source.kind == "url"
+
+    # Try fresh cache first (API kinds only)
+    if use_sidecar_cache and not force_refresh:
+        cached = _read_cache(cache_name)
+        if cached is not None:
+            logger.debug("Using cached marketplace data for '%s'", source.name)
+            meta = _read_stale_meta(cache_name) or {}
+            return _RawAcquireResult(
+                data=cached,
+                source_url=source.url if is_url else "",
+                source_digest=meta.get("index_digest", "") if is_url else "",
+            )
+
+    # Fetch from source
+    try:
+        if is_url:
+            stale_meta = _read_stale_meta(cache_name) or {}
+            result = _fetch_url_direct(
+                source.url,
+                etag=stale_meta.get("etag", ""),
+                last_modified=stale_meta.get("last_modified", ""),
+            )
+            if result is None:
+                stale = _read_stale_cache(cache_name)
+                if stale is None:
+                    raise MarketplaceFetchError(
+                        source.name, "got 304 Not Modified but no cached data is available"
+                    )
+                _write_cache(
+                    cache_name,
+                    stale,
+                    index_digest=stale_meta.get("index_digest", ""),
+                    etag=stale_meta.get("etag", ""),
+                    last_modified=stale_meta.get("last_modified", ""),
+                )
+                return _RawAcquireResult(
+                    data=stale,
+                    source_url=source.url,
+                    source_digest=stale_meta.get("index_digest", ""),
+                )
+            _write_cache(
+                cache_name,
+                result.data,
+                index_digest=result.digest,
+                etag=result.etag,
+                last_modified=result.last_modified,
+            )
+            return _RawAcquireResult(
+                data=result.data,
+                source_url=source.url,
+                source_digest=result.digest,
+            )
+
+        data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
+        if data is None:
+            raise MarketplaceFetchError(
+                source.name,
+                f"marketplace.json not found at '{source.path}' in {source.display_source}",
+            )
+        if use_sidecar_cache:
+            _write_cache(cache_name, data)
+        return _RawAcquireResult(data=data)
+    except MarketplaceFetchError:
+        # Stale-while-revalidate (API kinds only): serve expired cache on network error
+        if use_sidecar_cache:
+            stale = _read_stale_cache(cache_name)
+            if stale is not None:
+                logger.warning("Network error fetching '%s'; using stale cache", source.name)
+                meta = _read_stale_meta(cache_name) or {}
+                return _RawAcquireResult(
+                    data=stale,
+                    source_url=source.url if is_url else "",
+                    source_digest=meta.get("index_digest", "") if is_url else "",
+                )
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -1143,87 +1252,37 @@ def fetch_marketplace(
     Raises:
         MarketplaceFetchError: If fetch fails and no cache is available.
     """
-    cache_name = _cache_key(source)
-    use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
+    raw = _acquire_raw_data(source, force_refresh=force_refresh, auth_resolver=auth_resolver)
+    return parse_marketplace_json(
+        raw.data, source.name, source_url=raw.source_url, source_digest=raw.source_digest
+    )
 
-    # Try fresh cache first (API kinds only)
-    if use_sidecar_cache and not force_refresh:
-        cached = _read_cache(cache_name)
-        if cached is not None:
-            logger.debug("Using cached marketplace data for '%s'", source.name)
-            meta = _read_stale_meta(cache_name) or {}
-            return parse_marketplace_json(
-                cached,
-                source.name,
-                source_url=source.url if source.kind == "url" else "",
-                source_digest=meta.get("index_digest", "") if source.kind == "url" else "",
-            )
 
-    # Fetch from source
-    try:
-        if source.kind == "url":
-            stale_meta = _read_stale_meta(cache_name) or {}
-            result = _fetch_url_direct(
-                source.url,
-                etag=stale_meta.get("etag", ""),
-                last_modified=stale_meta.get("last_modified", ""),
-            )
-            if result is None:
-                stale = _read_stale_cache(cache_name)
-                if stale is None:
-                    raise MarketplaceFetchError(
-                        source.name, "got 304 Not Modified but no cached data is available"
-                    )
-                _write_cache(
-                    cache_name,
-                    stale,
-                    index_digest=stale_meta.get("index_digest", ""),
-                    etag=stale_meta.get("etag", ""),
-                    last_modified=stale_meta.get("last_modified", ""),
-                )
-                return parse_marketplace_json(
-                    stale,
-                    source.name,
-                    source_url=source.url,
-                    source_digest=stale_meta.get("index_digest", ""),
-                )
-            _write_cache(
-                cache_name,
-                result.data,
-                index_digest=result.digest,
-                etag=result.etag,
-                last_modified=result.last_modified,
-            )
-            return parse_marketplace_json(
-                result.data,
-                source.name,
-                source_url=source.url,
-                source_digest=result.digest,
-            )
+def fetch_marketplace_raw(
+    source: MarketplaceSource,
+    *,
+    force_refresh: bool = False,
+    auth_resolver: object | None = None,
+) -> dict:
+    """Fetch the raw marketplace.json dict without permissive parsing.
 
-        data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
-        if data is None:
-            raise MarketplaceFetchError(
-                source.name,
-                f"marketplace.json not found at '{source.path}' in {source.display_source}",
-            )
-        if use_sidecar_cache:
-            _write_cache(cache_name, data)
-        return parse_marketplace_json(data, source.name)
-    except MarketplaceFetchError:
-        # Stale-while-revalidate (API kinds only): serve expired cache on network error
-        if use_sidecar_cache:
-            stale = _read_stale_cache(cache_name)
-            if stale is not None:
-                logger.warning("Network error fetching '%s'; using stale cache", source.name)
-                meta = _read_stale_meta(cache_name) or {}
-                return parse_marketplace_json(
-                    stale,
-                    source.name,
-                    source_url=source.url if source.kind == "url" else "",
-                    source_digest=meta.get("index_digest", "") if source.kind == "url" else "",
-                )
-        raise
+    Identical fetch/cache logic to ``fetch_marketplace`` but returns the
+    unmodified JSON dict.  Use this when callers need to inspect the raw
+    structure before handing it to the permissive parser (e.g.
+    ``apm marketplace validate``).
+
+    Args:
+        source: Marketplace source to fetch.
+        force_refresh: Skip cache and re-fetch from network.
+        auth_resolver: Optional ``AuthResolver`` instance (created if None).
+
+    Returns:
+        dict: Raw marketplace.json content.
+
+    Raises:
+        MarketplaceFetchError: If fetch fails and no cache is available.
+    """
+    return _acquire_raw_data(source, force_refresh=force_refresh, auth_resolver=auth_resolver).data
 
 
 def fetch_or_cache(

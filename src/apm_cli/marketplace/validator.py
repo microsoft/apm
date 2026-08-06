@@ -3,16 +3,41 @@
 Provides validation functions for marketplace.json integrity checking.
 Used by ``apm marketplace validate``.
 
-All validators operate on parsed ``MarketplaceManifest`` / ``MarketplacePlugin``
-objects. The JSON parser (``models.py``) already drops entries that are
-structurally unrecognizable; these validators enforce additional business
-rules on the successfully parsed entries.
+Validation runs in two layers:
+
+1. **Structural** (``validate_raw_marketplace_structure``): operates on the raw
+   JSON dict before permissive parsing.  Catches type-level violations such as
+   ``plugins`` being a non-list that the parser would silently coerce to ``[]``.
+
+2. **Business-rule** (``validate_marketplace``, ``validate_plugin_schema``,
+   ``validate_no_duplicate_names``): operates on parsed
+   ``MarketplaceManifest`` / ``MarketplacePlugin`` objects.  The JSON parser
+   (``models.py``) already drops entries that are structurally unrecognizable;
+   these validators enforce additional business rules on the successfully
+   parsed entries.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from .models import MarketplaceManifest, MarketplacePlugin
+
+_PYTHON_TO_JSON_TYPE: dict[str, str] = {
+    "str": "string",
+    "int": "number",
+    "float": "number",
+    "bool": "boolean",
+    "NoneType": "null",
+    "list": "array",
+    "dict": "object",
+}
+
+
+def _json_type_name(value: Any) -> str:
+    """Return the JSON-schema type name for a Python value."""
+    python_name = type(value).__name__
+    return _PYTHON_TO_JSON_TYPE.get(python_name, python_name)
 
 
 @dataclass
@@ -23,6 +48,37 @@ class ValidationResult:
     passed: bool
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+
+def validate_raw_marketplace_structure(data: Any) -> ValidationResult:
+    """Check the raw marketplace.json dict for structural invariants.
+
+    This runs BEFORE the permissive parser (``parse_marketplace_json``) so
+    that type-level violations -- e.g. ``plugins`` being a string instead of
+    a list -- are surfaced rather than silently coerced to safe defaults.
+
+    Args:
+        data: The raw parsed JSON value.  Expected to be a ``dict``.
+
+    Returns:
+        ValidationResult: ``check_name="Structure"``, failed when invariants
+        are violated.
+    """
+    errors: list[str] = []
+
+    if not isinstance(data, dict):
+        errors.append(f"marketplace.json root must be an object, got {_json_type_name(data)!r}")
+        return ValidationResult(check_name="Structure", passed=False, errors=errors)
+
+    raw_plugins = data.get("plugins", [])
+    if not isinstance(raw_plugins, list):
+        errors.append(f"'plugins' field must be an array, got {_json_type_name(raw_plugins)!r}")
+
+    return ValidationResult(
+        check_name="Structure",
+        passed=len(errors) == 0,
+        errors=errors,
+    )
 
 
 def validate_marketplace(

@@ -172,6 +172,17 @@ Unregister a marketplace.
 ### `apm marketplace validate NAME`
 
 Validate the manifest of a registered marketplace against the schema.
+Runs a two-layer check: a structural pre-check on the raw JSON (catches
+a non-object root or a non-array `plugins` field), then business-rule
+validation on the parsed manifest (schema, duplicate names). Exits 1 and
+prints a summary when either layer finds errors.
+
+Example failure output for a malformed `plugins` field:
+
+```
+[x] Structure: 'plugins' field must be an array, got 'string'
+Summary: 0 passed, 0 warnings, 1 errors
+```
 
 ### `apm marketplace init`
 
