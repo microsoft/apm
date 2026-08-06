@@ -29,6 +29,7 @@ AGENT_DIAGNOSTIC_FUNCTIONS = {
     "AgentIntegrator._warn_codex_unverified_scope": True,
     "AgentIntegrator._warn_codex_tools_dropped": True,
     "AgentIntegrator._warn_opencode_frontmatter": False,
+    "AgentIntegrator._copy_github_agent": False,
 }
 ALLOWED_IDENTITY_DELEGATES = {
     "AgentIntegrator._warn_opencode_frontmatter": {"validate_opencode_frontmatter"},
@@ -133,7 +134,7 @@ def _diagnostic_calls(function: ast.AST) -> list[ast.Call]:
         for node in _walk_own_scope(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"warn", "lossy_agent_compilation"}
+        and node.func.attr in {"warn", "lossy_agent_compilation", "info"}
     ]
 
 

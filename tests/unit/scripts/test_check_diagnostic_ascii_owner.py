@@ -159,12 +159,15 @@ def test_opencode_wrapper_package_field_must_use_owner(
 ) -> None:
     """The wrapper's Diagnostic.package field is also terminal output."""
     consumer = repo_copy / "src/apm_cli/integration/agent_integrator.py"
-    source = consumer.read_text(encoding="utf-8").replace(
-        "package=printable_ascii_text(package_name),",
-        "package=package_name,",
-        1,
-    )
-    consumer.write_text(source, encoding="utf-8")
+    # _copy_github_agent now also holds this pattern (added as a new diagnostic
+    # consumer), so target the second occurrence specifically to corrupt
+    # _warn_opencode_frontmatter rather than _copy_github_agent.
+    needle = "package=printable_ascii_text(package_name),"
+    raw = consumer.read_text(encoding="utf-8")
+    first = raw.index(needle)
+    second = raw.index(needle, first + 1)
+    mutated = raw[:second] + raw[second:].replace(needle, "package=package_name,", 1)
+    consumer.write_text(mutated, encoding="utf-8")
 
     violations = checker.check(repo_copy)
 
@@ -174,6 +177,25 @@ def test_opencode_wrapper_package_field_must_use_owner(
     )
     assert any(
         "must not render raw source.name or package_name" in item.message for item in violations
+    )
+
+
+def test_copy_github_agent_package_field_must_use_owner(
+    repo_copy: Path,
+    checker,
+) -> None:
+    """_copy_github_agent is a new diagnostic consumer; its package field must use the owner."""
+    consumer = repo_copy / "src/apm_cli/integration/agent_integrator.py"
+    needle = "package=printable_ascii_text(package_name),"
+    raw = consumer.read_text(encoding="utf-8")
+    first = raw.index(needle)
+    mutated = raw[:first] + raw[first:].replace(needle, "package=package_name,", 1)
+    consumer.write_text(mutated, encoding="utf-8")
+
+    violations = checker.check(repo_copy)
+
+    assert any(
+        "AgentIntegrator._copy_github_agent must derive" in item.message for item in violations
     )
 
 

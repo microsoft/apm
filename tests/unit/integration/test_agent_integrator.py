@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from apm_cli.integration import AgentIntegrator
+from apm_cli.integration.agent_integrator import GITHUB_AGENT_TOOL_RENAMES
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
@@ -115,6 +116,34 @@ class TestAgentIntegrator:
 
         target_content = target.read_text()
         assert target_content == source_content
+
+    def test_copy_agent_pre_transform_applied_before_link_resolution(self):
+        """pre_transform receives the raw file content and its output is linked."""
+        source = self.project_root / "source.agent.md"
+        target = self.project_root / "target.agent.md"
+        source.write_text("MARKER content")
+
+        calls: list[str] = []
+
+        def recorder(content: str) -> str:
+            calls.append(content)
+            return content.replace("MARKER", "REPLACED")
+
+        self.integrator.copy_agent(source, target, pre_transform=recorder)
+
+        assert calls == ["MARKER content"], "pre_transform was not called with raw content"
+        assert target.read_text() == "REPLACED content"
+
+    def test_copy_agent_without_pre_transform_is_verbatim(self):
+        """copy_agent with no pre_transform is backward-compatible verbatim copy."""
+        source = self.project_root / "source.agent.md"
+        target = self.project_root / "target.agent.md"
+        content = "# Agent\n\nContent."
+        source.write_text(content)
+
+        self.integrator.copy_agent(source, target)
+
+        assert target.read_text() == content
 
     def test_get_target_filename_agent_format(self):
         """Test target filename generation with clean naming for .agent.md."""
@@ -1325,3 +1354,258 @@ class TestCodexAgentIntegration:
 # integrate_agents_for_target(windsurf, ...) path were removed when
 # the primitive was dropped to fix the uninstall cleanup bug.
 # ==================================================================
+
+
+class TestGithubAgentToolRenames:
+    """Tests for the VSCode Copilot tool-name rename transform (#2465).
+
+    VSCode Copilot namespaced its built-in tool identifiers.  Any *.agent.md
+    file deployed to the copilot (github_agent) target must have old names
+    rewritten automatically so the IDE does not emit warnings.
+    """
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    # ------------------------------------------------------------------
+    # Unit tests for _apply_github_agent_tool_renames
+    # ------------------------------------------------------------------
+
+    def test_all_six_known_renames_are_applied(self):
+        """Every entry in GITHUB_AGENT_TOOL_RENAMES must be rewritten."""
+        old_names = list(GITHUB_AGENT_TOOL_RENAMES.keys())
+        tools_yaml = "\n".join(f"  - {n}" for n in old_names)
+        content = f"---\ndescription: Agent\ntools:\n{tools_yaml}\n---\nBody.\n"
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        for old, new in GITHUB_AGENT_TOOL_RENAMES.items():
+            assert f"- {old}" not in result, f"Old YAML item '- {old}' still present after rename"
+            assert new in result, f"New name {new!r} missing after rename"
+
+    def test_unknown_tool_names_pass_through_unchanged(self):
+        """Tool names not in the rename map must be preserved verbatim."""
+        content = "---\ndescription: A\ntools:\n  - myCustomTool\n  - anotherTool\n---\nBody.\n"
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        assert "myCustomTool" in result
+        assert "anotherTool" in result
+
+    def test_already_namespaced_names_pass_through_unchanged(self):
+        """New-style namespaced names must not be double-rewritten."""
+        content = (
+            "---\ndescription: A\ntools:\n"
+            "  - vscode/askQuestions\n"
+            "  - execute/runInTerminal\n"
+            "---\nBody.\n"
+        )
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        assert result == content
+
+    def test_no_frontmatter_returns_content_unchanged(self):
+        """Files without YAML frontmatter are returned verbatim."""
+        content = "# Agent\n\nSome content.\n"
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        assert result == content
+
+    def test_no_tools_key_returns_content_unchanged(self):
+        """Files with frontmatter but no 'tools:' are returned verbatim."""
+        content = "---\ndescription: Agent\nmodel: gpt-4o\n---\nBody.\n"
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        assert result == content
+
+    def test_null_tools_returns_content_unchanged(self):
+        """tools: null frontmatter is returned verbatim."""
+        content = "---\ndescription: Agent\ntools: null\n---\nBody.\n"
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        assert result == content
+
+    def test_tools_not_a_list_returns_content_unchanged(self):
+        """Non-list tools value (e.g. string) is returned verbatim."""
+        content = "---\ndescription: Agent\ntools: all\n---\nBody.\n"
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        assert result == content
+
+    def test_mixed_old_and_unknown_tools_renames_only_known(self):
+        """Only known old names are renamed; unrecognised names are kept."""
+        content = (
+            "---\ndescription: A\ntools:\n"
+            "  - fetch\n"
+            "  - myCustomTool\n"
+            "  - runInTerminal\n"
+            "---\nBody.\n"
+        )
+
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+
+        assert "web/fetch" in result
+        assert "execute/runInTerminal" in result
+        assert "myCustomTool" in result
+        assert "- fetch" not in result
+        assert "- runInTerminal" not in result
+
+    # ------------------------------------------------------------------
+    # Integration tests via integrate_agents_for_target (github_agent)
+    # ------------------------------------------------------------------
+
+    def _create_package_info(self, package_dir: Path, *, name: str = "test-pkg") -> PackageInfo:
+        package = APMPackage(name=name, version="1.0.0", package_path=package_dir)
+        resolved_ref = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        return PackageInfo(
+            package=package,
+            install_path=package_dir,
+            resolved_reference=resolved_ref,
+            installed_at=datetime.now().isoformat(),
+        )
+
+    def test_integrate_copilot_target_rewrites_deprecated_tool_names(self):
+        """integrate_agents_for_target for copilot rewrites old tool names."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "reviewer.agent.md").write_text(
+            "---\ndescription: Code reviewer\ntools:\n"
+            "  - askQuestions\n"
+            "  - runInTerminal\n"
+            "  - fetch\n"
+            "---\nReview code.\n",
+            encoding="utf-8",
+        )
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["copilot"],
+            self._create_package_info(package_dir),
+            self.root,
+        )
+
+        assert result.files_integrated == 1
+        deployed = (self.root / ".github" / "agents" / "reviewer.agent.md").read_text(
+            encoding="utf-8"
+        )
+        assert "- askQuestions" not in deployed
+        assert "vscode/askQuestions" in deployed
+        assert "- runInTerminal" not in deployed
+        assert "execute/runInTerminal" in deployed
+        assert "web/fetch" in deployed
+
+    def test_integrate_copilot_target_preserves_no_tools_verbatim(self):
+        """Agents without a tools list are deployed verbatim by the copilot path."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        original = "---\ndescription: Simple agent\n---\nDo things.\n"
+        (agents_dir / "simple.agent.md").write_text(original, encoding="utf-8")
+
+        AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["copilot"],
+            self._create_package_info(package_dir),
+            self.root,
+        )
+
+        deployed = (self.root / ".github" / "agents" / "simple.agent.md").read_text(
+            encoding="utf-8"
+        )
+        assert deployed.strip() == original.strip()
+
+    def test_integrate_package_agents_deprecated_path_rewrites_tool_names(self):
+        """The deprecated integrate_package_agents also rewrites old tool names."""
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "linter.agent.md").write_text(
+            "---\ndescription: Linter\ntools:\n  - createFile\n  - listDirectory\n---\nLint.\n",
+            encoding="utf-8",
+        )
+
+        result = AgentIntegrator().integrate_package_agents(
+            self._create_package_info(package_dir),
+            self.root,
+        )
+
+        assert result.files_integrated == 1
+        deployed = (self.root / ".github" / "agents" / "linter.agent.md").read_text(
+            encoding="utf-8"
+        )
+        assert "- createFile" not in deployed
+        assert "- listDirectory" not in deployed
+        assert "edit/createFile" in deployed
+        assert "search/listDirectory" in deployed
+
+    def test_all_six_renames_via_full_integration_path(self):
+        """All six deprecated tool names are corrected in a full install cycle."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        tools_list = "\n".join(f"  - {t}" for t in GITHUB_AGENT_TOOL_RENAMES)
+        (agents_dir / "all-tools.agent.md").write_text(
+            f"---\ndescription: Full tool set\ntools:\n{tools_list}\n---\nDo work.\n",
+            encoding="utf-8",
+        )
+
+        AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["copilot"],
+            self._create_package_info(package_dir),
+            self.root,
+        )
+
+        deployed = (self.root / ".github" / "agents" / "all-tools.agent.md").read_text(
+            encoding="utf-8"
+        )
+        for old, new in GITHUB_AGENT_TOOL_RENAMES.items():
+            assert f"- {old}" not in deployed, (
+                f"Old YAML item '- {old}' still present in deployed file"
+            )
+            assert new in deployed, f"New name {new!r} missing in deployed file"
+
+    def test_non_string_tool_entries_pass_through_unchanged(self):
+        """Non-string entries in the tools list are preserved without coercion.
+
+        The isinstance(t, str) guard means mapping nodes, sequences, and other
+        non-string YAML values must survive the rename pass intact, even when
+        they appear alongside renamed string entries.
+        """
+        content = (
+            "---\n"
+            "description: Mixed tools\n"
+            "tools:\n"
+            "  - askQuestions\n"
+            "  - {name: customTool, description: My tool}\n"
+            "  - fetch\n"
+            "---\n"
+            "Body.\n"
+        )
+        result = AgentIntegrator._apply_github_agent_tool_renames(content)
+        # String entries that match the rename map are rewritten.
+        assert "vscode/askQuestions" in result
+        assert "web/fetch" in result
+        # Non-string mapping entry must survive -- it is not stringified.
+        assert "name: customTool" in result
+        assert "description: My tool" in result

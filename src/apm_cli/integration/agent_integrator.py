@@ -22,8 +22,26 @@ from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+# Renamed VSCode Copilot built-in tool names.
+# VSCode Copilot migrated built-in tool identifiers to a namespaced format.
+# Any *.agent.md file deployed to the copilot target has these old names
+# rewritten automatically so the IDE does not emit "Tool or toolset has been
+# renamed" warnings.  Only the tools list in the YAML frontmatter is affected;
+# the source package file is never modified.
+# Ref: https://github.com/microsoft/apm/issues/2465
+GITHUB_AGENT_TOOL_RENAMES: dict[str, str] = {
+    "askQuestions": "vscode/askQuestions",
+    "runInTerminal": "execute/runInTerminal",
+    "getTerminalOutput": "execute/getTerminalOutput",
+    "createFile": "edit/createFile",
+    "fetch": "web/fetch",
+    "listDirectory": "search/listDirectory",
+}
 
 # Kiro capability tags approved for agent 'tools' frontmatter.
 # Source: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
@@ -238,6 +256,13 @@ class AgentIntegrator(BaseIntegrator):
                     package_name=package_info.package.name,
                 )
                 links_resolved = 0
+            elif mapping.format_id == "github_agent":
+                links_resolved = self._copy_github_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
             else:
                 if mapping.format_id == "opencode_agent":
                     self._warn_opencode_frontmatter(
@@ -304,21 +329,125 @@ class AgentIntegrator(BaseIntegrator):
             KNOWN_TARGETS["copilot"],
         )
 
-    def copy_agent(self, source: Path, target: Path) -> int:
-        """Copy agent file verbatim, resolving context links.
+    def copy_agent(
+        self,
+        source: Path,
+        target: Path,
+        pre_transform: Callable[[str], str] | None = None,
+    ) -> int:
+        """Copy agent file, resolving context links.
 
         Args:
-            source: Source file path
-            target: Target file path
+            source: Source file path.
+            target: Target file path.
+            pre_transform: Optional callable applied to the raw file content
+                before link resolution.  Use this to inject format-specific
+                transforms (e.g. tool-name rewriting) without duplicating the
+                read/resolve/write body in each format helper.
 
         Returns:
-            int: Number of links resolved
+            int: Number of links resolved.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
+        if pre_transform is not None:
+            content = pre_transform(content)
         content, links_resolved = self.resolve_links(content, source, target)
         write_text_lf(target, content)
+        return links_resolved
+
+    # ------------------------------------------------------------------
+    # GitHub (Copilot) agent transformer -- tool name rewrite
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _apply_github_agent_tool_renames(content: str) -> str:
+        """Rewrite deprecated VSCode built-in tool names in a github_agent file.
+
+        Applies GITHUB_AGENT_TOOL_RENAMES to every string entry in the YAML
+        frontmatter ``tools:`` list.  Non-string entries (mappings, sequences,
+        etc.) are preserved as-is without coercion.  Other frontmatter field
+        *values* are semantically preserved, but their serialisation formatting
+        (quoting style, key order) may change due to the YAML roundtrip.  The
+        markdown body is byte-for-byte unchanged.  Returns the original
+        *content* unchanged when:
+
+        - the file has no YAML frontmatter
+        - the frontmatter is unparseable
+        - there is no ``tools:`` key
+        - ``tools:`` is null or not a list
+        - no string entry in the list matches a known rename
+        """
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if not fm_match:
+            return content
+        try:
+            fm = load_yaml_str(fm_match.group(1)) or {}
+        except yaml.YAMLError:
+            return content
+        if not isinstance(fm, dict):
+            return content
+        tools_raw = fm.get("tools")
+        if not isinstance(tools_raw, list):
+            return content
+        any_renamed = False
+        renamed = []
+        for t in tools_raw:
+            if isinstance(t, str) and t in GITHUB_AGENT_TOOL_RENAMES:
+                renamed.append(GITHUB_AGENT_TOOL_RENAMES[t])
+                any_renamed = True
+            else:
+                renamed.append(t)
+        if not any_renamed:
+            return content
+        fm["tools"] = renamed
+        body = content[fm_match.end() :]
+        fm_text = yaml_to_str(fm)
+        return f"---\n{fm_text}---\n{body}"
+
+    def _copy_github_agent(
+        self,
+        source: Path,
+        target: Path,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
+    ) -> int:
+        """Copy a github_agent file, rewriting deprecated tool names.
+
+        Delegates the read/resolve/write pipeline to :meth:`copy_agent` via
+        its ``pre_transform`` hook so that security checks (symlink guard) and
+        link resolution live in exactly one place.
+
+        When ``diagnostics`` is supplied and renames occur, an info-level
+        diagnostic is emitted naming the file and the count of rewrites.
+
+        Args:
+            source: Source ``.agent.md`` file path.
+            target: Destination path under ``.github/agents/``.
+            diagnostics: Optional collector for user-visible messages.
+            package_name: Package name for diagnostic context.
+
+        Returns:
+            int: Number of context links resolved.
+        """
+        rename_count: list[int] = [0]
+
+        def _transform(content: str) -> str:
+            renamed = self._apply_github_agent_tool_renames(content)
+            if renamed is not content:
+                rename_count[0] = sum(1 for old in GITHUB_AGENT_TOOL_RENAMES if old in content)
+            return renamed
+
+        links_resolved = self.copy_agent(source, target, pre_transform=_transform)
+        if rename_count[0] and diagnostics is not None:
+            diagnostics.info(
+                message=(
+                    f"{printable_ascii_text(source.name)}: rewrote {rename_count[0]} deprecated"
+                    f" VSCode tool name(s) to namespaced form"
+                ),
+                package=printable_ascii_text(package_name),
+            )
         return links_resolved
 
     # ------------------------------------------------------------------
@@ -721,7 +850,12 @@ class AgentIntegrator(BaseIntegrator):
                 ):
                     files_skipped += 1
                     continue
-                links_resolved = self.copy_agent(source_file, target_path)
+                links_resolved = self._copy_github_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
                 total_links_resolved += links_resolved
                 files_integrated += 1
                 target_paths.append(target_path)

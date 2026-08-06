@@ -110,14 +110,19 @@ if [ "$ADDED" -lt "$THRESHOLD" ]; then
 fi
 
 # Waiver: PR body (via GH_PR_BODY env) OR a commit-message trailer.
+# GitHub merge-queue squash commits prepend '* ' to each cherry-picked
+# commit message in the squash body, so the pattern must also match
+# '* apm-spec-waiver:'.
 WAIVER=""
 if [ -n "${GH_PR_BODY:-}" ]; then
   WAIVER="$(printf '%s\n' "$GH_PR_BODY" | grep -E '^apm-spec-waiver:' | head -1 || true)"
 fi
 if [ -z "$WAIVER" ]; then
   WAIVER="$(git log --format=%B "$MB"..HEAD \
-    | grep -E '^apm-spec-waiver:' | head -1 || true)"
+    | grep -E '^(\* )?apm-spec-waiver:' | head -1 || true)"
 fi
+# Strip optional squash-bullet prefix before extracting the rationale.
+WAIVER="${WAIVER#\* }"
 RATIONALE="${WAIVER#apm-spec-waiver:}"
 RATIONALE="${RATIONALE# }"
 if [ "${#RATIONALE}" -ge 16 ]; then

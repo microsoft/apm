@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --target copilot` now rewrites the six deprecated VSCode
+  Copilot built-in tool names (`askQuestions`, `runInTerminal`,
+  `getTerminalOutput`, `createFile`, `fetch`, `listDirectory`) to their
+  current namespaced equivalents in the deployed `.github/agents/` copy.
+  Package source files are never modified. Eliminates "Tool or toolset has
+  been renamed" IDE warnings without any source changes. (by
+  @sergio-sisternes-epam; closes #2465) (#2500)
 - Multi-target `apm compile` now avoids repeating expensive project analysis
   for each target, making multi-target runs scale like single-target runs
   without changing generated output. (closes #2482)
