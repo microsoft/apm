@@ -63,6 +63,46 @@ class TestPromptIntegrator:
         assert len(prompts) == 1
         assert prompts[0].name == "workflow.prompt.md"
 
+    def test_find_prompt_files_recurses_into_apm_prompts_subdirs(self):
+        """Namespaced prompts under .apm/prompts/ are discovered, not dropped."""
+        package_dir = self.project_root / "package"
+        apm_prompts = package_dir / ".apm" / "prompts"
+        (apm_prompts / "opsx").mkdir(parents=True)
+
+        (apm_prompts / "flat.prompt.md").write_text("# Flat")
+        (apm_prompts / "opsx" / "propose.prompt.md").write_text("# Propose")
+
+        found = {p.name for p in self.integrator.find_prompt_files(package_dir)}
+        assert found == {"flat.prompt.md", "propose.prompt.md"}
+
+    def test_find_prompt_files_does_not_recurse_package_root(self):
+        """Only .apm/prompts/ recurses -- an arbitrary package subtree must not."""
+        package_dir = self.project_root / "package"
+        (package_dir / "docs" / "examples").mkdir(parents=True)
+
+        (package_dir / "top.prompt.md").write_text("# Top")
+        (package_dir / "docs" / "examples" / "sample.prompt.md").write_text("# Sample")
+
+        found = {p.name for p in self.integrator.find_prompt_files(package_dir)}
+        assert found == {"top.prompt.md"}
+
+    def test_primitive_namespace_components(self):
+        """The namespace is the sub-directory path under the primitive dir."""
+        package_dir = self.project_root / "package"
+        apm_prompts = package_dir / ".apm" / "prompts"
+        (apm_prompts / "opsx" / "deep").mkdir(parents=True)
+
+        flat = apm_prompts / "flat.prompt.md"
+        nested = apm_prompts / "opsx" / "propose.prompt.md"
+        deeper = apm_prompts / "opsx" / "deep" / "dive.prompt.md"
+        outside = package_dir / "root.prompt.md"
+
+        assert self.integrator.primitive_namespace(flat, apm_prompts) == ()
+        assert self.integrator.primitive_namespace(nested, apm_prompts) == ("opsx",)
+        assert self.integrator.primitive_namespace(deeper, apm_prompts) == ("opsx", "deep")
+        # A file outside the primitive dir yields (), so callers can join blindly.
+        assert self.integrator.primitive_namespace(outside, apm_prompts) == ()
+
     def test_copy_prompt_verbatim(self):
         """Test copying prompt file verbatim without metadata injection."""
         source = self.project_root / "source.prompt.md"

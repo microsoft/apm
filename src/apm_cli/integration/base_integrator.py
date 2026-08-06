@@ -12,7 +12,11 @@ from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 
 
 def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
@@ -962,3 +966,42 @@ class BaseIntegrator:
                     results.append(f)
 
         return results
+
+    @staticmethod
+    def primitive_namespace(source_file: Path, primitive_dir: Path) -> tuple[str, ...]:
+        """Return the sub-directory components of *source_file* under *primitive_dir*.
+
+        A primitive authored at ``.apm/prompts/opsx/propose.prompt.md`` carries the
+        namespace ``("opsx",)``; one authored flat at ``.apm/prompts/propose.prompt.md``
+        (or in the package root) carries ``()``.  Callers join the namespace onto the
+        deploy directory so the layout an author wrote is the layout the harness sees --
+        Claude Code, for one, reads ``commands/opsx/propose.md`` as ``/opsx:propose``.
+
+        Returns an empty tuple when *source_file* is not under *primitive_dir*, so a
+        caller can always join unconditionally.  Each component is validated: a
+        traversal segment yields ``()`` rather than an escaping path, and
+        ``ensure_path_within`` at the call site remains the second line of defence.
+
+        Args:
+            source_file: Absolute path to the discovered primitive file.
+            primitive_dir: Absolute path to the directory the namespace is relative to.
+
+        Returns:
+            Tuple of directory components, outermost first.
+        """
+        try:
+            relative = source_file.relative_to(primitive_dir)
+        except ValueError:
+            return ()
+
+        parts = relative.parts[:-1]
+        if not parts:
+            return ()
+
+        try:
+            for part in parts:
+                validate_path_segments(part, context="primitive namespace")
+        except PathTraversalError:
+            return ()
+
+        return parts
