@@ -75,6 +75,8 @@ class TestInstallContextFields:
         "audit_override",
         "install_result",
         "target_decision",
+        # issue #1620: per-invocation bin/ consent flag (--trust-bin/--no-trust-bin)
+        "trust_bin",
     )
 
     def test_all_required_fields_present(self):

@@ -2842,6 +2842,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 16| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
 | 17| Cross-target primitive deployment                    | [req-tg-008](#req-tg-008), [req-lk-021](#req-lk-021)               | Consumer-default  |
 | 18| Case-collision materialization confusion             | [req-lk-022](#req-lk-022), [req-rs-016](#req-rs-016)               | Consumer-default  |
+| 19| Executable deployment in non-interactive contexts    | [req-sc-014](#req-sc-014)                                          | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2928,6 +2929,30 @@ from deployment by the trust resolution of
 [req-sc-011](#req-sc-011), a consumer MUST treat the presence
 requirement as satisfied and MUST surface each withheld executable as
 a diagnostic signal distinct from any missing-package violation.
+
+### 10.15 Per-invocation executable consent
+
+**Threat.** An operator runs `apm install` in a non-interactive context
+(piped output, CI pipeline, `--frozen` mode) and a marketplace plugin
+deploys `bin/` executables to the developer tool's PATH without any
+visible consent signal, because the per-invocation warning is swallowed
+by log redirection.
+
+**Mitigation.**
+
+<a id="req-sc-014"></a>
+**[req-sc-014]** A conforming **consumer** implementation that supports
+a per-invocation consent flag for `bin/` executable deployment MUST deny
+that deployment by default when its standard output is not connected to a
+terminal (i.e., the output stream is not a TTY), unless the operator has
+explicitly opted in for that invocation. An explicit per-invocation opt-in
+(for example `--trust-bin`) overrides the non-interactive default and
+permits deployment. An explicit per-invocation opt-out (for example
+`--no-trust-bin`) overrides the non-interactive default and denies
+deployment even when the output IS a terminal. The `allowExecutables`
+policy gate [req-sc-009](#req-sc-009) is evaluated before per-invocation
+consent and always takes precedence: a policy-level denial cannot be
+overridden by a per-invocation opt-in.
 
 ---
 
@@ -3027,6 +3052,7 @@ conformance statement identifying:
 [req-sc-008](#req-sc-008) (SHOULD), [req-sc-009](#req-sc-009),
 [req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011),
 [req-sc-012](#req-sc-012), [req-sc-013](#req-sc-013),
+[req-sc-014](#req-sc-014),
 [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
@@ -3465,11 +3491,12 @@ renumbering of conformance classes.
 | [req-sc-011](#req-sc-011)                | MUST    | 10.14   | consumer    |
 | [req-sc-012](#req-sc-012)                | MUST    | 10.14   | consumer    |
 | [req-sc-013](#req-sc-013)                | MUST    | 10.3    | consumer    |
+| [req-sc-014](#req-sc-014)                | MUST    | 10.15   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 111** (106 MUST, 5 SHOULD).
+**Total normative statements: 112** (107 MUST, 5 SHOULD).
 
 ---
 
@@ -3506,6 +3533,7 @@ renumbering of conformance classes.
 | 0.1.25  | 2026-08-03 | Spec-citation fold for portable project-scoped Claude hooks (closes #2408 Mode-B silent-extension gate). Added [req-tg-010] (Section 8.5.4, consumer MUST): a project-scoped native hook that may launch outside the consumer project anchors its generated command through the target portable project-directory environment variable, preserves the relative hook path, executes successfully when the variable identifies the consumer project, and never embeds an absolute checkout path; shell-expansion path syntax is rejected. Claude uses `CLAUDE_PROJECT_DIR` in POSIX and `$env:CLAUDE_PROJECT_DIR` in PowerShell. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 108 -> 109 (104 MUST, 5 SHOULD). |
 | 0.1.26  | 2026-08-03 | Spec-citation fold for VS Code OCI/Docker MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and package-scoped secret metadata uses VS Code secret-input references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 109 -> 110 (105 MUST, 5 SHOULD). |
 | 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
+| 0.1.28  | 2026-08-06 | Spec-citation fold for per-invocation executable consent in non-interactive contexts (closes #1620 Mode-B silent-extension gate). Added [req-sc-014] (Section 10.15, consumer MUST): a consumer that supports a per-invocation consent flag for bin/ executable deployment MUST deny deployment by default when stdout is not a TTY, unless the operator has explicitly opted in for that invocation; an explicit opt-in overrides the non-interactive default and permits deployment; an explicit opt-out overrides the default and denies deployment even in a terminal; the allowExecutables policy gate [req-sc-009] is evaluated first and always takes precedence. Added row 19 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 111 -> 112 (107 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
