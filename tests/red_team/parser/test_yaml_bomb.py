@@ -142,3 +142,74 @@ def test_shallow_alias_doc_still_parses_under_budget(tmp_path: Path, levels: int
     assert finished, f"depth={levels}: load did not finish"
     assert exc is None, f"depth={levels}: shallow doc wrongly rejected: {exc!r}"
     assert isinstance(result, dict)
+
+
+def test_large_anchor_free_lockfile_loads_successfully(tmp_path: Path):
+    """Regression for issue #2389: large anchor-free lockfile must not be rejected.
+
+    APM-generated lockfiles can accumulate a YAML node-weight sum that exceeds
+    the 5M alias-expansion budget purely through literal size, with zero anchors
+    or aliases.  Before the two-budget fix ``_guard_expansion`` raised a false-
+    positive "billion-laughs expansion bomb" error.  After the fix, anchor-free
+    documents bypass the tight expansion cap entirely.
+
+    The generated document contains approximately 6,000,000 scalar bytes across
+    150,000 mapping entries (no anchors, no aliases) -- well above the 5M weight
+    threshold -- and must load without error.
+    """
+    from apm_cli.utils.yaml_io import load_yaml
+
+    # Build a document whose accumulated leaf byte cost exceeds 5_000_000.
+    # Each entry contributes: key (8 bytes) + value (32 bytes hex) = ~40 bytes.
+    # 150_000 entries * 40 bytes = ~6_000_000 -- comfortably above the cap.
+    entry_count = 150_000
+    lines = ["packages:\n"]
+    for i in range(entry_count):
+        # 32-char hex value ensures enough byte weight per leaf.
+        lines.append(f"  pkg{i:06d}: abcdef1234567890abcdef1234567890\n")
+    doc = tmp_path / "apm.lock.yaml"
+    doc.write_text("".join(lines), encoding="utf-8")
+
+    finished, result, exc = run_guarded(lambda: load_yaml(doc), timeout=30.0)
+    assert finished, "load_yaml timed out on large anchor-free lockfile"
+    assert exc is None, f"large anchor-free lockfile wrongly rejected (false positive): {exc!r}"
+    assert isinstance(result, dict)
+    assert len(result["packages"]) == entry_count
+
+
+def test_merge_key_bomb_still_rejected(tmp_path: Path):
+    """Merge-key bomb is rejected by the merge-entry budget regardless of alias check.
+
+    A merge-key chain (``<<: [*a, *a]`` at each level) uses aliases AND the
+    ``<<`` merge key, so both the alias check and the merge-entry guard engage.
+    The level count is chosen so that the per-node expansion weight stays under
+    the 5M alias-expansion budget (levels=17 yields ~2.6M combined weight) while
+    the doubling merge entries (2**17 = 131,072 > 100,000) trigger the
+    merge-entry budget first.  This verifies the two-budget refactor did not
+    break the orthogonal ``flatten_mapping`` / merge-entry guard path.
+    """
+    import yaml
+
+    from apm_cli.utils.yaml_io import load_yaml
+
+    # 17 levels of doubling merge: 2**17 = 131_072 > _MAX_MERGE_ENTRIES (100_000).
+    # Combined expansion weight is ~2.6M -- below the 5M alias-expansion cap --
+    # so the merge-entry budget fires first and the alias-expansion guard is a
+    # no-op for this case.
+    levels = 17
+    lines = ["a0: &a0\n  x: 1\n"]
+    prev = "a0"
+    for i in range(1, levels + 1):
+        lines.append(f"a{i}: &a{i}\n  <<: [*{prev}, *{prev}]\n  y{i}: {i}\n")
+        prev = f"a{i}"
+    doc = tmp_path / "merge_bomb.yml"
+    doc.write_text("".join(lines), encoding="utf-8")
+
+    finished, _result, exc = run_guarded(lambda: load_yaml(doc), timeout=8.0)
+    assert finished, "load_yaml hung on merge-key bomb"
+    assert isinstance(exc, yaml.YAMLError), (
+        f"merge-key bomb must be rejected with yaml.YAMLError, got {exc!r}"
+    )
+    assert "merge-key expansion exceeded the safe budget" in str(exc), (
+        f"merge-entry guard must fire first, not alias-expansion guard; got {exc!r}"
+    )
