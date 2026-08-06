@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import tomlkit
 
 from apm_cli.adapters.client.codex import CodexClientAdapter
 
@@ -283,6 +284,40 @@ class TestConfigureMcpServer:
         with patch.object(adapter, "_fetch_server_info", return_value=server_info):
             result = adapter.configure_mcp_server("owner/remote-server")
         assert result is False
+
+    def test_returns_false_for_http_remote_on_public_host(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        # Plain http to a non-loopback host stays rejected (cleartext token risk).
+        server_info = {
+            "remotes": [{"url": "http://example.com/mcp", "transport_type": "streamable-http"}],
+            "packages": [],
+        }
+        with patch.object(adapter, "_fetch_server_info", return_value=server_info):
+            result = adapter.configure_mcp_server("owner/http-public-server")
+        assert result is False
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost:5500/mcp",
+            "http://127.0.0.1:3000/mcp",
+            "http://[::1]:8080/mcp",
+        ],
+    )
+    def test_configures_http_remote_on_loopback_host(self, tmp_path: Path, url: str) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        # Loopback http is allowed: Codex CLI itself accepts it and local dev
+        # servers don't carry certs. See issue #2467.
+        server_info = {
+            "remotes": [{"url": url, "transport_type": "streamable-http"}],
+            "packages": [],
+        }
+        with patch.object(adapter, "_fetch_server_info", return_value=server_info):
+            result = adapter.configure_mcp_server("owner/local-server")
+        assert result is True
+        config_text = (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
+        servers = tomlkit.parse(config_text)["mcp_servers"]
+        assert url in [server.get("url") for server in servers.values()]
 
     def test_uses_explicit_server_name_as_key(self, tmp_path: Path, capsys) -> None:
         adapter = _make_adapter(project_root=tmp_path)

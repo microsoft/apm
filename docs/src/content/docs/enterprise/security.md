@@ -446,6 +446,11 @@ with `apm policy explain <pkg>`, and surface fleet-wide layer conflicts with
 
 APM integrates MCP (Model Context Protocol) server configurations from packages. Trust is explicit and scoped by dependency depth.
 
+The Codex adapter requires HTTPS for non-loopback remote MCP endpoints.
+It accepts plain HTTP only for loopback addresses (`localhost`,
+`127.0.0.0/8`, and `::1`), where traffic stays on the local machine.
+Unrecognized host forms fail closed and continue to require HTTPS.
+
 ### Direct dependencies
 
 MCP servers declared by your direct dependencies (packages listed in your `apm.yml`) are auto-trusted. You explicitly chose to depend on these packages, so their MCP server declarations are accepted.

@@ -399,6 +399,33 @@ class TestCodexClientAdapter:
         result = adapter.configure_mcp_server("test/server", server_info_cache=cache)
         assert result is True
 
+    def test_configure_mcp_server_writes_loopback_http_remote(self, tmp_path: Path) -> None:
+        """A cached loopback HTTP remote reaches the Codex TOML file."""
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "id": "local",
+            "name": "local-server",
+            "packages": [],
+            "remotes": [
+                {
+                    "url": "http://localhost:5500/mcp",
+                    "transport_type": "streamable-http",
+                }
+            ],
+        }
+
+        assert adapter.configure_mcp_server(
+            "local/server", server_info_cache={"local/server": server_info}
+        )
+
+        import toml
+
+        data = toml.load(Path(adapter.get_config_path()))
+        stored_url = next(iter(data["mcp_servers"].values()))["url"]
+        parsed = urllib.parse.urlparse(stored_url)
+        assert parsed.scheme == "http"
+        assert parsed.hostname == "localhost"
+
     def test_format_server_config_sse_remote_returns_none(self, tmp_path: Path) -> None:
         """SSE remote-only servers return None (unsupported by Codex)."""
         adapter = CodexClientAdapter(project_root=tmp_path)
