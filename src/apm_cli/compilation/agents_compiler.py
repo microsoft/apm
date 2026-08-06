@@ -9,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, NamedTuple  # noqa: UP035
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
 
 from ..core.target_catalog import accepted_target_values, get_target_capability
 from ..core.target_detection import (
@@ -21,7 +21,7 @@ from ..core.target_detection import (
     should_compile_gemini_md,
 )
 from ..primitives.discovery import discover_primitives
-from ..primitives.models import PrimitiveCollection
+from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath
 from ..version import get_version
@@ -34,6 +34,10 @@ from .template_builder import (
     find_chatmode_by_name,
     generate_agents_md_template,
 )
+
+if TYPE_CHECKING:
+    from .context_optimizer import ContextOptimizer
+    from .distributed_compiler import DistributedAgentsCompiler
 
 _logger = logging.getLogger(__name__)
 
@@ -337,11 +341,41 @@ class AgentsCompiler:
         self.warnings: list[str] = []
         self.errors: list[str] = []
         self._logger = None
+        self._distributed_placement: dict[Path, tuple[Instruction, ...]] | None = None
+        self._distributed_context_optimizer: ContextOptimizer | None = None
 
     def _log(self, method: str, message: str, **kwargs):
         """Delegate to logger if available, else no-op."""
         if self._logger:
             getattr(self._logger, method)(message, **kwargs)
+
+    def _get_distributed_placement(
+        self,
+        config: CompilationConfig,
+        primitives: PrimitiveCollection,
+        compiler: "DistributedAgentsCompiler",
+    ) -> dict[Path, list[Instruction]]:
+        """Compute placement once per compile and return an isolated projection."""
+        if self._distributed_placement is None:
+            directory_map = compiler.analyze_directory_structure(primitives.instructions)
+            placement = compiler.determine_agents_placement(
+                primitives.instructions,
+                directory_map,
+                min_instructions=config.min_instructions_per_file,
+                debug=config.debug,
+            )
+            self._distributed_placement = {
+                path: tuple(instructions) for path, instructions in placement.items()
+            }
+            self._distributed_context_optimizer = compiler.context_optimizer
+        elif self._distributed_context_optimizer is not None:
+            # Reporting for every target must use the analysis that produced
+            # the shared placement, even though each target has its own compiler.
+            compiler.context_optimizer = self._distributed_context_optimizer
+
+        return {
+            path: list(instructions) for path, instructions in self._distributed_placement.items()
+        }
 
     def compile(
         self,
@@ -366,6 +400,9 @@ class AgentsCompiler:
         self.warnings.clear()
         self.errors.clear()
         self._logger = logger
+        # Placement is valid only for this invocation's primitive snapshot.
+        self._distributed_placement = None
+        self._distributed_context_optimizer = None
 
         try:
             # Use provided primitives or discover them (with dependency support)
@@ -574,6 +611,11 @@ class AgentsCompiler:
             "dry_run": config.dry_run,
             "skip_instructions": skip_instructions,
             "with_constitution": config.with_constitution,
+            "placement_map": self._get_distributed_placement(
+                config,
+                primitives,
+                distributed_compiler,
+            ),
         }
 
         # Compile distributed
@@ -824,15 +866,10 @@ class AgentsCompiler:
                 exclude_patterns=config.exclude,
                 source_dir=str(self.source_dir),
             )
-            # Analyze directory structure and determine placement
-            directory_map = distributed_compiler.analyze_directory_structure(
-                primitives.instructions
-            )
-            placement_map = distributed_compiler.determine_agents_placement(
-                primitives.instructions,
-                directory_map,
-                min_instructions=config.min_instructions_per_file,
-                debug=config.debug,
+            placement_map = self._get_distributed_placement(
+                config,
+                primitives,
+                distributed_compiler,
             )
 
         # Skip instructions in CLAUDE.md when they are already deployed to

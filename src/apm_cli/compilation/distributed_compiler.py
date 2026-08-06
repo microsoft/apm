@@ -214,16 +214,22 @@ class DistributedAgentsCompiler:
                         f"Found {len(referenced_contexts)} referenced context files"
                     )
 
-            # Phase 1: Directory structure analysis
-            directory_map = self.analyze_directory_structure(primitives.instructions)
+            placement_map = config.get("placement_map")
+            if placement_map is None:
+                # Phase 1: Directory structure analysis
+                directory_map = self.analyze_directory_structure(primitives.instructions)
 
-            # Phase 2: Determine optimal AGENTS.md placement
-            placement_map = self.determine_agents_placement(
-                primitives.instructions,
-                directory_map,
-                min_instructions=min_instructions,
-                debug=debug,
-            )
+                # Phase 2: Determine optimal AGENTS.md placement
+                placement_map = self.determine_agents_placement(
+                    primitives.instructions,
+                    directory_map,
+                    min_instructions=min_instructions,
+                    debug=debug,
+                )
+            else:
+                # Reporting must describe the placement used by this invocation,
+                # including when a caller reuses this compiler with a new map.
+                self._placement_map = placement_map
 
             # Phase 3: Generate distributed AGENTS.md files
             placements = self.generate_distributed_agents_files(

@@ -241,6 +241,7 @@ def _resolve_download_strategy(
         update_refs=update_refs,
         already_resolved=already_resolved,
         lockfile_match=lockfile_match,
+        ref_changed=ref_changed,
     )
 
     # Verify content integrity when lockfile has a hash.

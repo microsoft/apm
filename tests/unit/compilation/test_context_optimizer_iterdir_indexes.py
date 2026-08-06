@@ -181,6 +181,20 @@ class TestNoIterdirCalls:
             "(should use _children_by_directory index)"
         )
 
+    def test_instruction_relevance_no_listdir(self, tmp_path: Path) -> None:
+        """_is_instruction_relevant reuses the canonical file index."""
+        _touch(tmp_path, "src/main.py")
+        instruction = _make_instruction(apply_to="**/*.py")
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        optimizer.optimize_instruction_placement([instruction])
+        optimizer._directory_cache[tmp_path / "src"].pattern_matches.clear()
+
+        with patch(
+            "apm_cli.compilation.context_optimizer.os.listdir",
+            side_effect=AssertionError("relevance must not rescan the directory"),
+        ):
+            assert optimizer._is_instruction_relevant(instruction, tmp_path / "src")
+
 
 class TestMatchingDirectorySetsUnchanged:
     """Matching-directory sets must be identical to the pre-optimization behavior."""
