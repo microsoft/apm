@@ -21,6 +21,29 @@ apm install --target copilot-cowork --global
 
 No experimental flag is required.
 
+## Verify it works (60-second proof)
+
+Before deploying your own skills, confirm the end-to-end path is working by
+installing the APM smoke-test package. It contains a single sentinel skill that
+returns a fixed token you can verify by asking Copilot Cowork a question.
+
+```bash
+# Install the sentinel skill
+apm install packages/cowork-smoke-test --target copilot-cowork --global
+
+# Then open Microsoft 365 Copilot Cowork and ask:
+# "What does the cowork-smoke-test skill return?"
+# Expected response: the sentinel token "apm-cowork-e2e-ok"
+```
+
+The smoke-test package lives at `packages/cowork-smoke-test/` in this
+repository. It has no external dependencies and installs in seconds.
+
+If the sentinel does not appear, check OneDrive is running and syncing,
+then confirm the skills folder path with `apm config get copilot-cowork-skills-dir`.
+Use a fresh Copilot Cowork conversation -- the agent does not reload skills
+mid-session.
+
 ## First-run setup on macOS
 
 Corporate macOS machines very often mount more than one OneDrive root --

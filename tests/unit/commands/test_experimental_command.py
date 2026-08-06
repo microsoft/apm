@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.core.experimental import FlagValidationError
+
 # ---------------------------------------------------------------------------
 # Module-level fixtures
 # ---------------------------------------------------------------------------
@@ -745,7 +747,7 @@ class TestMultipleSuggestions:
 
         with patch(
             "apm_cli.commands.experimental.validate_flag_name",
-            side_effect=ValueError("unknown", ["suggestion_a", "suggestion_b"]),
+            side_effect=FlagValidationError("unknown", ["suggestion_a", "suggestion_b"], None),
         ):
             with pytest.raises(SystemExit):
                 _handle_unknown_flag("some_flag", logger)

@@ -1306,3 +1306,145 @@ class TestExperimentalFlagDataclass:
         flag = ExperimentalFlag(name="x", description="desc", default=False)
         with pytest.raises(AttributeError):
             flag.name = "y"  # type: ignore[misc]
+
+
+# ===========================================================================
+# tst-001: integration-tier project-scope cowork gating
+# ===========================================================================
+
+
+class TestCoworkProjectScopeGatingIntegration:
+    """Integration-tier gate: real apm.yml -> targets phase -> warn+skip.
+
+    Unlike the unit tests in tests/unit/install/phases/test_targets_phase.py
+    which use a MagicMock for apm_package, these tests parse a real apm.yml
+    fixture through APMPackage.from_apm_yml() so the full manifest-to-target
+    routing path is exercised.  Only the network-facing resolve_targets call
+    is mocked.
+    """
+
+    @pytest.fixture()
+    def project_with_cowork_yml(self, tmp_path: Path) -> Path:
+        """Return a project dir containing apm.yml with copilot-cowork + copilot."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: test-pkg\nversion: 0.1.0\ntargets:\n  - copilot-cowork\n  - copilot\n",
+            encoding="utf-8",
+        )
+        return project
+
+    def test_project_scope_warns_and_drops_cowork_from_real_apm_yml(
+        self, tmp_path: Path, project_with_cowork_yml: Path
+    ) -> None:
+        """When apm.yml lists copilot-cowork + copilot at project scope,
+        the targets phase must warn once and proceed with copilot only.
+
+        This test exercises the real apm.yml parsing path: APMPackage.from_apm_yml
+        reads and validates the fixture file, making this integration-tier
+        rather than unit-tier.
+        """
+        from unittest.mock import MagicMock
+
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.core.target_detection import ResolvedTargets
+        from apm_cli.install.phases.targets import run
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.models.apm_package import APMPackage
+
+        ctx = MagicMock()
+        ctx.project_root = project_with_cowork_yml
+        ctx.scope = InstallScope.PROJECT
+        ctx.target_override = None
+        ctx.target_override_source = None
+        ctx.target_decision = None
+        ctx.logger = MagicMock()
+        ctx.targets = []
+        ctx.integrators = {}
+        ctx.legacy_skill_paths = False
+
+        # Real apm.yml parsing -- this is what makes the test integration-tier.
+        ctx.apm_package = APMPackage.from_apm_yml(project_with_cowork_yml / "apm.yml")
+
+        copilot = KNOWN_TARGETS["copilot"]
+        cowork_root = tmp_path / "cowork"
+
+        from dataclasses import replace as _replace
+
+        cowork = _replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
+
+        v2_result = ResolvedTargets(targets=["copilot"], source="apm.yml", auto_create=True)
+
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork, copilot],
+            ),
+            patch("apm_cli.core.target_detection.detect_target"),
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=v2_result,
+            ),
+        ):
+            run(ctx)  # must NOT raise
+
+        # Warning must mention cowork and the --global remedy.
+        warning_text = " ".join(str(call) for call in ctx.logger.warning.call_args_list)
+        assert "copilot-cowork" in warning_text
+        assert "--global" in warning_text
+
+        # cowork must be absent from the final target list.
+        assert "copilot-cowork" not in [t.name for t in ctx.targets]
+        assert "copilot" in [t.name for t in ctx.targets]
+
+    def test_project_scope_cowork_warning_names_apm_yml_as_source(
+        self, tmp_path: Path, project_with_cowork_yml: Path
+    ) -> None:
+        """The warning includes the selection source (apm.yml) so the user
+        knows which config file to edit.
+        """
+        from unittest.mock import MagicMock
+
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.core.target_detection import ResolvedTargets
+        from apm_cli.install.phases.targets import run
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.models.apm_package import APMPackage
+
+        ctx = MagicMock()
+        ctx.project_root = project_with_cowork_yml
+        ctx.scope = InstallScope.PROJECT
+        ctx.target_override = None
+        ctx.target_override_source = "apm.yml"
+        ctx.target_decision = None
+        ctx.logger = MagicMock()
+        ctx.targets = []
+        ctx.integrators = {}
+        ctx.legacy_skill_paths = False
+
+        ctx.apm_package = APMPackage.from_apm_yml(project_with_cowork_yml / "apm.yml")
+
+        copilot = KNOWN_TARGETS["copilot"]
+        cowork_root = tmp_path / "cowork"
+
+        from dataclasses import replace as _replace
+
+        cowork = _replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
+
+        v2_result = ResolvedTargets(targets=["copilot"], source="apm.yml", auto_create=True)
+
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork, copilot],
+            ),
+            patch("apm_cli.core.target_detection.detect_target"),
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=v2_result,
+            ),
+        ):
+            run(ctx)
+
+        warning_text = " ".join(str(call) for call in ctx.logger.warning.call_args_list)
+        assert "apm.yml" in warning_text

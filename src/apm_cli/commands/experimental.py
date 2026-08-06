@@ -12,6 +12,7 @@ import click
 from ..core.command_logger import CommandLogger
 from ..core.experimental import (
     FLAGS,
+    FlagValidationError,
     display_name,
     get_malformed_flag_keys,
     get_overridden_flags,
@@ -127,31 +128,27 @@ def _handle_unknown_flag(name: str, logger: CommandLogger) -> None:
     """
     try:
         validate_flag_name(name)
-    except ValueError as exc:
-        args = exc.args
+    except FlagValidationError as exc:
         display = display_name(name)
-        guidance = args[2] if len(args) > 2 else None
-        graduated = args[3] if len(args) > 3 else None
 
-        if guidance:
-            if graduated == display:
+        if exc.guidance:
+            if exc.graduated_display == display:
                 logger.error(f"'{display}' is no longer an experimental flag")
             else:
                 logger.error(f"Unknown experimental feature: {display}")
                 logger.progress(
-                    f"Did you mean '{graduated}'? It is no longer an experimental flag."
+                    f"Did you mean '{exc.graduated_display}'? It is no longer an experimental flag."
                 )
-            for line in guidance.splitlines():
+            for line in exc.guidance.splitlines():
                 logger.progress(line)
             sys.exit(1)
 
         logger.error(f"Unknown experimental feature: {display}")
 
-        suggestions = args[1] if len(args) > 1 else []
-        if len(suggestions) == 1:
-            logger.progress(f"Did you mean: {suggestions[0]}?")
-        elif len(suggestions) > 1:
-            logger.progress(f"Similar features: {', '.join(suggestions)}")
+        if len(exc.suggestions) == 1:
+            logger.progress(f"Did you mean: {exc.suggestions[0]}?")
+        elif len(exc.suggestions) > 1:
+            logger.progress(f"Similar features: {', '.join(exc.suggestions)}")
 
         logger.progress("Run 'apm experimental list' to see all available features.")
         sys.exit(1)

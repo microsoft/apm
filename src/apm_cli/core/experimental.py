@@ -33,6 +33,38 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 
 
+class FlagValidationError(ValueError):
+    """Structured error raised by :func:`validate_flag_name`.
+
+    Replaces the positional-args ``ValueError`` protocol so callers can
+    access named fields instead of fragile index arithmetic.  The superclass
+    ``args`` tuple is populated identically to the old protocol for full
+    backward compatibility with any existing ``except ValueError`` handler
+    that still reads ``exc.args``.
+
+    Attributes:
+        message:           Human-readable error message.
+        suggestions:       Difflib-based live-flag suggestions (may be empty).
+        guidance:          Migration prose when the name resolves to a graduated
+                           flag; ``None`` for an ordinary typo.
+        graduated_display: Kebab-case display name of the graduated flag;
+                           ``None`` when guidance is ``None``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        suggestions: list[str],
+        guidance: str | None,
+        graduated_display: str | None = None,
+    ) -> None:
+        super().__init__(message, suggestions, guidance, graduated_display)
+        self.message = message
+        self.suggestions = suggestions
+        self.guidance = guidance
+        self.graduated_display = graduated_display
+
+
 @dataclass(frozen=True)
 class ExperimentalFlag:
     """Descriptor for a single experimental feature flag.
@@ -305,9 +337,9 @@ def validate_flag_name(name: str) -> str:
                 guidance = GRADUATED_FLAGS[graduated_name]
 
     if guidance is not None:
-        raise ValueError(msg, [], guidance, display_name(graduated_name))
+        raise FlagValidationError(msg, [], guidance, display_name(graduated_name))
 
-    raise ValueError(msg, [display_name(s) for s in suggestions], None)
+    raise FlagValidationError(msg, [display_name(s) for s in suggestions], None)
 
 
 def _set_flag(name: str, value: bool) -> ExperimentalFlag:
