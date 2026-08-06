@@ -407,8 +407,13 @@ def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
     assert view.problems == ()
 
 
-def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) -> None:
-    """A Claude-skill filesystem shape does not waive non-virtual manifests."""
+def test_manifestless_nonvirtual_claude_skill_is_accepted(tmp_path: Path) -> None:
+    """A local claude_skill with valid SKILL.md shape is accepted without apm.yml.
+
+    ``claude_skill`` packages never ship ``apm.yml`` by design.  The exemption
+    keys on the locked ``package_type`` plus the on-disk shape probe, not on
+    the virtual-type of the reference.  Regression guard for #2443.
+    """
     root = _write_manifest(tmp_path, name="root")
     skill_dir = tmp_path / "packages" / "skill"
     skill_dir.mkdir(parents=True)
@@ -423,8 +428,59 @@ def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) ->
 
     view = _derive(root, _lock(locked), tmp_path / "apm_modules")
 
-    assert len(view.problems) == 1
-    assert "manifest not found" in view.problems[0].message
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_repo_root_claude_skill_is_accepted(tmp_path: Path) -> None:
+    """Repo-root claude_skill deps (``owner/repo``) must not be rejected.
+
+    A repo-root skill has no ``virtual_path`` and ``is_virtual_subdirectory()``
+    returns ``False``.  The ``_allows_missing_manifest`` helper must still
+    accept it when the locked ``package_type`` is ``claude_skill`` and the
+    on-disk shape confirms a valid Claude skill.  Regression guard for #2443.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="makinux/adversarial-panel",
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Adversarial Panel\n", encoding="utf-8")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not (skill_dir / "apm.yml").exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_repo_root_claude_skill_skipped_when_modules_not_materialized(
+    tmp_path: Path,
+) -> None:
+    """Repo-root claude_skill with absent apm_modules falls back to lockfile type.
+
+    ``apm audit --ci`` may run without materialised ``apm_modules/``.  A
+    repo-root ``claude_skill`` must be accepted via the frozen lockfile
+    classification just as subdirectory skills are.  Regression guard for #2443.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="makinux/adversarial-panel",
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not skill_dir.exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
 
 
 def test_manifestless_virtual_package_without_skill_shape_records_problem(

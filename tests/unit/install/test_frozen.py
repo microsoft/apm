@@ -135,3 +135,52 @@ class TestEnforceFrozen:
             InstallService.enforce_frozen(req)
 
         assert any("stale-mcp" in reason for reason in exc_info.value.reasons)
+
+    def test_repo_root_claude_skill_with_mcp_state_accepted(self, tmp_path: Path):
+        """Regression guard for #2443: repo-root claude_skill + MCP must not fail.
+
+        A repo-root ``claude_skill`` dependency (e.g. ``makinux/adversarial-panel``)
+        has no ``apm.yml`` by design.  When the project also declares MCP servers,
+        ``enforce_frozen`` should not report the missing manifest as lockfile drift.
+
+        This test lets ``CurrentMcpConfigView.derive()`` run for real so that
+        ``_allows_missing_manifest`` is exercised on the actual repo-root path.
+        """
+        _write_apm_yml(tmp_path)
+
+        locked_skill = LockedDependency(
+            repo_url="https://github.com/makinux/adversarial-panel",
+            resolved_ref="main",
+            resolved_commit="a" * 40,
+            package_type="claude_skill",
+            depth=1,
+        )
+        _write_lockfile(tmp_path, [locked_skill])
+
+        # Write the MCP server into the lockfile so the diff is empty.
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock is not None
+        lock.mcp_servers = ["deepwiki"]
+        lock.mcp_configs = {"deepwiki": {"name": "deepwiki", "transport": "http"}}
+        lock.save(tmp_path / "apm.lock.yaml")
+
+        # Create the repo-root skill shape on disk (SKILL.md, no apm.yml).
+        modules_root = tmp_path / "apm_modules"
+        skill_dir = locked_skill.to_dependency_ref().get_install_path(modules_root)
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Adversarial Panel\n", encoding="utf-8")
+
+        dep = DependencyReference(repo_url="https://github.com/makinux/adversarial-panel")
+        req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
+        req.apm_package.package_path = tmp_path
+
+        # Root MCP dep: needs .name and .to_dict() to match the lockfile config.
+        mcp_dep = MagicMock()
+        mcp_dep.name = "deepwiki"
+        mcp_dep.to_dict.return_value = {"name": "deepwiki", "transport": "http"}
+        req.apm_package.get_all_mcp_dependencies.return_value = [mcp_dep]
+
+        # Patch get_modules_dir to return our controlled directory so derive()
+        # exercises the real _allows_missing_manifest path.
+        with patch("apm_cli.core.scope.get_modules_dir", return_value=modules_root):
+            InstallService.enforce_frozen(req)
