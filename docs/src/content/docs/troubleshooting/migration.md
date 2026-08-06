@@ -144,6 +144,33 @@ Existing target output is untouched. The new target's directory is created fresh
 
 Discovery: `apm targets` lists every supported target on the current binary.
 
+### Copilot Cowork graduated out of experimental
+
+`copilot-cowork` used to be gated behind an experimental flag. It is now generally available, which changes two things for anyone who was an early adopter.
+
+**`apm experimental enable copilot-cowork` now fails.** The flag no longer exists, so the command exits 1. Delete that line from any setup script or CI job -- nothing replaces it, the target simply works:
+
+```bash
+apm install --target copilot-cowork --global
+```
+
+Run `apm experimental reset` to clear the now-stale experimental config entry from `~/.apm/config.json`.
+
+**`--target all --global` no longer deploys to Cowork.** Cowork is an *explicit-only* target: it is never auto-detected and never included in `all`. While the flag existed, enabling it opted Cowork into the user-scope `all` expansion, so this is a real behaviour change rather than a rename.
+
+If you relied on `all` to reach Cowork, add a second explicit call:
+
+```bash
+apm install --target all --global
+apm install --target copilot-cowork --global
+```
+
+Why explicit-only: Cowork deploys into your OneDrive folder, which syncs to the cloud and is shared infrastructure rather than a local directory. Writing there is always a deliberate act.
+
+Cowork is also user-scope only. If `copilot-cowork` appears in an `apm.yml` `targets:` list, a project-scope `apm install` skips it with a warning and continues with the remaining targets; passing `--target copilot-cowork` without `--global` is still a hard error.
+
+See [Microsoft 365 Copilot Cowork](../../integrations/copilot-cowork/) for the full integration guide.
+
 ## 6. Default registry adoption (Git → registry routing)
 
 Adopting a default registry changes how **existing** shorthand dependencies resolve. Entries like `microsoft/apm-sample-package#^1.0.0` that previously cloned from GitHub route to the configured registry instead. APM does not print a migration banner — failures show up as registry errors (`no versions`, `401`) on the next `apm install`.

@@ -40,10 +40,12 @@ below). Claude, Grok Build, and Kiro keep target-native skill directories.
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
-`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
-desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
-runtime), and `hermes` are gated behind experimental flags and not listed
-above. See [Experimental](../experimental/).
+`copilot-app` (GitHub Copilot desktop App), `grok-cloud` (xAI Grok Cloud),
+`openclaw` (OpenClaw agent runtime), and `hermes` are gated behind
+experimental flags and not listed above. See
+[Experimental](../experimental/). `copilot-cowork` (Microsoft
+365 Copilot Cowork) is generally available but explicit-only and
+user-scope only -- see [Cowork integration](../../integrations/copilot-cowork/).
 
 ## Post-install instruction compilation
 
@@ -100,10 +102,15 @@ auto-detection. Both are available with `--target` and can be listed in a
 project's `apm.yml` `targets:` field so contributors running plain `apm
 install` pick them up automatically.
 
-`copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
-experimental targets that require `apm experimental enable <name>` before use.
-They are selected with `--target` only and cannot be listed in `apm.yml` (the
+`copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are experimental
+targets that require `apm experimental enable <name>` before use. They are
+selected with `--target` only and cannot be listed in `apm.yml` (the
 canonical targets validator will reject them).
+
+`copilot-cowork` is a canonical target key: it can be listed in `apm.yml`
+`targets:`, but it is explicit-only (excluded from `all`, never
+auto-detected) and user-scope only. At project scope APM warns and skips
+it; an explicit `--target copilot-cowork` without `--global` is an error.
 
 ## copilot
 

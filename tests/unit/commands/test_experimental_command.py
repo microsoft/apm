@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.core.experimental import FlagValidationError
+
 # ---------------------------------------------------------------------------
 # Module-level fixtures
 # ---------------------------------------------------------------------------
@@ -183,6 +185,40 @@ class TestEnableCommand:
         assert result.exit_code == 1
         assert "Unknown experimental feature" in result.output
         assert "Did you mean" not in result.output
+
+    def test_enable_graduated_cowork_flag_exits_1(self, runner: CliRunner) -> None:
+        """copilot-cowork graduated to GA; enabling it explains the migration."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["enable", "copilot-cowork"])
+        assert result.exit_code == 1
+        assert "no longer an experimental flag" in result.output
+        assert "generally available" in result.output
+        assert "apm install --target copilot-cowork --global" in result.output
+
+    def test_enable_graduated_flag_never_suggests_copilot_app(self, runner: CliRunner) -> None:
+        """Regression trap: suggesting copilot-app would enable the wrong target."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["enable", "copilot-cowork"])
+        assert "copilot-app" not in result.output
+        assert "Did you mean" not in result.output
+
+    def test_disable_graduated_cowork_flag_exits_1(self, runner: CliRunner) -> None:
+        """Both mutating verbs route through the same guidance."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["disable", "copilot-cowork"])
+        assert result.exit_code == 1
+        assert "no longer an experimental flag" in result.output
+
+    def test_typo_of_graduated_name_points_at_the_graduated_flag(self, runner: CliRunner) -> None:
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["enable", "copilot-cowrk"])
+        assert result.exit_code == 1
+        assert "Did you mean 'copilot-cowork'?" in result.output
+        assert "copilot-app" not in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -711,7 +747,7 @@ class TestMultipleSuggestions:
 
         with patch(
             "apm_cli.commands.experimental.validate_flag_name",
-            side_effect=ValueError("unknown", ["suggestion_a", "suggestion_b"]),
+            side_effect=FlagValidationError("unknown", ["suggestion_a", "suggestion_b"], None),
         ):
             with pytest.raises(SystemExit):
                 _handle_unknown_flag("some_flag", logger)

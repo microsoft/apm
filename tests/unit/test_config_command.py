@@ -811,10 +811,9 @@ class TestConfigSetCoworkSkillsDir:
     def setup_method(self):
         self.runner = CliRunner()
 
-    def test_set_copilot_cowork_skills_dir_flag_enabled_returns_exit_0(self):
-        """Valid absolute path with the cowork flag enabled succeeds."""
+    def test_set_copilot_cowork_skills_dir_returns_exit_0(self):
+        """Valid absolute path succeeds -- copilot-cowork is GA, no flag needed."""
         with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
             patch("apm_cli.config.set_copilot_cowork_skills_dir") as mock_set,
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/tmp/foo"),
         ):
@@ -822,15 +821,15 @@ class TestConfigSetCoworkSkillsDir:
         assert result.exit_code == 0
         mock_set.assert_called_once_with("/tmp/foo")
 
-    def test_set_copilot_cowork_skills_dir_flag_disabled_returns_exit_1(self):
-        """Attempting to set copilot-cowork-skills-dir without the cowork flag exits 1."""
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
+    def test_set_copilot_cowork_skills_dir_requires_no_flag(self):
+        """Setting the key never mentions the removed experimental flag."""
+        with (
+            patch("apm_cli.config.set_copilot_cowork_skills_dir"),
+            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/tmp/foo"),
+        ):
             result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"])
-        assert result.exit_code == 1
-        # The phrase may be line-wrapped in terminal output; check for the
-        # key parts that appear on the same output line.
-        assert "experimental" in result.output
-        assert "enable copilot-cowork" in result.output
+        assert result.exit_code == 0
+        assert "experimental" not in result.output
 
     def test_set_copilot_cowork_skills_dir_relative_path_exits_1(self):
         """Relative path is rejected with exit code 1 and an absolute-path hint."""
@@ -959,7 +958,7 @@ class TestConfigUnsetSubcommand:
 
 
 class TestConfigListingFlagGating:
-    """Tests that copilot-cowork-skills-dir appears in listings only when the flag is enabled."""
+    """Tests that copilot-cowork-skills-dir always appears in config listings."""
 
     def setup_method(self):
         self.runner = CliRunner()
@@ -971,12 +970,11 @@ class TestConfigListingFlagGating:
         except (FileNotFoundError, OSError):
             pass
 
-    def test_config_get_shows_copilot_cowork_skills_dir_when_flag_enabled(self):
-        """apm config get (no key) includes copilot-cowork-skills-dir when the flag is on."""
+    def test_config_get_always_shows_copilot_cowork_skills_dir(self):
+        """apm config get (no key) always includes copilot-cowork-skills-dir."""
         fake_config = {"auto_integrate": True}
         with (
             patch("apm_cli.config.get_config", return_value=fake_config),
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
             patch(
                 "apm_cli.config.get_copilot_cowork_skills_dir",
                 return_value="/enabled/path",
@@ -986,16 +984,16 @@ class TestConfigListingFlagGating:
         assert result.exit_code == 0
         assert "copilot-cowork-skills-dir" in result.output
 
-    def test_config_get_hides_copilot_cowork_skills_dir_when_flag_disabled(self):
-        """apm config get (no key) omits copilot-cowork-skills-dir when the flag is off."""
+    def test_config_get_shows_copilot_cowork_skills_dir_when_unset(self):
+        """The key is listed with an auto-detection note even when unset."""
         fake_config = {"auto_integrate": True}
         with (
             patch("apm_cli.config.get_config", return_value=fake_config),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
         ):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "copilot-cowork-skills-dir" not in result.output
+        assert "copilot-cowork-skills-dir" in result.output
 
     def test_config_show_includes_copilot_cowork_skills_dir_when_flag_enabled(self):
         """apm config (no subcommand) includes copilot-cowork-skills-dir when the flag is on."""
@@ -1020,8 +1018,8 @@ class TestConfigListingFlagGating:
         assert result.exit_code == 0
         assert "Cowork Skills Dir" in result.output
 
-    def test_config_show_omits_copilot_cowork_skills_dir_when_flag_disabled(self):
-        """apm config (no subcommand) omits copilot-cowork-skills-dir when the flag is off."""
+    def test_config_show_includes_copilot_cowork_skills_dir_when_unset(self):
+        """apm config (no subcommand) always shows the Cowork Skills Dir row."""
         import rich.table
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1037,7 +1035,7 @@ class TestConfigListingFlagGating:
             finally:
                 os.chdir(self.original_dir)
         assert result.exit_code == 0
-        assert "Cowork Skills Dir" not in result.output
+        assert "Cowork Skills Dir" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1046,7 +1044,7 @@ class TestConfigListingFlagGating:
 
 
 class TestFlagGatingRegression:
-    """Regression checks: only copilot-cowork-skills-dir is gated on the copilot-cowork flag."""
+    """Regression checks: no config key is gated on the removed copilot-cowork flag."""
 
     def setup_method(self):
         self.runner = CliRunner()
@@ -1066,32 +1064,24 @@ class TestFlagGatingRegression:
             result = self.runner.invoke(config, ["set", "temp-dir", "/tmp/foo"])
         assert result.exit_code == 0
 
-    def test_copilot_cowork_skills_dir_set_is_gated(self):
-        """apm config set copilot-cowork-skills-dir exits 1 when the copilot-cowork flag is off."""
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
+    def test_copilot_cowork_skills_dir_set_is_not_gated(self):
+        """apm config set copilot-cowork-skills-dir needs no experimental flag."""
+        with (
+            patch("apm_cli.config.set_copilot_cowork_skills_dir"),
+            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/some/path"),
+        ):
             result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/some/path"])
-        assert result.exit_code == 1
+        assert result.exit_code == 0
 
 
 class TestValidConfigKeys:
     """Tests for _valid_config_keys() feature-flag gating."""
 
-    def test_valid_config_keys_excludes_cowork_when_flag_off(self):
-        """copilot-cowork-skills-dir is hidden when the copilot_cowork flag is off."""
+    def test_valid_config_keys_always_includes_cowork(self):
+        """copilot-cowork-skills-dir is a GA key -- always listed."""
         from apm_cli.commands.config import _valid_config_keys
 
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = _valid_config_keys()
-
-        assert "auto-integrate" in result
-        assert "temp-dir" in result
-        assert "copilot-cowork-skills-dir" not in result
-
-    def test_valid_config_keys_includes_cowork_when_flag_on(self):
-        """copilot-cowork-skills-dir is listed when the copilot_cowork flag is on."""
-        from apm_cli.commands.config import _valid_config_keys
-
-        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
             result = _valid_config_keys()
 
         assert "auto-integrate" in result

@@ -1594,35 +1594,28 @@ class TestConfigCommandFlagPaths:
             result = runner.invoke(cli, ["config", "set", "audit-on-install", "invalid-mode"])
         assert result.exit_code != 0
 
-    def test_config_set_copilot_cowork_skills_dir_requires_flag(
-        self, runner: CliRunner, isolated_config: Path
-    ) -> None:
-        """apm config set copilot-cowork-skills-dir exits non-zero when flag is off."""
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = runner.invoke(
-                cli, ["config", "set", "copilot-cowork-skills-dir", "/some/path"]
-            )
-        assert result.exit_code != 0
-        assert "copilot-cowork" in result.output.lower()
-
-    def test_config_set_copilot_cowork_skills_dir_with_flag(
+    def test_config_set_copilot_cowork_skills_dir_requires_no_flag(
         self, runner: CliRunner, isolated_config: Path, tmp_path: Path
     ) -> None:
-        """apm config set copilot-cowork-skills-dir succeeds when flag is on."""
-        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
+        """apm config set copilot-cowork-skills-dir succeeds with every flag off."""
+        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
             result = runner.invoke(
                 cli, ["config", "set", "copilot-cowork-skills-dir", str(tmp_path)]
             )
         assert result.exit_code == 0
 
-    def test_config_set_copilot_cowork_skills_dir_invalid_path_with_flag(
+    def test_config_set_copilot_cowork_skills_dir_succeeds(
+        self, runner: CliRunner, isolated_config: Path, tmp_path: Path
+    ) -> None:
+        """apm config set copilot-cowork-skills-dir persists an absolute path."""
+        result = runner.invoke(cli, ["config", "set", "copilot-cowork-skills-dir", str(tmp_path)])
+        assert result.exit_code == 0
+
+    def test_config_set_copilot_cowork_skills_dir_invalid_path(
         self, runner: CliRunner, isolated_config: Path
     ) -> None:
         """apm config set copilot-cowork-skills-dir with relative path exits non-zero."""
-        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
-            result = runner.invoke(
-                cli, ["config", "set", "copilot-cowork-skills-dir", "relative/path"]
-            )
+        result = runner.invoke(cli, ["config", "set", "copilot-cowork-skills-dir", "relative/path"])
         assert result.exit_code != 0
 
     def test_config_get_no_key_shows_audit_on_install_when_flag_on(

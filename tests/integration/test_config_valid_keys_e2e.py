@@ -32,8 +32,8 @@ def isolated_config(tmp_path, monkeypatch):
 class TestConfigValidKeysE2E:
     """Full CLI pipeline tests for valid-keys gating in config set."""
 
-    def test_config_set_unknown_key_omits_cowork_when_flag_off(self, isolated_config):
-        """When copilot_cowork is disabled, cowork key must not appear."""
+    def test_config_set_unknown_key_lists_cowork_with_flags_off(self, isolated_config):
+        """copilot-cowork is GA -- its config key is listed with every flag off."""
         runner = CliRunner()
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
             result = runner.invoke(
@@ -43,11 +43,11 @@ class TestConfigValidKeysE2E:
             )
 
         assert result.exit_code != 0, f"Expected non-zero exit code, got {result.exit_code}"
-        assert "copilot-cowork-skills-dir" not in result.output
+        assert "copilot-cowork-skills-dir" in result.output
         assert "auto-integrate" in result.output
 
     def test_config_set_unknown_key_includes_cowork_when_flag_on(self, isolated_config):
-        """When copilot_cowork is enabled, cowork key must appear."""
+        """The cowork key is listed regardless of experimental flag state."""
         runner = CliRunner()
         with patch("apm_cli.core.experimental.is_enabled", return_value=True):
             result = runner.invoke(

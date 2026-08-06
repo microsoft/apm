@@ -170,7 +170,6 @@ apm experimental reset verbose-version
 | Name                  | Description                                                                      |
 |-----------------------|----------------------------------------------------------------------------------|
 | `verbose-version`     | Show Python version, platform, and install path in `apm --version`.              |
-| `copilot-cowork`      | Deploy APM skills to Microsoft 365 Copilot Cowork via OneDrive.                  |
 | `copilot-app`         | Deploy APM prompts that carry workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day`) as workflows in the GitHub Copilot desktop App (`~/.copilot/data.db`). See [Copilot App integration](../../integrations/copilot-app/). |
 | `grok-cloud`          | Deploy skills to xAI Grok Cloud (`.grok/skills/`). Grok Build is a separate stable target. |
 | `marketplace-authoring`| Enable marketplace authoring commands (init, build, publish, etc.).              |
@@ -180,7 +179,6 @@ apm experimental reset verbose-version
 | `hermes`              | Deploy skills, `AGENTS.md`, and MCP servers to the Hermes agent runtime.        |
 
 New flags are proposed via [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#how-to-add-an-experimental-feature-flag) and graduate to default when stable. See the contributor recipe for the full lifecycle.
-See also: [Cowork integration](../../integrations/copilot-cowork/).
 
 ## Storage and scope
 
@@ -190,8 +188,17 @@ Pass `-v` / `--verbose` to any subcommand after the subcommand name (for example
 
 When a flag's behaviour is considered stable, it graduates: the gated code becomes the default path and the flag is removed from the registry in a future release.
 
+### Graduated flags
+
+| Name              | What to do instead                                                    |
+|-------------------|-----------------------------------------------------------------------|
+| `copilot-cowork`  | Nothing -- run `apm install --target copilot-cowork --global`. See [Target migration](../../troubleshooting/migration/#copilot-cowork-graduated-out-of-experimental). |
+
+`apm experimental enable <graduated-flag>` exits 1 and prints the migration hint above rather than a fuzzy-match suggestion, so a stale setup script fails loudly with the correct next step. Clear the leftover config key with `apm experimental reset`.
+
 ## Troubleshooting
 
-- **"Unknown experimental feature"** - the name is not in the registry. Run `apm experimental list` to see the current set. Suggestions printed below the error use fuzzy matching on registered names.
+- **"... is no longer an experimental flag"** - the flag graduated to GA. The error prints what to run instead; see [Graduated flags](#graduated-flags).
+- **"Unknown experimental feature"** - the name is not in the registry. Run `apm experimental list` to see the current set. Graduated names are matched first: a near-miss on one prints `Did you mean 'copilot-cowork'? It is no longer an experimental flag.` followed by the migration hint. Only if no graduated name is close does the `Did you mean:` / `Similar features:` list appear, and it is drawn solely from currently registered flags -- a graduated name never shows up there.
 - **Unknown keys in config** - a flag that was enabled on a previous APM version may have been removed or renamed. `apm experimental list` surfaces a note when stale keys are present; `apm experimental reset` clears them.
 - **Malformed values in config** - if a registered flag has a non-boolean override in `~/.apm/config.json`, `apm experimental reset --yes` removes the bad value and restores the default.

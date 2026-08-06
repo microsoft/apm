@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `packages/cowork-smoke-test/` sample package: a single skill that
+  returns a fixed sentinel token, used to verify end-to-end that a skill
+  installed by APM is actually loaded by Microsoft 365 Copilot Cowork. (#2503)
+
+### Changed
+
+- **Microsoft 365 Copilot Cowork is now generally available.** The
+  `copilot-cowork` experimental flag has been removed; `apm install --target
+  copilot-cowork --global` works with no opt-in. `copilot-cowork` is an
+  explicit-only, user-scope-only target: it is never auto-detected and is
+  never included in `--target all`. (#2503)
+- `copilot-cowork` is now a canonical target key, so it may be listed in
+  `apm.yml` `targets:`. When Cowork is selected implicitly (via `apm.yml`
+  `targets:` or an `apm config target` default) at project scope, APM emits
+  one `[!]` warning, skips Cowork, and continues with the remaining targets.
+  An explicit `--target copilot-cowork` without `--global` remains a hard
+  error. (#2503)
+- `apm config set copilot-cowork-skills-dir` no longer requires an
+  experimental flag, and `copilot-cowork-skills-dir` is always listed by
+  `apm config` and `apm config get`. (#2503)
+- OpenAPM spec amendment 0.1.28 reconciles the Section 4.2.1 canonical
+  `target` set with the shipped target registry. `copilot-cowork`,
+  `kiro`, and `grok-build` were registered targets that the spec omitted,
+  which made them nominally non-conforming under `req-mf-005` (a producer
+  MUST reject any target outside the canonical set). `copilot-cowork` is
+  also recorded as explicit-only, so `req-tg-001` excludes it from `all`.
+  The `req-mf-005` conformance test now compares the spec against
+  `manifest_target_names()` instead of grepping the spec for its own list,
+  so a new target cannot ship without a spec amendment. No normative
+  statement count change. (#2503)
+
+### Fixed
+
+- `apm experimental enable <typo>` no longer routes a typo for a live flag
+  to graduated-flag guidance. `copilot-ap` scores above the fuzzy-match
+  cutoff against the graduated `copilot-cowork`, so it was answered with the
+  Cowork GA hint instead of `Did you mean: copilot-app?` -- pointing the
+  caller at an unrelated target. A graduated near-miss now only wins when it
+  matches more closely than the best live flag; an exact graduated name still
+  always wins. (#2503)
+
+### Removed
+
+- **BREAKING:** `apm experimental enable copilot-cowork` (and `disable` /
+  `reset` for that name) now exit 1 with "'copilot-cowork' is no longer an
+  experimental flag" plus the GA command to run instead. The flag has
+  graduated; drop it from any scripts and use
+  `apm install --target copilot-cowork --global` directly. A stale
+  `copilot_cowork` key in `~/.apm/config.json` is reported by
+  `apm experimental list` and cleaned by `apm experimental reset`. (#2503)
+- **BREAKING:** `apm install --target all --global` no longer deploys to
+  Cowork. Previously, with the experimental flag enabled, `all` at user scope
+  included `copilot-cowork`. Name the target explicitly instead:
+  `apm install --target copilot-cowork --global`. (#2503)
+  Both breaking changes are covered in
+  [Target migration](https://microsoft.github.io/apm/troubleshooting/migration/#copilot-cowork-graduated-out-of-experimental).
+
 ### Fixed
 
 - Multi-target `apm compile` now avoids repeating expensive project analysis
