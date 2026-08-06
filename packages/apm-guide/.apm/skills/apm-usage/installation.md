@@ -16,6 +16,9 @@ irm https://aka.ms/apm-windows | iex
 # Homebrew (macOS / Linux)
 brew install microsoft/apm/apm
 
+# WinGet (Windows)
+winget install Microsoft.APM
+
 # Scoop (Windows)
 scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm

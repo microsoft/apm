@@ -214,6 +214,12 @@ For `apm self-update`, run `apm self-update --check` with the same env vars and 
 brew install microsoft/apm/apm
 ```
 
+**WinGet (Windows):**
+
+```powershell
+winget install Microsoft.APM
+```
+
 **Scoop (Windows):**
 
 ```powershell
