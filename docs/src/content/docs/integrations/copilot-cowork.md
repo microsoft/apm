@@ -54,7 +54,7 @@ Resolution is first match wins:
 
 | Platform | Resolution |
 |----------|------------|
-| macOS | Search `~/Library/CloudStorage/OneDrive*`. One match is used. No matches means Cowork is unavailable. Two or more matches fail with an actionable error that lists the candidates and recommends `APM_COPILOT_COWORK_SKILLS_DIR` -- see [First-run setup on macOS](#first-run-setup-on-macos). |
+| macOS | Search `~/Library/CloudStorage/OneDrive*`. One match is used. No matches means Cowork is unavailable. Two or more matches fail with an actionable error that lists the candidates and recommends `apm config set copilot-cowork-skills-dir` or `APM_COPILOT_COWORK_SKILLS_DIR` -- see [First-run setup on macOS](#first-run-setup-on-macos). |
 | Windows | Use `%ONEDRIVECOMMERCIAL%`, then `%ONEDRIVE%`. |
 | Linux | No default lookup. Set `APM_COPILOT_COWORK_SKILLS_DIR` or persist the path with `apm config set copilot-cowork-skills-dir ...`. |
 

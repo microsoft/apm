@@ -333,8 +333,10 @@ def _gate_cowork_target(
                 )
             raise SystemExit(1)
         if ctx.logger:
+            _source = getattr(ctx, "target_override_source", None) or "apm.yml"
             ctx.logger.warning(
-                "Skipping the 'copilot-cowork' target: it deploys at user scope only. "
+                f"Skipping the 'copilot-cowork' target (selected via {_source}): "
+                "it deploys at user scope only. "
                 "Run: apm install --target copilot-cowork --global"
             )
         return [t for t in targets if t.name != "copilot-cowork"]

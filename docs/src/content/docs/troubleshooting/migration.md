@@ -154,7 +154,7 @@ Discovery: `apm targets` lists every supported target on the current binary.
 apm install --target copilot-cowork --global
 ```
 
-Run `apm experimental reset` to clear the now-stale `copilot_cowork` key from `~/.apm/config.json`.
+Run `apm experimental reset` to clear the now-stale experimental config entry from `~/.apm/config.json`.
 
 **`--target all --global` no longer deploys to Cowork.** Cowork is an *explicit-only* target: it is never auto-detected and never included in `all`. While the flag existed, enabling it opted Cowork into the user-scope `all` expansion, so this is a real behaviour change rather than a rename.
 

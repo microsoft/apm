@@ -594,7 +594,20 @@ class TestGraduatedFlags:
         assert "verbose-version" in args[1]
         assert len(args) == 2 or args[2] is None
 
-    def test_closer_live_flag_beats_graduated_near_miss(self) -> None:
+    @pytest.mark.parametrize(
+        ("typo", "expected_live_suggestion"),
+        [
+            # 'copilot-ap' is a better match for live 'copilot-app' than for
+            # graduated 'copilot_cowork'; the live suggestion must win.
+            ("copilot-ap", "copilot-app"),
+            # 'verbose-versio' is near 'verbose-version' (live) -- graduated
+            # names must not interfere with unrelated live flags.
+            ("verbose-versio", "verbose-version"),
+        ],
+    )
+    def test_closer_live_flag_beats_graduated_near_miss(
+        self, typo: str, expected_live_suggestion: str
+    ) -> None:
         """Regression trap: the graduated check must not shadow a better live match.
 
         'copilot-ap' is a typo for the LIVE 'copilot-app' flag, but it also
@@ -606,11 +619,11 @@ class TestGraduatedFlags:
         from apm_cli.core.experimental import validate_flag_name
 
         with pytest.raises(ValueError) as excinfo:
-            validate_flag_name("copilot-ap")
+            validate_flag_name(typo)
 
         args = excinfo.value.args
         # Live-suggestion path: guidance/graduated slots must stay empty.
-        assert "copilot-app" in args[1]
+        assert expected_live_suggestion in args[1]
         assert len(args) == 2 or args[2] is None
         assert "copilot-cowork" not in str(args[1:])
 

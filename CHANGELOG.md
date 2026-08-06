@@ -55,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** `apm experimental enable copilot-cowork` (and `disable` /
   `reset` for that name) now exit 1 with "'copilot-cowork' is no longer an
   experimental flag" plus the GA command to run instead. The flag has
-  graduated; no action is needed beyond dropping it from any scripts. A stale
+  graduated; drop it from any scripts and use
+  `apm install --target copilot-cowork --global` directly. A stale
   `copilot_cowork` key in `~/.apm/config.json` is reported by
   `apm experimental list` and cleaned by `apm experimental reset`. (#2503)
 - **BREAKING:** `apm install --target all --global` no longer deploys to
