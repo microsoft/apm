@@ -1717,3 +1717,72 @@ class TestCursorCommandPanelFindings:
         assert any(i.severity == "critical" for i in sec_items), (
             f"expected critical security diagnostic, got: {[(i.severity, i.message) for i in sec_items]}"
         )
+
+
+class TestNamespacedCommands:
+    """A prompt under .apm/prompts/<ns>/ keeps <ns> at the target.
+
+    Claude Code reads ``commands/opsx/propose.md`` as ``/opsx:propose``.  Before
+    recursive discovery landed, the nested source was never found at all: it was
+    silently dropped, so the namespaced command simply did not exist.
+    """
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".claude" / "commands").mkdir(parents=True)
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _make_nested_package(project_root):
+        pkg_dir = project_root / "apm_modules" / "test-pkg"
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        (prompts_dir / "opsx").mkdir(parents=True)
+
+        (prompts_dir / "flat.prompt.md").write_text(
+            "---\ndescription: Flat\n---\n# Flat\n", encoding="utf-8"
+        )
+        (prompts_dir / "opsx" / "propose.prompt.md").write_text(
+            "---\ndescription: Propose a change\n---\n# Propose\n", encoding="utf-8"
+        )
+
+        mock_info = MagicMock()
+        mock_info.install_path = pkg_dir
+        mock_info.resolved_reference = None
+        mock_info.package = MagicMock()
+        mock_info.package.name = "test-pkg"
+        return mock_info
+
+    def test_nested_prompt_keeps_its_namespace(self, temp_project):
+        """.apm/prompts/opsx/propose.prompt.md -> .claude/commands/opsx/propose.md."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = self._make_nested_package(temp_project)
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
+        )
+
+        commands = temp_project / ".claude" / "commands"
+        assert (commands / "opsx" / "propose.md").exists(), "namespaced command was dropped"
+        # The flat prompt is unaffected -- no existing package changes shape.
+        assert (commands / "flat.md").exists()
+        assert result.files_integrated == 2
+
+    def test_nested_prompt_content_is_transformed_normally(self, temp_project):
+        """Namespacing changes the path only, not the command transform."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = self._make_nested_package(temp_project)
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "opsx" / "propose.md")
+        assert post.metadata["description"] == "Propose a change"
+        assert "# Propose" in post.content
