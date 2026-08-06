@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --frozen` no longer fails on a cold cache when git-sourced
+  `apm_package` dependencies declare MCP servers; frozen hydration now
+  succeeds as expected before any packages are fetched. (closes #2456)
 - Multi-target `apm compile` now avoids repeating expensive project analysis
   for each target, making multi-target runs scale like single-target runs
   without changing generated output. (closes #2482)
