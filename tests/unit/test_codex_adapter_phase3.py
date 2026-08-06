@@ -798,3 +798,65 @@ class TestProcessEnvironmentVariables:
         with patch.dict(os.environ, {"MY_TOKEN": "from-env", "CI": "true"}):
             result = adapter._process_environment_variables(env_vars)
         assert result.get("MY_TOKEN") == "from-env"
+
+
+# ---------------------------------------------------------------------------
+# Regression: http loopback MCP URLs (issue #2467)
+# ---------------------------------------------------------------------------
+
+
+class TestHttpLoopbackMcpUrlRegression:
+    """Codex adapter must allow http:// for loopback hosts and reject it for
+    genuinely remote hosts.  Regression guard for issue #2467."""
+
+    def _remote_server_info(self, url: str) -> dict[str, object]:
+        return {
+            "name": "my-server",
+            "remotes": [{"url": url, "transport_type": "streamable-http", "headers": []}],
+            "packages": [],
+        }
+
+    def _make_and_format(self, tmp_path: Path, url: str) -> dict[str, object] | None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server_info = self._remote_server_info(url)
+        return adapter._format_server_config(server_info)
+
+    def test_http_localhost_deploys(self, tmp_path: Path) -> None:
+        result = self._make_and_format(tmp_path, "http://localhost:5500/mcp")
+        assert result is not None
+        from urllib.parse import urlparse
+
+        parsed = urlparse(result["url"])
+        assert parsed.scheme == "http"
+        assert parsed.hostname == "localhost"
+
+    def test_http_127_0_0_1_deploys(self, tmp_path: Path) -> None:
+        result = self._make_and_format(tmp_path, "http://127.0.0.1:3000/mcp")
+        assert result is not None
+        from urllib.parse import urlparse
+
+        parsed = urlparse(result["url"])
+        assert parsed.scheme == "http"
+        assert parsed.hostname == "127.0.0.1"
+
+    def test_http_ipv6_loopback_deploys(self, tmp_path: Path) -> None:
+        result = self._make_and_format(tmp_path, "http://[::1]:8080/mcp")
+        assert result is not None
+        from urllib.parse import urlparse
+
+        parsed = urlparse(result["url"])
+        assert parsed.scheme == "http"
+        assert parsed.hostname == "::1"
+
+    def test_http_remote_host_skipped(self, tmp_path: Path) -> None:
+        result = self._make_and_format(tmp_path, "http://example.com/mcp")
+        assert result is None
+
+    def test_https_remote_host_deploys(self, tmp_path: Path) -> None:
+        result = self._make_and_format(tmp_path, "https://example.com/mcp")
+        assert result is not None
+        from urllib.parse import urlparse
+
+        parsed = urlparse(result["url"])
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "example.com"

@@ -1537,6 +1537,19 @@ if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC33: local/private-host classification authority"
+network_owner="src/apm_cli/utils/network.py"
+# Only utils/network.py may define is_local_or_metadata_host; count all src definitions.
+network_fn_defs=$(grep -rEc \
+    '^def (is_local_or_metadata_host|_is_local_or_metadata_host)\(' \
+    src/apm_cli --include='*.py' \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+if [ "$network_fn_defs" -ne 1 ] \
+    || ! grep -q '^def is_local_or_metadata_host(' "$network_owner"; then
+    echo "[x] Local/private-host classification must route through utils/network.py::is_local_or_metadata_host"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

@@ -1025,29 +1025,29 @@ class TestMcpRegistryValidation:
 
     def test_is_local_or_metadata_host_localhost(self) -> None:
         """``_is_local_or_metadata_host`` detects localhost."""
-        from apm_cli.install.mcp.registry import _is_local_or_metadata_host
+        from apm_cli.utils.network import is_local_or_metadata_host
 
-        assert _is_local_or_metadata_host("localhost") is True
+        assert is_local_or_metadata_host("localhost") is True
 
     def test_is_local_or_metadata_host_loopback_ip(self) -> None:
         """``_is_local_or_metadata_host`` detects 127.0.0.1."""
-        from apm_cli.install.mcp.registry import _is_local_or_metadata_host
+        from apm_cli.utils.network import is_local_or_metadata_host
 
-        assert _is_local_or_metadata_host("127.0.0.1") is True
+        assert is_local_or_metadata_host("127.0.0.1") is True
 
     def test_is_local_or_metadata_host_private_ip(self) -> None:
         """``_is_local_or_metadata_host`` detects RFC1918 addresses."""
-        from apm_cli.install.mcp.registry import _is_local_or_metadata_host
+        from apm_cli.utils.network import is_local_or_metadata_host
 
-        assert _is_local_or_metadata_host("192.168.1.1") is True
-        assert _is_local_or_metadata_host("10.0.0.1") is True
+        assert is_local_or_metadata_host("192.168.1.1") is True
+        assert is_local_or_metadata_host("10.0.0.1") is True
 
     def test_is_local_or_metadata_host_public_host(self) -> None:
         """``_is_local_or_metadata_host`` returns False for public hosts."""
-        from apm_cli.install.mcp.registry import _is_local_or_metadata_host
+        from apm_cli.utils.network import is_local_or_metadata_host
 
-        assert _is_local_or_metadata_host("registry.npmjs.org") is False
-        assert _is_local_or_metadata_host(None) is False
+        assert is_local_or_metadata_host("registry.npmjs.org") is False
+        assert is_local_or_metadata_host(None) is False
 
     def test_resolve_registry_url_flag_wins(self) -> None:
         """``resolve_registry_url`` with CLI flag returns flag value as source."""

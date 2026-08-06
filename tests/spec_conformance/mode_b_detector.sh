@@ -102,7 +102,7 @@ ADDED="$(printf '%s\n' "$RAW_DIFF" \
   | grep -vE '^\+\s*(from |import )' \
   | grep -vE '^\+\s*@' \
   | grep -vE '^\+\s*[a-zA-Z_][a-zA-Z0-9_]*\s*:\s*[A-Za-z_][A-Za-z0-9_\[\], |\.]*\s*(=.*)?$' \
-  | wc -l | tr -d ' ')"
+  | wc -l | tr -d ' ')" || ADDED=0
 
 if [ "$ADDED" -lt "$THRESHOLD" ]; then
   echo "[+] mode_b: ${ADDED} substantive added lines (< ${THRESHOLD}); OK"
@@ -150,3 +150,4 @@ echo "  apm-spec-waiver: <one-line rationale, >= 16 chars>"
 echo ""
 echo "The waiver is echoed verbatim to the CI log."
 exit 1
+

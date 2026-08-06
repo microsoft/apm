@@ -20,7 +20,6 @@ It deliberately depends only on stdlib + click (for the typed
 from __future__ import annotations
 
 import contextlib
-import ipaddress
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from urllib.parse import urlparse, urlunparse
@@ -28,6 +27,7 @@ from urllib.parse import urlparse, urlunparse
 import click
 
 from ...models.dependency.mcp import _ALLOWED_URL_SCHEMES
+from ...utils.network import is_local_or_metadata_host as _is_local_or_metadata_host
 
 # Defensive cap on registry URL length to keep apm.yml diffs reviewable
 # and to bound any downstream URL parsing/logging surface.
@@ -56,37 +56,6 @@ def _redact_url_credentials(url: str) -> str:
         return urlunparse(sanitized)
     except (ValueError, TypeError):
         return url
-
-
-def _is_local_or_metadata_host(host: str | None) -> bool:
-    """Return True for loopback, link-local, RFC1918, or cloud-metadata IPs.
-
-    Used to surface a soft warning when ``--registry`` points at the local
-    machine or a cloud metadata endpoint -- both common SSRF sinks. The
-    warning is informational only; we do not block, because local registries
-    are a legitimate dev/CI workflow.
-    """
-    if not host:
-        return False
-    lowered = host.lower()
-    if lowered in ("localhost", "ip6-localhost", "ip6-loopback"):
-        return True
-    try:
-        addr = ipaddress.ip_address(lowered)
-    except ValueError:
-        # urlparse keeps decimal-encoded forms like '2130706433' (== 127.0.0.1)
-        # as the hostname string. Try int parse to catch that obfuscation.
-        try:
-            addr = ipaddress.ip_address(int(lowered))
-        except (ValueError, TypeError):
-            return False
-    return (
-        addr.is_loopback
-        or addr.is_link_local
-        or addr.is_private
-        or addr.is_multicast
-        or addr.is_unspecified
-    )
 
 
 def validate_registry_url(value: str | None) -> str | None:

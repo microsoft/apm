@@ -3051,3 +3051,35 @@ def test_bootstrap_project_name_guard_rejects_variable_bypass(tmp_path: Path) ->
 
     assert result.returncode == 1
     assert "ScriptRunner bootstrap name must be the resolver result" in result.stdout
+
+
+def test_local_or_metadata_host_classification_has_single_owner() -> None:
+    """AC33: is_local_or_metadata_host must live only in utils/network.py.
+
+    Regression guard: no second definition of (is|_is)_local_or_metadata_host
+    may appear in src/apm_cli, and no src file other than utils/network.py may
+    call ipaddress.ip_address() for host-classification purposes.
+    """
+    root = Path(__file__).parents[2]
+    owner_path = root / "src/apm_cli/utils/network.py"
+    owner = owner_path.read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    # Exactly one definition in the canonical owner
+    assert owner.count("def is_local_or_metadata_host(") == 1
+
+    # No other src file redefines the function
+    duplicate_paths = [
+        path
+        for path in (root / "src/apm_cli").rglob("*.py")
+        if path != owner_path
+        and (
+            "def is_local_or_metadata_host(" in path.read_text(encoding="utf-8")
+            or "def _is_local_or_metadata_host(" in path.read_text(encoding="utf-8")
+        )
+    ]
+    assert duplicate_paths == [], f"parallel definitions found: {duplicate_paths}"
+
+    # Guard is wired into the boundary script
+    assert "AC33" in guard
+    assert "utils/network.py::is_local_or_metadata_host" in guard

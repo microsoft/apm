@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-target `apm compile` now avoids repeating expensive project analysis
   for each target, making multi-target runs scale like single-target runs
   without changing generated output. (closes #2482)
+- Codex adapter no longer silently skips `http://` MCP URLs for loopback and
+  local-network hosts (`localhost`, `127.0.0.1`, `[::1]`, RFC 1918 ranges); the
+  `https` requirement is preserved for genuinely remote hosts.
+  (by @sergio-sisternes-epam, closes #2467)
 
 ## [0.28.0] - 2026-08-04
 

@@ -12,6 +12,7 @@ from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_success, _rich_warning
+from ...utils.network import is_local_or_metadata_host
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import MCPClientAdapter
@@ -263,11 +264,14 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
-            scheme = urlparse(remote_url).scheme.lower()
-            if scheme != "https":
+            parsed_remote = urlparse(remote_url)
+            scheme = parsed_remote.scheme.lower()
+            # utils.network.is_local_or_metadata_host covers loopback, link-local, RFC 1918
+            # private ranges, and cloud-metadata IPs -- not just strict loopback.
+            if scheme != "https" and not is_local_or_metadata_host(parsed_remote.hostname):
                 _rich_warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
-                    f"must use https:// (got {scheme or 'no scheme'}).",
+                    f"must use https:// for non-local hosts (got {scheme or 'no scheme'}).",
                     symbol="warning",
                 )
                 return None
