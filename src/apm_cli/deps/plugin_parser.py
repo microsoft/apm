@@ -616,6 +616,14 @@ def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
     - ``command``: binary to run
     - ``extensionToLanguage``: mapping of file extensions to language IDs
 
+    Copilot-dialect spellings are accepted as aliases (#2509): plugins
+    authored against the Copilot CLI schema -- including the official
+    ``dotnet/skills`` dotnet plugin -- write the extension map as
+    ``fileExtensions`` and the startup budget as ``warmupTimeoutMs``.
+    APM itself emits ``fileExtensions`` when generating Copilot output,
+    so rejecting it on intake would drop servers that every supported
+    consumer runtime accepts. Canonical names win when both are present.
+
     All resulting entries are routed through ``LSPDependency.from_dict()``
     for validation. Entries that fail validation are skipped with a warning.
 
@@ -655,6 +663,24 @@ def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
         ):
             if key in cfg:
                 dep[key] = cfg[key]
+
+        # Copilot-dialect aliases; canonical spelling wins when both exist.
+        for canonical, alias in (
+            ("extensionToLanguage", "fileExtensions"),
+            ("startupTimeout", "warmupTimeoutMs"),
+        ):
+            if canonical not in dep and alias in cfg:
+                dep[canonical] = cfg[alias]
+
+        # ``cwd`` has no LSPDependency equivalent: APM-managed servers are
+        # started by the consumer runtime in its own working directory.
+        # Ignore it explicitly rather than letting it look like a typo.
+        if "cwd" in cfg:
+            logger.debug(
+                "LSP server '%s' from plugin '%s': ignoring unsupported 'cwd'",
+                name,
+                plugin_path.name,
+            )
 
         # Route through the validation chokepoint
         try:

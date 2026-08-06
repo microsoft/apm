@@ -285,6 +285,87 @@ class TestLspServersToApmDeps:
         assert d["restartOnCrash"] is True
         assert d["maxRestarts"] == 3
 
+    def test_fileextensions_alias_accepted(self, tmp_path):
+        """Copilot-dialect ``fileExtensions`` maps onto ``extensionToLanguage`` (#2509)."""
+        servers = {
+            "csharp": {
+                "command": "csharp-ls",
+                "fileExtensions": {".cs": "csharp"},
+            }
+        }
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        assert deps[0]["extensionToLanguage"] == {".cs": "csharp"}
+        assert "fileExtensions" not in deps[0]
+
+    def test_canonical_spelling_wins_over_alias(self, tmp_path):
+        servers = {
+            "dual": {
+                "command": "lsp",
+                "extensionToLanguage": {".py": "python"},
+                "fileExtensions": {".rb": "ruby"},
+            }
+        }
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        assert deps[0]["extensionToLanguage"] == {".py": "python"}
+
+    def test_warmup_timeout_ms_alias_accepted(self, tmp_path):
+        servers = {
+            "slow": {
+                "command": "lsp",
+                "extensionToLanguage": {".py": "python"},
+                "warmupTimeoutMs": 120000,
+            }
+        }
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        assert deps[0]["startupTimeout"] == 120000
+        assert "warmupTimeoutMs" not in deps[0]
+
+    def test_official_dotnet_plugin_lsp_json_accepted(self, tmp_path):
+        """End-to-end regression for #2509: the exact server config shipped by
+        the official dotnet/skills dotnet plugin must survive intake."""
+        lsp_json = tmp_path / ".lsp.json"
+        lsp_json.write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "csharp": {
+                            "command": "dnx",
+                            "args": [
+                                "roslyn-language-server",
+                                "--yes",
+                                "--prerelease",
+                                "--",
+                                "--stdio",
+                                "--autoLoadProjects",
+                            ],
+                            "cwd": "${PLUGIN_ROOT}",
+                            "fileExtensions": {
+                                ".cs": "csharp",
+                                ".razor": "aspnetcorerazor",
+                                ".cshtml": "aspnetcorerazor",
+                            },
+                            "warmupTimeoutMs": 120000,
+                        }
+                    }
+                }
+            )
+        )
+        servers = _extract_lsp_servers(tmp_path, {})
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        d = deps[0]
+        assert d["name"] == "csharp"
+        assert d["command"] == "dnx"
+        assert d["extensionToLanguage"][".razor"] == "aspnetcorerazor"
+        assert d["startupTimeout"] == 120000
+        # Copilot-dialect and unsupported keys must not leak into the dep
+        assert "fileExtensions" not in d
+        assert "warmupTimeoutMs" not in d
+        assert "cwd" not in d
+
     def test_wrapped_lsp_json_produces_valid_deps(self, tmp_path):
         """End-to-end: .lsp.json with lspServers wrapper yields valid deps."""
         lsp_json = tmp_path / ".lsp.json"
