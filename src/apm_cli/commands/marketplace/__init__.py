@@ -10,11 +10,12 @@ import builtins
 import json
 import logging
 import re
+import shlex
 import sys
 import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
 
 import click
 
@@ -258,6 +259,9 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
         from the host via ``AuthResolver.classify_host``, ``url`` rewritten
         to the SCP form (subprocess git understands it natively),
         ``embedded_host=<host>``.
+      * Full ``ssh://`` URL (``ssh://git@host/org/repo.git`` or with port,
+        e.g. ``ssh://git@host:7999/org/repo.git``). Returns the URL untouched,
+        ``embedded_host`` extracted, ``kind`` classified by host.
       * Full HTTPS URL. Returns the URL untouched, ``embedded_host``
         extracted, ``kind`` classified by host. Hosts that ``AuthResolver``
         does not recognise as github/gitlab fall through as ``kind="git"``
@@ -269,8 +273,6 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
     Raises ``ValueError`` on malformed input (single-segment, HTTP, empty,
     or path-traversal sequences in any segment).
     """
-    from urllib.parse import urlparse
-
     from ...core.auth import AuthResolver
     from ...utils.github_host import is_valid_fqdn
 
@@ -306,6 +308,48 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
         kind = _host_kind_to_fetcher_kind(host_info.kind)
         return raw, kind, host
 
+    # --- ssh:// protocol URL (ssh://git@host/org/repo.git or with port) ----
+    if lowered.startswith("ssh://"):
+        # SECURITY: reject percent-encoded userinfo before urlparse decodes it.
+        # Same guard as DependencyReference._parse_ssh_protocol_url.
+        # Use re.IGNORECASE so the guard fires for SSH://, Ssh://, etc.
+        userinfo_match = re.match(r"^ssh://([^@/?#]+)@", raw, re.IGNORECASE)
+        if userinfo_match and "%" in userinfo_match.group(1):
+            raise ValueError(
+                "Percent-encoded characters are not allowed in SSH userinfo. "
+                "Use the literal username (e.g. 'ssh://myuser@host/...')."
+            )
+        parsed = urlparse(raw)
+        embedded_host = (parsed.hostname or "").strip().lower()
+        if not embedded_host:
+            raise ValueError(f"ssh:// URL is missing a host: '{raw}'")
+        # SECURITY: reject dash-prefix hostnames that could inject SSH options
+        # when passed to git subprocess (e.g. '-oProxyCommand=...'). Defense-in-
+        # depth: git 2.38+ also blocks this, but we guard at the parse layer.
+        if embedded_host.startswith("-"):
+            raise ValueError(
+                f"Invalid host in ssh:// URL: '{embedded_host}'. Hostnames must not start with '-'."
+            )
+        path_segments = [s for s in unquote(parsed.path or "").split("/") if s]
+        for seg in path_segments:
+            validate_path_segments(seg, context="marketplace SSH URL path", reject_empty=True)
+        if not path_segments:
+            raise ValueError(f"ssh:// URL is missing a repo path: '{raw}'")
+        host_info = AuthResolver.classify_host(embedded_host)
+        kind = _host_kind_to_fetcher_kind(host_info.kind)
+        if kind in ("github", "gitlab") and len(path_segments) < 2:
+            # GitHub / GitLab SSH URLs are owner/repo-shaped; a single
+            # path segment is ambiguous (no owner). Generic git URLs
+            # (kind == "git") MAY legitimately have a single segment.
+            raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO' in the URL path.")
+        if host_flag and host_flag.strip().lower() != embedded_host:
+            raise ValueError(
+                f"Conflicting host: --host '{host_flag}' does not match "
+                f"'{embedded_host}' in '{raw}'.\n"
+                f"To fix: drop --host and run: apm marketplace add {shlex.quote(raw)}"
+            )
+        return raw, kind, embedded_host
+
     # --- HTTPS URL --------------------------------------------------------
     if lowered.startswith("https://"):
         parsed = urlparse(raw)
@@ -313,9 +357,7 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
         if not embedded_host:
             raise ValueError(f"HTTPS URL is missing a host: '{raw}'")
         # Validate path segments for traversal markers.
-        from urllib.parse import unquote as _unquote
-
-        path_segments = [s for s in _unquote(parsed.path or "").split("/") if s]
+        path_segments = [s for s in unquote(parsed.path or "").split("/") if s]
         for seg in path_segments:
             validate_path_segments(seg, context="marketplace URL path", reject_empty=True)
         if not path_segments:
@@ -329,19 +371,15 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
             # (e.g. self-hosted ``https://gitea.example.com/repo``).
             raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO' in the URL path.")
         if host_flag and host_flag.strip().lower() != embedded_host:
-            import shlex as _shlex
-
             raise ValueError(
                 f"Conflicting host: --host '{host_flag}' does not match "
                 f"'{embedded_host}' in '{raw}'.\n"
-                f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
+                f"To fix: drop --host and run: apm marketplace add {shlex.quote(raw)}"
             )
         return raw, kind, embedded_host
 
     # --- Shorthand (OWNER/REPO or HOST/OWNER/.../REPO) --------------------
-    from urllib.parse import unquote as _unquote
-
-    raw_decoded = _unquote(raw)
+    raw_decoded = unquote(raw)
     segments = [seg for seg in raw_decoded.split("/") if seg]
     if len(segments) < 2:
         raise ValueError(
@@ -370,12 +408,10 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
     validate_path_segments(repo_name, context="marketplace repo name", reject_empty=True)
 
     if embedded_host and host_flag and host_flag.strip().lower() != embedded_host:
-        import shlex as _shlex
-
         raise ValueError(
             f"Conflicting host: --host '{host_flag}' does not match "
             f"'{embedded_host}' in '{raw}'.\n"
-            f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
+            f"To fix: drop --host and run: apm marketplace add {shlex.quote(raw)}"
         )
 
     from ...utils.github_host import default_host
@@ -607,10 +643,8 @@ def add(source, name, ref, branch, host, verbose):
             if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
                 # Should not happen because _host_kind_to_fetcher_kind already
                 # mapped non-trusted kinds to "git", but defend in depth.
-                import shlex as _shlex
-
-                quoted_repo = _shlex.quote(source)
-                quoted_host = _shlex.quote(resolved_host or "")
+                quoted_repo = shlex.quote(source)
+                quoted_host = shlex.quote(resolved_host or "")
                 logger.error(
                     _marketplace_add_unsupported_host_error(
                         resolved_host or "", quoted_repo, quoted_host, host_info.kind
@@ -822,8 +856,6 @@ def _default_alias_from_url(url: str) -> str:
     path-segment. For ``file://`` URLs the alias falls back to the
     final filesystem segment.
     """
-    from urllib.parse import urlparse
-
     parsed = urlparse(url) if "://" in url else None
     if parsed and parsed.path:
         tail = parsed.path.rstrip("/").rsplit("/", 1)[-1]

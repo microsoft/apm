@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm marketplace add ssh://git@host:PORT/org/repo.git` now parses correctly;
+  `ssh://` URLs with non-default ports were silently misparsed as shorthand,
+  producing a mangled GitHub URL. Self-hosted Git servers on non-standard SSH
+  ports now have a working `marketplace add` syntax. (closes #2464)
 - Multi-target `apm compile` now avoids repeating expensive project analysis
   for each target, making multi-target runs scale like single-target runs
   without changing generated output. (closes #2482)

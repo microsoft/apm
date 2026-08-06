@@ -64,7 +64,9 @@ Register a marketplace from a source reference. Accepted forms:
   `https://gitlab.com/acme/marketplace.git#v1.0.0`.
 - Hosted `marketplace.json` URL --
   `https://catalog.example.com/marketplace.json`.
-- SSH URL -- `git@host:org/repo.git` style.
+- SSH URL -- `git@host:org/repo.git` (SCP style) or
+  `ssh://git@host:PORT/org/repo.git` (scheme style; required when the
+  server uses a non-default port).
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
   relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
   direct `marketplace.json` file.
@@ -94,8 +96,11 @@ apm marketplace add https://gitea.example.com/org/repo.git#v1.0.0 --name custom
 # Hosted marketplace.json URL
 apm marketplace add https://catalog.example.com/marketplace.json --name catalog
 
-# SSH
+# SSH (SCP style)
 apm marketplace add git@gitea.example.com:org/repo.git --name custom
+
+# SSH with non-default port (scheme style; SCP shorthand cannot carry a port)
+apm marketplace add ssh://git@gitea.example.com:7999/org/repo.git --name custom
 
 # Local filesystem (bare repo, working directory, or marketplace.json file)
 apm marketplace add /srv/marketplaces/agent-forge.git --name agent-forge
