@@ -77,6 +77,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in
   direct policy URLs. (#2422)
+- `apm install --frozen` no longer reports a repo-root `claude_skill` dependency
+  as lockfile drift in projects that also carry MCP state. The absent `apm.yml`
+  is waived from the locked package type and the installed shape, regardless of
+  whether the skill was declared as a repository root or as a subdirectory.
+  (#2446)
 
 ### Performance
 
