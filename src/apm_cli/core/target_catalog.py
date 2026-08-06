@@ -291,6 +291,25 @@ def target_help_fragment(command: str) -> str:
     return f"Values: {', '.join(sorted(accepted_target_values(command)))}."
 
 
+def target_all_exclusion_help() -> str:
+    """Return the generated 'all' exclusion clause for command help strings.
+
+    Produces a sorted list of names excluded from 'all': explicit-only
+    non-experimental targets, 'experimental targets' as a category, and
+    mcp-only targets.  Adding a new catalog entry automatically appears here.
+    """
+    explicit_non_experimental = sorted(
+        cap.name
+        for cap in TARGET_CAPABILITIES.values()
+        if cap.explicit_only and cap.experimental_flag is None
+    )
+    mcp_only_names = sorted(cap.name for cap in TARGET_CAPABILITIES.values() if cap.mcp_only)
+    parts = [*explicit_non_experimental, "experimental targets", *mcp_only_names]
+    if len(parts) == 1:
+        return f"'all' excludes {parts[0]}"
+    return f"'all' excludes {', '.join(parts[:-1])}, and {parts[-1]}"
+
+
 def target_error_values(command: str) -> tuple[str, ...]:
     """Return accepted target values in deterministic error-display order."""
     return tuple(sorted(accepted_target_values(command)))
