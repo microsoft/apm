@@ -135,7 +135,7 @@ def _handle_unknown_flag(name: str, logger: CommandLogger) -> None:
 
         if guidance:
             if graduated == display:
-                logger.error(f"'{display}' is no longer an experimental flag.")
+                logger.error(f"'{display}' is no longer an experimental flag")
             else:
                 logger.error(f"Unknown experimental feature: {display}")
                 logger.progress(

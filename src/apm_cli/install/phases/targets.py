@@ -335,8 +335,7 @@ def _gate_cowork_target(
         if ctx.logger:
             ctx.logger.warning(
                 "Skipping the 'copilot-cowork' target: it deploys at user scope only. "
-                "Run: apm install --target copilot-cowork --global",
-                symbol="warning",
+                "Run: apm install --target copilot-cowork --global"
             )
         return [t for t in targets if t.name != "copilot-cowork"]
 

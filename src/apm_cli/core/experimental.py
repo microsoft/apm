@@ -297,7 +297,7 @@ def validate_flag_name(name: str) -> str:
         )
         if graduated_match:
             best_live = max(
-                (_match_ratio(normalised, name) for name in suggestions),
+                (_match_ratio(normalised, candidate) for candidate in suggestions),
                 default=0.0,
             )
             if _match_ratio(normalised, graduated_match[0]) > best_live:
