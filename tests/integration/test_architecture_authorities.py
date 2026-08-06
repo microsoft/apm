@@ -3051,3 +3051,69 @@ def test_bootstrap_project_name_guard_rejects_variable_bypass(tmp_path: Path) ->
 
     assert result.returncode == 1
     assert "ScriptRunner bootstrap name must be the resolver result" in result.stdout
+
+
+# -- AC33: MCP-capability single-authority (split-authority-repair, #2485) ----
+
+
+def test_mcp_capability_single_authority_no_catalog_field() -> None:
+    """TargetCapability must not declare mcp_capable; ClientFactory is the authority.
+
+    This is the split-authority-repair guard for #2485: before this repair two
+    independent authorities (a catalog boolean and ClientFactory.supported_clients)
+    both determined MCP capability. The catalog field has been removed; only
+    _resolve_target_runtimes via ClientFactory.supported_clients() may gate targets.
+    """
+    root = Path(__file__).parents[2]
+    catalog_source = (root / "src/apm_cli/core/target_catalog.py").read_text(encoding="utf-8")
+    assert "mcp_capable" not in catalog_source, (
+        "TargetCapability must not carry a mcp_capable field; "
+        "use ClientFactory.supported_clients() in _resolve_target_runtimes instead"
+    )
+
+
+def test_mcp_capability_single_authority_runtime_targets_unfiltered() -> None:
+    """runtime_targets must not filter on mcp_capable; filtering belongs in _resolve_target_runtimes.
+
+    AC33 split-authority-repair: a second capability check in runtime_targets
+    would re-introduce the split-authority pattern removed in #2485.
+    """
+    root = Path(__file__).parents[2]
+    detection_source = (root / "src/apm_cli/core/target_detection.py").read_text(encoding="utf-8")
+    assert "mcp_capable" not in detection_source, (
+        "runtime_targets must not filter on mcp_capable; "
+        "MCP-capability gating belongs exclusively in _resolve_target_runtimes"
+    )
+
+
+def test_mcp_capability_single_authority_client_factory_gate_present() -> None:
+    """_resolve_target_runtimes must call ClientFactory.supported_clients() as the sole gate.
+
+    AC33: The ClientFactory registry is the single source of truth for which
+    targets have MCP client adapters. Removing the supported_clients() call from
+    _resolve_target_runtimes would silently drop the non-MCP target guard.
+    """
+    root = Path(__file__).parents[2]
+    tree = ast.parse(
+        (root / "src/apm_cli/integration/mcp_integrator_install.py").read_text(encoding="utf-8")
+    )
+    resolver = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_resolve_target_runtimes"
+        ),
+        None,
+    )
+    assert resolver is not None, "_resolve_target_runtimes not found"
+    supported_clients_calls = [
+        node
+        for node in ast.walk(resolver)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "supported_clients"
+    ]
+    assert supported_clients_calls, (
+        "_resolve_target_runtimes must call ClientFactory.supported_clients() "
+        "as the MCP-capability gate (AC33 split-authority-repair)"
+    )

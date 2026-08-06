@@ -630,3 +630,187 @@ class TestRunMcpInstallConsoleNone:
         # At least the initial progress/info about MCP deps should appear
         any_log = logger.progress.call_args_list or logger.warning.call_args_list
         assert len(any_log) >= 0  # function executed at all
+
+
+# ---------------------------------------------------------------------------
+# #2485: non-MCP-capable targets must be filtered by ClientFactory, not catalog
+# ---------------------------------------------------------------------------
+# ClientFactory.supported_clients() is the single authority for MCP capability.
+# When all declared targets are non-MCP-capable the install must fail with an
+# actionable InstallFailureAlreadyRendered; when mixed targets are declared
+# only the MCP-capable subset must be attempted.
+
+
+class TestRunMcpInstallAgentSkillsTarget:
+    """Tests covering the ClientFactory-based non-MCP target filtering (#2485)."""
+
+    _NON_MCP_CLIENTS = frozenset({"codex", "copilot", "claude", "vscode"})
+
+    def test_mixed_codex_agent_skills_only_targets_codex(self, tmp_path: Path) -> None:
+        """With [codex, agent-skills], MCP install must only attempt codex.
+
+        ClientFactory.supported_clients() is patched to return only MCP-capable
+        adapters; agent-skills must be filtered at the ClientFactory gate, not
+        at the catalog level.
+        """
+        from apm_cli.core.target_detection import EffectiveTargetDecision
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        decision = EffectiveTargetDecision(["codex", "agent-skills"], source="apm.yml")
+        dep = _make_self_defined_dep("my-server")
+        logger = MagicMock()
+
+        attempted_runtimes: list[str] = []
+
+        def track_installs(runtime, *args, **kwargs):
+            attempted_runtimes.append(runtime)
+            return True
+
+        from apm_cli.integration import mcp_integrator as mi_mod
+
+        with (
+            patch.object(mi_mod.MCPIntegrator, "_install_for_runtime", side_effect=track_installs),
+            patch.object(
+                mi_mod.MCPIntegrator,
+                "_check_self_defined_servers_needing_installation",
+                return_value=["my-server"],
+            ),
+            patch.object(mi_mod.MCPIntegrator, "_build_self_defined_info", return_value={}),
+            patch.object(
+                mi_mod.MCPIntegrator,
+                "_gate_project_scoped_runtimes",
+                side_effect=lambda rts, **kw: rts,
+            ),
+        ):
+            # Patch ClientFactory at the import site inside _resolve_target_runtimes
+            with patch(
+                "apm_cli.factory.ClientFactory.supported_clients",
+                return_value=self._NON_MCP_CLIENTS,
+            ):
+                run_mcp_install(
+                    [dep],
+                    target_decision=decision,
+                    project_root=str(tmp_path),
+                    logger=logger,
+                )
+
+        assert attempted_runtimes == ["codex"], f"Expected only codex but got {attempted_runtimes}"
+
+    def test_agent_skills_only_target_raises_install_failure(self, tmp_path: Path) -> None:
+        """[agent-skills] alone with MCP deps must raise InstallFailureAlreadyRendered.
+
+        The single guard is ClientFactory.supported_clients(); when every resolved
+        runtime is absent from that set the install raises an actionable error (#2485).
+        """
+        from apm_cli.core.target_detection import EffectiveTargetDecision
+        from apm_cli.install.errors import InstallFailureAlreadyRendered
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        decision = EffectiveTargetDecision(["agent-skills"], source="apm.yml")
+        dep = _make_self_defined_dep("my-server")
+        logger = MagicMock()
+
+        with (
+            patch(
+                "apm_cli.factory.ClientFactory.supported_clients",
+                return_value=self._NON_MCP_CLIENTS,
+            ),
+            pytest.raises(InstallFailureAlreadyRendered, match="No MCP-capable target"),
+        ):
+            run_mcp_install(
+                [dep],
+                target_decision=decision,
+                project_root=str(tmp_path),
+                logger=logger,
+            )
+
+
+class TestRunMcpInstallClientFactoryFilter:
+    """TC-1: Direct regression tests for the ClientFactory gate in _resolve_target_runtimes.
+
+    These tests exercise the ClientFactory.supported_clients() filtering path
+    without going through the catalog's mcp_capable field, which was removed.
+    ClientFactory is the single source of truth for MCP capability (#2485).
+    """
+
+    _MCP_CLIENTS = frozenset({"codex", "copilot", "claude", "vscode"})
+
+    def test_non_mcp_targets_filtered_from_runtime_list(self, tmp_path: Path) -> None:
+        """ClientFactory gate drops non-MCP runtimes and logs a progress message."""
+        from apm_cli.core.target_detection import EffectiveTargetDecision
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        # grok-build is in_all=True but has no MCP adapter; must be silently dropped
+        decision = EffectiveTargetDecision(["codex", "grok-build"], source="apm.yml")
+        dep = _make_self_defined_dep("my-server")
+        logger = MagicMock()
+        attempted: list[str] = []
+
+        def track(runtime, *args, **kwargs):
+            attempted.append(runtime)
+            return True
+
+        from apm_cli.integration import mcp_integrator as mi_mod
+
+        with (
+            patch(
+                "apm_cli.factory.ClientFactory.supported_clients",
+                return_value=self._MCP_CLIENTS,
+            ),
+            patch.object(mi_mod.MCPIntegrator, "_install_for_runtime", side_effect=track),
+            patch.object(
+                mi_mod.MCPIntegrator,
+                "_check_self_defined_servers_needing_installation",
+                return_value=["my-server"],
+            ),
+            patch.object(mi_mod.MCPIntegrator, "_build_self_defined_info", return_value={}),
+            patch.object(
+                mi_mod.MCPIntegrator,
+                "_gate_project_scoped_runtimes",
+                side_effect=lambda rts, **kw: rts,
+            ),
+        ):
+            run_mcp_install(
+                [dep],
+                target_decision=decision,
+                project_root=str(tmp_path),
+                logger=logger,
+            )
+
+        assert attempted == ["codex"], f"Expected only codex, got {attempted}"
+        # The guard must log a progress message naming the skipped target
+        progress_calls = [str(c) for c in logger.progress.call_args_list]
+        assert any("grok-build" in c for c in progress_calls), (
+            "Expected progress message naming skipped non-MCP target"
+        )
+
+    def test_all_non_mcp_targets_raises_install_failure_with_label(self, tmp_path: Path) -> None:
+        """When every runtime is filtered by ClientFactory, raise InstallFailureAlreadyRendered.
+
+        The error message must name the failing targets and carry the 'declared'
+        label when the source is apm.yml.
+        """
+        from apm_cli.core.target_detection import EffectiveTargetDecision
+        from apm_cli.install.errors import InstallFailureAlreadyRendered
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        decision = EffectiveTargetDecision(["grok-build"], source="apm.yml")
+        dep = _make_self_defined_dep("my-server")
+        logger = MagicMock()
+
+        with (
+            patch(
+                "apm_cli.factory.ClientFactory.supported_clients",
+                return_value=self._MCP_CLIENTS,
+            ),
+            pytest.raises(
+                InstallFailureAlreadyRendered,
+                match=r"No MCP-capable target in the declared target set",
+            ),
+        ):
+            run_mcp_install(
+                [dep],
+                target_decision=decision,
+                project_root=str(tmp_path),
+                logger=logger,
+            )

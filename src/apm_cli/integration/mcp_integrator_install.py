@@ -611,31 +611,47 @@ def _resolve_target_runtimes(
             else:
                 selection_source = _TargetSelectionSource.DISCOVERY
 
-    # Not every accepted target can host MCP servers: `grok-build` writes
-    # native .grok configuration but has no MCP client adapter.  Drop
-    # non-MCP-capable runtimes here so that expanding `--target all` does
-    # not hard-fail the install on a runtime that cannot take MCP config.
-    # ClientFactory is the single source of truth for MCP capability.
+    # ClientFactory is the single source of truth for MCP capability (#2485).
+    # Non-MCP targets (e.g. agent-skills, grok-build) have no client adapter;
+    # silently dropping them when MCP-capable targets remain preserves correct
+    # installs for mixed-target projects. When every selected target is non-MCP-
+    # capable the caller must be told explicitly -- a silent skip would leave MCP
+    # dependencies permanently uninstalled with no indication why.
     # Direct `--runtime` calls bypass this: the adapter layer owns the
     # warning/error behavior for legacy runtime strings.
     if selection_source is not _TargetSelectionSource.RUNTIME:
-        from apm_cli.factory import ClientFactory as _McpCF
+        try:
+            from apm_cli.factory import ClientFactory as _McpCF
 
-        mcp_capable = _McpCF.supported_clients()
-        non_mcp = [rt for rt in target_runtimes if rt not in mcp_capable]
-        if non_mcp:
-            target_runtimes = [rt for rt in target_runtimes if rt in mcp_capable]
-            logger.progress(f"Skipped targets without MCP support: {', '.join(sorted(non_mcp))}")
-        if not target_runtimes and non_mcp:
-            logger.warning(
-                "No selected target supports MCP -- skipping MCP configuration. "
-                f"Targets without an MCP client: {', '.join(sorted(non_mcp))}. "
-                "Re-run with an MCP-capable target (for example "
-                "`--target copilot`) to install MCP servers."
-            )
-            return None
+            _raw = _McpCF.supported_clients()
+            mcp_capable_set: frozenset[str] | None = _raw if isinstance(_raw, frozenset) else None
+        except ImportError:
+            mcp_capable_set = None
 
-    # Exclusion narrows every selected source, including explicit CLI choices.
+        if mcp_capable_set is not None:
+            non_mcp = [rt for rt in target_runtimes if rt not in mcp_capable_set]
+            if non_mcp:
+                target_runtimes = [rt for rt in target_runtimes if rt in mcp_capable_set]
+                logger.progress(
+                    f"Skipped targets without MCP support: {', '.join(sorted(non_mcp))}"
+                )
+            if not target_runtimes and non_mcp:
+                # Every selected target lacks an MCP client adapter; fail with an
+                # actionable message so the user knows exactly what to change (#2485).
+                targets_csv = ", ".join(sorted(non_mcp))
+                _src = (
+                    target_decision.source if target_decision is not None else None
+                ) or "unknown"
+                _label = "declared" if _src == "apm.yml" else "selected"
+                message = (
+                    f"No MCP-capable target in the {_label} target set ({targets_csv}). "
+                    "Add an MCP-capable target (e.g., codex, copilot, claude) to install "
+                    "MCP dependencies."
+                )
+                logger.error(message)
+                raise InstallFailureAlreadyRendered(message)
+
+        # Exclusion narrows every selected source, including explicit CLI choices.
     # Apply it before progress output so the message names the narrowed set.
     if exclude:
         exclusions = {exclude}

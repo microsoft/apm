@@ -1537,6 +1537,26 @@ if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC33: MCP-capability single-authority (ClientFactory.supported_clients)"
+# split-authority-repair for #2485: only _resolve_target_runtimes via
+# ClientFactory.supported_clients() may decide whether a target is MCP-capable.
+# The catalog (TargetCapability) must NOT carry a separate mcp_capable field,
+# and runtime_targets must NOT filter on such a field.
+mcp_catalog_owner="src/apm_cli/core/target_catalog.py"
+mcp_resolve_owner="src/apm_cli/integration/mcp_integrator_install.py"
+if grep -q 'mcp_capable' "$mcp_catalog_owner"; then
+    echo "[x] TargetCapability must not declare mcp_capable; use ClientFactory.supported_clients()"
+    violations=$((violations + 1))
+fi
+if ! grep -q 'supported_clients()' "$mcp_resolve_owner"; then
+    echo "[x] _resolve_target_runtimes must call ClientFactory.supported_clients() as the MCP-capability gate"
+    violations=$((violations + 1))
+fi
+if grep -q 'mcp_capable' src/apm_cli/core/target_detection.py; then
+    echo "[x] runtime_targets must not filter on mcp_capable; filtering belongs in _resolve_target_runtimes"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

@@ -10,6 +10,40 @@ frequently, along with their cause and the shortest path to a fix.
 
 ---
 
+### MCP install: "No MCP-capable target in the declared target set"
+
+**Symptom:** `apm install` exits with an error like:
+
+```
+[x] No MCP-capable target in the declared target set (agent-skills).
+    Add an MCP-capable target (e.g., codex, copilot, claude) to install MCP dependencies.
+```
+
+**Cause:** Your `apm.yml` declares `dependencies.mcp:` entries but every
+target in `targets:` lacks an MCP client adapter (for example `agent-skills`,
+`grok-build`, `grok-cloud`, `openclaw`, `copilot-cowork`, or `copilot-app`
+-- these are skills-only or workflow targets marked `[ ]` in the
+[targets matrix](../targets-matrix/) **mcp** column).
+
+**Fix:** Add at least one MCP-capable target (`codex`, `copilot`, `claude`,
+`cursor`, `gemini`, `windsurf`, `kiro`, `vscode`, or `intellij`) alongside
+the non-MCP target:
+
+```yaml
+targets:
+  - codex        # MCP-capable
+  - agent-skills # skills-only; MCP is skipped for this target
+dependencies:
+  mcp:
+    - name: my-server
+      registry: true
+```
+
+Alternatively, remove `dependencies.mcp:` entries if you only need skills
+deployment.
+
+---
+
 ### Cursor: "Config version must be a number"
 
 **Symptom:** Cursor reports `Config version must be a number` or

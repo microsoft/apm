@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-target `apm compile` now avoids repeating expensive project analysis
   for each target, making multi-target runs scale like single-target runs
   without changing generated output. (closes #2482)
+- `apm install` no longer crashes with `ValueError: Unsupported client type`
+  when `targets:` includes a skills-only target such as `agent-skills` alongside
+  MCP-capable targets. Non-MCP-capable targets are now silently excluded from the
+  MCP install phase. Declaring only non-MCP targets when MCP dependencies are
+  present now fails with a clear, actionable message instead of an internal
+  exception. (closes #2485, by @sergio-sisternes-epam)
 
 ## [0.28.0] - 2026-08-04
 

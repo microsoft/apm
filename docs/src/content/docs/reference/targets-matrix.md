@@ -40,6 +40,13 @@ below). Claude, Grok Build, and Kiro keep target-native skill directories.
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
+Targets marked `[ ]` in the **mcp** column have no MCP client adapter and
+are silently skipped during `apm install` when MCP dependencies are declared
+alongside MCP-capable targets (a progress line names the skipped target).
+Declaring **only** non-MCP-capable targets when `dependencies.mcp:` entries
+are present fails with an actionable error -- see
+[Common errors](../common-errors/).
+
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
 desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
 runtime), and `hermes` are gated behind experimental flags and not listed
