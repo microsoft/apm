@@ -323,7 +323,8 @@ class TestResolveTargetsConsistency:
                     assert "instructions" in t.primitives
                     assert t.primitives["instructions"].format_id == "copilot_user_instructions"
                 if t.name == "cursor":
-                    assert "instructions" not in t.primitives
+                    assert "instructions" in t.primitives
+                    assert t.primitives["instructions"].format_id == "cursor_rules"
                 if t.name == "opencode":
                     assert "hooks" not in t.primitives
                 if t.name == "windsurf":

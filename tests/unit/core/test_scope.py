@@ -196,10 +196,10 @@ class TestTargetProfileUserScope:
     def test_copilot_is_partially_supported(self):
         assert KNOWN_TARGETS["copilot"].user_supported == "partial"
 
-    def test_cursor_is_partially_supported(self):
-        assert KNOWN_TARGETS["cursor"].user_supported == "partial"
+    def test_cursor_is_supported_at_user_scope(self):
+        assert KNOWN_TARGETS["cursor"].user_supported is True
         assert KNOWN_TARGETS["cursor"].user_root_dir == ".cursor"
-        assert "instructions" in KNOWN_TARGETS["cursor"].unsupported_user_primitives
+        assert KNOWN_TARGETS["cursor"].unsupported_user_primitives == ()
 
     def test_opencode_is_partially_supported(self):
         assert KNOWN_TARGETS["opencode"].user_supported == "partial"
@@ -241,12 +241,12 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("prompts") is True
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("instructions") is True
 
-    def test_supports_at_user_scope_cursor_partial(self):
-        # Cursor supports agents at user scope but not instructions
+    def test_supports_at_user_scope_cursor(self):
+        # Cursor fully supports instructions, agents, skills, and hooks at user scope.
         assert KNOWN_TARGETS["cursor"].supports_at_user_scope("agents") is True
         assert KNOWN_TARGETS["cursor"].supports_at_user_scope("skills") is True
         assert KNOWN_TARGETS["cursor"].supports_at_user_scope("hooks") is True
-        assert KNOWN_TARGETS["cursor"].supports_at_user_scope("instructions") is False
+        assert KNOWN_TARGETS["cursor"].supports_at_user_scope("instructions") is True
 
     def test_supports_at_user_scope_opencode_partial(self):
         # OpenCode supports agents at user scope but not hooks
@@ -305,18 +305,18 @@ class TestScopeWarnings:
         assert "cursor" in msg
         assert "opencode" in msg
         assert "copilot" in msg
-        # Claude is fully supported
+        # Claude and Cursor are fully supported
         assert "claude" in msg
         assert "fully supported" in msg.lower()
-        # Copilot, cursor, opencode are partially supported
+        # Copilot, opencode (and others) remain partially supported
         assert "partially supported" in msg.lower()
 
     def test_warn_message_includes_unsupported_primitives(self):
         msg = warn_unsupported_user_scope()
         # Copilot now supports instructions at user scope (#650); not in warning.
         assert "copilot (instructions)" not in msg
-        # Cursor excludes instructions
-        assert "cursor (instructions)" in msg
+        # Cursor now supports instructions at user scope; not in warning.
+        assert "cursor (instructions)" not in msg
         # OpenCode excludes hooks
         assert "opencode (hooks)" in msg
         # Windsurf excludes instructions
