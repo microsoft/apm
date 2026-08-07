@@ -45,6 +45,10 @@ _log = logging.getLogger(__name__)
 # Full SHA pattern: 40 hex characters
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 
+# Upper bound on git stderr folded into a clone error message, so a
+# verbose remote cannot flood the terminal.
+_GIT_STDERR_MAX_CHARS = 500
+
 
 def _safe_git_args() -> list[str]:
     """Return hardening ``-c`` args prepended to every git subprocess.
@@ -426,14 +430,16 @@ class GitCache:
                         robust_rmtree(staged, ignore_errors=True)
                         raise RuntimeError(
                             f"Failed to clone {_sanitize_url(url)} "
-                            f"(partial fallback also failed): {exc2}"
+                            f"(partial fallback also failed): {_clone_failure_detail(exc2)}"
                         ) from exc2
                 if not fallback_done:
                     # Clean up staged on failure
                     from ..utils.file_ops import robust_rmtree
 
                     robust_rmtree(staged, ignore_errors=True)
-                    raise RuntimeError(f"Failed to clone {_sanitize_url(url)}: {exc}") from exc
+                    raise RuntimeError(
+                        f"Failed to clone {_sanitize_url(url)}: {_clone_failure_detail(exc)}"
+                    ) from exc
 
             # Atomic land (lock is already held; pass it through so the
             # rename completes under the same critical section).
@@ -815,6 +821,43 @@ def _dir_size(path: Path) -> int:
     except OSError:
         pass
     return total
+
+
+def _sanitize_git_stderr(stderr: str) -> str:
+    """Redact credentials from git stderr before it reaches an error message.
+
+    ``_sanitize_url`` only redacts a URL's password component, so the
+    token-as-username form (``https://<token>@host``) would survive it.
+    Both that form and bare platform tokens are redacted here.
+    """
+    redacted = re.sub(r"(https?://)[^@/\s]+@", r"\1***@", stderr)
+    redacted = re.sub(
+        r"(ghp_|gho_|ghu_|ghs_|ghr_|glpat[_-])[A-Za-z0-9_\-]+",
+        "***",
+        redacted,
+    )
+    return redacted.strip()
+
+
+def _clone_failure_detail(exc: BaseException) -> str:
+    """Render a clone failure with git's own diagnostic included.
+
+    ``CalledProcessError.__str__`` reports only the exit status, so
+    interpolating the exception alone drops git's stderr. Callers that
+    classify failures by message text (``AuthResolver.
+    is_public_github_auth_failure``) then read an auth failure as a
+    network failure, sending users to debug connectivity for what is a
+    credential problem.
+    """
+    stderr = getattr(exc, "stderr", None)
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not stderr:
+        return str(exc)
+    detail = _sanitize_git_stderr(stderr)
+    if len(detail) > _GIT_STDERR_MAX_CHARS:
+        detail = f"{detail[:_GIT_STDERR_MAX_CHARS]}..."
+    return f"{exc}: {detail}" if detail else str(exc)
 
 
 def _sanitize_url(url: str) -> str:
