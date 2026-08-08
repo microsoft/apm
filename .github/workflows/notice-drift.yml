@@ -79,7 +79,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Pinned to the same Python version as ci.yml. NOTICE content
       # depends on which dist-info layout the installed wheels use, and
@@ -88,12 +88,12 @@ jobs:
       # Locking to 3.12 keeps the rendered output deterministic across
       # CI runs and developer machines.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
 
@@ -133,7 +133,7 @@ jobs:
       # and produce noisy false positives on otherwise-fine PRs.
       - name: License policy check (PR only)
         if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
           fail-on-severity: moderate
