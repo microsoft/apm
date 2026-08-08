@@ -40,9 +40,7 @@ class _HttpStatusError(RuntimeError):
 _UNTRANSLATED_AUTH_STDERR = (
     "fatal: Authentication failed for 'https://github.com/acme/private.git/'"
 )
-_TRANSLATED_AUTH_STDERR = (
-    "fatal\u00a0: Échec d'authentification pour 'https://github.com/acme/private.git/'"
-)
+_TRANSLATED_AUTH_STDERR = "fatal: Autentikasi gagal untuk 'https://github.com/acme/private.git/'"
 
 
 def _localized_git_stderr(env: dict[str, str]) -> str:
@@ -51,7 +49,9 @@ def _localized_git_stderr(env: dict[str, str]) -> str:
     Git resolves its message catalogue from ``LANGUAGE`` first, then
     ``LC_ALL``; the ``C`` locale has no catalogue, so the untranslated
     source string surfaces. Reproducing that precedence here is what makes
-    the retry contract fail when the locale is left inherited.
+    the retry contract fail when the locale is left inherited. The
+    translated form is git's own ``id`` catalogue entry, chosen because it
+    is a real translation that stays within printable ASCII.
     """
     catalogue = env.get("LANGUAGE") or env.get("LC_ALL") or ""
     if catalogue.startswith("C"):
@@ -484,7 +484,7 @@ def test_public_github_auth_failure_classifier_signal_vocabulary(
 @pytest.mark.parametrize(
     "locale_environment",
     (
-        {"LC_ALL": "fr_FR.UTF-8", "LANGUAGE": "fr_FR:fr"},
+        {"LC_ALL": "id_ID.UTF-8", "LANGUAGE": "id_ID:id"},
         {"LANG": "de_DE.UTF-8"},
         {"LC_MESSAGES": "ja_JP.UTF-8"},
     ),
@@ -521,7 +521,7 @@ def test_translated_clone_failure_still_retries_with_a_token() -> None:
             stderr=_localized_git_stderr(env),
         )
 
-    with patch.dict(os.environ, {"LC_ALL": "fr_FR.UTF-8", "LANGUAGE": "fr_FR:fr"}, clear=True):
+    with patch.dict(os.environ, {"LC_ALL": "id_ID.UTF-8", "LANGUAGE": "id_ID:id"}, clear=True):
         downloader = _public_downloader(resolver)
         downloader._execute_transport_plan(
             dep_ref.repo_url,
