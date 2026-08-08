@@ -105,13 +105,13 @@ class TestCopilotScopeResolution:
         assert not (self.project_root / ".copilot").exists()
 
     def test_user_scope_deploys_to_copilot(self):
-        """At user scope, instructions use concat format (not filtered)."""
+        """At user scope, instructions deploy modularly (not filtered)."""
         copilot = KNOWN_TARGETS["copilot"]
         resolved = copilot.for_scope(user_scope=True)
         assert resolved.root_dir == ".copilot"
-        # instructions now supported at user scope via concat (#650)
+        # instructions supported at user scope via modular .copilot/instructions/
         assert "instructions" in resolved.primitives
-        assert resolved.primitives["instructions"].format_id == "copilot_user_instructions"
+        assert resolved.primitives["instructions"].format_id == "github_instructions"
 
     def test_user_scope_agents_deploy_to_copilot(self):
         """At user scope, agents deploy to .copilot/agents/."""
@@ -319,9 +319,9 @@ class TestResolveTargetsConsistency:
             for t in targets:
                 if t.name == "copilot":
                     assert "prompts" in t.primitives
-                    # instructions now supported via concat (#650)
+                    # instructions supported via modular .copilot/instructions/
                     assert "instructions" in t.primitives
-                    assert t.primitives["instructions"].format_id == "copilot_user_instructions"
+                    assert t.primitives["instructions"].format_id == "github_instructions"
                 if t.name == "cursor":
                     assert "instructions" not in t.primitives
                 if t.name == "opencode":
