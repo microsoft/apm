@@ -17,7 +17,6 @@ irm https://aka.ms/apm-windows | iex
 brew install microsoft/apm/apm
 
 # Scoop (Windows)
-scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 
 # pip (all platforms, requires Python 3.10+)
