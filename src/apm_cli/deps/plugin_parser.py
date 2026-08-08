@@ -134,6 +134,26 @@ def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> 
     return True
 
 
+def _holds_skill_dirs(candidate: Path) -> bool:
+    """Return True iff *candidate* is a container of skills, not a skill itself.
+
+    A directory carrying its own ``SKILL.md`` is the skill, however deep it
+    sits in the plugin (``skills/engineering/tdd``). Anything else that has at
+    least one immediate child carrying ``SKILL.md`` is a container holding
+    them (the conventional ``skills/``). Directories matching neither shape
+    are not containers, so a declared entry keeps its own name rather than
+    spilling unrecognized contents into the shared skills root.
+    """
+    if (candidate / "SKILL.md").is_file():
+        return False
+    try:
+        return any(
+            (child / "SKILL.md").is_file() for child in candidate.iterdir() if child.is_dir()
+        )
+    except OSError:
+        return False
+
+
 def parse_plugin_manifest(plugin_json_path: Path) -> dict[str, Any]:
     """Parse a plugin.json manifest file.
 
@@ -783,24 +803,30 @@ def _map_plugin_artifacts(
         skill_dirs = [s for s in skill_sources if s.is_dir()]
         skill_files = [s for s in skill_sources if s.is_file()]
 
-        is_custom_list = isinstance(manifest.get("skills"), list)
-        if is_custom_list and skill_dirs:
+        # A declared ``skills`` entry is either the skill itself (``SKILL.md``
+        # at its root, e.g. ``./skills/engineering/tdd``) or a container
+        # holding one skill per child (the conventional ``./skills/``).
+        # Classify per entry rather than per manifest shape: naming a
+        # container after itself buries every skill one level too deep, while
+        # merging a lone skill spills a bare ``SKILL.md`` into the shared root
+        # under no name at all. Either way ``--skill`` sees nothing, because
+        # ``.apm/skills/<name>/SKILL.md`` is the exact depth that deployment,
+        # ``--skill`` enumeration, the bin/ security scan and primitive
+        # counting all read. See issue #2530.
+        #
+        # Undeclared discovery keeps merging unconditionally: the default
+        # ``skills/`` is the convention container by definition.
+        declared = isinstance(manifest.get("skills"), (list, str))
+        if skill_dirs:
             target_skills.mkdir(parents=True, exist_ok=True)
             for d in skill_dirs:
-                nested = target_skills / d.name
-                if _is_same_path(d, nested):
+                if declared and not _holds_skill_dirs(d):
+                    dest = target_skills / d.name
+                else:
+                    dest = target_skills
+                if _is_same_path(d, dest):
                     continue
-                shutil.copytree(
-                    d,
-                    nested,
-                    ignore=ignore_non_content,
-                    dirs_exist_ok=True,
-                )
-        elif skill_dirs:
-            for d in skill_dirs:
-                if _is_same_path(d, target_skills):
-                    continue
-                shutil.copytree(d, target_skills, dirs_exist_ok=True, ignore=ignore_non_content)
+                shutil.copytree(d, dest, dirs_exist_ok=True, ignore=ignore_non_content)
         if skill_files:
             target_skills.mkdir(parents=True, exist_ok=True)
             for f in skill_files:

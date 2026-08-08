@@ -255,6 +255,100 @@ class TestMapPluginArtifacts:
         assert (apm_dir / "skills" / "skills" / "SKILL.md").read_text() == "# A"
         assert (apm_dir / "skills" / "extra-skills" / "SKILL.md").read_text() == "# B"
 
+    def test_declared_skills_container_flattens_to_one_level(self, tmp_path):
+        """A declared container merges its skills instead of nesting itself.
+
+        Regression for #2530: ``"skills": ["./skills/"]`` names the
+        conventional container, not a skill. Copying it under its own name
+        buried every skill at ``.apm/skills/skills/<name>/`` -- one level
+        below where deployment, ``--skill`` enumeration, the bin/ security
+        scan and primitive counting all look.
+        """
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        container = plugin_dir / "skills"
+        for name in ("csharp-scripts", "dotnet-pinvoke"):
+            skill = container / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
+
+        normalized = apm_dir / "skills"
+        assert not (normalized / "skills").exists()
+        assert (normalized / "csharp-scripts" / "SKILL.md").read_text() == "# csharp-scripts"
+        assert (normalized / "dotnet-pinvoke" / "SKILL.md").read_text() == "# dotnet-pinvoke"
+
+    def test_declared_skills_string_single_skill_keeps_leaf_name(self, tmp_path):
+        """The string form classifies per entry too, not only the array form.
+
+        ``"skills": "./skills/engineering/tdd"`` names one skill. Merging its
+        contents would spill a bare ``SKILL.md`` into the shared skills root
+        under no name, leaving ``--skill`` with nothing to match -- the #2530
+        symptom reached through the other manifest shape.
+        """
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        skill = plugin_dir / "skills" / "engineering" / "tdd"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# tdd", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest={"skills": "./skills/engineering/tdd"},
+        )
+
+        normalized = apm_dir / "skills"
+        assert (normalized / "tdd" / "SKILL.md").read_text() == "# tdd"
+        assert not (normalized / "SKILL.md").exists()
+
+    def test_declared_skills_string_container_flattens(self, tmp_path):
+        """The string form of a container merges, same as the array form."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        for name in ("alpha", "beta"):
+            skill = plugin_dir / "skills" / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": "./skills/"})
+
+        normalized = apm_dir / "skills"
+        assert not (normalized / "skills").exists()
+        assert (normalized / "alpha" / "SKILL.md").read_text() == "# alpha"
+        assert (normalized / "beta" / "SKILL.md").read_text() == "# beta"
+
+    def test_declared_nested_skill_path_keeps_leaf_name(self, tmp_path):
+        """A declared entry that IS a skill lands under its own leaf name."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        skill = plugin_dir / "skills" / "engineering" / "tdd"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# tdd", encoding="utf-8")
+        sibling = plugin_dir / "skills" / "engineering" / "pairing"
+        sibling.mkdir(parents=True)
+        (sibling / "SKILL.md").write_text("# pairing", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest={"skills": ["./skills/engineering/tdd"]},
+        )
+
+        normalized = apm_dir / "skills"
+        assert (normalized / "tdd" / "SKILL.md").read_text() == "# tdd"
+        # Undeclared siblings stay out: the entry is a requirement, not a hint.
+        assert not (normalized / "pairing").exists()
+
     def test_custom_commands_path(self, tmp_path):
         """Manifest commands field redirects command discovery."""
         plugin_dir = tmp_path / "plugin"
