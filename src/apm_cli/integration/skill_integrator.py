@@ -616,21 +616,33 @@ class SkillIntegrator(BaseIntegrator):
             return frozenset()
 
     @staticmethod
+    def skill_source_dir(package_path: Path) -> Path:
+        """Return the directory a package's deployable skills are promoted from.
+
+        Single source of truth for skill routing: deployment and ``--skill``
+        enumeration both resolve through here so the set a user may select can
+        never drift from the set that actually deploys (issue #2530). A root
+        ``skills/`` bundle wins whenever it holds at least one skill; otherwise
+        the normalized ``.apm/skills/`` location supplies them.
+
+        Callers must handle a root ``SKILL.md`` before asking: a native
+        single-skill package deploys the bundle itself, not children.
+        """
+        root_bundle = package_path / "skills"
+        if SkillIntegrator._skill_names_in_directory(root_bundle):
+            return root_bundle
+        return package_path / ".apm" / "skills"
+
+    @staticmethod
     def available_skill_names(package_info) -> frozenset[str] | None:
         """Return names selectable through ``--skill`` for one package."""
         package_path = package_info.install_path
         if (package_path / "SKILL.md").is_file():
             return None
 
-        from apm_cli.models.validation import PackageType
-
-        normalized = package_path / ".apm" / "skills"
-        root_bundle = package_path / "skills"
-        if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
-            return SkillIntegrator._skill_names_in_directory(normalized)
-
-        root_names = SkillIntegrator._skill_names_in_directory(root_bundle)
-        return root_names or SkillIntegrator._skill_names_in_directory(normalized)
+        return SkillIntegrator._skill_names_in_directory(
+            SkillIntegrator.skill_source_dir(package_path)
+        )
 
     @staticmethod
     def _skill_filter_misses_available(
@@ -1453,10 +1465,11 @@ class SkillIntegrator(BaseIntegrator):
             )
 
         # SKILL_BUNDLE: promote skills from root-level skills/ directory.
+        # Routed through ``skill_source_dir`` -- the same helper backing
+        # ``available_skill_names`` -- so a ``--skill`` value can never be
+        # validated against a directory other than the one that deploys.
         root_skills_dir = package_path / "skills"
-        if root_skills_dir.is_dir() and any(
-            (d / "SKILL.md").exists() for d in root_skills_dir.iterdir() if d.is_dir()
-        ):
+        if self.skill_source_dir(package_path) == root_skills_dir:
             return self._merge_bin_paths(
                 self._integrate_skill_bundle(
                     package_info,
