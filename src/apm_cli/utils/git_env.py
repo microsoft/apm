@@ -90,6 +90,53 @@ def git_subprocess_env() -> dict[str, str]:
     return {k: v for k, v in external_process_env().items() if k not in _STRIP_GIT_VARS}
 
 
+def retain_non_auth_git_config_entries(env: dict[str, str]) -> int:
+    """Remove Git auth-channel entries and compact the remaining indexed config.
+
+    Git exposes command-scoped configuration through ``GIT_CONFIG_COUNT`` and
+    paired ``GIT_CONFIG_KEY_N`` / ``GIT_CONFIG_VALUE_N`` variables. This
+    function is the canonical owner for deciding which entries carry
+    authentication: keys containing ``extraheader`` and values beginning with
+    an ``Authorization:`` header are removed. Every other populated entry is
+    retained in order and re-indexed from zero.
+
+    Blank, invalid, and negative counts are treated as zero. Indexed variables
+    outside the declared count are removed so stale credentials cannot remain
+    in a child-process environment.
+
+    Args:
+        env: The subprocess environment to sanitize in place.
+
+    Returns:
+        The number of retained indexed Git configuration entries.
+    """
+    try:
+        count = max(0, int(env.pop("GIT_CONFIG_COUNT", "0") or "0"))
+    except ValueError:
+        count = 0
+
+    retained: list[tuple[str, str]] = []
+    for index in range(count):
+        key = env.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = env.get(f"GIT_CONFIG_VALUE_{index}", "")
+        if "extraheader" in key.lower() or value.strip().lower().startswith("authorization:"):
+            continue
+        if key:
+            retained.append((key, value))
+
+    for name in tuple(env):
+        if name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(name, None)
+
+    if retained:
+        env["GIT_CONFIG_COUNT"] = str(len(retained))
+        for index, (key, value) in enumerate(retained):
+            env[f"GIT_CONFIG_KEY_{index}"] = key
+            env[f"GIT_CONFIG_VALUE_{index}"] = value
+
+    return len(retained)
+
+
 def reset_git_cache() -> None:
     """Reset the cached git executable (for testing purposes only)."""
     global _git_executable

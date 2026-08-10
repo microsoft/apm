@@ -2579,15 +2579,25 @@ def test_git_auth_header_injection_has_single_owner() -> None:
     """
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/utils/github_host.py").read_text(encoding="utf-8")
+    git_env_owner = (root / "src/apm_cli/utils/git_env.py").read_text(encoding="utf-8")
+    auth_consumer = (root / "src/apm_cli/core/auth.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "def set_authorization_header_git_env(" in owner
     assert "def set_ado_bearer_git_env(" in owner
+    assert "def retain_non_auth_git_config_entries(" in git_env_owner
+    assert "retain_non_auth_git_config_entries(env)" in owner
+    assert "retain_non_auth_git_config_entries(env)" in auth_consumer
+    assert "| Git auth-config retain/reindex policy |" in architecture_doc
     assert "AC19: git-subprocess auth-header injection authority" in guard
     assert (
         "Git-subprocess Authorization-header injection must use "
         "set_authorization_header_git_env / set_ado_bearer_git_env" in guard
     )
+    assert "Git auth-config retain/reindex policy must be owned by utils/git_env.py" in guard
 
 
 def test_dependency_identity_and_materialization_path_have_separate_owners() -> None:
@@ -2710,6 +2720,47 @@ def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: 
     assert (
         "Git-subprocess Authorization-header injection must use "
         "set_authorization_header_git_env / set_ado_bearer_git_env" in result.stdout
+    )
+
+
+def test_git_auth_config_owner_guard_rejects_duplicate_predicate(tmp_path: Path) -> None:
+    """AC19 rejects a second auth-config retain/reindex policy."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/utils/github_host.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + "\n\ndef _duplicate_auth_config_policy(key, value):\n"
+        + '    return "extraheader" in key.lower() or '
+        + 'value.strip().lower().startswith("authorization:")\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Git auth-config retain/reindex policy must be owned by utils/git_env.py" in (
+        result.stdout
     )
 
 

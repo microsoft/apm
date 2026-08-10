@@ -44,6 +44,7 @@ from apm_cli.core.host_providers import (
     classify_host_provider,
 )
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.utils.git_env import retain_non_auth_git_config_entries
 from apm_cli.utils.github_host import (
     default_host,
     is_azure_devops_hostname,
@@ -1343,27 +1344,7 @@ class AuthResolver:
         env.pop("GIT_TOKEN", None)
         env.pop("GIT_HTTP_EXTRAHEADER", None)
         env.pop("GIT_CONFIG_PARAMETERS", None)
-        try:
-            count = int(env.pop("GIT_CONFIG_COUNT", "0"))
-        except ValueError:
-            count = 0
-        retained: list[tuple[str, str]] = []
-        for index in range(max(0, count)):
-            key = env.pop(f"GIT_CONFIG_KEY_{index}", "")
-            value = env.pop(f"GIT_CONFIG_VALUE_{index}", "")
-            normalized = key.lower()
-            if "extraheader" in normalized or value.strip().lower().startswith("authorization:"):
-                continue
-            if key:
-                retained.append((key, value))
-        for key in tuple(env):
-            if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
-                env.pop(key, None)
-        if retained:
-            env["GIT_CONFIG_COUNT"] = str(len(retained))
-            for index, (key, value) in enumerate(retained):
-                env[f"GIT_CONFIG_KEY_{index}"] = key
-                env[f"GIT_CONFIG_VALUE_{index}"] = value
+        retain_non_auth_git_config_entries(env)
 
     def emit_stale_pat_diagnostic(self, host_display: str) -> None:
         """Emit a [!] warning when PAT was rejected but bearer succeeded.

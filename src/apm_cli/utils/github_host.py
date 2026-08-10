@@ -4,6 +4,8 @@ import os
 import re
 import urllib.parse
 
+from apm_cli.utils.git_env import retain_non_auth_git_config_entries
+
 _ADO_SERVER_BASE_PATH_ERROR = (
     "Azure DevOps Server URLs mounted below '/tfs/' are not currently "
     "supported. Use a root-hosted collection URL such as "
@@ -617,25 +619,12 @@ def set_authorization_header_git_env(env: dict[str, str], scheme: str, credentia
 
     This helper instead rewrites the indexed set in place: existing
     auth-channel entries (any ``*extraheader*`` key, or a value that IS an
-    ``Authorization:`` header -- the same policy as
-    ``AuthResolver._clear_git_auth_env``) are removed so layered callers
+    ``Authorization:`` header) are removed by the shared
+    :func:`retain_non_auth_git_config_entries` owner so layered callers
     cannot stack duplicate Authorization headers, every other entry is
     preserved, and the new header is appended at the end.  Orphaned
     ``GIT_CONFIG_KEY_/VALUE_`` entries at or beyond the count are also
     dropped so no stale credential lingers in the child-process env table.
-
-    Note:
-        The retain/reindex predicate below intentionally mirrors
-        ``AuthResolver._clear_git_auth_env`` (``core/auth.py``) rather than
-        delegating to a shared primitive.  Extracting a single owner (e.g.
-        ``utils/git_env.py``) is the right end state -- see PR discussion on
-        #2368 and follow-up #2398 -- but doing so means editing
-        ``_clear_git_auth_env``, a security-critical function this bug does
-        not otherwise touch, which deserves its own focused security review
-        rather than riding along in this fix.
-        TODO(#2398): extract a shared ``_is_auth_channel_entry`` /
-        retain-reindex helper into ``utils/git_env.py``, and delegate both
-        this function and ``AuthResolver._clear_git_auth_env`` to it.
 
     Args:
         env: The subprocess env dict to mutate (base env already merged in).
@@ -654,26 +643,10 @@ def set_authorization_header_git_env(env: dict[str, str], scheme: str, credentia
     """
     if "\r" in scheme or "\n" in scheme or "\r" in credential or "\n" in credential:
         raise ValueError("scheme and credential must not contain CR or LF")
-    try:
-        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
-    except ValueError:
-        count = 0
-    retained: list[tuple[str, str]] = []
-    for index in range(count):
-        key = env.get(f"GIT_CONFIG_KEY_{index}", "")
-        value = env.get(f"GIT_CONFIG_VALUE_{index}", "")
-        if "extraheader" in key.lower() or value.strip().lower().startswith("authorization:"):
-            continue
-        if key:
-            retained.append((key, value))
-    for key in tuple(env):
-        if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
-            env.pop(key, None)
-    retained.append(("http.extraheader", f"Authorization: {scheme} {credential}"))
-    env["GIT_CONFIG_COUNT"] = str(len(retained))
-    for index, (key, value) in enumerate(retained):
-        env[f"GIT_CONFIG_KEY_{index}"] = key
-        env[f"GIT_CONFIG_VALUE_{index}"] = value
+    index = retain_non_auth_git_config_entries(env)
+    env["GIT_CONFIG_COUNT"] = str(index + 1)
+    env[f"GIT_CONFIG_KEY_{index}"] = "http.extraheader"
+    env[f"GIT_CONFIG_VALUE_{index}"] = f"Authorization: {scheme} {credential}"
 
 
 def set_ado_bearer_git_env(env: dict[str, str], bearer_token: str) -> None:
