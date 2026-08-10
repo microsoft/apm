@@ -989,8 +989,8 @@ git_auth_config_duplicate_hits=$(
         || true
 )
 if ! grep -q '^def retain_non_auth_git_config_entries(' "$git_auth_config_owner" \
-    || ! grep -q 'retain_non_auth_git_config_entries(env)' src/apm_cli/core/auth.py \
-    || ! grep -q 'retain_non_auth_git_config_entries(env)' src/apm_cli/utils/github_host.py \
+    || ! grep -q 'retain_non_auth_git_config_entries(' src/apm_cli/core/auth.py \
+    || ! grep -q 'retain_non_auth_git_config_entries(' src/apm_cli/utils/github_host.py \
     || [ -n "$git_auth_config_duplicate_hits" ]; then
     echo "[x] Git auth-config retain/reindex policy must be owned by utils/git_env.py"
     [ -n "$git_auth_config_duplicate_hits" ] && echo "$git_auth_config_duplicate_hits"

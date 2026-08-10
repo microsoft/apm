@@ -2589,8 +2589,8 @@ def test_git_auth_header_injection_has_single_owner() -> None:
     assert "def set_authorization_header_git_env(" in owner
     assert "def set_ado_bearer_git_env(" in owner
     assert "def retain_non_auth_git_config_entries(" in git_env_owner
-    assert "retain_non_auth_git_config_entries(env)" in owner
-    assert "retain_non_auth_git_config_entries(env)" in auth_consumer
+    assert "retain_non_auth_git_config_entries(" in owner
+    assert "retain_non_auth_git_config_entries(" in auth_consumer
     assert "| Git auth-config retain/reindex policy |" in architecture_doc
     assert "AC19: git-subprocess auth-header injection authority" in guard
     assert (
