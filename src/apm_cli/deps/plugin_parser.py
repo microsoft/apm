@@ -980,6 +980,27 @@ def _map_plugin_artifacts(
             f"Refusing to map plugin artifacts through symlinked destination: {apm_dir}"
         )
     plugin_path = plugin_path.resolve()
+    staging_root = apm_dir.resolve()
+    staging_parent = staging_root.parent
+    staging_name = staging_root.name
+
+    def ignore_non_content_and_staging(directory: str, contents: list[str]) -> set[str]:
+        """Exclude internal artifacts and the staging root from component copies."""
+        ignored = ignore_non_content(directory, contents)
+        try:
+            copying_from_plugin_root = Path(directory).resolve() == staging_parent
+        except OSError:
+            copying_from_plugin_root = False
+        if copying_from_plugin_root and staging_name in contents:
+            ignored.add(staging_name)
+        return ignored
+
+    def is_staging_content(path: Path) -> bool:
+        """Return whether a command source path belongs to the staging tree."""
+        try:
+            return path.resolve().is_relative_to(staging_root)
+        except OSError:
+            return False
 
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
@@ -1051,7 +1072,12 @@ def _map_plugin_artifacts(
         for d in agent_dirs:
             if _is_same_path(d, target_agents):
                 continue
-            shutil.copytree(d, target_agents, dirs_exist_ok=True, ignore=ignore_non_content)
+            shutil.copytree(
+                d,
+                target_agents,
+                dirs_exist_ok=True,
+                ignore=ignore_non_content_and_staging,
+            )
         if agent_files:
             target_agents.mkdir(parents=True, exist_ok=True)
             for f in agent_files:
@@ -1066,7 +1092,7 @@ def _map_plugin_artifacts(
         manifest,
         _resolve_sources,
         _is_same_path,
-        ignore_non_content,
+        ignore_non_content_and_staging,
     )
 
     # Map commands/ -> .apm/prompts/ (normalize .md -> .prompt.md)
@@ -1096,6 +1122,10 @@ def _map_plugin_artifacts(
             elif source.is_dir():
                 for source_file in source.rglob("*"):
                     if not source_file.is_file() or source_file.is_symlink():
+                        continue
+                    if is_staging_content(source_file) or source_file.name in ignore_non_content(
+                        str(source_file.parent), [source_file.name]
+                    ):
                         continue
                     _copy_command_file(source_file, target_prompts, rel_to=source)
 
@@ -1133,7 +1163,12 @@ def _map_plugin_artifacts(
             for d in hook_sources:
                 if _is_same_path(d, target_hooks):
                     continue
-                shutil.copytree(d, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
+                shutil.copytree(
+                    d,
+                    target_hooks,
+                    dirs_exist_ok=True,
+                    ignore=ignore_non_content_and_staging,
+                )
 
     # Pass-through files required for MCP/LSP plugins to function
     for passthrough in (".mcp.json", ".lsp.json", "settings.json"):

@@ -1749,6 +1749,89 @@ class TestSynthesizePreservesExistingManifest:
         assert result["name"] == "bad-pkg"
 
 
+class TestRootDeclaredComponents:
+    """Root declarations must copy only source content into the component tree."""
+
+    @staticmethod
+    def _plugin(tmp_path, component: str) -> tuple[Path, bool]:
+        plugin_dir = tmp_path / "plug"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / "SKILL.md").write_text("# hello\n", encoding="utf-8")
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "plug", component: ["./"]}),
+            encoding="utf-8",
+        )
+        (plugin_dir / ".apm-pin").write_text("internal cache marker\n", encoding="utf-8")
+        linked = plugin_dir / "linked.md"
+        try:
+            linked.symlink_to(plugin_dir / "SKILL.md")
+        except OSError:
+            return plugin_dir, False
+        return plugin_dir, True
+
+    @pytest.mark.parametrize(
+        ("component", "expected_files"),
+        [
+            ("agents", {"SKILL.md", ".claude-plugin/plugin.json"}),
+            ("skills", {"SKILL.md", ".claude-plugin/plugin.json"}),
+            ("commands", {"SKILL.prompt.md", ".claude-plugin/plugin.json"}),
+            ("hooks", {"SKILL.md", ".claude-plugin/plugin.json"}),
+        ],
+    )
+    def test_root_component_excludes_internal_and_symlinked_content(
+        self,
+        tmp_path,
+        component: str,
+        expected_files: set[str],
+    ) -> None:
+        """A root declaration has a stable, finite deployment tree."""
+        plugin_dir, has_symlink = self._plugin(tmp_path, component)
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+
+        _map_plugin_artifacts(plugin_dir, apm_dir, {"name": "plug", component: ["./"]})
+
+        component_root = apm_dir / {
+            "agents": "agents",
+            "skills": "skills/plug",
+            "commands": "prompts",
+            "hooks": "hooks",
+        }[component]
+        deployed_files = {
+            path.relative_to(component_root).as_posix()
+            for path in component_root.rglob("*")
+            if path.is_file()
+        }
+        assert deployed_files == expected_files
+        assert not list(component_root.rglob(".apm"))
+        assert not list(component_root.rglob(".apm-pin"))
+        if has_symlink:
+            assert "linked.md" not in deployed_files
+
+    def test_root_declared_skills_are_idempotent(self, tmp_path) -> None:
+        """Re-materializing a root declaration preserves an identical tree."""
+        plugin_dir, _ = self._plugin(tmp_path, "skills")
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        manifest = {"name": "plug", "skills": ["./"]}
+
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest)
+        first_tree = {
+            path.relative_to(apm_dir).as_posix(): path.read_bytes()
+            for path in apm_dir.rglob("*")
+            if path.is_file()
+        }
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest)
+        second_tree = {
+            path.relative_to(apm_dir).as_posix(): path.read_bytes()
+            for path in apm_dir.rglob("*")
+            if path.is_file()
+        }
+
+        assert second_tree == first_tree
+
+
 @pytest.mark.windows_compat
 class TestSyntheticManifestLineEndings:
     """apm#2619: synthetic apm.yml bytes must be platform-invariant (LF).
