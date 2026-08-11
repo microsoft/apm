@@ -980,9 +980,11 @@ def _map_plugin_artifacts(
             f"Refusing to map plugin artifacts through symlinked destination: {apm_dir}"
         )
     plugin_path = plugin_path.resolve()
+    # Command copying checks every discovered file, so resolve the staging
+    # root once rather than repeating filesystem resolution per path.
     staging_root = apm_dir.resolve()
-    staging_parent = staging_root.parent
-    staging_name = staging_root.name
+    staging_parent = apm_dir.parent.resolve()
+    staging_name = apm_dir.name
 
     def ignore_non_content_and_staging(directory: str, contents: list[str]) -> set[str]:
         """Exclude internal artifacts and the staging root from component copies."""
