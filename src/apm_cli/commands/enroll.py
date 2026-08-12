@@ -65,6 +65,12 @@ def resolve_existing_token(host: str) -> tuple[str | None, str]:
     ``source`` is the human-readable origin (env var name, ``gh-auth-token``,
     ``git-credential-fill``, or ``none``). Never returns the token in logs --
     callers must not print it.
+
+    The resolver is deliberately throwaway. ``AuthResolver`` caches per
+    instance, and ``run_enroll`` may set a token into ``os.environ`` *after*
+    this returns a miss; a retained resolver would keep serving the cached
+    ``token=None`` and break registration. Do not hoist this to a shared
+    instance -- see ``test_negative_resolution_is_not_cached_across_resolvers``.
     """
     from ..core.auth import AuthResolver
 
@@ -314,7 +320,8 @@ def run_enroll(
 
     # 'marketplace add' derives the alias from the repo name when --name is
     # omitted; recover whatever it actually registered so browse targets the
-    # right entry rather than a guess.
+    # right entry rather than a guess. Last-element is correct because
+    # add_marketplace() filters any same-name entry then appends (registry.py).
     if not alias:
         try:
             from ..marketplace.registry import get_registered_marketplaces

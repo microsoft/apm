@@ -128,6 +128,38 @@ class TestResolveExistingToken:
             token, source = resolve_existing_token("gitlab.com")
         assert (token, source) == ("t", "GITLAB_APM_PAT")
 
+    def test_negative_resolution_is_not_cached_across_resolvers(self, monkeypatch):
+        """A failed pre-check must not poison the resolution `marketplace add` does.
+
+        ``run_enroll`` pre-checks credentials, and on failure sets the token
+        into ``os.environ`` so the subsequent registration picks it up.
+        ``AuthResolver`` caches resolutions, so that only works because
+        ``resolve_existing_token`` uses a *throwaway* resolver whose cache dies
+        with it. If it ever holds a shared/module-level resolver instead, the
+        cached ``token=None`` would win and registration would fail right after
+        the user was told the token verified. This locks that invariant in.
+        """
+        from apm_cli.core.auth import AuthResolver
+
+        monkeypatch.delenv("GITLAB_APM_PAT", raising=False)
+        monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+
+        stale = AuthResolver()
+        assert stale.resolve("gitlab.com").token is None
+
+        monkeypatch.setenv("GITLAB_APM_PAT", "glpat-set-after-precheck")
+
+        # What enroll's pre-check does, and what `marketplace add` does next.
+        assert resolve_existing_token("gitlab.com") == (
+            "glpat-set-after-precheck",
+            "GITLAB_APM_PAT",
+        )
+        assert AuthResolver().resolve("gitlab.com").token == "glpat-set-after-precheck"
+
+        # The same instance still serves its cached miss -- proof the cache is
+        # real and that per-instance scoping is what makes the flow correct.
+        assert stale.resolve("gitlab.com").token is None
+
 
 class TestEnrollFlow:
     def setup_method(self):
