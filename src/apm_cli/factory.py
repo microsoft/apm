@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from .adapters.client.ai_assist import AiAssistClientAdapter
 from .adapters.client.antigravity import AntigravityClientAdapter
 from .adapters.client.claude import ClaudeClientAdapter
 from .adapters.client.codex import CodexClientAdapter
@@ -35,6 +36,7 @@ _MCP_CLIENT_REGISTRY: dict[str, type] = {
     "windsurf": WindsurfClientAdapter,
     "claude": ClaudeClientAdapter,
     "hermes": HermesClientAdapter,
+    "ai-assist": AiAssistClientAdapter,
 }
 
 

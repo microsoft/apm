@@ -275,6 +275,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "windsurf",
         "kiro",
         "hermes",
+        "ai-assist",
         "all",
         "minimal",
     )
@@ -415,6 +416,7 @@ def get_target_description(target: UserTargetType) -> str:
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
+        "ai-assist": "AGENTS.md + .agents/skills/ (project) or <config_dir>/skills/ + mcp_servers.yaml MCP (--global) -- experimental",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }

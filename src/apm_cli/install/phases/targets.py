@@ -210,6 +210,15 @@ def _check_hermes_flag_gate(
     _check_experimental_target_hint(explicit, targets, ctx, target_name="hermes")
 
 
+def _check_ai_assist_flag_gate(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+) -> None:
+    """Emit an enable-hint when the user asks for ai-assist but the flag is OFF."""
+    _check_experimental_target_hint(explicit, targets, ctx, target_name="ai-assist")
+
+
 def _check_grok_cloud_flag_gate(
     explicit: str | list[str] | None,
     targets: list,
@@ -545,6 +554,7 @@ def run(ctx: InstallContext) -> None:
     _check_openclaw_flag_gate(_explicit, _targets, ctx)
     _check_hermes_flag_gate(_explicit, _targets, ctx)
     _check_grok_cloud_flag_gate(_explicit, _targets, ctx)
+    _check_ai_assist_flag_gate(_explicit, _targets, ctx)
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.
     _targets = _resolve_targets_by_scope(ctx, _targets, _explicit, _is_user)

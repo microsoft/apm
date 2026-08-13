@@ -258,6 +258,7 @@ export default defineConfig({
 						{ label: 'GitHub Copilot App workflows (Experimental)', slug: 'integrations/copilot-app' },
 						{ label: 'Canvas extensions (Experimental)', slug: 'integrations/canvas' },
 						{ label: 'Hermes Agent (Experimental)', slug: 'integrations/hermes' },
+						{ label: 'ai-assist Agent (Experimental)', slug: 'integrations/ai-assist' },
 						{ label: 'AI runtime compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub rulesets', slug: 'integrations/github-rulesets' },
 					],
