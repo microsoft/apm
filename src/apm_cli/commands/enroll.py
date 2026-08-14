@@ -1,15 +1,34 @@
 """``apm enroll`` -- one-shot onboarding onto a marketplace on a new machine.
 
-Wraps the three steps a new joiner otherwise runs by hand: prove there is a
-usable credential for the marketplace host, register the marketplace, and
-smoke-test that it is browsable.
+Wraps the steps a new joiner otherwise runs by hand: make sure a credential
+for the marketplace host exists, register the marketplace, and smoke-test
+that it is browsable.
 
-Only the credential step needs new logic. Registration and browsing delegate
-to ``apm marketplace add`` / ``apm marketplace browse`` via ``ctx.invoke`` so
-this command inherits their source parsing, ref handling and error rendering
-rather than duplicating it.
+Only the credential step is new logic. Registration and browsing delegate to
+``apm marketplace add`` / ``apm marketplace browse`` via ``ctx.invoke``, so
+this command inherits their source parsing, ref handling, manifest-path
+auto-detection and error rendering rather than duplicating any of it.
 
-On the credential step, note that APM resolves tokens itself (see
+Deliberately, this command does **not** pre-flight the marketplace fetch.
+``marketplace.client._auto_detect_path`` already probes every candidate
+manifest location, and ``_fetch_via_api`` already maps 404 -> "try the next
+path" and raises on anything else. A second probe here would duplicate that
+logic, could drift from it, and would have to answer "is this repo public?"
+-- unanswerable cheaply, since unauthenticated GitHub API requests are capped
+at 60/hour per IP and an exhausted quota returns a 403 indistinguishable from
+a permissions failure. So the credential step asks only whether a token
+*exists*, and lets registration be the authority on whether it works.
+
+Known limitation, inherited not introduced: an *invalid* token against a
+private GitHub repo is reported as "No marketplace.json found ... Checked:
+<3 paths>" rather than as an auth failure. ``AuthResolver.try_with_fallback``
+retries the failed authenticated request anonymously, and GitHub 404s a
+private repo it will not admit exists, so the original 401 is swallowed.
+``apm marketplace add`` alone behaves identically -- verified -- so this is
+an APM-wide diagnostic gap, not something enrolment can fix by re-probing.
+Worth a separate issue against the fetch path.
+
+On resolution, note that APM finds tokens itself (see
 ``AuthResolver._resolve_token``): ``GITLAB_APM_PAT`` -> ``GITLAB_TOKEN`` ->
 git credential helper for GitLab, and ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN``
 -> ``gh auth token`` -> git credential helper for GitHub. Because the env
@@ -19,12 +38,6 @@ no need to evict a shadowing platform keychain entry. When a shadowing entry
 is detected we say so instead of deleting it -- silently mutating a global
 credential store is not something a package manager should do on the user's
 behalf.
-
-The credential probe covers GitLab and GitHub (including GitHub Enterprise
-Server, whose API base ``HostInfo`` resolves). ADO and generic git hosts have
-no equivalent manifest endpoint here, so they skip the check and rely on
-``marketplace add``'s own resolution. Public marketplaces need no token at
-all, so a failed check falls back to an anonymous probe before demanding one.
 """
 
 from __future__ import annotations
@@ -37,9 +50,7 @@ import click
 
 from ..core.command_logger import CommandLogger
 
-# Scopes the token-creation page is prefilled with, per host class. Read
-# access to the API is what the marketplace lookup needs; the repository
-# scope additionally covers cloning plugin sources.
+# Scopes the token-creation page is prefilled with, per host class.
 #   GitLab: granular scope names, passed as a ?scopes= query param.
 #   GitHub: classic-PAT scope; `repo` is the narrowest scope that reads a
 #           private repo's contents (there is no read-only variant).
@@ -51,8 +62,8 @@ _GITHUB_KINDS = ("github", "ghe_cloud", "ghes")
 _EPILOG = (
     "\b\n"
     "Examples:\n"
-    "  apm enroll gitlab.com/acme/team/apm-marketplace --name acme\n"
     "  apm enroll acme/apm-marketplace --name acme\n"
+    "  apm enroll gitlab.com/acme/team/apm-marketplace --name acme\n"
     "  apm enroll https://github.com/acme/apm-marketplace --name acme\n"
     "  apm enroll ./local-marketplace --name scratch\n"
     "\b\n"
@@ -88,123 +99,14 @@ def resolve_existing_token(host: str) -> tuple[str | None, str]:
     The resolver is deliberately throwaway. ``AuthResolver`` caches per
     instance, and ``run_enroll`` may set a token into ``os.environ`` *after*
     this returns a miss; a retained resolver would keep serving the cached
-    ``token=None`` and break registration. Do not hoist this to a shared
-    instance -- see ``test_negative_resolution_is_not_cached_across_resolvers``.
+    ``token=None`` and the registration below would not see the new token. Do
+    not hoist this to a shared instance -- see
+    ``test_negative_resolution_is_not_cached_across_resolvers``.
     """
     from ..core.auth import AuthResolver
 
     ctx = AuthResolver().resolve(host)
     return getattr(ctx, "token", None), getattr(ctx, "source", "none")
-
-
-def _probe_manifest(
-    token: str | None,
-    host: str,
-    project_path: str,
-    ref: str,
-) -> tuple[bool, int | None]:
-    """Try to read the marketplace manifest over REST with *token* (or none).
-
-    Returns ``(ok, status)``. ``status`` is the most informative code seen
-    across candidate paths -- a 401/403 anywhere outranks a 404, because
-    "you cannot authenticate" is the actionable message and 404 is what a
-    host returns for a private repo it will not admit exists.
-
-    Walks the same candidate paths as the real fetch: a marketplace may keep
-    its manifest at ``marketplace.json``, ``.github/plugin/…`` or
-    ``.claude-plugin/…``. Probing only one would report a false negative for
-    the other two.
-
-    URL and header construction are delegated to ``marketplace.client`` --
-    the same builders the real fetch uses -- so this probe cannot drift from
-    what registration will actually do, and inherits GitHub Enterprise
-    Server support (the builders derive the API base from ``HostInfo``).
-    """
-    import requests
-
-    from ..core.auth import AuthResolver
-    from ..marketplace.client import (
-        _MARKETPLACE_PATHS,
-        _github_contents_url,
-        _github_headers,
-        _gitlab_file_raw_url,
-        _gitlab_headers,
-    )
-    from ..marketplace.models import MarketplaceSource
-
-    cleaned = project_path.strip("/")
-    owner, _, repo = cleaned.rpartition("/")
-    if not owner or not repo:
-        return False, None
-
-    host_info = AuthResolver.classify_host(host)
-    is_github = host_info.kind in _GITHUB_KINDS
-    headers = _github_headers(token) if is_github else _gitlab_headers(token)
-
-    best: int | None = None
-    for candidate in _MARKETPLACE_PATHS:
-        source = MarketplaceSource(
-            name="_verify",
-            url=f"https://{host}/{cleaned}",
-            ref=ref,
-            path=candidate,
-            owner=owner,
-            repo=repo,
-            host=host,
-        )
-        url = (
-            _github_contents_url(source, candidate, host_info)
-            if is_github
-            else _gitlab_file_raw_url(source, candidate, host_info)
-        )
-        try:
-            status = requests.get(url, headers=headers, timeout=15).status_code
-        except requests.RequestException:
-            continue
-        if status == 200:
-            return True, 200
-        # An auth failure is more actionable than a missing-file 404.
-        if best is None or (status in (401, 403) and best not in (401, 403)):
-            best = status
-    return False, best
-
-
-def verify_token(
-    token: str | None,
-    host: str,
-    project_path: str,
-    *,
-    ref: str = "main",
-) -> tuple[bool, int | None]:
-    """Check *token* can actually read the marketplace manifest over REST.
-
-    Returns ``(ok, status_code)``. A token that git accepts is not
-    automatically one the host's REST API accepts: GitLab's PRIVATE-TOKEN
-    convention is satisfied by a personal/project access token, while an
-    OAuth session token valid for ``git clone`` gets a 401 there. Verifying
-    against the real endpoint is the only reliable check.
-    """
-    if not token:
-        return False, None
-    return _probe_manifest(token, host, project_path, ref)
-
-
-def _may_allow_anonymous(host_kind: str) -> bool:
-    """Return whether *host_kind* can serve a public repo without credentials.
-
-    Deliberately not an anonymous HTTP probe. Unauthenticated GitHub API
-    requests are capped at 60/hour per IP, and an exhausted quota returns
-    403 -- indistinguishable from a permissions 403. Gating on such a probe
-    makes enrollment fail intermittently for reasons that have nothing to do
-    with the user's credentials.
-
-    So this is a static capability answer, and the *caller* degrades to a
-    warning rather than a hard stop: ``marketplace add`` is the authority on
-    whether the fetch actually works, and it already handles anonymous public
-    access. A public repo therefore proceeds and succeeds; a private one
-    proceeds and fails with the fetch's own error.
-    """
-    return host_kind in _GITHUB_KINDS or host_kind == "gitlab"
 
 
 def _detect_shadowing_helper(host: str) -> bool:
@@ -256,12 +158,12 @@ def _is_interactive() -> bool:
 def _token_page_url(host: str, host_kind: str, token_name: str) -> str:
     """Return the host's token-creation page, name and scopes prefilled.
 
-    GitHub and GitLab use different paths and different query-param names
-    (``scopes`` as a comma list vs. repeated ``scopes[]``). Both accept a
-    prefilled description so the token is identifiable later.
+    GitHub and GitLab use different paths and different query-param names.
+    Both accept a prefilled description so the token is identifiable later.
+    The host is carried through rather than hardcoded, so GitHub Enterprise
+    Server points at the enterprise instance.
     """
     if host_kind in _GITHUB_KINDS:
-        # GitHub's classic-PAT page takes `description` and repeated `scopes`.
         return (
             f"https://{host}/settings/tokens/new"
             f"?description={quote(token_name)}&scopes={quote(_GITHUB_SCOPES)}"
@@ -272,7 +174,7 @@ def _token_page_url(host: str, host_kind: str, token_name: str) -> str:
     )
 
 
-def _open_token_page(logger: CommandLogger, host: str, host_kind: str = "gitlab") -> None:
+def _open_token_page(logger: CommandLogger, host: str, host_kind: str) -> None:
     """Open (or print) the host's token page with name and scopes prefilled."""
     import platform
     import webbrowser
@@ -292,21 +194,86 @@ def _open_token_page(logger: CommandLogger, host: str, host_kind: str = "gitlab"
         logger.tree_item(f"  {url}")
 
 
-def _host_and_project(source: str, host_flag: str | None) -> tuple[str, str, str]:
-    """Return ``(url, host, project_path)`` for *source*.
+def _host_and_kind(source: str, host_flag: str | None) -> tuple[str, str, str]:
+    """Return ``(url, host, host_kind)`` for *source*.
 
     Reuses ``marketplace add``'s parser so shorthand, SSH and full-URL forms
-    behave identically across both commands.
+    behave identically across both commands. Local sources yield an empty
+    host, which skips the credential step.
     """
+    from ..core.auth import AuthResolver
     from .marketplace import _parse_marketplace_source
 
     url, kind, embedded_host = _parse_marketplace_source(source, host_flag)
     if kind == "local":
-        return url, "", ""
-    parsed = urlparse(url)
-    host = embedded_host or parsed.netloc
-    project_path = parsed.path.strip("/").removesuffix(".git")
-    return url, host, project_path
+        return url, "", "local"
+    host = embedded_host or urlparse(url).netloc
+    return url, host, AuthResolver.classify_host(host).kind if host else "local"
+
+
+def ensure_credential(
+    logger: CommandLogger,
+    host: str,
+    host_kind: str,
+) -> int:
+    """Make sure a credential for *host* is available, prompting if needed.
+
+    Returns a process exit code: ``0`` to continue with registration.
+
+    Only asks whether a token *exists*. Whether it actually works is decided
+    by the fetch during registration, which reports auth failures precisely
+    (see the module docstring). A missing token is therefore not fatal here:
+    a public marketplace needs none, so we warn and let registration decide.
+    """
+    env_var = _token_env_var(host_kind)
+    if not env_var:
+        # ADO / generic git: APM resolves these differently and there is no
+        # token page to point at. Leave it to marketplace add.
+        return 0
+
+    token, token_source = resolve_existing_token(host)
+    if token:
+        logger.success(f"Using {host} credential from {token_source}", symbol="check")
+        return 0
+
+    logger.progress(f"No {host} credential found.", symbol="info")
+
+    if _detect_shadowing_helper(host):
+        logger.warning(
+            f"A macOS keychain entry for {host} may be shadowing newer "
+            f"credentials. If enrollment keeps failing, clear it with:\n"
+            f"    printf 'protocol=https\\nhost={host}\\n\\n' | "
+            f"git credential-osxkeychain erase"
+        )
+
+    scopes = _token_scopes(host_kind)
+
+    if not _is_interactive():
+        # Not fatal: a public marketplace needs no credential, and this
+        # cannot tell public from private without a probe that GitHub
+        # rate-limits. Registration below gives the real answer.
+        logger.warning(
+            f"Continuing without a credential: this succeeds for a public "
+            f"marketplace and fails below for a private one. Set {env_var} "
+            f"to a token with scopes '{scopes}' to authenticate."
+        )
+        return 0
+
+    _open_token_page(logger, host, host_kind)
+    pasted = click.prompt("    Paste the token (input hidden)", hide_input=True, default="")
+    pasted = (pasted or "").strip()
+    if not pasted:
+        logger.error("No token entered.")
+        return 1
+
+    # Set for the rest of THIS process so the registration below resolves it
+    # through the normal chain -- no second prompt, no special plumbing.
+    os.environ[env_var] = pasted
+    logger.warning(
+        f"This token is set for the current command only. To persist it, add "
+        f"to your shell profile:\n    export {env_var}='<token>'"
+    )
+    return 0
 
 
 def run_enroll(
@@ -315,124 +282,23 @@ def run_enroll(
     name: str | None,
     ref: str | None,
     host_flag: str | None,
-    skip_verify: bool,
+    no_token: bool,
     verbose: bool,
 ) -> int:
     """Execute the enrollment flow. Returns a process exit code."""
     logger = CommandLogger("enroll", verbose=verbose)
 
     try:
-        url, host, project_path = _host_and_project(source, host_flag)
+        url, host, host_kind = _host_and_kind(source, host_flag)
     except Exception as exc:
         logger.error(f"Invalid source '{source}': {exc}")
         return 1
 
-    from ..core.auth import AuthResolver
-
-    host_kind = AuthResolver.classify_host(host).kind if host else "local"
-    # GitLab and GitHub (incl. GHES) both have a REST manifest endpoint the
-    # probe below can use. ADO / generic git hosts do not, so they fall
-    # through to whatever credentials 'marketplace add' already resolves.
-    can_verify = host_kind == "gitlab" or host_kind in _GITHUB_KINDS
-
     # --- Step 1: credentials ------------------------------------------
-    if can_verify and not skip_verify and project_path:
-        logger.start(f"Checking credentials for {host}...", symbol="search")
-        token, token_source = resolve_existing_token(host)
-        ok, status = verify_token(token, host, project_path, ref=ref or "main")
-
-        if ok:
-            logger.success(
-                f"Existing credential works (source: {token_source})",
-                symbol="check",
-            )
-        else:
-            if token and status == 401:
-                hint = (
-                    "The token may be expired or revoked."
-                    if host_kind in _GITHUB_KINDS
-                    else "An OAuth session token works for git but not for the REST API."
-                )
-                logger.warning(
-                    f"The credential from {token_source} was rejected by the "
-                    f"{host} API (401). {hint}"
-                )
-            elif token and status in (403, 404):
-                # GitHub returns 404 (not 403) for a private repo the token
-                # cannot see, to avoid leaking existence. Same remedy either way.
-                logger.warning(
-                    f"The credential from {token_source} cannot see "
-                    f"'{project_path}' (HTTP {status}). It may lack access, or "
-                    f"the path may be wrong."
-                )
-            elif token:
-                detail = f" (HTTP {status})" if status else ""
-                logger.warning(f"The credential from {token_source} did not work{detail}.")
-            else:
-                logger.progress(f"No {host} credential found.", symbol="info")
-
-            if _detect_shadowing_helper(host):
-                logger.warning(
-                    f"A macOS keychain entry for {host} may be shadowing newer "
-                    f"credentials. If enrollment keeps failing, clear it with:\n"
-                    f"    printf 'protocol=https\\nhost={host}\\n\\n' | "
-                    f"git credential-osxkeychain erase"
-                )
-
-            env_var = _token_env_var(host_kind) or "GITLAB_APM_PAT"
-            scopes = _token_scopes(host_kind)
-
-            if not _is_interactive():
-                # A public marketplace needs no credential, and this check
-                # cannot tell public from private without an anonymous probe
-                # that GitHub rate-limits to 60/hour per IP. Rather than fail
-                # a working public enrollment on an unrelated 403, warn and
-                # let 'marketplace add' -- the actual authority -- decide.
-                if _may_allow_anonymous(host_kind):
-                    remedy = (
-                        f"Replace {env_var} with a token that has scopes '{scopes}'."
-                        if token
-                        else f"Set {env_var} to a token with scopes '{scopes}'."
-                    )
-                    logger.warning(
-                        f"Continuing without a working credential: this succeeds "
-                        f"for a public marketplace and fails below for a private "
-                        f"one. {remedy}"
-                    )
-                else:
-                    logger.error(
-                        f"No usable {host} credential and not running interactively.\n"
-                        f"    Set {env_var} to a token with scopes "
-                        f"'{scopes}' and re-run."
-                    )
-                    return 1
-            else:
-                _open_token_page(logger, host, host_kind)
-                pasted = click.prompt(
-                    "    Paste the token (input hidden)", hide_input=True, default=""
-                )
-                pasted = (pasted or "").strip()
-                if not pasted:
-                    logger.error("No token entered.")
-                    return 1
-
-                ok, status = verify_token(pasted, host, project_path, ref=ref or "main")
-                if not ok:
-                    detail = f" (HTTP {status})" if status else ""
-                    logger.error(
-                        f"That token did not work against the {host} API{detail}. "
-                        f"Check it has scopes '{scopes}' and try again."
-                    )
-                    return 1
-
-                # Make it usable for the rest of THIS process, so the
-                # marketplace add below succeeds without a second prompt.
-                os.environ[env_var] = pasted
-                logger.success(f"Token verified against the {host} API", symbol="check")
-                logger.warning(
-                    f"This token is set for the current command only. To persist "
-                    f"it, add to your shell profile:\n    export {env_var}='<token>'"
-                )
+    if host and not no_token:
+        code = ensure_credential(logger, host, host_kind)
+        if code != 0:
+            return code
 
     # --- Step 2: register ---------------------------------------------
     from .marketplace import add as marketplace_add
@@ -492,8 +358,8 @@ def run_enroll(
 
 @click.command(
     help=(
-        "Enroll this machine on a marketplace: verify credentials, register "
-        "the marketplace, and confirm it is browsable. Safe to re-run."
+        "Enroll this machine on a marketplace: ensure a credential exists, "
+        "register the marketplace, and confirm it is browsable. Safe to re-run."
     ),
     epilog=_EPILOG,
 )
@@ -507,19 +373,19 @@ def run_enroll(
     help="Git host FQDN for OWNER/REPO shorthand (default: github.com)",
 )
 @click.option(
-    "--skip-verify",
+    "--no-token",
     is_flag=True,
-    help="Skip the credential pre-check and go straight to registration",
+    help="Skip the credential step and go straight to registration",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def enroll(ctx, source, name, ref, host_flag, skip_verify, verbose):
+def enroll(ctx, source, name, ref, host_flag, no_token, verbose):
     """Onboard onto a marketplace in one command.
 
     SOURCE accepts the same forms as ``apm marketplace add``: OWNER/REPO or
     HOST/OWNER/REPO shorthand, a full HTTPS or SSH git URL, a local path, or
     a ``file://`` URI.
     """
-    exit_code = run_enroll(ctx, source, name, ref, host_flag, skip_verify, verbose)
+    exit_code = run_enroll(ctx, source, name, ref, host_flag, no_token, verbose)
     if exit_code != 0:
         sys.exit(exit_code)

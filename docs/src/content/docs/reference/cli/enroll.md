@@ -1,6 +1,6 @@
 ---
 title: apm enroll
-description: Onboard a machine onto a marketplace -- verify credentials, register, and confirm it is browsable.
+description: Onboard a machine onto a marketplace -- set up credentials, register, and confirm it is browsable.
 sidebar:
   order: 30
 ---
@@ -8,24 +8,24 @@ sidebar:
 ## Synopsis
 
 ```bash
-apm enroll SOURCE [--name ALIAS] [--ref REF] [--host FQDN] [--skip-verify] [--verbose]
+apm enroll SOURCE [--name ALIAS] [--ref REF] [--host FQDN] [--no-token] [--verbose]
 ```
 
 ## Description
 
 `apm enroll` performs the three steps a new joiner otherwise runs by hand:
 
-1. **Verify credentials** -- confirm a usable token exists for the marketplace
-   host, prompting for one if not.
+1. **Set up credentials** -- confirm a token for the marketplace host exists,
+   prompting for one if not.
 2. **Register** the marketplace (equivalent to [`apm marketplace add`](../marketplace/)).
 3. **Smoke-test** it by browsing the plugin list.
 
-It is safe to re-run. When a working credential is already configured, the
-token step is skipped entirely.
+It is safe to re-run. When a credential is already configured, the token step
+is a no-op.
 
 Only the credential step is new behaviour; registration and browsing delegate
 to `apm marketplace add` and `apm marketplace browse`, so `SOURCE` accepts
-exactly the same forms.
+exactly the same forms and reports the same errors.
 
 ## Credentials
 
@@ -38,36 +38,30 @@ configuration change is required.
 | GitLab | `GITLAB_APM_PAT`, `GITLAB_TOKEN`, git credential helper | `read_repository,read_api` |
 | GitHub / GHES | `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `gh auth token`, git credential helper | `repo` |
 
-The credential check calls the host's REST API rather than testing `git`
-access. This distinction matters: on GitLab, an OAuth session token is valid
-for `git clone` but returns `401` from the REST API, which is what marketplace
-lookups use.
-
-The probe tries every location a manifest can live in (`marketplace.json`,
-`.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json`), so a
-marketplace is not reported unreadable merely because it uses a different
-layout.
-
-When no usable token is found in an interactive terminal, `apm enroll` opens
-the host's token-creation page with the name and scopes prefilled, then
-prompts for the result. A pasted token is verified before use and applies to
-the current command only -- export it to persist it:
+When no token is found in an interactive terminal, `apm enroll` opens the
+host's token-creation page with the name and scopes prefilled, then prompts
+for the result. A pasted token applies to the current command only -- export
+it to persist it:
 
 ```bash
 export GITHUB_APM_PAT='ghp_...'    # or GITLAB_APM_PAT='glpat-...'
 ```
 
-Azure DevOps and generic git hosts have no equivalent manifest endpoint, so
-they skip the check and rely on whatever credentials `apm marketplace add`
-already resolves.
+Azure DevOps and generic git hosts resolve credentials differently and have
+no token page to point at, so they skip this step and rely on whatever
+`apm marketplace add` already resolves.
 
-:::note[Public marketplaces]
-A public marketplace needs no credential. Because distinguishing public from
-private would require an anonymous probe -- and GitHub caps unauthenticated
-requests at 60/hour per IP, returning a `403` indistinguishable from a
-permissions failure -- a failed credential check is a **warning, not a hard
-stop**. Registration proceeds and `apm marketplace add` decides: a public
-marketplace succeeds, a private one fails with its own error.
+:::note[The credential step does not validate the token]
+It checks only that a token *exists*. Whether it actually works is reported by
+registration, which already probes every manifest location and renders fetch
+errors precisely -- re-checking here would duplicate that logic and risk
+drifting from it.
+
+This also means a missing token is a **warning, not a hard stop**: a public
+marketplace needs none, and telling public from private would require an
+anonymous probe that GitHub rate-limits to 60 requests/hour per IP (an
+exhausted quota returns a `403` indistinguishable from a permissions failure).
+Registration decides: public succeeds, private fails with its own error.
 :::
 
 :::note[Shadowing credential helpers]
@@ -90,7 +84,7 @@ credentials for you.
 | `-n`, `--name` | Marketplace alias. Defaults to the repository name. |
 | `-r`, `--ref` | Git ref (branch, tag, or commit). Default: `main`. |
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. |
-| `--skip-verify` | Skip the credential pre-check and go straight to registration. |
+| `--no-token` | Skip the credential step and go straight to registration. |
 | `-v`, `--verbose` | Show detailed output. |
 
 ## Exit codes
@@ -98,7 +92,7 @@ credentials for you.
 | Code | Meaning |
 |---|---|
 | `0` | The marketplace was registered and is browsable. |
-| `1` | The source was invalid, or registration or browsing failed. |
+| `1` | The source was invalid, no token was entered at the prompt, or registration or browsing failed. |
 
 ## Non-interactive use
 
