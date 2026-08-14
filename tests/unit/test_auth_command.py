@@ -1,0 +1,259 @@
+"""Tests for the apm auth command."""
+
+from unittest.mock import MagicMock, patch
+
+from click.testing import CliRunner
+
+from apm_cli.commands.auth import (
+    auth,
+    check_token,
+    resolve_existing_token,
+    token_env_var,
+    token_page_url,
+    token_scopes,
+)
+
+
+def _auth_ctx(token, source):
+    ctx = MagicMock()
+    ctx.token = token
+    ctx.source = source
+    return ctx
+
+
+class TestHostMapping:
+    def test_gitlab(self):
+        assert token_env_var("gitlab") == "GITLAB_APM_PAT"
+        assert token_scopes("gitlab") == "read_repository,read_api"
+
+    def test_github_class(self):
+        for kind in ("github", "ghe_cloud", "ghes"):
+            assert token_env_var(kind) == "GITHUB_APM_PAT"
+            assert token_scopes(kind) == "repo"
+
+    def test_hosts_without_a_token_flow(self):
+        assert token_env_var("generic") is None
+        assert token_env_var("ado") is None
+
+    def test_github_token_page(self):
+        url = token_page_url("github.com", "github", "apm-test")
+        assert url.startswith("https://github.com/settings/tokens/new")
+        assert "scopes=repo" in url
+
+    def test_gitlab_token_page(self):
+        url = token_page_url("gitlab.com", "gitlab", "apm-test")
+        assert "/-/user_settings/personal_access_tokens" in url
+        assert "read_repository" in url
+
+    def test_ghes_page_stays_on_the_enterprise_host(self):
+        """Hardcoding github.com would send enterprise users to the wrong site."""
+        url = token_page_url("ghe.corp.example", "ghes", "apm-test")
+        assert url.startswith("https://ghe.corp.example/settings/tokens/new")
+        assert "github.com" not in url
+
+
+class TestCheckToken:
+    """--check hits the identity endpoint, so the answer does not depend on
+    access to any particular repository."""
+
+    def test_github_uses_token_header(self):
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=200)
+            ok, status = check_token("ghp_x", "github.com", "github")
+        assert (ok, status) == (True, 200)
+        assert get.call_args.kwargs["headers"]["Authorization"] == "token ghp_x"
+        assert "api.github.com/user" in get.call_args[0][0]
+
+    def test_gitlab_uses_private_token_header(self):
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=200)
+            check_token("glpat-x", "gitlab.com", "gitlab")
+        assert get.call_args.kwargs["headers"]["PRIVATE-TOKEN"] == "glpat-x"
+        assert "PRIVATE-TOKEN" in get.call_args.kwargs["headers"]
+
+    def test_oauth_token_is_rejected(self):
+        """A GitLab OAuth session token is git-valid but not REST-valid."""
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=401)
+            ok, status = check_token("oauth", "gitlab.com", "gitlab")
+        assert (ok, status) == (False, 401)
+
+    def test_ghes_uses_the_enterprise_api_base(self):
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=200)
+            check_token("ghp_x", "ghe.corp.example", "ghes")
+        assert "api.github.com" not in get.call_args[0][0]
+
+    def test_network_failure_is_not_a_crash(self):
+        import requests
+
+        with patch("requests.get", side_effect=requests.RequestException("boom")):
+            ok, status = check_token("t", "github.com", "github")
+        assert (ok, status) == (False, None)
+
+
+class TestResolveExistingToken:
+    def test_delegates_to_auth_resolver(self):
+        with patch("apm_cli.core.auth.AuthResolver") as resolver:
+            resolver.return_value.resolve.return_value = _auth_ctx("t", "GITLAB_APM_PAT")
+            assert resolve_existing_token("gitlab.com") == ("t", "GITLAB_APM_PAT")
+
+    def test_negative_resolution_is_not_cached_across_resolvers(self, monkeypatch):
+        """AuthResolver caches per instance; a retained one would serve a stale miss."""
+        from apm_cli.core.auth import AuthResolver
+
+        monkeypatch.delenv("GITLAB_APM_PAT", raising=False)
+        monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+
+        stale = AuthResolver()
+        assert stale.resolve("gitlab.com").token is None
+
+        monkeypatch.setenv("GITLAB_APM_PAT", "glpat-set-after-lookup")
+        assert resolve_existing_token("gitlab.com")[0] == "glpat-set-after-lookup"
+        assert stale.resolve("gitlab.com").token is None  # cache is real
+
+
+class TestAuthFlow:
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_existing_token_reported_without_network(self):
+        with (
+            patch("apm_cli.commands.auth.resolve_existing_token", return_value=("t", "gh-auth")),
+            patch("requests.get") as get,
+        ):
+            result = self.runner.invoke(auth, ["github.com"])
+        assert result.exit_code == 0
+        get.assert_not_called()  # no --check means no round trip
+        assert "gh-auth" in result.output
+
+    def test_check_validates_and_reports(self):
+        with (
+            patch("apm_cli.commands.auth.resolve_existing_token", return_value=("t", "env")),
+            patch("apm_cli.commands.auth.check_token", return_value=(True, 200)),
+        ):
+            result = self.runner.invoke(auth, ["github.com", "--check"])
+        assert result.exit_code == 0
+        assert "works" in result.output
+
+    def test_rejected_gitlab_token_explains_oauth(self):
+        """The whole point: say WHY, not just that it failed."""
+        with (
+            patch(
+                "apm_cli.commands.auth.resolve_existing_token",
+                return_value=("oauth", "GITLAB_APM_PAT"),
+            ),
+            patch("apm_cli.commands.auth.check_token", return_value=(False, 401)),
+            patch("apm_cli.commands.auth.is_interactive", return_value=False),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=False),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com", "--check"])
+        assert result.exit_code == 1
+        assert "OAuth" in result.output
+        assert "personal access token" in result.output
+
+    def test_non_interactive_without_token_exits_1(self):
+        with (
+            patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")),
+            patch("apm_cli.commands.auth.is_interactive", return_value=False),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=False),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com"])
+        assert result.exit_code == 1
+        assert "GITLAB_APM_PAT" in result.output
+        assert "Paste the token" not in result.output  # never prompted
+
+    def test_prompted_token_is_accepted(self):
+        with (
+            patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")),
+            patch("apm_cli.commands.auth.is_interactive", return_value=True),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=False),
+            patch("apm_cli.commands.auth.open_token_page"),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com"], input="glpat-good\n")
+        assert result.exit_code == 0
+        assert "GITLAB_APM_PAT" in result.output
+
+    def test_empty_paste_exits_1(self):
+        with (
+            patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")),
+            patch("apm_cli.commands.auth.is_interactive", return_value=True),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=False),
+            patch("apm_cli.commands.auth.open_token_page"),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com"], input="\n")
+        assert result.exit_code == 1
+        assert "No token entered" in result.output
+
+    def test_bad_pasted_token_with_check_exits_1(self):
+        with (
+            patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")),
+            patch("apm_cli.commands.auth.is_interactive", return_value=True),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=False),
+            patch("apm_cli.commands.auth.open_token_page"),
+            patch("apm_cli.commands.auth.check_token", return_value=(False, 401)),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com", "--check"], input="bad\n")
+        assert result.exit_code == 1
+        assert "rejected" in result.output
+
+    def test_a_repo_path_is_rejected(self):
+        """HOST is a host, not a marketplace source -- catch the confusion early."""
+        result = self.runner.invoke(auth, ["gitlab.com/acme/repo"])
+        assert result.exit_code == 1
+        assert "Expected a host name" in result.output
+
+    def test_host_without_a_token_flow_exits_1(self):
+        result = self.runner.invoke(auth, ["dev.azure.com"])
+        assert result.exit_code == 1
+        assert "No token flow" in result.output
+
+    def test_shadowing_keychain_is_reported_not_erased(self):
+        with (
+            patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")),
+            patch("apm_cli.commands.auth.is_interactive", return_value=False),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=True),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com"])
+        assert "keychain" in result.output.lower()
+        assert "erase" in result.output  # advice for the user to run
+
+
+class TestExportMode:
+    """`eval "$(apm auth <host> --export)"` requires a clean stdout."""
+
+    def setup_method(self):
+        # Click >= 8.2 keeps stdout and stderr separate by default; the old
+        # mix_stderr=False argument was removed.
+        self.runner = CliRunner()
+
+    def test_stdout_carries_only_the_export_line(self):
+        with patch(
+            "apm_cli.commands.auth.resolve_existing_token",
+            return_value=("glpat-x", "GITLAB_APM_PAT"),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com", "--export"])
+        assert result.exit_code == 0
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+        assert lines == ["export GITLAB_APM_PAT='glpat-x'"]
+
+    def test_narration_goes_to_stderr(self):
+        with patch(
+            "apm_cli.commands.auth.resolve_existing_token",
+            return_value=("glpat-x", "GITLAB_APM_PAT"),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com", "--export"])
+        assert "GITLAB_APM_PAT" in result.stderr or "credential" in result.stderr
+        assert "[+]" not in result.stdout
+
+    def test_single_quote_in_token_cannot_break_out_of_the_quoting(self):
+        """The output is eval'd, so a quote must not become shell syntax."""
+        with patch(
+            "apm_cli.commands.auth.resolve_existing_token",
+            return_value=("ab'; echo pwned; '", "GITLAB_APM_PAT"),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com", "--export"])
+        line = result.stdout.strip()
+        assert "'\\''" in line  # POSIX close-escape-reopen
+        assert line.startswith("export GITLAB_APM_PAT='")
+        assert line.endswith("'")

@@ -26,12 +26,12 @@ from apm_cli.commands._helpers import (
 )
 from apm_cli.commands.approve import approve_cmd, deny_cmd
 from apm_cli.commands.audit import audit
+from apm_cli.commands.auth import auth
 from apm_cli.commands.cache import cache
 from apm_cli.commands.compile import compile as compile_cmd
 from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
 from apm_cli.commands.doctor import doctor
-from apm_cli.commands.enroll import enroll
 from apm_cli.commands.experimental import experimental
 from apm_cli.commands.find import find as find_cmd
 from apm_cli.commands.init import init
@@ -59,7 +59,7 @@ from apm_cli.commands.view import view as view_cmd
 _CLI_EPILOG = (
     "\b\n"
     "Common workflows:\n"
-    "  apm enroll <marketplace>       Onboard a new machine onto a marketplace\n"
+    "  apm auth <host>                Set up credentials for a git host\n"
     "  apm init                       Scaffold a new project\n"
     "  apm install                    Install dependencies from apm.yml\n"
     "  apm install --frozen           Reproduce lockfile exactly (CI-safe)\n"
@@ -183,6 +183,7 @@ def cli(ctx, verbose: bool) -> None:
 # Register command groups
 cli.add_command(approve_cmd, name="approve")
 cli.add_command(audit)
+cli.add_command(auth)
 cli.add_command(cache)
 cli.add_command(deny_cmd, name="deny")
 cli.add_command(deps)
@@ -222,7 +223,6 @@ cli.add_command(outdated_cmd, name="outdated")
 cli.add_command(doctor)
 cli.add_command(lifecycle)
 cli.add_command(marketplace)
-cli.add_command(enroll)
 cli.add_command(find_cmd)
 cli.add_command(marketplace_search, name="search")
 
