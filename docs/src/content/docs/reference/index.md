@@ -13,7 +13,7 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 
 | Phase                  | Commands                                                                         |
 |------------------------|----------------------------------------------------------------------------------|
-| Project setup          | [`init`](./cli/init/), [`enroll`](./cli/enroll/), [`install`](./cli/install/), [`lock`](./cli/lock/), [`update`](./cli/update/), [`uninstall`](./cli/uninstall/) |
+| Project setup          | [`init`](./cli/init/), [`auth`](./cli/auth/), [`install`](./cli/install/), [`lock`](./cli/lock/), [`update`](./cli/update/), [`uninstall`](./cli/uninstall/) |
 | Inspect and audit      | [`view`](./cli/view/), [`deps`](./cli/deps/), [`outdated`](./cli/outdated/), [`list`](./cli/list/), [`find`](./cli/find/), [`audit`](./cli/audit/), [`doctor`](./cli/doctor/) |
 | Compile and integrate  | [`compile`](./cli/compile/), [`prune`](./cli/prune/), [`targets`](./cli/targets/), [`runtime`](./cli/runtime/) |
 | Cache and config       | [`cache`](./cli/cache/), [`config`](./cli/config/)                               |
