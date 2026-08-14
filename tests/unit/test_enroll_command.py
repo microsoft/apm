@@ -7,7 +7,10 @@ from click.testing import CliRunner
 
 from apm_cli.commands.enroll import (
     _host_and_project,
+    _may_allow_anonymous,
     _token_env_var,
+    _token_page_url,
+    _token_scopes,
     enroll,
     resolve_existing_token,
     verify_token,
@@ -112,13 +115,102 @@ class TestVerifyToken:
             verify_token("glpat-x", "gitlab.com", "acme/team/sub/repo")
         url = get.call_args[0][0]
         assert "acme%2Fteam%2Fsub%2Frepo" in url
-        assert ".claude-plugin%2Fmarketplace.json" in url
+        assert "api/v4/projects" in url
 
     def test_token_sent_as_private_token_header(self):
         with patch("requests.get") as get:
             get.return_value = MagicMock(status_code=200)
             verify_token("glpat-secret", "gitlab.com", "acme/repo")
         assert get.call_args.kwargs["headers"]["PRIVATE-TOKEN"] == "glpat-secret"
+
+    def test_all_candidate_manifest_paths_are_probed(self):
+        """A marketplace may keep its manifest at any of three locations.
+
+        Probing only one reports a false negative for the other two -- the
+        bug that made a real public GitHub marketplace look unreadable.
+        """
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=404)
+            ok, _ = verify_token("glpat-x", "gitlab.com", "acme/repo")
+        assert ok is False
+        probed = " ".join(str(c[0][0]) for c in get.call_args_list)
+        assert "marketplace.json" in probed
+        assert "github%2Fplugin" in probed or ".github/plugin" in probed
+        assert "claude-plugin" in probed
+
+    def test_stops_at_first_readable_path(self):
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=200)
+            ok, status = verify_token("glpat-x", "gitlab.com", "acme/repo")
+        assert (ok, status) == (True, 200)
+        assert get.call_count == 1  # no wasted requests after a hit
+
+    def test_auth_failure_outranks_missing_file(self):
+        """401 anywhere is more actionable than a 404 on another path."""
+        with patch("requests.get") as get:
+            get.side_effect = [
+                MagicMock(status_code=404),
+                MagicMock(status_code=401),
+                MagicMock(status_code=404),
+            ]
+            ok, status = verify_token("bad", "gitlab.com", "acme/repo")
+        assert ok is False
+        assert status == 401
+
+
+class TestVerifyTokenGitHub:
+    """GitHub uses a different API, URL shape and auth header than GitLab."""
+
+    def test_uses_contents_api_and_token_header(self):
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=200)
+            ok, status = verify_token("ghp_secret", "github.com", "acme/repo")
+        assert (ok, status) == (True, 200)
+        url = get.call_args[0][0]
+        assert "api.github.com/repos/acme/repo/contents/" in url
+        # GitHub wants `Authorization: token <t>`, never GitLab's PRIVATE-TOKEN.
+        assert get.call_args.kwargs["headers"]["Authorization"] == "token ghp_secret"
+        assert "PRIVATE-TOKEN" not in get.call_args.kwargs["headers"]
+
+    def test_ghes_uses_the_enterprise_api_base(self):
+        """Hardcoding api.github.com would break GitHub Enterprise Server."""
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=200)
+            verify_token("ghp_x", "ghe.corp.example", "acme/repo")
+        url = get.call_args[0][0]
+        assert "api.github.com" not in url
+        assert "ghe.corp.example" in url
+
+    def test_private_repo_404_is_reported(self):
+        """GitHub 404s a private repo the token cannot see, rather than 403."""
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=404)
+            ok, status = verify_token("ghp_x", "github.com", "acme/private")
+        assert ok is False
+        assert status == 404
+
+
+class TestTokenPageAndScopes:
+    def test_github_scopes_and_page(self):
+        assert _token_scopes("github") == "repo"
+        url = _token_page_url("github.com", "github", "apm-test")
+        assert url.startswith("https://github.com/settings/tokens/new")
+        assert "scopes=repo" in url
+
+    def test_gitlab_scopes_and_page(self):
+        assert _token_scopes("gitlab") == "read_repository,read_api"
+        url = _token_page_url("gitlab.com", "gitlab", "apm-test")
+        assert "/-/user_settings/personal_access_tokens" in url
+        assert "read_repository" in url
+
+    def test_ghes_token_page_stays_on_the_enterprise_host(self):
+        url = _token_page_url("ghe.corp.example", "ghes", "apm-test")
+        assert url.startswith("https://ghe.corp.example/settings/tokens/new")
+
+    def test_anonymous_capable_hosts(self):
+        assert _may_allow_anonymous("github") is True
+        assert _may_allow_anonymous("gitlab") is True
+        assert _may_allow_anonymous("generic") is False
 
 
 class TestResolveExistingToken:
@@ -178,17 +270,54 @@ class TestEnrollFlow:
         assert browse.call_count == 1
         assert "Paste the token" not in result.output
 
-    def test_non_interactive_without_token_fails_with_guidance(self):
-        """CI must not hang on a prompt; it must exit telling you what to set."""
+    def test_non_interactive_without_token_warns_and_continues(self):
+        """CI must not hang, and must not block a *public* marketplace.
+
+        The credential check cannot distinguish public from private without
+        an anonymous probe that GitHub rate-limits to 60/hour per IP, where
+        an exhausted quota is a 403 indistinguishable from a permissions
+        403. So it warns, names the env var, and lets `marketplace add` --
+        the actual authority -- decide.
+        """
         with (
             patch("apm_cli.commands.enroll.resolve_existing_token", return_value=(None, "none")),
             patch("apm_cli.commands.enroll.verify_token", return_value=(False, None)),
             patch("apm_cli.commands.enroll._is_interactive", return_value=False),
             patch("apm_cli.commands.enroll._detect_shadowing_helper", return_value=False),
+            patch("apm_cli.commands.marketplace.add"),
+            patch("apm_cli.commands.marketplace.browse"),
+        ):
+            result = self.runner.invoke(enroll, [GITLAB_SOURCE, "--name", "acme"])
+        assert result.exit_code == 0
+        assert "GITLAB_APM_PAT" in result.output
+        assert "Paste the token" not in result.output  # never prompted
+
+    def test_non_interactive_never_prompts(self):
+        """The CI guard's core promise: no prompt, so no hang."""
+        with (
+            patch("apm_cli.commands.enroll.resolve_existing_token", return_value=(None, "none")),
+            patch("apm_cli.commands.enroll.verify_token", return_value=(False, None)),
+            patch("apm_cli.commands.enroll._is_interactive", return_value=False),
+            patch("apm_cli.commands.enroll._detect_shadowing_helper", return_value=False),
+            patch("apm_cli.commands.enroll._open_token_page") as page,
+            patch("apm_cli.commands.marketplace.add"),
+            patch("apm_cli.commands.marketplace.browse"),
+        ):
+            self.runner.invoke(enroll, [GITLAB_SOURCE, "--name", "acme"])
+        page.assert_not_called()
+
+    def test_non_interactive_blocks_when_host_cannot_be_anonymous(self):
+        """A host with no anonymous path is still a hard stop -- exit 1."""
+        with (
+            patch("apm_cli.commands.enroll.resolve_existing_token", return_value=(None, "none")),
+            patch("apm_cli.commands.enroll.verify_token", return_value=(False, None)),
+            patch("apm_cli.commands.enroll._is_interactive", return_value=False),
+            patch("apm_cli.commands.enroll._detect_shadowing_helper", return_value=False),
+            patch("apm_cli.commands.enroll._may_allow_anonymous", return_value=False),
         ):
             result = self.runner.invoke(enroll, [GITLAB_SOURCE, "--name", "acme"])
         assert result.exit_code == 1
-        assert "GITLAB_APM_PAT" in result.output
+        assert "not running interactively" in result.output
 
     def test_prompted_token_is_verified_and_exported(self, monkeypatch):
         monkeypatch.delenv("GITLAB_APM_PAT", raising=False)

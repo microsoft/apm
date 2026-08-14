@@ -71,11 +71,33 @@ code=$?
 [ "$code" -eq 1 ] && ok "exited 1 (no hang)" || bad "expected exit 1, got $code"
 grep -q "GITLAB_APM_PAT" "$SANDBOX/out3" && ok "names the env var to set" || bad "no actionable guidance"
 
-head_ "6. Rejects bad input"
+head_ "6. Host-specific credential handling (offline, no API calls)"
+PY_BIN="$(dirname "$APM")/python"
+if [ -x "$PY_BIN" ]; then
+  probe=$("$PY_BIN" - <<'PY' 2>&1
+from apm_cli.commands.enroll import _token_env_var, _token_scopes, _token_page_url
+print(_token_env_var("github"), _token_scopes("github"), sep="|")
+print(_token_page_url("ghe.corp.example", "ghes", "t"))
+PY
+)
+  case "$probe" in
+    *"GITHUB_APM_PAT|repo"*) ok "GitHub -> GITHUB_APM_PAT, scope 'repo'" ;;
+    *) bad "GitHub credential mapping wrong: $probe" ;;
+  esac
+  case "$probe" in
+    # Hardcoding api.github.com / github.com would break Enterprise Server.
+    *"https://ghe.corp.example/settings/tokens/new"*) ok "GHES token page stays on the enterprise host" ;;
+    *) bad "GHES token page wrong: $probe" ;;
+  esac
+else
+  echo "  SKIP  no python next to $APM"
+fi
+
+head_ "7. Rejects bad input"
 "$APM" enroll "http://gitlab.com/a/b" --name x </dev/null >/dev/null 2>&1
 [ $? -ne 0 ] && ok "insecure HTTP rejected" || bad "accepted an http:// source"
 
-head_ "7. Your real config was never touched"
+head_ "8. Your real config was never touched"
 real="$(eval echo ~"$(whoami)")/.apm/marketplaces.json"
 if [ -f "$real" ] && ! grep -q '"name": *"demo"' "$real" 2>/dev/null; then
   ok "no sandbox entries leaked into $real"
@@ -84,7 +106,7 @@ else
 fi
 
 if [ $# -ge 1 ]; then
-  head_ "8. Real marketplace: $1  (interactive -- may prompt for a token)"
+  head_ "9. Real marketplace: $1  (interactive -- may prompt for a token)"
   echo "  This is the path I could not test: browser + paste against a private remote."
   "$APM" enroll "$1" --name validate-real
   echo "  exit code: $?"

@@ -29,28 +29,46 @@ exactly the same forms.
 
 ## Credentials
 
-APM resolves GitLab tokens in this order: `GITLAB_APM_PAT`, then
-`GITLAB_TOKEN`, then your git credential helper. Because the environment
-variables are consulted first, exporting one is sufficient -- no git
+APM resolves tokens itself, and the environment variables are consulted
+before any git credential helper -- so exporting one is sufficient and no git
 configuration change is required.
 
-The credential check calls the GitLab REST API rather than testing `git`
-access. This distinction matters: an OAuth session token is valid for
-`git clone` but returns `401` from the REST API, which is what marketplace
-lookups use. A token needs the scopes `read_repository,read_api`.
+| Host | Resolution order | Scopes |
+|---|---|---|
+| GitLab | `GITLAB_APM_PAT`, `GITLAB_TOKEN`, git credential helper | `read_repository,read_api` |
+| GitHub / GHES | `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `gh auth token`, git credential helper | `repo` |
+
+The credential check calls the host's REST API rather than testing `git`
+access. This distinction matters: on GitLab, an OAuth session token is valid
+for `git clone` but returns `401` from the REST API, which is what marketplace
+lookups use.
+
+The probe tries every location a manifest can live in (`marketplace.json`,
+`.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json`), so a
+marketplace is not reported unreadable merely because it uses a different
+layout.
 
 When no usable token is found in an interactive terminal, `apm enroll` opens
-GitLab's token-creation page with the name and scopes prefilled, then prompts
-for the result. A pasted token is verified before use and applies to the
-current command only -- export it to persist it:
+the host's token-creation page with the name and scopes prefilled, then
+prompts for the result. A pasted token is verified before use and applies to
+the current command only -- export it to persist it:
 
 ```bash
-export GITLAB_APM_PAT='glpat-...'
+export GITHUB_APM_PAT='ghp_...'    # or GITLAB_APM_PAT='glpat-...'
 ```
 
-The credential pre-check is GitLab-specific. Other hosts go straight to
-registration, using whatever credentials `apm marketplace add` already
-resolves.
+Azure DevOps and generic git hosts have no equivalent manifest endpoint, so
+they skip the check and rely on whatever credentials `apm marketplace add`
+already resolves.
+
+:::note[Public marketplaces]
+A public marketplace needs no credential. Because distinguishing public from
+private would require an anonymous probe -- and GitHub caps unauthenticated
+requests at 60/hour per IP, returning a `403` indistinguishable from a
+permissions failure -- a failed credential check is a **warning, not a hard
+stop**. Registration proceeds and `apm marketplace add` decides: a public
+marketplace succeeds, a private one fails with its own error.
+:::
 
 :::note[Shadowing credential helpers]
 On macOS, the system `osxkeychain` helper is unscoped: a stale entry for a
@@ -80,20 +98,29 @@ credentials for you.
 | Code | Meaning |
 |---|---|
 | `0` | The marketplace was registered and is browsable. |
-| `1` | The source was invalid, no usable credential was available, or registration or browsing failed. |
+| `1` | The source was invalid, or registration or browsing failed. |
 
 ## Non-interactive use
 
 `apm enroll` never prompts when `APM_NON_INTERACTIVE` or `CI` is set, or when
-stdin is not a TTY. Without a usable credential it exits `1` and names the
-environment variable to set, rather than hanging.
+stdin is not a TTY -- it cannot hang waiting for input.
+
+Without a usable credential on GitHub or GitLab it warns, names the
+environment variable to set, and continues, so a public marketplace still
+enrolls. Registration then decides the outcome. Set a token to authenticate:
 
 ```bash
-export GITLAB_APM_PAT='glpat-...'
-apm enroll gitlab.com/acme/team/apm-marketplace --name acme
+export GITHUB_APM_PAT='ghp_...'
+apm enroll acme/apm-marketplace --name acme
 ```
 
 ## Examples
+
+Enroll on a private GitHub marketplace:
+
+```bash
+apm enroll acme/apm-marketplace --name acme
+```
 
 Enroll on a private GitLab marketplace:
 
