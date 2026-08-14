@@ -59,7 +59,7 @@ else
   bad "no --name run failed"
 fi
 
-head_ "5. CI guard -- must NOT hang, must exit 1 with guidance"
+head_ "5. CI guard -- must NOT hang; warns, names the env var, defers to registration"
 # Subshell rather than `env -u`: macOS env requires -u before assignments,
 # GNU env does not. A subshell is portable across both.
 (
@@ -68,8 +68,11 @@ head_ "5. CI guard -- must NOT hang, must exit 1 with guidance"
   "$APM" enroll "gitlab.com/no-such-org-xyz/private-repo" --name ci </dev/null
 ) >"$SANDBOX/out3" 2>&1
 code=$?
-[ "$code" -eq 1 ] && ok "exited 1 (no hang)" || bad "expected exit 1, got $code"
+# A missing credential is no longer fatal on its own -- a public marketplace
+# needs none. This source does not exist, so registration fails and exit is 1.
+[ "$code" -eq 1 ] && ok "exited 1 via registration (no hang)" || bad "expected exit 1, got $code"
 grep -q "GITLAB_APM_PAT" "$SANDBOX/out3" && ok "names the env var to set" || bad "no actionable guidance"
+grep -qi "paste the token" "$SANDBOX/out3" && bad "prompted despite APM_NON_INTERACTIVE" || ok "never prompted"
 
 head_ "6. Host-specific credential handling (offline, no API calls)"
 PY_BIN="$(dirname "$APM")/python"
