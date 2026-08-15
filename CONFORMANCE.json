@@ -1156,6 +1156,17 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-014",
+      "keyword": "MUST",
+      "section": "10.15",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_bin_deployment_defaults_to_deny_in_non_interactive_context"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
@@ -1268,7 +1279,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 81,
+      "active": 82,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1292,5 +1303,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 111
+  "total_requirements": 112
 }

@@ -1333,6 +1333,8 @@ class SkillIntegrator(BaseIntegrator):
         scope=None,
         policy=None,
         skip_bin: bool = False,
+        bin_skip_reason_override: str | None = None,
+        trust_bin: bool | None = None,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
 
@@ -1355,6 +1357,15 @@ class SkillIntegrator(BaseIntegrator):
                 package ships one.  Used by the executable approval gate to
                 block unapproved bin/ executables while still deploying text
                 primitives (skills, sub-skills).
+            bin_skip_reason_override: When *skip_bin* is True, use this
+                string as ``bin_skipped_reason`` instead of the default
+                ``"not_approved"``.  Lets the caller distinguish
+                ``--no-trust-bin`` (``"not_trusted"``) from the
+                ``allowExecutables`` gate.
+            trust_bin: Tri-state consent flag.  ``True`` suppresses the
+                trust-posture warning; ``False`` is handled upstream by
+                setting *skip_bin*; ``None`` (default) emits the warning
+                when bin/ is deployed.
 
         Returns:
             SkillIntegrationResult: Results of the integration operation
@@ -1414,7 +1425,7 @@ class SkillIntegrator(BaseIntegrator):
 
         if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
             if skip_bin:
-                bin_skip_reason = "not_approved"
+                bin_skip_reason = bin_skip_reason_override or "not_approved"
             else:
                 bin_paths, bin_skip_reason = self._deploy_plugin_bin(
                     package_info,
@@ -1424,6 +1435,7 @@ class SkillIntegrator(BaseIntegrator):
                     policy=policy,
                     force=force,
                     logger=logger,
+                    trust_bin=trust_bin,
                 )
 
         # Check if this is a native Skill (already has SKILL.md at root)
@@ -1539,6 +1551,7 @@ class SkillIntegrator(BaseIntegrator):
         policy=None,
         force: bool = False,
         logger=None,
+        trust_bin: bool | None = None,
     ) -> tuple[list[Path], str | None]:
         """Deploy bin/ executables and plugin manifest for a MARKETPLACE_PLUGIN.
 
@@ -1558,6 +1571,13 @@ class SkillIntegrator(BaseIntegrator):
         (owner read/write/execute; all group/other bits cleared) on POSIX
         systems.  The deployed root is user-scoped (~/.claude/skills/), so
         tighter-than-0o755 permissions are correct.
+
+        When *trust_bin* is ``None`` (no ``--trust-bin`` / ``--no-trust-bin``
+        flag), a prominent trust-posture warning is emitted after deployment
+        so the user is aware that executables are on Claude Code's PATH.
+        When *trust_bin* is ``True`` (``--trust-bin``), the warning is
+        suppressed.  ``False`` is never passed here (handled upstream by
+        the caller setting ``skip_bin=True``).
 
         Returns ``(deployed_paths, skip_reason)``.  ``skip_reason`` is non-None
         ONLY when the package ships a bin/ but it could not be deployed for an
@@ -1619,6 +1639,16 @@ class SkillIntegrator(BaseIntegrator):
             )
             if manifest is not None:
                 deployed.append(manifest)
+
+        # Trust-posture warning: when bin/ is deployed without explicit
+        # --trust-bin consent, surface a prominent warning so the user
+        # knows executables are on Claude Code's PATH.
+        if deployed and trust_bin is None and logger:
+            canonical = package_info.get_canonical_dependency_string()
+            logger.warning(
+                f"Plugin '{canonical}' adds executables to Claude Code's PATH. "
+                "Pass --trust-bin to allow, or --no-trust-bin to skip bin/ deployment.",
+            )
 
         return deployed, None
 
