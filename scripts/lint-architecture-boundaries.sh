@@ -1422,7 +1422,7 @@ marketplace_structure_owner="src/apm_cli/marketplace/models.py"
 marketplace_structure_validator="src/apm_cli/marketplace/validator.py"
 marketplace_structure_parallel_hits=$(
     grep -rEn --include='*.py' \
-        'structural_errors[[:space:]]*=' \
+        'structural_errors([[:space:]]*:[^=]+)?[[:space:]]*=' \
         src/apm_cli/marketplace \
         | grep -v "^${marketplace_structure_owner}:" \
         || true

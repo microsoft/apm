@@ -795,6 +795,47 @@ def test_marketplace_structural_diagnostic_guard_rejects_dropped_plugins_error(
     )
 
 
+def test_marketplace_structural_diagnostic_guard_rejects_annotated_parallel_owner(
+    tmp_path: Path,
+) -> None:
+    """AC33 must reject type-annotated structural-error assignments outside its owner."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    validator_path = sandbox / "src/apm_cli/marketplace/validator.py"
+    validator_path.write_text(
+        validator_path.read_text(encoding="utf-8") + "\nstructural_errors: tuple[str, ...] = ()\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Marketplace structural diagnostics must originate in marketplace/models.py"
+        in result.stdout
+    )
+
+
 def test_local_marketplace_audit_path_owner_guard_rejects_bypass(tmp_path: Path) -> None:
     """AC10b must reject direct use of a private local-path helper."""
     root = Path(__file__).parents[2]
