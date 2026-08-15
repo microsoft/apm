@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE
+from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.utils.diagnostics import printable_ascii_text
 
 logger = logging.getLogger(__name__)
 
@@ -27,40 +29,51 @@ def _looks_like_local_path(value: str) -> bool:
     value = value.strip()
     if not value:
         return False
-    if value.startswith("file://"):
+    if value.lower().startswith("file:"):
         return True
-    if value.startswith(("/", "./", "../", "~")):
+    if value.startswith(("/", "./", "../", "~", ".\\", "..\\", "~\\", "\\\\")):
         return True
     # Windows drive letter: C:\ or C:/
     return bool(len(value) >= 3 and value[1:3] in (":\\", ":/") and value[0].isalpha())
+
+
+def _is_valid_remote_coordinate(value: object) -> bool:
+    """Return whether a source locator parses as a non-local dependency."""
+    if not isinstance(value, str) or not value.strip() or _looks_like_local_path(value):
+        return False
+    try:
+        return not DependencyReference.parse(value.strip()).is_local
+    except ValueError:
+        return False
 
 
 def _dict_source_error(source_type: str, repo: object, url: object) -> str | None:
     """Return a structural diagnostic for an unsupported dict plugin source."""
     has_repo = isinstance(repo, str) and "/" in repo.strip()
     has_url = isinstance(url, str) and bool(url.strip())
+    safe_source_type = printable_ascii_text(source_type)
     if source_type == "npm":
         return "source: unsupported source type 'npm'"
     if not source_type and not has_repo:
         return "source: expected a supported source type or an owner/repository field"
     if source_type not in {"", "github", "url", "git-subdir", "gitlab"}:
-        return f"source: unsupported source type '{source_type}'"
+        return f"source: unsupported source type '{safe_source_type}'"
     if source_type == "github":
         if not has_repo:
             return "source: github requires an owner/repository field"
-        if _looks_like_local_path(repo):
-            return "source: github requires a non-local owner/repository field"
+        if not _is_valid_remote_coordinate(repo):
+            return "source: github requires a valid non-local owner/repository field"
     if source_type == "url":
         if not has_url:
             return "source: url requires a non-empty url field"
-        if _looks_like_local_path(url):
-            return "source: url requires a non-local url field"
+        if not _is_valid_remote_coordinate(url):
+            return "source: url requires a valid non-local url field"
     if source_type in {"git-subdir", "gitlab"}:
         locator = repo if has_repo else url
         if not locator:
             return f"source: {source_type} requires an owner/repository or url field"
-        if _looks_like_local_path(locator):
-            return f"source: {source_type} requires a non-local owner/repository or url field"
+        if not _is_valid_remote_coordinate(locator):
+            return f"source: {source_type} requires a valid non-local owner/repository or url field"
     return None
 
 
@@ -451,6 +464,8 @@ def _parse_plugin_entry(
             # Normalize: ensure "type" key is set for downstream resolvers
             if source_type and "type" not in raw:
                 raw = {**raw, "type": source_type}
+            elif not source_type and "repository" in raw:
+                raw = {**raw, "type": "github", "repo": raw["repository"]}
             source = raw
         else:
             logger.debug("Skipping plugin '%s' with unrecognized source format", name)
@@ -507,12 +522,15 @@ def _parse_plugin_entry(
     if isinstance(source, dict):
         raw_tp = source.get("tag_pattern")
         if raw_tp is not None:
-            from .tag_pattern import validate_tag_pattern
+            from .tag_pattern import TagPatternError, validate_tag_pattern
 
-            tag_pattern = validate_tag_pattern(
-                raw_tp,
-                context=f"Plugin {name!r} source.tag_pattern",
-            )
+            try:
+                tag_pattern = validate_tag_pattern(
+                    raw_tp,
+                    context=f"Plugin {name!r} source.tag_pattern",
+                )
+            except TagPatternError as exc:
+                return None, f"source.tag_pattern: {printable_ascii_text(str(exc))}"
 
     return (
         MarketplacePlugin(

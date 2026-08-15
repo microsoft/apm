@@ -45,7 +45,37 @@ pytestmark = [
         (
             "local-github-source",
             b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "github", "repo": "/tmp/local-plugin"}}]\n}\n',
-            "plugins[0].source: github requires a non-local owner/repository field",
+            "plugins[0].source: github requires a valid non-local owner/repository field",
+        ),
+        (
+            "local-file-url-source",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "url", "url": "file:/tmp/local-plugin"}}]\n}\n',
+            "plugins[0].source: url requires a valid non-local url field",
+        ),
+        (
+            "local-windows-url-source",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "url", "url": ".\\\\\\\\local-plugin"}}]\n}\n',
+            "plugins[0].source: url requires a valid non-local url field",
+        ),
+        (
+            "local-git-subdir-source",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "git-subdir", "url": "~\\\\\\\\local-plugin"}}]\n}\n',
+            "plugins[0].source: git-subdir requires a valid non-local owner/repository or url field",
+        ),
+        (
+            "invalid-url-source",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "url", "url": ":::invalid:::"}}]\n}\n',
+            "plugins[0].source: url requires a valid non-local url field",
+        ),
+        (
+            "invalid-tag-pattern",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "github", "repo": "owner/repo", "tag_pattern": "latest"}}]\n}\n',
+            "plugins[0].source.tag_pattern:",
+        ),
+        (
+            "control-character-source-type",
+            b'{\n  "name": "malformed",\n  "plugins": [{"name": "bad", "source": {"type": "bad\\u001b"}}]\n}\n',
+            "plugins[0].source: unsupported source type 'bad?'",
         ),
     ],
 )
@@ -88,5 +118,6 @@ def test_marketplace_invalid_plugins_validation(
     assert "Found 0 plugins" not in validation_output
     assert "Schema: passed" not in validation_output
     assert "Names: passed" not in validation_output
+    assert "\x1b" not in validation_output
     assert manifest_path.read_bytes() == source_bytes
     assert registry_path.read_bytes() == registry_bytes

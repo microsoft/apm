@@ -219,7 +219,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm marketplace browse NAME` | Browse marketplace plugins | -- |
 | `apm marketplace update [NAME]` | Update marketplace index | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
-| `apm marketplace validate NAME` | Validate raw structure and plugin schema. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
+| `apm marketplace validate NAME` | Validate raw structure, plugin schema, and duplicate plugin names. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
 | `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |

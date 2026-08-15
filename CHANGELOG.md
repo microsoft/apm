@@ -98,7 +98,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supported hidden tool roots. (#2441)
 - `apm pack --check-clean` now honors `--marketplace-path` overrides.
   (closes #2427, #2461)
-- `apm pack --check-clean` now honors `--marketplace-path` overrides. (#2427)
 - `apm marketplace validate` now reports malformed plugin structures without
   rewriting the registered marketplace or its source manifest. (#2445)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
