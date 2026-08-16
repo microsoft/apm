@@ -66,6 +66,20 @@ On GitHub and GitHub API-compatible hosts, the `.github-private` repo is preferr
     apm-policy.yml         # auto-discovered by every repo in <org>
 ```
 
+**GitLab (gitlab.com and self-managed)** rejects project paths that start with `.` or `_`, so none of the candidates above are valid there. GitLab uses its own default instead:
+
+| Priority | Repo name | Valid on |
+|----------|-----------|---------|
+| 1 | `apm-policy` | GitLab (gitlab.com and self-managed) |
+
+```
+<group>/
+  apm-policy/
+    apm-policy.yml         # auto-discovered by every project in <group>
+```
+
+Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project without `apm-policy` (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
+
 When `apm install` or `apm audit --ci --policy org` runs in a project, APM resolves the org from the project's git remote and searches the candidate repos above (cached locally, default 1 hour TTL).
 
 Alternative sources, useful for testing or non-GitHub setups:

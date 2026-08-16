@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
+from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
     DEFAULT_CACHE_TTL,
@@ -25,9 +26,11 @@ from apm_cli.policy.discovery import (
     _fetch_ado_contents,
     _fetch_ado_org_policy,
     _fetch_from_ado_repo,
+    _fetch_from_gitlab_repo,
     _fetch_from_repo,
     _fetch_from_url,
     _fetch_github_contents,
+    _fetch_gitlab_contents,
     _get_cache_dir,
     _load_from_file,
     _parse_remote_url,
@@ -68,6 +71,14 @@ class TestParseRemoteUrl(unittest.TestCase):
     def test_ado(self):
         result = _parse_remote_url("https://dev.azure.com/contoso/project/_git/repo")
         self.assertEqual(result, ("contoso", "dev.azure.com"))
+
+    def test_https_gitlab(self):
+        result = _parse_remote_url("https://gitlab.com/contoso/my-project.git")
+        self.assertEqual(result, ("contoso", "gitlab.com"))
+
+    def test_ssh_gitlab_self_managed(self):
+        result = _parse_remote_url("git@gitlab.example.com:contoso/my-project.git")
+        self.assertEqual(result, ("contoso", "gitlab.example.com"))
 
     def test_ssh_no_git_suffix(self):
         result = _parse_remote_url("git@github.com:contoso/my-project")
@@ -1014,6 +1025,53 @@ class TestAutoDiscover(unittest.TestCase):
         mock_candidates.assert_called_once_with("ado.example.test")
         self.assertEqual(mock_ado_fetch.call_args.kwargs["port"], 8443)
 
+    @patch("apm_cli.policy.discovery._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_host_only_tries_apm_policy(self, mock_extract, mock_gitlab_fetch):
+        """GitLab host profile skips the GitHub-family cascade, only tries apm-policy."""
+        mock_extract.return_value = ("contoso", "gitlab.com", None)
+        mock_gitlab_fetch.return_value = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:gitlab.com/contoso/apm-policy", outcome="found"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            mock_gitlab_fetch.assert_called_once()
+            call_kwargs = mock_gitlab_fetch.call_args.kwargs
+            self.assertEqual(call_kwargs["repo"], "apm-policy")
+            self.assertEqual(call_kwargs["org"], "contoso")
+            self.assertTrue(result.found)
+
+    @patch("apm_cli.policy.discovery._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_self_managed_preserves_remote_port(self, mock_extract, mock_gitlab_fetch):
+        mock_extract.return_value = ("contoso", "gitlab.example.test", 8443)
+        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["port"], 8443)
+        # Absent (no policy published) must be a clean no-op, not an error.
+        self.assertEqual(result.outcome, "absent")
+        self.assertIsNone(result.error)
+
+    @patch("apm_cli.policy.discovery._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_absent_is_clean_no_op(self, mock_extract, mock_gitlab_fetch):
+        """No apm-policy project on GitLab -> absent, not a fetch-failure warning."""
+        mock_extract.return_value = ("contoso", "gitlab.com", None)
+        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            self.assertFalse(result.found)
+            self.assertEqual(result.outcome, "absent")
+            self.assertIsNone(result.error)
+
 
 class TestPolicyRepoCandidates(unittest.TestCase):
     """Test _policy_repo_candidates host profile selection."""
@@ -1041,6 +1099,21 @@ class TestPolicyRepoCandidates(unittest.TestCase):
     def test_unknown_host_returns_all(self):
         result = _policy_repo_candidates("gitlab.example.com")
         self.assertEqual(result, (".github-private", ".github", ".apm", "_apm"))
+
+    def test_gitlab_com_only_tries_apm_policy(self):
+        """GitLab rejects a leading '.' or '_' in project paths (#2566)."""
+        result = _policy_repo_candidates("gitlab.com")
+        self.assertEqual(result, ("apm-policy",))
+
+    def test_gitlab_self_managed_via_env_only_tries_apm_policy(self):
+        with patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.com"}, clear=False):
+            result = _policy_repo_candidates("gitlab.example.com")
+        self.assertEqual(result, ("apm-policy",))
+
+    def test_gitlab_policy_repo_env_override(self):
+        with patch.dict(os.environ, {"APM_GITLAB_POLICY_REPO": "org-policy"}, clear=False):
+            result = _policy_repo_candidates("gitlab.com")
+        self.assertEqual(result, ("org-policy",))
 
 
 class TestFetchAdoContents(unittest.TestCase):
@@ -1438,6 +1511,249 @@ class TestGetTokenForHost(unittest.TestCase):
         token = _get_token_for_host("github.com")
         # All env vars are empty strings, which are falsy
         self.assertFalse(token)
+
+
+class TestFetchGitlabContents(unittest.TestCase):
+    """Test _fetch_gitlab_contents for the GitLab Repository Files API."""
+
+    def _auth_context(self, token: str | None):
+        ctx = MagicMock()
+        ctx.token = token
+        ctx.git_env = {}
+        return ctx
+
+    def _resolver(self, mock_resolver_cls, token: str | None):
+        # gitlab_rest_headers is a plain @staticmethod (no instance state), so
+        # delegate the mocked class's attribute to the real implementation --
+        # otherwise ``AuthResolver.gitlab_rest_headers(token)`` in production
+        # code would return a MagicMock instead of real headers. _RealAuthResolver
+        # was imported at module load time, before @patch replaced the name in
+        # apm_cli.core.auth, so it still points at the genuine class.
+        mock_resolver_cls.gitlab_rest_headers = _RealAuthResolver.gitlab_rest_headers
+
+        resolver = mock_resolver_cls.return_value
+        resolver.resolve.return_value = self._auth_context(token)
+        resolver.build_error_context.return_value = "\n    auth remediation"
+
+        def try_with_fallback(host, operation, **kwargs):
+            resolve_kwargs = {"org": kwargs.get("org")}
+            if kwargs.get("port") is not None:
+                resolve_kwargs["port"] = kwargs["port"]
+            ctx = resolver.resolve(host, **resolve_kwargs)
+            return operation(ctx.token, ctx.git_env)
+
+        resolver.try_with_fallback.side_effect = try_with_fallback
+        return resolver
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_success(self, mock_get, mock_resolver_cls):
+        self._resolver(mock_resolver_cls, "my-gitlab-token")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = VALID_POLICY_YAML
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+        self.assertIsNone(error)
+        self.assertEqual(content, VALID_POLICY_YAML)
+        call_kwargs = mock_get.call_args
+        headers = call_kwargs[1].get("headers", {})
+        self.assertEqual(headers.get("PRIVATE-TOKEN"), "my-gitlab-token")
+        api_url = mock_get.call_args.args[0]
+        self.assertIn("/projects/contoso%2Fapm-policy/repository/files/", api_url)
+        self.assertIn("ref=HEAD", api_url)
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_404_returns_error(self, mock_get, mock_resolver_cls):
+        self._resolver(mock_resolver_cls, "my-gitlab-token")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+        self.assertIsNone(content)
+        self.assertIn("404", error)
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_410_returns_not_found_error(self, mock_get, mock_resolver_cls):
+        """Self-managed GitLab has been observed returning 410 for a missing project (#2566)."""
+        self._resolver(mock_resolver_cls, "my-gitlab-token")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 410
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+        self.assertIsNone(content)
+        self.assertIn("410", error)
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_401_returns_error(self, mock_get, mock_resolver_cls):
+        resolver = self._resolver(mock_resolver_cls, "my-gitlab-token")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+        self.assertIsNone(content)
+        self.assertIn("401", error)
+        self.assertIn("auth remediation", error)
+        resolver.build_error_context.assert_called_once_with(
+            "gitlab.com", "fetch org policy", org="contoso"
+        )
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_redirect_rejected(self, mock_get, mock_resolver_cls):
+        self._resolver(mock_resolver_cls, "my-gitlab-token")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 302
+        mock_resp.headers = {"Location": "https://evil.example.com"}
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+        self.assertIsNone(content)
+        self.assertIn("redirect", error.lower())
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_no_auth_token_still_sends_request(self, mock_get, mock_resolver_cls):
+        """Unauthenticated requests are allowed (public GitLab projects)."""
+        self._resolver(mock_resolver_cls, None)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = VALID_POLICY_YAML
+        mock_get.return_value = mock_resp
+
+        _content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+        self.assertIsNone(error)
+        call_kwargs = mock_get.call_args
+        headers = call_kwargs[1].get("headers", {})
+        self.assertNotIn("PRIVATE-TOKEN", headers)
+        self.assertNotIn("Authorization", headers)
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_custom_self_managed_host_and_port(self, mock_get, mock_resolver_cls):
+        resolver = self._resolver(mock_resolver_cls, "my-gitlab-token")
+        mock_get.return_value = MagicMock(status_code=200, text=VALID_POLICY_YAML)
+
+        with patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False):
+            content, error = _fetch_gitlab_contents(
+                "contoso",
+                "apm-policy",
+                "apm-policy.yml",
+                host="gitlab.example.test",
+                port=8443,
+            )
+
+        self.assertIsNone(error)
+        self.assertEqual(content, VALID_POLICY_YAML)
+        parsed = urlparse(mock_get.call_args.args[0])
+        self.assertEqual(parsed.hostname, "gitlab.example.test")
+        self.assertEqual(parsed.port, 8443)
+        resolver.resolve.assert_called_once_with(
+            "gitlab.example.test",
+            org="contoso",
+            port=8443,
+        )
+
+
+class TestFetchFromGitlabRepo(unittest.TestCase):
+    """Test _fetch_from_gitlab_repo orchestration around the GitLab transport."""
+
+    @patch("apm_cli.policy.discovery._fetch_gitlab_contents")
+    def test_200_caches_result(self, mock_fetch):
+        mock_fetch.return_value = (VALID_POLICY_YAML, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            result = _fetch_from_gitlab_repo(
+                org="contoso",
+                repo="apm-policy",
+                host="gitlab.com",
+                project_root=root,
+                no_cache=True,
+            )
+            self.assertTrue(result.found)
+            self.assertEqual(result.source, "org:gitlab.com/contoso/apm-policy")
+            self.assertFalse(result.cached)
+
+    @patch("apm_cli.policy.discovery._fetch_gitlab_contents")
+    def test_404_no_error(self, mock_fetch):
+        mock_fetch.return_value = (None, "404: Policy file not found")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_from_gitlab_repo(
+                org="contoso",
+                repo="apm-policy",
+                host="gitlab.com",
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+            self.assertFalse(result.found)
+            self.assertEqual(result.outcome, "absent")
+            self.assertIsNone(result.error)
+
+    @patch("apm_cli.policy.discovery._fetch_gitlab_contents")
+    def test_410_is_treated_as_absent_no_op(self, mock_fetch):
+        """410 on self-managed GitLab must be a clean no-op, not a warning (#2566)."""
+        mock_fetch.return_value = (None, "410: Policy file not found")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_from_gitlab_repo(
+                org="contoso",
+                repo="apm-policy",
+                host="gitlab.example.test",
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+            self.assertFalse(result.found)
+            self.assertEqual(result.outcome, "absent")
+            self.assertIsNone(result.error)
+
+    @patch("apm_cli.policy.discovery._fetch_gitlab_contents")
+    def test_api_error_uses_stale_cache(self, mock_fetch):
+        mock_fetch.return_value = (None, "Connection error fetching policy")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "gitlab.com/contoso/apm-policy"
+            _write_cache(repo_ref, _make_test_policy(), root)
+            cache_dir = _get_cache_dir(root)
+            key = _cache_key(repo_ref)
+            meta_file = cache_dir / f"{key}.meta.json"
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta["cached_at"] = time.time() - DEFAULT_CACHE_TTL - 100
+            meta_file.write_text(json.dumps(meta), encoding="utf-8")
+
+            result = _fetch_from_gitlab_repo(
+                org="contoso",
+                repo="apm-policy",
+                host="gitlab.com",
+                project_root=root,
+            )
+            self.assertTrue(result.found)
+            self.assertTrue(result.cached)
+            self.assertEqual(result.outcome, "cached_stale")
+
+    @patch("apm_cli.policy.discovery._fetch_gitlab_contents")
+    def test_invalid_policy_yaml(self, mock_fetch):
+        mock_fetch.return_value = ("enforcement: bogus\n", None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_from_gitlab_repo(
+                org="contoso",
+                repo="apm-policy",
+                host="gitlab.com",
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+            self.assertFalse(result.found)
+            self.assertIn("Invalid policy", result.error)
 
 
 class TestPolicyFetchResult(unittest.TestCase):

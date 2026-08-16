@@ -94,6 +94,7 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
 | `APM_POLICY_DISABLE` | Set to `1` to skip policy discovery and enforcement for **the entire shell session**. Loudly logged. | unset | Equivalent to the per-invocation `--no-policy` on commands that expose it. The only escape hatch for `apm deps update`. See [`apm policy`](../cli/policy/). |
+| `APM_GITLAB_POLICY_REPO` | Override the org policy project name auto-discovered on GitLab (gitlab.com and self-managed). | `apm-policy` | GitLab rejects project paths starting with `.` or `_`, so the GitHub-family candidate cascade (`.github-private`, `.github`, `.apm`, `_apm`) does not apply there. See [Policy Files](../../enterprise/apm-policy/#where-it-lives). |
 
 ## External scanners
 
