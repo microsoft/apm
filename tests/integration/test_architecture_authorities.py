@@ -14,6 +14,35 @@ from types import ModuleType
 import pytest
 
 
+def test_agent_plugin_contract_has_single_owner() -> None:
+    """Native Agent Plugin interpretation must route through its loader."""
+    root = Path(__file__).parents[2]
+    loader = (root / "src/apm_cli/agent_plugins/loader.py").read_text(encoding="utf-8")
+    validation = (root / "src/apm_cli/models/validation.py").read_text(encoding="utf-8")
+    detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
+    legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/check_bundle_format_authority.sh").read_text(encoding="utf-8")
+    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+    validation_tree = ast.parse(validation)
+    agent_validation = next(
+        node
+        for node in validation_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_validate_agent_plugin"
+    )
+    agent_validation_source = ast.get_source_segment(validation, agent_validation) or ""
+
+    assert loader.count("def load_agent_plugin(") == 1
+    assert loader.count("def detect_agent_plugin(") == 1
+    assert "normalize_plugin_directory" not in agent_validation_source
+    assert "detect_agent_plugin(package_path)" in detection
+    assert "reject_agent_plugin_legacy_normalization(plugin_path)" in legacy
+    assert "Agent Plugin classification must route through its loader" in guard
+    assert "| Agent Plugins v1 contract interpretation and component discovery |" in architecture
+    assert "| Agent Plugin portable manifest authority |" in architecture
+
+
 def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     """Policy cache refs must be sanitized by the canonical writer."""
     root = Path(__file__).parents[2]

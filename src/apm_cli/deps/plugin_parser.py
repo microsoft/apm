@@ -182,6 +182,9 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     Returns:
         Path: Path to the generated apm.yml.
     """
+    from ..agent_plugins.loader import reject_agent_plugin_legacy_normalization
+
+    reject_agent_plugin_legacy_normalization(plugin_path)
     manifest: dict[str, Any] = {}
 
     if plugin_json_path is not None and plugin_json_path.exists():

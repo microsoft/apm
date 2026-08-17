@@ -8,10 +8,11 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..agent_plugins.validation import validate_plugin_manifest_file
+from ..agent_plugins import AgentPluginError, load_agent_plugin
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 
 if TYPE_CHECKING:
+    from ..agent_plugins import AgentPlugin
     from .apm_package import APMPackage
 
 
@@ -100,6 +101,7 @@ class ValidationResult:
     errors: list[str]
     warnings: list[str]
     package: APMPackage | None = None
+    agent_plugin: AgentPlugin | None = None
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
 
     def __init__(self):
@@ -107,6 +109,7 @@ class ValidationResult:
         self.errors = []
         self.warnings = []
         self.package = None
+        self.agent_plugin = None
         self.package_type = None
 
     def add_error(self, error: str) -> None:
@@ -356,6 +359,12 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     result.package_type = pkg_type
 
     if pkg_type == PackageType.INVALID:
+        if plugin_json_path is not None:
+            try:
+                load_agent_plugin(package_path)
+            except AgentPluginError as exc:
+                result.add_error(f"Failed to process Agent Plugin: {exc}")
+                return result
         # Two sub-cases of INVALID:
         # 1. apm.yml present but no .apm/ directory (or .apm is a file)
         # 2. Nothing recognizable at all
@@ -373,14 +382,6 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
                     "or add skills/<name>/SKILL.md for a skill bundle."
                 )
         else:
-            if plugin_json_path is not None:
-                plugin_result = validate_plugin_manifest_file(plugin_json_path)
-                for error in plugin_result.errors:
-                    result.add_error(error)
-                for warning in plugin_result.warnings:
-                    result.add_warning(warning)
-                if result.errors:
-                    return result
             result.add_error(
                 f"Not a valid APM package: no apm.yml, SKILL.md, hooks, or "
                 f"plugin structure found in {package_path.name}. "
@@ -394,7 +395,7 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     if result.package_type == PackageType.HOOK_PACKAGE:
         return _validate_hook_package(package_path, result)
 
-    # Handle Agent Plugins -- synthesize apm.yml from plugin.json and validate
+    # Handle Agent Plugins through their native immutable contract owner.
     if result.package_type == PackageType.AGENT_PLUGIN:
         return _validate_agent_plugin(package_path, plugin_json_path, result)
 
@@ -426,30 +427,24 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
 def _validate_agent_plugin(
     package_path: Path, plugin_json_path: Path | None, result: ValidationResult
 ) -> ValidationResult:
-    """Validate an Agent Plugin and synthesize apm.yml from plugin.json."""
-    from ..deps.plugin_parser import normalize_plugin_directory
-    from .apm_package import APMPackage
-
+    """Validate an Agent Plugin without entering Claude normalization."""
     if plugin_json_path is None:
         result.add_error("Agent Plugin package is missing plugin.json")
         return result
 
-    manifest_result = validate_plugin_manifest_file(plugin_json_path)
-    for warning in manifest_result.warnings:
-        result.add_warning(warning)
-    if not manifest_result.is_valid:
-        for error in manifest_result.errors:
-            result.add_error(error)
-        return result
-
     try:
-        apm_yml_path = normalize_plugin_directory(package_path, plugin_json_path)
-        package = APMPackage.from_apm_yml(apm_yml_path)
-    except Exception as exc:
+        plugin = load_agent_plugin(package_path)
+    except AgentPluginError as exc:
         result.add_error(f"Failed to process Agent Plugin: {exc}")
         return result
 
-    result.package = package
+    result.agent_plugin = plugin
+    for diagnostic in plugin.diagnostics:
+        message = f"{diagnostic.code}: {diagnostic.message}"
+        if diagnostic.severity.value == "error":
+            result.add_warning(message)
+        else:
+            result.add_warning(message)
     result.package_type = PackageType.AGENT_PLUGIN
     return result
 

@@ -71,6 +71,8 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Effective marketplace output path | marketplace/output_profiles.py (resolve_effective_output_path) | `src/apm_cli/marketplace/output_profiles.py` |
 | Bootstrap project-name validation and fallback | core/project_name.py (resolve_bootstrap_project_name) | `src/apm_cli/core/project_name.py` |
 | Marketplace raw-structure diagnostics | marketplace/models.py parser; validator.py consumes them | `src/apm_cli/marketplace/models.py`; `src/apm_cli/marketplace/validator.py` |
+| Agent Plugins v1 contract interpretation and component discovery | agent_plugins/loader.py (load_agent_plugin) | `src/apm_cli/agent_plugins/loader.py`; `src/apm_cli/agent_plugins/ir.py` |
+| Agent Plugin portable manifest authority | agent_plugins/loader.py (_load_apm_configuration) | `src/apm_cli/agent_plugins/loader.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.
