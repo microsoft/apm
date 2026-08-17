@@ -566,7 +566,10 @@ def _fetch_git(
     """Fetch marketplace.json from a generic git URL via subprocess + GitCache.
 
     Sparse-cone clones only the requested manifest path. AuthResolver owns
-    remote-aware credential selection and Git environment policy.
+    remote-aware credential selection and Git environment policy. ADO hosts
+    route the checkout through ``AuthResolver.try_with_fallback`` with the
+    repository path so path-scoped ``git credential fill`` can run after PAT
+    and bearer authentication fail.
     """
     _validate_ref(source.ref, source.name)
 
@@ -602,30 +605,48 @@ def _fetch_git(
             ),
         )
 
-    try:
-        auth_ctx = (
-            auth_resolver.resolve_for_remote(host_info.host, source.url, org, port=source.port)
-            if source.port is not None
-            else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
-        )
-        git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
-    except ValueError as exc:
-        logger.debug(
-            "Generic-git policy rejected '%s': %s",
-            source.name,
-            type(exc).__name__,
-        )
-        raise _rewrite_policy_error(exc) from exc
-
     cache = GitCache(get_cache_root(), refresh=False)
-    try:
-        # Sparse-cone clone -- only the marketplace.json directory tree is fetched.
-        checkout_dir = cache.get_checkout(
+
+    def _checkout(_token, git_env):
+        return cache.get_checkout(
             source.url,
             source.ref,
             env=git_env,
             sparse_paths=[file_path] if "/" in file_path else None,
         )
+
+    try:
+        if getattr(host_info, "kind", "") == "ado":
+            fallback_kwargs = {
+                "org": org,
+                "path": urlsplit(source.url).path.lstrip("/"),
+                "unauth_first": False,
+            }
+            if source.port is not None:
+                fallback_kwargs["port"] = source.port
+            checkout_dir = auth_resolver.try_with_fallback(
+                host_info.host,
+                _checkout,
+                **fallback_kwargs,
+            )
+        else:
+            try:
+                auth_ctx = (
+                    auth_resolver.resolve_for_remote(
+                        host_info.host, source.url, org, port=source.port
+                    )
+                    if source.port is not None
+                    else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
+                )
+                git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
+            except ValueError as exc:
+                logger.debug(
+                    "Generic-git policy rejected '%s': %s",
+                    source.name,
+                    type(exc).__name__,
+                )
+                raise _rewrite_policy_error(exc) from exc
+            checkout_dir = _checkout(None, git_env)
     except (GitUrlRewriteError, GitUrlRewriteProbeError) as exc:
         logger.debug("Generic-git rewrite policy rejected '%s'", source.name)
         raise _rewrite_policy_error(exc) from exc
