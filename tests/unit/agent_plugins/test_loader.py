@@ -172,7 +172,11 @@ def test_malformed_manifest_schema_after_probe_prefix_fails_closed(tmp_path: Pat
 def test_oversized_root_manifest_fails_closed(tmp_path: Path) -> None:
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "plugin.json").write_text(
-        '{"name":"legacy-or-native","padding":"' + ("x" * (5 * 1024 * 1024)) + '"}',
+        '{"$schema":"'
+        + PLUGIN_SCHEMA_ID
+        + '","name":"native","padding":"'
+        + ("x" * (5 * 1024 * 1024))
+        + '"}',
         encoding="utf-8",
     )
 
@@ -249,6 +253,38 @@ def test_claude_normalizer_preserves_explicit_legacy_plugin_behavior(tmp_path: P
 
     assert apm_yml == tmp_path / "apm.yml"
     assert apm_yml.is_file()
+
+
+def test_claude_normalizer_preserves_symlinked_schema_less_legacy_manifest(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path.parent / f"{tmp_path.name}-legacy.json"
+    target.write_text(
+        json.dumps({"name": "linked-legacy", "version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "plugin.json"
+    manifest.symlink_to(target)
+
+    apm_yml = normalize_plugin_directory(tmp_path, manifest)
+
+    assert apm_yml.is_file()
+    assert "name: linked-legacy" in apm_yml.read_text(encoding="utf-8")
+
+
+def test_claude_normalizer_preserves_oversized_schema_less_legacy_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "plugin.json"
+    manifest.write_text(
+        '{"name":"legacy","padding":"' + ("x" * (5 * 1024 * 1024)) + '"}',
+        encoding="utf-8",
+    )
+
+    apm_yml = normalize_plugin_directory(tmp_path, manifest)
+
+    assert apm_yml.is_file()
+    assert f"name: {tmp_path.name}" in apm_yml.read_text(encoding="utf-8")
 
 
 def test_generic_credential_reference_is_not_portable_auth(tmp_path: Path) -> None:
@@ -331,3 +367,90 @@ def test_non_portable_mcp_placeholders_are_rejected(
 
     assert plugin.components.mcp_servers == ()
     assert message in plugin.diagnostics[0].message
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("command", "./../outside"),
+        ("cwd", "./../outside"),
+        ("cwd", "${PLUGIN_ROOT}/../outside"),
+        ("cwd", "${PLUGIN_DATA}/../outside"),
+        ("command", "./..\\outside"),
+        ("cwd", "./..\\outside"),
+        ("cwd", "${PLUGIN_ROOT}/..\\outside"),
+        ("cwd", "${PLUGIN_DATA}/..\\outside"),
+    ],
+)
+def test_mcp_paths_cannot_escape_their_permitted_root(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    _write_manifest(tmp_path)
+    server = {"type": "stdio", "command": "tool", field: value}
+    _write_mcp(tmp_path, {"bad": server})
+
+    plugin = load_agent_plugin(tmp_path)
+
+    assert plugin.components.mcp_servers == ()
+    assert "escape" in plugin.diagnostics[0].message
+
+
+@pytest.mark.parametrize("field", ["command", "cwd"])
+def test_mcp_plugin_relative_paths_cannot_resolve_through_escaping_symlink(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    _write_manifest(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    server = {"type": "stdio", "command": "tool", field: "./linked/server"}
+    _write_mcp(tmp_path, {"bad": server})
+
+    plugin = load_agent_plugin(tmp_path)
+
+    assert plugin.components.mcp_servers == ()
+    assert "escape" in plugin.diagnostics[0].message
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x1f", "\r", "\n", "\x7f"])
+def test_mcp_http_header_values_reject_prohibited_controls(
+    tmp_path: Path,
+    control: str,
+) -> None:
+    _write_manifest(tmp_path)
+    _write_mcp(
+        tmp_path,
+        {
+            "bad": {
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+                "headers": {"X-Value": f"before{control}after"},
+            }
+        },
+    )
+
+    plugin = load_agent_plugin(tmp_path)
+
+    assert plugin.components.mcp_servers == ()
+    assert "HTTP field-value control character" in plugin.diagnostics[0].message
+
+
+def test_mcp_http_header_values_allow_horizontal_tab(tmp_path: Path) -> None:
+    _write_manifest(tmp_path)
+    _write_mcp(
+        tmp_path,
+        {
+            "valid": {
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+                "headers": {"X-Value": "before\tafter"},
+            }
+        },
+    )
+
+    plugin = load_agent_plugin(tmp_path)
+
+    assert tuple(server.name for server in plugin.components.mcp_servers) == ("valid",)

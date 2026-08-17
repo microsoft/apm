@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
@@ -223,12 +223,14 @@ def validate_mcp_config_file(
     *,
     expected_plugin_schema_id: str = PLUGIN_SCHEMA_ID,
     isolate_invalid_servers: bool = False,
+    plugin_root: Path | None = None,
 ) -> ValidationResult:
     """Validate an mcp.json file from disk."""
     return validate_mcp_config_document(
         read_json_document(path),
         expected_plugin_schema_id=expected_plugin_schema_id,
         isolate_invalid_servers=isolate_invalid_servers,
+        plugin_root=plugin_root if plugin_root is not None else path.parent,
     )
 
 
@@ -341,6 +343,7 @@ def validate_mcp_config_document(
     *,
     expected_plugin_schema_id: str = PLUGIN_SCHEMA_ID,
     isolate_invalid_servers: bool = False,
+    plugin_root: Path | None = None,
 ) -> ValidationResult:
     """Validate an mcp.json document locally."""
     result = ValidationResult(schema_id=MCP_SCHEMA_ID)
@@ -366,7 +369,12 @@ def validate_mcp_config_document(
     normalized_servers: dict[str, Any] = {}
     for server_name, server_value in mcp_servers.items():
         server_result = ValidationResult(schema_id=result.schema_id)
-        validated = _validate_mcp_server(server_name, server_value, server_result)
+        validated = _validate_mcp_server(
+            server_name,
+            server_value,
+            server_result,
+            plugin_root=plugin_root,
+        )
         if server_result.errors:
             if isolate_invalid_servers:
                 result.warnings.extend(f"{error}; server ignored" for error in server_result.errors)
@@ -475,7 +483,11 @@ def _copy_extensions_field(
 
 
 def _validate_mcp_server(
-    server_name: str, server_value: object, result: ValidationResult
+    server_name: str,
+    server_value: object,
+    result: ValidationResult,
+    *,
+    plugin_root: Path | None,
 ) -> dict[str, Any] | None:
     if not isinstance(server_value, dict):
         result.add_error(f"mcpServers.{server_name} must be an object")
@@ -500,12 +512,21 @@ def _validate_mcp_server(
             result.add_error(f"mcpServers.{server_name} contains an unknown field: {key}")
 
     if server_type == "stdio":
-        return _validate_stdio_server(server_name, server_value, result)
+        return _validate_stdio_server(
+            server_name,
+            server_value,
+            result,
+            plugin_root=plugin_root,
+        )
     return _validate_http_server(server_name, server_value, result, server_type=server_type)
 
 
 def _validate_stdio_server(
-    server_name: str, server_value: dict[str, Any], result: ValidationResult
+    server_name: str,
+    server_value: dict[str, Any],
+    result: ValidationResult,
+    *,
+    plugin_root: Path | None,
 ) -> dict[str, Any] | None:
     command = server_value.get("command")
     if not isinstance(command, str) or not command:
@@ -513,6 +534,9 @@ def _validate_stdio_server(
         return None
     if not (_BARE_COMMAND_RE.fullmatch(command) or command.startswith("./")):
         result.add_error(f"mcpServers.{server_name}.command must be a bare token or a ./ path")
+        return None
+    if command.startswith("./") and _plugin_relative_path_escapes(command[2:], plugin_root):
+        result.add_error(f"mcpServers.{server_name}.command escapes the plugin root")
         return None
 
     normalized: dict[str, Any] = {"type": "stdio", "command": command}
@@ -546,6 +570,10 @@ def _validate_stdio_server(
             result.add_error(
                 f"mcpServers.{server_name}.cwd must be a ./, ${'{'}PLUGIN_ROOT{'}'}, or ${'{'}PLUGIN_DATA{'}'} path"
             )
+            return None
+        cwd_error = _cwd_containment_error(cwd, plugin_root)
+        if cwd_error is not None:
+            result.add_error(f"mcpServers.{server_name}.cwd {cwd_error}")
             return None
         normalized["cwd"] = cwd
 
@@ -661,14 +689,21 @@ def _validate_http_server(
                     f"mcpServers.{server_name}.headers contains a duplicate name: {key}"
                 )
                 return None
+            value_error: str | None = None
             if not isinstance(value, str):
-                result.add_error(f"mcpServers.{server_name}.headers.{key} must be a string")
-                return None
-            if _contains_plugin_variable(value):
-                result.add_error(
+                value_error = f"mcpServers.{server_name}.headers.{key} must be a string"
+            elif _contains_prohibited_header_value_char(value):
+                value_error = (
+                    f"mcpServers.{server_name}.headers.{key} contains a prohibited "
+                    "HTTP field-value control character"
+                )
+            elif _contains_plugin_variable(value):
+                value_error = (
                     f"mcpServers.{server_name}.headers.{key} must be literal; "
                     "placeholder expansion is not defined"
                 )
+            if value_error is not None:
+                result.add_error(value_error)
                 return None
             seen_headers.add(lowered)
             cleaned_headers[key] = value
@@ -681,6 +716,57 @@ def _validate_http_server(
             return None
 
     return normalized
+
+
+def _cwd_containment_error(value: str, plugin_root: Path | None) -> str | None:
+    if value.startswith("./"):
+        escaped = _plugin_relative_path_escapes(value[2:], plugin_root)
+    elif value == "${PLUGIN_ROOT}":
+        escaped = False
+    elif value.startswith("${PLUGIN_ROOT}/"):
+        escaped = _plugin_relative_path_escapes(
+            value.removeprefix("${PLUGIN_ROOT}/"),
+            plugin_root,
+        )
+    elif value == "${PLUGIN_DATA}":
+        escaped = False
+    else:
+        escaped = _relative_path_escapes(value.removeprefix("${PLUGIN_DATA}/"))
+    return "escapes its permitted root" if escaped else None
+
+
+def _plugin_relative_path_escapes(value: str, plugin_root: Path | None) -> bool:
+    if _relative_path_escapes(value):
+        return True
+    if plugin_root is None:
+        return False
+    relative = Path(*PurePosixPath(value).parts)
+    try:
+        (plugin_root / relative).resolve().relative_to(plugin_root.resolve())
+    except (OSError, ValueError):
+        return True
+    return False
+
+
+def _relative_path_escapes(value: str) -> bool:
+    portable_path = PurePosixPath(value.replace("\\", "/"))
+    if portable_path.is_absolute():
+        return True
+    depth = 0
+    for part in portable_path.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if depth == 0:
+                return True
+            depth -= 1
+        else:
+            depth += 1
+    return False
+
+
+def _contains_prohibited_header_value_char(value: str) -> bool:
+    return any((ord(char) < 0x20 and char != "\t") or ord(char) == 0x7F for char in value)
 
 
 def _is_valid_http_url(url: str) -> bool:
