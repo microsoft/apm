@@ -71,7 +71,6 @@ _APM_CONFIGURATION_FIELDS = frozenset(
     }
 )
 _SCHEMA_PROBE_RE = re.compile(rb'"\$schema"\s*:\s*"(https://agent-plugins\.org/schemas/[^"]+)"')
-_UNREADABLE_SCHEMA_ID = "<unreadable-root-plugin-json>"
 
 
 def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
@@ -81,7 +80,9 @@ def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
         return None
     preflight_error = _manifest_preflight_error(manifest_path)
     if preflight_error is not None:
-        schema_id = _probe_agent_plugin_schema(manifest_path) or _UNREADABLE_SCHEMA_ID
+        schema_id = _probe_agent_plugin_schema(manifest_path, package_root)
+        if schema_id is None:
+            return None
         return AgentPluginDetection(
             manifest_path=manifest_path,
             schema_id=schema_id,
@@ -90,7 +91,7 @@ def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
     try:
         document = read_json_document(manifest_path)
     except (OSError, ValueError) as exc:
-        schema_id = _probe_agent_plugin_schema(manifest_path)
+        schema_id = _probe_agent_plugin_schema(manifest_path, package_root)
         if schema_id is None:
             return None
         return AgentPluginDetection(
@@ -433,6 +434,7 @@ def _discover_mcp_servers(
             mcp_path,
             expected_plugin_schema_id=PLUGIN_SCHEMA_ID,
             isolate_invalid_servers=True,
+            plugin_root=root,
         )
     except (OSError, ValueError) as exc:
         return (), [
@@ -548,11 +550,18 @@ def _has_exact_entry(parent: Path, name: str) -> bool:
         return False
 
 
-def _probe_agent_plugin_schema(path: Path) -> str | None:
-    if path.is_symlink() or not path.is_file():
+def _probe_agent_plugin_schema(path: Path, package_root: Path) -> str | None:
+    probe_path = path
+    if path.is_symlink():
+        try:
+            probe_path = path.resolve(strict=True)
+            probe_path.relative_to(package_root.resolve())
+        except (OSError, ValueError):
+            return None
+    if not probe_path.is_file():
         return None
     try:
-        with path.open("rb") as handle:
+        with probe_path.open("rb") as handle:
             prefix = handle.read(MAX_JSON_BYTES + 1)
     except OSError:
         return None
