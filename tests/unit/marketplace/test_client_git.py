@@ -74,9 +74,7 @@ def test_fetch_git_calls_gitcache_with_sparse_path(
     assert call_kwargs["env"] == {"GIT_TERMINAL_PROMPT": "0"}
 
 
-def test_fetch_git_ado_url_routes_via_subprocess(
-    tmp_path: Path, fake_host_info, fake_auth_resolver
-) -> None:
+def test_fetch_git_ado_url_routes_via_auth_fallback(tmp_path: Path, fake_auth_resolver) -> None:
     """``_fetch_git`` (the ADO REST fallback path) still clones via ``GitCache``.
 
     ADO marketplace reads now prefer ``_fetch_ado`` (REST items API); this test
@@ -89,11 +87,12 @@ def test_fetch_git_ado_url_routes_via_subprocess(
 
     gitcache_mock = MagicMock()
     gitcache_mock.get_checkout.return_value = str(checkout)
-    fake_auth_resolver.resolve.return_value = SimpleNamespace(
-        git_env={
-            "GIT_CONFIG_KEY_0": "http.extraheader",
-            "GIT_CONFIG_VALUE_0": "AUTHORIZATION: bearer xxx",
-        }
+    auth_env = {
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "AUTHORIZATION: bearer xxx",
+    }
+    fake_auth_resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: (
+        operation("bearer-token", auth_env)
     )
 
     with (
@@ -103,11 +102,13 @@ def test_fetch_git_ado_url_routes_via_subprocess(
         result = _fetch_git(
             _git_source("https://dev.azure.com/org/project/_git/repo"),
             "marketplace.json",
-            host_info=SimpleNamespace(host="dev.azure.com"),
+            host_info=SimpleNamespace(host="dev.azure.com", kind="ado"),
             auth_resolver=fake_auth_resolver,
         )
 
     assert result == {}
+    _, fallback_kwargs = fake_auth_resolver.try_with_fallback.call_args
+    assert fallback_kwargs["path"] == "org/project/_git/repo"
     env = gitcache_mock.get_checkout.call_args.kwargs["env"]
     assert "GIT_CONFIG_VALUE_0" in env
 

@@ -749,6 +749,30 @@ class AuthResolver:
                 )
             raise exc
 
+        def _try_ado_credential_fallback(exc: Exception) -> T:
+            """Retry ADO with a repository-scoped Git credential helper."""
+            if not self._allow_external_fallback:
+                raise exc
+            path_suffix = f" (path={path})" if path else ""
+            _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
+            credential = self._token_manager.resolve_credential_from_git(
+                host_info.host,
+                port=host_info.port,
+                path=path,
+            )
+            if not credential:
+                raise exc
+            _log(f"git credential fill resolved a credential for {host_info.display_name}")
+            return operation(
+                credential,
+                self._build_git_env(
+                    credential,
+                    scheme="basic",
+                    host_kind="ado",
+                    base_env=base_env,
+                ),
+            )
+
         # Hosts that never have public repos -> auth-only
         if host_info.kind == "ghe_cloud":
             ctx = _auth_context()
@@ -779,7 +803,11 @@ class AuthResolver:
                     host_info.display_name,
                     exc,
                 )
-                return _try_ado_bearer_fallback(exc)
+                try:
+                    result = _try_ado_bearer_fallback(exc)
+                except Exception as auth_exc:
+                    result = _try_ado_credential_fallback(auth_exc)
+                return result
 
         if unauth_first:
             # Validation path: save rate limits, EMU-safe
