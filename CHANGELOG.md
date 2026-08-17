@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consent over marketplace-plugin `bin/` executable deployment. `--trust-bin`
   approves deployment silently; `--no-trust-bin` skips `bin/` even when policy
   permits it. The `allowExecutables` policy gate still takes precedence. (closes #1620)
+- `APM_GITLAB_POLICY_ROOT_GROUP` centralizes GitLab org-policy discovery under one root group on self-managed instances, so a company with many independent root groups can share a single `apm-policy` project instead of needing one per group; ignored on gitlab.com. (#2605)
 
 ### Fixed
 

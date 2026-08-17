@@ -94,6 +94,26 @@ def _gitlab_policy_repo_candidates() -> tuple[str, ...]:
     return (os.environ.get("APM_GITLAB_POLICY_REPO", "").strip() or _GITLAB_DEFAULT_POLICY_REPO,)
 
 
+def _gitlab_policy_root_group(host: str, org: str) -> str:
+    """Return the effective GitLab root group for policy discovery.
+
+    Self-managed GitLab instances often host many independent root groups
+    (departments, teams) under one company-owned instance -- unlike
+    gitlab.com, where each root namespace is an independent tenant and no
+    cross-tenant override would make sense. ``APM_GITLAB_POLICY_ROOT_GROUP``
+    lets a self-managed instance centralize org policy under one designated
+    root group instead of requiring an ``apm-policy`` project per root
+    group. Distinguished from gitlab.com by exact hostname match, per
+    ``is_gitlab_hostname``'s own cloud/self-managed split: ignored on
+    gitlab.com, where *org* (the project's own root namespace, extracted
+    from its git remote) is always used unchanged.
+    """
+    if host == "gitlab.com":
+        return org
+    override = os.environ.get("APM_GITLAB_POLICY_ROOT_GROUP", "").strip()
+    return override or org
+
+
 def _policy_repo_candidates(host: str) -> tuple[str, ...]:
     """Return candidate policy repo names for *host* in precedence order.
 
@@ -895,6 +915,8 @@ def _auto_discover(
     candidates = _policy_repo_candidates(host)
     is_ado = is_azure_devops_hostname(host)
     is_gitlab = is_gitlab_hostname(host)
+    if is_gitlab:
+        org = _gitlab_policy_root_group(host, org)
 
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
