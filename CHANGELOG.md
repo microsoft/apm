@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalid GitLab project paths. A missing policy project is now a clean
   "no policy" outcome instead of surfacing a fetch-failure warning on every
   `apm install` / `apm audit`. Override the project name with
-  `APM_GITLAB_POLICY_REPO`. (closes #2566)
+  `APM_GITLAB_POLICY_REPO`. (#2605)
 - Windows binary is now Authenticode-signed in the release workflow, eliminating
   the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
   PyInstaller bundles. (#2435)
