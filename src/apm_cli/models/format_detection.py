@@ -114,8 +114,8 @@ class ClaudePluginFormatEvidence:
 class AgentPluginFormatEvidence:
     """File-system signals gathered by ``AgentPluginDetector``."""
 
-    plugin_json_path: Path | None
-    schema_id: str | None
+    plugin_json_path: Path
+    schema_id: str
     supported: bool
 
 
@@ -285,35 +285,18 @@ class ClaudePluginDetector:
 
 
 class AgentPluginDetector:
-    """Detects Agent Plugin root-manifest signals before Claude fallbacks."""
+    """Delegates native Agent Plugin classification to the contract owner."""
 
     def detect(self, package_path: Path) -> AgentPluginFormatEvidence | None:
-        plugin_json_path = package_path / "plugin.json"
-        if not plugin_json_path.exists() and not plugin_json_path.is_symlink():
-            return None
-        if plugin_json_path.is_symlink():
-            return AgentPluginFormatEvidence(
-                plugin_json_path=plugin_json_path, schema_id=None, supported=False
-            )
-        try:
-            from ..agent_plugins.io import read_json_document
+        from ..agent_plugins.loader import detect_agent_plugin
 
-            document = read_json_document(plugin_json_path)
-        except (OSError, ValueError):
-            return None
-        if not isinstance(document, dict):
-            return None
-        schema_id = document.get("$schema")
-        if not isinstance(schema_id, str):
-            return None
-        from ..agent_plugins.validation import is_agent_plugin_schema_id, supports_plugin_schema_id
-
-        if not is_agent_plugin_schema_id(schema_id):
+        detection = detect_agent_plugin(package_path)
+        if detection is None:
             return None
         return AgentPluginFormatEvidence(
-            plugin_json_path=plugin_json_path,
-            schema_id=schema_id,
-            supported=supports_plugin_schema_id(schema_id),
+            plugin_json_path=detection.manifest_path,
+            schema_id=detection.schema_id,
+            supported=detection.error is None,
         )
 
 

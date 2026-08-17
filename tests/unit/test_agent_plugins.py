@@ -9,11 +9,16 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from apm_cli.agent_plugins import (
+    AGENT_PLUGINS_SITE_COMMIT,
+    AGENT_PLUGINS_SPEC_COMMIT,
+    AGENT_PLUGINS_SPEC_SHA256,
     AGENT_PLUGINS_VERSION,
     COM_MICROSOFT_APM_NAMESPACE,
     COM_MICROSOFT_APM_SCHEMA_VERSION,
     MCP_SCHEMA_ID,
+    MCP_SCHEMA_SHA256,
     PLUGIN_SCHEMA_ID,
+    PLUGIN_SCHEMA_SHA256,
     read_json_document,
     supports_mcp_schema_id,
     supports_plugin_schema_id,
@@ -51,6 +56,19 @@ class TestVendoredSchemas:
 
     def test_constants_match_v1_contract(self) -> None:
         assert AGENT_PLUGINS_VERSION == "1.0.0"
+        assert AGENT_PLUGINS_SITE_COMMIT == "b946d6f331055fe83bc675f213e49b53d9371d20"
+        assert AGENT_PLUGINS_SPEC_COMMIT == "b78a4f162d92c4b09ee205a11f59a6187926d947"
+        assert (
+            AGENT_PLUGINS_SPEC_SHA256
+            == "367152c5f3d619f7d8bef05ce528b0ed810ad95cff72a2f40d85c0ef52b383d1"
+        )
+        assert (
+            PLUGIN_SCHEMA_SHA256
+            == "0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883"
+        )
+        assert (
+            MCP_SCHEMA_SHA256 == "6539175bfcdf43085855183e86da40ea94b166547a72b47ae9a0a390516d3acb"
+        )
         assert COM_MICROSOFT_APM_NAMESPACE == "com.microsoft.apm"
         assert COM_MICROSOFT_APM_SCHEMA_VERSION == "1"
         assert PLUGIN_SCHEMA_ID.endswith("/plugin.schema.json")

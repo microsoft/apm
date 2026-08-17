@@ -91,7 +91,8 @@ class TestAgentPluginDetector:
 
     def test_returns_evidence_when_agent_schema_present(self, tmp_path: Path) -> None:
         (tmp_path / "plugin.json").write_text(
-            '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"}'
+            '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",'
+            '"name":"valid-plugin"}'
         )
         ev = AgentPluginDetector().detect(tmp_path)
         assert isinstance(ev, AgentPluginFormatEvidence)
@@ -102,6 +103,18 @@ class TestAgentPluginDetector:
             '{"$schema":"https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"}'
         )
         ev = AgentPluginDetector().detect(tmp_path)
+        assert isinstance(ev, AgentPluginFormatEvidence)
+        assert ev.supported is False
+
+    def test_manifest_authority_conflict_is_invalid_evidence(self, tmp_path: Path) -> None:
+        (tmp_path / "plugin.json").write_text(
+            '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",'
+            '"name":"native-plugin","version":"1.0.0"}'
+        )
+        (tmp_path / "apm.yml").write_text("name: other\nversion: 1.0.0\n")
+
+        ev = AgentPluginDetector().detect(tmp_path)
+
         assert isinstance(ev, AgentPluginFormatEvidence)
         assert ev.supported is False
 

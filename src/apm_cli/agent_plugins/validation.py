@@ -50,6 +50,8 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _VARIABLE_VALUE_RE = re.compile(r"^\$\{[^{}]+\}$")
+_VARIABLE_REFERENCE_RE = re.compile(r"\$\{([^{}]+)\}")
+_PORTABLE_VARIABLE_NAMES = frozenset({"PLUGIN_ROOT", "PLUGIN_DATA"})
 _SECRET_ARG_RE = re.compile(
     r"^--?(?:authorization|api[-_]?key|access[-_]?key|token|secret|password|"
     r"credential|cookie|private[-_]?key|database[-_]?url)(?:=(.*))?$",
@@ -163,6 +165,52 @@ def url_contains_literal_secret(value: object) -> bool:
         _SECRET_KEY_RE.search(key) and not _VARIABLE_VALUE_RE.fullmatch(query_value)
         for key, query_value in parse_qsl(parsed.query, keep_blank_values=True)
     )
+
+
+def _agent_plugin_contains_secret_fields(values: object) -> bool:
+    """Return whether an Agent Plugin mapping declares a secret-shaped field."""
+    return isinstance(values, dict) and any(_SECRET_KEY_RE.search(str(key)) for key in values)
+
+
+def _agent_plugin_args_contain_secret(values: object) -> bool:
+    """Return whether Agent Plugin argv appears to carry a credential."""
+    if not isinstance(values, list):
+        return False
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        if _SECRET_ARG_RE.fullmatch(value) is not None:
+            return True
+        if _SECRET_KEY_RE.search(value):
+            return True
+        if re.search(r"\bbearer\s+[^\s]+", value, re.IGNORECASE):
+            return True
+    return False
+
+
+def _agent_plugin_url_contains_secret(value: object) -> bool:
+    """Return whether a literal Agent Plugin URL carries credential material."""
+    if not isinstance(value, str):
+        return False
+    parsed = urlparse(value)
+    return bool(
+        parsed.username
+        or parsed.password
+        or any(_SECRET_KEY_RE.search(key) for key, _ in parse_qsl(parsed.query))
+    )
+
+
+def _contains_unsupported_plugin_variable(value: str) -> bool:
+    """Return whether a value references a non-portable variable name."""
+    return any(
+        match.group(1) not in _PORTABLE_VARIABLE_NAMES
+        for match in _VARIABLE_REFERENCE_RE.finditer(value)
+    )
+
+
+def _contains_plugin_variable(value: str) -> bool:
+    """Return whether a literal-only field contains any plugin placeholder."""
+    return _VARIABLE_REFERENCE_RE.search(value) is not None
 
 
 def validate_plugin_manifest_file(path: Path) -> ValidationResult:
@@ -324,7 +372,7 @@ def validate_mcp_config_document(
                 result.warnings.extend(f"{error}; server ignored" for error in server_result.errors)
             else:
                 result.errors.extend(server_result.errors)
-        if validated is not None:
+        if validated is not None and not server_result.errors:
             normalized_servers[server_name] = validated
 
     result.normalized = {"$schema": result.schema_id, "mcpServers": normalized_servers}
@@ -469,54 +517,30 @@ def _validate_stdio_server(
 
     normalized: dict[str, Any] = {"type": "stdio", "command": command}
 
-    args = server_value.get("args")
+    args, args_error = _normalize_stdio_args(server_name, server_value.get("args"))
+    if args_error is not None:
+        result.add_error(args_error)
+        return None
     if args is not None:
-        args_error: str | None = None
-        if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
-            args_error = f"mcpServers.{server_name}.args must be an array of strings"
-        elif args_contain_literal_secret(args):
-            args_error = (
-                f"mcpServers.{server_name}.args contains a literal secret; use a ${{VAR}} reference"
-            )
-        if args_error is not None:
-            result.add_error(args_error)
-            return None
-        normalized["args"] = list(args)
+        normalized["args"] = args
 
-    env = server_value.get("env")
+    env, env_error = _normalize_stdio_env(server_name, server_value.get("env"))
+    if env_error is not None:
+        result.add_error(env_error)
+        return None
     if env is not None:
-        if not isinstance(env, dict):
-            result.add_error(f"mcpServers.{server_name}.env must be an object")
-            return None
-        cleaned_env: dict[str, str] = {}
-        seen_names: set[str] = set()
-        for key, value in env.items():
-            if not isinstance(key, str):
-                result.add_error(f"mcpServers.{server_name}.env keys must be strings")
-                return None
-            if key.upper() in _RESERVED_ENV_NAMES:
-                result.add_error(f"mcpServers.{server_name}.env cannot define reserved name: {key}")
-                return None
-            lowered = key.lower()
-            if lowered in seen_names:
-                result.add_error(f"mcpServers.{server_name}.env contains a duplicate name: {key}")
-                return None
-            if not isinstance(value, str):
-                result.add_error(f"mcpServers.{server_name}.env.{key} must be a string")
-                return None
-            seen_names.add(lowered)
-            cleaned_env[key] = value
-        normalized["env"] = cleaned_env
-        if contains_literal_secret_fields(cleaned_env):
-            result.add_error(
-                f"mcpServers.{server_name}.env contains a literal secret; use a ${{VAR}} reference"
-            )
-            return None
+        normalized["env"] = env
 
     cwd = server_value.get("cwd")
     if cwd is not None:
         if not isinstance(cwd, str):
             result.add_error(f"mcpServers.{server_name}.cwd must be a string")
+            return None
+        if _contains_unsupported_plugin_variable(cwd):
+            result.add_error(
+                f"mcpServers.{server_name}.cwd contains an unsupported placeholder; "
+                "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable"
+            )
             return None
         if not _PLUGIN_RELATIVE_CWD_RE.fullmatch(cwd):
             result.add_error(
@@ -526,6 +550,66 @@ def _validate_stdio_server(
         normalized["cwd"] = cwd
 
     return normalized
+
+
+def _normalize_stdio_args(
+    server_name: str,
+    value: object,
+) -> tuple[list[str] | None, str | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None, f"mcpServers.{server_name}.args must be an array of strings"
+    if _agent_plugin_args_contain_secret(value):
+        return (
+            None,
+            f"mcpServers.{server_name}.args contains a literal secret or credential material; "
+            "Agent Plugins defines no portable credential references",
+        )
+    if any(_contains_unsupported_plugin_variable(item) for item in value):
+        return (
+            None,
+            f"mcpServers.{server_name}.args contains an unsupported placeholder; "
+            "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
+        )
+    return list(value), None
+
+
+def _normalize_stdio_env(
+    server_name: str,
+    value: object,
+) -> tuple[dict[str, str] | None, str | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, dict):
+        return None, f"mcpServers.{server_name}.env must be an object"
+    if _agent_plugin_contains_secret_fields(value):
+        return (
+            None,
+            f"mcpServers.{server_name}.env contains credential material; "
+            "Agent Plugins defines no portable credential references",
+        )
+    cleaned: dict[str, str] = {}
+    seen_names: set[str] = set()
+    for key, item in value.items():
+        if not isinstance(key, str):
+            return None, f"mcpServers.{server_name}.env keys must be strings"
+        if key.upper() in _RESERVED_ENV_NAMES:
+            return None, f"mcpServers.{server_name}.env cannot define reserved name: {key}"
+        lowered = key.lower()
+        if lowered in seen_names:
+            return None, f"mcpServers.{server_name}.env contains a duplicate name: {key}"
+        if not isinstance(item, str):
+            return None, f"mcpServers.{server_name}.env.{key} must be a string"
+        if _contains_unsupported_plugin_variable(item):
+            return (
+                None,
+                f"mcpServers.{server_name}.env.{key} contains an unsupported placeholder; "
+                "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
+            )
+        seen_names.add(lowered)
+        cleaned[key] = item
+    return cleaned, None
 
 
 def _validate_http_server(
@@ -542,9 +626,15 @@ def _validate_http_server(
     if not _is_valid_http_url(url):
         result.add_error(f"mcpServers.{server_name}.url must be a valid http or https URL")
         return None
-    if url_contains_literal_secret(url):
+    if _contains_plugin_variable(url):
         result.add_error(
-            f"mcpServers.{server_name}.url contains a literal secret; use a ${{VAR}} reference"
+            f"mcpServers.{server_name}.url must be literal; placeholder expansion is not defined"
+        )
+        return None
+    if _agent_plugin_url_contains_secret(url):
+        result.add_error(
+            f"mcpServers.{server_name}.url contains credential material; "
+            "Agent Plugins URLs are literal and authentication is client-managed"
         )
         return None
 
@@ -574,13 +664,19 @@ def _validate_http_server(
             if not isinstance(value, str):
                 result.add_error(f"mcpServers.{server_name}.headers.{key} must be a string")
                 return None
+            if _contains_plugin_variable(value):
+                result.add_error(
+                    f"mcpServers.{server_name}.headers.{key} must be literal; "
+                    "placeholder expansion is not defined"
+                )
+                return None
             seen_headers.add(lowered)
             cleaned_headers[key] = value
         normalized["headers"] = cleaned_headers
-        if contains_literal_secret_fields(cleaned_headers):
+        if _agent_plugin_contains_secret_fields(cleaned_headers):
             result.add_error(
-                f"mcpServers.{server_name}.headers contains a literal secret; "
-                "use a ${VAR} reference"
+                f"mcpServers.{server_name}.headers contains credential material; "
+                "Agent Plugins headers are literal and authentication is client-managed"
             )
             return None
 
