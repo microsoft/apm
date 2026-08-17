@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole units and blocked before deployment until a native client lifecycle
   qualifies, never projected as legacy primitives. (by @sergio-sisternes-epam;
   closes #2522) (#2654)
+- `APM_GITLAB_POLICY_ROOT_GROUP` centralizes GitLab org-policy discovery under one root group on self-managed instances, so a company with many independent root groups can share a single `apm-policy` project instead of needing one per group; ignored on gitlab.com. (#2605)
 
 ### Fixed
 

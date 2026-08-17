@@ -32,6 +32,7 @@ from apm_cli.policy.discovery import (
     _fetch_github_contents,
     _fetch_gitlab_contents,
     _get_cache_dir,
+    _gitlab_policy_root_group,
     _load_from_file,
     _parse_remote_url,
     _policy_repo_candidates,
@@ -1061,6 +1062,53 @@ class TestAutoDiscover(unittest.TestCase):
 
     @patch("apm_cli.policy.discovery._fetch_from_gitlab_repo")
     @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_self_managed_root_group_override_reaches_fetch(
+        self, mock_extract, mock_gitlab_fetch
+    ):
+        """A project under team-a's own remote still resolves to the
+        instance-wide policy root group when APM_GITLAB_POLICY_ROOT_GROUP is
+        set, so many independent root groups can share one apm-policy
+        project instead of needing one apiece."""
+        mock_extract.return_value = ("team-a", "gitlab.example.test", None)
+        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GITLAB_HOST": "gitlab.example.test",
+                    "APM_GITLAB_POLICY_ROOT_GROUP": "platform-governance",
+                },
+                clear=False,
+            ),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "platform-governance")
+
+    @patch("apm_cli.policy.discovery._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_cloud_ignores_root_group_override(self, mock_extract, mock_gitlab_fetch):
+        """gitlab.com is multi-tenant -- the self-managed override must not
+        leak into cloud discovery even if the env var happens to be set."""
+        mock_extract.return_value = ("team-a", "gitlab.com", None)
+        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with (
+            patch.dict(
+                os.environ,
+                {"APM_GITLAB_POLICY_ROOT_GROUP": "platform-governance"},
+                clear=False,
+            ),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "team-a")
+
+    @patch("apm_cli.policy.discovery._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_gitlab_absent_is_clean_no_op(self, mock_extract, mock_gitlab_fetch):
         """No apm-policy project on GitLab -> absent, not a fetch-failure warning."""
         mock_extract.return_value = ("contoso", "gitlab.com", None)
@@ -1114,6 +1162,41 @@ class TestPolicyRepoCandidates(unittest.TestCase):
         with patch.dict(os.environ, {"APM_GITLAB_POLICY_REPO": "org-policy"}, clear=False):
             result = _policy_repo_candidates("gitlab.com")
         self.assertEqual(result, ("org-policy",))
+
+
+class TestGitlabPolicyRootGroup(unittest.TestCase):
+    """Test _gitlab_policy_root_group: cloud vs self-managed root-group override."""
+
+    def test_gitlab_com_ignores_override(self):
+        """Cloud gitlab.com is a multi-tenant host -- no cross-tenant override."""
+        with patch.dict(os.environ, {"APM_GITLAB_POLICY_ROOT_GROUP": "central"}, clear=False):
+            result = _gitlab_policy_root_group("gitlab.com", "team-a")
+        self.assertEqual(result, "team-a")
+
+    def test_gitlab_com_without_override_returns_org_unchanged(self):
+        result = _gitlab_policy_root_group("gitlab.com", "team-a")
+        self.assertEqual(result, "team-a")
+
+    def test_self_managed_without_override_returns_org_unchanged(self):
+        env = {}
+        with patch.dict(os.environ, env, clear=True):
+            result = _gitlab_policy_root_group("gitlab.example.com", "team-a")
+        self.assertEqual(result, "team-a")
+
+    def test_self_managed_with_override_centralizes_on_configured_group(self):
+        """Self-managed instances often host many independent root groups
+        (departments/teams); the override lets them all share one policy
+        root group instead of requiring an apm-policy project per group."""
+        env = {"APM_GITLAB_POLICY_ROOT_GROUP": "platform-governance"}
+        with patch.dict(os.environ, env, clear=False):
+            result = _gitlab_policy_root_group("gitlab.example.com", "team-a")
+        self.assertEqual(result, "platform-governance")
+
+    def test_self_managed_blank_override_returns_org_unchanged(self):
+        env = {"APM_GITLAB_POLICY_ROOT_GROUP": "   "}
+        with patch.dict(os.environ, env, clear=False):
+            result = _gitlab_policy_root_group("gitlab.example.com", "team-a")
+        self.assertEqual(result, "team-a")
 
 
 class TestFetchAdoContents(unittest.TestCase):
