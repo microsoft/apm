@@ -11,7 +11,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, quote, urlparse, urlsplit
 
 from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy.discovery import (
@@ -1561,8 +1561,54 @@ class TestFetchGitlabContents(unittest.TestCase):
         headers = call_kwargs[1].get("headers", {})
         self.assertEqual(headers.get("PRIVATE-TOKEN"), "my-gitlab-token")
         api_url = mock_get.call_args.args[0]
-        self.assertIn("/projects/contoso%2Fapm-policy/repository/files/", api_url)
-        self.assertIn("ref=HEAD", api_url)
+        parsed = urlsplit(api_url)
+        self.assertEqual(
+            parsed.path,
+            "/api/v4/projects/"
+            + quote("contoso/apm-policy", safe="")
+            + "/repository/files/apm-policy.yml/raw",
+        )
+        self.assertEqual(parse_qs(parsed.query).get("ref"), ["HEAD"])
+
+    def test_private_project_authenticates_on_first_attempt(self):
+        """Regression guard (Copilot review on PR #2605): auth-first, not unauth-first.
+
+        GitLab returns 404 (not 401/403) to an unauthenticated request for a
+        private project, to avoid leaking its existence. This fetcher's
+        ``_request`` only raises on 401/403, so ``unauth_first=True`` would
+        let ``try_with_fallback`` accept that unauthenticated 404 as "the"
+        result and never retry with a configured token -- permanently
+        masking a private policy repo even with a valid GITLAB_APM_PAT set.
+        Exercises the REAL AuthResolver (not the simplified single-call stub
+        used by the other tests in this class) so the actual try_with_fallback
+        branching between an unauth-first and an auth-first attempt is
+        under test.
+        """
+        from apm_cli.core.token_manager import GitHubTokenManager
+
+        def fake_get(_url, headers=None, **_kwargs):
+            resp = MagicMock()
+            if headers and headers.get("PRIVATE-TOKEN") == "glpat_secret":
+                resp.status_code = 200
+                resp.text = VALID_POLICY_YAML
+            else:
+                resp.status_code = 404
+            return resp
+
+        env = {"GITLAB_APM_PAT": "glpat_secret"}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None),
+            patch("apm_cli.policy.discovery.requests.get", side_effect=fake_get) as mock_get,
+        ):
+            content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+
+        self.assertIsNone(error)
+        self.assertEqual(content, VALID_POLICY_YAML)
+        # The token must be on the FIRST request -- not a retry after an
+        # unauthenticated attempt was silently accepted as "not found".
+        self.assertEqual(mock_get.call_count, 1)
+        self.assertEqual(mock_get.call_args.kwargs["headers"].get("PRIVATE-TOKEN"), "glpat_secret")
 
     @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")

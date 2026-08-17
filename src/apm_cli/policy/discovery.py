@@ -1732,7 +1732,7 @@ def _fetch_gitlab_contents(
             port=port,
             path=project_path,
             host_type="gitlab",
-            unauth_first=True,
+            unauth_first=False,
         )
         if resp.status_code in (404, 410):
             return None, f"{resp.status_code}: Policy file not found"
