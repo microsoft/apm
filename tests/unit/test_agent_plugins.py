@@ -277,7 +277,7 @@ class TestLocalMcpValidation:
         assert result.is_valid is False
         assert any("reserved name" in error for error in result.errors)
 
-    def test_remote_url_validation_is_structural_not_security_policy(self) -> None:
+    def test_remote_url_rejects_userinfo_and_fragment(self) -> None:
         url = "http://user:literal@example.com:8080/${UNKNOWN_VAR}#fragment"
         result = validate_mcp_config_document(
             {
@@ -290,6 +290,31 @@ class TestLocalMcpValidation:
                 },
             }
         )
+        assert result.is_valid is False
+        assert any("url" in error for error in result.errors)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/${UNKNOWN_VAR}?token=${GITHUB_TOKEN}",
+            "http://localhost:8080/${UNKNOWN_VAR}",
+            "http://127.0.0.1:8080/${UNKNOWN_VAR}",
+            "http://[::1]:8080/${UNKNOWN_VAR}",
+        ],
+    )
+    def test_remote_url_accepts_spec_endpoints_and_preserves_literals(self, url: str) -> None:
+        result = validate_mcp_config_document(
+            {
+                "$schema": MCP_SCHEMA_ID,
+                "mcpServers": {
+                    "tool": {
+                        "type": "streamable-http",
+                        "url": url,
+                    }
+                },
+            }
+        )
+
         assert result.is_valid is True
         assert result.normalized is not None
         assert result.normalized["mcpServers"]["tool"]["url"] == url
@@ -304,6 +329,11 @@ class TestLocalMcpValidation:
             "https://example.com:/mcp",
             "https://user name@example.com/mcp",
             "https://exa\nmple.com/mcp",
+            "https://user:literal@example.com/mcp",
+            "https://example.com/mcp#fragment",
+            "http://example.com/mcp",
+            "http://192.0.2.1/mcp",
+            "http://[2001:db8::1]/mcp",
         ],
     )
     def test_remote_url_rejects_placeholder_or_invalid_authority(self, url: str) -> None:

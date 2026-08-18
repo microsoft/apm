@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -10,9 +11,43 @@ from typing import TypeAlias
 from .errors import AgentPluginError
 
 JsonScalar: TypeAlias = str | int | float | bool | None
-FrozenJsonValue: TypeAlias = (
-    JsonScalar | tuple["FrozenJsonValue", ...] | tuple[tuple[str, "FrozenJsonValue"], ...]
-)
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenJsonArray:
+    """Immutable JSON array that remains distinct from an object."""
+
+    values: tuple[FrozenJsonValue, ...]
+
+    def thaw(self) -> list[JsonValue]:
+        """Return a mutable JSON-compatible array."""
+        return [thaw_frozen_json(value) for value in self.values]
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenJsonObject:
+    """Immutable, deterministically ordered JSON object."""
+
+    items: tuple[tuple[str, FrozenJsonValue], ...]
+
+    def __iter__(self) -> Iterator[tuple[str, FrozenJsonValue]]:
+        """Iterate deterministic key/value pairs."""
+        return iter(self.items)
+
+    def thaw(self) -> dict[str, JsonValue]:
+        """Return a mutable JSON-compatible object."""
+        return {key: thaw_frozen_json(value) for key, value in self.items}
+
+
+FrozenJsonValue: TypeAlias = JsonScalar | FrozenJsonArray | FrozenJsonObject
+JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+
+
+def thaw_frozen_json(value: FrozenJsonValue) -> JsonValue:
+    """Thaw one immutable JSON value without guessing its container type."""
+    if isinstance(value, (FrozenJsonArray, FrozenJsonObject)):
+        return value.thaw()
+    return value
 
 
 class DiagnosticSeverity(str, Enum):
@@ -102,7 +137,7 @@ class ApmExtensionData:
     """Validated com.microsoft.apm manifest extension data."""
 
     schema_version: str
-    values: tuple[tuple[str, FrozenJsonValue], ...]
+    values: FrozenJsonObject
     provenance: SourceProvenance
 
 
@@ -110,7 +145,7 @@ class ApmExtensionData:
 class ApmConfiguration:
     """APM-only dependency, policy, and build configuration from apm.yml."""
 
-    values: tuple[tuple[str, FrozenJsonValue], ...]
+    values: FrozenJsonObject
     provenance: Path
 
 

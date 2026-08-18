@@ -683,6 +683,8 @@ def _is_valid_http_url(url: str) -> bool:
         return False
     if parsed.scheme not in {"http", "https"}:
         return False
+    if parsed.username is not None or parsed.password is not None or "#" in url:
+        return False
     if not _is_valid_http_authority(parsed.netloc):
         return False
     host = parsed.hostname
@@ -691,9 +693,13 @@ def _is_valid_http_url(url: str) -> bool:
     if port is not None and not (0 < port <= 65535):
         return False
     try:
-        ipaddress.ip_address(host)
+        address = ipaddress.ip_address(host)
     except ValueError:
-        return all(_HTTP_DNS_LABEL_RE.fullmatch(label) for label in host.rstrip(".").split("."))
+        address = None
+        if not all(_HTTP_DNS_LABEL_RE.fullmatch(label) for label in host.rstrip(".").split(".")):
+            return False
+    if parsed.scheme == "http":
+        return host == "localhost" or (address is not None and address.is_loopback)
     return True
 
 

@@ -36,6 +36,8 @@ from .ir import (
     ApmConfiguration,
     ApmExtensionData,
     DiagnosticSeverity,
+    FrozenJsonArray,
+    FrozenJsonObject,
     FrozenJsonValue,
     McpServerType,
     SourceProvenance,
@@ -553,7 +555,7 @@ def _freeze_json(value: object) -> FrozenJsonValue:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, list):
-        return tuple(_freeze_json(item) for item in value)
+        return FrozenJsonArray(tuple(_freeze_json(item) for item in value))
     if isinstance(value, dict):
         return _freeze_object(value)
     raise AgentPluginManifestAuthorityError(
@@ -561,8 +563,10 @@ def _freeze_json(value: object) -> FrozenJsonValue:
     )
 
 
-def _freeze_object(value: dict[str, Any]) -> tuple[tuple[str, FrozenJsonValue], ...]:
-    return tuple(sorted((str(key), _freeze_json(item)) for key, item in value.items()))
+def _freeze_object(value: dict[str, Any]) -> FrozenJsonObject:
+    if not all(isinstance(key, str) for key in value):
+        raise AgentPluginManifestAuthorityError("APM configuration object keys must be strings")
+    return FrozenJsonObject(tuple(sorted((key, _freeze_json(item)) for key, item in value.items())))
 
 
 def _diagnostic(

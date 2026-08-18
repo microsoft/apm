@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
@@ -14,8 +15,12 @@ from apm_cli.agent_plugins import (
     PLUGIN_SCHEMA_ID,
     AgentPluginLegacyBoundaryError,
     AgentPluginManifestAuthorityError,
+    FrozenJsonArray,
+    FrozenJsonObject,
+    FrozenJsonValue,
     NotAgentPluginError,
     load_agent_plugin,
+    thaw_frozen_json,
 )
 from apm_cli.deps.plugin_parser import normalize_plugin_directory
 
@@ -356,6 +361,68 @@ def test_matching_apm_identity_is_ignored_while_configuration_is_preserved(
     assert tuple(diagnostic.code for diagnostic in plugin.diagnostics) == (
         "manifest.apm_identity.ignored",
     )
+
+
+def test_apm_configuration_preserves_empty_container_types(tmp_path: Path) -> None:
+    _write_manifest(tmp_path)
+    expected = {
+        "dependencies": {
+            "apm": [
+                {},
+                {
+                    "emptyObject": {},
+                    "emptyArray": [],
+                    "nested": [{}, [], {"array": [[], {}]}],
+                },
+            ]
+        },
+        "policy": {
+            "emptyObject": {},
+            "emptyArray": [],
+            "mixed": {"array": [{}, []]},
+        },
+    }
+    (tmp_path / "apm.yml").write_text(
+        "dependencies:\n"
+        "  apm:\n"
+        "    - {}\n"
+        "    - emptyObject: {}\n"
+        "      emptyArray: []\n"
+        "      nested:\n"
+        "        - {}\n"
+        "        - []\n"
+        "        - array:\n"
+        "            - []\n"
+        "            - {}\n"
+        "policy:\n"
+        "  emptyObject: {}\n"
+        "  emptyArray: []\n"
+        "  mixed:\n"
+        "    array:\n"
+        "      - {}\n"
+        "      - []\n",
+        encoding="utf-8",
+    )
+
+    plugin = load_agent_plugin(tmp_path)
+
+    assert plugin.apm_configuration is not None
+    frozen = plugin.apm_configuration.values
+    assert isinstance(frozen, FrozenJsonObject)
+    dependencies = dict(frozen)["dependencies"]
+    assert isinstance(dependencies, FrozenJsonObject)
+    apm = dict(dependencies)["apm"]
+    assert isinstance(apm, FrozenJsonArray)
+    assert isinstance(apm.values[0], FrozenJsonObject)
+    assert apm.values[0] != FrozenJsonArray(())
+    assert frozen.thaw() == expected
+    assert thaw_frozen_json(frozen) == expected
+    assert load_agent_plugin(tmp_path).apm_configuration == plugin.apm_configuration
+
+
+def test_frozen_json_union_is_publicly_exported() -> None:
+    assert FrozenJsonArray in get_args(FrozenJsonValue)
+    assert FrozenJsonObject in get_args(FrozenJsonValue)
 
 
 def test_claude_normalizer_rejects_native_agent_plugin(tmp_path: Path) -> None:
