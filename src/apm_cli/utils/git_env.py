@@ -96,19 +96,23 @@ def retain_non_auth_git_config_entries(env: dict[str, str]) -> int:
     Git exposes command-scoped configuration through ``GIT_CONFIG_COUNT`` and
     paired ``GIT_CONFIG_KEY_N`` / ``GIT_CONFIG_VALUE_N`` variables. This
     function is the canonical owner for deciding which entries carry
-    authentication: keys containing ``extraheader`` and values beginning with
-    an ``Authorization:`` header are removed. Every other populated entry is
+    authentication. As a defense-in-depth policy, every key containing
+    ``extraheader`` is removed, even when its value is not an authorization
+    header. Values beginning with ``Authorization:`` or
+    ``Proxy-Authorization:`` are also removed. Every other populated entry is
     retained in order and re-indexed from zero.
 
     Blank, invalid, and negative counts are treated as zero. Indexed variables
     outside the declared count are removed so stale credentials cannot remain
-    in a child-process environment.
+    in a child-process environment. When no entries remain,
+    ``GIT_CONFIG_COUNT`` is left absent, which Git treats as zero.
 
     Args:
         env: The subprocess environment to sanitize in place.
 
     Returns:
-        The number of retained indexed Git configuration entries.
+        The number of retained indexed Git configuration entries, which is
+        also the next available zero-based index for callers appending one.
     """
     try:
         count = max(0, int(env.pop("GIT_CONFIG_COUNT", "0") or "0"))
@@ -119,7 +123,10 @@ def retain_non_auth_git_config_entries(env: dict[str, str]) -> int:
     for index in range(count):
         key = env.get(f"GIT_CONFIG_KEY_{index}", "")
         value = env.get(f"GIT_CONFIG_VALUE_{index}", "")
-        if "extraheader" in key.lower() or value.strip().lower().startswith("authorization:"):
+        normalized_value = value.strip().lower()
+        if "extraheader" in key.lower() or normalized_value.startswith(
+            ("authorization:", "proxy-authorization:")
+        ):
             continue
         if key:
             retained.append((key, value))

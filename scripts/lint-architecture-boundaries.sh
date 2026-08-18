@@ -976,15 +976,18 @@ if [ -n "$auth_header_dictmerge_hits" ]; then
     violations=$((violations + 1))
 fi
 
-# #2398: the retain/reindex policy used while clearing or replacing indexed
+# #2398: the entry-filtering policy used while clearing or replacing indexed
 # Git auth config has one owner. Reintroducing either half of the predicate in
 # auth.py or github_host.py would restore the split authority fixed here.
 git_auth_config_owner="src/apm_cli/utils/git_env.py"
+git_auth_config_consumers="
+src/apm_cli/core/auth.py
+src/apm_cli/utils/github_host.py
+"
 git_auth_config_duplicate_hits=$(
-    grep -rEn --include='*.py' \
-        '"extraheader" in .*\.lower\(\)|\.strip\(\)\.lower\(\)\.startswith\("authorization:"\)' \
-        src/apm_cli \
-        | grep -v "^${git_auth_config_owner}:" \
+    grep -nE \
+        '"extraheader"[[:space:]]+in[[:space:]]+|\.startswith\(\(?[[:space:]]*"(authorization:|proxy-authorization:)' \
+        $git_auth_config_consumers \
         | grep -v 'architecture-authority-exempt:' \
         || true
 )
@@ -992,7 +995,7 @@ if ! grep -q '^def retain_non_auth_git_config_entries(' "$git_auth_config_owner"
     || ! grep -q 'retain_non_auth_git_config_entries(' src/apm_cli/core/auth.py \
     || ! grep -q 'retain_non_auth_git_config_entries(' src/apm_cli/utils/github_host.py \
     || [ -n "$git_auth_config_duplicate_hits" ]; then
-    echo "[x] Git auth-config retain/reindex policy must be owned by utils/git_env.py"
+    echo "[x] Git auth-config entry filtering must be owned by utils/git_env.py"
     [ -n "$git_auth_config_duplicate_hits" ] && echo "$git_auth_config_duplicate_hits"
     violations=$((violations + 1))
 fi

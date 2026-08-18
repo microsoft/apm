@@ -2591,13 +2591,13 @@ def test_git_auth_header_injection_has_single_owner() -> None:
     assert "def retain_non_auth_git_config_entries(" in git_env_owner
     assert "retain_non_auth_git_config_entries(" in owner
     assert "retain_non_auth_git_config_entries(" in auth_consumer
-    assert "| Git auth-config retain/reindex policy |" in architecture_doc
+    assert "| Git auth-config entry filtering |" in architecture_doc
     assert "AC19: git-subprocess auth-header injection authority" in guard
     assert (
         "Git-subprocess Authorization-header injection must use "
         "set_authorization_header_git_env / set_ado_bearer_git_env" in guard
     )
-    assert "Git auth-config retain/reindex policy must be owned by utils/git_env.py" in guard
+    assert "Git auth-config entry filtering must be owned by utils/git_env.py" in guard
 
 
 def test_dependency_identity_and_materialization_path_have_separate_owners() -> None:
@@ -2724,7 +2724,7 @@ def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: 
 
 
 def test_git_auth_config_owner_guard_rejects_duplicate_predicate(tmp_path: Path) -> None:
-    """AC19 rejects a second auth-config retain/reindex policy."""
+    """AC19 rejects a second auth-config entry-filtering policy."""
     root = Path(__file__).parents[2]
     sandbox = tmp_path / "repo"
     shutil.copytree(
@@ -2744,8 +2744,8 @@ def test_git_auth_config_owner_guard_rejects_duplicate_predicate(tmp_path: Path)
     consumer.write_text(
         consumer.read_text(encoding="utf-8")
         + "\n\ndef _duplicate_auth_config_policy(key, value):\n"
-        + '    return "extraheader" in key.lower() or '
-        + 'value.strip().lower().startswith("authorization:")\n',
+        + "    normalized = key.lower()\n"
+        + '    return "extraheader" in normalized\n',
         encoding="utf-8",
     )
 
@@ -2759,9 +2759,7 @@ def test_git_auth_config_owner_guard_rejects_duplicate_predicate(tmp_path: Path)
     )
 
     assert result.returncode == 1
-    assert "Git auth-config retain/reindex policy must be owned by utils/git_env.py" in (
-        result.stdout
-    )
+    assert "Git auth-config entry filtering must be owned by utils/git_env.py" in (result.stdout)
 
 
 def test_public_github_anonymous_first_has_single_auth_owner() -> None:

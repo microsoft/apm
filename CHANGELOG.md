@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Centralized indexed Git auth-config filtering in `utils/git_env.py`, including
+  removal of proxy authorization headers, to keep credential clearing and
+  authorization-header replacement consistent. — by @EvanGruhlkey (#2544)
+
 ### Fixed
 
 - Multi-target `apm compile` now avoids repeating expensive project analysis
