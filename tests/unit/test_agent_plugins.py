@@ -226,7 +226,7 @@ class TestLocalMcpValidation:
                     "stdio-ok": {"type": "stdio", "command": "./bin/tool", "cwd": "./data"},
                     invalid_server_name: {
                         "type": "streamable-http",
-                        "url": "http://example.com/mcp",
+                        "url": "https://example.com:bad/mcp",
                     },
                     "sse-ok": {"type": "sse", "url": "https://example.com/sse"},
                 },
@@ -238,7 +238,7 @@ class TestLocalMcpValidation:
                     "stdio-ok": {"type": "stdio", "command": "./bin/tool"},
                     invalid_server_name: {
                         "type": "streamable-http",
-                        "url": "http://example.com/mcp",
+                        "url": "https://example.com:bad/mcp",
                     },
                     "sse-ok": {"type": "sse", "url": "https://example.com/sse"},
                 },
@@ -249,7 +249,7 @@ class TestLocalMcpValidation:
                 "mcpServers": {
                     "stdio-ok": {"type": "stdio", "command": "./bin/tool"},
                     "remote-ok": {"type": "streamable-http", "url": "https://example.com/mcp"},
-                    invalid_server_name: {"type": "sse", "url": "https://example.com/#frag"},
+                    invalid_server_name: {"type": "sse", "url": "https://${UNKNOWN_HOST}/mcp"},
                 },
             }
 
@@ -277,18 +277,48 @@ class TestLocalMcpValidation:
         assert result.is_valid is False
         assert any("reserved name" in error for error in result.errors)
 
-    def test_remote_url_rules_are_strict(self) -> None:
+    def test_remote_url_validation_is_structural_not_security_policy(self) -> None:
+        url = "http://user:literal@example.com:8080/${UNKNOWN_VAR}#fragment"
         result = validate_mcp_config_document(
             {
                 "$schema": MCP_SCHEMA_ID,
                 "mcpServers": {
                     "tool": {
                         "type": "streamable-http",
-                        "url": "http://example.com/mcp",
+                        "url": url,
                     }
                 },
             }
         )
+        assert result.is_valid is True
+        assert result.normalized is not None
+        assert result.normalized["mcpServers"]["tool"]["url"] == url
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://${UNKNOWN_HOST}/mcp",
+            "https://example.com:${UNKNOWN_PORT}/mcp",
+            "https://example.com:bad/mcp",
+            "https://${TOKEN}@example.com/mcp",
+            "https://example.com:/mcp",
+            "https://user name@example.com/mcp",
+            "https://exa\nmple.com/mcp",
+        ],
+    )
+    def test_remote_url_rejects_placeholder_or_invalid_authority(self, url: str) -> None:
+        result = validate_mcp_config_document(
+            {
+                "$schema": MCP_SCHEMA_ID,
+                "mcpServers": {
+                    "tool": {
+                        "type": "streamable-http",
+                        "url": url,
+                    }
+                },
+            }
+        )
+
         assert result.is_valid is False
         assert any("url" in error for error in result.errors)
 
@@ -300,7 +330,10 @@ class TestLocalMcpValidation:
             ["Authorization: Bearer literal"],
         ],
     )
-    def test_stdio_args_reject_literal_secrets(self, args: list[str]) -> None:
+    def test_stdio_args_preserve_literals_without_enforcing_security_policy(
+        self,
+        args: list[str],
+    ) -> None:
         result = validate_mcp_config_document(
             {
                 "$schema": MCP_SCHEMA_ID,
@@ -308,8 +341,9 @@ class TestLocalMcpValidation:
             }
         )
 
-        assert result.is_valid is False
-        assert any("literal secret" in error for error in result.errors)
+        assert result.is_valid is True
+        assert result.normalized is not None
+        assert result.normalized["mcpServers"]["tool"]["args"] == args
 
 
 class TestLspExtensionValidation:

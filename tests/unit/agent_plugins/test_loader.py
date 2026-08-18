@@ -378,23 +378,36 @@ def test_claude_normalizer_preserves_explicit_legacy_plugin_behavior(tmp_path: P
     assert apm_yml.is_file()
 
 
-def test_generic_credential_reference_is_not_portable_auth(tmp_path: Path) -> None:
+def test_unknown_placeholder_shaped_values_remain_literal_in_stdio_ir(
+    tmp_path: Path,
+) -> None:
     _write_manifest(tmp_path)
     _write_mcp(
         tmp_path,
         {
-            "bad": {
+            "literal": {
                 "type": "stdio",
                 "command": "tool",
-                "env": {"API_TOKEN": "${TOKEN}"},
+                "args": ["--token", "${GITHUB_TOKEN}", "${UNKNOWN_VAR}/arg"],
+                "env": {
+                    "API_TOKEN": "${GITHUB_TOKEN}",
+                    "CONFIG": "${UNKNOWN_VAR}/config",
+                },
+                "cwd": "${UNKNOWN_VAR}/work",
             }
         },
     )
 
     plugin = load_agent_plugin(tmp_path)
 
-    assert plugin.components.mcp_servers == ()
-    assert "no portable credential references" in plugin.diagnostics[0].message
+    server = plugin.components.mcp_servers[0]
+    assert server.args == ("--token", "${GITHUB_TOKEN}", "${UNKNOWN_VAR}/arg")
+    assert server.env == (
+        ("API_TOKEN", "${GITHUB_TOKEN}"),
+        ("CONFIG", "${UNKNOWN_VAR}/config"),
+    )
+    assert server.cwd == "${UNKNOWN_VAR}/work"
+    assert plugin.diagnostics == ()
 
 
 def test_mcp_unknown_server_field_isolated_from_valid_sibling(tmp_path: Path) -> None:
@@ -413,51 +426,36 @@ def test_mcp_unknown_server_field_isolated_from_valid_sibling(tmp_path: Path) ->
     assert "unexpected" in plugin.diagnostics[0].message
 
 
-@pytest.mark.parametrize(
-    ("server", "message"),
-    [
-        (
-            {"type": "stdio", "command": "tool", "args": ["${HOME}/tool"]},
-            "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
-        ),
-        (
-            {"type": "stdio", "command": "tool", "env": {"CONFIG": "${HOME}/config"}},
-            "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
-        ),
-        (
-            {"type": "stdio", "command": "tool", "cwd": "${PLUGIN_ROOT}/${HOME}"},
-            "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
-        ),
-        (
-            {"type": "stdio", "command": "tool", "cwd": "./${TOKEN}"},
-            "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
-        ),
-        (
-            {"type": "streamable-http", "url": "https://example.com/${TENANT}"},
-            "placeholder expansion is not defined",
-        ),
-        (
-            {
-                "type": "streamable-http",
-                "url": "https://example.com/mcp",
-                "headers": {"X-Tenant": "${TENANT}"},
-            },
-            "placeholder expansion is not defined",
-        ),
-    ],
-)
-def test_non_portable_mcp_placeholders_are_rejected(
+def test_url_and_headers_preserve_all_placeholder_shaped_literals(
     tmp_path: Path,
-    server: dict[str, object],
-    message: str,
 ) -> None:
     _write_manifest(tmp_path)
-    _write_mcp(tmp_path, {"bad": server})
+    url = "https://example.com/${PLUGIN_ROOT}/${PLUGIN_DATA}/${UNKNOWN_VAR}?token=${GITHUB_TOKEN}"
+    authorization = "Bearer ${GITHUB_TOKEN}"
+    marker = "${PLUGIN_ROOT}:${PLUGIN_DATA}:${UNKNOWN_VAR}"
+    _write_mcp(
+        tmp_path,
+        {
+            "literal": {
+                "type": "streamable-http",
+                "url": url,
+                "headers": {
+                    "Authorization": authorization,
+                    "X-Placeholders": marker,
+                },
+            }
+        },
+    )
 
     plugin = load_agent_plugin(tmp_path)
 
-    assert plugin.components.mcp_servers == ()
-    assert message in plugin.diagnostics[0].message
+    server = plugin.components.mcp_servers[0]
+    assert server.url == url
+    assert server.headers == (
+        ("Authorization", authorization),
+        ("X-Placeholders", marker),
+    )
+    assert plugin.diagnostics == ()
 
 
 @pytest.mark.parametrize(

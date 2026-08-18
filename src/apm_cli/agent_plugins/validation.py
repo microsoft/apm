@@ -23,10 +23,12 @@ from .io import read_json_document
 
 _PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_HTTP_DNS_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _BARE_COMMAND_RE = re.compile(r"^[^\s/\\]+$")
 _PLUGIN_RELATIVE_CWD_RE = re.compile(
     r"^(?:\./|\$\{PLUGIN_ROOT\}(?:/|$)|\$\{PLUGIN_DATA\}(?:/|$)).*"
 )
+_LITERAL_PLACEHOLDER_CWD_RE = re.compile(r"^\$\{(?!PLUGIN_ROOT\}|PLUGIN_DATA\})[^{}]+\}(?:/.*)?$")
 _RESERVED_ENV_NAMES = frozenset({"PLUGIN_ROOT", "PLUGIN_DATA"})
 _PLUGIN_TOP_LEVEL_FIELDS = frozenset(
     {
@@ -50,8 +52,6 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _VARIABLE_VALUE_RE = re.compile(r"^\$\{[^{}]+\}$")
-_VARIABLE_REFERENCE_RE = re.compile(r"\$\{([^{}]+)\}")
-_PORTABLE_VARIABLE_NAMES = frozenset({"PLUGIN_ROOT", "PLUGIN_DATA"})
 _SECRET_ARG_RE = re.compile(
     r"^--?(?:authorization|api[-_]?key|access[-_]?key|token|secret|password|"
     r"credential|cookie|private[-_]?key|database[-_]?url)(?:=(.*))?$",
@@ -165,52 +165,6 @@ def url_contains_literal_secret(value: object) -> bool:
         _SECRET_KEY_RE.search(key) and not _VARIABLE_VALUE_RE.fullmatch(query_value)
         for key, query_value in parse_qsl(parsed.query, keep_blank_values=True)
     )
-
-
-def _agent_plugin_contains_secret_fields(values: object) -> bool:
-    """Return whether an Agent Plugin mapping declares a secret-shaped field."""
-    return isinstance(values, dict) and any(_SECRET_KEY_RE.search(str(key)) for key in values)
-
-
-def _agent_plugin_args_contain_secret(values: object) -> bool:
-    """Return whether Agent Plugin argv appears to carry a credential."""
-    if not isinstance(values, list):
-        return False
-    for value in values:
-        if not isinstance(value, str):
-            continue
-        if _SECRET_ARG_RE.fullmatch(value) is not None:
-            return True
-        if _SECRET_KEY_RE.search(value):
-            return True
-        if re.search(r"\bbearer\s+[^\s]+", value, re.IGNORECASE):
-            return True
-    return False
-
-
-def _agent_plugin_url_contains_secret(value: object) -> bool:
-    """Return whether a literal Agent Plugin URL carries credential material."""
-    if not isinstance(value, str):
-        return False
-    parsed = urlparse(value)
-    return bool(
-        parsed.username
-        or parsed.password
-        or any(_SECRET_KEY_RE.search(key) for key, _ in parse_qsl(parsed.query))
-    )
-
-
-def _contains_unsupported_plugin_variable(value: str) -> bool:
-    """Return whether a value references a non-portable variable name."""
-    return any(
-        match.group(1) not in _PORTABLE_VARIABLE_NAMES
-        for match in _VARIABLE_REFERENCE_RE.finditer(value)
-    )
-
-
-def _contains_plugin_variable(value: str) -> bool:
-    """Return whether a literal-only field contains any plugin placeholder."""
-    return _VARIABLE_REFERENCE_RE.search(value) is not None
 
 
 def validate_plugin_manifest_file(path: Path) -> ValidationResult:
@@ -560,15 +514,11 @@ def _validate_stdio_server(
         if not isinstance(cwd, str):
             result.add_error(f"mcpServers.{server_name}.cwd must be a string")
             return None
-        if _contains_unsupported_plugin_variable(cwd):
+        if not (
+            _PLUGIN_RELATIVE_CWD_RE.fullmatch(cwd) or _LITERAL_PLACEHOLDER_CWD_RE.fullmatch(cwd)
+        ):
             result.add_error(
-                f"mcpServers.{server_name}.cwd contains an unsupported placeholder; "
-                "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable"
-            )
-            return None
-        if not _PLUGIN_RELATIVE_CWD_RE.fullmatch(cwd):
-            result.add_error(
-                f"mcpServers.{server_name}.cwd must be a ./, ${'{'}PLUGIN_ROOT{'}'}, or ${'{'}PLUGIN_DATA{'}'} path"
+                f"mcpServers.{server_name}.cwd must be a ./ path or begin with a placeholder"
             )
             return None
         cwd_error = _cwd_containment_error(cwd, plugin_root)
@@ -588,18 +538,6 @@ def _normalize_stdio_args(
         return None, None
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         return None, f"mcpServers.{server_name}.args must be an array of strings"
-    if _agent_plugin_args_contain_secret(value):
-        return (
-            None,
-            f"mcpServers.{server_name}.args contains a literal secret or credential material; "
-            "Agent Plugins defines no portable credential references",
-        )
-    if any(_contains_unsupported_plugin_variable(item) for item in value):
-        return (
-            None,
-            f"mcpServers.{server_name}.args contains an unsupported placeholder; "
-            "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
-        )
     return list(value), None
 
 
@@ -611,12 +549,6 @@ def _normalize_stdio_env(
         return None, None
     if not isinstance(value, dict):
         return None, f"mcpServers.{server_name}.env must be an object"
-    if _agent_plugin_contains_secret_fields(value):
-        return (
-            None,
-            f"mcpServers.{server_name}.env contains credential material; "
-            "Agent Plugins defines no portable credential references",
-        )
     cleaned: dict[str, str] = {}
     seen_names: set[str] = set()
     for key, item in value.items():
@@ -629,12 +561,6 @@ def _normalize_stdio_env(
             return None, f"mcpServers.{server_name}.env contains a duplicate name: {key}"
         if not isinstance(item, str):
             return None, f"mcpServers.{server_name}.env.{key} must be a string"
-        if _contains_unsupported_plugin_variable(item):
-            return (
-                None,
-                f"mcpServers.{server_name}.env.{key} contains an unsupported placeholder; "
-                "only ${PLUGIN_ROOT} and ${PLUGIN_DATA} are portable",
-            )
         seen_names.add(lowered)
         cleaned[key] = item
     return cleaned, None
@@ -654,18 +580,6 @@ def _validate_http_server(
     if not _is_valid_http_url(url):
         result.add_error(f"mcpServers.{server_name}.url must be a valid http or https URL")
         return None
-    if _contains_plugin_variable(url):
-        result.add_error(
-            f"mcpServers.{server_name}.url must be literal; placeholder expansion is not defined"
-        )
-        return None
-    if _agent_plugin_url_contains_secret(url):
-        result.add_error(
-            f"mcpServers.{server_name}.url contains credential material; "
-            "Agent Plugins URLs are literal and authentication is client-managed"
-        )
-        return None
-
     normalized: dict[str, Any] = {"type": server_type, "url": url}
     headers = server_value.get("headers")
     if headers is not None:
@@ -697,24 +611,12 @@ def _validate_http_server(
                     f"mcpServers.{server_name}.headers.{key} contains a prohibited "
                     "HTTP field-value control character"
                 )
-            elif _contains_plugin_variable(value):
-                value_error = (
-                    f"mcpServers.{server_name}.headers.{key} must be literal; "
-                    "placeholder expansion is not defined"
-                )
             if value_error is not None:
                 result.add_error(value_error)
                 return None
             seen_headers.add(lowered)
             cleaned_headers[key] = value
         normalized["headers"] = cleaned_headers
-        if _agent_plugin_contains_secret_fields(cleaned_headers):
-            result.add_error(
-                f"mcpServers.{server_name}.headers contains credential material; "
-                "Agent Plugins headers are literal and authentication is client-managed"
-            )
-            return None
-
     return normalized
 
 
@@ -730,8 +632,10 @@ def _cwd_containment_error(value: str, plugin_root: Path | None) -> str | None:
         )
     elif value == "${PLUGIN_DATA}":
         escaped = False
-    else:
+    elif value.startswith("${PLUGIN_DATA}/"):
         escaped = _relative_path_escapes(value.removeprefix("${PLUGIN_DATA}/"))
+    else:
+        escaped = False
     return "escapes its permitted root" if escaped else None
 
 
@@ -770,19 +674,41 @@ def _contains_prohibited_header_value_char(value: str) -> bool:
 
 
 def _is_valid_http_url(url: str) -> bool:
-    parsed = urlparse(url)
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in url):
+        return False
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError:
+        return False
     if parsed.scheme not in {"http", "https"}:
         return False
-    if not parsed.netloc or parsed.username or parsed.password or parsed.fragment:
+    if not _is_valid_http_authority(parsed.netloc):
         return False
     host = parsed.hostname
-    if host is None:
+    if host is None or any(char.isspace() or char in "${}" for char in host):
         return False
-    if parsed.scheme == "http":
-        if host == "localhost":
-            return True
-        try:
-            return ipaddress.ip_address(host).is_loopback
-        except ValueError:
-            return False
+    if port is not None and not (0 < port <= 65535):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return all(_HTTP_DNS_LABEL_RE.fullmatch(label) for label in host.rstrip(".").split("."))
     return True
+
+
+def _is_valid_http_authority(authority: str) -> bool:
+    if (
+        not authority
+        or "${" in authority
+        or authority.count("@") > 1
+        or any(char in "\\<>{}^`|" for char in authority)
+    ):
+        return False
+    host_port = authority.rsplit("@", 1)[-1]
+    if not host_port:
+        return False
+    if host_port.startswith("["):
+        closing = host_port.find("]")
+        return closing > 1 and host_port[closing + 1 :] != ":"
+    return not host_port.endswith(":")
