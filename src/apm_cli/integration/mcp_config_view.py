@@ -197,38 +197,57 @@ def _package_manifest_path(
     lockfile: LockFile,
     modules_root: Path,
     project_root: Path,
-) -> Path:
-    """Resolve a locked package's canonical current manifest path."""
+) -> tuple[Path, bool]:
+    """Resolve a locked package's canonical current manifest path.
+
+    Returns ``(manifest_path, package_dir_is_symlink)``. The symlink check
+    MUST happen before ``.resolve()``, which follows symlinks (including
+    broken ones) and would otherwise silently substitute the link's target
+    -- indistinguishable from "never fetched" to a caller that only sees
+    the resolved path (see :func:`_allows_missing_manifest`).
+    """
     if dependency.source == "local":
         package_dir = resolve_local_dep_dir(dependency, lockfile, project_root)
     else:
         package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
-    return (package_dir / "apm.yml").resolve()
+    return (package_dir / "apm.yml").resolve(), package_dir.is_symlink()
 
 
 def _allows_missing_manifest(
     dependency: LockedDependency,
     package_dir: Path,
+    *,
+    package_dir_is_symlink: bool,
 ) -> bool:
     """Return whether the package contract permits an absent apm.yml."""
     if dependency.package_type == PackageType.SKILL_BUNDLE.value:
         return True
 
+    # Cold cache: the package directory itself was never materialised (a
+    # fresh CI checkout with an empty apm_modules/, or a setup-only job that
+    # never ran a plain `apm install`). That is distinct from a *present*
+    # directory missing its manifest, which is genuinely suspicious. A
+    # locked non-local dependency simply hasn't been fetched yet -- the
+    # lockfile pin is intact and a plain `apm install` would restore it
+    # without changing apm.lock.yaml, regardless of package_type (#2456).
+    # `apm audit --ci` already tolerates the equivalent state (#2329) for
+    # the same reason. A local dependency's directory not existing has no
+    # such explanation -- nothing fetches it -- so the tolerance excludes it.
+    #
+    # A dangling symlink at the package path is a present, corrupted entry,
+    # not cold-cache state, so it must still route to the strict checks
+    # below rather than being waived alongside a genuinely absent directory.
+    if not package_dir.exists() and not package_dir_is_symlink:
+        return dependency.source != "local"
+
     dependency_ref = dependency.to_dependency_ref()
     if not dependency_ref.is_virtual_subdirectory():
         return False
 
-    # ``apm audit --ci`` runs without materialising ``apm_modules/``: the drift
-    # replay uses a throwaway scratch dir, and a setup-only CI job (install the
-    # CLI, then audit -- no ``apm install``) never populates the real modules
-    # tree.  When the package directory is absent we cannot probe the on-disk
-    # shape, so fall back to the frozen lockfile classification -- a virtual
-    # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  Once the
-    # modules ARE materialised the strict shape probe below still runs and
-    # guards against a mislabeled or malformed installed package.
-    if not package_dir.exists():
-        return dependency.package_type == PackageType.CLAUDE_SKILL.value
-
+    # Once modules ARE materialised, the strict shape probe guards against a
+    # mislabeled or malformed installed package: a virtual `claude_skill`
+    # legitimately ships no `apm.yml` by design, but only when both the
+    # on-disk shape and the lockfile classification agree.
     package_type, _ = detect_package_type(package_dir)
     return (
         package_type is PackageType.CLAUDE_SKILL
@@ -257,7 +276,7 @@ def _collect_locked_dependencies(
             continue
         fallback_path = _fallback_manifest_path(dependency, modules_root, project_root)
         try:
-            manifest_path = _package_manifest_path(
+            manifest_path, package_dir_is_symlink = _package_manifest_path(
                 dependency,
                 lockfile,
                 modules_root,
@@ -286,7 +305,11 @@ def _collect_locked_dependencies(
             continue
 
         if not manifest_path.exists():
-            if _allows_missing_manifest(dependency, manifest_path.parent):
+            if _allows_missing_manifest(
+                dependency,
+                manifest_path.parent,
+                package_dir_is_symlink=package_dir_is_symlink,
+            ):
                 continue
             problems.append(
                 McpSourceProblem(
