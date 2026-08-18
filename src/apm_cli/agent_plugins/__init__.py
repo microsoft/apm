@@ -39,6 +39,7 @@ from .ir import (
     SourceProvenance,
 )
 from .loader import (
+    admit_legacy_plugin_manifest,
     detect_agent_plugin,
     load_agent_plugin,
     reject_agent_plugin_legacy_normalization,
@@ -94,6 +95,7 @@ __all__ = [
     "SourceProvenance",
     "UnsupportedAgentPluginVersionError",
     "ValidationResult",
+    "admit_legacy_plugin_manifest",
     "args_contain_literal_secret",
     "contains_literal_secret_fields",
     "detect_agent_plugin",

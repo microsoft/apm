@@ -222,6 +222,16 @@ class TestClaudePluginDetector:
         assert ev.plugin_json_path == tmp_path / "plugin.json"
         assert ev.has_claude_plugin_dir is False
 
+    def test_rejected_root_symlink_is_not_probed_as_claude_evidence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path.parent / f"{tmp_path.name}-target.json"
+        target.write_text('{"name":"legacy-or-native"}', encoding="utf-8")
+        (tmp_path / "plugin.json").symlink_to(target)
+
+        assert ClaudePluginDetector().detect(tmp_path) is None
+
     def test_returns_evidence_for_claude_plugin_dir(self, tmp_path: Path) -> None:
         (tmp_path / ".claude-plugin").mkdir()
         ev = ClaudePluginDetector().detect(tmp_path)

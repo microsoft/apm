@@ -32,8 +32,10 @@ if [ -f "$agent_plugin_owner" ]; then
     fi
     if ! grep -q '^def detect_agent_plugin(' "$agent_plugin_owner" \
         || ! grep -q '^def load_agent_plugin(' "$agent_plugin_owner" \
+        || ! grep -q '^def _read_admissible_root_manifest(' "$agent_plugin_owner" \
+        || ! grep -q 'read_json_document(manifest_path, reject_duplicate_schema=True)' "$agent_plugin_owner" \
         || ! grep -q '^def _load_apm_configuration(' "$agent_plugin_owner"; then
-        echo "[x] Agent Plugin loader must own detection, loading, and manifest authority"
+        echo "[x] Agent Plugin loader must own admissibility, detection, loading, and manifest authority"
         exit 1
     fi
 
@@ -50,7 +52,8 @@ if [ -f "$agent_plugin_owner" ]; then
     if printf '%s\n' "$agent_validation_body" \
         | grep -Eq 'normalize_plugin_directory|synthesize_apm_yml_from_plugin' \
         || ! grep -q 'detect_agent_plugin(package_path)' "$format_detection" \
-        || ! grep -q 'reject_agent_plugin_legacy_normalization(plugin_path)' "$legacy_parser"; then
+        || ! grep -q 'admit_legacy_plugin_manifest(package_path)' "$format_detection" \
+        || ! grep -q 'admit_legacy_plugin_manifest(plugin_path)' "$legacy_parser"; then
         echo "[x] Agent Plugin classification must route through its loader, not Claude normalization"
         exit 1
     fi

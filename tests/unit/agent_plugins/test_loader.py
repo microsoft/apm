@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -13,7 +14,6 @@ from apm_cli.agent_plugins import (
     PLUGIN_SCHEMA_ID,
     AgentPluginLegacyBoundaryError,
     AgentPluginManifestAuthorityError,
-    AgentPluginManifestError,
     NotAgentPluginError,
     load_agent_plugin,
 )
@@ -144,56 +144,179 @@ def test_invalid_skill_directory_is_reported(tmp_path: Path) -> None:
     )
 
 
-def test_malformed_schema_bearing_manifest_fails_closed(tmp_path: Path) -> None:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "plugin.json").write_text(
-        '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",',
-        encoding="utf-8",
-    )
-
-    with pytest.raises(AgentPluginManifestError, match=r"Invalid root plugin\.json"):
-        load_agent_plugin(tmp_path)
+def _assert_present_manifest_cannot_reach_claude(tmp_path: Path, message: str) -> None:
+    with pytest.raises(AgentPluginLegacyBoundaryError, match=message):
+        normalize_plugin_directory(tmp_path, tmp_path / "plugin.json")
     assert not (tmp_path / "apm.yml").exists()
 
 
-def test_malformed_manifest_schema_after_probe_prefix_fails_closed(tmp_path: Path) -> None:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "plugin.json").write_text(
-        '{"padding":"'
-        + ("x" * 70_000)
-        + '","$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",',
-        encoding="utf-8",
-    )
-
-    with pytest.raises(AgentPluginManifestError, match=r"Invalid root plugin\.json"):
-        load_agent_plugin(tmp_path)
-
-
-def test_oversized_root_manifest_fails_closed(tmp_path: Path) -> None:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "plugin.json").write_text(
-        '{"$schema":"'
-        + PLUGIN_SCHEMA_ID
-        + '","name":"native","padding":"'
-        + ("x" * (5 * 1024 * 1024))
-        + '"}',
-        encoding="utf-8",
-    )
-
-    with pytest.raises(AgentPluginManifestError, match="exceeds"):
-        load_agent_plugin(tmp_path)
-
-
-def test_symlinked_root_manifest_fails_closed(tmp_path: Path) -> None:
-    target = tmp_path / "target.json"
-    target.write_text(
-        json.dumps({"$schema": PLUGIN_SCHEMA_ID, "name": "linked-plugin"}),
-        encoding="utf-8",
-    )
+@pytest.mark.parametrize("target_kind", ["inside", "outside", "dangling"])
+def test_symlinked_root_manifest_cannot_reach_claude(
+    tmp_path: Path,
+    target_kind: str,
+) -> None:
+    if target_kind == "inside":
+        target = tmp_path / "target.json"
+    else:
+        target = tmp_path.parent / f"{tmp_path.name}-{target_kind}.json"
+    if target_kind != "dangling":
+        target.write_text(json.dumps({"name": "legacy-or-native"}), encoding="utf-8")
     (tmp_path / "plugin.json").symlink_to(target)
 
-    with pytest.raises(AgentPluginManifestError, match="symbolic link"):
-        load_agent_plugin(tmp_path)
+    _assert_present_manifest_cannot_reach_claude(tmp_path, "symlink")
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        '{"name":"legacy","padding":"',
+        f'{{"$schema":"{PLUGIN_SCHEMA_ID}","padding":"',
+        '{"padding":"',
+    ],
+)
+def test_oversized_root_manifest_cannot_reach_claude(
+    tmp_path: Path,
+    prefix: str,
+) -> None:
+    suffix = f'","$schema":"{PLUGIN_SCHEMA_ID}"}}' if prefix == '{"padding":"' else '"}'
+    (tmp_path / "plugin.json").write_text(
+        prefix + ("x" * (5 * 1024 * 1024)) + suffix,
+        encoding="utf-8",
+    )
+
+    _assert_present_manifest_cannot_reach_claude(tmp_path, "exceeds")
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ('{"name":"malformed"', "Invalid JSON"),
+        (
+            f'{{"$schema":"{PLUGIN_SCHEMA_ID}","$schema":"{PLUGIN_SCHEMA_ID}","name":"duplicate"}}',
+            r"duplicate \$schema",
+        ),
+        ('{"$schema":1,"name":"non-string"}', r"\$schema must be a string"),
+        ('["not-an-object"]', "JSON object"),
+    ],
+)
+def test_invalid_present_manifest_cannot_reach_claude(
+    tmp_path: Path,
+    content: str,
+    message: str,
+) -> None:
+    (tmp_path / "plugin.json").write_text(content, encoding="utf-8")
+
+    _assert_present_manifest_cannot_reach_claude(tmp_path, message)
+
+
+def test_non_regular_present_manifest_cannot_reach_claude(tmp_path: Path) -> None:
+    (tmp_path / "plugin.json").mkdir()
+
+    _assert_present_manifest_cannot_reach_claude(tmp_path, "regular file")
+
+
+def test_unreadable_present_manifest_cannot_reach_claude(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_manifest(tmp_path)
+
+    def unreadable(_path: Path, *, reject_duplicate_schema: bool = False) -> object:
+        del reject_duplicate_schema
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("apm_cli.agent_plugins.loader.read_json_document", unreadable)
+
+    _assert_present_manifest_cannot_reach_claude(tmp_path, "permission denied")
+
+
+def test_unreadable_manifest_directory_cannot_fall_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_iterdir = Path.iterdir
+
+    def unreadable(path: Path):
+        if path == tmp_path:
+            raise OSError("directory permission denied")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", unreadable)
+
+    _assert_present_manifest_cannot_reach_claude(tmp_path, "could not be determined")
+
+
+def test_manifest_swap_to_symlink_is_rejected_before_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = tmp_path / "plugin.json"
+    manifest.write_text('{"name":"legacy"}', encoding="utf-8")
+    moved = tmp_path / "moved.json"
+    real_open = os.open
+
+    def swap_then_open(path: Path, flags: int) -> int:
+        manifest.rename(moved)
+        manifest.symlink_to(moved)
+        return real_open(path, flags)
+
+    monkeypatch.setattr("apm_cli.agent_plugins.io.os.O_NOFOLLOW", 0, raising=False)
+    monkeypatch.setattr("apm_cli.agent_plugins.io.os.open", swap_then_open)
+
+    _assert_present_manifest_cannot_reach_claude(tmp_path, "changed during validation")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO files are unavailable")
+def test_manifest_swap_to_fifo_cannot_block_or_fall_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = tmp_path / "plugin.json"
+    manifest.write_text('{"name":"legacy"}', encoding="utf-8")
+    moved = tmp_path / "moved.json"
+    real_open = os.open
+
+    def swap_then_open(path: Path, flags: int) -> int:
+        manifest.rename(moved)
+        os.mkfifo(manifest)
+        return real_open(path, flags)
+
+    monkeypatch.setattr("apm_cli.agent_plugins.io.os.open", swap_then_open)
+
+    _assert_present_manifest_cannot_reach_claude(tmp_path, "regular file")
+
+
+def test_root_legacy_manifest_is_parsed_once_for_normalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = tmp_path / "plugin.json"
+    manifest.write_text('{"name":"legacy"}', encoding="utf-8")
+    from apm_cli.agent_plugins import loader
+
+    real_read = loader.read_json_document
+    reads = 0
+
+    def count_read(path: Path, *, reject_duplicate_schema: bool = False) -> object:
+        nonlocal reads
+        reads += 1
+        return real_read(path, reject_duplicate_schema=reject_duplicate_schema)
+
+    monkeypatch.setattr(loader, "read_json_document", count_read)
+
+    normalize_plugin_directory(tmp_path, manifest)
+
+    assert reads == 1
+
+
+def test_nested_legacy_manifest_normalization_remains_supported(tmp_path: Path) -> None:
+    manifest = tmp_path / ".claude-plugin" / "plugin.json"
+    manifest.parent.mkdir()
+    manifest.write_text('{"name":"nested-legacy"}', encoding="utf-8")
+
+    apm_yml = normalize_plugin_directory(tmp_path, manifest)
+
+    assert "name: nested-legacy" in apm_yml.read_text(encoding="utf-8")
 
 
 def test_apm_yml_conflicting_identity_is_rejected(tmp_path: Path) -> None:
@@ -253,38 +376,6 @@ def test_claude_normalizer_preserves_explicit_legacy_plugin_behavior(tmp_path: P
 
     assert apm_yml == tmp_path / "apm.yml"
     assert apm_yml.is_file()
-
-
-def test_claude_normalizer_preserves_symlinked_schema_less_legacy_manifest(
-    tmp_path: Path,
-) -> None:
-    target = tmp_path.parent / f"{tmp_path.name}-legacy.json"
-    target.write_text(
-        json.dumps({"name": "linked-legacy", "version": "1.0.0"}),
-        encoding="utf-8",
-    )
-    manifest = tmp_path / "plugin.json"
-    manifest.symlink_to(target)
-
-    apm_yml = normalize_plugin_directory(tmp_path, manifest)
-
-    assert apm_yml.is_file()
-    assert "name: linked-legacy" in apm_yml.read_text(encoding="utf-8")
-
-
-def test_claude_normalizer_preserves_oversized_schema_less_legacy_manifest(
-    tmp_path: Path,
-) -> None:
-    manifest = tmp_path / "plugin.json"
-    manifest.write_text(
-        '{"name":"legacy","padding":"' + ("x" * (5 * 1024 * 1024)) + '"}',
-        encoding="utf-8",
-    )
-
-    apm_yml = normalize_plugin_directory(tmp_path, manifest)
-
-    assert apm_yml.is_file()
-    assert f"name: {tmp_path.name}" in apm_yml.read_text(encoding="utf-8")
 
 
 def test_generic_credential_reference_is_not_portable_auth(tmp_path: Path) -> None:

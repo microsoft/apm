@@ -110,3 +110,46 @@ def test_agent_plugin_guard_rejects_parallel_in_package_loader(tmp_path: Path) -
     assert result.stdout.splitlines()[0] == (
         "[x] Agent Plugin interpretation must live in src/apm_cli/agent_plugins/loader.py"
     )
+
+
+def test_agent_plugin_guard_requires_admissibility_before_legacy_fallback(
+    tmp_path: Path,
+) -> None:
+    """The checker must reject removal of the present-manifest admissibility gate."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "scripts/check_bundle_format_authority.sh",
+        "src/apm_cli/bundle/formats.py",
+        "src/apm_cli/agent_plugins/loader.py",
+        "src/apm_cli/models/validation.py",
+        "src/apm_cli/models/format_detection.py",
+        "src/apm_cli/deps/plugin_parser.py",
+    )
+    for relative in paths:
+        source = root / relative
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+    loader = sandbox / "src/apm_cli/agent_plugins/loader.py"
+    loader.write_text(
+        loader.read_text(encoding="utf-8").replace(
+            "read_json_document(manifest_path, reject_duplicate_schema=True)",
+            "read_json_document(manifest_path)",
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", str(sandbox / "scripts/check_bundle_format_authority.sh"), str(sandbox)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout.splitlines()[0] == (
+        "[x] Agent Plugin loader must own admissibility, detection, loading, and manifest authority"
+    )
