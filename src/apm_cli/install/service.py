@@ -328,21 +328,30 @@ class InstallService:
         if not withheld:
             return
 
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.deps.lockfile import LockFile
-        from apm_cli.install.drift import _collect_tracked_files
         from apm_cli.install.errors import FrozenInstallError
 
+        # Re-read rather than reuse the copy `enforce_frozen` loaded: this
+        # judges what is on disk now.  `--frozen` is a CI primitive with a
+        # single writer, so nothing else is expected to touch the file
+        # between the two reads; drift.py's own membership checks make the
+        # same assumption.
         committed = LockFile.read(_frozen_lockfile_path(request))
         if committed is None:  # pragma: no cover -- enforce_frozen ran first
             return
-        committed_paths = set(_collect_tracked_files(committed))
+        # DeploymentLedgerCodec owns the deployed-files vocabulary (see
+        # `scripts/lint-architecture-boundaries.sh`); ask it directly rather
+        # than borrowing drift.py's private wrapper around the same call.
+        committed_paths = set(DeploymentLedgerCodec.legacy_deployed_file_claims(committed))
 
         unclaimed: set[str] = set()
         for payload in withheld:
             candidate = LockFile.from_yaml(payload)
             if committed.is_semantically_equivalent(candidate):
                 continue
-            unclaimed |= set(_collect_tracked_files(candidate)) - committed_paths
+            claimed = set(DeploymentLedgerCodec.legacy_deployed_file_claims(candidate))
+            unclaimed |= claimed - committed_paths
         if not unclaimed:
             return
 
@@ -352,7 +361,10 @@ class InstallService:
                 f"  - {path} is deployed by this install but not recorded in apm.lock.yaml"
                 for path in _outermost(unclaimed)
             ],
-            tip="Tip: run 'apm install' without --frozen, then commit apm.lock.yaml.",
+            tip=(
+                "Tip: the files were still deployed; only the lockfile write was "
+                "withheld. Run 'apm install' without --frozen, then commit apm.lock.yaml."
+            ),
         )
 
 
@@ -363,6 +375,10 @@ def _outermost(paths: set[str]) -> list[str]:
     beneath it, so an unrecorded skill otherwise reports twice.  Sorted
     order puts an ancestor before its descendants, so a single pass over
     the accumulated output is enough.
+
+    The prefix scan is O(n^2) in the number of unclaimed paths.  It runs
+    only on the error path of a failing frozen install, where *n* is what
+    one install left unrecorded and the process is about to exit.
     """
     outermost: list[str] = []
     for path in sorted(paths):
