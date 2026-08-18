@@ -602,6 +602,7 @@ def test_malformed_plugin_rows_fail_closed(mutate, message: str) -> None:
     [
         ("git", "git@example.invalid:acme/plugin.git", GIT_SHA),
         ("git", "git@github.com:acme/plugin.git", GIT_SHA),
+        ("git", "git@github.com:/srv/git/plugin.git", GIT_SHA),
         ("git", "git@ssh.dev.azure.com:v3/acme/project/plugin", GIT_SHA),
         ("git", "ssh://git@github.com/acme/plugin.git", GIT_SHA),
         ("git", "ssh://git@ssh.dev.azure.com/v3/acme/project/plugin", GIT_SHA),
@@ -627,6 +628,36 @@ def test_credential_free_non_url_locators_remain_supported(
     )
 
     assert record.source_locator == source_locator
+
+
+@pytest.mark.parametrize(
+    "source_locator",
+    [
+        "git@github.com:/",
+        "git@github.com://srv/git/plugin.git",
+        "git@github.com:/srv\\git\\plugin.git",
+        "git@github.com:/srv/git/plugin.git?token",
+        "git@github.com:/srv/git/plugin.git#ref",
+        "git@github.com:/srv/git/plugin git",
+        "oauth2:TOKEN@github.com:/srv/git/plugin.git",
+        "x-access-token:SECRET@github.com:/srv/git/plugin.git",
+    ],
+)
+def test_git_scp_absolute_path_rejects_empty_malformed_and_credential_forms(
+    source_locator: str,
+) -> None:
+    with pytest.raises(ValueError, match=r"Installed Agent Plugin .*source_locator"):
+        InstalledPluginRecordCodec.build(
+            identity="stable-plugin",
+            version="1.0.0",
+            source_kind="git",
+            source_locator=source_locator,
+            resolved_ref=GIT_SHA,
+            source_digest=None,
+            scope="project",
+            components=(),
+            prior_record=None,
+        )
 
 
 @pytest.mark.parametrize(

@@ -22,6 +22,9 @@ _SOURCE_LOCATOR_VALIDATOR_FINGERPRINTS = {
         "a30b5b00c676420accdab9ba14f139a679ad242470a501250cdd0192b451db74"
     ),
 }
+_SOURCE_LOCATOR_SCP_GRAMMAR_FINGERPRINT = (
+    "cd3aaf8e8c727260b0f7dba78cdb8076bb9c27935e196ffc864b01480beebce4"
+)
 
 
 def _function_source(source: str, name: str) -> str:
@@ -31,6 +34,23 @@ def _function_source(source: str, name: str) -> str:
             item
             for item in ast.walk(tree)
             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == name
+        ),
+        None,
+    )
+    if node is None:
+        return ""
+    return ast.get_source_segment(source, node) or ""
+
+
+def _assignment_source(source: str, name: str) -> str:
+    """Return source for one named assignment."""
+    tree = ast.parse(source)
+    node = next(
+        (
+            item
+            for item in ast.walk(tree)
+            if isinstance(item, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == name for target in item.targets)
         ),
         None,
     )
@@ -180,6 +200,12 @@ def main() -> int:
         for name, expected in _SOURCE_LOCATOR_VALIDATOR_FINGERPRINTS.items()
     ):
         violations.append("installed plugin source locator validators must match guarded grammar")
+    scp_grammar = _assignment_source(lockfile, "_PLUGIN_GIT_SCP_RE")
+    if (
+        hashlib.sha256(scp_grammar.encode("utf-8")).hexdigest()
+        != _SOURCE_LOCATOR_SCP_GRAMMAR_FINGERPRINT
+    ):
+        violations.append("installed plugin SCP path grammar must match guarded syntax")
     if not _has_positive_locator_flow(source_locator_node):
         violations.append("installed plugin source locators must route through positive grammar")
     if (

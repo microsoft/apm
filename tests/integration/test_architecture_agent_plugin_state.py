@@ -125,6 +125,18 @@ import pytest
             "        pass\n",
             "source locator validators must match guarded grammar",
         ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            'r"(?P<path>(?:',
+            'r"(?P<path>.*)(?:',
+            "SCP path grammar must match guarded syntax",
+        ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "(?:[^/?#\\s\\\\]|/[^/?#\\s\\\\])",
+            "[^?#\\s\\\\]",
+            "SCP path grammar must match guarded syntax",
+        ),
     ],
 )
 def test_agent_plugin_state_guard_breaks_on_authority_mutation(

@@ -46,7 +46,7 @@ _PLUGIN_SSH_URL_SCHEMES = frozenset({"git", "git+ssh", "ssh"})
 _PLUGIN_GIT_SCP_RE = re.compile(
     r"^(?P<username>[A-Za-z0-9._-]+)@"
     r"(?P<host>\[[0-9A-Fa-f:]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?):"
-    r"(?P<path>[^/?#\s][^?#\s]*)$"
+    r"(?P<path>(?:[^/?#\s\\]|/[^/?#\s\\])[^?#\s\\]*)$"
 )
 _PLUGIN_URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _PLUGIN_DNS_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
