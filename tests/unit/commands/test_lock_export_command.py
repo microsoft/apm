@@ -155,12 +155,13 @@ def test_export_without_generated_at_uses_fixed_epoch(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         _seed(Path.cwd())
         lock_path = Path("apm.lock.yaml")
+        lock_text = lock_path.read_text(encoding="utf-8").replace("\r\n", "\n")
         lock_path.write_text(
-            lock_path.read_text(encoding="utf-8").replace(
-                'generated_at: "2024-01-01T00:00:00+00:00"\n', ""
-            ),
+            lock_text.replace('generated_at: "2024-01-01T00:00:00+00:00"\n', ""),
             encoding="utf-8",
+            newline="",
         )
+        assert "generated_at" not in lock_path.read_text(encoding="utf-8")
 
         result = runner.invoke(cli, ["lock", "export"])
 
