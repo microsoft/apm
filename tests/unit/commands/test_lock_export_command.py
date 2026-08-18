@@ -151,6 +151,23 @@ def test_export_invalid_timestamp_exits_2(runner, tmp_path, timestamp):
         assert "Expected timezone-aware ISO 8601 format" in result.stderr
 
 
+def test_export_without_generated_at_uses_fixed_epoch(runner, tmp_path):
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _seed(Path.cwd())
+        lock_path = Path("apm.lock.yaml")
+        lock_path.write_text(
+            lock_path.read_text(encoding="utf-8").replace(
+                'generated_at: "2024-01-01T00:00:00+00:00"\n', ""
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(cli, ["lock", "export"])
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["metadata"]["timestamp"] == ("1970-01-01T00:00:00+00:00")
+
+
 def test_export_undeclared_omits_licenses(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         _seed(Path.cwd())

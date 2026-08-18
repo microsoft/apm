@@ -585,6 +585,8 @@ class TestUpdateLockfile:
         lock = LockFile.read(missing)
         assert lock is not None
         assert lock.mcp_servers == ["svc"]
+        assert lock.generated_at is None
+        assert "generated_at" not in missing.read_text(encoding="utf-8")
 
     def test_mcp_servers_sorted_in_lockfile(self, tmp_path):
         lock_path = tmp_path / "apm.lock.yaml"

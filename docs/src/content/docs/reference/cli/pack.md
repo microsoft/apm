@@ -203,7 +203,6 @@ pack:
   bundle_files:
     .github/agents/architect.md: a1b2c3...
 lockfile_version: '1'
-generated_at: ...
 dependencies:
   - repo_url: owner/repo
 ```

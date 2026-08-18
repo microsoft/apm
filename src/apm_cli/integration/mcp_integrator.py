@@ -19,7 +19,6 @@ import re
 import shutil
 import warnings
 from collections.abc import MutableMapping
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -859,7 +858,6 @@ class MCPIntegrator:
             ):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return
-            lockfile.generated_at = datetime.now(timezone.utc).isoformat()
             lockfile.save(lock_path)
         except Exception as exc:
             _log.debug(

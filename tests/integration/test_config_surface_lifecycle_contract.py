@@ -227,7 +227,7 @@ def _assert_semantic_lifecycle_state(
     expected: LifecycleStateSnapshot,
     actual: LifecycleStateSnapshot,
 ) -> None:
-    """Assert convergence while ignoring the separate generated-at churn lane."""
+    """Assert convergence while ignoring optional legacy generated-at metadata."""
     assert actual.manifest_bytes == expected.manifest_bytes
     assert actual.deployment_records == expected.deployment_records
     assert actual.mcp_state_bytes == expected.mcp_state_bytes

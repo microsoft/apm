@@ -58,6 +58,7 @@ def test_repeated_install_with_unchanged_lsp_keeps_lockfile_bytes(
     first_bytes = lock_path.read_bytes()
     first_lock = LockFile.read(lock_path)
     assert first_lock is not None
+    assert first_lock.generated_at is None
     assert first_lock.lsp_servers == ["pyright"]
 
     second_result = runner.invoke(cli, ["install", "--target", "copilot"])

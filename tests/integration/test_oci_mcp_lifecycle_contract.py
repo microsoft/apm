@@ -234,7 +234,7 @@ def _assert_idempotent_state(
     first: LifecycleStateSnapshot,
     second: LifecycleStateSnapshot,
 ) -> None:
-    """Assert every durable field except the lock generation timestamp is exact."""
+    """Assert every durable field except optional legacy timestamp metadata is exact."""
     assert second.manifest_bytes == first.manifest_bytes
     assert second.deployment_records == first.deployment_records
     assert second.mcp_state_bytes == first.mcp_state_bytes

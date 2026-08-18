@@ -135,10 +135,7 @@ def _run_lockfile_phase_and_mcp_persist(
     ctx.package_types = {dep_key: package_type}
 
     _FixedDatetime.instant = instant
-    with (
-        patch("apm_cli.deps.lockfile.datetime", _FixedDatetime),
-        patch("apm_cli.integration.mcp_integrator.datetime", _FixedDatetime),
-    ):
+    with patch("apm_cli.deps.lockfile.datetime", _FixedDatetime):
         LockfileBuilder(ctx).build_and_save()
         mcp_deps = package.get_mcp_dependencies()
         MCPIntegrator.update_lockfile(
@@ -239,7 +236,7 @@ def test_unchanged_local_instructions_do_not_rewrite_lockfile(tmp_path: Path) ->
     first_bytes = lock_path.read_bytes()
     first_lock = LockFile.read(lock_path)
     assert first_lock is not None
-    assert first_lock.generated_at == first_instant.isoformat()
+    assert first_lock.generated_at is None
     assert first_lock.local_deployed_files == [".github/instructions/local.instructions.md"]
 
     _run_lockfile_phase_and_local_persist(tmp_path, second_instant)
@@ -263,7 +260,7 @@ def test_unchanged_mcp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
     first_bytes = lock_path.read_bytes()
     first_lock = LockFile.read(lock_path)
     assert first_lock is not None
-    assert first_lock.generated_at == first_instant.isoformat()
+    assert first_lock.generated_at is None
 
     _run_lockfile_phase_and_mcp_persist(tmp_path, package, second_instant)
     second_bytes = lock_path.read_bytes()
@@ -288,7 +285,7 @@ def test_unchanged_mcp_target_servers_do_not_rewrite_lockfile(tmp_path: Path) ->
     first_bytes = lock_path.read_bytes()
     first_lock = LockFile.read(lock_path)
     assert first_lock is not None
-    assert first_lock.generated_at == first_instant.isoformat()
+    assert first_lock.generated_at is None
     assert first_lock.mcp_target_servers == target_servers
 
     second_context = _run_lockfile_phase_and_mcp_persist(
@@ -350,7 +347,7 @@ def test_real_mcp_target_change_writes_once_then_converges(tmp_path: Path) -> No
     changed_lock = LockFile.read(lock_path)
     assert changed_lock is not None
     assert changed_writes == [lock_path]
-    assert changed_lock.generated_at == second_instant.isoformat()
+    assert changed_lock.generated_at is None
     assert changed_lock.mcp_target_servers == changed_targets
 
     converged_writes: list[Path] = []
@@ -454,7 +451,7 @@ def test_stale_partial_provenance_repairs_once_then_converges(tmp_path: Path) ->
     repaired = LockFile.read(lock_path)
     assert repaired is not None
     assert repair_writes == [lock_path]
-    assert repaired.generated_at == second_instant.isoformat()
+    assert repaired.generated_at is None
     assert repaired.mcp_config_provenance == {}
     repaired_bytes = lock_path.read_bytes()
 
@@ -640,7 +637,7 @@ def test_changed_mcp_dependencies_update_lockfile(tmp_path: Path) -> None:
     second_lock = LockFile.read(lock_path)
     assert second_lock is not None
 
-    assert second_lock.generated_at == second_instant.isoformat()
+    assert second_lock.generated_at is None
     assert second_lock.mcp_servers == ["github"]
     assert second_lock.mcp_configs == {
         "github": {
@@ -651,6 +648,30 @@ def test_changed_mcp_dependencies_update_lockfile(tmp_path: Path) -> None:
         }
     }
     assert second_bytes != first_bytes
+
+
+def test_changed_mcp_dependencies_refresh_legacy_generated_at(tmp_path: Path) -> None:
+    """A substantive rewrite keeps legacy timestamp metadata current."""
+    package = _write_manifest_with_mcp(tmp_path)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+
+    _run_lockfile_phase_and_mcp_persist(tmp_path, package, first_instant)
+    lock_path = get_lockfile_path(tmp_path)
+    legacy = load_yaml(lock_path)
+    legacy["generated_at"] = first_instant.isoformat()
+    dump_yaml(legacy, lock_path)
+
+    changed_package = _write_manifest_with_mcp(
+        tmp_path,
+        server_name="github",
+        server_url="https://api.githubcopilot.com/mcp/",
+    )
+    _run_lockfile_phase_and_mcp_persist(tmp_path, changed_package, second_instant)
+
+    changed_lock = LockFile.read(lock_path)
+    assert changed_lock is not None
+    assert changed_lock.generated_at == second_instant.isoformat()
 
 
 def test_unchanged_lsp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> None:
@@ -664,7 +685,7 @@ def test_unchanged_lsp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
     first_bytes = lock_path.read_bytes()
     first_lock = LockFile.read(lock_path)
     assert first_lock is not None
-    assert first_lock.generated_at == first_instant.isoformat()
+    assert first_lock.generated_at is None
 
     _run_lockfile_phase_and_lsp_persist(tmp_path, package, second_instant)
     second_bytes = lock_path.read_bytes()

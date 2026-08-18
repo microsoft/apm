@@ -1,5 +1,6 @@
 """Tests for the APM lock file module."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -234,6 +235,7 @@ class TestLockFile:
         yaml_str = lock.to_yaml()
         data = yaml.safe_load(yaml_str)
         assert data["lockfile_version"] == "1"
+        assert "generated_at" not in data
         assert len(data["dependencies"]) == 1
 
     def test_from_yaml(self):
@@ -251,6 +253,26 @@ class TestLockFile:
         loaded = LockFile.read(lock_path)
         assert loaded is not None
         assert loaded.has_dependency("owner/repo")
+
+    def test_write_refreshes_existing_generated_at(self, tmp_path, monkeypatch):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        lock.add_dependency(LockedDependency(repo_url="owner/repo"))
+        next_write = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        fixed_datetime = Mock()
+        fixed_datetime.now.return_value = next_write
+        monkeypatch.setattr("apm_cli.deps.lockfile.datetime", fixed_datetime)
+
+        lock.write(lock_path)
+
+        assert yaml.safe_load(lock_path.read_text(encoding="utf-8"))["generated_at"] == (
+            next_write.isoformat()
+        )
 
     def test_mcp_servers_round_trip(self, tmp_path):
         """mcp_servers must survive a write → read cycle."""

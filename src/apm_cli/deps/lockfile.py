@@ -706,7 +706,7 @@ class LockFile:
     """APM lock file for reproducible dependency resolution."""
 
     lockfile_version: str = "1"
-    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    generated_at: str | None = None
     apm_version: str | None = None
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
@@ -813,8 +813,9 @@ class LockFile:
         try:
             data: dict[str, Any] = {
                 "lockfile_version": emit_version,
-                "generated_at": self.generated_at,
             }
+            if self.generated_at is not None:
+                data["generated_at"] = self.generated_at
             if self.apm_version:
                 data["apm_version"] = self.apm_version
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
@@ -867,7 +868,7 @@ class LockFile:
         data = _validate_lockfile_container(loaded)
         lock = cls(
             lockfile_version=data.get("lockfile_version", "1"),
-            generated_at=data.get("generated_at", ""),
+            generated_at=data.get("generated_at"),
             apm_version=data.get("apm_version"),
         )
         for dep_data in data.get("dependencies", []):
@@ -911,9 +912,23 @@ class LockFile:
         return lock
 
     def write(self, path: Path) -> None:
-        """Write lock file to disk."""
+        """Write lock file to disk, preserving legacy timestamp behavior.
+
+        New lockfiles omit ``generated_at``.  When the on-disk lockfile already
+        carries the field, keep it stable for semantic no-ops and refresh it for
+        substantive writes. This behavior should be changed to remove the legacy
+        timestamp in a future APM version, but for now it preserves backward
+        compatibility with older APM builds that expect the field.
+        """
         from ..utils.atomic_io import atomic_write_text
 
+        existing = type(self).read(path) if path.exists() else None
+        if existing is not None and existing.generated_at is not None:
+            if self.is_semantically_equivalent(existing):
+                if self.generated_at is None:
+                    self.generated_at = existing.generated_at
+            else:
+                self.generated_at = datetime.now(timezone.utc).isoformat()
         atomic_write_text(path, self.to_yaml())
 
     @classmethod

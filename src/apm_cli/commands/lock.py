@@ -277,7 +277,7 @@ def _run_lock(
     help=(
         "Pin the SBOM timestamp (ISO 8601 with timezone required, e.g. "
         "2024-06-01T00:00:00+00:00) for reproducible output. Defaults to "
-        "SOURCE_DATE_EPOCH, then the lockfile's generated_at."
+        "generated_at, then the Unix epoch."
     ),
 )
 def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | None) -> None:
