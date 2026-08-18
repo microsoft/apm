@@ -100,11 +100,28 @@ class TestModuleLevelHelpers(unittest.TestCase):
 
 
 class TestGetConfigPath(unittest.TestCase):
-    def test_returns_path_under_home_copilot(self) -> None:
-        adapter = _make_adapter()
+    def test_user_scope_returns_path_under_home_copilot(self) -> None:
+        adapter = _make_adapter(user_scope=True)
         config_path = adapter.get_config_path()
         self.assertIn(".copilot", config_path)
         self.assertTrue(config_path.endswith("mcp-config.json"))
+
+    def test_project_scope_returns_github_mcp_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = _make_adapter(project_root=tmpdir)
+            config_path = adapter.get_config_path()
+            self.assertTrue(
+                config_path.endswith(".github/mcp.json")
+                or config_path.endswith(".github\\mcp.json")
+            )
+
+    def test_project_scope_creates_github_dir(self) -> None:
+        import pathlib
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = _make_adapter(project_root=tmpdir)
+            adapter.get_config_path()
+            self.assertTrue((pathlib.Path(tmpdir) / ".github").is_dir())
 
 
 # ---------------------------------------------------------------------------

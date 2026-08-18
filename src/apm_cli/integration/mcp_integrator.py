@@ -622,14 +622,24 @@ class MCPIntegrator:
             )
 
         if "copilot" in target_runtimes:
-            _clean_json_mcp_config(
-                Path.home() / ".copilot" / "mcp-config.json",
-                expanded_stale,
-                logger,
-                "Copilot CLI config",
-                use_rich=True,
-                fail_on_write_error=fail_on_write_error,
-            )
+            if scope is InstallScope.PROJECT and project_root is not None:
+                _clean_json_mcp_config(
+                    project_root_path / ".github" / "mcp.json",
+                    expanded_stale,
+                    logger,
+                    ".github/mcp.json",
+                    use_rich=True,
+                    fail_on_write_error=fail_on_write_error,
+                )
+            else:
+                _clean_json_mcp_config(
+                    Path.home() / ".copilot" / "mcp-config.json",
+                    expanded_stale,
+                    logger,
+                    "Copilot CLI config (~/.copilot/mcp-config.json)",
+                    use_rich=True,
+                    fail_on_write_error=fail_on_write_error,
+                )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:

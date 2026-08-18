@@ -98,6 +98,7 @@ def test_current_runtime_mapping_is_characterized() -> None:
     """Lock runtime-to-native-profile routing before moving its owner."""
     assert RUNTIME_TO_CANONICAL_TARGET == {
         "agents": "copilot",
+        "copilot": "copilot",
         "intellij": "copilot",
         "vscode": "copilot",
     }

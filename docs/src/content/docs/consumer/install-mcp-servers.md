@@ -135,6 +135,7 @@ unresolved required entries fail closed.
 
 | Harness | File | Scope | Format |
 |---|---|---|---|
+| GitHub Copilot CLI | `.github/mcp.json` | project | JSON `mcpServers` |
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
@@ -165,10 +166,11 @@ write.
 The same effective decision drives package, MCP, and LSP phases; APM does
 not re-resolve each phase independently.
 
-At project scope, the canonical `copilot` target writes MCP state to VS Code's
-`.vscode/mcp.json`. At global scope it writes Copilot CLI's
-`~/.copilot/mcp-config.json`. Use the legacy `--runtime copilot` override only
-when a project-scoped command must address the Copilot CLI adapter directly.
+At project scope, the canonical `copilot` target writes MCP state to both
+`.github/mcp.json` (Copilot CLI) and `.vscode/mcp.json` (VS Code IDE). At
+global scope it writes Copilot CLI's `~/.copilot/mcp-config.json`. Use
+`--runtime vscode` to address only VS Code, or `--runtime copilot` to address
+only the Copilot CLI adapter.
 
 **Portability boundary:** A committed target list makes lockfile MCP ownership
 deterministic across machines with different installed harnesses. If `targets:`

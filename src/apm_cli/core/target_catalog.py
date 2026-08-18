@@ -22,6 +22,7 @@ class TargetCapability:
     compile_family: str | None
     runtimes: tuple[str, ...]
     commands: frozenset[str]
+    subtargets: Mapping[str, tuple[str, ...]] = MappingProxyType({})
 
 
 _TARGET_COMMANDS = frozenset({"compile", "install", "update"})
@@ -39,6 +40,7 @@ def _capability(
     primitive_profile: str | None = None,
     compile_family: str | None = None,
     runtimes: tuple[str, ...] = (),
+    subtargets: Mapping[str, tuple[str, ...]] = MappingProxyType({}),
 ) -> TargetCapability:
     """Create catalog data shared by all target-selecting commands."""
     return TargetCapability(
@@ -53,6 +55,7 @@ def _capability(
         compile_family=compile_family,
         runtimes=runtimes,
         commands=_TARGET_COMMANDS,
+        subtargets=subtargets,
     )
 
 
@@ -110,7 +113,10 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="copilot",
             compile_family="vscode",
-            runtimes=("vscode", "agents"),
+            runtimes=("vscode", "copilot", "agents"),
+            subtargets=MappingProxyType(
+                {"vscode": ("vscode",), "cli": ("copilot",), "agents": ("agents",)}
+            ),
         ),
         _capability(
             "claude",
