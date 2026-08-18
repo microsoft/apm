@@ -46,7 +46,36 @@ def test_lockfile_valid_v2_passes_schema():
 def test_lockfile_declares_apiversion():
     schema = load_schema("lockfile-v0.1.schema.json")
     assert "lockfile_version" in schema["required"]
-    assert set(schema["properties"]["lockfile_version"]["enum"]) == {"1", "2"}
+    assert set(schema["properties"]["lockfile_version"]["enum"]) == {"1", "2", "3"}
+
+
+@pytest.mark.req("req-lk-002")
+def test_nonempty_installed_plugins_require_v3_in_schema():
+    v3 = {
+        "lockfile_version": "3",
+        "dependencies": [],
+        "installed_plugins": [{"identity": "stable-plugin"}],
+    }
+    validate_against("lockfile-v0.1.schema.json", v3)
+
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "lockfile-v0.1.schema.json",
+            {**v3, "lockfile_version": "2"},
+        )
+
+
+@pytest.mark.req("req-lk-002")
+def test_installed_plugins_schema_rejects_non_array_container():
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "lockfile-v0.1.schema.json",
+            {
+                "lockfile_version": "3",
+                "dependencies": [],
+                "installed_plugins": {},
+            },
+        )
 
 
 @pytest.mark.req("req-lk-003")

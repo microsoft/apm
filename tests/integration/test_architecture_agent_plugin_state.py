@@ -40,6 +40,12 @@ import pytest
             "ledger ownership must replace, never union",
         ),
         (
+            "src/apm_cli/core/deployment_ledger.py",
+            "active_prior.active_owner != owner",
+            "False",
+            "ledger ownership must reject unrelated takeover",
+        ),
+        (
             "src/apm_cli/install/agent_plugin_state.py",
             "logical_plugin, logical_data = InstalledPluginRecordCodec.root_values(",
             "logical_plugin, logical_data = bypass_root_values(",
@@ -52,10 +58,22 @@ import pytest
             "malformed installed plugin lock state must fail closed",
         ),
         (
+            "src/apm_cli/deps/lockfile.py",
+            'return "3"',
+            'return "2"',
+            "lifecycle state must require lockfile version 3",
+        ),
+        (
             "src/apm_cli/install/agent_plugin_state.py",
             "plugin = validation.agent_plugin",
             "plugin = None",
             "installed state projection must retain canonical ValidationResult IR",
+        ),
+        (
+            "src/apm_cli/install/agent_plugin_state.py",
+            "current = resolved_candidate",
+            "current = lexical_candidate",
+            "managed plugin paths must walk canonical contained ancestors",
         ),
     ],
 )

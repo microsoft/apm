@@ -24,6 +24,8 @@ from apm_cli.deps.lockfile import (
     LockfileFormatError,
 )
 from apm_cli.install.agent_plugin_state import (
+    PreparedAgentPluginRoot,
+    _managed_path,
     prepare_agent_plugin_root,
     prepare_installed_plugin_state,
     project_installed_plugin_record,
@@ -300,18 +302,19 @@ def test_state_rollback_restores_prior_record_root_and_ledger(
     assert old_deployment.locator.key not in lockfile.deployment_ledger.records
     assert (active_root / "plugin.json").read_text(encoding="utf-8").find("2.0.0") >= 0
 
-    original_rollback = prepared.root.rollback
+    original_rollback = PreparedAgentPluginRoot.rollback
 
-    def fail_rollback() -> None:
+    def fail_rollback(self: PreparedAgentPluginRoot) -> None:
         raise OSError("locked")
 
-    monkeypatch.setattr(prepared.root, "rollback", fail_rollback)
+    monkeypatch.setattr(PreparedAgentPluginRoot, "rollback", fail_rollback)
     with pytest.raises(OSError, match="locked"):
         prepared.rollback()
     assert lockfile.installed_plugins["stable-plugin"].version == "2.0.0"
     assert lockfile.deployment_ledger == prepared.ledger.replacement
+    assert "2.0.0" in (active_root / "plugin.json").read_text(encoding="utf-8")
 
-    monkeypatch.setattr(prepared.root, "rollback", original_rollback)
+    monkeypatch.setattr(PreparedAgentPluginRoot, "rollback", original_rollback)
     prepared.rollback()
     assert lockfile.installed_plugins == {"stable-plugin": old_record}
     assert lockfile.deployment_ledger == prepared.ledger.prior
@@ -472,6 +475,36 @@ def test_failed_backup_rename_never_deletes_active_root(
             "credential-free",
         ),
         (
+            lambda row: row["source"].update(locator="//token@example.invalid/plugin.git"),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(locator="https:token@example.invalid/plugin.git"),
+            "malformed remote URL",
+        ),
+        (
+            lambda row: row["source"].update(locator="git+https:token@example.invalid/plugin.git"),
+            "malformed remote URL",
+        ),
+        (
+            lambda row: row["source"].update(
+                locator="https://example.invalid/plugin.git?access_token=secret"
+            ),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(
+                locator="https://example.invalid/plugin.git#access-token"
+            ),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(
+                locator="https://token%40value@example.invalid/plugin.git"
+            ),
+            "credential-free",
+        ),
+        (
             lambda row: row["source"].update(resolved_ref="main"),
             "full commit SHA",
         ),
@@ -500,6 +533,33 @@ def test_malformed_plugin_rows_fail_closed(mutate, message: str) -> None:
 
     with pytest.raises(ValueError, match=message):
         InstalledPluginRecordCodec.from_rows(rows)
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "source_locator", "resolved_ref"),
+    [
+        ("git", "git@example.invalid:acme/plugin.git", GIT_SHA),
+        ("local", "/tmp/user@example.invalid/plugin", None),
+    ],
+)
+def test_credential_free_non_url_locators_remain_supported(
+    source_kind: str,
+    source_locator: str,
+    resolved_ref: str | None,
+) -> None:
+    record = InstalledPluginRecordCodec.build(
+        identity="stable-plugin",
+        version="1.0.0",
+        source_kind=source_kind,
+        source_locator=source_locator,
+        resolved_ref=resolved_ref,
+        source_digest=None,
+        scope="project",
+        components=(),
+        prior_record=None,
+    )
+
+    assert record.source_locator == source_locator
 
 
 def test_normal_root_removal_retains_plugin_data(tmp_path: Path) -> None:
@@ -604,3 +664,48 @@ def test_finalized_state_cannot_rollback_active_root_or_metadata(tmp_path: Path)
     assert active_root.exists()
     assert lockfile.installed_plugins == prepared.replacement_records
     assert lockfile.deployment_ledger == prepared.ledger.replacement
+
+
+def test_managed_path_canonicalizes_noncanonical_contained_input(tmp_path: Path) -> None:
+    state_base = tmp_path / "state"
+    state_base.mkdir()
+
+    managed = _managed_path(state_base / "nested" / ".." / "plugin", state_base)
+
+    assert managed == state_base / "plugin"
+
+
+def test_owner_replacement_rejects_unrelated_active_owner_takeover() -> None:
+    owner = _record("stable-plugin").owner_key
+    locator = ".github/agents/shared.agent.md"
+    unrelated = _owned_record("owner/dependency", locator, "sha256:dependency")
+    desired = _owned_record(owner, locator, "sha256:plugin")
+    prior = DeploymentLedger(records={unrelated.locator.key: unrelated})
+
+    with pytest.raises(ValueError, match="actively owned by an unrelated owner"):
+        DeploymentLedgerCodec.prepare_owner_replacement(prior, owner, (desired,))
+
+    assert prior.records == {unrelated.locator.key: unrelated}
+
+
+def test_owner_replacement_preserves_shared_claim_when_plugin_is_already_active() -> None:
+    owner = _record("stable-plugin").owner_key
+    locator = _locator(".github/agents/shared.agent.md")
+    prior_record = DeploymentRecord(
+        locator=locator,
+        owners=("owner/dependency", owner),
+        active_owner=owner,
+        content_hash="sha256:old",
+    )
+    desired = _owned_record(owner, locator.value, "sha256:new")
+
+    transition = DeploymentLedgerCodec.prepare_owner_replacement(
+        DeploymentLedger(records={locator.key: prior_record}),
+        owner,
+        (desired,),
+    )
+
+    replacement = transition.replacement.records[locator.key]
+    assert replacement.owners == ("owner/dependency", owner)
+    assert replacement.active_owner == owner
+    assert replacement.content_hash == "sha256:new"

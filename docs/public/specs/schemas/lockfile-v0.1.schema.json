@@ -6,10 +6,11 @@
   "type": "object",
   "required": ["lockfile_version", "dependencies"],
   "properties": {
-    "lockfile_version": { "enum": ["1", "2"] },
+    "lockfile_version": { "enum": ["1", "2", "3"] },
     "generated_at": { "type": "string" },
     "apm_version": { "type": "string" },
     "dependencies": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "installed_plugins": { "type": "array", "items": { "type": "object" } },
     "mcp_servers": { "type": "array" },
     "mcp_configs": { "type": "object" },
     "local_deployed_files": { "type": "array", "items": { "type": "string" } },
@@ -26,6 +27,17 @@
   "patternProperties": {
     "^x-[a-z][a-z0-9-]*$": {}
   },
+  "allOf": [
+    {
+      "if": {
+        "required": ["installed_plugins"],
+        "properties": { "installed_plugins": { "minItems": 1 } }
+      },
+      "then": {
+        "properties": { "lockfile_version": { "const": "3" } }
+      }
+    }
+  ],
   "additionalProperties": true,
   "$defs": {
     "hashEnvelope": {

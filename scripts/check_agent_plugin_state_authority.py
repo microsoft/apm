@@ -67,10 +67,17 @@ def main() -> int:
     replacement = _function_source(ledger, "prepare_owner_replacement")
     if "records.pop(key, None)" not in replacement or ".union(" in replacement:
         violations.append("native plugin ledger ownership must replace, never union")
+    if "active_prior.active_owner != owner" not in replacement or (
+        "actively owned by an unrelated owner" not in replacement
+    ):
+        violations.append("native plugin ledger ownership must reject unrelated takeover")
     if 'if "installed_plugins" in data:' not in lockfile or (
         'InstalledPluginRecordCodec.validate_rows(data["installed_plugins"])' not in lockfile
     ):
         violations.append("malformed installed plugin lock state must fail closed")
+    required_version = _function_source(lockfile, "_required_lockfile_version")
+    if "if self.installed_plugins:" not in required_version or 'return "3"' not in required_version:
+        violations.append("installed plugin lifecycle state must require lockfile version 3")
 
     projection = _function_source(state, "project_installed_plugin_record")
     if "plugin = validation.agent_plugin" not in projection or (
@@ -81,6 +88,11 @@ def main() -> int:
         violations.append("installed state projection must not re-read plugin manifests")
     if "InstalledPluginRecordCodec.build(" not in projection:
         violations.append("installed state construction must route through the lockfile codec")
+    managed_path = _function_source(state, "_managed_path")
+    if "resolved_candidate = ensure_path_within(" not in managed_path or (
+        "current = resolved_candidate" not in managed_path
+    ):
+        violations.append("managed plugin paths must walk canonical contained ancestors")
 
     if violations:
         for violation in violations:

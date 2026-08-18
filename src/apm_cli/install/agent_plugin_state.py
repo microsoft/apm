@@ -127,11 +127,11 @@ class PreparedInstalledPluginState:
         if self.committed:
             raise RuntimeError("Installed Agent Plugin state is already committed")
         self.root.commit()
-        self.lockfile.installed_plugins = dict(self.replacement_records)
+        self.lockfile.replace_installed_plugins(self.replacement_records)
         try:
             DeploymentLedgerCodec.commit_owner_replacement(self.lockfile, self.ledger)
         except (RuntimeError, ValueError):
-            self.lockfile.installed_plugins = dict(self.prior_records)
+            self.lockfile.replace_installed_plugins(self.prior_records)
             self.root.rollback()
             raise
         self.committed = True
@@ -146,7 +146,7 @@ class PreparedInstalledPluginState:
         DeploymentLedgerCodec.validate_owner_rollback(self.lockfile, self.ledger)
         self.root.rollback()
         DeploymentLedgerCodec.rollback_owner_replacement(self.lockfile, self.ledger)
-        self.lockfile.installed_plugins = dict(self.prior_records)
+        self.lockfile.replace_installed_plugins(self.prior_records)
         self.committed = False
 
     def finalize(self) -> None:
@@ -160,18 +160,30 @@ class PreparedInstalledPluginState:
 
 
 def _managed_path(path: Path, state_base: Path) -> Path:
-    """Return a lexical managed path after containment and symlink checks."""
+    """Return a canonical managed path after containment and symlink checks."""
     resolved_base = state_base.resolve()
-    candidate = path if path.is_absolute() else resolved_base / path
-    ensure_path_within(candidate, resolved_base)
-    current = candidate
+    lexical_candidate = path if path.is_absolute() else resolved_base / path
+    for ancestor in (lexical_candidate, *lexical_candidate.parents):
+        if ancestor.is_symlink():
+            raise PathTraversalError(
+                f"Managed Agent Plugin path '{lexical_candidate}' cannot contain symbolic links"
+            )
+        if ancestor == resolved_base:
+            break
+    resolved_candidate = ensure_path_within(lexical_candidate, resolved_base)
+    current = resolved_candidate
     while current != resolved_base:
         if current.is_symlink():
             raise PathTraversalError(
-                f"Managed Agent Plugin path '{candidate}' cannot contain symbolic links"
+                f"Managed Agent Plugin path '{resolved_candidate}' cannot contain symbolic links"
             )
-        current = current.parent
-    return candidate
+        parent = current.parent
+        if parent == current:
+            raise PathTraversalError(
+                f"Managed Agent Plugin path '{resolved_candidate}' has no contained ancestor"
+            )
+        current = parent
+    return resolved_candidate
 
 
 def resolve_agent_plugin_roots(

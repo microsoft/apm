@@ -30,7 +30,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
+from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError, NotAgentPluginError
 from apm_cli.bundle.local_bundle import check_target_mismatch
 from apm_cli.install.agent_plugin_runtime import (
     stage_agent_plugin_bundle,
@@ -210,7 +210,7 @@ class TestMcpJsonNeverDeployed:
 
 
 class TestAgentPluginMaterialization:
-    def test_agent_plugin_bundle_staging_cannot_cross_deployment_boundary(
+    def test_malformed_native_manifest_fails_typed_before_staging_or_mutation(
         self, tmp_path: Path
     ) -> None:
         bundle = _build_bundle(
@@ -235,23 +235,12 @@ class TestAgentPluginMaterialization:
         project.mkdir()
         bi = _bundle_info(bundle, bundle_format="agent-plugin")
         target = KNOWN_TARGETS["copilot"]
-        bi = stage_agent_plugin_bundle(bi, project, global_=False)
 
-        with pytest.raises(AgentPluginDeploymentBoundaryError):
-            integrate_local_bundle(
-                bi,
-                project,
-                targets=[target],
-                force=False,
-                dry_run=False,
-                diagnostics=None,
-                logger=None,
-                scope=None,
-                alias=None,
-            )
+        with pytest.raises(NotAgentPluginError, match=r"does not contain a root plugin.json"):
+            stage_agent_plugin_bundle(bi, project, global_=False)
 
-        retained_roots = list((project / "apm_modules" / ".agent-plugins").iterdir())
-        assert retained_roots
+        assert bi.retained_root is None
+        assert not (project / "apm_modules" / ".agent-plugins").exists()
         assert not (project / "apm_modules" / ".plugin-data").exists()
         assert not (project / target.root_dir / "extensions" / "ext.json").exists()
 

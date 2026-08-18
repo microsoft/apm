@@ -161,6 +161,11 @@ class DeploymentLedgerCodec:
 
         for desired in desired_records.values():
             prior = records.get(desired.locator.key)
+            active_prior = prior_ledger.records.get(desired.locator.key)
+            if active_prior is not None and active_prior.active_owner != owner:
+                raise ValueError(
+                    "Cannot replace a deployment locator actively owned by an unrelated owner"
+                )
             unrelated = tuple(item for item in prior.owners if item != owner) if prior else ()
             records[desired.locator.key] = DeploymentRecord(
                 locator=desired.locator,

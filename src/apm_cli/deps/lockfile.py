@@ -32,7 +32,7 @@ _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
 _ALLOWED_PLUGIN_SOURCE_KINDS = {"local", "cache", "git", "archive", "registry"}
 _LOWER_HEX = frozenset("0123456789abcdef")
-SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
+SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3"})
 
 
 def installed_apm_version() -> str:
@@ -125,6 +125,8 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
             InstalledPluginRecordCodec.validate_rows(data["installed_plugins"])
         except ValueError as exc:
             raise LockfileFormatError(str(exc)) from exc
+        if data["installed_plugins"] and version != "3":
+            raise LockfileFormatError("Non-empty installed_plugins requires lockfile_version '3'")
     return data
 
 
@@ -248,17 +250,21 @@ class InstalledPluginRecord:
         if any(ord(character) < 32 or ord(character) == 127 for character in self.source_locator):
             raise ValueError("Installed Agent Plugin source_locator contains control characters")
         parsed_locator = urlsplit(self.source_locator)
-        if (
-            parsed_locator.scheme
-            and parsed_locator.netloc
-            and (
-                parsed_locator.username is not None
-                or parsed_locator.password is not None
-                or bool(parsed_locator.query)
-                or bool(parsed_locator.fragment)
-            )
+        if parsed_locator.netloc and (
+            parsed_locator.username is not None or parsed_locator.password is not None
         ):
             raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+        if (parsed_locator.scheme or parsed_locator.netloc) and (
+            parsed_locator.query or parsed_locator.fragment
+        ):
+            raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+        scheme_parts = frozenset(parsed_locator.scheme.casefold().split("+"))
+        if scheme_parts.intersection({"ftp", "git", "http", "https", "ssh"}) and not (
+            parsed_locator.netloc
+        ):
+            raise ValueError(
+                "Installed Agent Plugin source_locator must not use a malformed remote URL"
+            )
         if self.resolved_ref is not None and not self.resolved_ref:
             raise ValueError("Installed Agent Plugin resolved_ref must be non-empty or null")
         if self.source_digest is not None and not self.source_digest:
@@ -1107,6 +1113,11 @@ class LockFile:
     _deployments_present: bool = field(default=False, repr=False, compare=False)
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
 
+    def __post_init__(self) -> None:
+        """Promote directly constructed lifecycle state to its required version."""
+        if self.installed_plugins:
+            self.lockfile_version = self._required_lockfile_version()
+
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
 
@@ -1168,8 +1179,16 @@ class LockFile:
     def _required_lockfile_version(self) -> str:
         """Return the minimum schema version required by current lock state."""
         if self.installed_plugins:
-            return "2"
+            return "3"
         return "2" if self._needs_v2() else "1"
+
+    def replace_installed_plugins(
+        self,
+        records: Mapping[str, InstalledPluginRecord],
+    ) -> None:
+        """Replace lifecycle records and synchronize their required schema version."""
+        self.installed_plugins = dict(records)
+        self.lockfile_version = self._required_lockfile_version()
 
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
@@ -1178,12 +1197,12 @@ class LockFile:
         if not self.deployment_ledger.records:
             self.deployment_ledger = DeploymentLedgerCodec.from_lockfile(self)
         DeploymentLedgerCodec.apply_to_lockfile(self.deployment_ledger, self)
-        # Opportunistic v1<->v2 derivation (design §6.1, invariant §2.1.4):
+        # Content-driven v1<->v2<->v3 derivation:
         # the lockfile_version field always reflects current content at
         # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
-        # that mutate ``self.dependencies`` directly or remove the last
-        # registry / git-semver dep need the field re-derived here so the
-        # on-disk version is correct in both directions.
+        # that mutate content directly need the field re-derived here. Installed
+        # plugin lifecycle/ownership records require v3 and downgrade only after
+        # the last record is removed.
         self.lockfile_version = self._required_lockfile_version()
         emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
@@ -1256,7 +1275,11 @@ class LockFile:
         for dep_data in data.get("dependencies", []):
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         if "installed_plugins" in data:
-            lock.installed_plugins = InstalledPluginRecordCodec.from_rows(data["installed_plugins"])
+            installed_plugins = InstalledPluginRecordCodec.from_rows(data["installed_plugins"])
+            if installed_plugins:
+                lock.replace_installed_plugins(installed_plugins)
+            else:
+                lock.installed_plugins = {}
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.mcp_target_servers = {
