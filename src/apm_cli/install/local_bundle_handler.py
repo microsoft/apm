@@ -69,8 +69,6 @@ def install_local_bundle(
     )
     from ..integration.targets import resolve_targets
 
-    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
-
     # Reject incompatible flags with a single consolidated error.  Preserve
     # dict insertion order (matches the order options are declared on the
     # CLI command) rather than alphabetising -- M-cli-3.
@@ -95,6 +93,8 @@ def install_local_bundle(
     logger.start(f"Installing local bundle from {bundle_arg}")
 
     try:
+        enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
+
         # Resolve targets before policy preflight so target restrictions apply
         # to the actual deployment set, including auto-detected targets.
         explicit = target if target else None
@@ -436,7 +436,10 @@ def install_local_bundle(
         # conventions, and ``MCPIntegrator.install`` handles per-target
         # dispatch (same code path used for ``apm.yml mcp_dependencies``).
     finally:
-        if getattr(bundle_info, "format", "") == BundleFormat.AGENT_PLUGIN.value:
+        if (
+            getattr(bundle_info, "format", "") == BundleFormat.AGENT_PLUGIN.value
+            and bundle_info.retained_root is not None
+        ):
             from .agent_plugin_runtime import discard_staged_agent_plugin_bundle
 
             discard_staged_agent_plugin_bundle(bundle_info)

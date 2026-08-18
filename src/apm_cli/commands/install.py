@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
@@ -1190,15 +1191,7 @@ def install(  # noqa: PLR0913
             "--frozen and --update are mutually exclusive. "
             "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
         )
-    # --root: see apm_cli.install.root_redirect.install_root_redirect.
-    # Conflicts with --global (user scope writes are anchored at $HOME
-    # and have no concept of an arbitrary deploy root). ``--dry-run`` is
-    # threaded through so the context manager skips the ``mkdir``
-    # side-effect on previews. Entered manually (rather than via
-    # ``with``) so the existing top-level try/except/finally below does
-    # not need a full-body re-indent; the matching ``__exit__`` in that
-    # ``finally`` restores cwd + clears the source-root override on every
-    # exit path (return, sys.exit -> SystemExit, exception).
+    # The root redirect restores cwd in the command's existing finally block.
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
     from ..core.install_audit import resolve_audit_override_from_cli
@@ -1279,10 +1272,7 @@ def install(  # noqa: PLR0913
                         "--allow-insecure-host": bool(allow_insecure_hosts),
                     },
                 )
-                # Local bundle install renders its own summary; mark
-                # ``summary_rendered = True`` so the finally-block (line ~1423)
-                # does not emit a misleading "install interrupted" line on the
-                # success path.  See issue #1207 D3.
+                # The local-bundle handler renders its own success summary.
                 summary_rendered = True
                 return
             # IM7: path exists but isn't a recognised bundle.  For archive
@@ -1585,6 +1575,13 @@ def install(  # noqa: PLR0913
                     symbol="info",
                 )
 
+    except AgentPluginDeploymentBoundaryError as e:
+        logger.error(str(e))
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
     except InsecureDependencyPolicyError as e:
         command_result = (
             transaction.fail(e)

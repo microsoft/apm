@@ -502,6 +502,43 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 "before rendering success"
             )
 
+    install_commands = _named_functions(install_command_tree, "install")
+    typed_bundle_failure = False
+    if len(install_commands) == 1:
+        for node in ast.walk(install_commands[0]):
+            if not isinstance(node, ast.Try):
+                continue
+            typed_handlers = [
+                handler
+                for handler in node.handlers
+                if isinstance(handler.type, ast.Name)
+                and handler.type.id == "AgentPluginDeploymentBoundaryError"
+            ]
+            generic_handlers = [
+                handler
+                for handler in node.handlers
+                if isinstance(handler.type, ast.Name) and handler.type.id == "Exception"
+            ]
+            if len(typed_handlers) != 1 or not generic_handlers:
+                continue
+            typed_handler = typed_handlers[0]
+            typed_bundle_failure = (
+                typed_handler.lineno < min(handler.lineno for handler in generic_handlers)
+                and "logger.error" in _function_calls(typed_handler)
+                and any(
+                    isinstance(item, ast.Attribute)
+                    and item.attr == "FAILED"
+                    for item in ast.walk(typed_handler)
+                )
+            )
+            if typed_bundle_failure:
+                break
+    if not typed_bundle_failure:
+        violations.append(
+            f"{install_command_path}: typed native bundle failures must render through "
+            "logger.error before the generic exception handler"
+        )
+
     local_bundle_defs = _named_functions(services_tree, "integrate_local_bundle")
     if len(local_bundle_defs) != 1 or not _is_call_statement(
         _first_executable_statement(local_bundle_defs[0]) if local_bundle_defs else None,

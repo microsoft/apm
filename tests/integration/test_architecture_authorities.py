@@ -264,6 +264,12 @@ def test_agent_plugin_contract_has_single_owner() -> None:
             "dry-run must collect every native deployment failure",
         ),
         (
+            "src/apm_cli/commands/install.py",
+            "    except AgentPluginDeploymentBoundaryError as e:",
+            "    except RuntimeError as e:",
+            "typed native bundle failures must render through logger.error",
+        ),
+        (
             "src/apm_cli/policy/ci_checks.py",
             "        except AgentPluginDeploymentBoundaryError as exc:",
             "        except RuntimeError as exc:",

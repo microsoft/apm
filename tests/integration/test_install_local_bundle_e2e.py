@@ -26,6 +26,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.bundle.packer import pack_bundle
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
@@ -93,6 +94,35 @@ def _make_plugin_bundle(
         )
 
     return bundle
+
+
+def _make_native_agent_plugin_bundle(tmp_path: Path) -> Path:
+    """Create native Agent Plugin input that must stop at the G2 boundary."""
+    bundle = _make_plugin_bundle(tmp_path)
+    (bundle / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": PLUGIN_SCHEMA_ID,
+                "name": "native-bundle",
+                "description": "Native components are not deployable at G2",
+            }
+        ),
+        encoding="ascii",
+    )
+    return bundle
+
+
+def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes | None]]:
+    snapshot = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            snapshot[relative] = ("symlink", str(path.readlink()).encode())
+        elif path.is_dir():
+            snapshot[relative] = ("dir", None)
+        else:
+            snapshot[relative] = ("file", path.read_bytes())
+    return snapshot
 
 
 def _make_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
@@ -315,9 +345,10 @@ class TestInstallLocalBundleE2E:
         )
 
         assert result.exit_code == 1
-        assert "Native Agent Plugin components are not" in result.output
-        assert "enabled yet, so deployment was blocked" in result.output
-        assert "apm pack --claude-plugin" in result.output
+        output = " ".join(result.output.split())
+        assert "Native Agent Plugin components are not enabled yet" in output
+        assert "deployment was blocked" in output
+        assert "apm pack --claude-plugin" in output
         assert sorted(path.relative_to(project) for path in project.rglob("*")) == before_paths
         assert {
             path.relative_to(project): path.read_bytes()
@@ -550,6 +581,43 @@ class TestInstallLocalBundleDryRun:
                 assert files == [], f"dry-run wrote files: {files}"
         # Lockfile must not be created on dry-run.
         assert not (project / "apm.lock.yaml").exists()
+
+
+@pytest.mark.parametrize("archive", (False, True), ids=("directory", "archive"))
+@pytest.mark.parametrize("dry_run", (False, True), ids=("real", "dry-run"))
+def test_native_local_bundle_boundary_renders_typed_cli_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    archive: bool,
+    dry_run: bool,
+) -> None:
+    bundle = _make_native_agent_plugin_bundle(tmp_path / "src")
+    bundle_arg = _make_zip(tmp_path / "archive", bundle) if archive else bundle
+    project = _make_project(tmp_path / "dst", targets=["copilot"])
+    project_before = _tree_snapshot(project)
+    source_before = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
+    args = ("--dry-run",) if dry_run else ()
+
+    result = _invoke_install(
+        project,
+        str(bundle_arg),
+        *args,
+        monkeypatch=monkeypatch,
+    )
+
+    assert result.exit_code == 1
+    assert _tree_snapshot(project) == project_before
+    source_after = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
+    assert source_after == source_before
+    output = " ".join(result.output.split())
+    assert "Native Agent Plugin components are not enabled yet" in output
+    assert "apm plugin init --claude-plugin" in output
+    assert "apm pack --claude-plugin" in output
+    assert "ask the publisher for a legacy-compatible package" in output
+    assert "Error installing dependencies" not in output
+    assert "Run with --verbose" not in output
+    assert "Install complete" not in output
+    assert "Dry run complete" not in output
 
 
 # ---------------------------------------------------------------------------
