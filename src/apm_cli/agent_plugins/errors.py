@@ -25,3 +25,7 @@ class AgentPluginManifestAuthorityError(AgentPluginManifestError):
 
 class AgentPluginLegacyBoundaryError(AgentPluginError):
     """Raised when native Agent Plugin input reaches Claude normalization."""
+
+
+class AgentPluginDeploymentBoundaryError(AgentPluginError):
+    """Raised when native Agent Plugin content reaches a deployment boundary."""

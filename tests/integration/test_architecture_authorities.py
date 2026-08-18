@@ -22,6 +22,11 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     package_owner = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
     validation = (root / "src/apm_cli/models/validation.py").read_text(encoding="utf-8")
     resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text(encoding="utf-8")
+    errors = (root / "src/apm_cli/agent_plugins/errors.py").read_text(encoding="utf-8")
+    services = (root / "src/apm_cli/install/services.py").read_text(encoding="utf-8")
+    skill_integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text(
+        encoding="utf-8"
+    )
     detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
     legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
     guard = (root / "scripts/check_bundle_format_authority.sh").read_text(encoding="utf-8")
@@ -44,6 +49,9 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "package = project_agent_plugin_package(plugin)" in agent_validation_source
     assert "result.package = package" in agent_validation_source
     assert "return validation.package" in resolver
+    assert errors.count("class AgentPluginDeploymentBoundaryError(") == 1
+    assert services.count("def enforce_agent_plugin_deployment_boundary(") == 1
+    assert "PackageType.AGENT_PLUGIN" not in skill_integrator
     assert "APMPackage(" not in projection
     assert "read_json_document" not in projection
     assert "detect_agent_plugin(package_path)" in detection
@@ -156,6 +164,73 @@ def test_agent_plugin_contract_has_single_owner() -> None:
             "        result = None\n        _apm_yml_cache[cache_key] = result",
             "APMPackage file loading must route through from_mapping owner",
         ),
+        (
+            "src/apm_cli/install/services.py",
+            "    enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "    from apm_cli.integration.dispatch import get_dispatch_table",
+            "    from apm_cli.integration.dispatch import get_dispatch_table\n\n"
+            "    enforce_agent_plugin_deployment_boundary(package_info)",
+            "native deployment gate must be the first integration action",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "package_info.package_type is not PackageType.AGENT_PLUGIN",
+            "package_info.package_type is PackageType.AGENT_PLUGIN",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "        raise AgentPluginDeploymentBoundaryError(",
+            "        return AgentPluginDeploymentBoundaryError(",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            'getattr(package, "agent_plugin", None)',
+            'getattr(package, "legacy_plugin", None)',
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        PackageType.SKILL_BUNDLE,\n        PackageType.MARKETPLACE_PLUGIN,",
+            "        PackageType.SKILL_BUNDLE,\n"
+            "        PackageType.AGENT_PLUGIN,\n"
+            "        PackageType.MARKETPLACE_PLUGIN,",
+            "SkillIntegrator must not route AGENT_PLUGIN content",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "        # Check if package type allows skill installation",
+            "        # Check if package type allows skill installation",
+            "integrate_package_skill must reject native packages",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "        package_path = package_info.install_path",
+            "        package_path = package_info.install_path",
+            "available_skill_names must reject native packages",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "        enforce_agent_plugin_deployment_boundary(m.package_info)\n"
+            "    except AgentPluginDeploymentBoundaryError as exc:",
+            "        pass\n    except AgentPluginDeploymentBoundaryError as exc:",
+            "native deployment gate must precede selective and generic integration",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "        diagnostics.error(\n",
+            "        diagnostics.warn(\n",
+            "native deployment failure must remain a recorded non-success outcome",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            '        deltas["installed"] = 0',
+            '        deltas["installed"] = 1',
+            "native deployment failure must remain a recorded non-success outcome",
+        ),
     ],
 )
 def test_agent_plugin_projection_guard_rejects_bypass(
@@ -170,10 +245,14 @@ def test_agent_plugin_projection_guard_rejects_bypass(
     sandbox = tmp_path / "repo"
     paths = (
         "src/apm_cli/agent_plugins/ir.py",
+        "src/apm_cli/agent_plugins/errors.py",
         "src/apm_cli/agent_plugins/loader.py",
         "src/apm_cli/agent_plugins/projection.py",
         "src/apm_cli/deps/plugin_parser.py",
         "src/apm_cli/deps/apm_resolver.py",
+        "src/apm_cli/install/services.py",
+        "src/apm_cli/install/template.py",
+        "src/apm_cli/integration/skill_integrator.py",
         "src/apm_cli/models/apm_package.py",
         "src/apm_cli/models/format_detection.py",
         "src/apm_cli/models/validation.py",

@@ -16,6 +16,7 @@ from .constants import (
     SUPPORTED_PLUGIN_SCHEMA_IDS,
 )
 from .errors import (
+    AgentPluginDeploymentBoundaryError,
     AgentPluginError,
     AgentPluginLegacyBoundaryError,
     AgentPluginManifestAuthorityError,
@@ -93,6 +94,7 @@ __all__ = [
     "SUPPORTED_PLUGIN_SCHEMA_IDS",
     "AgentPlugin",
     "AgentPluginComponents",
+    "AgentPluginDeploymentBoundaryError",
     "AgentPluginDetection",
     "AgentPluginDiagnostic",
     "AgentPluginError",

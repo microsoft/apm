@@ -238,6 +238,29 @@ def _resolve_bin_skip(
     return False, None
 
 
+def enforce_agent_plugin_deployment_boundary(package_info: Any | None) -> None:
+    """Block native Agent Plugin deployment until canonical IR integration exists."""
+    from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
+    from apm_cli.models.validation import PackageType
+
+    if package_info is None:
+        return
+    if package_info.package_type is not PackageType.AGENT_PLUGIN:
+        return
+
+    package = getattr(package_info, "package", None)
+    if package is None or getattr(package, "agent_plugin", None) is None:
+        raise AgentPluginDeploymentBoundaryError(
+            "Native Agent Plugin canonical IR is missing, so component deployment was blocked. "
+            "Native Agent Plugin components are not enabled yet; use the explicit legacy Claude "
+            "plugin format only if the package author intended legacy compatibility."
+        )
+    raise AgentPluginDeploymentBoundaryError(
+        "Native Agent Plugin components are not enabled yet; use the explicit legacy Claude "
+        "plugin format only if the package author intended legacy compatibility."
+    )
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -287,7 +310,12 @@ def integrate_package_primitives(  # noqa: PLR0913
     deploys but a prominent warning is emitted.
 
     Returns a dict with integration counters and the list of deployed file paths.
+
+    Raises:
+        AgentPluginDeploymentBoundaryError: If native Agent Plugin content reaches deployment.
     """
+    enforce_agent_plugin_deployment_boundary(package_info)
+
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope

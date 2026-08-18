@@ -13,9 +13,14 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
+from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.package_resolution import effective_deploy_skill_subset
-from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
+from apm_cli.install.services import (
+    IntegratorBundle,
+    enforce_agent_plugin_deployment_boundary,
+    integrate_package_primitives,
+)
 from apm_cli.install.sources import DependencySource, Materialization
 
 
@@ -115,6 +120,18 @@ def _integrate_materialization(
     dep_key = m.dep_key
     diagnostics = ctx.diagnostics
     logger = ctx.logger
+
+    try:
+        enforce_agent_plugin_deployment_boundary(m.package_info)
+    except AgentPluginDeploymentBoundaryError as exc:
+        deltas["installed"] = 0
+        ctx.package_deployed_files[dep_key] = []
+        package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
+        diagnostics.error(
+            f"{source.INTEGRATE_ERROR_PREFIX}: {exc}",
+            package=package_key,
+        )
+        return deltas
 
     if ctx.skill_subset_from_cli and ctx.skill_subset:
         from apm_cli.install.outcome import require_requested_components
