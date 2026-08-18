@@ -176,17 +176,17 @@ class LocalDependencySource(DependencySource):
     INTEGRATE_ERROR_PREFIX = "Failed to integrate primitives from local package"
 
     def acquire(self) -> Materialization | None:
+        from apm_cli.agent_plugins.errors import AgentPluginError
+        from apm_cli.agent_plugins.loader import detect_agent_plugin
         from apm_cli.core.scope import InstallScope
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.install.phases.local_content import _copy_local_package
         from apm_cli.models.apm_package import (
-            APMPackage,
             GitReferenceType,
             PackageInfo,
-            PackageType,
             ResolvedReference,
         )
-        from apm_cli.models.validation import detect_package_type
+        from apm_cli.models.validation import validate_apm_package
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
@@ -225,6 +225,22 @@ class LocalDependencySource(DependencySource):
         # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
         # has nothing to do.
         base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
+        original_src = Path(dep_ref.local_path).expanduser()
+        if not original_src.is_absolute():
+            original_src = (base_dir / original_src).resolve()
+        else:
+            original_src = original_src.resolve()
+
+        try:
+            native_detection = detect_agent_plugin(original_src) if original_src.is_dir() else None
+        except AgentPluginError as exc:
+            raise DirectDependencyError(f"Local Agent Plugin is invalid: {exc}") from exc
+        if native_detection is not None:
+            native_gate = validate_apm_package(original_src)
+            if not native_gate.is_valid or native_gate.package is None:
+                details = "; ".join(native_gate.errors) or "validator returned no package"
+                raise DirectDependencyError(f"Local Agent Plugin is invalid: {details}")
+
         result_path = _copy_local_package(
             dep_ref,
             install_path,
@@ -242,36 +258,16 @@ class LocalDependencySource(DependencySource):
         if logger:
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
-        # Build minimal PackageInfo for integration. Anchor source_path on
-        # the *original* user source directory (not the apm_modules copy) so
-        # any transitive ``../sibling`` dep declared inside this package
-        # resolves against where the developer wrote the path (#857).
-        local_apm_yml = install_path / "apm.yml"
-        if local_apm_yml.exists():
-            original_src = Path(dep_ref.local_path).expanduser()
-            if not original_src.is_absolute():
-                # For TRANSITIVE local deps the relative path is anchored on
-                # the parent package's directory (base_dir above), not on
-                # the consumer's project root. Reusing base_dir here keeps
-                # the source_path stamped on the loaded APMPackage in lock-
-                # step with where _copy_local_package actually copied from.
-                original_src = (base_dir / original_src).resolve()
-            else:
-                original_src = original_src.resolve()
-            local_pkg = APMPackage.from_apm_yml(local_apm_yml, source_path=original_src)
-            # TODO(#940): post-construction mutation of .source has the same
-            # cache-poisoning shape as the bug fixed in this PR. Today the
-            # cache key is (apm.yml, source_path) so mutating .source is
-            # safe, but keep this in mind when reworking the source field.
-            if not local_pkg.source:
-                local_pkg.source = dep_ref.local_path
-        else:
-            local_pkg = APMPackage(
-                name=Path(dep_ref.local_path).name,
-                version="0.0.0",
-                package_path=install_path,
-                source=dep_ref.local_path,
-            )
+        validation = validate_apm_package(
+            install_path,
+            source_path=original_src,
+        )
+        if not validation.is_valid or validation.package is None:
+            details = "; ".join(validation.errors) or "validator returned no package"
+            raise DirectDependencyError(f"Local package is invalid: {details}")
+        local_pkg = validation.package
+        if not local_pkg.source:
+            local_pkg.source = dep_ref.local_path
 
         local_ref = ResolvedReference(
             original_ref="local",
@@ -285,15 +281,8 @@ class LocalDependencySource(DependencySource):
             resolved_reference=local_ref,
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,
+            package_type=validation.package_type,
         )
-
-        # Detect package type
-        pkg_type, plugin_json_path = detect_package_type(install_path)
-        local_info.package_type = pkg_type
-        if pkg_type in {PackageType.AGENT_PLUGIN, PackageType.MARKETPLACE_PLUGIN}:
-            from apm_cli.deps.plugin_parser import normalize_plugin_directory
-
-            normalize_plugin_directory(install_path, plugin_json_path)
 
         # Record for lockfile
         node = ctx.dependency_graph.dependency_tree.get_node(dep_key)
@@ -408,6 +397,8 @@ class CachedDependencySource(DependencySource):
         return cached_commit
 
     def acquire(self) -> Materialization | None:
+        from apm_cli.agent_plugins.errors import AgentPluginError
+        from apm_cli.agent_plugins.loader import detect_agent_plugin
         from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.models.apm_package import (
@@ -463,6 +454,20 @@ class CachedDependencySource(DependencySource):
         if not dep_ref.reference:
             deltas["unpinned"] = 1
 
+        native_validation = None
+        try:
+            native_detection = detect_agent_plugin(install_path)
+        except AgentPluginError as exc:
+            raise DirectDependencyError(f"Cached Agent Plugin is invalid: {exc}") from exc
+        if native_detection is not None:
+            native_validation = validate_apm_package(
+                install_path,
+                source_path=install_path,
+            )
+            if not native_validation.is_valid or native_validation.package is None:
+                details = "; ".join(native_validation.errors) or "validator returned no package"
+                raise DirectDependencyError(f"Cached Agent Plugin is invalid: {details}")
+
         # Skip integration entirely if no targets.  The template will
         # write the empty deployed_files entry on its own (single source
         # of truth), so we just signal "skip integration" via
@@ -477,31 +482,37 @@ class CachedDependencySource(DependencySource):
                 deltas=deltas,
             )
 
-        # Load package from apm.yml. Anchor source_path on the clone location
-        # so transitive ``local_path`` deps inside this remote package resolve
-        # from there (#857).
-        apm_yml_path = install_path / APM_YML_FILENAME
-        pkg_type, _ = detect_package_type(install_path)
-        if apm_yml_path.exists():
-            cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
-            # TODO(#940): see note in _materialize_local for the same caveat
-            # about post-construction mutation of .source.
-            if not cached_package.source:
-                cached_package.source = dep_ref.repo_url
-        elif pkg_type == PackageType.CLAUDE_SKILL:
-            validation_result = validate_apm_package(install_path)
-            if not validation_result.is_valid or validation_result.package is None:
-                details = "; ".join(validation_result.errors) or "validator returned no package"
-                raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
-            cached_package = validation_result.package
-            cached_package.source = dep_ref.repo_url
+        if native_validation is not None:
+            validation_result = native_validation
+            cached_package = native_validation.package
+            if cached_package is None:
+                raise DirectDependencyError(
+                    "Cached Agent Plugin validation produced no package metadata"
+                )
+            pkg_type = validation_result.package_type
         else:
-            cached_package = APMPackage(
-                name=dep_ref.repo_url.split("/")[-1],
-                version="unknown",
-                package_path=install_path,
-                source=dep_ref.repo_url,
-            )
+            apm_yml_path = install_path / APM_YML_FILENAME
+            pkg_type, _ = detect_package_type(install_path)
+            if apm_yml_path.exists():
+                cached_package = APMPackage.from_apm_yml(
+                    apm_yml_path,
+                    source_path=install_path,
+                )
+            elif pkg_type == PackageType.CLAUDE_SKILL:
+                validation_result = validate_apm_package(install_path)
+                if not validation_result.is_valid or validation_result.package is None:
+                    details = "; ".join(validation_result.errors) or "validator returned no package"
+                    raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
+                cached_package = validation_result.package
+            else:
+                cached_package = APMPackage(
+                    name=dep_ref.repo_url.split("/")[-1],
+                    version="unknown",
+                    package_path=install_path,
+                    source=dep_ref.repo_url,
+                )
+        if not cached_package.source:
+            cached_package.source = dep_ref.repo_url
 
         resolved_or_cached_ref = (
             resolved_ref
@@ -520,9 +531,8 @@ class CachedDependencySource(DependencySource):
             resolved_reference=resolved_or_cached_ref,
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,
+            package_type=pkg_type,
         )
-
-        cached_package_info.package_type = pkg_type
 
         # Collect for lockfile
         node = ctx.dependency_graph.dependency_tree.get_node(dep_key)

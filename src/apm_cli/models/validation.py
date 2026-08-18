@@ -8,7 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..agent_plugins import AgentPluginError, load_agent_plugin
+from ..agent_plugins.errors import AgentPluginError
+from ..agent_plugins.loader import load_agent_plugin
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 
 if TYPE_CHECKING:
@@ -325,7 +326,11 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
     )
 
 
-def validate_apm_package(package_path: Path) -> ValidationResult:
+def validate_apm_package(
+    package_path: Path,
+    *,
+    source_path: Path | None = None,
+) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
     Supports six package types:
@@ -397,7 +402,12 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
 
     # Handle Agent Plugins through their native immutable contract owner.
     if result.package_type == PackageType.AGENT_PLUGIN:
-        return _validate_agent_plugin(package_path, plugin_json_path, result)
+        return _validate_agent_plugin(
+            package_path,
+            plugin_json_path,
+            result,
+            source_path=source_path,
+        )
 
     # Handle Claude Skills (no apm.yml) - auto-generate minimal apm.yml
     skill_md_path = package_path / SKILL_MD_FILENAME
@@ -410,7 +420,7 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
 
     # Handle Skill Bundles (nested skills/<name>/SKILL.md)
     if result.package_type == PackageType.SKILL_BUNDLE:
-        return _validate_skill_bundle(package_path, result)
+        return _validate_skill_bundle(package_path, result, source_path=source_path)
 
     # Standard APM package or HYBRID validation (has apm.yml)
     apm_yml_path = package_path / APM_YML_FILENAME
@@ -419,13 +429,27 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     # (back-compat for packages that ship both .apm/ primitives AND SKILL.md).
     # Otherwise validate as a skill bundle with apm.yml metadata.
     if result.package_type == PackageType.HYBRID:
-        return _validate_hybrid_package(package_path, apm_yml_path, result)
+        return _validate_hybrid_package(
+            package_path,
+            apm_yml_path,
+            result,
+            source_path=source_path,
+        )
 
-    return _validate_apm_package_with_yml(package_path, apm_yml_path, result)
+    return _validate_apm_package_with_yml(
+        package_path,
+        apm_yml_path,
+        result,
+        source_path=source_path,
+    )
 
 
 def _validate_agent_plugin(
-    package_path: Path, plugin_json_path: Path | None, result: ValidationResult
+    package_path: Path,
+    plugin_json_path: Path | None,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
 ) -> ValidationResult:
     """Validate an Agent Plugin without entering Claude normalization."""
     if plugin_json_path is None:
@@ -434,11 +458,17 @@ def _validate_agent_plugin(
 
     try:
         plugin = load_agent_plugin(package_path)
+        from ..agent_plugins.projection import project_agent_plugin_package
+
+        package = project_agent_plugin_package(plugin)
+        if source_path is not None:
+            package.source_path = source_path.resolve()
     except AgentPluginError as exc:
         result.add_error(f"Failed to process Agent Plugin: {exc}")
         return result
 
     result.agent_plugin = plugin
+    result.package = package
     for diagnostic in plugin.diagnostics:
         message = f"{diagnostic.code}: {diagnostic.message}"
         if diagnostic.severity.value == "error":
@@ -519,7 +549,12 @@ def _validate_claude_skill(
     return result
 
 
-def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> ValidationResult:
+def _validate_skill_bundle(
+    package_path: Path,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
+) -> ValidationResult:
     """Validate a SKILL_BUNDLE package (nested skills/<name>/SKILL.md).
 
     For each ``skills/<name>/`` with a SKILL.md:
@@ -618,7 +653,7 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
     # Build APMPackage: use apm.yml if present, otherwise synthesize
     if apm_yml_path.exists():
         try:
-            package = APMPackage.from_apm_yml(apm_yml_path)
+            package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
         except (ValueError, FileNotFoundError) as e:
             result.add_error(f"Invalid apm.yml: {e}")
             return result
@@ -637,7 +672,11 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
 
 
 def _validate_hybrid_package(
-    package_path: Path, apm_yml_path: Path, result: ValidationResult
+    package_path: Path,
+    apm_yml_path: Path,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
 ) -> ValidationResult:
     """Validate a HYBRID package (apm.yml + SKILL.md).
 
@@ -662,14 +701,19 @@ def _validate_hybrid_package(
     # Back-compat: if .apm/ exists, the author intends independent primitives.
     apm_dir = package_path / APM_DIR
     if apm_dir.exists() and apm_dir.is_dir():
-        return _validate_apm_package_with_yml(package_path, apm_yml_path, result)
+        return _validate_apm_package_with_yml(
+            package_path,
+            apm_yml_path,
+            result,
+            source_path=source_path,
+        )
 
     # --- Skill-bundle path (no .apm/) ---
     from .apm_package import APMPackage
 
     # Parse apm.yml -- authoritative for APM-owned fields.
     try:
-        package = APMPackage.from_apm_yml(apm_yml_path)
+        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
     except (ValueError, FileNotFoundError) as e:
         result.add_error(f"Invalid apm.yml: {e}")
         return result
@@ -748,7 +792,11 @@ def _validate_marketplace_plugin(
 
 
 def _validate_apm_package_with_yml(
-    package_path: Path, apm_yml_path: Path, result: ValidationResult
+    package_path: Path,
+    apm_yml_path: Path,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
 ) -> ValidationResult:
     """Validate a standard APM package with apm.yml.
 
@@ -764,7 +812,7 @@ def _validate_apm_package_with_yml(
 
     # Try to parse apm.yml
     try:
-        package = APMPackage.from_apm_yml(apm_yml_path)
+        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
         result.package = package
     except (ValueError, FileNotFoundError) as e:
         result.add_error(f"Invalid apm.yml: {e}")

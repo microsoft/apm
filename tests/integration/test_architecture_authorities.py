@@ -18,7 +18,10 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     """Native Agent Plugin interpretation must route through its loader."""
     root = Path(__file__).parents[2]
     loader = (root / "src/apm_cli/agent_plugins/loader.py").read_text(encoding="utf-8")
+    projection = (root / "src/apm_cli/agent_plugins/projection.py").read_text(encoding="utf-8")
+    package_owner = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
     validation = (root / "src/apm_cli/models/validation.py").read_text(encoding="utf-8")
+    resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text(encoding="utf-8")
     detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
     legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
     guard = (root / "scripts/check_bundle_format_authority.sh").read_text(encoding="utf-8")
@@ -35,12 +38,165 @@ def test_agent_plugin_contract_has_single_owner() -> None:
 
     assert loader.count("def load_agent_plugin(") == 1
     assert loader.count("def detect_agent_plugin(") == 1
+    assert projection.count("def project_agent_plugin_package(") == 1
+    assert package_owner.count("def from_mapping(") == 1
     assert "normalize_plugin_directory" not in agent_validation_source
+    assert "package = project_agent_plugin_package(plugin)" in agent_validation_source
+    assert "result.package = package" in agent_validation_source
+    assert "return validation.package" in resolver
+    assert "APMPackage(" not in projection
+    assert "read_json_document" not in projection
     assert "detect_agent_plugin(package_path)" in detection
     assert "admit_legacy_plugin_manifest(plugin_path)" in legacy
     assert "Agent Plugin classification must route through its loader" in guard
     assert "| Agent Plugins v1 contract interpretation and component discovery |" in architecture
     assert "| Agent Plugin portable manifest authority |" in architecture
+    assert "| APMPackage interpreted-manifest construction |" in architecture
+    assert "| Agent Plugin compatibility package projection |" in architecture
+    assert architecture == (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new", "message"),
+    [
+        (
+            "src/apm_cli/models/validation.py",
+            "package = project_agent_plugin_package(plugin)",
+            "package = None",
+            "Agent Plugin compatibility packages must route through the projection owner",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "package = project_agent_plugin_package(plugin)",
+            "package = project_agent_plugin_package(plugin)\n        package = None",
+            "native validation bypasses projection or enters normalization",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "    result.agent_plugin = plugin",
+            "    normalize_plugin_directory(package_path, plugin_json_path)\n"
+            "    result.agent_plugin = plugin",
+            "Agent Plugin classification must route through its loader, not Claude normalization",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "APMPackage.from_mapping(",
+            "APMPackage(",
+            "Agent Plugin compatibility packages must route through the projection owner",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            "    plugin.manifest.path.read_text()\n    data = _project_apm_configuration(plugin)",
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            "    plugin.manifest.path.chmod(0o600)\n    data = _project_apm_configuration(plugin)",
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            '    json.JSONDecoder().decode("{}")\n    data = _project_apm_configuration(plugin)',
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "from .ir import AgentPlugin, thaw_frozen_json",
+            "from .ir import AgentPlugin, thaw_frozen_json\n"
+            "from json import loads as thaw_frozen_json",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "from .ir import AgentPlugin, thaw_frozen_json",
+            "from .ir import AgentPlugin, thaw_frozen_json\n"
+            '__import__("json").JSONDecoder().decode("{}")',
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    projected = thaw_frozen_json(configuration.values)",
+            "    projected = thaw(configuration.values)",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    projected = thaw_frozen_json(configuration.values)",
+            "    thaw_frozen_json(configuration.values)\n    projected = {}",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "            return validation.package",
+            "            return None",
+            "Agent Plugin dependency loading must preserve the projected package",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "            return validation.package",
+            "            if False:\n"
+            "                return validation.package\n"
+            "            return None",
+            "Agent Plugin dependency loading must preserve the projected package",
+        ),
+        (
+            "src/apm_cli/models/apm_package.py",
+            "        result = cls.from_mapping(",
+            "        result = cls(",
+            "APMPackage file loading must route through from_mapping owner",
+        ),
+        (
+            "src/apm_cli/models/apm_package.py",
+            "        _apm_yml_cache[cache_key] = result",
+            "        result = None\n        _apm_yml_cache[cache_key] = result",
+            "APMPackage file loading must route through from_mapping owner",
+        ),
+    ],
+)
+def test_agent_plugin_projection_guard_rejects_bypass(
+    tmp_path: Path,
+    relative_path: str,
+    old: str,
+    new: str,
+    message: str,
+) -> None:
+    """The boundary guard must reject projection and normalization bypasses."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "src/apm_cli/agent_plugins/ir.py",
+        "src/apm_cli/agent_plugins/loader.py",
+        "src/apm_cli/agent_plugins/projection.py",
+        "src/apm_cli/deps/plugin_parser.py",
+        "src/apm_cli/deps/apm_resolver.py",
+        "src/apm_cli/models/apm_package.py",
+        "src/apm_cli/models/format_detection.py",
+        "src/apm_cli/models/validation.py",
+    )
+    for relative in paths:
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, destination)
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    assert old in source
+    mutation_path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/check_bundle_format_authority.sh", str(sandbox)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert message in result.stdout + result.stderr
 
 
 def test_policy_cache_metadata_redaction_has_single_owner() -> None:

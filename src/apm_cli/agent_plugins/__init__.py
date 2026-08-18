@@ -66,6 +66,16 @@ from .validation import (
     validate_plugin_manifest_file,
 )
 
+
+def __getattr__(name: str) -> object:
+    """Lazily expose compatibility projection without a models import cycle."""
+    if name != "project_agent_plugin_package":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from .projection import project_agent_plugin_package
+
+    return project_agent_plugin_package
+
+
 __all__ = [
     "AGENT_PLUGINS_SCHEMA_PREFIX",
     "AGENT_PLUGINS_SITE_COMMIT",
@@ -110,6 +120,7 @@ __all__ = [
     "detect_agent_plugin",
     "is_agent_plugin_schema_id",
     "load_agent_plugin",
+    "project_agent_plugin_package",
     "read_json_document",
     "reject_agent_plugin_legacy_normalization",
     "schema_version_from_id",

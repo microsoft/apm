@@ -14,6 +14,7 @@ from apm_cli.commands.uninstall.engine import (
     LocalSlotRefresh,
     _activate_staged_local_refresh,
     _recover_local_refresh_backups,
+    _stage_shared_local_survivors,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.path_security import PathTraversalError
@@ -398,6 +399,52 @@ def test_interrupted_local_refresh_backup_is_recovered(
     assert restored.is_dir()
     assert not backup.exists()
     logger.progress.assert_called_once()
+
+
+def test_local_refresh_staging_accepts_native_agent_plugin_without_apm_yml(
+    tmp_path: Path,
+) -> None:
+    """Uninstall survivor staging consumes native validation projection."""
+    from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+
+    modules_dir = tmp_path / "apm_modules"
+    install_path = modules_dir / "_local" / "native-plugin"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    parsed = MagicMock()
+    parsed.get_install_path.return_value = install_path
+    survivor = MagicMock()
+    survivor.get_unique_key.return_value = "local:native-plugin"
+
+    def copy_native_plugin(_survivor, staged_path, *_args, **_kwargs):
+        staged_path.mkdir(parents=True)
+        (staged_path / "plugin.json").write_text(
+            f'{{"$schema":"{PLUGIN_SCHEMA_ID}","name":"native.plugin","version":"1.0.0"}}',
+            encoding="ascii",
+        )
+        return staged_path
+
+    with (
+        patch("apm_cli.commands.uninstall.engine._parse_dependency_entry", return_value=parsed),
+        patch(
+            "apm_cli.commands.uninstall.engine._surviving_local_refs_at_install_path",
+            return_value=[survivor],
+        ),
+        patch(
+            "apm_cli.install.phases.local_content._copy_local_package",
+            side_effect=copy_native_plugin,
+        ),
+    ):
+        refreshes = _stage_shared_local_survivors(
+            [object()],
+            [survivor],
+            modules_dir,
+            project_root,
+            MagicMock(),
+        )
+
+    assert refreshes[install_path].staged_path.is_dir()
+    assert not (refreshes[install_path].staged_path / "apm.yml").exists()
 
 
 def test_local_refresh_activation_rejects_outside_install_path(

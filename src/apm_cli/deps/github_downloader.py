@@ -24,7 +24,6 @@ from ..models.apm_package import (
     DependencyReference,
     GitReferenceType,
     PackageInfo,
-    PackageType,
     RemoteRef,
     ResolvedReference,
     validate_apm_package,
@@ -1623,12 +1622,10 @@ class GitHubPackageDownloader:
                 _rmtree(temp_dir)
 
         # Validate the extracted package (after temp dir is cleaned up)
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            error_msgs = "; ".join(validation_result.errors)
-            raise RuntimeError(
-                f"Subdirectory is not a valid APM package or Claude Skill: {error_msgs}"
-            )
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
 
         # Get the resolved reference for metadata
         resolved_ref = ResolvedReference(
@@ -1639,7 +1636,6 @@ class GitHubPackageDownloader:
         )
 
         # For plugins without an explicit version, stamp with the short commit SHA.
-        package = validation_result.package
         from .package_validator import stamp_plugin_version
 
         stamp_plugin_version(
@@ -1822,21 +1818,14 @@ class GitHubPackageDownloader:
                     package = validation_result.package
                     package.source = dep_ref.to_github_url()
                     package.resolved_commit = resolved_ref.resolved_commit
-                    if (
-                        validation_result.package_type
-                        in (PackageType.AGENT_PLUGIN, PackageType.MARKETPLACE_PLUGIN)
-                        and package.version == "0.0.0"
-                        and resolved_ref.resolved_commit
-                    ):
-                        short_sha = resolved_ref.resolved_commit[:7]
-                        package.version = short_sha
-                        apm_yml_path = target_path / "apm.yml"
-                        if apm_yml_path.exists():
-                            from ..utils.yaml_io import dump_yaml, load_yaml
+                    from .package_validator import stamp_plugin_version
 
-                            _data = load_yaml(apm_yml_path) or {}
-                            _data["version"] = short_sha
-                            dump_yaml(_data, apm_yml_path)
+                    stamp_plugin_version(
+                        package,
+                        validation_result.package_type,
+                        resolved_ref.resolved_commit,
+                        target_path,
+                    )
                     return PackageInfo(
                         package=package,
                         install_path=target_path,

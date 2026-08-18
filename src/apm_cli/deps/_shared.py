@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..models.apm_package import APMPackage
+    from ..models.dependency.reference import DependencyReference
+    from ..models.validation import ValidationResult
 
 
-def _validate_and_load_package(validation_result, target_path: Path, dep_ref) -> object:
+def _validate_and_load_package(
+    validation_result: ValidationResult,
+    target_path: Path,
+    dep_ref: DependencyReference,
+) -> APMPackage:
     """Check *validation_result*, clean up *target_path* on failure, and return the package.
 
     Args:
@@ -31,6 +41,8 @@ def _validate_and_load_package(validation_result, target_path: Path, dep_ref) ->
         raise RuntimeError(error_msg.strip())
 
     if not validation_result.package:
+        if target_path.exists():
+            robust_rmtree(target_path, ignore_errors=True)
         raise RuntimeError(
             f"Package validation succeeded but no package metadata found for {dep_ref.repo_url}"
         )

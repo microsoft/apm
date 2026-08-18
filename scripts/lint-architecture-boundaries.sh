@@ -459,8 +459,11 @@ claude_skill_cached_body=$(awk '
     flag {print}
 ' "$claude_skill_metadata_consumer")
 claude_skill_cached_branch=$(printf '%s\n' "$claude_skill_cached_body" | awk '
-    /elif pkg_type == PackageType.CLAUDE_SKILL:/ {flag=1}
-    flag && /^        else:/ {exit}
+    /elif pkg_type == PackageType.CLAUDE_SKILL:/ {
+        flag=1
+        branch_indent=match($0, /[^ ]/)
+    }
+    flag && /^[[:space:]]*else:/ && match($0, /[^ ]/) == branch_indent {exit}
     flag {print}
 ')
 if ! printf '%s\n' "$claude_skill_owner_body" | grep -q 'load_frontmatter' \

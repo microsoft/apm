@@ -1004,17 +1004,17 @@ class TestNormalizePluginDirectory:
         data = yaml.safe_load(apm_yml_path.read_text())
         assert data["name"] == "json-name"
 
-    def test_invalid_plugin_json_falls_back_to_dir_name(self, tmp_path: Path) -> None:
-        import yaml
+    def test_invalid_plugin_json_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins import AgentPluginLegacyBoundaryError
 
         plugin_dir = tmp_path / "fallback-name"
         plugin_dir.mkdir()
         plugin_json = plugin_dir / "plugin.json"
         plugin_json.write_text("{ bad json {{")
 
-        apm_yml_path = normalize_plugin_directory(plugin_dir, plugin_json)
-        data = yaml.safe_load(apm_yml_path.read_text())
-        assert data["name"] == "fallback-name"
+        with pytest.raises(AgentPluginLegacyBoundaryError, match="Invalid JSON"):
+            normalize_plugin_directory(plugin_dir, plugin_json)
+        assert not (plugin_dir / "apm.yml").exists()
 
 
 class TestMapPluginArtifacts:

@@ -9,7 +9,7 @@ yet reached by test_sources_classification.py:
   - USER-scope + absolute path → allowed
   - _copy_local_package failure → return None
   - success path with apm.yml present
-  - success path without apm.yml (bare APMPackage)
+  - fail-closed path without a supported manifest
   - relative local_path resolution
   - package_type detection (MARKETPLACE_PLUGIN branch)
 * CachedDependencySource._resolve_cached_commit
@@ -222,8 +222,10 @@ class TestLocalDependencySourceAcquire:
         assert result is None
         ctx.diagnostics.error.assert_called_once()
 
-    def test_success_without_apm_yml(self, tmp_path: Path) -> None:
-        """Success path: no apm.yml in install_path → bare APMPackage."""
+    def test_without_supported_manifest_fails_closed(self, tmp_path: Path) -> None:
+        """A copied local directory without a package contract is rejected."""
+        from apm_cli.install.errors import DirectDependencyError
+
         ctx = _make_ctx(project_root=tmp_path)
         dep_ref = _make_dep_ref(is_local=True, local_path=str(tmp_path), reference=None)
         install_path = tmp_path / "install"
@@ -235,10 +237,6 @@ class TestLocalDependencySourceAcquire:
                 return_value=install_path,
             ),
             patch(
-                "apm_cli.models.validation.detect_package_type",
-                return_value=(None, None),
-            ),
-            patch(
                 "apm_cli.utils.content_hash.compute_package_hash",
                 return_value="abc123",
             ),
@@ -246,11 +244,10 @@ class TestLocalDependencySourceAcquire:
             from apm_cli.install.sources import LocalDependencySource
 
             source = LocalDependencySource(ctx, dep_ref, install_path, "owner/pkg")
-            result = source.acquire()
+            with pytest.raises(DirectDependencyError, match="Local package is invalid"):
+                source.acquire()
 
-        assert result is not None
-        assert result.dep_key == "owner/pkg"
-        assert result.install_path == install_path
+        assert not (install_path / "apm.yml").exists()
 
     def test_success_with_apm_yml(self, tmp_path: Path) -> None:
         """Success path: apm.yml present → APMPackage.from_apm_yml called."""
@@ -262,7 +259,9 @@ class TestLocalDependencySourceAcquire:
         install_path.mkdir()
 
         # Create a minimal apm.yml in the install path
-        (install_path / "apm.yml").write_text("name: mypkg\nversion: 0.1.0\n")
+        (install_path / "apm.yml").write_text(
+            "name: mypkg\nversion: 0.1.0\ndependencies:\n  apm:\n    - owner/repo\n"
+        )
 
         mock_pkg = MagicMock()
         mock_pkg.source = None
@@ -299,6 +298,9 @@ class TestLocalDependencySourceAcquire:
         dep_ref = _make_dep_ref(is_local=True, local_path=str(tmp_path), reference=None)
         install_path = tmp_path / "install"
         install_path.mkdir()
+        (install_path / "apm.yml").write_text(
+            "name: mypkg\nversion: 0.1.0\ndependencies:\n  apm:\n    - owner/repo\n"
+        )
 
         with (
             patch(
@@ -321,8 +323,8 @@ class TestLocalDependencySourceAcquire:
 
         mock_logger.download_complete.assert_called_once()
 
-    def test_marketplace_plugin_normalise_called(self, tmp_path: Path) -> None:
-        """MARKETPLACE_PLUGIN package type triggers normalize_plugin_directory."""
+    def test_marketplace_plugin_normalizes_through_validation(self, tmp_path: Path) -> None:
+        """Legacy marketplace plugins retain their explicit normalization path."""
         from apm_cli.models.apm_package import PackageType
 
         ctx = _make_ctx(project_root=tmp_path)
@@ -330,6 +332,7 @@ class TestLocalDependencySourceAcquire:
         install_path = tmp_path / "install"
         install_path.mkdir()
         fake_plugin_json = install_path / "plugin.json"
+        fake_plugin_json.write_text('{"name": "legacy-plugin"}', encoding="utf-8")
 
         with (
             patch(
@@ -337,22 +340,19 @@ class TestLocalDependencySourceAcquire:
                 return_value=install_path,
             ),
             patch(
-                "apm_cli.models.validation.detect_package_type",
-                return_value=(PackageType.MARKETPLACE_PLUGIN, fake_plugin_json),
-            ),
-            patch(
                 "apm_cli.utils.content_hash.compute_package_hash",
                 return_value="abc",
             ),
-            patch("apm_cli.deps.plugin_parser.normalize_plugin_directory") as mock_normalise,
         ):
             from apm_cli.install.sources import LocalDependencySource
 
             source = LocalDependencySource(ctx, dep_ref, install_path, "owner/plugin")
             result = source.acquire()
 
-        mock_normalise.assert_called_once_with(install_path, fake_plugin_json)
         assert result is not None
+        assert result.package_info is not None
+        assert result.package_info.package_type == PackageType.MARKETPLACE_PLUGIN
+        assert (install_path / "apm.yml").exists()
 
 
 # ---------------------------------------------------------------------------
