@@ -1444,6 +1444,11 @@ if ! grep -q 'structural_errors: tuple\[str, \.\.\.\] = ()' "$marketplace_struct
     violations=$((violations + 1))
 fi
 
+echo "[*] AC34: installed Agent Plugin lifecycle state authority"
+if ! uv run --extra dev python scripts/check_agent_plugin_state_authority.py; then
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC29: dependency identity and materialization path authority"
 identity_owner="src/apm_cli/models/dependency/identity.py"
 materialization_owner="src/apm_cli/models/dependency/materialization.py"

@@ -5,11 +5,14 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -27,6 +30,8 @@ logger = logging.getLogger(__name__)
 _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
+_ALLOWED_PLUGIN_SOURCE_KINDS = {"local", "cache", "git", "archive", "registry"}
+_LOWER_HEX = frozenset("0123456789abcdef")
 SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
 
 
@@ -115,6 +120,11 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
             DeploymentLedgerCodec.validate_rows(data["deployments"])
         except ValueError as exc:
             raise LockfileFormatError(str(exc)) from exc
+    if "installed_plugins" in data:
+        try:
+            InstalledPluginRecordCodec.validate_rows(data["installed_plugins"])
+        except ValueError as exc:
+            raise LockfileFormatError(str(exc)) from exc
     return data
 
 
@@ -161,6 +171,380 @@ def _normalize_exec_status(raw: Any) -> str | None:
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     """Return values without duplicates, preserving first-seen order."""
     return list(dict.fromkeys(values))
+
+
+@dataclass(frozen=True, slots=True)
+class InstalledPluginComponentFact:
+    """One canonical installed component fact retained for later deployment."""
+
+    kind: str
+    name: str
+    relative_path: str | None = None
+    metadata: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous or traversal-shaped component facts."""
+        if not self.kind or not self.name:
+            raise ValueError("Installed Agent Plugin component kind and name are required")
+        if self.relative_path is not None:
+            from ..utils.path_security import validate_path_segments
+
+            posix_path = PurePosixPath(self.relative_path)
+            windows_path = PureWindowsPath(self.relative_path)
+            if posix_path.is_absolute() or windows_path.is_absolute() or bool(windows_path.drive):
+                raise ValueError("Installed Agent Plugin component paths must be relative")
+            validate_path_segments(
+                self.relative_path,
+                context="installed Agent Plugin component path",
+                reject_empty=True,
+            )
+        metadata_keys = [key for key, value in self.metadata if key and value]
+        if len(metadata_keys) != len(self.metadata) or len(set(metadata_keys)) != len(
+            metadata_keys
+        ):
+            raise ValueError("Installed Agent Plugin component metadata must have unique values")
+
+
+@dataclass(frozen=True, slots=True)
+class InstalledPluginRecord:
+    """Canonical lockfile state for one installed Agent Plugin."""
+
+    record_version: int
+    ownership_generation: int
+    identity: str
+    version: str | None
+    source_kind: str
+    source_locator: str
+    resolved_ref: str | None
+    source_digest: str | None
+    plugin_root: str
+    data_root: str
+    scope: str
+    components: tuple[InstalledPluginComponentFact, ...]
+
+    @property
+    def owner_key(self) -> str:
+        """Return the stable deployment-ledger owner key."""
+        return InstalledPluginRecordCodec.owner_key(self.identity)
+
+    def __post_init__(self) -> None:
+        """Reject malformed durable state instead of coercing it."""
+        if self.record_version != 1:
+            raise ValueError(
+                f"Unsupported installed Agent Plugin record version: {self.record_version}"
+            )
+        if self.ownership_generation < 1:
+            raise ValueError("Installed Agent Plugin ownership_generation must be positive")
+        if not self.identity or self.identity != self.identity.strip() or "\x00" in self.identity:
+            raise ValueError("Installed Agent Plugin identity must be a non-empty string")
+        if self.version is not None and not self.version:
+            raise ValueError("Installed Agent Plugin version must be non-empty or null")
+        if self.source_kind not in _ALLOWED_PLUGIN_SOURCE_KINDS:
+            raise ValueError(
+                f"Unsupported installed Agent Plugin source kind: {self.source_kind!r}"
+            )
+        if not self.source_locator or self.source_locator != self.source_locator.strip():
+            raise ValueError("Installed Agent Plugin source_locator is required")
+        if any(ord(character) < 32 or ord(character) == 127 for character in self.source_locator):
+            raise ValueError("Installed Agent Plugin source_locator contains control characters")
+        parsed_locator = urlsplit(self.source_locator)
+        if (
+            parsed_locator.scheme
+            and parsed_locator.netloc
+            and (
+                parsed_locator.username is not None
+                or parsed_locator.password is not None
+                or bool(parsed_locator.query)
+                or bool(parsed_locator.fragment)
+            )
+        ):
+            raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+        if self.resolved_ref is not None and not self.resolved_ref:
+            raise ValueError("Installed Agent Plugin resolved_ref must be non-empty or null")
+        if self.source_digest is not None and not self.source_digest:
+            raise ValueError("Installed Agent Plugin source_digest must be non-empty or null")
+        if self.source_kind in {"git", "cache"} and self.resolved_ref is None:
+            raise ValueError(
+                f"Installed Agent Plugin source kind {self.source_kind!r} requires resolved_ref"
+            )
+        if self.source_kind == "git" and (
+            len(self.resolved_ref or "") not in {40, 64}
+            or any(character not in _LOWER_HEX for character in (self.resolved_ref or ""))
+        ):
+            raise ValueError("Installed Agent Plugin git sources require a full commit SHA")
+        if self.source_kind in {"archive", "registry"} and self.source_digest is None:
+            raise ValueError(
+                f"Installed Agent Plugin source kind {self.source_kind!r} requires source_digest"
+            )
+        if self.source_digest is not None:
+            if not self.source_digest.startswith("sha256:"):
+                raise ValueError(
+                    "Installed Agent Plugin source_digest must be canonical sha256:<hex>"
+                )
+            digest = self.source_digest[len("sha256:") :]
+            if len(digest) != 64 or any(character not in _LOWER_HEX for character in digest):
+                raise ValueError(
+                    "Installed Agent Plugin source_digest must be canonical sha256:<hex>"
+                )
+        expected_plugin_root, expected_data_root = InstalledPluginRecordCodec.root_values(
+            self.identity,
+            self.scope,
+        )
+        if self.plugin_root != expected_plugin_root or self.data_root != expected_data_root:
+            raise ValueError("Installed Agent Plugin roots must use the canonical logical layout")
+        component_keys = [(fact.kind.casefold(), fact.name.casefold()) for fact in self.components]
+        if len(component_keys) != len(set(component_keys)):
+            raise ValueError("Installed Agent Plugin component facts are ambiguous")
+
+
+class InstalledPluginRecordCodec:
+    """Sole identity, construction, and lockfile codec owner for plugin state."""
+
+    @staticmethod
+    def storage_key(identity: str) -> str:
+        """Return a path-safe key derived only from canonical plugin identity."""
+        if not isinstance(identity, str) or not identity or "\x00" in identity:
+            raise ValueError("Installed Agent Plugin identity must be a non-empty string")
+        return f"plugin-{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
+
+    @staticmethod
+    def owner_key(identity: str) -> str:
+        """Return the deployment-ledger owner key for canonical identity."""
+        return f"agent-plugin:{InstalledPluginRecordCodec.storage_key(identity)}"
+
+    @staticmethod
+    def root_values(identity: str, scope: str) -> tuple[str, str]:
+        """Return portable logical PLUGIN_ROOT and PLUGIN_DATA values."""
+        storage_key = InstalledPluginRecordCodec.storage_key(identity)
+        if scope == "project":
+            return (
+                f"apm_modules/.agent-plugins/{storage_key}",
+                f"apm_modules/.plugin-data/{storage_key}",
+            )
+        if scope == "user":
+            return (f"agent-plugins/{storage_key}", f"plugin-data/{storage_key}")
+        raise ValueError("Installed Agent Plugin scope must be 'project' or 'user'")
+
+    @staticmethod
+    def build(
+        *,
+        identity: str,
+        version: str | None,
+        source_kind: str,
+        source_locator: str,
+        resolved_ref: str | None,
+        source_digest: str | None,
+        scope: str,
+        components: tuple[InstalledPluginComponentFact, ...],
+        prior_record: InstalledPluginRecord | None,
+    ) -> InstalledPluginRecord:
+        """Build the next generation of one installed plugin record."""
+        if prior_record is not None and prior_record.identity != identity:
+            raise ValueError("Prior installed Agent Plugin record has a different identity")
+        generation = 1 if prior_record is None else prior_record.ownership_generation + 1
+        plugin_root, data_root = InstalledPluginRecordCodec.root_values(identity, scope)
+        return InstalledPluginRecord(
+            record_version=1,
+            ownership_generation=generation,
+            identity=identity,
+            version=version,
+            source_kind=source_kind,
+            source_locator=source_locator,
+            resolved_ref=resolved_ref,
+            source_digest=source_digest,
+            plugin_root=plugin_root,
+            data_root=data_root,
+            scope=scope,
+            components=tuple(sorted(components, key=lambda item: (item.kind, item.name))),
+        )
+
+    @staticmethod
+    def rows(records: Mapping[str, InstalledPluginRecord]) -> list[dict[str, Any]]:
+        """Serialize installed plugin records in deterministic identity order."""
+        InstalledPluginRecordCodec._validate_record_mapping(records)
+        rows: list[dict[str, Any]] = []
+        for identity in sorted(records, key=lambda item: (item.casefold(), item)):
+            record = records[identity]
+            rows.append(
+                {
+                    "record_version": record.record_version,
+                    "ownership_generation": record.ownership_generation,
+                    "identity": record.identity,
+                    "version": record.version,
+                    "source": {
+                        "kind": record.source_kind,
+                        "locator": record.source_locator,
+                        "resolved_ref": record.resolved_ref,
+                        "digest": record.source_digest,
+                    },
+                    "plugin_root": record.plugin_root,
+                    "data_root": record.data_root,
+                    "scope": record.scope,
+                    "components": [
+                        {
+                            "kind": component.kind,
+                            "name": component.name,
+                            "relative_path": component.relative_path,
+                            "metadata": dict(component.metadata),
+                        }
+                        for component in record.components
+                    ],
+                }
+            )
+        return rows
+
+    @staticmethod
+    def from_rows(rows: Any) -> dict[str, InstalledPluginRecord]:
+        """Parse strict installed plugin rows without malformed-state coercion."""
+        InstalledPluginRecordCodec.validate_rows(rows)
+        records: dict[str, InstalledPluginRecord] = {}
+        for row in rows:
+            source = row["source"]
+            components = tuple(
+                InstalledPluginComponentFact(
+                    kind=component["kind"],
+                    name=component["name"],
+                    relative_path=component.get("relative_path"),
+                    metadata=tuple(sorted(component["metadata"].items())),
+                )
+                for component in row["components"]
+            )
+            record = InstalledPluginRecord(
+                record_version=row["record_version"],
+                ownership_generation=row["ownership_generation"],
+                identity=row["identity"],
+                version=row["version"],
+                source_kind=source["kind"],
+                source_locator=source["locator"],
+                resolved_ref=source["resolved_ref"],
+                source_digest=source["digest"],
+                plugin_root=row["plugin_root"],
+                data_root=row["data_root"],
+                scope=row["scope"],
+                components=components,
+            )
+            records[record.identity] = record
+        InstalledPluginRecordCodec._validate_record_mapping(records)
+        return records
+
+    @staticmethod
+    def validate_rows(rows: Any) -> None:
+        """Validate the complete persisted shape before constructing records."""
+        if not isinstance(rows, list):
+            raise ValueError("Lockfile installed_plugins must be a list")
+        required = {
+            "record_version",
+            "ownership_generation",
+            "identity",
+            "version",
+            "source",
+            "plugin_root",
+            "data_root",
+            "scope",
+            "components",
+        }
+        identities: set[str] = set()
+        folded: set[str] = set()
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict) or set(row) != required:
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid fields")
+            if (
+                not isinstance(row["record_version"], int)
+                or isinstance(row["record_version"], bool)
+                or not isinstance(row["ownership_generation"], int)
+                or isinstance(row["ownership_generation"], bool)
+            ):
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid versions")
+            if not isinstance(row["identity"], str):
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid identity")
+            identity = row["identity"]
+            if identity in identities or identity.casefold() in folded:
+                raise ValueError("Lockfile installed plugin identities are case-fold ambiguous")
+            identities.add(identity)
+            folded.add(identity.casefold())
+            if row["version"] is not None and not isinstance(row["version"], str):
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid version")
+            if not all(
+                isinstance(row[field], str) for field in ("plugin_root", "data_root", "scope")
+            ):
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid roots")
+            source = row["source"]
+            if not isinstance(source, dict) or set(source) != {
+                "kind",
+                "locator",
+                "resolved_ref",
+                "digest",
+            }:
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid source")
+            if not isinstance(source["kind"], str) or not isinstance(source["locator"], str):
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid source")
+            if any(
+                source[field] is not None and not isinstance(source[field], str)
+                for field in ("resolved_ref", "digest")
+            ):
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid provenance")
+            if not isinstance(row["components"], list):
+                raise ValueError(f"Lockfile installed plugin row {index} has invalid components")
+            for component in row["components"]:
+                if not isinstance(component, dict) or set(component) != {
+                    "kind",
+                    "name",
+                    "relative_path",
+                    "metadata",
+                }:
+                    raise ValueError(f"Lockfile installed plugin row {index} has invalid component")
+                if not isinstance(component["kind"], str) or not isinstance(component["name"], str):
+                    raise ValueError(f"Lockfile installed plugin row {index} has invalid component")
+                if component["relative_path"] is not None and not isinstance(
+                    component["relative_path"], str
+                ):
+                    raise ValueError(f"Lockfile installed plugin row {index} has invalid component")
+                metadata = component["metadata"]
+                if not isinstance(metadata, dict) or not all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in metadata.items()
+                ):
+                    raise ValueError(f"Lockfile installed plugin row {index} has invalid metadata")
+        InstalledPluginRecordCodec.from_rows_unchecked(rows)
+
+    @staticmethod
+    def from_rows_unchecked(rows: list[dict[str, Any]]) -> None:
+        """Run dataclass invariants without recursively re-entering validation."""
+        for row in rows:
+            source = row["source"]
+            InstalledPluginRecord(
+                record_version=row["record_version"],
+                ownership_generation=row["ownership_generation"],
+                identity=row["identity"],
+                version=row["version"],
+                source_kind=source["kind"],
+                source_locator=source["locator"],
+                resolved_ref=source["resolved_ref"],
+                source_digest=source["digest"],
+                plugin_root=row["plugin_root"],
+                data_root=row["data_root"],
+                scope=row["scope"],
+                components=tuple(
+                    InstalledPluginComponentFact(
+                        kind=component["kind"],
+                        name=component["name"],
+                        relative_path=component["relative_path"],
+                        metadata=tuple(sorted(component["metadata"].items())),
+                    )
+                    for component in row["components"]
+                ),
+            )
+
+    @staticmethod
+    def _validate_record_mapping(records: Mapping[str, InstalledPluginRecord]) -> None:
+        """Reject key drift and case-fold ambiguity in in-memory state."""
+        folded: set[str] = set()
+        for identity, record in records.items():
+            if identity != record.identity:
+                raise ValueError("Installed Agent Plugin record key differs from identity")
+            if identity.casefold() in folded:
+                raise ValueError("Installed Agent Plugin identities are case-fold ambiguous")
+            folded.add(identity.casefold())
 
 
 @dataclass
@@ -701,6 +1085,7 @@ class LockFile:
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     apm_version: str | None = None
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
+    installed_plugins: dict[str, InstalledPluginRecord] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
     mcp_configs: dict[str, dict] = field(default_factory=dict)
     mcp_target_servers: dict[str, list[str]] = field(default_factory=dict)
@@ -780,6 +1165,12 @@ class LockFile:
                 return True
         return False
 
+    def _required_lockfile_version(self) -> str:
+        """Return the minimum schema version required by current lock state."""
+        if self.installed_plugins:
+            return "2"
+        return "2" if self._needs_v2() else "1"
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -793,7 +1184,7 @@ class LockFile:
         # that mutate ``self.dependencies`` directly or remove the last
         # registry / git-semver dep need the field re-derived here so the
         # on-disk version is correct in both directions.
-        self.lockfile_version = "2" if self._needs_v2() else "1"
+        self.lockfile_version = self._required_lockfile_version()
         emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
         # of the flat local_deployed_files / local_deployed_file_hashes
@@ -809,6 +1200,8 @@ class LockFile:
                 data["apm_version"] = self.apm_version
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
             data["deployments"] = DeploymentLedgerCodec.rows(self.deployment_ledger)
+            if self.installed_plugins:
+                data["installed_plugins"] = InstalledPluginRecordCodec.rows(self.installed_plugins)
             if self.mcp_servers:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
@@ -862,6 +1255,8 @@ class LockFile:
         )
         for dep_data in data.get("dependencies", []):
             lock.add_dependency(LockedDependency.from_dict(dep_data))
+        if "installed_plugins" in data:
+            lock.installed_plugins = InstalledPluginRecordCodec.from_rows(data["installed_plugins"])
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.mcp_target_servers = {
@@ -1031,6 +1426,8 @@ class LockFile:
             other_dep = other.dependencies[key]
             if dep.to_dict() != other_dep.to_dict():
                 return False
+        if dict(self.installed_plugins) != dict(other.installed_plugins):
+            return False
         if sorted(self.mcp_servers) != sorted(other.mcp_servers):
             return False
         if self.mcp_configs != other.mcp_configs:
