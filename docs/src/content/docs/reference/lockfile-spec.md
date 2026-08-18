@@ -134,7 +134,7 @@ deployments:
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `lockfile_version` | string | yes | Schema version. `"1"` for plain Git projects; `"2"` when any dependency has `source: "registry"` or Git semver resolution fields (`constraint`, `resolved_tag`, `resolved_at`). |
-| `generated_at` | ISO 8601 string | no | Legacy write timestamp. New lockfiles omit it; when an existing lockfile carries it, APM refreshes it on substantive writes. Ignored by equivalence checks. |
+| _(Deprecated)_ `generated_at` | ISO 8601 string | no | Legacy write timestamp. New lockfiles omit it; when an existing lockfile carries it, APM refreshes it on substantive writes. Ignored by equivalence checks. |
 | `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
@@ -331,8 +331,8 @@ shipped.
 leaves the file untouched. New lockfiles omit `generated_at` so independent
 dependency changes do not manufacture timestamp conflicts. If a pre-existing
 lockfile includes the field, APM retains it for compatibility and refreshes it
-only on a substantive write. Remove the field once to opt an existing project
-into timestamp-free output; APM will not add it back.
+only on a substantive write. To migrate a legacy lockfile manually, delete the
+`generated_at: ...` line from `apm.lock.yaml` once; APM will not add it back.
 
 ## Drift and integrity
 

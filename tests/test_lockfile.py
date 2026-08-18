@@ -274,6 +274,21 @@ class TestLockFile:
             next_write.isoformat()
         )
 
+    def test_write_preserves_existing_generated_at_on_noop(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        original_timestamp = "2025-01-01T00:00:00+00:00"
+        lock_path.write_text(
+            f"lockfile_version: '1'\ngenerated_at: '{original_timestamp}'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile()
+
+        lock.write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["generated_at"] == original_timestamp
+        assert lock.generated_at == original_timestamp
+
     def test_mcp_servers_round_trip(self, tmp_path):
         """mcp_servers must survive a write → read cycle."""
         lock = LockFile(apm_version="1.0.0")

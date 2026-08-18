@@ -918,7 +918,8 @@ class LockFile:
         carries the field, keep it stable for semantic no-ops and refresh it for
         substantive writes. This behavior should be changed to remove the legacy
         timestamp in a future APM version, but for now it preserves backward
-        compatibility with older APM builds that expect the field.
+        compatibility with older APM builds that expect the field. This method
+        may mutate ``self.generated_at`` to preserve or refresh that metadata.
         """
         from ..utils.atomic_io import atomic_write_text
 
