@@ -7,12 +7,11 @@ import hashlib
 import json
 import shutil
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
-from apm_cli.agent_plugins import validate_mcp_config_document
-from apm_cli.bundle.local_bundle import detect_local_bundle
-from apm_cli.install.local_bundle_handler import _parse_bundle_mcp_servers
+from apm_cli.agent_plugins import NotAgentPluginError, load_agent_plugin
 
 pytestmark = [pytest.mark.integration, pytest.mark.component]
 
@@ -27,10 +26,6 @@ _CLAUSES = {
     "mcp-loading": "Agent Plugins v1 ss7.2.2(1)",
     "variables": "Agent Plugins v1 ss9.1-ss9.2",
 }
-_APM_REQUIREMENT = (
-    "APM-PLUGIN-SC-1 unknown placeholder text cannot authorize target-native "
-    "ambient credential expansion"
-)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -74,23 +69,33 @@ def _copy_portable_plugin(root: Path, name: str) -> Path:
 
 
 def _server_names(plugin_root: Path) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            dependency.name
-            for dependency in _parse_bundle_mcp_servers(
-                plugin_root,
-                agent_plugin=True,
-            )
-        )
+    plugin = load_agent_plugin(plugin_root)
+    return tuple(server.name for server in plugin.components.mcp_servers)
+
+
+def _write_discovery_mcp(plugin_root: Path) -> None:
+    (plugin_root / "mcp.json").write_text(
+        json.dumps(
+            {
+                "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+                "mcpServers": {
+                    "exact-root": {
+                        "type": "stdio",
+                        "command": "printf",
+                    }
+                },
+            }
+        ),
+        encoding="ascii",
     )
 
 
 def test_discovery_accepts_only_exact_root_agent_plugin_paths(tmp_path: Path) -> None:
     """Exact root names are the only inputs (ss4.1.2, ss5.1, ss6.1, ss7.2.1)."""
     exact = _copy_portable_plugin(tmp_path, "exact")
-    exact_info = detect_local_bundle(exact)
-    assert exact_info is not None
-    assert exact_info.package_id == "contract-plugin"
+    _write_discovery_mcp(exact)
+    exact_plugin = load_agent_plugin(exact)
+    assert exact_plugin.identity.name == "contract-plugin"
 
     nested_manifest = tmp_path / "nested-manifest"
     nested_manifest.mkdir()
@@ -100,15 +105,19 @@ def test_discovery_accepts_only_exact_root_agent_plugin_paths(tmp_path: Path) ->
     )
     case_manifest = _copy_portable_plugin(tmp_path, "case-manifest")
     (case_manifest / "plugin.json").rename(case_manifest / "Plugin.json")
-    assert detect_local_bundle(nested_manifest) is None
-    with pytest.raises(ValueError, match="ambiguous metadata paths"):
-        detect_local_bundle(case_manifest)
+    with pytest.raises(NotAgentPluginError):
+        load_agent_plugin(nested_manifest)
+    with pytest.raises(NotAgentPluginError):
+        load_agent_plugin(case_manifest)
 
     alternate = _copy_portable_plugin(tmp_path, "alternate-mcp")
+    _write_discovery_mcp(alternate)
     (alternate / "mcp.json").rename(alternate / ".mcp.json")
     case_variant = _copy_portable_plugin(tmp_path, "case-mcp")
+    _write_discovery_mcp(case_variant)
     (case_variant / "mcp.json").rename(case_variant / "MCP.JSON")
     nested = _copy_portable_plugin(tmp_path, "nested-mcp")
+    _write_discovery_mcp(nested)
     (nested / "nested").mkdir()
     (nested / "mcp.json").rename(nested / "nested" / "mcp.json")
 
@@ -119,59 +128,43 @@ def test_discovery_accepts_only_exact_root_agent_plugin_paths(tmp_path: Path) ->
         "nested/mcp.json": _server_names(nested),
     }
     assert actual == {
-        "mcp.json": ("contract-remote", "contract-stdio"),
+        "mcp.json": ("exact-root",),
         ".mcp.json": (),
         "MCP.JSON": (),
         "nested/mcp.json": (),
     }, f"{_CLAUSES['components']}; {_CLAUSES['mcp-loading']}"
 
 
-def test_only_plugin_root_and_data_have_runtime_variable_semantics(tmp_path: Path) -> None:
-    """Only two variables expand in args/env/cwd; URL/headers stay literal (ss7.2.1, ss9.2)."""
+def test_loader_preserves_portable_runtime_expressions(tmp_path: Path) -> None:
+    """IR preserves ss9.2 expressions; URL/header fields stay literal under ss7.2.1."""
     plugin_root = _copy_portable_plugin(tmp_path, "variables")
-    runtime_root = tmp_path / "retained" / "contract-plugin"
-    data_root = tmp_path / "data" / "contract-plugin"
-    dependencies = {
-        dependency.name: dependency
-        for dependency in _parse_bundle_mcp_servers(
-            plugin_root,
-            data_root=data_root,
-            agent_plugin=True,
-            runtime_root=runtime_root,
-        )
-    }
-    stdio = dependencies["contract-stdio"]
-    remote = dependencies["contract-remote"]
+    plugin = load_agent_plugin(plugin_root)
+    servers = {server.name: server for server in plugin.components.mcp_servers}
+    assert tuple(servers) == ("contract-remote", "contract-stdio"), (
+        f"{_CLAUSES['variables']}; {_CLAUSES['components']}; diagnostics={plugin.diagnostics!r}"
+    )
+    stdio = servers["contract-stdio"]
+    remote = servers["contract-remote"]
 
     assert list(stdio.args) == [
-        f"{runtime_root}/bin/tool",
-        f"{data_root}/state",
+        "${PLUGIN_ROOT}/bin/tool",
+        "${PLUGIN_DATA}/state",
         "${UNKNOWN_VAR}",
     ]
-    assert stdio.env["ROOT_REF"] == f"{runtime_root}/config"
-    assert stdio.env["DATA_REF"] == f"{data_root}/cache"
-    assert stdio.env["UNKNOWN_REF"] == "${UNKNOWN_VAR}"
-    assert stdio.cwd == str(runtime_root)
-    assert remote.url == "https://example.invalid/${PLUGIN_ROOT}/mcp"
-    assert remote.headers == {
+    stdio_env = dict(stdio.env)
+    assert stdio_env["ROOT_REF"] == "${PLUGIN_ROOT}/config"
+    assert stdio_env["DATA_REF"] == "${PLUGIN_DATA}/cache"
+    assert stdio_env["UNKNOWN_REF"] == "${UNKNOWN_VAR}"
+    assert stdio.cwd == "${PLUGIN_ROOT}"
+
+    parsed_url = urlparse(remote.url or "")
+    assert parsed_url.scheme == "https"
+    assert parsed_url.hostname == "example.invalid"
+    assert parsed_url.path == "/${PLUGIN_ROOT}/mcp"
+    assert parsed_url.params == ""
+    assert parsed_url.query == ""
+    assert parsed_url.fragment == ""
+    assert dict(remote.headers) == {
         "X-Plugin-Data": "${PLUGIN_DATA}",
         "X-Unknown": "${UNKNOWN_VAR}",
     }
-
-    # Unknown placeholders remain literal under ss9.2. APM separately refuses
-    # to project credential-shaped literals into targets that expand them.
-    unknown_secret_reference = validate_mcp_config_document(
-        {
-            "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-            "mcpServers": {
-                "ambient-secret": {
-                    "type": "stdio",
-                    "command": "printf",
-                    "env": {"API_TOKEN": "${GITHUB_TOKEN}"},
-                }
-            },
-        }
-    )
-    assert unknown_secret_reference.is_valid is False, (
-        f"{_APM_REQUIREMENT}; {_CLAUSES['variables']} keeps ${{GITHUB_TOKEN}} literal"
-    )

@@ -8,6 +8,7 @@ import shutil
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import pytest
 
@@ -45,6 +46,7 @@ _APM_REQUIREMENTS = {
     "identity": "APM-PLUGIN-LC-1 manifest identity owns retained root, data, and services",
     "state": "APM-PLUGIN-LC-2 install/update/audit/uninstall converge durable state",
     "invalid": "APM-PLUGIN-LC-3 invalid executable components cannot report full success",
+    "projection": "APM-PLUGIN-LC-4 portable expressions project without target reinterpretation",
     "ambient": "APM-PLUGIN-SC-1 ambient credentials never reach plugin-native config",
     "trust": "APM-PLUGIN-SC-2 executable denial is source-form invariant",
 }
@@ -187,6 +189,11 @@ def _lock_service_owners(project: Path) -> tuple[str, ...]:
 def _config_text(project: Path, path: PurePosixPath) -> str:
     config = project.joinpath(*path.parts)
     return config.read_text(encoding="utf-8") if config.is_file() else ""
+
+
+def _resolved_text(path: Path) -> str:
+    """Return the canonical text used by runtime-owned filesystem values."""
+    return str(path.resolve())
 
 
 def _target_mcp_servers(state: _RuntimeState) -> tuple[str, ...]:
@@ -462,11 +469,148 @@ def test_invalid_plugin_services_cannot_create_false_success_state(
     )
 
 
+def test_runtime_projection_expands_only_portable_path_fields(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """APM-PLUGIN-LC-4 projects ss9.2 paths while preserving ss7.2.1 literals."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "projection", base_env=os.environ)
+    environment = isolated.subprocess_env()
+    project = _write_project(
+        isolated.work_root / "consumer",
+        target="kiro",
+        approve=True,
+    )
+    source = _copy_plugin(isolated.package_root / "projection-plugin")
+    (source / "mcp.json").write_text(
+        json.dumps(
+            {
+                "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+                "mcpServers": {
+                    "ambient-probe": {
+                        "type": "stdio",
+                        "command": "printf",
+                        "args": [
+                            "${PLUGIN_ROOT}/bin/tool",
+                            "${PLUGIN_DATA}/state",
+                            "${UNKNOWN_VAR}",
+                        ],
+                        "env": {
+                            "ROOT_REF": "${PLUGIN_ROOT}/config",
+                            "DATA_REF": "${PLUGIN_DATA}/cache",
+                            "UNKNOWN_REF": "${UNKNOWN_VAR}",
+                        },
+                        "cwd": "${PLUGIN_ROOT}",
+                    },
+                    "literal-remote": {
+                        "type": "streamable-http",
+                        "url": "https://example.invalid/${PLUGIN_ROOT}/mcp",
+                        "headers": {
+                            "X-Plugin-Data": "${PLUGIN_DATA}",
+                            "X-Unknown": "${UNKNOWN_VAR}",
+                        },
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="ascii",
+    )
+
+    result = _run(
+        _runner(apm_binary_path),
+        project,
+        environment,
+        ("install", str(source), "--target", "kiro", "--no-policy"),
+        "agent-plugin-runtime-projection",
+    )
+    config_text = _config_text(project, _KIRO_CONFIG)
+    violations: list[str] = []
+    if result.returncode != 0:
+        violations.append(f"install returned {result.returncode}")
+    try:
+        config = json.loads(config_text)
+    except json.JSONDecodeError as exc:
+        config = {}
+        violations.append(f"target MCP config is not valid JSON: {exc}")
+    servers = config.get("mcpServers") if isinstance(config, dict) else None
+    if not isinstance(servers, dict):
+        servers = {}
+        violations.append("target MCP config has no mcpServers object")
+    stdio = servers.get("ambient-probe")
+    remote = servers.get("literal-remote")
+    if not isinstance(stdio, dict):
+        violations.append("target MCP config omitted ambient-probe")
+    else:
+        projected_env = stdio.get("env")
+        if not isinstance(projected_env, dict):
+            violations.append("ambient-probe has no env object")
+        else:
+            root_value = projected_env.get("PLUGIN_ROOT")
+            data_value = projected_env.get("PLUGIN_DATA")
+            if not isinstance(root_value, str) or not isinstance(data_value, str):
+                violations.append("reserved runtime paths were not projected as strings")
+            else:
+                projected_root = Path(root_value)
+                projected_data = Path(data_value)
+                if projected_root.name != projected_data.name:
+                    violations.append("PLUGIN_ROOT and PLUGIN_DATA use different owner identities")
+                if root_value != _resolved_text(
+                    project / "apm_modules" / ".agent-plugins" / projected_root.name
+                ):
+                    violations.append("PLUGIN_ROOT was not projected to the resolved retained root")
+                if data_value != _resolved_text(
+                    project / "apm_modules" / ".plugin-data" / projected_data.name
+                ):
+                    violations.append("PLUGIN_DATA was not projected to the resolved data root")
+                if stdio.get("args") != [
+                    f"{root_value}/bin/tool",
+                    f"{data_value}/state",
+                    "${UNKNOWN_VAR}",
+                ]:
+                    violations.append("args did not expand only PLUGIN_ROOT and PLUGIN_DATA")
+                if projected_env.get("ROOT_REF") != f"{root_value}/config":
+                    violations.append(
+                        "env ROOT_REF was reinterpreted instead of expanding PLUGIN_ROOT"
+                    )
+                if projected_env.get("DATA_REF") != f"{data_value}/cache":
+                    violations.append(
+                        "env DATA_REF was reinterpreted instead of expanding PLUGIN_DATA"
+                    )
+                if stdio.get("cwd") != root_value:
+                    violations.append("cwd did not expand PLUGIN_ROOT")
+            if projected_env.get("UNKNOWN_REF") != "${UNKNOWN_VAR}":
+                violations.append("unknown env expression was not preserved literally")
+    if not isinstance(remote, dict):
+        violations.append("target MCP config omitted literal-remote")
+    else:
+        parsed_url = urlparse(str(remote.get("url", "")))
+        if (
+            parsed_url.scheme,
+            parsed_url.hostname,
+            parsed_url.path,
+            parsed_url.query,
+            parsed_url.fragment,
+        ) != ("https", "example.invalid", "/${PLUGIN_ROOT}/mcp", "", ""):
+            violations.append(f"remote URL was not byte-literal by components: {parsed_url!r}")
+        if remote.get("headers") != {
+            "X-Plugin-Data": "${PLUGIN_DATA}",
+            "X-Unknown": "${UNKNOWN_VAR}",
+        }:
+            violations.append("remote headers were not preserved byte-for-byte")
+    assert violations == [], (
+        f"{_APM_REQUIREMENTS['projection']}\n"
+        + "\n".join(violations)
+        + f"\nreturncode={result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )
+
+
 def test_ambient_github_credentials_are_not_handed_to_plugin_runtime(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """ss9.2 leaves unknown text literal; APM-PLUGIN-SC-1 must prevent runtime injection."""
+    """ss9.2 is literal; APM-PLUGIN-SC-1 blocks unsafe target-native expansion."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "ambient", base_env=os.environ)
     environment = isolated.subprocess_env()
     environment["GITHUB_TOKEN"] = "dummy-ambient-github-token"
