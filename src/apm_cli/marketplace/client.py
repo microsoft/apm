@@ -569,7 +569,8 @@ def _fetch_git(
     remote-aware credential selection and Git environment policy. ADO hosts
     route the checkout through ``AuthResolver.try_with_fallback`` with the
     repository path so path-scoped ``git credential fill`` can run after PAT
-    and bearer authentication fail.
+    and bearer authentication fail, while retaining the hardened Git base
+    environment.
     """
     _validate_ref(source.ref, source.name)
 
@@ -624,6 +625,7 @@ def _fetch_git(
             }
             if source.port is not None:
                 fallback_kwargs["port"] = source.port
+            fallback_kwargs["base_env"] = auth_resolver.hardened_git_base_env()
             checkout_dir = auth_resolver.try_with_fallback(
                 host_info.host,
                 _checkout,
