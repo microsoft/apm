@@ -298,6 +298,7 @@ class TestLocalMcpValidation:
         [
             "https://example.com/${UNKNOWN_VAR}?token=${GITHUB_TOKEN}",
             "https://example.com/${_X}/${X1}?encoded=hello%20world",
+            "https://example.com./mcp",
             "http://localhost:8080/${UNKNOWN_VAR}",
             "http://127.0.0.1:8080/${UNKNOWN_VAR}",
             "http://[::1]:8080/${UNKNOWN_VAR}",
@@ -326,9 +327,13 @@ class TestLocalMcpValidation:
             "https://${UNKNOWN_HOST}/mcp",
             "https://example.com:${UNKNOWN_PORT}/mcp",
             "https://example.com:bad/mcp",
+            "https://example.com:0/mcp",
             "https://${TOKEN}@example.com/mcp",
             "https://example.com:/mcp",
             "https://user name@example.com/mcp",
+            "https://example.com/\x00",
+            "https://example.com/\x01",
+            "https://example.com/\x7f",
             "https://exa\nmple.com/mcp",
             "https://user:literal@example.com/mcp",
             "https://example.com/mcp#fragment",
@@ -369,6 +374,59 @@ class TestLocalMcpValidation:
             }
         )
 
+        assert result.is_valid is False
+        assert any("url" in error for error in result.errors)
+
+    @pytest.mark.parametrize("rooted", [False, True])
+    def test_remote_url_accepts_maximum_dns_hostname_length(self, rooted: bool) -> None:
+        host = ".".join(["a" * 63] * 3 + ["a" * 61])
+        if rooted:
+            host += "."
+        url = f"https://{host}/mcp"
+
+        result = validate_mcp_config_document(
+            {
+                "$schema": MCP_SCHEMA_ID,
+                "mcpServers": {
+                    "tool": {
+                        "type": "streamable-http",
+                        "url": url,
+                    }
+                },
+            }
+        )
+
+        assert len(host) == (254 if rooted else 253)
+        assert result.is_valid is True
+        assert result.normalized is not None
+        assert result.normalized["mcpServers"]["tool"]["url"] == url
+
+    @pytest.mark.parametrize(
+        ("labels", "expected_length"),
+        [
+            (["a" * 63] * 3 + ["a" * 62], 254),
+            (["a"] * 128, 255),
+        ],
+    )
+    def test_remote_url_rejects_dns_hostname_over_total_length_limit(
+        self,
+        labels: list[str],
+        expected_length: int,
+    ) -> None:
+        host = ".".join(labels)
+        result = validate_mcp_config_document(
+            {
+                "$schema": MCP_SCHEMA_ID,
+                "mcpServers": {
+                    "tool": {
+                        "type": "streamable-http",
+                        "url": f"https://{host}/mcp",
+                    }
+                },
+            }
+        )
+
+        assert len(host) == expected_length
         assert result.is_valid is False
         assert any("url" in error for error in result.errors)
 

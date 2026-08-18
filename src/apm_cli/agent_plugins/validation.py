@@ -703,7 +703,9 @@ def _is_valid_http_url(url: str) -> bool:
         if host.endswith(".."):
             return False
         dns_host = host[:-1] if host.endswith(".") else host
-        if not all(_HTTP_DNS_LABEL_RE.fullmatch(label) for label in dns_host.split(".")):
+        if len(dns_host) > 253 or not all(
+            _HTTP_DNS_LABEL_RE.fullmatch(label) for label in dns_host.split(".")
+        ):
             return False
     if parsed.scheme == "http":
         return host == "localhost" or (address is not None and address.is_loopback)
