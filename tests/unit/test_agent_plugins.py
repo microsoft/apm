@@ -339,6 +339,8 @@ class TestLocalMcpValidation:
             "https://example.com/%2",
             "https://example.com/%GG",
             "https://example.com\\mcp",
+            "https://example.com/path\\segment",
+            "https://example.com/mcp?value=left\\right",
             "https://example.com/${X",
             "https://example.com/${}",
             "https://example.com/${1X}",
@@ -346,6 +348,12 @@ class TestLocalMcpValidation:
             "https://example.com/stray}",
             "http://[::1%eth0]/",
             "http://[::1%25eth0]/",
+            "https://[::1%ab]/",
+            "https://[::1%25eth0]/",
+            "https://[2001:db8::1%25eth0]/",
+            "https://example.com../",
+            "https://example.com/\u0080",
+            "https://example.com/\u009f",
         ],
     )
     def test_remote_url_rejects_placeholder_or_invalid_authority(self, url: str) -> None:

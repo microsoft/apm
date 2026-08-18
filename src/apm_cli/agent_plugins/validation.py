@@ -692,17 +692,20 @@ def _is_valid_http_url(url: str) -> bool:
     host = parsed.hostname
     if host is None or any(char.isspace() or char in "${}" for char in host):
         return False
+    if "%" in host:
+        return False
     if port is not None and not (0 < port <= 65535):
         return False
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
         address = None
-        if not all(_HTTP_DNS_LABEL_RE.fullmatch(label) for label in host.rstrip(".").split(".")):
+        if host.endswith(".."):
+            return False
+        dns_host = host[:-1] if host.endswith(".") else host
+        if not all(_HTTP_DNS_LABEL_RE.fullmatch(label) for label in dns_host.split(".")):
             return False
     if parsed.scheme == "http":
-        if "%" in host:
-            return False
         return host == "localhost" or (address is not None and address.is_loopback)
     return True
 
@@ -711,7 +714,7 @@ def _has_valid_url_lexical_syntax(url: str) -> bool:
     if (
         "\\" in url
         or _INVALID_PERCENT_ESCAPE_RE.search(url)
-        or any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in url)
+        or any(char.isspace() or ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F for char in url)
     ):
         return False
     without_placeholders = _URL_PLACEHOLDER_RE.sub("", url)
