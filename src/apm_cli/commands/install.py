@@ -1558,7 +1558,7 @@ def install(  # noqa: PLR0913
             )
             command_result.installed_count = apm_count
             command_result.diagnostics = apm_diagnostics
-            if dry_run:
+            if dry_run and command_result.disposition is not InstallDisposition.FAILED:
                 command_result.disposition = InstallDisposition.DRY_RUN
             command_result = finalize_install_result(
                 command_result,
@@ -1757,6 +1757,10 @@ def _install_apm_packages(ctx, outcome):
 
     # Show what will be installed if dry run
     if ctx.dry_run:
+        from apm_cli.install.template import preflight_agent_plugin_dry_run
+
+        preflight_agent_plugin_dry_run(ctx, all_apm_deps)
+
         # -- W2-dry-run (#827): policy preflight in preview mode --
         # Runs discovery + checks against direct manifest deps (not
         # resolved/transitive -- dry-run does not run the resolver).

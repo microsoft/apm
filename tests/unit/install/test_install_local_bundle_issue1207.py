@@ -30,9 +30,9 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.bundle.local_bundle import check_target_mismatch
 from apm_cli.install.agent_plugin_runtime import (
-    commit_agent_plugin_bundle,
     stage_agent_plugin_bundle,
 )
 from apm_cli.install.services import integrate_local_bundle
@@ -210,7 +210,9 @@ class TestMcpJsonNeverDeployed:
 
 
 class TestAgentPluginMaterialization:
-    def test_agent_plugin_bundle_materializes_retained_roots_and_data(self, tmp_path: Path) -> None:
+    def test_agent_plugin_bundle_staging_cannot_cross_deployment_boundary(
+        self, tmp_path: Path
+    ) -> None:
         bundle = _build_bundle(
             tmp_path,
             files={
@@ -235,27 +237,27 @@ class TestAgentPluginMaterialization:
         target = KNOWN_TARGETS["copilot"]
         bi = stage_agent_plugin_bundle(bi, project, global_=False)
 
-        result = integrate_local_bundle(
-            bi,
-            project,
-            targets=[target],
-            force=False,
-            dry_run=False,
-            diagnostics=None,
-            logger=None,
-            scope=None,
-            alias=None,
-        )
-        commit_agent_plugin_bundle(bi)
+        with pytest.raises(AgentPluginDeploymentBoundaryError):
+            integrate_local_bundle(
+                bi,
+                project,
+                targets=[target],
+                force=False,
+                dry_run=False,
+                diagnostics=None,
+                logger=None,
+                scope=None,
+                alias=None,
+            )
 
         retained_roots = list((project / "apm_modules" / ".agent-plugins").iterdir())
-        data_roots = list((project / "apm_modules" / ".plugin-data").iterdir())
         assert retained_roots
-        assert data_roots
-        assert any("extensions/ext.json" in f.replace("\\", "/") for f in result["deployed_files"])
-        assert (project / target.root_dir / "extensions" / "ext.json").is_file()
+        assert not (project / "apm_modules" / ".plugin-data").exists()
+        assert not (project / target.root_dir / "extensions" / "ext.json").exists()
 
-    def test_agent_plugin_bundle_dry_run_creates_no_retained_roots(self, tmp_path: Path) -> None:
+    def test_agent_plugin_bundle_dry_run_is_blocked_without_retained_roots(
+        self, tmp_path: Path
+    ) -> None:
         bundle = _build_bundle(
             tmp_path,
             files={"com.microsoft.apm/agents/coder.md": "# Coder\n"},
@@ -264,19 +266,19 @@ class TestAgentPluginMaterialization:
         project.mkdir()
         bi = _bundle_info(bundle, bundle_format="agent-plugin")
 
-        result = integrate_local_bundle(
-            bi,
-            project,
-            targets=[KNOWN_TARGETS["copilot"]],
-            force=False,
-            dry_run=True,
-            diagnostics=None,
-            logger=None,
-            scope=None,
-            alias=None,
-        )
+        with pytest.raises(AgentPluginDeploymentBoundaryError):
+            integrate_local_bundle(
+                bi,
+                project,
+                targets=[KNOWN_TARGETS["copilot"]],
+                force=False,
+                dry_run=True,
+                diagnostics=None,
+                logger=None,
+                scope=None,
+                alias=None,
+            )
 
-        assert result["deployed_files"]
         assert not (project / "apm_modules" / ".agent-plugins").exists()
         assert not (project / "apm_modules" / ".plugin-data").exists()
 

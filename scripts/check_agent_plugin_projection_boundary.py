@@ -144,7 +144,7 @@ def _assigns_subscript_value(
     )
 
 
-def check(root: Path) -> list[str]:
+def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
     """Return projection-boundary violations under one repository root."""
     source_root = root / "src" / "apm_cli"
     projection_path = source_root / "agent_plugins" / "projection.py"
@@ -154,6 +154,12 @@ def check(root: Path) -> list[str]:
     errors_path = source_root / "agent_plugins" / "errors.py"
     services_path = source_root / "install" / "services.py"
     template_path = source_root / "install" / "template.py"
+    integrate_phase_path = source_root / "install" / "phases" / "integrate.py"
+    local_bundle_handler_path = source_root / "install" / "local_bundle_handler.py"
+    ci_checks_path = source_root / "policy" / "ci_checks.py"
+    uninstall_cli_path = source_root / "commands" / "uninstall" / "cli.py"
+    uninstall_engine_path = source_root / "commands" / "uninstall" / "engine.py"
+    install_command_path = source_root / "commands" / "install.py"
     skill_integrator_path = source_root / "integration" / "skill_integrator.py"
     required = (
         projection_path,
@@ -163,6 +169,12 @@ def check(root: Path) -> list[str]:
         errors_path,
         services_path,
         template_path,
+        integrate_phase_path,
+        local_bundle_handler_path,
+        ci_checks_path,
+        uninstall_cli_path,
+        uninstall_engine_path,
+        install_command_path,
         skill_integrator_path,
     )
     missing = [str(path) for path in required if not path.is_file()]
@@ -184,6 +196,12 @@ def check(root: Path) -> list[str]:
     errors_tree = parsed.get(errors_path)
     services_tree = parsed.get(services_path)
     template_tree = parsed.get(template_path)
+    integrate_phase_tree = parsed.get(integrate_phase_path)
+    local_bundle_handler_tree = parsed.get(local_bundle_handler_path)
+    ci_checks_tree = parsed.get(ci_checks_path)
+    uninstall_cli_tree = parsed.get(uninstall_cli_path)
+    uninstall_engine_tree = parsed.get(uninstall_engine_path)
+    install_command_tree = parsed.get(install_command_path)
     skill_integrator_tree = parsed.get(skill_integrator_path)
     if (
         projection_tree is None
@@ -193,6 +211,12 @@ def check(root: Path) -> list[str]:
         or errors_tree is None
         or services_tree is None
         or template_tree is None
+        or integrate_phase_tree is None
+        or local_bundle_handler_tree is None
+        or ci_checks_tree is None
+        or uninstall_cli_tree is None
+        or uninstall_engine_tree is None
+        or install_command_tree is None
         or skill_integrator_tree is None
     ):
         return violations
@@ -212,57 +236,72 @@ def check(root: Path) -> list[str]:
         )
 
     boundary_defs = _named_functions(
-        services_tree,
+        errors_tree,
         "enforce_agent_plugin_deployment_boundary",
     )
     if len(boundary_defs) != 1:
         violations.append(
-            f"{services_path}: native deployment boundary must have exactly one definition"
+            f"{errors_path}: native deployment boundary must have exactly one definition"
         )
     else:
         boundary_def = boundary_defs[0]
-        native_branches = [
-            node
-            for node in ast.walk(boundary_def)
-            if isinstance(node, ast.If) and _is_native_package_predicate(node.test)
-        ]
         typed_raises = [
             node
             for node in ast.walk(boundary_def)
             if isinstance(node, ast.Raise)
             and _raise_name(node) == "AgentPluginDeploymentBoundaryError"
         ]
-        returns = [node for node in ast.walk(boundary_def) if isinstance(node, ast.Return)]
-        has_none_guard = any(
-            isinstance(node, ast.If)
-            and isinstance(node.test, ast.Compare)
-            and isinstance(node.test.left, ast.Name)
-            and node.test.left.id == "package_info"
-            and len(node.test.ops) == 1
-            and isinstance(node.test.ops[0], ast.Is)
-            and len(node.test.comparators) == 1
-            and isinstance(node.test.comparators[0], ast.Constant)
-            and node.test.comparators[0].value is None
-            and len(node.body) == 1
-            and isinstance(node.body[0], ast.Return)
+        native_package_guards = [
+            node
             for node in ast.walk(boundary_def)
-        )
+            if isinstance(node, ast.If) and _is_native_package_predicate(node.test)
+        ]
         has_attached_ir_check = any(
             isinstance(node, ast.Constant) and node.value == "agent_plugin"
             for node in ast.walk(boundary_def)
         )
+        has_native_bundle_check = any(
+            isinstance(node, ast.Attribute)
+            and node.attr == "AGENT_PLUGIN"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "BundleFormat"
+            for node in ast.walk(boundary_def)
+        )
+        native_bundle_guards = [
+            node
+            for node in ast.walk(boundary_def)
+            if isinstance(node, ast.If)
+            and any(
+                isinstance(item, ast.Attribute)
+                and item.attr == "AGENT_PLUGIN"
+                and isinstance(item.value, ast.Name)
+                and item.value.id == "BundleFormat"
+                for item in ast.walk(node.test)
+            )
+        ]
+        bundle_fails_closed = len(native_bundle_guards) == 1 and any(
+            isinstance(node, ast.Raise)
+            and _raise_name(node) == "AgentPluginDeploymentBoundaryError"
+            for node in ast.walk(native_bundle_guards[0])
+        )
+        package_fails_closed = (
+            bool(boundary_def.body)
+            and isinstance(boundary_def.body[-1], ast.Raise)
+            and _raise_name(boundary_def.body[-1]) == "AgentPluginDeploymentBoundaryError"
+        )
         if (
-            len(native_branches) != 1
-            or len(native_branches[0].body) != 1
-            or not isinstance(native_branches[0].body[0], ast.Return)
-            or len(returns) != 2
-            or len(typed_raises) != 2
-            or not has_none_guard
+            len(native_package_guards) != 1
+            or not native_package_guards[0].body
+            or not isinstance(native_package_guards[0].body[0], ast.Return)
+            or not typed_raises
             or not has_attached_ir_check
+            or not has_native_bundle_check
+            or not bundle_fails_closed
+            or not package_fails_closed
         ):
             violations.append(
-                f"{services_path}: native deployment boundary must fail closed on "
-                "AGENT_PLUGIN and missing canonical IR"
+                f"{errors_path}: native deployment boundary must fail closed on "
+                "AGENT_PLUGIN packages, bundles, and missing canonical IR"
             )
 
     integration_defs = _named_functions(services_tree, "integrate_package_primitives")
@@ -309,46 +348,223 @@ def check(root: Path) -> list[str]:
                 f"{template_path}: native deployment gate must precede selective and "
                 "generic integration"
             )
-        failure_handlers = [
-            node
-            for node in ast.walk(template_defs[0])
-            if isinstance(node, ast.ExceptHandler)
-            and isinstance(node.type, ast.Name)
-            and node.type.id == "AgentPluginDeploymentBoundaryError"
-        ]
-        failure_is_recorded = False
-        if len(failure_handlers) == 1:
-            handler = failure_handlers[0]
-            calls = _function_calls(handler)
-            failure_is_recorded = (
-                "diagnostics.error" in calls
-                and _assigns_subscript_value(
-                    handler,
-                    owner="deltas",
-                    key="installed",
-                    value=0,
-                )
-                and any(
-                    isinstance(node, ast.Assign)
-                    and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Subscript)
-                    and isinstance(node.targets[0].value, ast.Attribute)
-                    and node.targets[0].value.attr == "package_deployed_files"
-                    and isinstance(node.value, ast.List)
-                    and not node.value.elts
-                    for node in ast.walk(handler)
-                )
-                and any(
-                    isinstance(node, ast.Return)
-                    and isinstance(node.value, ast.Name)
-                    and node.value.id == "deltas"
-                    for node in handler.body
-                )
+    failure_recorders = _named_functions(template_tree, "_record_agent_plugin_boundary_failure")
+    if len(failure_recorders) != 1:
+        violations.append(
+            f"{template_path}: native deployment failure must have one diagnostic owner"
+        )
+    else:
+        recorder = failure_recorders[0]
+        calls = _function_calls(recorder)
+        failure_is_recorded = (
+            "ctx.diagnostics.error" in calls
+            and _assigns_subscript_value(
+                recorder,
+                owner="deltas",
+                key="installed",
+                value=0,
             )
+            and any(
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Subscript)
+                and isinstance(node.targets[0].value, ast.Attribute)
+                and node.targets[0].value.attr == "package_deployed_files"
+                and isinstance(node.value, ast.List)
+                and not node.value.elts
+                for node in ast.walk(recorder)
+            )
+        )
         if not failure_is_recorded:
             violations.append(
                 f"{template_path}: native deployment failure must remain a recorded "
                 "non-success outcome"
+            )
+
+    integrate_runs = _named_functions(integrate_phase_tree, "run")
+    if len(integrate_runs) != 1:
+        violations.append(f"{integrate_phase_path}: integration phase must have one run owner")
+    else:
+        calls = [
+            (_call_name(node), node.lineno)
+            for node in ast.walk(integrate_runs[0])
+            if isinstance(node, ast.Call)
+        ]
+        batch_gates = [
+            line for name, line in calls if name == "preflight_agent_plugin_materializations"
+        ]
+        integration_calls = [line for name, line in calls if name == "run_integration_template"]
+        if (
+            len(batch_gates) != 1
+            or not integration_calls
+            or batch_gates[0] >= min(integration_calls)
+        ):
+            violations.append(
+                f"{integrate_phase_path}: native batch preflight must run before "
+                "the first package integration"
+            )
+
+    install_helpers = _named_functions(install_command_tree, "_install_apm_packages")
+    if len(install_helpers) != 1:
+        violations.append(
+            f"{install_command_path}: install planning must have one dependency owner"
+        )
+    else:
+        calls = [
+            (_call_name(node), node.lineno)
+            for node in ast.walk(install_helpers[0])
+            if isinstance(node, ast.Call)
+        ]
+        dry_run_gates = [line for name, line in calls if name == "preflight_agent_plugin_dry_run"]
+        dry_run_exits = [line for name, line in calls if name == "render_and_exit"]
+        if len(dry_run_gates) != 1 or not dry_run_exits or dry_run_gates[0] >= min(dry_run_exits):
+            violations.append(
+                f"{install_command_path}: dry-run must preflight native dependencies "
+                "before rendering success"
+            )
+
+    local_bundle_defs = _named_functions(services_tree, "integrate_local_bundle")
+    if len(local_bundle_defs) != 1 or not _is_call_statement(
+        _first_executable_statement(local_bundle_defs[0]) if local_bundle_defs else None,
+        "enforce_agent_plugin_deployment_boundary",
+    ):
+        violations.append(
+            f"{services_path}: opaque local bundle deployment must start at the native boundary"
+        )
+
+    local_bundle_handlers = _named_functions(local_bundle_handler_tree, "install_local_bundle")
+    if len(local_bundle_handlers) != 1:
+        violations.append(
+            f"{local_bundle_handler_path}: local bundle handler must have one install owner"
+        )
+    else:
+        calls = [
+            (_call_name(node), node.lineno)
+            for node in ast.walk(local_bundle_handlers[0])
+            if isinstance(node, ast.Call)
+        ]
+        gates = [line for name, line in calls if name == "enforce_agent_plugin_deployment_boundary"]
+        side_effects = [
+            line
+            for name, line in calls
+            if name
+            in {
+                "resolve_targets",
+                "run_policy_preflight",
+                "stage_agent_plugin_bundle",
+                "integrate_local_bundle",
+            }
+        ]
+        if len(gates) != 1 or not side_effects or gates[0] >= min(side_effects):
+            violations.append(
+                f"{local_bundle_handler_path}: native local bundles must fail before "
+                "staging or deployment"
+            )
+
+    drift_defs = _named_functions(ci_checks_tree, "_check_drift")
+    if len(drift_defs) != 1:
+        violations.append(f"{ci_checks_path}: drift check must have one structured owner")
+    else:
+        typed_handlers = [
+            node
+            for node in ast.walk(drift_defs[0])
+            if isinstance(node, ast.ExceptHandler)
+            and isinstance(node.type, ast.Name)
+            and node.type.id == "AgentPluginDeploymentBoundaryError"
+        ]
+        structured_failure = bool(typed_handlers) and any(
+            isinstance(node, ast.keyword)
+            and node.arg == "passed"
+            and isinstance(node.value, ast.Constant)
+            and node.value.value is False
+            for node in ast.walk(typed_handlers[0])
+        )
+        if len(typed_handlers) != 1 or not structured_failure:
+            violations.append(
+                f"{ci_checks_path}: drift must translate native deployment failures "
+                "into a failed CheckResult"
+            )
+
+    uninstall_preflights = _named_functions(
+        uninstall_engine_tree,
+        "_preflight_uninstall_survivors",
+    )
+    installed_survivor_gate = False
+    declared_source_gate = False
+    if len(uninstall_preflights) == 1:
+        preflight = uninstall_preflights[0]
+        for node in ast.walk(preflight):
+            if not isinstance(node, ast.Call):
+                continue
+            if _call_name(node) == "enforce_agent_plugin_deployment_boundary" and node.args:
+                installed_survivor_gate |= (
+                    isinstance(node.args[0], ast.Name) and node.args[0].id == "package_info"
+                )
+                declared_source_gate |= (
+                    isinstance(node.args[0], ast.Call) and _call_name(node.args[0]) == "PackageInfo"
+                )
+        declared_source_gate &= "validate_apm_package" in _function_calls(preflight)
+    if len(uninstall_preflights) != 1 or not installed_survivor_gate or not declared_source_gate:
+        violations.append(
+            f"{uninstall_engine_path}: uninstall survivor preflight must use "
+            "the native deployment boundary owner against declared local sources"
+        )
+
+    uninstall_defs = _named_functions(uninstall_cli_tree, "uninstall")
+    if len(uninstall_defs) != 1:
+        violations.append(f"{uninstall_cli_path}: uninstall command must have one owner")
+    else:
+        calls = [
+            (_call_name(node), node.lineno)
+            for node in ast.walk(uninstall_defs[0])
+            if isinstance(node, ast.Call)
+        ]
+        gates = [line for name, line in calls if name == "_preflight_uninstall_survivors"]
+        side_effects = [
+            line
+            for name, line in calls
+            if name
+            in {
+                "_fire_uninstall_scripts",
+                "_stage_shared_local_survivors",
+                "dump_yaml_roundtrip",
+                "_remove_packages_from_disk",
+                "_sync_integrations_after_uninstall",
+            }
+        ]
+        if not gates or not side_effects or min(gates) >= min(side_effects):
+            violations.append(
+                f"{uninstall_cli_path}: uninstall survivor preflight must run before "
+                "scripts, staging, or destructive reconciliation"
+            )
+
+    sync_defs = _named_functions(uninstall_engine_tree, "_sync_integrations_after_uninstall")
+    if len(sync_defs) != 1:
+        violations.append(
+            f"{uninstall_engine_path}: uninstall integration sync must have one owner"
+        )
+    else:
+        calls = [
+            (_call_name(node), node.lineno)
+            for node in ast.walk(sync_defs[0])
+            if isinstance(node, ast.Call)
+        ]
+        gates = [line for name, line in calls if name == "_preflight_uninstall_survivors"]
+        mutations = [
+            line
+            for name, line in calls
+            if name
+            in {
+                "clear_discovery_cache",
+                "sync_for_target",
+                "sync_integration",
+                "integrate_package_skill",
+            }
+        ]
+        if not gates or not mutations or min(gates) >= min(mutations):
+            violations.append(
+                f"{uninstall_engine_path}: direct uninstall sync must preflight "
+                "survivors before integration mutation"
             )
 
     native_skill_references = [

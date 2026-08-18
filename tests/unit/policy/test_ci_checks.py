@@ -12,6 +12,7 @@ from apm_cli.policy.ci_checks import (
     _check_config_consistency,
     _check_content_integrity,
     _check_deployed_files_present,
+    _check_drift,
     _check_lockfile_exists,
     _check_no_orphans,
     _check_ref_consistency,
@@ -67,6 +68,27 @@ def _make_deployed_file(project: Path, rel_path: str, content: str = "clean\n") 
     p = project / rel_path
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
+
+
+def test_drift_translates_native_deployment_boundary_to_check_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
+    from apm_cli.deps.lockfile import LockFile
+
+    error = AgentPluginDeploymentBoundaryError("native deployment blocked")
+
+    def blocked_replay(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr("apm_cli.install.drift.run_replay", blocked_replay)
+    result, findings = _check_drift(tmp_path, LockFile())
+
+    assert result.name == "drift"
+    assert result.passed is False
+    assert result.details == [str(error)]
+    assert findings == []
 
 
 # -- Fixtures -------------------------------------------------------

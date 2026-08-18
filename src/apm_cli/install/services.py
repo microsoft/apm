@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
+
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
@@ -236,29 +238,6 @@ def _resolve_bin_skip(
     if trust_bin is None and non_interactive:
         return True, "not_trusted"
     return False, None
-
-
-def enforce_agent_plugin_deployment_boundary(package_info: Any | None) -> None:
-    """Block native Agent Plugin deployment until canonical IR integration exists."""
-    from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
-    from apm_cli.models.validation import PackageType
-
-    if package_info is None:
-        return
-    if package_info.package_type is not PackageType.AGENT_PLUGIN:
-        return
-
-    package = getattr(package_info, "package", None)
-    if package is None or getattr(package, "agent_plugin", None) is None:
-        raise AgentPluginDeploymentBoundaryError(
-            "Native Agent Plugin canonical IR is missing, so component deployment was blocked. "
-            "Native Agent Plugin components are not enabled yet; use the explicit legacy Claude "
-            "plugin format only if the package author intended legacy compatibility."
-        )
-    raise AgentPluginDeploymentBoundaryError(
-        "Native Agent Plugin components are not enabled yet; use the explicit legacy Claude "
-        "plugin format only if the package author intended legacy compatibility."
-    )
 
 
 def integrate_package_primitives(  # noqa: PLR0913
@@ -856,6 +835,8 @@ def integrate_local_bundle(
         ``deployed_file_hashes`` (dict[str, str]), ``skipped`` (int), and
         per-primitive counters (``skills``, ``agents``, ``commands``, ...).
     """
+    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
+
     import hashlib
     import shutil
 

@@ -16,6 +16,8 @@ from .engine import (
     _dependency_public_label,
     _dry_run_uninstall,
     _parse_dependency_entry,
+    _preflight_uninstall_survivors,
+    _project_transitive_orphans,
     _remove_packages_from_disk,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
@@ -155,6 +157,26 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         selected_package_labels = tuple(
             _dependency_public_label(package) for package in packages_to_remove
         )
+        surviving_deps = list(current_deps)
+        removed_keys = builtins.set()
+        for package in packages_to_remove:
+            surviving_deps.remove(package)
+            removed_keys.add(_parse_dependency_entry(package).get_unique_key())
+        projected_orphans, _ = _project_transitive_orphans(
+            lockfile,
+            packages_to_remove,
+            modules_dir,
+            apm_yml_path,
+            logger,
+            warn_on_incomplete=False,
+        )
+        _preflight_uninstall_survivors(
+            surviving_deps,
+            modules_dir,
+            lockfile=lockfile,
+            excluded_keys=removed_keys | builtins.set(projected_orphans),
+            source_root=manifest_path.parent,
+        )
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.
@@ -197,8 +219,25 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             _dependency_public_label(package) for package in packages_to_remove
         )
         surviving_deps = list(current_deps)
+        removed_keys = builtins.set()
         for package in packages_to_remove:
             surviving_deps.remove(package)
+            removed_keys.add(_parse_dependency_entry(package).get_unique_key())
+        projected_orphans, _ = _project_transitive_orphans(
+            lockfile,
+            packages_to_remove,
+            modules_dir,
+            apm_yml_path,
+            logger,
+            warn_on_incomplete=False,
+        )
+        _preflight_uninstall_survivors(
+            surviving_deps,
+            modules_dir,
+            lockfile=lockfile,
+            excluded_keys=removed_keys | builtins.set(projected_orphans),
+            source_root=manifest_path.parent,
+        )
         if not dry_run:
             staged_local_refreshes = _stage_shared_local_survivors(
                 packages_to_remove,
@@ -268,13 +307,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 7: Collect deployed files for removed packages (before lockfile mutation)
         from ...integration.base_integrator import BaseIntegrator
 
-        removed_keys = builtins.set()
-        for pkg in packages_to_remove:
-            try:
-                ref = _parse_dependency_entry(pkg)
-                removed_keys.add(ref.get_unique_key())
-            except (ValueError, TypeError, AttributeError, KeyError):
-                removed_keys.add(pkg)
         removed_keys.update(actual_orphans)
         all_deployed_files = builtins.set()
         if lockfile:

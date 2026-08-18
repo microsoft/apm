@@ -23,7 +23,6 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     validation = (root / "src/apm_cli/models/validation.py").read_text(encoding="utf-8")
     resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text(encoding="utf-8")
     errors = (root / "src/apm_cli/agent_plugins/errors.py").read_text(encoding="utf-8")
-    services = (root / "src/apm_cli/install/services.py").read_text(encoding="utf-8")
     skill_integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text(
         encoding="utf-8"
     )
@@ -50,7 +49,7 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "result.package = package" in agent_validation_source
     assert "return validation.package" in resolver
     assert errors.count("class AgentPluginDeploymentBoundaryError(") == 1
-    assert services.count("def enforce_agent_plugin_deployment_boundary(") == 1
+    assert errors.count("def enforce_agent_plugin_deployment_boundary(") == 1
     assert "PackageType.AGENT_PLUGIN" not in skill_integrator
     assert "APMPackage(" not in projection
     assert "read_json_document" not in projection
@@ -173,19 +172,25 @@ def test_agent_plugin_contract_has_single_owner() -> None:
             "native deployment gate must be the first integration action",
         ),
         (
-            "src/apm_cli/install/services.py",
+            "src/apm_cli/agent_plugins/errors.py",
             "package_info.package_type is not PackageType.AGENT_PLUGIN",
             "package_info.package_type is PackageType.AGENT_PLUGIN",
             "native deployment boundary must fail closed",
         ),
         (
-            "src/apm_cli/install/services.py",
-            "        raise AgentPluginDeploymentBoundaryError(",
-            "        return AgentPluginDeploymentBoundaryError(",
+            "src/apm_cli/agent_plugins/errors.py",
+            "        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "        return AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
             "native deployment boundary must fail closed",
         ),
         (
-            "src/apm_cli/install/services.py",
+            "src/apm_cli/agent_plugins/errors.py",
+            "    raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "    return None  # native package accepted",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
             'getattr(package, "agent_plugin", None)',
             'getattr(package, "legacy_plugin", None)',
             "native deployment boundary must fail closed",
@@ -221,15 +226,71 @@ def test_agent_plugin_contract_has_single_owner() -> None:
         ),
         (
             "src/apm_cli/install/template.py",
-            "        diagnostics.error(\n",
-            "        diagnostics.warn(\n",
+            "    ctx.diagnostics.error(\n",
+            "    ctx.diagnostics.warn(\n",
             "native deployment failure must remain a recorded non-success outcome",
         ),
         (
             "src/apm_cli/install/template.py",
-            '        deltas["installed"] = 0',
-            '        deltas["installed"] = 1',
+            '    deltas["installed"] = 0',
+            '    deltas["installed"] = 1',
             "native deployment failure must remain a recorded non-success outcome",
+        ),
+        (
+            "src/apm_cli/install/phases/integrate.py",
+            "    if not preflight_agent_plugin_materializations(materialized):",
+            "    if not materialized:",
+            "native batch preflight must run before the first package integration",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "        preflight_agent_plugin_dry_run(",
+            "        disabled_agent_plugin_preflight(\n",
+            "dry-run must preflight native dependencies before rendering success",
+        ),
+        (
+            "src/apm_cli/policy/ci_checks.py",
+            "        except AgentPluginDeploymentBoundaryError as exc:",
+            "        except RuntimeError as exc:",
+            "drift must translate native deployment failures into a failed CheckResult",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/cli.py",
+            "        _preflight_uninstall_survivors(\n"
+            "            surviving_deps,\n"
+            "            modules_dir,\n"
+            "            lockfile=lockfile,\n"
+            "            excluded_keys=removed_keys | builtins.set(projected_orphans),\n"
+            "            source_root=manifest_path.parent,\n"
+            "        )",
+            "        pass  # native preflight removed",
+            "uninstall survivor preflight must run before scripts, staging, "
+            "or destructive reconciliation",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/engine.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)",
+            "        pass  # native survivor accepted",
+            "uninstall survivor preflight must use the native deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/engine.py",
+            "            validation = validate_apm_package(source_path, source_path=source_path)",
+            "            continue  # declared local source accepted without validation",
+            "uninstall survivor preflight must use the native deployment boundary owner "
+            "against declared local sources",
+        ),
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "    pass  # native local bundle accepted",
+            "native local bundles must fail before staging or deployment",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "    pass  # native opaque bundle accepted",
+            "opaque local bundle deployment must start at the native boundary",
         ),
     ],
 )
@@ -252,7 +313,13 @@ def test_agent_plugin_projection_guard_rejects_bypass(
         "src/apm_cli/deps/apm_resolver.py",
         "src/apm_cli/install/services.py",
         "src/apm_cli/install/template.py",
+        "src/apm_cli/install/phases/integrate.py",
+        "src/apm_cli/install/local_bundle_handler.py",
         "src/apm_cli/integration/skill_integrator.py",
+        "src/apm_cli/policy/ci_checks.py",
+        "src/apm_cli/commands/uninstall/cli.py",
+        "src/apm_cli/commands/uninstall/engine.py",
+        "src/apm_cli/commands/install.py",
         "src/apm_cli/models/apm_package.py",
         "src/apm_cli/models/format_detection.py",
         "src/apm_cli/models/validation.py",

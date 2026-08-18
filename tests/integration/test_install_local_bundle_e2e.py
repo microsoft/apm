@@ -250,7 +250,7 @@ class TestInstallLocalBundleE2E:
     def test_install_local_bundle_from_pack_tar_gz(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Pack tar.gz escape hatch -> local install deploys files without network."""
+        """Explicit legacy pack tar.gz installs files without network."""
         source = tmp_path / "source-project"
         source.mkdir()
         (source / "apm.yml").write_text(
@@ -264,7 +264,7 @@ class TestInstallLocalBundleE2E:
         archive = pack_bundle(
             source,
             tmp_path / "archives",
-            fmt="plugin",
+            fmt="claude-plugin",
             archive=True,
             archive_format="tar.gz",
         ).bundle_path
@@ -280,6 +280,50 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+
+    def test_install_native_pack_is_blocked_before_project_mutation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Native packed input reaches the local-bundle fail-closed gate."""
+        source = tmp_path / "source-project"
+        source.mkdir()
+        (source / "apm.yml").write_text(
+            yaml.dump({"name": "native-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        LockFile().write(source / "apm.lock.yaml")
+        skill_path = source / ".apm" / "skills" / "coding" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text("# Coding Skill\n", encoding="utf-8")
+        archive = pack_bundle(
+            source,
+            tmp_path / "archives",
+            fmt="plugin",
+            archive=True,
+            archive_format="tar.gz",
+        ).bundle_path
+        project = _make_project(tmp_path / "dst")
+        before_paths = sorted(path.relative_to(project) for path in project.rglob("*"))
+        before_files = {
+            path.relative_to(project): path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        }
+
+        result = _invoke_install(
+            project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+        )
+
+        assert result.exit_code == 1
+        assert "Native Agent Plugin components are not" in result.output
+        assert "enabled yet, so deployment was blocked" in result.output
+        assert "apm pack --claude-plugin" in result.output
+        assert sorted(path.relative_to(project) for path in project.rglob("*")) == before_paths
+        assert {
+            path.relative_to(project): path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        } == before_files
 
     def test_install_local_bundle_multi_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

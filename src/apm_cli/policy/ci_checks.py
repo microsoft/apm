@@ -614,6 +614,7 @@ def _check_drift(
     then the audit remains non-blocking so CI does not red-mark a
     fresh checkout that has never installed.
     """
+    from ..agent_plugins.errors import AgentPluginDeploymentBoundaryError
     from ..deps.lockfile import get_lockfile_path
     from ..deps.path_anchoring import LocalResolutionError
     from ..install.drift import (
@@ -636,6 +637,16 @@ def _check_drift(
 
         try:
             scratch = run_replay(config, logger)
+        except AgentPluginDeploymentBoundaryError as exc:
+            return (
+                CheckResult(
+                    name="drift",
+                    passed=False,
+                    message=f"drift replay blocked: {exc}",
+                    details=[str(exc)],
+                ),
+                [],
+            )
         except LocalResolutionError as exc:
             return (
                 CheckResult(

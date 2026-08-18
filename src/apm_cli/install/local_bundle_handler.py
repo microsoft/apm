@@ -63,8 +63,13 @@ def install_local_bundle(
     )
     from ..core.scope import InstallScope
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from ..install.services import integrate_local_bundle
+    from ..install.services import (
+        enforce_agent_plugin_deployment_boundary,
+        integrate_local_bundle,
+    )
     from ..integration.targets import resolve_targets
+
+    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
     # Reject incompatible flags with a single consolidated error.  Preserve
     # dict insertion order (matches the order options are declared on the
