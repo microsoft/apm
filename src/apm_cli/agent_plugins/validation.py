@@ -24,6 +24,8 @@ from .io import read_json_document
 _PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _HTTP_DNS_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_URL_PLACEHOLDER_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+_INVALID_PERCENT_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _BARE_COMMAND_RE = re.compile(r"^[^\s/\\]+$")
 _PLUGIN_RELATIVE_CWD_RE = re.compile(
     r"^(?:\./|\$\{PLUGIN_ROOT\}(?:/|$)|\$\{PLUGIN_DATA\}(?:/|$)).*"
@@ -674,7 +676,7 @@ def _contains_prohibited_header_value_char(value: str) -> bool:
 
 
 def _is_valid_http_url(url: str) -> bool:
-    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in url):
+    if not _has_valid_url_lexical_syntax(url):
         return False
     try:
         parsed = urlparse(url)
@@ -699,8 +701,21 @@ def _is_valid_http_url(url: str) -> bool:
         if not all(_HTTP_DNS_LABEL_RE.fullmatch(label) for label in host.rstrip(".").split(".")):
             return False
     if parsed.scheme == "http":
+        if "%" in host:
+            return False
         return host == "localhost" or (address is not None and address.is_loopback)
     return True
+
+
+def _has_valid_url_lexical_syntax(url: str) -> bool:
+    if (
+        "\\" in url
+        or _INVALID_PERCENT_ESCAPE_RE.search(url)
+        or any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in url)
+    ):
+        return False
+    without_placeholders = _URL_PLACEHOLDER_RE.sub("", url)
+    return "{" not in without_placeholders and "}" not in without_placeholders
 
 
 def _is_valid_http_authority(authority: str) -> bool:

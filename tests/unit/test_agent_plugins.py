@@ -297,6 +297,7 @@ class TestLocalMcpValidation:
         "url",
         [
             "https://example.com/${UNKNOWN_VAR}?token=${GITHUB_TOKEN}",
+            "https://example.com/${_X}/${X1}?encoded=hello%20world",
             "http://localhost:8080/${UNKNOWN_VAR}",
             "http://127.0.0.1:8080/${UNKNOWN_VAR}",
             "http://[::1]:8080/${UNKNOWN_VAR}",
@@ -334,6 +335,17 @@ class TestLocalMcpValidation:
             "http://example.com/mcp",
             "http://192.0.2.1/mcp",
             "http://[2001:db8::1]/mcp",
+            "https://example.com/%",
+            "https://example.com/%2",
+            "https://example.com/%GG",
+            "https://example.com\\mcp",
+            "https://example.com/${X",
+            "https://example.com/${}",
+            "https://example.com/${1X}",
+            "https://example.com/${X-Y}",
+            "https://example.com/stray}",
+            "http://[::1%eth0]/",
+            "http://[::1%25eth0]/",
         ],
     )
     def test_remote_url_rejects_placeholder_or_invalid_authority(self, url: str) -> None:
