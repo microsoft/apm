@@ -37,7 +37,7 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert loader.count("def detect_agent_plugin(") == 1
     assert "normalize_plugin_directory" not in agent_validation_source
     assert "detect_agent_plugin(package_path)" in detection
-    assert "reject_agent_plugin_legacy_normalization(plugin_path)" in legacy
+    assert "admit_legacy_plugin_manifest(plugin_path)" in legacy
     assert "Agent Plugin classification must route through its loader" in guard
     assert "| Agent Plugins v1 contract interpretation and component discovery |" in architecture
     assert "| Agent Plugin portable manifest authority |" in architecture

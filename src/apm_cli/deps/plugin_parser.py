@@ -182,19 +182,23 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     Returns:
         Path: Path to the generated apm.yml.
     """
-    from ..agent_plugins.loader import reject_agent_plugin_legacy_normalization
+    from ..agent_plugins.loader import admit_legacy_plugin_manifest
 
-    reject_agent_plugin_legacy_normalization(plugin_path)
-    manifest: dict[str, Any] = {}
-
-    if plugin_json_path is not None and plugin_json_path.exists():
-        try:  # noqa: SIM105
-            manifest = parse_plugin_manifest(plugin_json_path)
-        except (ValueError, FileNotFoundError, RecursionError, MemoryError):
-            pass  # Treat as empty manifest; fall back to dir-name defaults
+    admitted_manifest = admit_legacy_plugin_manifest(plugin_path)
+    manifest: dict[str, Any] = admitted_manifest or {}
+    root_manifest = plugin_path / "plugin.json"
+    if (
+        admitted_manifest is None
+        and plugin_json_path is not None
+        and plugin_json_path != root_manifest
+        and plugin_json_path.exists()
+    ):
+        manifest = parse_plugin_manifest(plugin_json_path)
 
     # Derive name from directory if not in manifest
     if "name" not in manifest or not manifest["name"]:
+        if admitted_manifest is not None:
+            raise ValueError("Present root plugin.json must declare a non-empty name")
         manifest["name"] = plugin_path.name
 
     return synthesize_apm_yml_from_plugin(plugin_path, manifest)

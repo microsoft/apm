@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
@@ -23,7 +24,7 @@ from .errors import (
     NotAgentPluginError,
     UnsupportedAgentPluginVersionError,
 )
-from .io import MAX_JSON_BYTES, read_json_document
+from .io import read_json_document
 from .ir import (
     AgentPlugin,
     AgentPluginComponents,
@@ -70,39 +71,37 @@ _APM_CONFIGURATION_FIELDS = frozenset(
         "type",
     }
 )
-_SCHEMA_PROBE_RE = re.compile(rb'"\$schema"\s*:\s*"(https://agent-plugins\.org/schemas/[^"]+)"')
+_REJECTED_MANIFEST_SCHEMA_ID = "<rejected-root-plugin-json>"
+
+
+@dataclass(frozen=True, slots=True)
+class _AdmissibleRootManifest:
+    path: Path
+    document: Mapping[str, Any]
 
 
 def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
     """Classify and interpret a native Agent Plugin from its exact root manifest."""
     manifest_path = package_root / "plugin.json"
-    if not _has_exact_entry(package_root, "plugin.json"):
-        return None
-    preflight_error = _manifest_preflight_error(manifest_path)
-    if preflight_error is not None:
-        schema_id = _probe_agent_plugin_schema(manifest_path, package_root)
-        if schema_id is None:
-            return None
-        return AgentPluginDetection(
-            manifest_path=manifest_path,
-            schema_id=schema_id,
-            error=AgentPluginManifestError(preflight_error),
-        )
     try:
-        document = read_json_document(manifest_path)
-    except (OSError, ValueError) as exc:
-        schema_id = _probe_agent_plugin_schema(manifest_path, package_root)
-        if schema_id is None:
-            return None
-        return AgentPluginDetection(
-            manifest_path=manifest_path,
-            schema_id=schema_id,
-            error=AgentPluginManifestError(f"Invalid root plugin.json: {exc}"),
+        evidence = _read_admissible_root_manifest(package_root)
+    except AgentPluginManifestError as exc:
+        return _rejected_manifest_detection(
+            manifest_path,
+            str(exc),
         )
-    if not isinstance(document, dict):
+    if evidence is None:
         return None
-    schema_id = document.get("$schema")
-    if not isinstance(schema_id, str) or not schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
+    document = dict(evidence.document)
+    if "$schema" not in document:
+        return None
+    schema_id = document["$schema"]
+    if not isinstance(schema_id, str):
+        return _rejected_manifest_detection(
+            manifest_path,
+            "Invalid root plugin.json: $schema must be a string",
+        )
+    if not schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
         return None
     try:
         loader = _VERSION_LOADERS.get(schema_id)
@@ -124,6 +123,17 @@ def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
     )
 
 
+def _rejected_manifest_detection(
+    manifest_path: Path,
+    message: str,
+) -> AgentPluginDetection:
+    return AgentPluginDetection(
+        manifest_path=manifest_path,
+        schema_id=_REJECTED_MANIFEST_SCHEMA_ID,
+        error=AgentPluginManifestError(message),
+    )
+
+
 def load_agent_plugin(package_root: Path) -> AgentPlugin:
     """Load one native Agent Plugin or raise a typed fail-closed error."""
     detection = detect_agent_plugin(package_root)
@@ -140,13 +150,51 @@ def load_agent_plugin(package_root: Path) -> AgentPlugin:
 
 def reject_agent_plugin_legacy_normalization(package_root: Path) -> None:
     """Prevent native Agent Plugin input from entering Claude normalization."""
-    detection = detect_agent_plugin(package_root)
-    if detection is not None:
-        detail = f": {detection.error}" if detection.error is not None else ""
+    admit_legacy_plugin_manifest(package_root)
+
+
+def admit_legacy_plugin_manifest(package_root: Path) -> dict[str, Any] | None:
+    """Return one admissible schema-less legacy manifest or reject fallback."""
+    try:
+        evidence = _read_admissible_root_manifest(package_root)
+    except AgentPluginManifestError as exc:
+        raise AgentPluginLegacyBoundaryError(
+            f"Present root plugin.json cannot enter Claude plugin normalization: {exc}"
+        ) from exc
+    if evidence is None:
+        return None
+    schema_id = evidence.document.get("$schema")
+    if isinstance(schema_id, str) and schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
         raise AgentPluginLegacyBoundaryError(
             "Agent Plugin input must be interpreted by load_agent_plugin(), "
-            f"not Claude plugin normalization{detail}"
+            "not Claude plugin normalization"
         )
+    return dict(evidence.document)
+
+
+def _read_admissible_root_manifest(package_root: Path) -> _AdmissibleRootManifest | None:
+    manifest_path = package_root / "plugin.json"
+    try:
+        manifest_present = any(entry.name == "plugin.json" for entry in package_root.iterdir())
+    except OSError as exc:
+        raise AgentPluginManifestError(
+            f"Root plugin.json presence could not be determined: {exc}"
+        ) from exc
+    if not manifest_present:
+        return None
+    try:
+        document = read_json_document(manifest_path, reject_duplicate_schema=True)
+    except (OSError, ValueError) as exc:
+        raise AgentPluginManifestError(f"Invalid root plugin.json: {exc}") from exc
+    if not isinstance(document, dict):
+        raise AgentPluginManifestError("Invalid root plugin.json: manifest must be a JSON object")
+    schema_id = document.get("$schema")
+    if "$schema" in document and not isinstance(schema_id, str):
+        raise AgentPluginManifestError("Invalid root plugin.json: $schema must be a string")
+    return _AdmissibleRootManifest(
+        path=manifest_path,
+        document=MappingProxyType(document),
+    )
 
 
 def _load_v1(
@@ -548,41 +596,6 @@ def _has_exact_entry(parent: Path, name: str) -> bool:
         return any(entry.name == name for entry in parent.iterdir())
     except OSError:
         return False
-
-
-def _probe_agent_plugin_schema(path: Path, package_root: Path) -> str | None:
-    probe_path = path
-    if path.is_symlink():
-        try:
-            probe_path = path.resolve(strict=True)
-            probe_path.relative_to(package_root.resolve())
-        except (OSError, ValueError):
-            return None
-    if not probe_path.is_file():
-        return None
-    try:
-        with probe_path.open("rb") as handle:
-            prefix = handle.read(MAX_JSON_BYTES + 1)
-    except OSError:
-        return None
-    match = _SCHEMA_PROBE_RE.search(prefix)
-    if match is None:
-        return None
-    return match.group(1).decode("ascii")
-
-
-def _manifest_preflight_error(path: Path) -> str | None:
-    if path.is_symlink():
-        return "Root plugin.json must not be a symbolic link"
-    if not path.is_file():
-        return "Root plugin.json must be a regular file"
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        return f"Root plugin.json metadata is unreadable: {exc}"
-    if size > MAX_JSON_BYTES:
-        return f"Root plugin.json exceeds the {MAX_JSON_BYTES}-byte read limit"
-    return None
 
 
 _VERSION_LOADERS: dict[str, Callable[[Path, Path, dict[str, Any]], AgentPlugin]] = {

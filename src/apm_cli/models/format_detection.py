@@ -270,9 +270,19 @@ class ClaudePluginDetector:
     """
 
     def detect(self, package_path: Path) -> ClaudePluginFormatEvidence | None:
+        from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
+        from ..agent_plugins.loader import admit_legacy_plugin_manifest
         from ..utils.helpers import find_plugin_json
 
-        plugin_json_path = find_plugin_json(package_path)
+        try:
+            admitted_manifest = admit_legacy_plugin_manifest(package_path)
+        except AgentPluginLegacyBoundaryError:
+            return None
+        plugin_json_path = (
+            package_path / "plugin.json"
+            if admitted_manifest is not None
+            else find_plugin_json(package_path)
+        )
         has_claude_plugin_dir = (package_path / ".claude-plugin").is_dir()
         plugin_dirs_present = tuple(name for name in _PLUGIN_DIRS if (package_path / name).is_dir())
         if plugin_json_path is None and not has_claude_plugin_dir:
