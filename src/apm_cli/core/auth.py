@@ -753,6 +753,10 @@ class AuthResolver:
             """Retry ADO with a repository-scoped Git credential helper."""
             if not self._allow_external_fallback:
                 raise exc
+            from apm_cli.utils.github_host import is_ado_auth_failure_signal
+
+            if not is_ado_auth_failure_signal(str(exc)):
+                raise exc
             path_suffix = f" (path={path})" if path else ""
             _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
             credential = self._token_manager.resolve_credential_from_git(

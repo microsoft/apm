@@ -565,10 +565,11 @@ def _fetch_git(
 ) -> dict | None:
     """Fetch marketplace.json from a generic git URL via subprocess + GitCache.
 
-    Sparse-cone clones only the requested manifest path. Uses
-    ``AuthResolver.resolve(host, org).git_env`` to build the git env; for
-    hosts APM doesn't recognise, the env passes through to the user's
-    credential helpers (matches ``apm install`` posture).
+    Sparse-cone clones only the requested manifest path. Generic hosts use
+    ``AuthResolver.resolve(host, org).git_env`` as before. ADO hosts route the
+    checkout through ``AuthResolver.try_with_fallback`` with the repository
+    path, allowing path-scoped ``git credential fill`` after PAT and bearer
+    authentication fail while retaining the hardened Git base environment.
     """
     _validate_ref(source.ref, source.name)
 
@@ -594,6 +595,7 @@ def _fetch_git(
             }
             if source.port is not None:
                 fallback_kwargs["port"] = source.port
+            fallback_kwargs["base_env"] = auth_resolver.hardened_git_base_env()
             checkout_dir = auth_resolver.try_with_fallback(
                 host_info.host,
                 _checkout,

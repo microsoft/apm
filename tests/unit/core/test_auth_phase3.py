@@ -678,6 +678,25 @@ class TestTryWithFallbackCredentialChain:
         assert gcm_env["GIT_CONFIG_KEY_0"] == "http.extraheader"
         assert gcm_env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
 
+    def test_ado_network_failure_does_not_probe_credential_helper(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+
+            def _op(_token, _env):
+                raise RuntimeError("network timeout")
+
+            with pytest.raises(RuntimeError, match="network timeout"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        credential_fill.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # build_error_context — non-ADO paths
