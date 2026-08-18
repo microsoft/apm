@@ -480,11 +480,29 @@ def test_failed_backup_rename_never_deletes_active_root(
         ),
         (
             lambda row: row["source"].update(locator="https:token@example.invalid/plugin.git"),
-            "malformed remote URL",
+            "credential-free URL",
         ),
         (
             lambda row: row["source"].update(locator="git+https:token@example.invalid/plugin.git"),
-            "malformed remote URL",
+            "credential-free URL",
+        ),
+        (
+            lambda row: row["source"].update(
+                locator="x-access-token:ghs_TOKEN@github.com:org/repo.git"
+            ),
+            "credential-free URL",
+        ),
+        (
+            lambda row: row["source"].update(locator="oauth2:TOKEN@host:path"),
+            "credential-free URL",
+        ),
+        (
+            lambda row: row["source"].update(locator="user:password@host:path"),
+            "credential-free URL",
+        ),
+        (
+            lambda row: row["source"].update(locator="Git@github.com:org/repo.git"),
+            "canonical git@host:path",
         ),
         (
             lambda row: row["source"].update(
@@ -503,6 +521,50 @@ def test_failed_backup_rename_never_deletes_active_root(
                 locator="https://token%40value@example.invalid/plugin.git"
             ),
             "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(locator="ssh://g%69t@github.com/org/repo.git"),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(
+                locator="https://X-ACCESS-TOKEN:SECRET@github.com/org/repo.git"
+            ),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(
+                locator="https://user%3Avalue%40github.com/org/repo.git"
+            ),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(locator="ssh://git%40github.com/org/repo.git"),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(locator="https://github.com\\evil/org/repo.git"),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(locator="https://github.com:notaport/org/repo.git"),
+            "invalid remote URL",
+        ),
+        (
+            lambda row: row["source"].update(locator="https://github.com /org/repo.git"),
+            "credential-free",
+        ),
+        (
+            lambda row: row["source"].update(locator="https://host..example/org/repo.git"),
+            "invalid URL host",
+        ),
+        (
+            lambda row: row["source"].update(locator="https://host-.example/org/repo.git"),
+            "invalid URL host",
+        ),
+        (
+            lambda row: row["source"].update(locator="git@[:]:org/repo.git"),
+            "invalid host",
         ),
         (
             lambda row: row["source"].update(resolved_ref="main"),
@@ -539,7 +601,12 @@ def test_malformed_plugin_rows_fail_closed(mutate, message: str) -> None:
     ("source_kind", "source_locator", "resolved_ref"),
     [
         ("git", "git@example.invalid:acme/plugin.git", GIT_SHA),
+        ("git", "git@github.com:acme/plugin.git", GIT_SHA),
+        ("git", "git@ssh.dev.azure.com:v3/acme/project/plugin", GIT_SHA),
+        ("git", "ssh://git@github.com/acme/plugin.git", GIT_SHA),
+        ("git", "ssh://git@ssh.dev.azure.com/v3/acme/project/plugin", GIT_SHA),
         ("local", "/tmp/user@example.invalid/plugin", None),
+        ("local", "/tmp/plugin@release", None),
     ],
 )
 def test_credential_free_non_url_locators_remain_supported(
@@ -560,6 +627,134 @@ def test_credential_free_non_url_locators_remain_supported(
     )
 
     assert record.source_locator == source_locator
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "source_locator", "resolved_ref", "source_digest"),
+    [
+        ("local", "file:///tmp/plugin@release", None, None),
+        ("local", "file://localhost/tmp/plugin", None, None),
+        ("cache", "/cache/plugin@release", "cache-key", None),
+        ("cache", "file:///cache/plugin", "cache-key", None),
+        ("archive", "/tmp/plugin.zip", None, SOURCE_DIGEST),
+        ("archive", "https://example.invalid/plugin.zip", None, SOURCE_DIGEST),
+        ("registry", "registry.example.invalid/acme/plugin", None, SOURCE_DIGEST),
+        ("registry", "https://registry.example.invalid/acme/plugin", None, SOURCE_DIGEST),
+    ],
+)
+def test_source_kind_positive_locator_shapes_remain_supported(
+    source_kind: str,
+    source_locator: str,
+    resolved_ref: str | None,
+    source_digest: str | None,
+) -> None:
+    record = InstalledPluginRecordCodec.build(
+        identity="stable-plugin",
+        version="1.0.0",
+        source_kind=source_kind,
+        source_locator=source_locator,
+        resolved_ref=resolved_ref,
+        source_digest=source_digest,
+        scope="project",
+        components=(),
+        prior_record=None,
+    )
+
+    assert record.source_locator == source_locator
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "source_locator", "resolved_ref", "source_digest"),
+    [
+        ("local", "file://user:password@localhost/tmp/plugin", None, None),
+        ("cache", "file://oauth2:TOKEN@localhost/cache/plugin", "cache-key", None),
+        (
+            "archive",
+            "https://x-access-token:ghs_TOKEN@example.invalid/plugin.zip",
+            None,
+            SOURCE_DIGEST,
+        ),
+        (
+            "registry",
+            "https://oauth2:TOKEN@registry.example.invalid/acme/plugin",
+            None,
+            SOURCE_DIGEST,
+        ),
+        ("git", "ssh://oauth2:TOKEN@github.com/acme/plugin.git", GIT_SHA, None),
+    ],
+)
+def test_all_source_kinds_reject_url_userinfo_credentials(
+    source_kind: str,
+    source_locator: str,
+    resolved_ref: str | None,
+    source_digest: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="credential-free"):
+        InstalledPluginRecordCodec.build(
+            identity="stable-plugin",
+            version="1.0.0",
+            source_kind=source_kind,
+            source_locator=source_locator,
+            resolved_ref=resolved_ref,
+            source_digest=source_digest,
+            scope="project",
+            components=(),
+            prior_record=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "source_locator", "resolved_ref", "source_digest"),
+    [
+        ("local", "https:placeholder@example.invalid/plugin", None, None),
+        ("cache", "file:oauth2:TOKEN@localhost/cache", "cache-key", None),
+        (
+            "archive",
+            "https:x-access-token@secret.example.invalid/plugin.zip",
+            None,
+            SOURCE_DIGEST,
+        ),
+        (
+            "registry",
+            "https:oauth2@secret.registry.example.invalid/plugin",
+            None,
+            SOURCE_DIGEST,
+        ),
+    ],
+)
+def test_non_git_paths_reject_malformed_uri_prefixes(
+    source_kind: str,
+    source_locator: str,
+    resolved_ref: str | None,
+    source_digest: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="valid source-kind path or URL"):
+        InstalledPluginRecordCodec.build(
+            identity="stable-plugin",
+            version="1.0.0",
+            source_kind=source_kind,
+            source_locator=source_locator,
+            resolved_ref=resolved_ref,
+            source_digest=source_digest,
+            scope="project",
+            components=(),
+            prior_record=None,
+        )
+
+
+def test_file_url_rejects_port_without_host() -> None:
+    with pytest.raises(ValueError, match="invalid file URL"):
+        InstalledPluginRecordCodec.build(
+            identity="stable-plugin",
+            version="1.0.0",
+            source_kind="local",
+            source_locator="file://:123/tmp/plugin",
+            resolved_ref=None,
+            source_digest=None,
+            scope="project",
+            components=(),
+            prior_record=None,
+        )
 
 
 def test_normal_root_removal_retains_plugin_data(tmp_path: Path) -> None:

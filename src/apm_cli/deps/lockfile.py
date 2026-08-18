@@ -6,7 +6,9 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -33,6 +35,21 @@ _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"
 _ALLOWED_PLUGIN_SOURCE_KINDS = {"local", "cache", "git", "archive", "registry"}
 _LOWER_HEX = frozenset("0123456789abcdef")
 SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3"})
+_PLUGIN_SOURCE_URL_SCHEMES = {
+    "archive": frozenset({"file", "http", "https"}),
+    "cache": frozenset({"file"}),
+    "git": frozenset({"git", "git+https", "git+ssh", "http", "https", "ssh"}),
+    "local": frozenset({"file"}),
+    "registry": frozenset({"http", "https"}),
+}
+_PLUGIN_SSH_URL_SCHEMES = frozenset({"git", "git+ssh", "ssh"})
+_PLUGIN_GIT_SCP_RE = re.compile(
+    r"^(?P<username>[A-Za-z0-9._-]+)@"
+    r"(?P<host>\[[0-9A-Fa-f:]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?):"
+    r"(?P<path>[^/?#\s][^?#\s]*)$"
+)
+_PLUGIN_URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+_PLUGIN_DNS_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 
 
 def installed_apm_version() -> str:
@@ -51,6 +68,99 @@ class LockfileFormatError(ValueError):
 
 class UnsupportedLockfileVersionError(LockfileFormatError):
     """Raised when a lockfile declares a version this client cannot read."""
+
+
+def _is_valid_plugin_source_hostname(hostname: str) -> bool:
+    """Return whether a locator host is an IP address or strict DNS name."""
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        if len(hostname) > 253:
+            return False
+        return all(
+            bool(label) and _PLUGIN_DNS_LABEL_RE.fullmatch(label) is not None
+            for label in hostname.split(".")
+        )
+
+
+def _validate_standard_plugin_source_url(source_kind: str, locator: str) -> bool:
+    """Validate one explicit URL and return whether URL syntax was present."""
+    if locator.startswith("//"):
+        raise ValueError(
+            "Installed Agent Plugin source_locator must use credential-free explicit URL syntax"
+        )
+    if "://" not in locator:
+        return False
+    try:
+        parsed = urlsplit(locator)
+        parsed_port = parsed.port
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise ValueError("Installed Agent Plugin source_locator has an invalid remote URL") from exc
+    if parsed_port is not None and not 1 <= parsed_port <= 65535:
+        raise ValueError("Installed Agent Plugin source_locator has an invalid remote URL")
+    if parsed.scheme.casefold() not in _PLUGIN_SOURCE_URL_SCHEMES[source_kind]:
+        raise ValueError(
+            "Installed Agent Plugin source_locator uses an unsupported source-kind URL scheme"
+        )
+    authority = locator.split("://", 1)[1].split("/", 1)[0]
+    if "%" in authority or "\\" in locator or any(character.isspace() for character in locator):
+        raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+    if parsed.password is not None:
+        raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+    if parsed.username is not None:
+        if parsed.username != "git":
+            raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+        if source_kind != "git":
+            raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+        if parsed.scheme.casefold() not in _PLUGIN_SSH_URL_SCHEMES:
+            raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Installed Agent Plugin source_locator must be credential-free")
+    host_and_port = parsed.netloc.rsplit("@", 1)[-1]
+    if host_and_port.endswith(":"):
+        raise ValueError("Installed Agent Plugin source_locator has an invalid remote URL")
+    if parsed.scheme.casefold() == "file":
+        if parsed_port is not None or (parsed.netloc and hostname is None):
+            raise ValueError("Installed Agent Plugin source_locator has an invalid file URL")
+    elif hostname is None:
+        raise ValueError("Installed Agent Plugin source_locator has an invalid remote URL")
+    if hostname is not None and not _is_valid_plugin_source_hostname(hostname):
+        raise ValueError("Installed Agent Plugin source_locator has an invalid URL host")
+    return True
+
+
+def _validate_git_scp_locator(locator: str) -> None:
+    """Accept only canonical non-secret ``git@host:path`` SCP syntax."""
+    match = _PLUGIN_GIT_SCP_RE.fullmatch(locator)
+    if match is None:
+        raise ValueError(
+            "Installed Agent Plugin git source_locator must use a credential-free URL "
+            "or canonical git@host:path"
+        )
+    username = match.group("username")
+    if username != "git":
+        raise ValueError(
+            "Installed Agent Plugin git source_locator must use canonical git@host:path"
+        )
+    host = match.group("host")
+    hostname = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    if not _is_valid_plugin_source_hostname(hostname):
+        raise ValueError("Installed Agent Plugin git source_locator has an invalid host")
+
+
+def _validate_plugin_source_locator(source_kind: str, locator: str) -> None:
+    """Validate source-kind locator grammar without persisting credentials."""
+    if _validate_standard_plugin_source_url(source_kind, locator):
+        return
+    if source_kind == "git":
+        _validate_git_scp_locator(locator)
+        return
+    if _PLUGIN_URI_SCHEME_RE.match(locator) and not PureWindowsPath(locator).drive:
+        raise ValueError(
+            "Installed Agent Plugin source_locator must use a valid source-kind path or URL"
+        )
 
 
 def _validate_lockfile_container(data: object) -> dict[str, Any]:
@@ -249,22 +359,7 @@ class InstalledPluginRecord:
             raise ValueError("Installed Agent Plugin source_locator is required")
         if any(ord(character) < 32 or ord(character) == 127 for character in self.source_locator):
             raise ValueError("Installed Agent Plugin source_locator contains control characters")
-        parsed_locator = urlsplit(self.source_locator)
-        if parsed_locator.netloc and (
-            parsed_locator.username is not None or parsed_locator.password is not None
-        ):
-            raise ValueError("Installed Agent Plugin source_locator must be credential-free")
-        if (parsed_locator.scheme or parsed_locator.netloc) and (
-            parsed_locator.query or parsed_locator.fragment
-        ):
-            raise ValueError("Installed Agent Plugin source_locator must be credential-free")
-        scheme_parts = frozenset(parsed_locator.scheme.casefold().split("+"))
-        if scheme_parts.intersection({"ftp", "git", "http", "https", "ssh"}) and not (
-            parsed_locator.netloc
-        ):
-            raise ValueError(
-                "Installed Agent Plugin source_locator must not use a malformed remote URL"
-            )
+        _validate_plugin_source_locator(self.source_kind, self.source_locator)
         if self.resolved_ref is not None and not self.resolved_ref:
             raise ValueError("Installed Agent Plugin resolved_ref must be non-empty or null")
         if self.source_digest is not None and not self.source_digest:

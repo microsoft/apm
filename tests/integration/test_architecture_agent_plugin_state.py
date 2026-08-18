@@ -75,6 +75,56 @@ import pytest
             "current = lexical_candidate",
             "managed plugin paths must walk canonical contained ancestors",
         ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "        _validate_git_scp_locator(locator)\n",
+            "        if False:\n            _validate_git_scp_locator(locator)\n",
+            "source locators must route through positive grammar",
+        ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "if parsed.password is not None:",
+            "if parsed.password is not None and False:",
+            "URL locators must reject credential userinfo",
+        ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            'if username != "git":',
+            'if username != "git" and False:',
+            "SCP locators must allow only canonical git login",
+        ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "_PLUGIN_URI_SCHEME_RE.match(locator)",
+            "False",
+            "source locators must route through positive grammar",
+        ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "    if parsed.password is not None:\n"
+            "        raise ValueError("
+            '"Installed Agent Plugin source_locator must be credential-free")\n',
+            "    if False:\n"
+            "        if parsed.password is not None:\n"
+            "            raise ValueError("
+            '"Installed Agent Plugin source_locator must be credential-free")\n',
+            "source locator validators must match guarded grammar",
+        ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "        _validate_git_scp_locator(locator)\n",
+            '        _validate_git_scp_locator("git@example.invalid:path")\n',
+            "source locator validators must match guarded grammar",
+        ),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "        raise ValueError(\n"
+            '            "Installed Agent Plugin source_locator must use a valid '
+            'source-kind path or URL"\n'
+            "        )\n",
+            "        pass\n",
+            "source locator validators must match guarded grammar",
+        ),
     ],
 )
 def test_agent_plugin_state_guard_breaks_on_authority_mutation(

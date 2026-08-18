@@ -4,8 +4,24 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import sys
 from pathlib import Path
+
+_SOURCE_LOCATOR_VALIDATOR_FINGERPRINTS = {
+    "_is_valid_plugin_source_hostname": (
+        "9a687c1b947fd7c8d12c7a4bc997377de6c089a4b0e6adefdce81d5bded4754e"
+    ),
+    "_validate_standard_plugin_source_url": (
+        "7def81b52676dd17767dddfa165519776ec56f537ba97ea7f5fbcd7cb2abe400"
+    ),
+    "_validate_git_scp_locator": (
+        "5455e72b7ca9cd837162dd4d2dc486809473a34e3774da5870562855cc1686f1"
+    ),
+    "_validate_plugin_source_locator": (
+        "a30b5b00c676420accdab9ba14f139a679ad242470a501250cdd0192b451db74"
+    ),
+}
 
 
 def _function_source(source: str, name: str) -> str:
@@ -21,6 +37,99 @@ def _function_source(source: str, name: str) -> str:
     if node is None:
         return ""
     return ast.get_source_segment(source, node) or ""
+
+
+def _function_node(source: str, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Return one named function node."""
+    tree = ast.parse(source)
+    return next(
+        (
+            item
+            for item in ast.walk(tree)
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == name
+        ),
+        None,
+    )
+
+
+def _function_fingerprint(source: str, name: str) -> str:
+    """Return a Python-version-independent source fingerprint."""
+    function_source = _function_source(source, name)
+    if not function_source:
+        return ""
+    payload = function_source.encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _has_exact_if_expression(node: ast.AST | None, expression: str) -> bool:
+    """Return whether *node* contains an if with exactly *expression* as its test."""
+    if node is None:
+        return False
+    expected = ast.dump(ast.parse(expression, mode="eval").body, include_attributes=False)
+    for item in ast.walk(node):
+        if isinstance(item, ast.If) and (ast.dump(item.test, include_attributes=False) == expected):
+            return True
+    return False
+
+
+def _function_statements(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[ast.stmt]:
+    """Return function statements without the optional docstring."""
+    statements = list(node.body)
+    if (
+        statements
+        and isinstance(statements[0], ast.Expr)
+        and isinstance(statements[0].value, ast.Constant)
+        and isinstance(statements[0].value.value, str)
+    ):
+        statements.pop(0)
+    return statements
+
+
+def _has_positive_locator_flow(node: ast.AST | None) -> bool:
+    """Require URL, Git SCP, and malformed-prefix gates in executable order."""
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    statements = _function_statements(node)
+    if len(statements) != 3 or not all(isinstance(item, ast.If) for item in statements):
+        return False
+    url_branch, git_branch, path_branch = statements
+    expected_url = ast.dump(
+        ast.parse(
+            "_validate_standard_plugin_source_url(source_kind, locator)",
+            mode="eval",
+        ).body,
+        include_attributes=False,
+    )
+    expected_git = ast.dump(
+        ast.parse('source_kind == "git"', mode="eval").body,
+        include_attributes=False,
+    )
+    expected_path = ast.dump(
+        ast.parse(
+            "_PLUGIN_URI_SCHEME_RE.match(locator) and not PureWindowsPath(locator).drive",
+            mode="eval",
+        ).body,
+        include_attributes=False,
+    )
+    if ast.dump(url_branch.test, include_attributes=False) != expected_url:
+        return False
+    if len(url_branch.body) != 1 or not isinstance(url_branch.body[0], ast.Return):
+        return False
+    if ast.dump(git_branch.test, include_attributes=False) != expected_git:
+        return False
+    if len(git_branch.body) != 2 or not isinstance(git_branch.body[1], ast.Return):
+        return False
+    scp_call = git_branch.body[0]
+    if not (
+        isinstance(scp_call, ast.Expr)
+        and isinstance(scp_call.value, ast.Call)
+        and isinstance(scp_call.value.func, ast.Name)
+        and scp_call.value.func.id == "_validate_git_scp_locator"
+    ):
+        return False
+    return ast.dump(path_branch.test, include_attributes=False) == expected_path
 
 
 def _definition_paths(root: Path, *, class_name: str = "", function_name: str = "") -> list[str]:
@@ -63,6 +172,24 @@ def main() -> int:
         "InstalledPluginRecordCodec.root_values(identity.name, scope)" not in state
     ):
         violations.append("PLUGIN_ROOT and PLUGIN_DATA must route through the lockfile codec")
+    source_locator_node = _function_node(lockfile, "_validate_plugin_source_locator")
+    source_url_node = _function_node(lockfile, "_validate_standard_plugin_source_url")
+    source_scp_node = _function_node(lockfile, "_validate_git_scp_locator")
+    if any(
+        _function_fingerprint(lockfile, name) != expected
+        for name, expected in _SOURCE_LOCATOR_VALIDATOR_FINGERPRINTS.items()
+    ):
+        violations.append("installed plugin source locator validators must match guarded grammar")
+    if not _has_positive_locator_flow(source_locator_node):
+        violations.append("installed plugin source locators must route through positive grammar")
+    if (
+        not _has_exact_if_expression(source_url_node, "parsed.password is not None")
+        or not _has_exact_if_expression(source_url_node, 'parsed.username != "git"')
+        or not _has_exact_if_expression(source_url_node, 'source_kind != "git"')
+    ):
+        violations.append("installed plugin URL locators must reject credential userinfo")
+    if not _has_exact_if_expression(source_scp_node, 'username != "git"'):
+        violations.append("installed plugin SCP locators must allow only canonical git login")
 
     replacement = _function_source(ledger, "prepare_owner_replacement")
     if "records.pop(key, None)" not in replacement or ".union(" in replacement:
