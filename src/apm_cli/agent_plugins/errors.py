@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from apm_cli.models.apm_package import DependencyReference, PackageInfo
 
 _AGENT_PLUGIN_RECOVERY = (
     "Package authors: use 'apm plugin init --claude-plugin' and "
@@ -69,3 +74,38 @@ def enforce_agent_plugin_deployment_boundary(
     if package is None or getattr(package, "agent_plugin", None) is None:
         raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_IR_MISSING)
     raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
+
+
+def preflight_reintegration_survivors(
+    dependencies: Iterable[DependencyReference],
+    modules_dir: Path,
+    *,
+    require_valid_installed: bool = False,
+) -> list[tuple[DependencyReference, PackageInfo]]:
+    """Validate installed survivors before clear-then-rebuild integration."""
+    from apm_cli.models.apm_package import build_installed_package_info
+
+    plan = []
+    seen: set[str] = set()
+    for dependency in dependencies:
+        dep_key = dependency.get_unique_key()
+        if dep_key in seen:
+            continue
+        seen.add(dep_key)
+        try:
+            install_path = dependency.get_install_path(modules_dir)
+        except ValueError:
+            if require_valid_installed:
+                raise
+            continue
+        package_info = build_installed_package_info(dependency, modules_dir)
+        if package_info is None:
+            if require_valid_installed and install_path.exists():
+                raise ValueError(
+                    "Cannot validate surviving package before integration rebuild: "
+                    f"{dependency.get_identity()}"
+                )
+            continue
+        enforce_agent_plugin_deployment_boundary(package_info)
+        plan.append((dependency, package_info))
+    return plan

@@ -1759,11 +1759,12 @@ def _install_apm_packages(ctx, outcome):
     if ctx.dry_run:
         from apm_cli.install.template import preflight_agent_plugin_dry_run
 
-        preflight_agent_plugin_dry_run(ctx, all_apm_deps)
-
+        if should_install_apm and not preflight_agent_plugin_dry_run(ctx, all_apm_deps):
+            ctx.install_result = InstallResult(diagnostics=ctx.logger.diagnostics)
+            ctx.install_result.disposition = InstallDisposition.FAILED
+            return 0, 0, 0, ctx.logger.diagnostics
         # -- W2-dry-run (#827): policy preflight in preview mode --
-        # Runs discovery + checks against direct manifest deps (not
-        # resolved/transitive -- dry-run does not run the resolver).
+        # Runs discovery + checks against direct manifest deps, not transitives.
         # Block-severity violations render as "Would be blocked by
         # policy" without raising.  Documented limitation: transitive
         # deps are NOT evaluated since the resolver does not run.

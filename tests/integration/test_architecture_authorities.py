@@ -226,8 +226,8 @@ def test_agent_plugin_contract_has_single_owner() -> None:
         ),
         (
             "src/apm_cli/install/template.py",
-            "    ctx.diagnostics.error(\n",
-            "    ctx.diagnostics.warn(\n",
+            "    diagnostics.error(f",
+            "    diagnostics.warn(f",
             "native deployment failure must remain a recorded non-success outcome",
         ),
         (
@@ -244,9 +244,24 @@ def test_agent_plugin_contract_has_single_owner() -> None:
         ),
         (
             "src/apm_cli/commands/install.py",
-            "        preflight_agent_plugin_dry_run(",
-            "        disabled_agent_plugin_preflight(\n",
-            "dry-run must preflight native dependencies before rendering success",
+            "        if should_install_apm and not preflight_agent_plugin_dry_run(ctx, all_apm_deps):",
+            "        preflight_agent_plugin_dry_run(ctx, all_apm_deps)\n        if False:",
+            "dry-run must return a structured failed result before rendering success",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "            ctx.install_result.disposition = InstallDisposition.FAILED",
+            "            ctx.install_result.disposition = InstallDisposition.DRY_RUN",
+            "dry-run must return a structured failed result before rendering success",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "            except AgentPluginDeploymentBoundaryError as exc:\n"
+            "                package_key = (",
+            "            except AgentPluginDeploymentBoundaryError as exc:\n"
+            "                raise exc\n"
+            "                package_key = (",
+            "dry-run must collect every native deployment failure",
         ),
         (
             "src/apm_cli/policy/ci_checks.py",
@@ -269,8 +284,8 @@ def test_agent_plugin_contract_has_single_owner() -> None:
         ),
         (
             "src/apm_cli/commands/uninstall/engine.py",
-            "        enforce_agent_plugin_deployment_boundary(package_info)",
-            "        pass  # native survivor accepted",
+            "    return preflight_reintegration_survivors(\n        installed_refs,",
+            "    return disabled_survivor_preflight(\n        installed_refs,",
             "uninstall survivor preflight must use the native deployment boundary owner",
         ),
         (
@@ -291,6 +306,25 @@ def test_agent_plugin_contract_has_single_owner() -> None:
             "    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
             "    pass  # native opaque bundle accepted",
             "opaque local bundle deployment must start at the native boundary",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n"
+            "        plan.append((dependency, package_info))",
+            "        plan.append((dependency, package_info))",
+            "survivor reintegration preflight must use the native deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/commands/prune.py",
+            "        _preflight_prune_survivors(\n",
+            "        disabled_prune_survivor_preflight(\n",
+            "prune must preflight survivors through the native deployment boundary",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "        survivor_plan = preflight_reintegration_survivors(\n",
+            "        survivor_plan = list(\n",
+            "direct hook survivor reconciliation must preflight before mutation",
         ),
     ],
 )
@@ -320,6 +354,8 @@ def test_agent_plugin_projection_guard_rejects_bypass(
         "src/apm_cli/commands/uninstall/cli.py",
         "src/apm_cli/commands/uninstall/engine.py",
         "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/prune.py",
+        "src/apm_cli/integration/hook_integrator.py",
         "src/apm_cli/models/apm_package.py",
         "src/apm_cli/models/format_detection.py",
         "src/apm_cli/models/validation.py",

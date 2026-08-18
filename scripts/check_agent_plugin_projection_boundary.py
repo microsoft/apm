@@ -160,6 +160,8 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
     uninstall_cli_path = source_root / "commands" / "uninstall" / "cli.py"
     uninstall_engine_path = source_root / "commands" / "uninstall" / "engine.py"
     install_command_path = source_root / "commands" / "install.py"
+    prune_command_path = source_root / "commands" / "prune.py"
+    hook_integrator_path = source_root / "integration" / "hook_integrator.py"
     skill_integrator_path = source_root / "integration" / "skill_integrator.py"
     required = (
         projection_path,
@@ -175,6 +177,8 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         uninstall_cli_path,
         uninstall_engine_path,
         install_command_path,
+        prune_command_path,
+        hook_integrator_path,
         skill_integrator_path,
     )
     missing = [str(path) for path in required if not path.is_file()]
@@ -202,6 +206,8 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
     uninstall_cli_tree = parsed.get(uninstall_cli_path)
     uninstall_engine_tree = parsed.get(uninstall_engine_path)
     install_command_tree = parsed.get(install_command_path)
+    prune_command_tree = parsed.get(prune_command_path)
+    hook_integrator_tree = parsed.get(hook_integrator_path)
     skill_integrator_tree = parsed.get(skill_integrator_path)
     if (
         projection_tree is None
@@ -217,6 +223,8 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         or uninstall_cli_tree is None
         or uninstall_engine_tree is None
         or install_command_tree is None
+        or prune_command_tree is None
+        or hook_integrator_tree is None
         or skill_integrator_tree is None
     ):
         return violations
@@ -313,6 +321,23 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             f"{services_path}: native deployment gate must be the first integration action"
         )
 
+    survivor_preflights = _named_functions(
+        errors_tree,
+        "preflight_reintegration_survivors",
+    )
+    if len(survivor_preflights) != 1:
+        violations.append(f"{errors_path}: survivor reintegration must have one preflight owner")
+    else:
+        survivor_calls = _function_calls(survivor_preflights[0])
+        if (
+            "build_installed_package_info" not in survivor_calls
+            or "enforce_agent_plugin_deployment_boundary" not in survivor_calls
+        ):
+            violations.append(
+                f"{errors_path}: survivor reintegration preflight must use "
+                "the native deployment boundary owner"
+            )
+
     template_defs = _named_functions(template_tree, "_integrate_materialization")
     if len(template_defs) != 1:
         violations.append(
@@ -348,16 +373,22 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 f"{template_path}: native deployment gate must precede selective and "
                 "generic integration"
             )
+    diagnostic_recorders = _named_functions(
+        template_tree,
+        "_record_agent_plugin_boundary_diagnostic",
+    )
     failure_recorders = _named_functions(template_tree, "_record_agent_plugin_boundary_failure")
-    if len(failure_recorders) != 1:
+    if len(diagnostic_recorders) != 1 or len(failure_recorders) != 1:
         violations.append(
             f"{template_path}: native deployment failure must have one diagnostic owner"
         )
     else:
+        diagnostic_recorder = diagnostic_recorders[0]
         recorder = failure_recorders[0]
         calls = _function_calls(recorder)
         failure_is_recorded = (
-            "ctx.diagnostics.error" in calls
+            "diagnostics.error" in _function_calls(diagnostic_recorder)
+            and "_record_agent_plugin_boundary_diagnostic" in calls
             and _assigns_subscript_value(
                 recorder,
                 owner="deltas",
@@ -380,6 +411,29 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 f"{template_path}: native deployment failure must remain a recorded "
                 "non-success outcome"
             )
+    dry_run_preflights = _named_functions(template_tree, "preflight_agent_plugin_dry_run")
+    dry_run_collects = False
+    if len(dry_run_preflights) == 1:
+        dry_run_preflight = dry_run_preflights[0]
+        calls = _function_calls(dry_run_preflight)
+        typed_handlers = [
+            node
+            for node in ast.walk(dry_run_preflight)
+            if isinstance(node, ast.ExceptHandler)
+            and isinstance(node.type, ast.Name)
+            and node.type.id == "AgentPluginDeploymentBoundaryError"
+        ]
+        dry_run_collects = (
+            "enforce_agent_plugin_deployment_boundary" in calls
+            and "_record_agent_plugin_boundary_diagnostic" in calls
+            and len(typed_handlers) == 1
+            and not any(isinstance(node, ast.Raise) for node in ast.walk(dry_run_preflight))
+        )
+    if not dry_run_collects:
+        violations.append(
+            f"{template_path}: dry-run must collect every native deployment failure "
+            "through the package diagnostic owner"
+        )
 
     integrate_runs = _named_functions(integrate_phase_tree, "run")
     if len(integrate_runs) != 1:
@@ -415,11 +469,36 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             for node in ast.walk(install_helpers[0])
             if isinstance(node, ast.Call)
         ]
-        dry_run_gates = [line for name, line in calls if name == "preflight_agent_plugin_dry_run"]
+        dry_run_gate_ifs = [
+            node
+            for node in ast.walk(install_helpers[0])
+            if isinstance(node, ast.If)
+            and "preflight_agent_plugin_dry_run" in _function_calls(node.test)
+        ]
+        dry_run_gates = [node.lineno for node in dry_run_gate_ifs]
         dry_run_exits = [line for name, line in calls if name == "render_and_exit"]
-        if len(dry_run_gates) != 1 or not dry_run_exits or dry_run_gates[0] >= min(dry_run_exits):
+        assigns_failed = bool(dry_run_gate_ifs) and any(
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Attribute)
+            and node.targets[0].attr == "disposition"
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "FAILED"
+            for node in ast.walk(dry_run_gate_ifs[0])
+        )
+        failed_return = bool(dry_run_gate_ifs) and (
+            "InstallResult" in _function_calls(dry_run_gate_ifs[0])
+            and any(isinstance(node, ast.Return) for node in ast.walk(dry_run_gate_ifs[0]))
+            and assigns_failed
+        )
+        if (
+            len(dry_run_gates) != 1
+            or not dry_run_exits
+            or dry_run_gates[0] >= min(dry_run_exits)
+            or not failed_return
+        ):
             violations.append(
-                f"{install_command_path}: dry-run must preflight native dependencies "
+                f"{install_command_path}: dry-run must return a structured failed result "
                 "before rendering success"
             )
 
@@ -493,13 +572,11 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
     declared_source_gate = False
     if len(uninstall_preflights) == 1:
         preflight = uninstall_preflights[0]
+        installed_survivor_gate = "preflight_reintegration_survivors" in _function_calls(preflight)
         for node in ast.walk(preflight):
             if not isinstance(node, ast.Call):
                 continue
             if _call_name(node) == "enforce_agent_plugin_deployment_boundary" and node.args:
-                installed_survivor_gate |= (
-                    isinstance(node.args[0], ast.Name) and node.args[0].id == "package_info"
-                )
                 declared_source_gate |= (
                     isinstance(node.args[0], ast.Call) and _call_name(node.args[0]) == "PackageInfo"
                 )
@@ -508,6 +585,61 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         violations.append(
             f"{uninstall_engine_path}: uninstall survivor preflight must use "
             "the native deployment boundary owner against declared local sources"
+        )
+
+    prune_preflights = _named_functions(prune_command_tree, "_preflight_prune_survivors")
+    prune_defs = _named_functions(prune_command_tree, "prune")
+    prune_helper_uses_owner = len(
+        prune_preflights
+    ) == 1 and "preflight_reintegration_survivors" in _function_calls(prune_preflights[0])
+    prune_precedes_mutation = False
+    if len(prune_defs) == 1:
+        calls = [
+            (_call_name(node), node.lineno)
+            for node in ast.walk(prune_defs[0])
+            if isinstance(node, ast.Call)
+        ]
+        gates = [line for name, line in calls if name == "_preflight_prune_survivors"]
+        mutations = [
+            line
+            for name, line in calls
+            if name
+            in {
+                "safe_rmtree",
+                "remove_stale_deployed_files",
+                "DeploymentLedgerCodec.reconcile_owner_references",
+                "lockfile.write",
+                "HookIntegrator().reconcile_after_removal",
+            }
+        ]
+        prune_precedes_mutation = bool(len(gates) == 1 and mutations and gates[0] < min(mutations))
+    if not prune_helper_uses_owner or not prune_precedes_mutation:
+        violations.append(
+            f"{prune_command_path}: prune must preflight survivors through the native "
+            "deployment boundary before mutation"
+        )
+
+    hook_reconciles = _named_functions(hook_integrator_tree, "reconcile_after_removal")
+    hook_reconcile_is_guarded = False
+    if len(hook_reconciles) == 1:
+        calls = [
+            (_call_name(node), node.lineno)
+            for node in ast.walk(hook_reconciles[0])
+            if isinstance(node, ast.Call)
+        ]
+        gates = [line for name, line in calls if name == "preflight_reintegration_survivors"]
+        mutations = [
+            line
+            for name, line in calls
+            if name in {"self.sync_integration", "self.integrate_hooks_for_target"}
+        ]
+        hook_reconcile_is_guarded = bool(
+            len(gates) == 1 and mutations and gates[0] < min(mutations)
+        )
+    if not hook_reconcile_is_guarded:
+        violations.append(
+            f"{hook_integrator_path}: direct hook survivor reconciliation must preflight "
+            "before mutation"
         )
 
     uninstall_defs = _named_functions(uninstall_cli_tree, "uninstall")

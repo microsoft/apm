@@ -1962,10 +1962,10 @@ class HookIntegrator(BaseIntegrator):
         Target scope (#2250): wipe and rebuild use the same resolved targets.
         ``reconcile_dropped_targets`` separately owns target contraction.
         """
+        from apm_cli.agent_plugins.errors import preflight_reintegration_survivors
         from apm_cli.constants import APM_MODULES_DIR
         from apm_cli.install.target_filter import resolve_effective_package_targets
         from apm_cli.models.apm_package import (
-            build_installed_package_info,
             surviving_dependency_refs_for_reintegration,
         )
 
@@ -1984,18 +1984,13 @@ class HookIntegrator(BaseIntegrator):
         surviving_deps = surviving_dependency_refs_for_reintegration(
             apm_package, project_root, lockfile=lockfile
         )
+        survivor_plan = preflight_reintegration_survivors(
+            surviving_deps,
+            project_root / APM_MODULES_DIR,
+            require_valid_installed=True,
+        )
         rebuild_plan = []
-        for dep_ref in surviving_deps:
-            modules_root = project_root / APM_MODULES_DIR
-            install_path = dep_ref.get_install_path(modules_root)
-            pkg_info = build_installed_package_info(dep_ref, modules_root)
-            if pkg_info is None:
-                if install_path.exists():
-                    raise ValueError(
-                        "Cannot validate surviving package before hook rebuild: "
-                        f"{dep_ref.get_identity()}"
-                    )
-                continue
+        for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(
                 targets,
                 dep_ref.target_subset,

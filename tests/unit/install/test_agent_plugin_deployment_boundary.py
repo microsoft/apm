@@ -30,6 +30,7 @@ from apm_cli.install.services import (
 )
 from apm_cli.install.sources import Materialization
 from apm_cli.install.template import run_integration_template
+from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator, get_effective_type
 from apm_cli.models.apm_package import APMPackage, PackageContentType, PackageInfo
 from apm_cli.models.dependency import DependencyReference
@@ -487,6 +488,172 @@ def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
     assert "ask the publisher for a legacy-compatible package" in output
 
 
+@pytest.mark.parametrize("include_ordinary", (False, True))
+def test_dry_run_collects_every_native_failure_with_real_install_parity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    include_ordinary: bool,
+) -> None:
+    workspace = tmp_path / "workspace"
+    native_sources = [workspace / "native-a", workspace / "native-b"]
+    for index, source in enumerate(native_sources):
+        _write_adversarial_agent_plugin(source, workspace / f"outside-{index}.txt")
+        (source / "skills" / "native" / "nested" / "outside-link").unlink()
+    ordinary = workspace / "ordinary"
+    if include_ordinary:
+        _write_ordinary_package(ordinary)
+
+    dependencies = [str(native_sources[0])]
+    if include_ordinary:
+        dependencies.append(str(ordinary))
+    dependencies.append(str(native_sources[1]))
+    native_integrator_calls: list[str] = []
+    original_integrate = SkillIntegrator.integrate_package_skill
+    original_available = SkillIntegrator.available_skill_names
+
+    def tracked_integrate(self, package_info, *args, **kwargs):
+        if package_info.package_type is PackageType.AGENT_PLUGIN:
+            native_integrator_calls.append("integrate")
+        return original_integrate(self, package_info, *args, **kwargs)
+
+    def tracked_available(package_info):
+        if package_info.package_type is PackageType.AGENT_PLUGIN:
+            native_integrator_calls.append("available")
+        return original_available(package_info)
+
+    monkeypatch.setattr(SkillIntegrator, "integrate_package_skill", tracked_integrate)
+    monkeypatch.setattr(SkillIntegrator, "available_skill_names", tracked_available)
+    source_snapshots = {
+        source: _tree_snapshot(source)
+        for source in [*native_sources, *([ordinary] if include_ordinary else [])]
+    }
+    outputs = {}
+    for mode, extra_args in (("real", ()), ("dry-run", ("--dry-run",))):
+        project = workspace / mode
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            json.dumps(
+                {
+                    "name": f"consumer-{mode}",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": dependencies},
+                    "target": "copilot",
+                }
+            ),
+            encoding="ascii",
+        )
+        _write_known_good_state(project)
+        LockFile().write(project / "apm.lock.yaml")
+        before = _tree_snapshot(project)
+        monkeypatch.chdir(project)
+
+        result = CliRunner().invoke(
+            cli,
+            ["install", "--no-policy", "--target", "copilot", *extra_args],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 1, result.output
+        assert _tree_snapshot(project) == before, result.output
+        for source, snapshot in source_snapshots.items():
+            assert _tree_snapshot(source) == snapshot
+        output = " ".join(result.output.split())
+        assert "2 packages failed" in output
+        assert "Run with --verbose" not in output
+        assert "Install complete" not in output
+        assert "Dry run complete" not in output
+        for source in native_sources:
+            assert source.name in output
+        outputs[mode] = output
+
+    assert native_integrator_calls == []
+    for phrase in (
+        "Native Agent Plugin components are not enabled yet",
+        "apm plugin init --claude-plugin",
+        "apm pack --claude-plugin",
+        "ask the publisher for a legacy-compatible package",
+    ):
+        assert outputs["real"].count(phrase) == outputs["dry-run"].count(phrase) == 2
+
+
+def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    native = tmp_path / "native"
+    project.mkdir()
+    _write_adversarial_agent_plugin(native, tmp_path / "outside.txt")
+    (native / "skills" / "native" / "nested" / "outside-link").unlink()
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": [str(native)]},
+            }
+        ),
+        encoding="ascii",
+    )
+    before = _tree_snapshot(project)
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(
+        cli,
+        ["install", "--dry-run", "--only", "mcp", "--no-policy"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _tree_snapshot(project) == before
+    assert "Native Agent Plugin components are not enabled yet" not in result.output
+
+
+def test_dry_run_native_detection_does_not_normalize_legacy_plugin_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    legacy = tmp_path / "legacy"
+    project.mkdir()
+    legacy.mkdir()
+    (legacy / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "legacy",
+                "version": "1.0.0",
+                "description": "Explicit Claude legacy package",
+            }
+        ),
+        encoding="ascii",
+    )
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": [str(legacy)]},
+                "target": "claude",
+            }
+        ),
+        encoding="ascii",
+    )
+    source_before = _tree_snapshot(legacy)
+    project_before = _tree_snapshot(project)
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(
+        cli,
+        ["install", "--dry-run", "--no-policy"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _tree_snapshot(legacy) == source_before
+    assert _tree_snapshot(project) == project_before
+    assert not (legacy / "apm.yml").exists()
+
+
 def _write_uninstall_fixture(project: Path, native_source: Path) -> None:
     removed = project / "apm_modules" / "owner" / "removed"
     survivor = project / "apm_modules" / "owner" / "native"
@@ -653,6 +820,135 @@ def test_uninstall_allows_native_transitive_orphan_removal(
 
     assert result.exit_code == 0, result.output
     assert not parent.exists()
+    assert not native_orphan.exists()
+
+
+def _write_prune_fixture(project: Path, outside: Path) -> None:
+    orphan = project / "apm_modules" / "owner" / "orphan"
+    survivor = project / "apm_modules" / "owner" / "native"
+    _write_ordinary_package(orphan)
+    _write_adversarial_agent_plugin(survivor, outside)
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": ["owner/native"]},
+                "target": "claude",
+            }
+        ),
+        encoding="ascii",
+    )
+    dependencies = {}
+    for repo_url in ("owner/orphan", "owner/native"):
+        dependency = LockedDependency(repo_url=repo_url)
+        dependencies[dependency.get_unique_key()] = dependency
+    _write_known_good_state(project)
+    LockFile(dependencies=dependencies).write(project / "apm.lock.yaml")
+
+
+def test_prune_blocks_native_survivor_before_removal_or_reconciliation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_prune_fixture(project, tmp_path / "outside.txt")
+    before = _tree_snapshot(project)
+    remove = MagicMock()
+    sync = MagicMock()
+    integrate = MagicMock()
+    monkeypatch.setattr("apm_cli.commands.prune.safe_rmtree", remove)
+    monkeypatch.setattr(HookIntegrator, "sync_integration", sync)
+    monkeypatch.setattr(HookIntegrator, "integrate_hooks_for_target", integrate)
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
+
+    assert result.exit_code == 1, result.output
+    assert _tree_snapshot(project) == before
+    assert remove.mock_calls == []
+    assert sync.mock_calls == []
+    assert integrate.mock_calls == []
+    assert "Native Agent Plugin components are not enabled yet" in " ".join(result.output.split())
+
+
+def test_prune_dry_run_does_not_reintegrate_native_survivors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_prune_fixture(project, tmp_path / "outside.txt")
+    before = _tree_snapshot(project)
+    sync = MagicMock()
+    integrate = MagicMock()
+    monkeypatch.setattr(HookIntegrator, "sync_integration", sync)
+    monkeypatch.setattr(HookIntegrator, "integrate_hooks_for_target", integrate)
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(cli, ["prune", "--dry-run"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert _tree_snapshot(project) == before
+    assert sync.mock_calls == []
+    assert integrate.mock_calls == []
+    assert "Native Agent Plugin components are not enabled yet" not in result.output
+
+
+def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_prune_fixture(project, tmp_path / "outside.txt")
+    lockfile = LockFile.read(project / "apm.lock.yaml")
+    assert lockfile is not None
+    lockfile.dependencies.pop("owner/orphan")
+    before = _tree_snapshot(project)
+    sync = MagicMock()
+    integrate = MagicMock()
+    monkeypatch.setattr(HookIntegrator, "sync_integration", sync)
+    monkeypatch.setattr(HookIntegrator, "integrate_hooks_for_target", integrate)
+
+    with pytest.raises(AgentPluginDeploymentBoundaryError):
+        HookIntegrator().reconcile_after_removal(
+            APMPackage.from_apm_yml(project / "apm.yml"),
+            project,
+            lockfile=lockfile,
+        )
+
+    assert _tree_snapshot(project) == before
+    assert sync.mock_calls == []
+    assert integrate.mock_calls == []
+
+
+def test_prune_allows_native_true_orphan_removal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    native_orphan = project / "apm_modules" / "owner" / "native"
+    project.mkdir()
+    _write_adversarial_agent_plugin(native_orphan, tmp_path / "outside.txt")
+    (native_orphan / "apm.yml").write_text(
+        "name: native\nversion: 1.0.0\n",
+        encoding="ascii",
+    )
+    (project / "apm.yml").write_text(
+        "name: consumer\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+        encoding="ascii",
+    )
+    dependency = LockedDependency(repo_url="owner/native")
+    LockFile(dependencies={dependency.get_unique_key(): dependency}).write(
+        project / "apm.lock.yaml"
+    )
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
     assert not native_orphan.exists()
 
 

@@ -996,8 +996,11 @@ def _preflight_uninstall_survivors(
     source_root: Path | None = None,
 ) -> list[tuple[DependencyReference, object]]:
     """Validate every reintegration survivor before uninstall can mutate state."""
-    from ...install.services import enforce_agent_plugin_deployment_boundary
-    from ...models.apm_package import PackageInfo, build_installed_package_info
+    from ...agent_plugins.errors import (
+        enforce_agent_plugin_deployment_boundary,
+        preflight_reintegration_survivors,
+    )
+    from ...models.apm_package import PackageInfo
     from ...models.validation import validate_apm_package
 
     excluded = excluded_keys or set()
@@ -1028,32 +1031,17 @@ def _preflight_uninstall_survivors(
     else:
         refs = [_parse_dependency_entry(entry) for entry in surviving_dependencies]
 
-    plan = []
-    seen: set[str] = set()
-    for dep_ref in refs:
-        dep_key = dep_ref.get_unique_key()
-        if dep_key in seen or dep_key in excluded:
-            continue
-        seen.add(dep_key)
-        if source_root is not None and dep_ref.is_local:
-            continue
-        try:
-            install_path = dep_ref.get_install_path(modules_dir)
-        except ValueError:
-            if require_valid_installed:
-                raise
-            continue
-        package_info = build_installed_package_info(dep_ref, modules_dir)
-        if package_info is None:
-            if require_valid_installed and install_path.exists():
-                raise ValueError(
-                    f"Cannot validate surviving package before hook rebuild: "
-                    f"{dep_ref.get_identity()}"
-                )
-            continue
-        enforce_agent_plugin_deployment_boundary(package_info)
-        plan.append((dep_ref, package_info))
-    return plan
+    installed_refs = [
+        dep_ref
+        for dep_ref in refs
+        if dep_ref.get_unique_key() not in excluded
+        and not (source_root is not None and dep_ref.is_local)
+    ]
+    return preflight_reintegration_survivors(
+        installed_refs,
+        modules_dir,
+        require_valid_installed=require_valid_installed,
+    )
 
 
 def _sync_integrations_after_uninstall(

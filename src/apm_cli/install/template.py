@@ -24,7 +24,12 @@ from apm_cli.install.services import (
     enforce_agent_plugin_deployment_boundary,
     integrate_package_primitives,
 )
-from apm_cli.install.sources import DependencySource, Materialization
+from apm_cli.install.sources import (
+    CachedDependencySource,
+    DependencySource,
+    LocalDependencySource,
+    Materialization,
+)
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -136,32 +141,74 @@ def preflight_agent_plugin_materializations(
     return not blocked
 
 
-def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> None:
-    """Fail a non-materializing plan when native package bytes are available."""
+def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> bool:
+    """Collect native boundary failures for a non-materializing plan."""
     from apm_cli.core.scope import get_modules_dir
     from apm_cli.models.apm_package import PackageInfo
-    from apm_cli.models.validation import validate_apm_package
+    from apm_cli.models.validation import (
+        PackageType,
+        detect_package_type,
+        validate_apm_package,
+    )
 
     source_root = ctx.project_root
     modules_dir = get_modules_dir(ctx.scope)
+    diagnostics = ctx.logger.diagnostics
+    blocked = False
     for dependency in dependencies:
         if dependency.is_local and dependency.local_path:
             package_path = Path(dependency.local_path).expanduser()
             if not package_path.is_absolute():
                 package_path = (source_root / package_path).resolve()
-            validation = validate_apm_package(package_path, source_path=package_path)
         else:
             package_path = dependency.get_install_path(modules_dir)
+        package_type, _ = detect_package_type(package_path)
+        if package_type is not PackageType.AGENT_PLUGIN:
+            continue
+        if dependency.is_local:
+            validation = validate_apm_package(package_path, source_path=package_path)
+        else:
             validation = validate_apm_package(package_path)
         if validation.is_valid and validation.package is not None:
-            enforce_agent_plugin_deployment_boundary(
-                PackageInfo(
-                    package=validation.package,
-                    install_path=package_path,
-                    dependency_ref=dependency,
-                    package_type=validation.package_type,
+            try:
+                enforce_agent_plugin_deployment_boundary(
+                    PackageInfo(
+                        package=validation.package,
+                        install_path=package_path,
+                        dependency_ref=dependency,
+                        package_type=validation.package_type,
+                    )
                 )
-            )
+            except AgentPluginDeploymentBoundaryError as exc:
+                package_key = (
+                    dependency.local_path
+                    if dependency.is_local and dependency.local_path
+                    else dependency.get_unique_key()
+                )
+                prefix = (
+                    LocalDependencySource.INTEGRATE_ERROR_PREFIX
+                    if dependency.is_local
+                    else CachedDependencySource.INTEGRATE_ERROR_PREFIX
+                )
+                _record_agent_plugin_boundary_diagnostic(
+                    diagnostics,
+                    package_key=package_key,
+                    prefix=prefix,
+                    error=exc,
+                )
+                blocked = True
+    return not blocked
+
+
+def _record_agent_plugin_boundary_diagnostic(
+    diagnostics,
+    *,
+    package_key: str,
+    prefix: str,
+    error: AgentPluginDeploymentBoundaryError,
+) -> None:
+    """Record one package-attributed native deployment failure."""
+    diagnostics.error(f"{prefix}: {error}", package=package_key)
 
 
 def _record_agent_plugin_boundary_failure(
@@ -177,9 +224,11 @@ def _record_agent_plugin_boundary_failure(
     deltas["installed"] = 0
     ctx.package_deployed_files[dep_key] = []
     package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
-    ctx.diagnostics.error(
-        f"{source.INTEGRATE_ERROR_PREFIX}: {error}",
-        package=package_key,
+    _record_agent_plugin_boundary_diagnostic(
+        ctx.diagnostics,
+        package_key=package_key,
+        prefix=source.INTEGRATE_ERROR_PREFIX,
+        error=error,
     )
     return deltas
 
