@@ -53,7 +53,9 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
         == ALL_CANONICAL_TARGETS
     )
     assert (
-        frozenset({"ai-assist", "copilot-app", "copilot-cowork", "grok-cloud", "hermes", "openclaw"})
+        frozenset(
+            {"ai-assist", "copilot-app", "copilot-cowork", "grok-cloud", "hermes", "openclaw"}
+        )
         == EXPERIMENTAL_TARGETS
     )
     assert frozenset({"agent-skills", "antigravity", "grok-cloud"}) == EXPLICIT_ONLY_TARGETS

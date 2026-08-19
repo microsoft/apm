@@ -138,7 +138,7 @@ class TestAiAssistParserE2E:
             f"Output:\n{combined}"
         )
         normalized = " ".join(combined.split())
-        assert "apm experimental enable ai_assist" in normalized or "apm experimental enable ai-assist" in normalized, (
+        assert "apm experimental enable ai-assist" in normalized, (
             f"Enable hint not found -- targets phase may not have run.\nOutput:\n{combined}"
         )
 
@@ -351,8 +351,7 @@ class TestAiAssistCompileE2E:
         )
         agents_md = project / "AGENTS.md"
         assert agents_md.is_file(), (
-            f"compile -t ai-assist did not emit AGENTS.md at {agents_md}.\n"
-            f"Output:\n{result.output}"
+            f"compile -t ai-assist did not emit AGENTS.md at {agents_md}.\nOutput:\n{result.output}"
         )
         assert "Always write tests first." in agents_md.read_text(encoding="utf-8")
 

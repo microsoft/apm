@@ -163,9 +163,7 @@ class TestAiAssistConfigPath(unittest.TestCase):
         adapter = AiAssistClientAdapter()
         with patch.dict("os.environ", {"AI_ASSIST_CONFIG_DIR": "/custom/ai-assist"}):
             path = Path(adapter.get_config_path())
-        expected = (
-            Path("/custom/ai-assist").expanduser().resolve(strict=False) / "mcp_servers.yaml"
-        )
+        expected = Path("/custom/ai-assist").expanduser().resolve(strict=False) / "mcp_servers.yaml"
         self.assertEqual(path, expected)
 
 
