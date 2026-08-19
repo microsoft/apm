@@ -726,12 +726,12 @@ class TestMarketplaceValidator:
         results = validate_marketplace(manifest)
         assert all(r.passed for r in results)
 
-    def test_validate_marketplace_returns_two_results(self) -> None:
+    def test_validate_marketplace_returns_structure_schema_and_name_results(self) -> None:
         from apm_cli.marketplace.validator import validate_marketplace
 
         manifest = self._make_manifest([self._make_plugin()])
         results = validate_marketplace(manifest)
-        assert len(results) == 2
+        assert [result.check_name for result in results] == ["Structure", "Schema", "Names"]
 
     def test_validate_plugin_schema_empty_name(self) -> None:
         from apm_cli.marketplace.models import MarketplacePlugin

@@ -188,6 +188,7 @@ class InstallContext:
     audit_override: str | None = None
     install_result: InstallResult | None = None
     target_decision: "EffectiveTargetDecision | None" = None
+    trust_bin: bool | None = None
 
 
 # APM Dependencies (conditional import for graceful degradation)
@@ -1071,6 +1072,18 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.option(
+    "--trust-bin/--no-trust-bin",
+    "trust_bin",
+    default=None,
+    help=(
+        "Allow or skip bin/ executable deployment for this invocation. "
+        "--trust-bin deploys bin/ executables (suppresses the trust warning). "
+        "--no-trust-bin skips bin/ deployment even when policy allows it. "
+        "Default: deploys bin/ but emits a warning; non-interactive contexts "
+        "skip bin/ by default. Use 'apm approve' for persistent per-package trust."
+    ),
+)
+@click.option(
     "--root",
     "root",
     type=click.Path(file_okay=False, resolve_path=True),
@@ -1120,6 +1133,7 @@ def install(  # noqa: PLR0913
     refresh,
     legacy_skill_paths,
     alias,
+    trust_bin,
     root,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
@@ -1528,6 +1542,7 @@ def install(  # noqa: PLR0913
                 plan_callback=None,
                 skill_subset=_skill_subset,
                 skill_subset_from_cli=bool(skill_names),
+                trust_bin=trust_bin,
             )
 
             apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(

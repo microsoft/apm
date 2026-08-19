@@ -103,8 +103,8 @@ the [policy schema](../policy-schema/).
 
 ### `deployed-files-present`
 
-- **What it verifies.** That every path in each lockfile entry's `deployed_files` exists on disk under the project root.
-- **Fails when.** One or more deployed files are missing (e.g. a developer ran `apm install` then deleted integrated files, or skipped install entirely).
+- **What it verifies.** That every path in each lockfile entry's `deployed_files` exists on disk under the project root. Gitignored paths are considered expected-absent and do not cause a failure.
+- **Fails when.** One or more non-gitignored deployed files are missing (e.g. a developer ran `apm install` then deleted integrated files, or skipped install entirely).
 - **Remediation.** Run `apm install` to restore integrated files. When
   `apm.yml` declares targets, install also removes stale entries outside the
   declared, gated, and dynamic target set. Then commit the updated lockfile:

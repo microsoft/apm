@@ -9,6 +9,7 @@ from apm_cli.marketplace.models import (
     MarketplaceManifest,
     MarketplacePlugin,
     MarketplaceSource,
+    parse_marketplace_json,
 )
 from apm_cli.marketplace.validator import (
     ValidationResult,
@@ -123,14 +124,65 @@ class TestValidateMarketplace:
             _plugin("b", "owner/b"),
         )
         results = validate_marketplace(manifest)
-        assert len(results) == 2
+        assert len(results) == 3
         assert all(r.passed for r in results)
 
     def test_empty_marketplace_passes_all(self):
         manifest = _manifest()
         results = validate_marketplace(manifest)
-        assert len(results) == 2
+        assert len(results) == 3
         assert all(r.passed for r in results)
+
+    def test_malformed_plugins_shape_is_retained_for_validation(self):
+        """A tolerant parse must preserve raw shape failures for validate."""
+        manifest = parse_marketplace_json(
+            {"name": "test-marketplace", "plugins": "not-an-array"},
+            source_name="test-marketplace",
+        )
+
+        assert manifest.plugins == ()
+        assert manifest.structural_errors == ("plugins: expected a list",)
+
+        results = validate_marketplace(manifest)
+
+        assert results[0] == ValidationResult(
+            check_name="Structure",
+            passed=False,
+            errors=["plugins: expected a list"],
+        )
+
+    def test_unsupported_plugin_source_is_retained_for_validation(self):
+        """Discarded sources remain visible to the validation command."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "test-marketplace",
+                "plugins": [{"name": "npm-plugin", "source": {"type": "npm"}}],
+            },
+            source_name="test-marketplace",
+        )
+
+        assert manifest.plugins == ()
+        assert manifest.structural_errors == ("plugins[0].source: unsupported source type 'npm'",)
+
+    def test_identity_less_dict_source_is_retained_for_validation(self):
+        """Validation must surface sources that would fail during resolution."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "test-marketplace",
+                "plugins": [{"name": "invalid", "source": {}}],
+            },
+            source_name="test-marketplace",
+        )
+
+        assert manifest.plugins == ()
+        assert manifest.structural_errors == (
+            "plugins[0].source: expected a supported source type or an owner/repository field",
+        )
+        assert validate_marketplace(manifest)[0] == ValidationResult(
+            check_name="Structure",
+            passed=False,
+            errors=list(manifest.structural_errors),
+        )
 
 
 # ===================================================================
