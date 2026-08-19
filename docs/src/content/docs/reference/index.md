@@ -18,7 +18,7 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 | Compile and integrate  | [`compile`](./cli/compile/), [`prune`](./cli/prune/), [`targets`](./cli/targets/), [`runtime`](./cli/runtime/) |
 | Cache and config       | [`cache`](./cli/cache/), [`config`](./cli/config/)                               |
 | Run scripts            | [`run`](./cli/run/)                                                              |
-| Author and distribute  | [`pack`](./cli/pack/), [`unpack`](./cli/unpack/), [`preview`](./cli/preview/), [`plugin`](./cli/plugin/), [`publish`](./cli/publish/), [`lifecycle`](./cli/lifecycle/), [`marketplace`](./cli/marketplace/), [`search`](./cli/search/), [`self-update`](./cli/self-update/) |
+| Author and distribute  | [`pack`](./cli/pack/), [`unpack`](./cli/unpack/), [`preview`](./cli/preview/), [`plugin`](./cli/plugin/), [`publish`](./cli/publish/), [`export-patch`](./cli/export-patch/), [`lifecycle`](./cli/lifecycle/), [`marketplace`](./cli/marketplace/), [`search`](./cli/search/), [`self-update`](./cli/self-update/) |
 | Governance             | [`approve`](./cli/approve/), [`deny`](./cli/deny/), [`policy`](./cli/policy/), [`mcp`](./cli/mcp/) |
 | Experimental           | [`experimental`](./cli/experimental/)                                            |
 

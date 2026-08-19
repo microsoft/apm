@@ -239,6 +239,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 ## Related
 
 - [`apm install`](../install/) -- the built-in scan that blocks critical findings before deployment.
+- [`apm export-patch`](../export-patch/) -- turn the `modified` drift this reports into upstream patches.
 - [`apm prune`](../prune/) -- reconciles the canonical deployment-owner references this check validates.
 - [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) -- consumer-side overview of the two-layer security model.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.

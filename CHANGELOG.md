@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consent over marketplace-plugin `bin/` executable deployment. `--trust-bin`
   approves deployment silently; `--no-trust-bin` skips `bin/` even when policy
   permits it. The `allowExecutables` policy gate still takes precedence. (closes #1620)
+- New `apm export-patch` command exports local edits to APM-managed files
+  as unified diffs against the packages that deployed them, one
+  `git apply`-ready `.patch` file per package with the locked base recorded
+  in the header. Verbatim-deployed files only; transformed deployments are
+  listed as skipped with the reason. (by @edenfunf; closes #2118) (#2162)
 
 ### Fixed
 
