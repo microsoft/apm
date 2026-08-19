@@ -150,7 +150,7 @@ Claude Code.
 Cursor.
 
 - **Detection.** `.cursor/` directory, or legacy `.cursorrules` file.
-- **Deploy directory.** `.cursor/`.
+- **Deploy directory.** `.cursor/` (project scope); `~/.cursor/` (user scope).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
   - instructions: `.cursor/rules/<name>.mdc`

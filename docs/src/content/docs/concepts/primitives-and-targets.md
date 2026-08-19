@@ -85,7 +85,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 | `copilot` | `.github/` (project), `~/.copilot/` (user scope) | vscode |
 | `claude` | `.claude/` | claude |
 | `grok-build` | `.grok/` | agents |
-| `cursor` | `.cursor/` | agents |
+| `cursor` | `.cursor/` (project), `~/.cursor/` (user scope) | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
 | `antigravity` | `.agents/` (project), `~/.gemini/` (user) | agents |
