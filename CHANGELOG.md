@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consent over marketplace-plugin `bin/` executable deployment. `--trust-bin`
   approves deployment silently; `--no-trust-bin` skips `bin/` even when policy
   permits it. The `allowExecutables` policy gate still takes precedence. (closes #1620)
+- Internal: added opt-in GitLab install smoke-test infrastructure, pinned to an
+  expected fixture commit. The scheduled/manual smoke remains skipped until
+  maintainers publish and configure the public fixture. (#1663, tracks #1229)
 
 ### Fixed
 

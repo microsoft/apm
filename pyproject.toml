@@ -194,14 +194,15 @@ timeout_multiplier = 5.0
 use_setproctitle = false
 
 [tool.pytest.ini_options]
-addopts = "-m 'not benchmark and not live' --strict-markers"
+addopts = "-m 'not benchmark and not live and not live_generic' --strict-markers"
 testpaths = ["tests"]
 markers = [
     "unit: pure logic with no filesystem and no CLI",
     "component: in-process behavior that touches a filesystem or one command boundary",
     "e2e: a real installed CLI crossing at least one command boundary",
     "integration: marks tests as integration tests that may require network access",
-    "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
+    "live: marks tests that hit real remote repos via live network cloning",
+    "live_generic: marks tests that hit the live GitLab install fixture",
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
     "windows_compat: load-bearing cross-platform regression contract family (CRLF-safe atomic writes, portable path formatting, git-executable resolution, socket/thread shutdown); runs on every OS and is additionally selected by the PR-time Windows Compatibility Gate -- NOT a requires_windows skip-gate, do not use requires_windows for this",
@@ -211,6 +212,7 @@ markers = [
     "requires_ado_bearer: requires az CLI logged in + APM_TEST_ADO_BEARER=1",
     "requires_network_integration: requires APM_RUN_INTEGRATION_TESTS=1",
     "requires_windows: requires a Windows host",
+    "requires_live_generic_fixture: requires a live package and its pinned expected commit SHA",
     "requires_apm_binary: requires built apm binary on PATH (or APM_BINARY_PATH)",
     "requires_runtime_codex: requires codex runtime installed",
     "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",
