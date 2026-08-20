@@ -5,6 +5,7 @@ config file to guard against the cp1252/cp950 UnicodeDecodeError class of
 bugs on Windows when ``open()`` is called without an explicit encoding.
 """
 
+import builtins
 import json
 
 import pytest
@@ -51,6 +52,51 @@ class TestConfigUtf8RoundTrip:
         assert isolated_config.exists()
         # File must be readable as UTF-8 JSON.
         json.loads(isolated_config.read_bytes().decode("utf-8"))
+
+
+class TestUnsetConfigHelpers:
+    """Unset helpers route through the shared update_config write path."""
+
+    @pytest.mark.parametrize(
+        ("unset_func", "key"),
+        (
+            (config_mod.unset_temp_dir, "temp_dir"),
+            (config_mod.unset_allow_protocol_fallback, "allow_protocol_fallback"),
+            (config_mod.unset_prefer_ssh, "prefer_ssh"),
+            (config_mod.unset_copilot_cowork_skills_dir, "copilot_cowork_skills_dir"),
+        ),
+    )
+    def test_unset_helpers_use_update_config(self, monkeypatch, unset_func, key):
+        calls = []
+
+        def fake_update_config(updates, *, remove_keys=()):
+            calls.append((updates, tuple(remove_keys)))
+
+        monkeypatch.setattr(config_mod, "update_config", fake_update_config)
+
+        unset_func()
+
+        assert calls == [({}, (key,))]
+
+    def test_update_config_absent_remove_key_does_not_write(self, isolated_config, monkeypatch):
+        config_mod.get_config()
+        real_open = builtins.open
+
+        def guarded_open(file, mode="r", *args, **kwargs):
+            if "w" in mode:
+                raise AssertionError("absent-key removal should not rewrite config")
+            return real_open(file, mode, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", guarded_open)
+
+        config_mod.update_config({}, remove_keys=("missing_key",))
+
+    def test_update_config_present_remove_key_writes_removal(self, isolated_config):
+        config_mod.update_config({"temp_dir": "/tmp/apm"})
+
+        config_mod.update_config({}, remove_keys=("temp_dir",))
+
+        assert "temp_dir" not in config_mod.get_config()
 
 
 class TestAuditOnInstallConfig:

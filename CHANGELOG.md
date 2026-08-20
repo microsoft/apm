@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Skill deployment now honors primitive deploy-root overrides (such as
+  `.agents/skills`) consistently across integrator paths instead of bypassing
+  configured primitive roots. (by @abhinavgautam01) (#1667)
+- Config unset helpers no longer rewrite `~/.apm/config.json` when the key is
+  already absent, preserving true no-op behavior for unset calls.
+  (by @abhinavgautam01) (#1667)
 - Windows binary is now Authenticode-signed in the release workflow, eliminating
   the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
   PyInstaller bundles. (#2435)
