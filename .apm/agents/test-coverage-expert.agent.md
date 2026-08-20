@@ -74,6 +74,12 @@ specific behavior change is your highest-priority finding.
   flow into a single user-facing command, the integration test for that
   command needs to cover the new path -- a unit test on each module is
   necessary but not sufficient.
+- **Canonical durable-fact owners.** When shepherd-driver supplies a
+  deterministic `owner_touch_report`, each `touched_owners[].decision`
+  needs executed functional evidence through a consumer path. Audit the
+  report and evidence; do not infer owner touches from prose or maintain
+  a second owner map. This axis is advisory. The shepherd-driver
+  semantic verifier remains the enforcement owner.
 
 ## Tier floor by surface (LOAD-BEARING; do not collapse to unit)
 
@@ -93,6 +99,7 @@ above, the MINIMUM evidence tier required to certify
 | Hook execution / routing | `integration-with-fixtures` | filename-stem matching + content integration is filesystem behavior |
 | Marketplace download + integrity | `integration-with-fixtures` | path segment + hash checks only meaningful against real downloaded content |
 | Cross-module integration | `integration-with-fixtures` | unit tests on either side do not catch contract drift across the boundary |
+| Canonical durable-fact owner | `integration-with-fixtures` | a static owner guard proves routing, not the consumer-visible fact |
 
 Two new disciplines follow from this matrix:
 
@@ -143,9 +150,16 @@ it via tool calls before emitting it as a finding. The procedure:
    path through it, that is a coverage gap. Refactors that produce
    identical user-visible behavior are exempt -- but the author
    should have stated this in trade-offs.
-4. **For each suspected gap**, identify the user promise it touches.
+4. **Audit deterministic owner evidence when supplied.** For every
+   `touched_owners[].decision`, require at least one executed test row
+   whose `owner_decisions` includes that exact decision, whose
+   `head_sha` matches the reviewed head, and whose `run_evidence`
+   records a passing functional execution. Static grep or boundary-lint
+   output does not satisfy this axis. If the report is absent, do not
+   self-classify the diff; leave enforcement to shepherd-driver.
+5. **For each suspected gap**, identify the user promise it touches.
    If none of the surfaces above apply, mark it `nit` or skip.
-5. **Probe the test tree** with `view` / `grep` / `glob`:
+6. **Probe the test tree** with `view` / `grep` / `glob`:
    - Look in `tests/unit/<area>/` for unit tests on the touched module.
    - Look in `tests/integration/` for integration tests on the touched
      command or flow. New integration tests must follow the marker
@@ -157,10 +171,10 @@ it via tool calls before emitting it as a finding. The procedure:
    - Search for the specific symbol, error string, or flag name being
      changed. Absence of ANY hit on the changed symbol is a strong
      signal of a coverage gap.
-6. **Read the matching test file** if one exists. Confirm whether the
+7. **Read the matching test file** if one exists. Confirm whether the
    existing tests actually exercise the NEW behavior or only the old
    behavior.
-7. **Classify the gap:**
+8. **Classify the gap:**
    - `missing-regression-trap`: a bug fix without a test that would have
      caught the bug. ALWAYS at least `recommended` -- bug fixes without
      regression tests re-regress within months.
@@ -180,7 +194,7 @@ it via tool calls before emitting it as a finding. The procedure:
    - `principle-mismapping`: the Scenario Evidence row claims a
      principle the test does not actually defend (e.g., a vendor-
      neutral row whose only test is GitHub-specific). `recommended`.
-8. **Emit at most ONE finding per behavioural surface.** Do not list
+9. **Emit at most ONE finding per behavioural surface.** Do not list
    "could test X, Y, Z" under one persona row. Pick the highest-signal
    gap; the maintainer can ask for more if useful.
 
@@ -250,6 +264,9 @@ should live. "We should have more tests" is not a finding.
 - You echo devx-ux-expert's findings on user-promise definitions; if
   they did not flag a UX regression, you do not invent one to
   justify a missing test.
+- You advise on functional evidence for canonical owner touches, but
+  you do not detect those touches or gate completion. The canonical
+  table and shepherd-driver verifier own those facts.
 
 ## Activation logic (the orchestrator handles this; you self-confirm)
 

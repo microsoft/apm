@@ -15,7 +15,7 @@ Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](./installation/).
+- APM installed -- see [Installation](../installation/).
 - A GitHub account and an empty repo for publishing (step 5).
 - A runtime where you can try the result: GitHub Copilot, Claude Code, Kiro,
   or Cursor.
@@ -29,6 +29,15 @@ cd team-skills
 
 `apm init` creates exactly one file -- the manifest. The `.apm/` source tree
 is yours to author.
+
+:::tip[Already have a Claude plugin?]
+If `skills/`, `agents/`, or `commands/` already exists at the project root,
+`apm init` leaves that layout in place. It writes `includes: auto` without
+creating `.apm/`, and those plugin-native directories remain sources for
+`apm pack`. Create `.apm/` later when you want `apm pack` to source from that
+directory instead of the project root. See [source layout and install-time
+discovery](../../producer/pack-a-bundle/#source-layout-and-install-time-discovery).
+:::
 
 ```
 team-skills/
@@ -52,11 +61,11 @@ includes: auto
 scripts: {}
 ```
 
-`includes: auto` is the field that makes step 4 work: with no remote
-dependencies declared, `apm install` walks your local `.apm/` tree
-and deploys what it finds. Set `includes: []` (or omit the field) and
-local content stops deploying. Override with an explicit list of
-paths to gate exactly what ships.
+`includes: auto` records explicit consent to deploy or pack local content.
+Omitting the field preserves legacy implicit consent and produces an audit
+advisory. Use an explicit list of paths when you need an exhaustive publication
+boundary. Source layout is independent: `.apm/` is authoritative when present;
+otherwise supported plugin-native root directories remain pack sources.
 
 ## 2. Add a skill
 
@@ -184,8 +193,9 @@ Output:
 Note the split: **agents** are runtime-specific and land under
 `.github/agents/` (Copilot's directory). **Skills** land under
 `.agents/skills/` -- the cross-client universal location that
-Copilot, Cursor, OpenCode, Codex, and Gemini all read. Claude Code
-is the exception: it reads `.claude/skills/`.
+Copilot, Cursor, OpenCode, Codex, Gemini, and Windsurf all read.
+Claude Code, Grok Build, and Kiro instead read `.claude/skills/`,
+`.grok/skills/`, and `.kiro/skills/`.
 
 Your tree now has source on the left and runtime-ready output on the right:
 
@@ -208,12 +218,9 @@ team-skills/
 
 `apm install` resolves which harness directories to populate using a strict
 priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
-filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.github/copilot-instructions.md`,
-`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). The example layout
-above shows `.github/` because `.github/copilot-instructions.md` exists in the
-project; if you also have `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, or
-`.kiro/`, those directories get populated too. With no signal at all, `apm install` exits with
-code 2 and a teaching message instead of silently picking a target -- declare an
+[filesystem signals](../../reference/cli/targets/#detection-signals). That
+canonical list defines every auto-detection signal. With no signal, `apm
+install` exits with code 2 instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
 `targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects
 in the current directory. To target explicitly, see the
@@ -221,10 +228,17 @@ in the current directory. To target explicitly, see the
 
 > **What about `apm compile`?** Compile is a different concern: it
 > generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools
-> that read a top-level context document for instructions (Codex, Gemini,
-> plain `agents`-protocol hosts). Gemini also receives commands, skills,
-> hooks, and MCP via `apm install`. Copilot, Claude Code, and Cursor read
-> the per-skill directories directly -- no compile step needed.
+> that read a top-level context document for instructions. Targets listed under
+> [post-install instruction compilation](../../reference/targets-matrix/#post-install-instruction-compilation)
+> print a hint after `apm install` when dependency instructions need
+> `apm compile`.
+> Gemini and Claude also receive commands, skills, hooks, and MCP via
+> `apm install`. Claude instructions deploy directly to `.claude/rules/`, while
+> Copilot and Cursor read their native instruction directories -- none of those
+> instruction paths needs a compile step.
+> If your project commits those generated files, set `targets:` in `apm.yml`
+> to keep the committed set consistent across machines. See
+> [Pin committed output with targets:](/apm/reference/cli/compile/#pin-committed-output-with-targets).
 
 Now open Copilot or Claude in this project. Ask "draft a PR description for
 my last commit". The `pr-description` skill activates on its own. To get the
@@ -311,7 +325,7 @@ APM recognizes three layouts. Pick the one that matches what you are shipping:
   it directly without restructuring.
 
 For the full comparison and metadata precedence rules, see
-[Package Types](../reference/package-types/).
+[Package Types](../../reference/package-types/).
 
 ## Next steps
 

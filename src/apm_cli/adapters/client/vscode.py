@@ -5,14 +5,22 @@ following the official documentation at:
 https://code.visualstudio.com/docs/copilot/chat/mcp-servers
 """
 
+import hashlib
 import json
 import re
 from pathlib import Path
 
+from ...core.docker_args import DockerArgsProcessor
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
-from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter, registry_field_is_required
+from .base import (
+    _ENV_VAR_RE,
+    _INPUT_VAR_RE,
+    _RUNTIME_TEMPLATE_VARIABLE_RE,
+    MCPClientAdapter,
+    registry_field_is_required,
+)
 
 # Legacy ``<VAR>`` placeholder (Copilot CLI / Codex only). VS Code does not
 # resolve angle-bracket placeholders, so emitting them produces literal
@@ -289,26 +297,82 @@ class VSCodeClientAdapter(MCPClientAdapter):
             package = self._select_best_package(server_info["packages"])
             runtime_hint = package.get("runtime_hint", "") if package else ""
             registry_name = self._infer_registry_name(package) if package else ""
-            pkg_args = (
-                self._extract_package_args(package, runtime_vars=runtime_vars) if package else []
+            is_docker = runtime_hint == "docker" or registry_name == "docker"
+            env_config, declared_inputs = self._declared_vscode_environment(
+                package,
+                server_name=server_info.get("name", ""),
+                env_overrides=env_overrides,
+                existing_server_config=existing_server_config,
             )
+            secret_fallbacks, argument_inputs = self._declared_vscode_argument_secret_inputs(
+                package,
+                server_name=server_info.get("name", ""),
+            )
+            seen_input_ids = {item.get("id") for item in input_vars}
+            for input_definition in (*declared_inputs, *argument_inputs):
+                if input_definition.get("id") in seen_input_ids:
+                    continue
+                input_vars.append(input_definition)
+                seen_input_ids.add(input_definition.get("id"))
+
+            runtime_groups = []
+            package_groups = []
+            if package and not is_docker:
+                parser_kwargs = {
+                    "resolved_env": env_config,
+                    "runtime_vars": runtime_vars,
+                    "runtime_variable_fallbacks": {"workspaceFolder": "${workspaceFolder}"},
+                    "secret_variable_fallbacks": secret_fallbacks,
+                    "package_name": package.get("name", ""),
+                }
+                runtime_groups = self._parse_non_container_argument_groups(
+                    package.get("runtime_arguments"),
+                    **parser_kwargs,
+                )
+                package_groups = self._parse_non_container_argument_groups(
+                    package.get("package_arguments"),
+                    **parser_kwargs,
+                )
 
             # Handle npm packages
             if runtime_hint == "npx" or registry_name == "npm":
                 package_name = package.get("name")
-                # Filter out package name from extracted args to avoid duplication
-                # (legacy runtime_arguments often include it as the first entry)
-                extra_args = [a for a in pkg_args if a != package_name] if pkg_args else []
-
                 server_config = {
                     "type": "stdio",
-                    "command": "npx",
-                    "args": ["-y", package_name] + extra_args,  # noqa: RUF005
+                    "command": runtime_hint or "npx",
+                    "args": self._build_non_container_launcher_argv(
+                        package_name,
+                        runtime_groups,
+                        package_groups,
+                        launcher_prefix=("-y",),
+                    ),
                 }
 
             # Handle docker packages
-            elif runtime_hint == "docker" or registry_name == "docker":
-                args = pkg_args if pkg_args else ["run", "-i", "--rm", package.get("name")]
+            elif is_docker:
+                docker_kwargs = (
+                    {"secret_variable_fallbacks": secret_fallbacks} if secret_fallbacks else {}
+                )
+                unresolved_variables: list[str] = []
+                args = self._docker_run_args(
+                    package,
+                    runtime_vars,
+                    unresolved_variables=unresolved_variables,
+                    **docker_kwargs,
+                )
+                if args is None:
+                    if package.get("runtime_arguments") or package.get("package_arguments"):
+                        variable_name = (
+                            unresolved_variables[0] if unresolved_variables else "unknown"
+                        )
+                        _rich_warning(
+                            "Could not resolve required container run option "
+                            f"'{variable_name}' for '{package.get('name', '')}'; "
+                            "target configuration was not changed. Set the required "
+                            "registry runtime variables and rerun 'apm install'."
+                        )
+                        return {}, []
+                    args = self._ensure_docker_image_arg(["run", "-i", "--rm"], package.get("name"))
 
                 server_config = {"type": "stdio", "command": "docker", "args": args}
 
@@ -318,73 +382,71 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 or "python" in runtime_hint
                 or registry_name == "pypi"
             ):
-                # Determine the command based on runtime_hint
                 if runtime_hint == "uvx":
                     command = "uvx"
                 elif "python" in runtime_hint:
                     command = "python3" if runtime_hint in ["python", "pip"] else runtime_hint
                 else:
                     command = "uvx"
-
-                if pkg_args:
-                    args = pkg_args
-                elif runtime_hint == "uvx" or command == "uvx":
-                    args = [package.get("name", "")]
-                else:
+                if command != "uvx":
                     module_name = (
                         package.get("name", "").replace("mcp-server-", "").replace("-", "_")
                     )
-                    args = ["-m", f"mcp_server_{module_name}"]
-
-                server_config = {"type": "stdio", "command": command, "args": args}
+                    module_operand = f"mcp_server_{module_name}"
+                    authored_args = self._flatten_non_container_argument_groups(
+                        [*runtime_groups, *package_groups]
+                    )
+                    runtime_values = self._flatten_non_container_argument_groups(runtime_groups)
+                    has_authored_entrypoint = (
+                        any(group.kind == "legacy" for group in runtime_groups)
+                        or any(
+                            value == "-"
+                            or value in ("-c", "-m")
+                            or (value.startswith(("-c", "-m")) and len(value) > 2)
+                            for value in runtime_values
+                        )
+                        or any(
+                            group.kind == "positional"
+                            and len(group.values) == 1
+                            and not group.values[0].startswith("-")
+                            for group in runtime_groups
+                        )
+                    )
+                    if has_authored_entrypoint:
+                        args = authored_args
+                    else:
+                        args = self._build_non_container_launcher_argv(
+                            module_operand,
+                            runtime_groups,
+                            package_groups,
+                            launcher_prefix=("-m",),
+                        )
+                else:
+                    args = self._build_non_container_launcher_argv(
+                        package.get("name", ""),
+                        runtime_groups,
+                        package_groups,
+                    )
+                server_config = {
+                    "type": "stdio",
+                    "command": command,
+                    "args": args,
+                }
 
             # Generic fallback for packages with a runtime_hint (e.g. dotnet, nuget, mcpb)
             elif package and runtime_hint:
-                args = pkg_args if pkg_args else [package.get("name", "")]
+                server_config = {
+                    "type": "stdio",
+                    "command": runtime_hint,
+                    "args": self._build_non_container_launcher_argv(
+                        package.get("name", ""),
+                        runtime_groups,
+                        package_groups,
+                    ),
+                }
 
-                server_config = {"type": "stdio", "command": runtime_hint, "args": args}
-
-            # Add environment variables if present. Optional registry env vars
-            # are emitted only when the user already has a value in config or
-            # install-time collection found one; otherwise they would create an
-            # unwanted VS Code prompt on every server start.
-            env_vars = (
-                package.get("environment_variables") or package.get("environmentVariables") or []
-            )
-            if env_vars:
-                env_config = {}
-                for env_var in env_vars:
-                    if "name" not in env_var:
-                        continue
-                    name = env_var["name"]
-                    input_var_name = name.lower().replace("_", "-")
-                    input_ref = f"${{input:{input_var_name}}}"
-                    env_value = self._value_for_declared_vscode_env(
-                        env_var,
-                        env_overrides=env_overrides,
-                        existing_server_config=existing_server_config,
-                        input_ref=input_ref,
-                    )
-                    if env_value is None:
-                        continue
-                    env_config[name] = env_value
-                    if env_value == input_ref:
-                        input_vars.append(
-                            {
-                                "type": "promptString",
-                                "id": input_var_name,
-                                "description": env_var.get("description", f"{name} for MCP server"),
-                                "password": True,
-                            }
-                        )
-                    else:
-                        input_vars.extend(
-                            self._extract_input_variables(
-                                {name: env_value}, server_info.get("name", "")
-                            )
-                        )
-                if env_config:
-                    server_config["env"] = env_config
+            if env_config:
+                server_config["env"] = env_config
 
         # If no server config was created from packages, check for other server types
         if not server_config:
@@ -451,6 +513,103 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
         self._merge_extra(server_config, server_info)
         return server_config, input_vars
+
+    def _declared_vscode_environment(
+        self,
+        package,
+        *,
+        server_name,
+        env_overrides=None,
+        existing_server_config=None,
+    ):
+        """Return target-native env values and input definitions for a package."""
+        if not package:
+            return {}, []
+        env_vars = package.get("environment_variables") or package.get("environmentVariables") or []
+        env_config = {}
+        input_vars = []
+        for env_var in env_vars:
+            if "name" not in env_var:
+                continue
+            name = env_var["name"]
+            input_var_name = name.lower().replace("_", "-")
+            input_ref = f"${{input:{input_var_name}}}"
+            env_value = self._value_for_declared_vscode_env(
+                env_var,
+                env_overrides=env_overrides,
+                existing_server_config=existing_server_config,
+                input_ref=input_ref,
+            )
+            if env_value is None:
+                continue
+            env_config[name] = env_value
+            if env_value == input_ref:
+                input_vars.append(
+                    {
+                        "type": "promptString",
+                        "id": input_var_name,
+                        "description": env_var.get(
+                            "description",
+                            f"{name} for MCP server",
+                        ),
+                        "password": True,
+                    }
+                )
+            else:
+                input_vars.extend(
+                    self._extract_input_variables(
+                        {name: env_value},
+                        server_name,
+                    )
+                )
+        return env_config, input_vars
+
+    @staticmethod
+    def _vscode_argument_secret_input_id(server_name: str, variable_name: str) -> str:
+        """Return a collision-safe VS Code input ID for one server variable."""
+        server_digest = hashlib.sha256(server_name.encode("utf-8")).hexdigest()[:12]
+        return f"mcp-{server_digest}-{variable_name.encode('utf-8').hex()}"
+
+    @classmethod
+    def _declared_vscode_argument_secret_inputs(cls, package, *, server_name: str):
+        """Return VS Code input indirections for secret argument variables."""
+        if not package:
+            return {}, []
+        package_variables = cls._package_runtime_variable_metadata(package)
+        if package_variables is None:
+            raise ValueError("MCP package argument variable metadata must be valid")
+        fallbacks = {}
+        input_vars = []
+        templates = []
+        for field_name in ("runtime_arguments", "package_arguments"):
+            for argument in package.get(field_name) or []:
+                if not isinstance(argument, dict):
+                    continue
+                template = argument.get(
+                    "value",
+                    argument.get("default", argument.get("value_hint", "")),
+                )
+                if isinstance(template, str):
+                    templates.append(template)
+        for variable_name, variable_info in package_variables.items():
+            if not any(f"{{{variable_name}}}" in template for template in templates):
+                continue
+            if not variable_info.get("isSecret", variable_info.get("is_secret", False)):
+                continue
+            input_id = cls._vscode_argument_secret_input_id(server_name, variable_name)
+            fallbacks[variable_name] = f"${{input:{input_id}}}"
+            input_vars.append(
+                {
+                    "type": "promptString",
+                    "id": input_id,
+                    "description": variable_info.get(
+                        "description",
+                        f"{variable_name} for MCP server",
+                    ),
+                    "password": True,
+                }
+            )
+        return fallbacks, input_vars
 
     @staticmethod
     def _has_value(value):
@@ -588,74 +747,228 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
     @staticmethod
     def _extract_package_args(package, runtime_vars=None):
-        """Extract positional arguments from a package entry.
+        """Keep the retired flat extractor available to private compatibility callers.
 
-        The MCP registry API uses ``package_arguments`` (with ``type``/``value``
-        pairs).  Older or synthetic entries may use ``runtime_arguments``
-        (with ``is_required``/``value_hint``).  v0.1 registry format uses
-        ``runtime_arguments`` where a ``variables`` dict is a *sibling* of
-        ``value_hint``; the ``value_hint`` string contains ``{var_name}``
-        placeholders that are substituted at config-generation time.
-        This method normalises all formats into a flat list of argument strings.
-
-        Args:
-            package (dict): A single package entry.
-            runtime_vars (dict, optional): Runtime variable substitutions.
-                When a ``{var_name}`` placeholder is encountered in a v0.1
-                ``value_hint``, the corresponding value from ``runtime_vars``
-                is used.  For VS Code, ``workspaceFolder`` defaults to the
-                native ``${workspaceFolder}`` interpolation token when not
-                supplied via ``runtime_vars``.
-
-        Returns:
-            list[str]: Ordered argument strings, may be empty.
+        Launcher generation must not call this method: flattening erases named
+        group boundaries and cannot merge package identity safely. The canonical
+        production path is ``MCPClientAdapter._build_non_container_launcher_argv``.
+        Existing private callers retain the historical package-arguments-first
+        and legacy ``value_hint`` behavior during the transition.
         """
         if not package:
             return []
 
-        # Prefer package_arguments (current API format)
-        pkg_args = package.get("package_arguments") or []
-        if pkg_args:
-            args = []
-            for arg in pkg_args:
-                if isinstance(arg, dict):
-                    value = arg.get("value", "")
-                    if value:
-                        args.append(value)
-            if args:
-                return args
+        package_args = package.get("package_arguments") or []
+        extracted = [
+            argument.get("value")
+            for argument in package_args
+            if isinstance(argument, dict) and argument.get("value")
+        ]
+        if extracted:
+            return extracted
 
-        # Fall back to runtime_arguments (legacy / synthetic format and v0.1 variables shape)
-        rt_args = package.get("runtime_arguments") or []
-        if rt_args:
-            args = []
-            for arg in rt_args:
-                if isinstance(arg, dict):
-                    if "variables" in arg and "value_hint" in arg:
-                        # v0.1 format: variables is a sibling of value_hint; the
-                        # value_hint string contains {var_name} placeholders.
-                        value = arg["value_hint"]
-                        for var_name in arg["variables"]:
-                            if runtime_vars and var_name in runtime_vars:
-                                replacement = runtime_vars[var_name]
-                            elif var_name == "workspaceFolder":
-                                # VS Code native variable substitution token
-                                replacement = "${workspaceFolder}"
-                            else:
-                                replacement = f"${{{var_name}}}"
-                            value = value.replace(f"{{{var_name}}}", replacement)
-                        if value:
-                            args.append(value)
-                    elif arg.get("is_required", False) and arg.get("value_hint"):
-                        # Legacy format: explicit is_required=True entries
-                        args.append(arg["value_hint"])
-                    elif "value_hint" in arg and arg["value_hint"] and "is_required" not in arg:
-                        # v0.1 format: plain value_hint entries without is_required
-                        args.append(arg["value_hint"])
-            if args:
-                return args
+        extracted = []
+        for argument in package.get("runtime_arguments") or []:
+            if not isinstance(argument, dict):
+                continue
+            if "variables" in argument and "value_hint" in argument:
+                value = argument["value_hint"]
+                for variable_name in argument["variables"]:
+                    replacement = (runtime_vars or {}).get(variable_name)
+                    if replacement is None:
+                        replacement = (
+                            "${workspaceFolder}"
+                            if variable_name == "workspaceFolder"
+                            else f"${{{variable_name}}}"
+                        )
+                    value = value.replace(
+                        f"{{{variable_name}}}",
+                        str(replacement),
+                    )
+                if value:
+                    extracted.append(value)
+            elif argument.get("value_hint") and (
+                argument.get("is_required", False) or "is_required" not in argument
+            ):
+                extracted.append(argument["value_hint"])
+        return extracted
 
-        return []
+    @classmethod
+    def _docker_run_args(
+        cls,
+        package: dict,
+        runtime_vars: dict | None = None,
+        *,
+        secret_variable_fallbacks: dict[str, str] | None = None,
+        unresolved_variables: list[str] | None = None,
+    ) -> list[str] | None:
+        """Build ``docker run`` arguments from a container package's metadata.
+
+        Container packages retain a dedicated assembler because Docker requires
+        options before the image and package arguments after it. Non-container
+        package identity and typed argument grouping are owned separately by
+        ``MCPClientAdapter._build_non_container_launcher_argv``.
+
+        Handles both argument spellings -- v0.1 ``value`` (beside a ``type``)
+        and the legacy ``value_hint`` -- because reading only the latter
+        dropped every option a v0.1 registry supplied, including mounts whose
+        values APM had just collected from the user (#2377). ``named`` entries
+        contribute their flag as well as its value, matching
+        ``CopilotClientAdapter._process_arguments``.
+
+        ``package_arguments`` are the container's own argv and follow the image
+        per ``docker run [OPTIONS] IMAGE [ARG...]``.
+
+        Returns ``None`` -- leaving the caller on its previous synthesized
+        launcher -- when the registry arguments cannot form a usable command:
+        no ``run`` verb, or a placeholder in a required entry that this
+        install could not resolve. Emitting a half-substituted mount path
+        would be worse than the image-only command that shipped before. An
+        *optional* entry whose placeholder is unresolved is dropped on its
+        own instead -- declining a whole working command over a mount the
+        registry itself marked optional would throw away every required
+        argument with it.
+
+        Args:
+            package (dict): A single package entry from the registry.
+            runtime_vars (dict, optional): Collected runtime variable values.
+
+        Returns:
+            list[str] | None: Ordered ``docker`` arguments, or None to decline.
+        """
+        if not package:
+            return None
+        package_variables = cls._package_runtime_variable_metadata(package)
+        if package_variables is None:
+            if unresolved_variables is not None:
+                unresolved_variables.append("invalid metadata")
+            return None
+        run_options = cls._docker_arg_values(
+            package.get("runtime_arguments"),
+            runtime_vars,
+            secret_variable_fallbacks,
+            package_variables,
+            unresolved_variables,
+        )
+        if run_options is None:
+            return None
+        package_args = cls._docker_arg_values(
+            package.get("package_arguments"),
+            runtime_vars,
+            secret_variable_fallbacks,
+            package_variables,
+            unresolved_variables,
+        )
+        if package_args is None:
+            return None
+        if not run_options and package_args and package_args[0] == "run":
+            image_index = cls._docker_image_arg_index(package_args, package.get("name"))
+            if image_index is None:
+                run_options = package_args
+                package_args = []
+            else:
+                run_options = package_args[: image_index + 1]
+                package_args = package_args[image_index + 1 :]
+        elif not run_options and package_args:
+            run_options = ["run", "-i", "--rm"]
+        # The subcommand has to lead: `docker -v … run` is not a run invocation,
+        # and there would be nothing for the flag normalizer to anchor on.
+        if not run_options or run_options[0] != "run":
+            return None
+
+        image = package.get("name")
+        # Some registry data repeats the whole docker argv in package_arguments
+        # instead of describing the container's own arguments. Appending that
+        # after the image would hand docker a second `run …` as the container
+        # command, so treat it as a duplicate of what runtime_arguments said.
+        if (package_args and package_args[0] == "run") or any(
+            cls._docker_image_references_match(argument, image) for argument in package_args
+        ):
+            package_args = []
+
+        # Reuse the shared normalizer so a registry template that omits -i/--rm
+        # still yields an interactive, self-cleaning container.
+        args: list[str] = DockerArgsProcessor.process_docker_args(run_options, {})
+        try:
+            with_image: list[str] = cls._ensure_docker_image_arg(args, image)
+        except ValueError:
+            return None
+        return with_image + package_args
+
+    @classmethod
+    def _docker_arg_values(
+        cls,
+        entries: list | None,
+        runtime_vars: dict | None,
+        secret_variable_fallbacks: dict[str, str] | None,
+        package_variables: dict[str, dict],
+        unresolved_variables: list[str] | None,
+    ) -> list[str] | None:
+        """Resolve one registry argument list into CLI argument strings.
+
+        Returns ``None`` when a *required* entry carries a placeholder this
+        install has no value for, so the caller can decline the whole command.
+        An optional entry in the same situation is skipped by itself.
+
+        An optional entry whose placeholder DID resolve is kept: its value was
+        explicitly collected from the user, and discarding user-supplied
+        configuration is the failure mode #2377 exists to prevent.
+        """
+        args: list[str] = []
+        for arg in entries or []:
+            if not isinstance(arg, dict):
+                continue
+            arg_type = arg.get("type")
+            # v0.1 marks optional entries with ``isRequired``; only package-level
+            # keys get camelCase-normalized, so accept either spelling here. An
+            # explicit null means "unspecified", not "optional".
+            required = arg.get("is_required", arg.get("isRequired"))
+            required = True if required is None else bool(required)
+            if not required and "variables" not in arg:
+                continue
+
+            # A typed entry carries its payload in ``value`` -- ``value_hint`` is
+            # the schema's *display* hint for it, and emitting that renders
+            # placeholder words like "env_var_name" as CLI arguments. Untyped
+            # legacy entries have only the hint. This mirrors
+            # ``CopilotClientAdapter._process_arguments``.
+            if arg_type in ("positional", "named"):
+                raw = arg.get("value", arg.get("default"))
+            else:
+                raw = arg.get("value_hint", arg.get("value", arg.get("default")))
+
+            if raw is None or raw == "":
+                # A named entry contributes its flag even with no value:
+                # dropping ``--read-only`` silently weakens the container.
+                if arg_type == "named" and arg.get("name"):
+                    name = str(arg["name"])
+                    if cls._docker_option_requires_value(name):
+                        if required:
+                            return None
+                        continue
+                    args.append(name)
+                continue
+
+            template = str(raw)
+            substituted = cls._substitute_runtime_variables(
+                template,
+                package_variables,
+                runtime_vars,
+                {"workspaceFolder": "${workspaceFolder}"},
+                secret_variable_fallbacks,
+            )
+            if substituted is None:
+                if required:
+                    if unresolved_variables is not None:
+                        match = _RUNTIME_TEMPLATE_VARIABLE_RE.search(template)
+                        unresolved_variables.append(match.group(1) if match else "unknown")
+                    return None
+                continue
+            template = substituted
+            if arg_type == "named" and arg.get("name"):
+                args.append(str(arg["name"]))
+            args.append(template)
+        return args
 
     @staticmethod
     def _select_remote_with_url(remotes):

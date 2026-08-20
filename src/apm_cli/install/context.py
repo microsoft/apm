@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
+    from apm_cli.install.helpers.ref_reuse import RefResolverCacheKey
+    from apm_cli.security.executables import ExecTrustContext
 
 
 @dataclass
@@ -53,9 +59,16 @@ class InstallContext:
     marketplace_provenance: dict[str, Any] | None = None
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
-    target_override: str | None = None  # CLI --target value
+    target_override: str | list[str] | None = None  # effective --target value
+    target_decision: EffectiveTargetDecision | None = None
+    # Provenance label for ``target_override`` when it did NOT come from the CLI.
+    # None means an explicit CLI ``--target`` selector. When the value is
+    # populated from the configured default (``apm config target``), this is
+    # set to "apm config target" so provenance output is not misattributed.
+    target_override_source: str | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
+    transaction: Any = None  # InstallTransaction
 
     dry_run: bool = False
     lockfile_only: bool = False
@@ -63,10 +76,6 @@ class InstallContext:
     verbose: bool = False
     refresh: bool = False
     dev: bool = False
-    # --trust-canvas-extensions: opt in to deploying dependency-provided
-    # canvas extensions (executable Node code). First-party (root project .apm/)
-    # canvases deploy without this; only dependency canvases are gated.
-    trust_canvas: bool = False
     only_packages: list[str] | None = None
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
@@ -83,12 +92,14 @@ class InstallContext:
     all_apm_deps: list[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: list[Any] = field(default_factory=list)  # resolve
+    update_plan_complete_dep_keys: set[str] = field(default_factory=set)  # resolve
     dependency_graph: Any = None  # resolve
     existing_lockfile: Any = None  # resolve
     lockfile_path: Path | None = None  # resolve
     apm_modules_dir: Path | None = None  # resolve
     downloader: Any = None  # resolve (GitHubPackageDownloader)
     ref_resolver: Any = None  # resolve (TieredRefResolver | None) -- #1369 fast-path
+    ref_freshness_policy: RefFreshnessPolicy | None = None  # resolve
     callback_downloaded: dict[str, Any] = field(default_factory=dict)  # resolve
     callback_failures: set[str] = field(default_factory=set)  # resolve
     transitive_failures: list[tuple[str, str]] = field(default_factory=list)  # resolve
@@ -117,6 +128,11 @@ class InstallContext:
     # consumed by install/sources.py to plumb the resolution into the
     # lockfile via InstalledPackage.git_semver_resolution.
     git_semver_resolutions: dict[str, Any] = field(default_factory=dict)
+    # Run-scoped cache of RefResolver instances keyed by (host, token-fingerprint)
+    # so semver deps sharing an upstream repo reuse one ``git ls-remote`` tag
+    # listing (RefResolver memoizes per instance) instead of one per dep.
+    # Populated lazily in _maybe_resolve_git_semver during the resolve phase.
+    ref_resolver_cache: dict[RefResolverCacheKey, Any] = field(default_factory=dict)
     managed_files: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------
@@ -124,6 +140,10 @@ class InstallContext:
     # ------------------------------------------------------------------
     intended_dep_keys: set[str] = field(default_factory=set)
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
+    # Cleanup refusals retain the original lockfile hash, not a hash of
+    # user-edited bytes. Lockfile assembly consumes this after cleanup.
+    package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
     # Declared-license provenance (issue #1777, U6): maps dep_key -> the SPDX
@@ -158,6 +178,11 @@ class InstallContext:
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
+    # #1873 executable-trust: the resolved trust context (built once per
+    # install) and the per-dependency lockfile exec_status computed at the gate.
+    exec_trust_ctx: ExecTrustContext | None = None  # lazily built in template
+    exec_allow_map: dict[str, dict[str, bool]] | None = None  # None means gate disabled
+    package_exec_status: dict[str, str] = field(default_factory=dict)  # dep_key -> exec_status
 
     # ------------------------------------------------------------------
     # policy_gate

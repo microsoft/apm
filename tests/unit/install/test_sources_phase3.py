@@ -27,7 +27,7 @@ yet reached by test_sources_classification.py:
   - success path with logger
   - success path with progress object
   - unpinned dep (reference=None → deltas["unpinned"]=1)
-  - hash mismatch → sys.exit(1)
+  - hash mismatch raises DirectDependencyError
   - exception in download → diagnostics.error + return None
   - no targets path
 * make_dependency_source factory
@@ -465,6 +465,36 @@ class TestResolveCachedCommit:
         result = source._resolve_cached_commit()
         assert result == "sha-xyz"
 
+    def test_registry_dep_skips_reference_fallback(self) -> None:
+        """Registry deps must not store dep_ref.reference as resolved_commit.
+
+        dep_ref.reference is a semver range (e.g. '^1.0.0') for registry deps.
+        Storing it as resolved_commit corrupts the lockfile and causes the
+        update plan to show a spurious '^1.0.0 -> -' diff.
+        """
+        ctx = _make_ctx(existing_lockfile=None)
+        dep_ref = _make_dep_ref(reference="^1.0.0")
+        dep_ref.source = "registry"
+        source = self._make_source(ctx, dep_ref, fetched_this_run=False)
+
+        result = source._resolve_cached_commit()
+        assert result is None
+
+    def test_registry_dep_with_lockfile_sha_still_uses_sha(self) -> None:
+        """Registry dep: when lockfile has a real SHA, carry it forward."""
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = "abc1234def5678"
+        existing_lockfile = MagicMock()
+        existing_lockfile.get_dependency.return_value = locked_dep
+
+        ctx = _make_ctx(existing_lockfile=existing_lockfile)
+        dep_ref = _make_dep_ref(reference="^1.0.0")
+        dep_ref.source = "registry"
+        source = self._make_source(ctx, dep_ref, fetched_this_run=False)
+
+        result = source._resolve_cached_commit()
+        assert result == "abc1234def5678"
+
 
 # ---------------------------------------------------------------------------
 # CachedDependencySource.acquire
@@ -762,8 +792,10 @@ class TestFreshDependencySourceAcquire:
         assert result is not None
         assert result.deltas.get("unpinned") == 1
 
-    def test_hash_mismatch_calls_sys_exit(self, tmp_path: Path) -> None:
-        """Content hash mismatch → sys.exit(1)."""
+    def test_hash_mismatch_raises_direct_dependency_error(self, tmp_path: Path) -> None:
+        """Content hash mismatch raises a structured install error."""
+        from apm_cli.install.errors import DirectDependencyError
+
         ctx = _make_ctx(targets=["copilot"], logger=None, tui=None, update_refs=False)
         dep_ref = _make_dep_ref(is_virtual=False, reference="main")
         install_path = tmp_path / "pkg"
@@ -787,12 +819,10 @@ class TestFreshDependencySourceAcquire:
             patch("apm_cli.utils.path_security.safe_rmtree"),
             patch("apm_cli.utils.console._rich_error"),
             patch("apm_cli.utils.console._rich_success"),
-            pytest.raises(SystemExit) as exc_info,
+            pytest.raises(DirectDependencyError, match="Content hash mismatch"),
         ):
             source = self._make_source(ctx, dep_ref, install_path, dep_locked_chk=locked_chk)
             source.acquire()
-
-        assert exc_info.value.code == 1
 
     def test_exception_in_download_records_error_returns_none(self, tmp_path: Path) -> None:
         """Exception in download → diagnostics.error + None returned."""

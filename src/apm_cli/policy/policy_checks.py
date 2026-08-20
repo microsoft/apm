@@ -14,6 +14,7 @@ from pathlib import Path
 from .models import CheckResult, CIAuditResult
 
 _logger = logging.getLogger(__name__)
+FAIL_CLOSED_POLICY_CHECKS = frozenset({"dependency-content-hashes"})
 
 
 # -- Helpers -------------------------------------------------------
@@ -177,7 +178,16 @@ def _check_required_packages_deployed(
     lock: LockFile | None,
     policy: DependencyPolicy,
 ) -> CheckResult:
-    """Check 4: required packages appear in lockfile with deployed files."""
+    """Check 4: required packages are PRESENT in the lockfile (issue #1873, Gap B).
+
+    Asserts package PRESENCE, not materialised ``deployed_files``. A package
+    can be legitimately present-but-parked -- resolved and locked, with its
+    executable primitives gated pending approval (``exec_status =
+    gated_pending_approval``) and therefore zero deployed files yet. The old
+    ``not locked.deployed_files`` test mis-fired on exactly that healthy state
+    and blocked installs that should succeed. Executable trust is now audited
+    separately by ``required-executable-untrusted``.
+    """
     if not policy.effective_require or lock is None:
         return CheckResult(
             name="required-packages-deployed",
@@ -187,32 +197,89 @@ def _check_required_packages_deployed(
 
     dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
-    not_deployed: list[str] = []
+    not_present: list[str] = []
     for req in policy.effective_require:
         pkg_name = req.split("#")[0]
         if pkg_name not in dep_names:
             continue  # not in manifest -- check 3 handles this
 
-        # Find in lockfile by exact key match
-        locked = lock_by_name.get(pkg_name)
-        if not locked or not locked.deployed_files:
-            not_deployed.append(pkg_name)
+        # PRESENCE, not deployment: the package must appear in the lockfile.
+        if lock_by_name.get(pkg_name) is None:
+            not_present.append(pkg_name)
 
-    if not not_deployed:
+    if not not_present:
         return CheckResult(
             name="required-packages-deployed",
             passed=True,
-            message="All required packages deployed",
+            message="All required packages present in lockfile",
         )
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
         message=(
-            f"{len(not_deployed)} required package(s) not deployed. "
+            f"{len(not_present)} required package(s) absent from the lockfile. "
             "Hint: run `apm install --no-policy` to repair the lockfile, "
             "then reinstall normally."
         ),
-        details=not_deployed,
+        details=not_present,
+    )
+
+
+def _check_required_executable_untrusted(
+    deps: list[DependencyReference],
+    lock: LockFile | None,
+    exec_policy: ExecutablesPolicy,
+) -> CheckResult:
+    """Check 4b: required-executable packages must be TRUSTED, not parked.
+
+    For every package in the org ``executables.require`` set, the lockfile's
+    ``exec_status`` must be ``deployed``. A present-but-parked package
+    (``gated_pending_approval``) or a denied one is a hard CI failure here --
+    the install itself SUCCEEDS so a developer can self-approve, but a fleet
+    that mandates the executable cannot ship it untrusted (issue #1873).
+    """
+    required = tuple(exec_policy.require or ())
+    if not required or lock is None:
+        return CheckResult(
+            name="required-executable-untrusted",
+            passed=True,
+            message="No required executables to verify",
+        )
+
+    from ..security.executables import TRUST_DEPLOYED
+
+    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
+    untrusted: list[str] = []
+    for req in required:
+        pkg_name = req.split("#")[0]
+        if pkg_name not in dep_names:
+            continue  # presence is audited by required-packages / -deployed
+        locked = lock_by_name.get(pkg_name)
+        # Trusted when exec_status is absent (no executables declared) or when
+        # the executable gate recorded a deployed state. Gated or denied
+        # required executables are untrusted.
+        if locked is None or (
+            locked.exec_status is not None and locked.exec_status != TRUST_DEPLOYED
+        ):
+            untrusted.append(pkg_name)
+
+    if not untrusted:
+        return CheckResult(
+            name="required-executable-untrusted",
+            passed=True,
+            message="All required executables are trusted",
+        )
+    recommend = set(exec_policy.recommend or ())
+    bulk_eligible = [pkg for pkg in untrusted if pkg in recommend]
+    remedy = "Trust them to deploy: `apm approve <package>` per package."
+    if bulk_eligible:
+        remedy += " Org-recommended packages can be bulk-trusted with `apm approve --recommended`."
+    return CheckResult(
+        name="required-executable-untrusted",
+        passed=False,
+        message=(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}"),
+        details=untrusted,
     )
 
 
@@ -1026,6 +1093,59 @@ def _check_pinned_constraints(
     )
 
 
+def _check_dependency_content_hashes(
+    lockfile,
+    policy: IntegrityPolicy,
+) -> CheckResult:
+    """Check that persisted non-local dependencies carry required hashes.
+
+    The integrity decision remains owned by
+    :func:`apm_cli.install.integrity.enforce_require_hashes`; this adapter only
+    translates its fail-closed result into the public audit check vocabulary.
+    A missing lockfile is handled by the baseline ``lockfile-exists`` check, and
+    a project with no lockfile dependencies satisfies this rule vacuously.
+    """
+    check_name = "dependency-content-hashes"
+    from apm_cli.install.integrity import (
+        enforce_require_hashes,
+        require_hashes_enabled,
+    )
+
+    if not require_hashes_enabled(policy):
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="Dependency content hashes not required by policy",
+        )
+    if lockfile is None:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message=("No lockfile available -- see lockfile-exists for required remediation"),
+        )
+
+    try:
+        enforce_require_hashes(
+            lockfile.get_package_dependencies(),
+            enabled=True,
+        )
+    except RuntimeError as exc:
+        return CheckResult(
+            name=check_name,
+            passed=False,
+            message=(
+                "Locked dependencies are missing required content hashes -- "
+                "run 'apm install' to regenerate them"
+            ),
+            details=[str(exc)],
+        )
+    return CheckResult(
+        name=check_name,
+        passed=True,
+        message="All locked dependencies carry required content hashes",
+    )
+
+
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -1035,7 +1155,7 @@ def run_dependency_policy_checks(
     lockfile=None,
     policy: ApmPolicy,
     mcp_deps=None,
-    effective_target: str | None = None,
+    effective_target: str | list[str] | None = None,
     fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
@@ -1123,6 +1243,8 @@ def run_dependency_policy_checks(
     if _run(_check_required_packages(deps_list, policy.dependencies)):
         return result
     if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
+        return result
+    if _run(_check_required_executable_untrusted(deps_list, lockfile, policy.executables)):
         return result
     if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
         return result
@@ -1236,6 +1358,14 @@ def run_policy_checks(
 
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:
+        return result
+
+    hash_check = _check_dependency_content_hashes(
+        lock,
+        policy.security.integrity,
+    )
+    result.checks.append(hash_check)
+    if fail_fast and not hash_check.passed:
         return result
 
     def _run(check: CheckResult) -> bool:

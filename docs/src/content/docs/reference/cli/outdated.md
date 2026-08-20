@@ -15,10 +15,12 @@ apm outdated [OPTIONS]
 
 ## Description
 
-`apm outdated` reads `apm.lock.yaml` and queries each remote to detect staleness:
+`apm outdated` reads `apm.lock.yaml` and queries each authenticated upstream to
+detect staleness. It does not report locally cached refs as current upstream
+state:
 
 - **Plain tag-pinned deps** (e.g. `v1.2.3` or `1.2.3`): semver compare against the latest matching remote tag.
-- **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref.
+- **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref. For virtual subdirectory packages (installed via `path:` in `apm.yml`), `{name}` is derived from the final path segment, so a dep with `path: packages/my-pkg` resolves tags like `my-pkg_v1.2.3`.
 - **Full-SHA revision-pinned deps**: compare the pinned SHA against the commit behind the latest annotated semver tag. Branches and lightweight tags are ignored.
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
@@ -29,7 +31,7 @@ Common monorepo layouts are detected automatically for `outdated` reporting. Set
 
 Local dependencies and Artifactory-hosted deps are skipped. Legacy `apm.lock` files are migrated to `apm.lock.yaml` automatically on read.
 
-To apply the suggested updates, run `apm install --update` (see [Related](#related)).
+To apply the suggested updates, run [`apm update`](../update/).
 
 ## Options
 
@@ -51,18 +53,19 @@ Sample output:
 
 ```
                         Dependency Status
-  Package                       Current   Latest             Status      Source
-  ----------------------------- --------- ------------------ ----------- ---------------
-  acme/agent-skills             v1.2.0    v1.4.1            outdated    git tags
-  acme/prompt-pack              main      9c1ab2f0          outdated    git branch
-  acme/sha-pinned               a1b2c3d4  v2.0.0 (9e8d7c6b) outdated    git tags
-  acme/lint-rules               v0.3.0    v0.3.0            up-to-date  git tags
-  nadavy/e2e-demo               1.0.1     1.1.1            outdated    registry: corp
-  microsoft/apm-review-panel    0.1.1     0.1.2            outdated    registry: corp (lockfile)
-  acme/deploy-helpers           stable    -                unknown     registry (pinned ref)
-  pirate-skill@apm-marketplace  v0.2.1    v0.3.0 (...)     outdated    marketplace: apm-marketplace
+  Package                       Current          Latest             Status       Source
+  ----------------------------- ---------------- ------------------ ------------ -----------------------
+  acme/agent-skills             v1.2.0           v1.4.1             outdated     git tags
+  acme/prompt-pack              main             9c1ab2f0           outdated     git branch
+  acme/sha-pinned               a1b2c3d4         v2.0.0 (9e8d7c6b)  outdated     git tags
+  acme/lint-rules               v0.3.0           v0.3.0             up-to-date   git tags
+  org/monorepo/packages/my-pkg  my-pkg_v1.0.0    my-pkg_v1.1.0      outdated     git tags
+  nadavy/e2e-demo               1.0.1            1.1.1              outdated     registry: corp
+  microsoft/apm-review-panel    0.1.1            0.1.2              outdated     registry: corp (lockfile)
+  acme/deploy-helpers           stable           -                  unknown      registry (pinned ref)
+  pirate-skill@apm-marketplace  v0.2.1           v0.3.0 (...)       outdated     marketplace: apm-marketplace
 
-  [!] 2 outdated dependencies found
+  [!] 7 outdated dependencies found
 ```
 
 Check user-scope deps installed under `~/.apm/`:
@@ -79,6 +82,22 @@ Show available tags for outdated packages:
 apm outdated --verbose
 ```
 
+### Monorepo subdirectory packages
+
+Monorepo dependency installed via `path:`:
+
+```yaml
+# apm.yml
+- git: https://github.com/org/monorepo.git
+  path: packages/my-pkg
+  ref: my-pkg_v1.0.0
+```
+
+`apm.lock.yaml` records the resolved commit SHA at lock time; the tag ref drives
+`outdated` detection only and is not the integrity pin.
+
+With a newer tag `my-pkg_v1.1.0` on the remote, `apm outdated` reports it as outdated.
+
 Use 8 parallel checks for large dependency sets:
 
 ```bash
@@ -89,9 +108,9 @@ apm outdated -j 8
 
 | Status | Meaning |
 |---|---|
-| `up-to-date` | Locked ref matches the remote. |
+| `up-to-date` | Locked ref matches the current state from the authoritative remote. |
 | `outdated` | A newer tag, branch tip SHA, or registry version in the manifest range is available. |
-| `unknown` | The remote could not be queried, or the ref could not be resolved. For registry deps, also check auth (`APM_REGISTRY_TOKEN_{NAME}`) and that the registry URL is configured. |
+| `unknown` | APM reports `unknown` and continues when the authoritative remote cannot be queried or the ref cannot be resolved. It does not report a cached Git ref as `up-to-date`. For registry deps, also check auth (`APM_REGISTRY_TOKEN_{NAME}`) and that the registry URL is configured. |
 
 Registry `Source` values:
 
@@ -114,7 +133,7 @@ Registry `Source` values:
 
 ## Related
 
-- [`apm install`](../install/) -- pass `--update` to upgrade outdated deps and rewrite the lockfile.
+- [`apm update`](../update/) -- re-resolve outdated deps and rewrite the lockfile after confirmation.
 - [`apm view`](../view/) -- inspect a single package's metadata or available versions.
 - [`apm audit`](../audit/) -- security scan over installed primitives, suitable for CI gating.
 - [Registries guide](../../../guides/registries/) -- declare registries, publish flat archives, and consume registry-sourced deps.

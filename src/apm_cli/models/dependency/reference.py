@@ -3,7 +3,7 @@
 import re
 import urllib.parse
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
@@ -16,38 +16,44 @@ from ...utils.github_host import (
     is_visualstudio_legacy_hostname,
     maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
+    reject_unsupported_ado_server_base_path,
     unsupported_host_error,
     validate_ssh_user,
 )
 from ...utils.path_security import (
     PathTraversalError,
-    ensure_path_within,
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
 from .identity import (
+    _DEFAULT_SCHEME_PORTS,
     _NON_ADO_PATH_SEGMENT_RE,
     InvalidSemverRangeError,
     _is_valid_registry_semver_range,
     _looks_like_invalid_semver_range,
     _path_segment_pattern,
+    _split_shorthand_host_port,
     build_canonical_dependency_string,
     build_dependency_unique_key,
+    is_case_insensitive_package_identity,
+    normalize_package_repo_url,
 )
+from .materialization import build_materialization_path
+from .object_fields import (
+    apply_optional_dependency_fields,
+    local_path_apm_yml_entry,
+    parse_alias_override,
+    reject_unknown_fields,
+    reject_unknown_git_fields,
+)
+from .provider_coordinates import ProviderCoordinateMixin
 from .types import VirtualPackageType
-
-# Identity/semver helpers re-exported from .identity for back-compat imports.
-# Default ports per URI scheme -- used to normalise away redundant
-# explicit ports (e.g. https://host:443/...) so that lockfile keys
-# and error messages stay consistent regardless of how the user
-# spelled the URL.
-_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
 @dataclass
-class DependencyReference:
+class DependencyReference(ProviderCoordinateMixin):
     """Represents a reference to an APM dependency."""
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
@@ -70,6 +76,8 @@ class DependencyReference:
     # Local path dependency fields
     is_local: bool = False  # True if this is a local filesystem dependency
     local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
+    declaring_parent: str | None = None
+    anchored_local_path: str | None = None
 
     # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
     is_parent_repo_inheritance: bool = False
@@ -82,6 +90,7 @@ class DependencyReference:
 
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
+    target_subset: list[str] | None = None  # Sorted lowercase target names, or None = all
 
     # SSH username for SCP-shorthand or ``ssh://`` dependencies. ``None`` for
     # non-SSH inputs. Defaults to ``"git"`` whenever an SSH form was parsed
@@ -109,6 +118,29 @@ class DependencyReference:
     marketplace_name: str | None = None
     marketplace_plugin_name: str | None = None
     marketplace_version_spec: str | None = None
+
+    @property
+    def canonical_repo_url(self) -> str:
+        """Return the comparison-only repository identity."""
+        return normalize_package_repo_url(
+            self.repo_url,
+            host=self.host,
+            source=self.source,
+            registry_prefix=self.artifactory_prefix,
+            is_local=self.is_local,
+            is_marketplace=self.is_marketplace,
+        )
+
+    @property
+    def has_case_insensitive_repo_identity(self) -> bool:
+        """Return whether repository casing is presentation-only."""
+        return is_case_insensitive_package_identity(
+            host=self.host,
+            source=self.source,
+            registry_prefix=self.artifactory_prefix,
+            is_local=self.is_local,
+            is_marketplace=self.is_marketplace,
+        )
 
     @property
     def ref_kind(self) -> str | None:
@@ -156,7 +188,6 @@ class DependencyReference:
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
         ".instructions.md",
-        ".chatmode.md",
         ".agent.md",
     )
 
@@ -181,7 +212,6 @@ class DependencyReference:
             "agents",
             "prompts",
             "instructions",
-            "chatmodes",
             "collections",
             "contexts",
             "memory",
@@ -194,16 +224,27 @@ class DependencyReference:
 
     def is_azure_devops(self) -> bool:
         """Check if this reference points to Azure DevOps."""
-        from ...utils.github_host import is_azure_devops_hostname
-
         return self.host is not None and is_azure_devops_hostname(self.host)
+
+    @classmethod
+    def canonical_ado_coordinates(
+        cls,
+        host: str | None,
+        repo_url: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return canonical ADO coordinates for a host and repository path."""
+        return (
+            cls._validate_final_repo_fields(host, repo_url)
+            if host and is_azure_devops_hostname(host)
+            else (None, None, None)
+        )
 
     @property
     def virtual_type(self) -> "VirtualPackageType | None":
         """Return the type of virtual package, or None if not virtual.
 
         Classification is by extension only -- never by path segment.
-        ``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``
+        ``.prompt.md``/``.instructions.md``/``.agent.md``
         is FILE; everything else is SUBDIRECTORY (resolved at fetch time
         by probing for ``apm.yml``, ``SKILL.md``, ``plugin.json``, etc).
         Paths like ``collections/foo`` (no extension) are SUBDIRECTORY.
@@ -299,7 +340,44 @@ class DependencyReference:
             is_virtual=self.is_virtual,
             virtual_path=self.virtual_path,
             registry_prefix=self.artifactory_prefix,
+            declaring_parent=self.declaring_parent,
+            anchored_local_path=self.anchored_local_path,
+            is_marketplace=self.is_marketplace,
         )
+
+    def get_resolution_key(self) -> str:
+        """Return identity plus the declared ref constraint."""
+        if self.reference:
+            return f"{self.get_unique_key()}#{self.reference}"
+        return self.get_unique_key()
+
+    def get_cycle_key(self) -> str:
+        """Return physical local identity for recursion detection."""
+        if self.is_local and self.anchored_local_path:
+            return f"local:{self.anchored_local_path}"
+        return self.get_unique_key()
+
+    def _format_reference(self, repo_url: str) -> str:
+        """Format one scheme-free reference from the supplied repository path."""
+        if self.is_local and self.local_path:
+            return self.local_path
+
+        host = self.host or default_host()
+        is_default = host.lower() == default_host().lower()
+        host_label = f"{host}:{self.port}" if self.port else host
+
+        if is_default and not self.port and not self.artifactory_prefix:
+            result = repo_url
+        elif self.artifactory_prefix:
+            result = f"{host_label}/{self.artifactory_prefix}/{repo_url}"
+        else:
+            result = f"{host_label}/{repo_url}"
+
+        if self.is_virtual and self.virtual_path:
+            result = f"{result}/{self.virtual_path}"
+        if self.reference:
+            result = f"{result}#{self.reference}"
+        return result
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -318,32 +396,11 @@ class DependencyReference:
         Returns:
             str: Canonical dependency string
         """
-        if self.is_local and self.local_path:
-            return self.local_path
+        return self._format_reference(self.canonical_repo_url)
 
-        host = self.host or default_host()
-
-        is_default = host.lower() == default_host().lower()
-        # Custom port is part of the transport and must travel with the host label.
-        host_label = f"{host}:{self.port}" if self.port else host
-
-        # Start with optional host prefix
-        if is_default and not self.port and not self.artifactory_prefix:
-            result = self.repo_url
-        elif self.artifactory_prefix:
-            result = f"{host_label}/{self.artifactory_prefix}/{self.repo_url}"
-        else:
-            result = f"{host_label}/{self.repo_url}"
-
-        # Append virtual path for virtual packages
-        if self.is_virtual and self.virtual_path:
-            result = f"{result}/{self.virtual_path}"
-
-        # Append reference (branch, tag, commit)
-        if self.reference:
-            result = f"{result}#{self.reference}"
-
-        return result
+    def to_display_reference(self) -> str:
+        """Return a portable reference retaining source repository casing."""
+        return self._format_reference(self.repo_url)
 
     def get_identity(self) -> str:
         """Return the identity of this dependency (canonical form without ref/alias).
@@ -359,14 +416,16 @@ class DependencyReference:
 
         host = self.host or default_host()
         is_default = host.lower() == default_host().lower()
-        host_label = f"{host}:{self.port}" if self.port else host
+        normalized_host = host.lower()
+        host_label = f"{normalized_host}:{self.port}" if self.port else normalized_host
+        repo_url = self.canonical_repo_url
 
         if is_default and not self.port and not self.artifactory_prefix:
-            result = self.repo_url
+            result = repo_url
         elif self.artifactory_prefix:
-            result = f"{host_label}/{self.artifactory_prefix}/{self.repo_url}"
+            result = f"{host_label}/{self.artifactory_prefix}/{repo_url}"
         else:
-            result = f"{host_label}/{self.repo_url}"
+            result = f"{host_label}/{repo_url}"
 
         if self.is_virtual and self.virtual_path:
             result = f"{result}/{self.virtual_path}"
@@ -401,7 +460,7 @@ class DependencyReference:
             str: Host-blind canonical string (e.g., "owner/repo")
         """
         return build_canonical_dependency_string(
-            self.repo_url,
+            self.canonical_repo_url,
             is_local=self.is_local,
             local_path=self.local_path,
             is_virtual=self.is_virtual,
@@ -413,21 +472,6 @@ class DependencyReference:
 
         This is the single source of truth for where a package lives in apm_modules/.
 
-        For regular packages:
-            - GitHub: apm_modules/owner/repo/
-            - ADO: apm_modules/org/project/repo/
-
-        For virtual file/collection packages:
-            - GitHub: apm_modules/owner/<virtual-package-name>/
-            - ADO: apm_modules/org/project/<virtual-package-name>/
-
-        For subdirectory packages (Claude Skills, nested APM packages):
-            - GitHub: apm_modules/owner/repo/subdir/path/
-            - ADO: apm_modules/org/project/repo/subdir/path/
-
-        For local packages:
-            - apm_modules/_local/<directory-name>/
-
         Args:
             apm_modules_dir: Path to the apm_modules directory
 
@@ -437,73 +481,7 @@ class DependencyReference:
         Returns:
             Path: Absolute path to the package installation directory
         """
-        if self.is_marketplace:
-            raise ValueError(
-                f"Cannot compute install path for unresolved marketplace dependency "
-                f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
-            )
-
-        if self.is_local and self.local_path:
-            pkg_dir_name = Path(self.local_path).name
-            validate_path_segments(
-                pkg_dir_name,
-                context="local package path",
-                reject_empty=True,
-            )
-            result = apm_modules_dir / "_local" / pkg_dir_name
-            ensure_path_within(result, apm_modules_dir)
-            return result
-
-        repo_parts = self.repo_url.split("/")
-
-        # Security: reject traversal in repo_url segments (catches lockfile injection)
-        validate_path_segments(self.repo_url, context="repo_url")
-
-        # Security: reject traversal in virtual_path (catches lockfile injection)
-        if self.virtual_path:
-            validate_path_segments(self.virtual_path, context="virtual_path")
-        result: Path | None = None
-
-        if self.is_virtual:
-            # Subdirectory packages (like Claude Skills) should use natural path structure
-            if self.is_virtual_subdirectory():
-                # Use repo path + subdirectory path
-                if self.is_azure_devops() and len(repo_parts) >= 3:
-                    # ADO: org/project/repo/subdir
-                    result = (
-                        apm_modules_dir
-                        / repo_parts[0]
-                        / repo_parts[1]
-                        / repo_parts[2]
-                        / self.virtual_path
-                    )
-                elif len(repo_parts) >= 2:
-                    # owner/repo/subdir or group/subgroup/repo/subdir
-                    result = apm_modules_dir.joinpath(*repo_parts, self.virtual_path)
-            else:
-                # Virtual file/collection: use sanitized package name (flattened)
-                package_name = self.get_virtual_package_name()
-                if self.is_azure_devops() and len(repo_parts) >= 3:
-                    # ADO: org/project/virtual-pkg-name
-                    result = apm_modules_dir / repo_parts[0] / repo_parts[1] / package_name
-                elif len(repo_parts) >= 2:
-                    # owner/virtual-pkg-name (use first segment as namespace)
-                    result = apm_modules_dir / repo_parts[0] / package_name
-        # Regular package: use full repo path
-        elif self.is_azure_devops() and len(repo_parts) >= 3:
-            # ADO: org/project/repo
-            result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2]
-        elif len(repo_parts) >= 2:
-            # owner/repo or group/subgroup/repo (generic hosts)
-            result = apm_modules_dir.joinpath(*repo_parts)
-
-        if result is None:
-            # Fallback: join all parts
-            result = apm_modules_dir.joinpath(*repo_parts)
-
-        # Security: ensure the computed path stays within apm_modules/
-        ensure_path_within(result, apm_modules_dir)
-        return result
+        return build_materialization_path(self, apm_modules_dir)
 
     @staticmethod
     def _reject_shorthand_alias(dependency_str: str) -> None:
@@ -805,6 +783,7 @@ class DependencyReference:
 
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
+            reject_unknown_fields(entry, {"path", "alias", "skills", "targets"}, "path")
             local = entry["path"]
             if not isinstance(local, str) or not local.strip():
                 raise ValueError("'path' field must be a non-empty string")
@@ -815,7 +794,9 @@ class DependencyReference:
                     "or 'path' must be a local filesystem path "
                     "(starting with './', '../', '/', or '~')"
                 )
-            return cls.parse(local)
+            dep = cls.parse(local)
+            apply_optional_dependency_fields(dep, entry)
+            return dep
 
         if "git" not in entry:
             raise ValueError(
@@ -825,12 +806,10 @@ class DependencyReference:
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
-        host_type = cls._parse_host_type(entry.get("type"))
 
         # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
         if git_url == "parent":
-            if host_type is not None:
-                raise ValueError("'type' is only supported for remote git dependencies")
+            reject_unknown_git_fields(entry, parent=True)
             path_raw = entry.get("path")
             if path_raw is None:
                 raise ValueError(
@@ -841,37 +820,26 @@ class DependencyReference:
             normalized_path = cls._normalize_parent_repo_decl_path(path_raw)
 
             ref_override = entry.get("ref")
-            alias_override = entry.get("alias")
             reference: str | None = None
             if ref_override is not None:
                 if not isinstance(ref_override, str) or not ref_override.strip():
                     raise ValueError("'ref' field must be a non-empty string")
                 reference = ref_override.strip()
 
-            alias_val: str | None = None
-            if alias_override is not None:
-                if not isinstance(alias_override, str) or not alias_override.strip():
-                    raise ValueError("'alias' field must be a non-empty string")
-                alias_override = alias_override.strip()
-                if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
-                    raise ValueError(
-                        f"Invalid alias: {alias_override}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
-                    )
-                alias_val = alias_override
-
             return cls(
                 repo_url="_parent",
                 host=None,
                 reference=reference,
-                alias=alias_val,
+                alias=parse_alias_override(entry.get("alias")),
                 virtual_path=normalized_path,
                 is_virtual=True,
                 is_parent_repo_inheritance=True,
             )
 
+        reject_unknown_git_fields(entry, parent=False)
+        host_type = cls._parse_host_type(entry.get("type"))
         sub_path = entry.get("path")
         ref_override = entry.get("ref")
-        alias_override = entry.get("alias")
         allow_insecure = entry.get("allow_insecure", False)
         if not isinstance(allow_insecure, bool):
             raise ValueError("'allow_insecure' field must be a boolean")
@@ -901,65 +869,31 @@ class DependencyReference:
                 raise ValueError("'ref' field must be a non-empty string")
             dep.reference = ref_override.strip()
 
-        if alias_override is not None:
-            if not isinstance(alias_override, str) or not alias_override.strip():
-                raise ValueError("'alias' field must be a non-empty string")
-            alias_override = alias_override.strip()
-            if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
-                raise ValueError(
-                    f"Invalid alias: {alias_override}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
-                )
-            dep.alias = alias_override
-
         # Apply sub-path as virtual package
         if sub_path:
             dep.virtual_path = sub_path
             dep.is_virtual = True
 
-        # Parse skills: field (SKILL_BUNDLE subset selection)
-        skills_raw = entry.get("skills")
-        if skills_raw is not None:
-            if not isinstance(skills_raw, (list,)):
-                raise ValueError("'skills' field must be a list of skill names")
-            if len(skills_raw) == 0:
-                raise ValueError(
-                    "skills: must contain at least one name; "
-                    "remove the field to install all skills in the bundle."
-                )
-            seen: set = set()
-            validated: list = []
-            for name in skills_raw:
-                if not isinstance(name, str) or not name.strip():
-                    raise ValueError("Each entry in 'skills' must be a non-empty string")
-                name = name.strip()
-                # Path safety: reject traversal sequences
-                validate_path_segments(name, context="skills/<name>")
-                if name not in seen:
-                    seen.add(name)
-                    validated.append(name)
-            dep.skill_subset = sorted(validated)
-
+        apply_optional_dependency_fields(dep, entry)
         return dep
 
     @staticmethod
     def _parse_host_type(raw: object) -> str | None:
         """Parse the optional object-form ``type`` host-kind hint.
 
-        Currently only ``gitlab`` is accepted; any other value fails closed with
-        a ``ValueError``. This is a deliberate gate, not an oversight: future
-        host kinds (e.g. ``gitea``, ``bitbucket``) would extend the accepted set
-        here and thread a matching branch through ``AuthResolver.classify_host``
-        and ``host_backends.backend_for``. Until those backends exist, rejecting
-        unknown hints keeps classification explicit rather than silently
-        mis-routing a bespoke host to the GitHub path.
+        Values come from the canonical host-provider registry. Unknown hints
+        fail closed rather than silently selecting a generic transport.
         """
         if raw is None:
             return None
         if not isinstance(raw, str) or not raw.strip():
             raise ValueError("'type' field must be a non-empty string")
         value = raw.strip().lower()
-        if value != "gitlab":
-            raise ValueError(f"'type' field only supports 'gitlab'; got {raw!r}")
+        from apm_cli.core.host_providers import accepted_host_types
+
+        supported = accepted_host_types()
+        if value not in supported:
+            raise ValueError(f"'type' field supports {', '.join(supported)}; got {raw!r}")
         return value
 
     @classmethod
@@ -1137,7 +1071,7 @@ class DependencyReference:
 
         The only parse-time inference kept is **structural**: a path whose
         last segment ends in a virtual file extension
-        (``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``)
+        (``.prompt.md``/``.instructions.md``/``.agent.md``)
         is by shape a virtual file dep -- the file is the last segment and
         the repo is everything before it.  This is not a directory-marker
         heuristic; the file extension is the type.  The shallower boundary
@@ -1159,95 +1093,10 @@ class DependencyReference:
 
     @classmethod
     def _parse_registry_object_entry(cls, entry: dict) -> "DependencyReference":
-        """Parse the object-form registry entry per §3.2.
+        """Parse the object-form registry entry per §3.2. See ``registry_entry.py``."""
+        from .registry_entry import parse_registry_object_entry
 
-        Required keys:
-            id:       <owner>/<repo>   # package identity at the registry
-            version:  <any-string>      # opaque version string; registry resolves it
-
-        Optional:
-            registry: <name>           # routes to named registry; omit to use default
-            path:     prompts/foo.md   # virtual sub-path; omit to install the whole package
-            alias:    <name>           # same meaning as in other object forms
-        """
-        from ...deps.registry.feature_gate import require_package_registry_enabled
-
-        require_package_registry_enabled("Object-form registry dependencies")
-
-        _registry_raw = entry.get("registry")
-        registry_name: str | None = None
-        if _registry_raw is not None:
-            if not isinstance(_registry_raw, str) or not _registry_raw.strip():
-                raise ValueError(
-                    "Object-form registry entry: 'registry' must be a non-empty "
-                    "string (the name of an entry in the apm.yml registries: block)"
-                )
-            registry_name = _registry_raw.strip()
-
-        pkg_id = entry.get("id")
-        if not isinstance(pkg_id, str) or not pkg_id.strip():
-            raise ValueError(
-                "Object-form registry entry: 'id' is required and must be a "
-                "non-empty 'owner/repo' string"
-            )
-        pkg_id = pkg_id.strip()
-        if "/" not in pkg_id:
-            raise ValueError(
-                f"Object-form registry entry: 'id' must be 'owner/repo', got {pkg_id!r}"
-            )
-
-        raw_path = entry.get("path")
-        sub_path: str | None = None
-        if raw_path is not None:
-            if not isinstance(raw_path, str) or not raw_path.strip():
-                raise ValueError(
-                    "Object-form registry entry: 'path' must be a non-empty string "
-                    "when provided (e.g. 'prompts/review.prompt.md')"
-                )
-            sub_path = raw_path.strip().strip("/").replace("\\", "/").strip("/")
-            validate_path_segments(sub_path, context="path")
-
-        version = entry.get("version")
-        if not isinstance(version, str) or not version.strip():
-            raise ValueError("Object-form registry entry: 'version' is required")
-        version = version.strip()
-
-        alias = entry.get("alias")
-        if alias is not None:
-            if not isinstance(alias, str) or not alias.strip():
-                raise ValueError("'alias' field must be a non-empty string")
-            alias = alias.strip()
-            if not re.match(r"^[a-zA-Z0-9._-]+$", alias):
-                raise ValueError(
-                    f"Invalid alias: {alias}. Aliases can only contain "
-                    f"letters, numbers, dots, underscores, and hyphens"
-                )
-
-        # Reject any unknown keys to catch typos early.
-        known = {"registry", "id", "path", "version", "alias"}
-        unknown = set(entry.keys()) - known
-        if unknown:
-            raise ValueError(
-                f"Object-form registry entry has unknown fields: "
-                f"{sorted(unknown)}. Known fields: {sorted(known)}"
-            )
-
-        owner_segments = pkg_id.split("/")
-        validate_path_segments(pkg_id, context="registry id")
-        for seg in owner_segments:
-            if not re.match(r"^[a-zA-Z0-9._-]+$", seg):
-                raise ValueError(f"Invalid registry id segment: {seg!r} in {pkg_id!r}")
-
-        return cls(
-            repo_url=pkg_id,
-            host=default_host(),
-            reference=version,
-            virtual_path=sub_path,
-            is_virtual=sub_path is not None,
-            alias=alias,
-            source="registry",
-            registry_name=registry_name,
-        )
+        return parse_registry_object_entry(cls, entry)
 
     @classmethod
     def _detect_virtual_package(cls, dependency_str: str):
@@ -1541,13 +1390,15 @@ class DependencyReference:
         Validates path components before returning.
 
         Returns:
-            ``(parsed_url, host)``
+            ``(parsed_url, host, port)`` with any custom shorthand port.
         """
         parts = repo_url.split("/")
 
         if "_git" in parts:
             git_idx = parts.index("_git")
             parts = parts[:git_idx] + parts[git_idx + 1 :]
+
+        parts[0], port = _split_shorthand_host_port(parts[0])
 
         if len(parts) >= 3 and is_supported_git_host(parts[0]):
             host = parts[0]
@@ -1615,7 +1466,7 @@ class DependencyReference:
         github_url = urllib.parse.urljoin(f"https://{host}/", quoted_repo)
         parsed_url = urllib.parse.urlparse(github_url)
 
-        return parsed_url, host
+        return parsed_url, host, port
 
     @classmethod
     def _validate_url_repo_path(cls, parsed_url) -> tuple[str, str | None]:
@@ -1791,7 +1642,7 @@ class DependencyReference:
             if port == _DEFAULT_SCHEME_PORTS.get(scheme):
                 port = None
         else:
-            parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
+            parsed_url, host, port = cls._resolve_shorthand_to_parsed_url(repo_url, host)
 
         repo_url, url_virtual_path = cls._validate_url_repo_path(parsed_url)
 
@@ -1811,15 +1662,7 @@ class DependencyReference:
 
     @classmethod
     def _validate_final_repo_fields(cls, host, repo_url):
-        """Validate the final repo_url and extract ADO organisation fields.
-
-        Performs character-set and segment-count validation appropriate for
-        the detected host type (Azure DevOps vs generic git host).
-
-        Returns:
-            ``(ado_organization, ado_project, ado_repo)`` -- all ``None``
-            for non-ADO hosts.
-        """
+        """Validate a repository path and return its ADO coordinates when applicable."""
         is_ado_final = host and is_azure_devops_hostname(host)
         if is_ado_final:
             if not re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._\- ]+/[a-zA-Z0-9._\- ]+$", repo_url):
@@ -1910,7 +1753,7 @@ class DependencyReference:
         # --- Local path detection (must run before URL/host parsing) ---
         if cls.is_local_path(dependency_str):
             local = dependency_str.strip()
-            pkg_name = Path(local).name
+            pkg_name = (PureWindowsPath(local) if "\\" in local else Path(local)).name
             if not pkg_name or pkg_name in (".", ".."):
                 raise ValueError(
                     f"Local path '{local}' does not resolve to a named directory. "
@@ -1930,6 +1773,7 @@ class DependencyReference:
             )
 
         cls._reject_shorthand_alias(dependency_str)
+        reject_unsupported_ado_server_base_path(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 
@@ -1968,7 +1812,8 @@ class DependencyReference:
                 elif _stripped.startswith("http://"):
                     explicit_scheme = "http"
 
-        # Phase 3: final validation and ADO field extraction
+        # Phase 3: full validation (all hosts) + ADO field extraction.
+        # canonical_ado_coordinates is for consumers with validated input only.
         ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(host, repo_url)
 
         if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
@@ -2002,12 +1847,17 @@ class DependencyReference:
     def to_apm_yml_entry(self):
         """Return the entry to store in apm.yml.
 
-        For HTTP (insecure) deps, returns a dict with 'git' and 'allow_insecure' keys.
-        For deps with skill_subset, returns a dict with 'git' and 'skills' keys.
-        For all other deps, returns the canonical string (same as to_canonical()).
+        - Local path deps with optional fields: returns a dict with 'path'.
+        - HTTP (insecure) git deps: returns a dict with 'git' and 'allow_insecure' keys.
+        - Git deps with skill_subset or target_subset: returns a dict with 'git' plus
+          the applicable optional keys.
+        - Registry deps (object-form ``id:``/``registry:``): always returns a dict
+          with 'id', 'version', plus the applicable optional keys.
+        - All other deps: returns a scheme-free string retaining repository casing.
 
         Returns:
-            str or dict: String for simple deps; dict for HTTP or skill-subset deps.
+            str or dict: String for simple deps; dict for local-with-subsets, HTTP,
+            registry, or skill/target-subset deps.
 
         Raises:
             ValueError: If this is an unresolved marketplace dependency.
@@ -2017,9 +1867,33 @@ class DependencyReference:
                 f"Cannot serialize unresolved marketplace dependency "
                 f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
             )
+        if self.source == "registry":
+            entry: dict[str, object] = {"id": self.repo_url}
+            if self.registry_name:
+                entry["registry"] = self.registry_name
+            if self.virtual_path:
+                entry["path"] = self.virtual_path
+            entry["version"] = self.reference
+            if self.alias:
+                entry["alias"] = self.alias
+            if self.skill_subset:
+                entry["skills"] = sorted(self.skill_subset)
+            if self.target_subset:
+                entry["targets"] = sorted(self.target_subset)
+            return entry
+        if self.is_local and self.local_path:
+            if self.skill_subset or self.target_subset or self.alias:
+                return local_path_apm_yml_entry(
+                    self.local_path,
+                    self.alias,
+                    self.skill_subset,
+                    self.target_subset,
+                )
+            return self.to_display_reference()
         if self.is_insecure:
             host = self.host or default_host()
-            entry = {"git": f"http://{host}/{self.repo_url}"}
+            netloc = f"{host}:{self.port}" if self.port else host
+            entry = {"git": f"http://{netloc}/{self.repo_url}"}
             if self.reference:
                 entry["ref"] = self.reference
             if self.alias:
@@ -2027,41 +1901,42 @@ class DependencyReference:
             entry["allow_insecure"] = self.allow_insecure
             if self.skill_subset:
                 entry["skills"] = sorted(self.skill_subset)
+            if self.target_subset:
+                entry["targets"] = sorted(self.target_subset)
             return entry
-        if self.skill_subset:
-            entry = {"git": self.get_identity()}
+        if self.skill_subset or self.target_subset:
+            entry = {"git": self._format_reference(self.repo_url).split("#", 1)[0]}
             if self.reference:
                 entry["ref"] = self.reference
             if self.alias:
                 entry["alias"] = self.alias
-            entry["skills"] = sorted(self.skill_subset)
+            if self.skill_subset:
+                entry["skills"] = sorted(self.skill_subset)
+            if self.target_subset:
+                entry["targets"] = sorted(self.target_subset)
             return entry
-        return self.to_canonical()
+        return self.to_display_reference()
 
     def to_github_url(self) -> str:
-        """Convert to full repository URL.
-
-        For Azure DevOps, generates: https://dev.azure.com/org/project/_git/repo
-        For GitHub, generates: https://github.com/owner/repo
-        For local packages, returns the local path.
-        """
+        """Convert to the canonical repository URL, or return a local path."""
         if self.is_local and self.local_path:
             return self.local_path
 
         host = self.host or default_host()
         netloc = f"{host}:{self.port}" if self.port else host
-
         scheme = "http" if self.is_insecure else "https"
-
         if self.is_azure_devops():
-            # ADO format: https://dev.azure.com/org/project/_git/repo
-            project = urllib.parse.quote(self.ado_project, safe="")
-            repo = urllib.parse.quote(self.ado_repo, safe="")
-            return f"https://{netloc}/{self.ado_organization}/{project}/_git/{repo}"
+            self.validate_provider_coordinates()
+            organization = self.ado_organization
+            ado_project = self.ado_project
+            ado_repo = self.ado_repo
+            project = urllib.parse.quote(ado_project, safe="")
+            repo = urllib.parse.quote(ado_repo, safe="")
+            org_path = "" if is_visualstudio_legacy_hostname(host) else f"{organization}/"
+            return f"https://{netloc}/{org_path}{project}/_git/{repo}"
         elif self.artifactory_prefix:
             return f"{scheme}://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
         else:
-            # Git host format: https://github.com/owner/repo
             return f"{scheme}://{netloc}/{self.repo_url}"
 
     def to_clone_url(self) -> str:

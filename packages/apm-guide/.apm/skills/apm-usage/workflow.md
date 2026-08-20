@@ -13,11 +13,11 @@ cd existing-repo && apm init                   # existing repo
 # 3. Install packages
 apm install microsoft/apm-sample-package#v1.0.0
 
-# 4. Compile (needed for Codex, OpenCode, Gemini, Antigravity, single-file targets)
+# 4. Compile root context (recommended for non-Copilot targets)
 apm compile
 
 # 5. Commit and share
-git add apm.yml apm.lock.yaml .apm/ .github/ .claude/ .cursor/
+git add apm.yml apm.lock.yaml .apm/ .github/ .claude/ .cursor/ .grok/ AGENTS.md
 git commit -m "Add APM dependencies"
 ```
 
@@ -29,7 +29,8 @@ version:       <string>                    # REQUIRED -- semver (e.g. 1.0.0)
 description:   <string>                    # optional
 author:        <string>                    # optional
 license:       <string>                    # optional -- SPDX (e.g. MIT)
-target:        <string | list>              # optional -- vscode|claude|codex|opencode|all (or list: [claude, copilot])
+targets:       <list<enum>>                  # optional -- canonical; includes copilot|claude|grok-build|...
+target:        <string | list>               # legacy compatibility; prefer targets:
 type:          <enum>                      # optional -- instructions|skill|hybrid|prompts
 scripts:       <map<string, string>>       # optional -- named commands
 dependencies:
@@ -39,7 +40,7 @@ devDependencies:                           # optional -- excluded from bundles
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:                               # optional
-  target:      <enum>                      # vscode|claude|codex|opencode|all (or list)
+  target:      <enum>                      # copilot|claude|grok-build|codex|opencode|all (or list)
   strategy:    <enum>                      # distributed|single-file
   output:      <string>                    # custom output path
   chatmode:    <string>                    # chatmode to prepend
@@ -58,35 +59,34 @@ compilation:                               # optional
 
 ### Target auto-detection
 
-When no target is specified, APM auto-detects from project structure. The `target` field accepts a single string or a list:
+When no target is specified, APM auto-detects from project signals. Prefer the
+canonical `targets:` list:
 
 ```yaml
-# Single target
-target: copilot
-
-# Multiple targets -- only these are compiled/installed
-target: [claude, copilot]
+# Only these targets are compiled/installed
+targets: [claude, copilot]
 ```
 
 CLI equivalent: `--target claude,copilot` (comma-separated).
 
-| Condition | Detected target |
-|-----------|-----------------|
-| `.github/` exists only | `vscode` |
-| `.claude/` exists only | `claude` |
-| `.codex/` exists | `codex` |
-| Multiple target folders | `all` |
-| Neither exists | `minimal` (AGENTS.md only) |
+Signals include recognized `.github/` Copilot files and subdirectories for
+`copilot`, `.claude/` or `CLAUDE.md` for `claude`, `.grok/` for stable
+`grok-build`, `.cursor/` or legacy `.cursorrules` for `cursor`, `.codex/` for
+`codex`, and `.gemini/` or `GEMINI.md` for `gemini`. OpenCode, Windsurf, and
+Kiro use `.opencode/`, `.windsurf/`, and `.kiro/`.
 
-Auto-detection only applies when `target:` is omitted entirely. Invalid `target:` values fail at parse time with a message naming the apm.yml path and the offending token. The same shared validator runs for both `apm.yml`'s `target:` and the `--target` CLI flag, so identical input produces identical results at every entry point.
+Auto-detection applies only when both manifest fields are omitted. Prefer
+canonical stable names. The legacy singular `target:` field also accepts CLI
+aliases; experimental targets such as `grok-cloud` cannot be stored in
+`targets:`.
 
 | Input | Result |
 |-------|--------|
 | `target: bogus` (unknown token) | parse error -- fix the typo |
-| `target: ""` or `target: []` (empty) | parse error -- remove the line if you meant auto-detect |
+| `target: ""` or `target: []` (empty) | parse error -- remove the field to auto-detect |
 | `target: [all, claude]` (`all` mixed with other targets) | parse error -- use `all` alone |
-| `target: opencode,claude,copilot,agents` (CSV string in YAML) | accepted; parses identically to the list form `target: [opencode, claude, copilot, agents]` (used to silently zero-deploy before #820 was fixed) |
-| `target:` line omitted | auto-detect from folders (table above) |
+| `target: opencode,claude,copilot` (CSV string in YAML) | accepted; parses identically to the list form |
+| Both fields omitted | auto-detect from the signals above |
 
 ## What to commit
 
@@ -95,7 +95,8 @@ Auto-detection only applies when `target:` is omitted entirely. Invalid `target:
 | `apm.yml` | Yes | Manifest -- declares dependencies |
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits for reproducibility |
 | `.apm/` | Yes | Local primitives (instructions, agents, etc.) |
-| `.github/`, `.claude/`, `.cursor/` | Yes | Deployed files for agent runtimes |
+| Target-owned directories such as `.github/`, `.claude/`, `.grok/`, and `.agents/` | Yes | Deployed files for agent runtimes |
+| `AGENTS.md` | Yes | Compiled root context for agents-family targets |
 | `apm_modules/` | **No** | Downloaded sources -- add to `.gitignore` |
 
 ## Team member setup
@@ -113,4 +114,4 @@ Use `apm install --update` to refresh to latest refs.
 
 ## Local bundle install
 
-`apm install <bundle>` accepts a directory, `.zip` (default), or legacy `.tar.gz` produced by `apm pack` and deploys its contents into the consumer's resolved target. Bundles are target-agnostic; the project decides where files land (same precedence as registry installs: `--target` > `apm.yml` > directory detection). For compile-only targets (OpenCode, Codex, Gemini, Antigravity) instructions stage under `apm_modules/<slug>/.apm/instructions/` and the install prints a hint to run `apm compile` to merge them into the target's single-file format (`AGENTS.md`, `GEMINI.md`).
+`apm install <bundle>` accepts a directory, `.zip` (default), or legacy `.tar.gz` produced by `apm pack` and deploys its contents into the consumer's resolved target. Bundles are target-agnostic; the project decides where files land (same precedence as registry installs: `--target` > `apm.yml` > directory detection). Targets without native instruction deployment (OpenCode, Codex, and Gemini) stage instructions under `apm_modules/<slug>/.apm/instructions/` and print a hint to run `apm compile`. Grok Build deploys native `.grok/rules/`; compile it separately when you also want `AGENTS.md`.

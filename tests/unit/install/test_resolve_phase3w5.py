@@ -79,6 +79,27 @@ def _make_mock_graph(*, circular=None, deps=None):
     return mock_graph
 
 
+def test_materialization_migration_logger_reports_relative_case_change(
+    tmp_path: Path,
+) -> None:
+    """Verbose diagnostics name the old and new package directory spelling."""
+    from apm_cli.install.phases.resolve import _materialization_migration_logger
+
+    logger = MagicMock()
+    modules = tmp_path / "apm_modules"
+    report = _materialization_migration_logger(logger, modules)
+
+    assert report is not None
+    report(
+        modules / "mixedorg" / "mixedchild",
+        modules / "MixedOrg" / "MixedChild",
+    )
+
+    logger.verbose_detail.assert_called_once_with(
+        "    Migrated package directory casing: mixedorg/mixedchild -> MixedOrg/MixedChild"
+    )
+
+
 def _run_ctx(ctx, tmp_path, *, graph=None, extra_env=None, mock_resolver=None):
     mods_dir = tmp_path / "apm_modules"
     env = {"APM_NO_CACHE": "1", **(extra_env or {})}

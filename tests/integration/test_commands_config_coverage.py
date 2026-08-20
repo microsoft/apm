@@ -1462,7 +1462,7 @@ class TestSelfUpdateHelpers:
 
         with patch.object(su, "_is_windows_platform", return_value=False):
             cmd = su._get_installer_run_command("/tmp/install.sh")
-        assert "sh" in cmd[0] or cmd[0] == "/bin/sh"
+        assert "bash" in cmd[0]
         assert "/tmp/install.sh" in cmd
 
     def test_get_update_installer_suffix_unix(self) -> None:

@@ -1,6 +1,24 @@
 """Typed result containers for APM operations."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+
+
+class InstallDisposition(str, Enum):
+    """Canonical completion state for an install attempt."""
+
+    SUCCESS = "success"
+    PARTIAL_SUCCESS = "partial-success"
+    VALIDATION_FAILED = "validation-failed"
+    CANCELLED = "cancelled"
+    DRY_RUN = "dry-run"
+    FAILED = "failed"
 
 
 @dataclass
@@ -12,6 +30,11 @@ class InstallResult:
     agents_integrated: int = 0
     diagnostics: object = None  # DiagnosticCollector or None
     package_types: dict[str, str] = field(default_factory=dict)  # dep_key -> type string
+    disposition: InstallDisposition = InstallDisposition.SUCCESS
+    exit_code: int = 0
+    committed: bool = False
+    error: BaseException | None = field(default=None, repr=False)
+    target_decision: EffectiveTargetDecision | None = None
 
 
 @dataclass

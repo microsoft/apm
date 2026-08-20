@@ -89,8 +89,12 @@ def _make_output_report(**kwargs) -> MarketplaceOutputReport:
 def _make_marketplace_yml_file(tmp_path: Path, content: dict | None = None) -> Path:
     """Write a minimal marketplace.yml and return its path."""
     default = {
+        "name": "test-marketplace",
+        "description": "Fixture marketplace for builder unit coverage",
+        "version": "0.1.0",
+        "owner": {"name": "test-owner"},
         "claude": {"output": "marketplace.json"},
-        "build": {"tag_pattern": "v{version}"},
+        "build": {"tagPattern": "v{version}"},
         "packages": [],
     }
     data = content if content is not None else default

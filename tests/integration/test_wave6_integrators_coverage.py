@@ -15,14 +15,18 @@ Strategy:
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,
     HookIntegrator,
-    _copilot_keys_to_gemini,
     _filter_hook_files_for_target,
     _reinject_apm_source_from_sidecar,
+)
+from apm_cli.integration.hook_native_formats import (
+    _copilot_keys_to_gemini,
     _to_gemini_hook_entries,
 )
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
@@ -606,7 +610,8 @@ class TestToGeminiHookEntries:
     def test_passes_through_already_nested_entry(self):
         entry = {"hooks": [{"type": "command", "command": "echo bye"}]}
         result = _to_gemini_hook_entries([entry])
-        assert result[0] is entry
+        assert result[0] == entry
+        assert result[0] is not entry
 
     def test_propagates_apm_source(self):
         entry = {"type": "command", "bash": "x", "_apm_source": "my-pkg"}
@@ -992,7 +997,12 @@ class TestIntegrateHooksForTarget:
 
         # Create a target with a name not in _MERGE_HOOK_TARGETS
         dummy_target = TargetProfile(
-            name="unknown-target",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="unknown-target",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".unknown",
             primitives={"hooks": PrimitiveMapping("hooks", ".json", "hooks")},
         )

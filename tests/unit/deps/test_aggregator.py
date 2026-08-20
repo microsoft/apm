@@ -130,7 +130,7 @@ class TestScanWorkflowsForDependencies:
                 return_value=["nonexistent.prompt.md"],
             ),
             patch(
-                "apm_cli.deps.aggregator.frontmatter.load",
+                "apm_cli.deps.aggregator.load_frontmatter",
                 side_effect=OSError("file not found"),
             ),
         ):

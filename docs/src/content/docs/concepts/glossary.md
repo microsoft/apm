@@ -100,10 +100,11 @@ Source: `src/apm_cli/core/auth.py`.
 ### harness
 
 The agent runtime that executes primitives: GitHub Copilot (CLI + IDE),
-Claude Code, Cursor, Codex, Gemini, OpenCode, Windsurf. Each harness has
+Claude Code, Grok Build, Cursor, Codex, Gemini, Antigravity, OpenCode,
+Windsurf, and Kiro. Each harness has
 its own primitive directory layout and file format.
 
-NOT the same as a target. The target is the `apm.yml` field that selects
+NOT the same as a target. The target is the manifest or CLI selector for
 which harnesses to compile for; the harness is the runtime itself.
 
 Source: `src/apm_cli/integration/targets.py` (see `KNOWN_TARGETS`).
@@ -212,13 +213,13 @@ Source: `src/apm_cli/policy/`.
 ### primitive
 
 The atomic unit APM ships. The supported kinds are: instructions,
-skills, prompts, agents, hooks, commands, plugins, and MCP servers.
+skills, prompts, agents, hooks, commands, plugins, MCP servers, and experimental canvas extensions.
 Each kind has its own integrator that knows how to deploy it into each
 harness.
 
 NOT every file in a package. Only files matching the primitive layout
 under recognised directories (`agents/`, `skills/`, `prompts/`,
-`instructions/`, `hooks/`, `commands/`) are deployed.
+`instructions/`, `hooks/`, `commands/`, `extensions/`) are deployed.
 
 See: [Primitives and targets](/apm/concepts/primitives-and-targets/).
 Source: `src/apm_cli/integration/`.
@@ -251,8 +252,9 @@ Source: `src/apm_cli/models/apm_package.py`,
 ### target
 
 The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
-compiles for (`copilot`, `claude`, `cursor`, `codex`, `gemini`,
-`opencode`, `windsurf`, `kiro`, or `all`). Drives which integrator runs and
+compiles for (`copilot`, `claude`, `grok-build`, `cursor`, `codex`, `gemini`,
+`antigravity`, `opencode`, `windsurf`, `kiro`, or
+`agent-skills`). `all` is a CLI `--target` value only. Drives which integrator runs and
 which directories receive output during `apm compile`.
 
 NOT the harness itself. Target is the declaration; the harness is the

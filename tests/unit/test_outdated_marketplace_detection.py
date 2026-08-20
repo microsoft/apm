@@ -47,6 +47,8 @@ def _make_dep(
     dep.registry_prefix = registry_prefix
     dep.discovered_via = discovered_via
     dep.marketplace_plugin_name = marketplace_plugin_name
+    dep.is_virtual = False
+    dep.virtual_path = None
     return dep
 
 

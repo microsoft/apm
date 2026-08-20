@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Cursor, Codex, Gemini, Antigravity, OpenCode, and Windsurf. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
+A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Grok Build, Cursor, Codex, Gemini, OpenCode, Windsurf, and Kiro, with Antigravity available as an explicit CLI-only target. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
 
 This page is the canonical reference. Tutorials and how-tos link here; do not duplicate.
 
@@ -33,7 +33,7 @@ Executable, parameterized AI workflows. Equivalent to a callable program for an 
 
 Specialized AI personalities with tool boundaries and expertise scope.
 
-- Source: `.apm/agents/*.agent.md` (legacy: `.chatmode.md`)
+- Source: `.apm/agents/*.agent.md`
 - Deep dive: [Agent workflows](/apm/producer/author-primitives/instructions-and-agents/)
 
 ### Skills
@@ -70,7 +70,7 @@ Model Context Protocol servers declared as dependencies. APM writes the per-harn
 
 ### Canvas extensions (experimental)
 
-GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `extension.mjs` (executable Node.js). Copilot-only. Behind the `canvas` experimental flag; dependency-provided canvases are blocked unless `--trust-canvas-extensions` is passed, because they are arbitrary executable code. Project scope deploys to `.github/extensions/`; `--global` deploys a dependency canvas to `~/.copilot/extensions/` (always requiring the trust flag).
+GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `extension.mjs` (executable Node.js). Copilot-only. Behind the `canvas` experimental flag; dependency-provided canvases are blocked unless approved via the `executables` block in `apm.yml` and `apm approve <pkg>`, because they are arbitrary executable code. Project scope deploys to `.github/extensions/`; `--global` deploys a dependency canvas to `~/.copilot/extensions/` (always requiring approval).
 
 - Source: `.apm/extensions/<name>/extension.mjs`
 - Deploys to: `.github/extensions/<name>/` (project) or `~/.copilot/extensions/<name>/` (`--global`)
@@ -78,12 +78,13 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field and on the `--target` flag. The output directory is where APM writes deployed primitives. The "agent-skills" and "copilot-cowork" targets exist in the registry but are not end-user runtimes; they are covered separately in the experimental reference.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`); `antigravity` remains explicit-only. The output directory is where APM writes deployed primitives.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
 | `copilot` | `.github/` (project), `~/.copilot/` (user scope) | vscode |
 | `claude` | `.claude/` | claude |
+| `grok-build` | `.grok/` | agents |
 | `cursor` | `.cursor/` | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
@@ -96,13 +97,14 @@ Notes per target:
 
 - **copilot** -- GitHub Copilot (CLI + IDE). User-scope partial: prompts and instructions are project-scope only.
 - **claude** -- Claude Code. Full user-scope support. Hooks merge into `.claude/settings.json` rather than living as separate files.
+- **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Instructions are not deployable at user scope (Cursor exposes them via the Settings UI only).
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
 - **antigravity** -- Google Antigravity CLI (`agy`), successor to Gemini CLI. Explicit-only target (`--target antigravity`); the `.agents/` root is shared, so it is never auto-detected and is not part of `--target all`. Instructions deploy as rules under `.agents/rules/`. Skills use `.agents/skills/`. Hooks use Antigravity's native `.agents/hooks.json` schema. MCP servers write to a dedicated `.agents/mcp_config.json`. No commands primitive (legacy Gemini commands convert to skills upstream).
 - **opencode** -- OpenCode. No hooks support.
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
-- **kiro** -- Kiro IDE. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, and MCP lands in `.kiro/settings/mcp.json`.
+- **kiro** -- Kiro IDE/CLI v3. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, MCP lands in `.kiro/settings/mcp.json`, and agents deploy to `.kiro/agents/<stem>.md` with frontmatter filtered to `description`, `model`, and `tools` only.
 
 ## The compatibility matrix
 
@@ -113,17 +115,17 @@ Rows are primitives, columns are harnesses. Cell legend:
 - **unsupported** -- APM does not deliver this primitive to this harness.
 - **gated** -- delivered behind an explicit declaration or trust flag.
 
-| Primitive | Copilot | Claude | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro |
-|---|---|---|---|---|---|---|---|---|---|
-| instructions | native | native | native | compiled | compiled | native | compiled | native | native |
-| prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported |
-| agents | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | unsupported |
-| skills | native | native | native | native | native | native | native | native | native |
-| hooks | native | native | native | native | native | native | unsupported | native | native |
-| commands | unsupported | native | compiled | unsupported | compiled | unsupported | compiled | compiled | unsupported |
-| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
-| MCP servers | native | native | native | native | native | native | native | native | native |
-| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| Primitive | Copilot | Claude | Grok Build | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro |
+|---|---|---|---|---|---|---|---|---|---|---|
+| instructions | native | native | native | native | compiled | compiled | native | compiled | native | native |
+| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported |
+| agents | native | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled |
+| skills | native | native | native | native | native | native | native | native | native | native |
+| hooks | native | native | unsupported | native | native | native | native | unsupported | native | native |
+| commands | unsupported | native | compiled | compiled | unsupported | compiled | unsupported | compiled | compiled | unsupported |
+| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
+| MCP servers | native | native | unsupported | native | native | native | native | native | native | native |
+| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 
 How to read a cell:
 
@@ -131,11 +133,12 @@ How to read a cell:
 - `prompts / claude = compiled` -- APM transforms `.apm/prompts/<n>.prompt.md` into `.claude/commands/<n>.md`. The prompt becomes a `/command`.
 - `agents / gemini = unsupported` -- Gemini CLI has no agents primitive; APM does not deliver `.agent.md` files to it. Their content still reaches Gemini through the compiled `GEMINI.md` if referenced from instructions.
 - `agents / antigravity = unsupported` -- Antigravity CLI has no agents primitive; their content reaches Antigravity through the compiled `AGENTS.md`.
+- `agents / kiro = compiled` -- APM writes `.kiro/agents/<relative-stem>.md`; frontmatter is filtered to `description`, `model`, and `tools` (unsupported tool values fail the deploy). See [targets-matrix](/apm/reference/targets-matrix/#kiro) for the approved tool set.
 - `instructions / antigravity = native` -- APM deploys instructions as plain-markdown rules under `.agents/rules/`.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
 - `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.
-- `canvas / copilot = gated` -- requires the `canvas` experimental flag; a canvas shipped by a dependency is executable code, so it stays blocked until you pass `--trust-canvas-extensions`. First-party canvases in your own package deploy at project scope once the flag is on. With `--global`, a dependency canvas deploys to `~/.copilot/extensions/` and always requires the trust flag (first-party global install is not supported). Every other harness is `unsupported`: a canvas is a Copilot CLI construct only.
+- `canvas / copilot = gated` -- requires the `canvas` experimental flag; a canvas shipped by a dependency is executable code, so it stays blocked until the package is approved via the `executables` block in `apm.yml` (`apm approve <pkg>`). First-party canvases in your own package deploy at project scope once the flag is on. With `--global`, a dependency canvas deploys to `~/.copilot/extensions/` and always requires approval (first-party global install is not supported). Every other harness is `unsupported`: a canvas is a Copilot CLI construct only.
 
 ## Where compiled context files land
 
@@ -170,15 +173,19 @@ Full pattern, the three pack-time gotchas, and verification steps: [Dev-only pri
 
 ## How a target is selected
 
-`apm install` and `apm compile` resolve active targets in this order:
+`apm install` and `apm compile` use the same first three target sources:
 
 1. Explicit `--target <slug>` flag, when passed.
 2. The `targets:` field in `apm.yml`, when present.
-3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) already exists in the workspace is selected.
-4. Fallback: `minimal` -- APM writes `AGENTS.md` only and skips folder
-   integration. Create one of the harness folders above (or set
-   `targets:` explicitly) for full integration.
+3. Auto-detection: recognized
+   [filesystem signals](../../reference/cli/targets/#detection-signals) select
+   the matching harness.
+With no signal, `apm install` exits with a target-selection error. `apm compile`
+retains its legacy `vscode`/minimal fallback.
 
 Unknown target slugs are rejected upstream by the manifest parser; they never silently fall through to the default.
 
-For flag reference and exact resolution semantics, see [`apm compile` and `apm install`](/apm/reference/cli/install/). For policy controls that further restrict which primitives a target may deploy, see [Governance guide](/apm/enterprise/governance-guide/).
+For exact resolution semantics, see [`apm install`](../../reference/cli/install/)
+and [`apm compile`](../../reference/cli/compile/). For policy controls that
+further restrict which primitives a target may deploy, see [Governance
+guide](../../enterprise/governance-guide/).

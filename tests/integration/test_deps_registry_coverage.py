@@ -15,6 +15,7 @@ import base64
 import gzip
 import hashlib
 import io
+import json
 import tarfile
 import zipfile
 from pathlib import Path
@@ -92,6 +93,30 @@ def _make_fake_session(
         response.json.side_effect = ValueError("no json")
         response.content = content
     return session
+
+
+def _streamed_resp(
+    body: Any,
+    *,
+    status: int = 200,
+    content_type: str = "application/json",
+    url: str = "https://registry.example.com/v1/test",
+) -> MagicMock:
+    """Build a Response double matching the streamed/capped read contract.
+
+    The registry client reads bodies incrementally via ``iter_content`` under a
+    byte cap (not buffered ``.json()``), so a faithful double must yield the
+    encoded body through ``iter_content`` and expose a real ``headers`` dict
+    plus ``.url`` (read by the error-detail ``_safe_problem_json`` path).
+    """
+    raw = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
+    resp = MagicMock(spec=requests.Response)
+    resp.status_code = status
+    resp.url = url
+    resp.headers = {"Content-Type": content_type}
+    resp.content = raw
+    resp.iter_content = lambda chunk_size=None: iter([raw] if raw else [])
+    return resp
 
 
 def _anon_auth() -> RegistryAuthContext:
@@ -348,11 +373,9 @@ class TestRegistryClientListVersions:
             ]
         }
         session = MagicMock(spec=requests.Session)
-        resp = MagicMock(spec=requests.Response)
-        resp.status_code = 200
-        resp.url = "https://registry.example.com/v1/packages/acme/tool/versions"
-        resp.headers = {"Content-Type": "application/json"}
-        resp.json.return_value = payload
+        resp = _streamed_resp(
+            payload, url="https://registry.example.com/v1/packages/acme/tool/versions"
+        )
         session.request.return_value = resp
 
         client = RegistryClient("https://registry.example.com", _anon_auth(), session=session)
@@ -404,11 +427,9 @@ class TestRegistryClientListVersions:
     def test_missing_versions_array_raises(self) -> None:
         """Response without 'versions' key raises RegistryError."""
         session = MagicMock(spec=requests.Session)
-        resp = MagicMock(spec=requests.Response)
-        resp.status_code = 200
-        resp.url = "https://registry.example.com/v1/packages/acme/tool/versions"
-        resp.headers = {"Content-Type": "application/json"}
-        resp.json.return_value = {"data": []}
+        resp = _streamed_resp(
+            {"data": []}, url="https://registry.example.com/v1/packages/acme/tool/versions"
+        )
         session.request.return_value = resp
 
         client = RegistryClient("https://registry.example.com", _anon_auth(), session=session)
@@ -419,11 +440,9 @@ class TestRegistryClientListVersions:
         """Auth header is forwarded when a bearer token is configured."""
         payload = {"versions": []}
         session = MagicMock(spec=requests.Session)
-        resp = MagicMock(spec=requests.Response)
-        resp.status_code = 200
-        resp.url = "https://registry.example.com/v1/packages/acme/tool/versions"
-        resp.headers = {"Content-Type": "application/json"}
-        resp.json.return_value = payload
+        resp = _streamed_resp(
+            payload, url="https://registry.example.com/v1/packages/acme/tool/versions"
+        )
         session.request.return_value = resp
 
         client = RegistryClient(
@@ -440,11 +459,10 @@ class TestRegistryClientListVersions:
 
         payload = {"versions": []}
         session = MagicMock(spec=requests.Session)
-        resp = MagicMock(spec=requests.Response)
-        resp.status_code = 200
-        resp.url = "https://registry.example.com/v1/packages/my%2Borg/my%2Btool/versions"
-        resp.headers = {"Content-Type": "application/json"}
-        resp.json.return_value = payload
+        resp = _streamed_resp(
+            payload,
+            url="https://registry.example.com/v1/packages/my%2Borg/my%2Btool/versions",
+        )
         session.request.return_value = resp
 
         client = RegistryClient("https://registry.example.com", _anon_auth(), session=session)
@@ -504,12 +522,11 @@ class TestRegistryClientPublishVersion:
             "published_at": "2024-01-01T00:00:00Z",
         }
         session = MagicMock(spec=requests.Session)
-        resp = MagicMock(spec=requests.Response)
-        resp.status_code = 201
-        resp.url = "https://registry.example.com/v1/packages/acme/tool/versions/1.0.0"
-        resp.headers = {"Content-Type": "application/json"}
-        resp.content = b'{"package":"acme/tool","version":"1.0.0","digest":"sha256:abc123"}'
-        resp.json.return_value = payload
+        resp = _streamed_resp(
+            payload,
+            status=201,
+            url="https://registry.example.com/v1/packages/acme/tool/versions/1.0.0",
+        )
         session.request.return_value = resp
 
         client = RegistryClient("https://registry.example.com", _bearer_auth(), session=session)
@@ -583,10 +600,11 @@ class TestRegistryClientFetchFromUrl:
     def test_http_error_raises(self) -> None:
         """HTTP 404 from fetch_from_url raises RegistryError."""
         session = MagicMock(spec=requests.Session)
-        resp = MagicMock(spec=requests.Response)
-        resp.status_code = 404
-        resp.headers = {"Content-Type": "application/json"}
-        resp.json.return_value = {"title": "Not Found"}
+        resp = _streamed_resp(
+            {"title": "Not Found"},
+            status=404,
+            url="https://registry.example.com/v1/packages/o/r/versions/1.0.0/download",
+        )
         session.request.return_value = resp
 
         client = RegistryClient("https://registry.example.com", _bearer_auth(), session=session)

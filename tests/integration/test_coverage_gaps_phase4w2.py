@@ -726,12 +726,12 @@ class TestMarketplaceValidator:
         results = validate_marketplace(manifest)
         assert all(r.passed for r in results)
 
-    def test_validate_marketplace_returns_two_results(self) -> None:
+    def test_validate_marketplace_returns_structure_schema_and_name_results(self) -> None:
         from apm_cli.marketplace.validator import validate_marketplace
 
         manifest = self._make_manifest([self._make_plugin()])
         results = validate_marketplace(manifest)
-        assert len(results) == 2
+        assert [result.check_name for result in results] == ["Structure", "Schema", "Names"]
 
     def test_validate_plugin_schema_empty_name(self) -> None:
         from apm_cli.marketplace.models import MarketplacePlugin
@@ -1604,11 +1604,13 @@ class TestFileScannerScanLockfilePackages:
         assert scanned == 1
         assert "suspicious.md" in findings
 
-    def test_scans_directory_via_scan_files_in_dir(self, tmp_path: Path) -> None:
+    def test_scans_claimed_directory_recursively(self, tmp_path: Path) -> None:
         from apm_cli.security.file_scanner import scan_lockfile_packages
 
         dir_path = tmp_path / "mypkg"
         dir_path.mkdir()
+        (dir_path / "one.md").write_text("one\n", encoding="ascii")
+        (dir_path / "two.md").write_text("two\n", encoding="ascii")
 
         mock_lock = MagicMock()
         mock_dep = MagicMock()
@@ -1618,7 +1620,6 @@ class TestFileScannerScanLockfilePackages:
         with (
             patch("apm_cli.security.file_scanner.LockFile") as mock_lf,
             patch("apm_cli.security.file_scanner._is_safe_lockfile_path", return_value=True),
-            patch("apm_cli.security.file_scanner._scan_files_in_dir", return_value=({}, 2)),
         ):
             mock_lf.read.return_value = mock_lock
             _findings, scanned = scan_lockfile_packages(tmp_path)
@@ -1815,22 +1816,30 @@ class TestPostDepsLocalPhase:
 
     def test_stale_cleanup_runs_when_old_files(self, tmp_path: Path) -> None:
         from apm_cli.install.phases.post_deps_local import run
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        stale = ".github/instructions/stale.instructions.md"
+        current = ".github/instructions/current.instructions.md"
 
         ctx = self._make_ctx(
-            local_deployed=["current.md"],
-            old_local_deployed=["stale.md", "current.md"],
+            local_deployed=[current],
+            old_local_deployed=[stale, current],
             has_diag_errors=False,
             tmp_path=tmp_path,
         )
+        ctx.targets = [KNOWN_TARGETS["copilot"]]
+        (tmp_path / "apm.yml").write_text("targets:\n  - copilot\n", encoding="utf-8")
 
         mock_cleanup_result = MagicMock()
         mock_cleanup_result.failed = []
         mock_cleanup_result.deleted_targets = []
         mock_cleanup_result.skipped_user_edit = []
-        mock_cleanup_result.deleted = ["stale.md"]
+        mock_cleanup_result.skipped_unmanaged = []
+        mock_cleanup_result.retained = []
+        mock_cleanup_result.deleted = [stale]
 
         mock_lock = MagicMock()
-        mock_lock.local_deployed_files = []
+        mock_lock.local_deployed_files = [stale, current]
         mock_lock.local_deployed_file_hashes = {}
         mock_lock.is_semantically_equivalent.return_value = False
 
@@ -1838,8 +1847,7 @@ class TestPostDepsLocalPhase:
             patch(
                 "apm_cli.integration.cleanup.remove_stale_deployed_files",
                 return_value=mock_cleanup_result,
-            ),
-            patch("apm_cli.integration.base_integrator.BaseIntegrator"),
+            ) as mock_rm,
             patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls,
             patch(
                 "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
@@ -1850,20 +1858,30 @@ class TestPostDepsLocalPhase:
             mock_lf_cls.read.return_value = None
             run(ctx)
 
+        mock_rm.assert_called_once()
+        assert set(mock_rm.call_args.args[0]) == {stale}
+        assert ctx.local_deployed_files == [current]
+
     def test_skips_stale_cleanup_when_local_errors(self, tmp_path: Path) -> None:
         """When integration had errors, stale cleanup is skipped."""
         from apm_cli.install.phases.post_deps_local import run
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        stale = ".github/instructions/stale.instructions.md"
+        current = ".github/instructions/current.instructions.md"
 
         ctx = self._make_ctx(
-            local_deployed=["current.md"],
-            old_local_deployed=["stale.md"],
+            local_deployed=[current],
+            old_local_deployed=[stale],
             has_diag_errors=True,
             local_content_errors_before=0,  # errors happened during integration
             tmp_path=tmp_path,
         )
+        ctx.targets = [KNOWN_TARGETS["copilot"]]
+        (tmp_path / "apm.yml").write_text("targets:\n  - copilot\n", encoding="utf-8")
 
         mock_lock = MagicMock()
-        mock_lock.local_deployed_files = []
+        mock_lock.local_deployed_files = [stale]
         mock_lock.local_deployed_file_hashes = {}
         mock_lock.is_semantically_equivalent.return_value = True
 
@@ -1880,3 +1898,4 @@ class TestPostDepsLocalPhase:
             run(ctx)
 
         mock_rm.assert_not_called()
+        assert set(ctx.local_deployed_files) == {current, stale}

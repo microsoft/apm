@@ -37,6 +37,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -454,7 +455,7 @@ class TestCoworkUninstallSyncIntegration:
 
         # -- setup: cowork target profile ---
         cowork_target = TargetProfile(
-            name="copilot-cowork",
+            capability=TARGET_CAPABILITIES["copilot-cowork"],
             root_dir="copilot-cowork",
             primitives={
                 "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
@@ -503,7 +504,7 @@ class TestCoworkUninstallSyncIntegration:
         project_root.mkdir()
 
         cowork_target = TargetProfile(
-            name="copilot-cowork",
+            capability=TARGET_CAPABILITIES["copilot-cowork"],
             root_dir="copilot-cowork",
             primitives={
                 "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),

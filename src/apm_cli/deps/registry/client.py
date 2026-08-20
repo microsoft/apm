@@ -20,6 +20,7 @@ Design notes:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import urllib.parse
 from collections.abc import Mapping
@@ -29,6 +30,90 @@ from typing import Any
 import requests
 
 from .auth import RegistryAuthContext
+
+# Untrusted registry JSON is read incrementally with a hard byte cap so a
+# multi-GB body cannot OOM the client before any parse runs, and decoded with
+# a widened except so a deep-nested body (RecursionError) or non-UTF-8 body
+# (UnicodeDecodeError) fails CLOSED as a RegistryError instead of escaping the
+# install path uncaught. Mirrors marketplace/client.py::_read_capped_json.
+_MAX_REGISTRY_JSON_BYTES = 10 * 1024 * 1024  # 10 MiB
+_MAX_PROBLEM_JSON_BYTES = 256 * 1024  # RFC 7807 error bodies are small
+_REGISTRY_CHUNK_BYTES = 64 * 1024
+_REGISTRY_JSON_ERRORS = (ValueError, json.JSONDecodeError, RecursionError, UnicodeDecodeError)
+
+
+def _read_capped_body(
+    response: requests.Response,
+    url: str | None,
+    *,
+    max_bytes: int = _MAX_REGISTRY_JSON_BYTES,
+) -> bytes:
+    """Read a response body incrementally, capping total bytes.
+
+    Works for both streamed (``stream=True``) and buffered responses: a
+    buffered response's ``iter_content`` replays the cached body. Raises
+    ``RegistryError`` if the advertised or actual size exceeds ``max_bytes``.
+    Always closes the response.
+    """
+    with contextlib.suppress(ValueError, TypeError):
+        declared = int(response.headers.get("Content-Length", ""))
+        if declared > max_bytes:
+            raise RegistryError(
+                f"registry body exceeds {max_bytes} byte cap (declared {declared})",
+                url=url,
+            )
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        for chunk in response.iter_content(chunk_size=_REGISTRY_CHUNK_BYTES):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > max_bytes:
+                raise RegistryError(
+                    f"registry body exceeds {max_bytes} byte cap",
+                    url=url,
+                )
+            chunks.append(chunk)
+    except requests.RequestException as exc:
+        raise RegistryError(
+            f"transport error reading registry body: {exc}",
+            url=url,
+        ) from exc
+    finally:
+        with contextlib.suppress(Exception):
+            response.close()
+    return b"".join(chunks)
+
+
+def _decode_capped_json(response: requests.Response, endpoint: str, url: str | None) -> Any:
+    """Read a capped body and decode it as JSON, failing closed as RegistryError."""
+    raw = _read_capped_body(response, url)
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except _REGISTRY_JSON_ERRORS as exc:
+        raise RegistryError(
+            f"registry returned non-JSON for {endpoint}: {exc}",
+            url=url,
+        ) from exc
+
+
+def _safe_problem_json(response: requests.Response) -> dict[str, Any]:
+    """Best-effort parse of a small RFC 7807 error body; never raises.
+
+    A hostile 4xx body (deep-nested JSON -> RecursionError, oversized int
+    -> ValueError, non-UTF-8 -> UnicodeDecodeError, or a body over the small
+    problem cap -> RegistryError) degrades to ``{}`` rather than masking the
+    real HTTP error with a parse crash on the install path.
+    """
+    if "json" not in (response.headers.get("Content-Type", "") or ""):
+        return {}
+    try:
+        raw = _read_capped_body(response, response.url, max_bytes=_MAX_PROBLEM_JSON_BYTES)
+        problem = json.loads(raw.decode("utf-8"))
+    except (*_REGISTRY_JSON_ERRORS, RegistryError):
+        return {}
+    return problem if isinstance(problem, dict) else {}
 
 
 class RegistryError(Exception):
@@ -179,13 +264,7 @@ class RegistryClient:
                 url=url,
             ) from exc
         if response.status_code >= 400:
-            problem: dict[str, Any] = {}
-            try:
-                ctype = response.headers.get("Content-Type", "")
-                if "json" in ctype:
-                    problem = response.json()
-            except (ValueError, json.JSONDecodeError):
-                problem = {}
+            problem = _safe_problem_json(response)
             raise RegistryError(
                 _format_error(response.status_code, problem, url),
                 status=response.status_code,
@@ -195,19 +274,15 @@ class RegistryClient:
         return response
 
     def _response_json(self, response: requests.Response, endpoint: str) -> Any:
-        try:
-            return response.json()
-        except (ValueError, json.JSONDecodeError) as exc:
-            raise RegistryError(
-                f"registry returned non-JSON for {endpoint}: {exc}",
-                url=response.url,
-            ) from exc
+        return _decode_capped_json(response, endpoint, response.url)
 
     # ------------------------------------------------------------------ §5.1
     def list_versions(self, owner: str, repo: str) -> list[VersionEntry]:
         """``GET /v1/packages/{owner}/{repo}/versions``."""
         path = f"/v1/packages/{_quote(owner)}/{_quote(repo)}/versions"
-        response = self._request("GET", path)
+        # stream=True so the untrusted /versions body is read incrementally
+        # under the byte cap (a buffered read would OOM before the cap runs).
+        response = self._request("GET", path, stream=True)
         payload = self._response_json(response, "/versions")
         raw_versions = payload.get("versions") if isinstance(payload, dict) else None
         if not isinstance(raw_versions, list):
@@ -265,13 +340,7 @@ class RegistryClient:
         except requests.RequestException as exc:
             raise RegistryError(f"transport error fetching {url}: {exc}", url=url) from exc
         if response.status_code >= 400:
-            problem: dict[str, Any] = {}
-            try:
-                ctype = response.headers.get("Content-Type", "")
-                if "json" in ctype:
-                    problem = response.json()
-            except (ValueError, json.JSONDecodeError):
-                problem = {}
+            problem = _safe_problem_json(response)
             raise RegistryError(
                 _format_error(response.status_code, problem, url),
                 status=response.status_code,
@@ -319,13 +388,7 @@ class RegistryClient:
                 url=url,
             ) from exc
         if response.status_code >= 400:
-            problem: dict[str, Any] = {}
-            try:
-                ctype = response.headers.get("Content-Type", "")
-                if "json" in ctype:
-                    problem = response.json()
-            except (ValueError, json.JSONDecodeError):
-                problem = {}
+            problem = _safe_problem_json(response)
             raise RegistryError(
                 _format_error(response.status_code, problem, url),
                 status=response.status_code,

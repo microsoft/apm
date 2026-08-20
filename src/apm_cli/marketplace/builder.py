@@ -28,16 +28,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
-
 if TYPE_CHECKING:
-    from ..core.auth import HostInfo
+    from ..core.auth import AuthContext, HostInfo
 
 from ..utils.github_host import default_host
 from ..utils.path_security import ensure_path_within
+from ..utils.yaml_io import load_yaml_str
 from ._io import atomic_write
 from ._shared import iter_semver_tags
-from .auth_helpers import resolve_token_for_host
+from .auth_helpers import resolve_auth_for_host
 from .diagnostics import BuildDiagnostic
 from .errors import (
     BuildError,
@@ -59,6 +58,7 @@ from .output_profiles import (
     CODEX_MARKETPLACE_OUTPUT,
     DEFAULT_MARKETPLACE_OUTPUT,
     MarketplaceOutputProfile,
+    resolve_effective_output_path,
 )
 from .ref_resolver import RefResolver
 from .semver import SemVer, parse_semver, satisfies_range
@@ -73,6 +73,21 @@ from .yml_schema import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_METADATA_MAX_BYTES = 64 * 1024
+
+
+def _read_capped_text(resp: Any) -> str:
+    """Read a remote metadata body bounded to ``_LOCAL_METADATA_MAX_BYTES``.
+
+    Cosmetic metadata enrichment must never buffer an unbounded remote
+    ``apm.yml``; a body over the cap raises ``ValueError``, which the caller's
+    ``except Exception`` turns into a fail-closed ``None`` (no metadata) -- the
+    same byte ceiling the local on-disk reader applies.
+    """
+    raw = resp.read(_LOCAL_METADATA_MAX_BYTES + 1)
+    if len(raw) > _LOCAL_METADATA_MAX_BYTES:
+        raise ValueError("remote metadata exceeds byte cap")
+    return raw.decode("utf-8")
+
 
 __all__ = [
     "BuildDiagnostic",
@@ -93,7 +108,7 @@ class ResolvedPackage:
     """A package entry after ref resolution."""
 
     name: str
-    source_repo: str  # "owner/repo" only
+    source_repo: str  # repository path without an optional host
     subdir: str | None  # APM-only (used to compose the output ``source`` object)
     ref: str  # resolved tag name, e.g. "v1.2.0"
     sha: str  # 40-char git SHA
@@ -102,6 +117,9 @@ class ResolvedPackage:
     is_prerelease: bool  # True if the resolved ref was a prerelease semver
     host: str | None = None  # non-default git host parsed from apm.yml source
     source_url: str | None = None  # canonical URL for sourceBase-composed entries
+    # Propagated to marketplace.json so consumer range resolution and
+    # diagnostics use the producer's convention without re-reading apm.yml.
+    effective_tag_pattern: str = ""
 
 
 @dataclass(frozen=True)
@@ -400,11 +418,21 @@ class MarketplaceBuilder:
     def _get_resolver(self) -> RefResolver:
         if self._resolver is None:
             self._ensure_auth()
+            auth = self._resolve_auth_for_host(self._host)
+            harden = getattr(
+                self._auth_resolver,
+                "hardened_git_env_for_context",
+                None,
+            )
             self._resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
                 host=self._host,
-                token=self._github_token,
+                token=auth.token if auth else self._github_token,
+                auth_scheme=getattr(auth, "auth_scheme", "basic"),
+                git_env=(harden(auth) if auth is not None and callable(harden) else None),
+                auth_resolver=self._auth_resolver,
+                auth_target=self._host,
             )
         return self._resolver
 
@@ -438,24 +466,33 @@ class MarketplaceBuilder:
             cached = self._host_resolvers.get(key)
             if cached is not None:
                 return cached
-            token = self._resolve_token_for_host(resolved_host, org=org)
+            auth = self._resolve_auth_for_host(resolved_host, org=org)
+            harden = getattr(
+                self._auth_resolver,
+                "hardened_git_env_for_context",
+                None,
+            )
             logger.debug(
                 "Creating per-host RefResolver for %s (org=%s, token=%s)",
                 resolved_host,
                 org or "none",
-                "set" if token else "unset",
+                "set" if auth else "unset",
             )
             resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
                 host=resolved_host,
-                token=token,
+                token=auth.token if auth else None,
+                auth_scheme=getattr(auth, "auth_scheme", "basic"),
+                git_env=(harden(auth) if auth is not None and callable(harden) else None),
+                auth_resolver=self._auth_resolver,
+                auth_target=resolved_host,
             )
             self._host_resolvers[key] = resolver
             return resolver
 
-    def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
-        """Resolve an auth token for *host* via the shared marketplace helper."""
+    def _resolve_auth_for_host(self, host: str, *, org: str | None = None) -> AuthContext | None:
+        """Resolve the complete auth context for marketplace git operations."""
         if self._options.offline:
             return None
         from ..core.auth import AuthResolver  # lazy import
@@ -464,12 +501,17 @@ class MarketplaceBuilder:
         if resolver is None:
             resolver = AuthResolver()
             self._auth_resolver = resolver
-        return resolve_token_for_host(
+        return resolve_auth_for_host(
             host,
             offline=self._options.offline,
             org=org,
             auth_resolver=resolver,
         )
+
+    def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
+        """Resolve an auth token for *host* via the shared marketplace helper."""
+        auth = self._resolve_auth_for_host(host, org=org)
+        return auth.token if auth else None
 
     def _ensure_auth(self) -> None:
         """Lazily resolve host classification and GitHub token.
@@ -491,13 +533,18 @@ class MarketplaceBuilder:
     # -- output path --------------------------------------------------------
 
     def _output_path(self) -> Path:
-        if self._options.output_override is not None:
-            return self._options.output_override
         yml = self._load_yml()
-        output_path = self._project_root / yml.claude.output
-        # Containment guard -- reject output paths that escape the project root.
-        ensure_path_within(output_path, self._project_root)
-        return output_path
+        overrides = (
+            {DEFAULT_MARKETPLACE_OUTPUT.name: self._options.output_override}
+            if self._options.output_override is not None
+            else None
+        )
+        return resolve_effective_output_path(
+            yml,
+            DEFAULT_MARKETPLACE_OUTPUT,
+            self._project_root,
+            overrides,
+        )
 
     def _mapper_for_profile(self, profile: MarketplaceOutputProfile):
         mapper = MARKETPLACE_OUTPUT_MAPPERS.get(profile.mapper)
@@ -591,6 +638,7 @@ class MarketplaceBuilder:
                 owner_repo,
                 source_host=source_host,
                 source_url=source_url,
+                effective_tag_pattern=entry.tag_pattern or yml.build.tag_pattern,
             )
         # version range resolution
         return self._resolve_version_range(
@@ -610,6 +658,7 @@ class MarketplaceBuilder:
         *,
         source_host: str | None = None,
         source_url: str | None = None,
+        effective_tag_pattern: str = "",
     ) -> ResolvedPackage:
         """Resolve an entry with an explicit ``ref:`` field."""
         ref_text = entry.ref
@@ -629,68 +678,83 @@ class MarketplaceBuilder:
                 is_prerelease=sv.is_prerelease if sv else False,
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
             )
 
         refs = resolver.list_remote_refs(owner_repo)
 
-        # Try as tag first (only check tag refs)
+        # Single-pass index for O(1) lookup by tag name, full refname, and branch
+        tags_by_name: dict[str, Any] = {}
+        refs_by_name: dict[str, Any] = {}
+        branches_by_name: dict[str, Any] = {}
         for remote_ref in refs:
-            if not remote_ref.name.startswith("refs/tags/"):
-                continue
+            refs_by_name[remote_ref.name] = remote_ref
+            if remote_ref.name.startswith("refs/tags/"):
+                tag_name = _strip_ref_prefix(remote_ref.name)
+                tags_by_name[tag_name] = remote_ref
+            elif remote_ref.name.startswith("refs/heads/"):
+                branch_name = remote_ref.name[len("refs/heads/") :]
+                branches_by_name[branch_name] = remote_ref
+
+        # Try as tag first
+        if ref_text in tags_by_name:
+            remote_ref = tags_by_name[ref_text]
             tag_name = _strip_ref_prefix(remote_ref.name)
-            if tag_name == ref_text:
-                sv = parse_semver(tag_name.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=tag_name,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+            sv = parse_semver(tag_name.lstrip("vV"))
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=tag_name,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=sv.is_prerelease if sv else False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
+            )
 
         # Try as full refname
-        for remote_ref in refs:
-            if remote_ref.name == ref_text:
-                short = _strip_ref_prefix(remote_ref.name)
-                is_branch = remote_ref.name.startswith("refs/heads/")
-                if is_branch and not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, short)
-                sv = parse_semver(short.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=short,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+        if ref_text in refs_by_name:
+            remote_ref = refs_by_name[ref_text]
+            short = _strip_ref_prefix(remote_ref.name)
+            is_branch = remote_ref.name.startswith("refs/heads/")
+            if is_branch and not self._options.allow_head:
+                raise HeadNotAllowedError(entry.name, short)
+            sv = parse_semver(short.lstrip("vV"))
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=short,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=sv.is_prerelease if sv else False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
+            )
 
         # Try as branch name
-        for remote_ref in refs:
-            if remote_ref.name == f"refs/heads/{ref_text}":
-                if not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, ref_text)
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=ref_text,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+        if ref_text in branches_by_name:
+            remote_ref = branches_by_name[ref_text]
+            if not self._options.allow_head:
+                raise HeadNotAllowedError(entry.name, ref_text)
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=ref_text,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+                effective_tag_pattern=effective_tag_pattern,
+            )
 
         # HEAD special case
         if ref_text.upper() == "HEAD":
@@ -753,6 +817,7 @@ class MarketplaceBuilder:
             is_prerelease=best_sv.is_prerelease,
             host=self._resolved_output_host(source_host=source_host, source_url=source_url),
             source_url=source_url,
+            effective_tag_pattern=pattern,
         )
 
     # -- concurrent resolution ----------------------------------------------
@@ -864,7 +929,7 @@ class MarketplaceBuilder:
                     _LOCAL_METADATA_MAX_BYTES,
                 )
                 return None
-            data = yaml.safe_load(raw.decode("utf-8"))
+            data = load_yaml_str(raw.decode("utf-8"))
             if not isinstance(data, dict):
                 return None
             result: dict[str, str] = {}
@@ -959,7 +1024,7 @@ class MarketplaceBuilder:
                     req.add_header("Authorization", f"token {token}")
                 try:
                     with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = resp.read().decode("utf-8")
+                        raw = _read_capped_text(resp)
                 except urllib.error.HTTPError as exc:
                     if exc.code != 404:
                         raise
@@ -974,7 +1039,7 @@ class MarketplaceBuilder:
                     if token:
                         req.add_header("Authorization", f"token {token}")
                     with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = resp.read().decode("utf-8")
+                        raw = _read_capped_text(resp)
             else:
                 api_base = (
                     host_info.api_base if host_info else None
@@ -986,8 +1051,8 @@ class MarketplaceBuilder:
                     req.add_header("Authorization", f"token {token}")
 
                 with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                    raw = resp.read().decode("utf-8")
-            data = yaml.safe_load(raw)
+                    raw = _read_capped_text(resp)
+            data = load_yaml_str(raw)
             if not isinstance(data, dict):
                 return None
             result: dict[str, str] = {}
@@ -1131,8 +1196,11 @@ class MarketplaceBuilder:
     ) -> tuple[Path, tuple[str, ...]]:
         """Write the configured Codex marketplace output using resolved packages."""
         yml = self._load_yml()
-        output_path = self._project_root / yml.codex.output
-        ensure_path_within(output_path, self._project_root)
+        output_path = resolve_effective_output_path(
+            yml,
+            CODEX_MARKETPLACE_OUTPUT,
+            self._project_root,
+        )
         output = self.write_output(CODEX_MARKETPLACE_OUTPUT, resolved, output_path)
         return output.output_path, output.warnings
 

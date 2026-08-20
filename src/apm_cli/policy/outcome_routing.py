@@ -33,6 +33,19 @@ if TYPE_CHECKING:  # pragma: no cover - type-checking only
     from apm_cli.policy.schema import ApmPolicy
 
 
+# Genuine resolution failures with no policy usable by approval fallback.
+POLICY_HASH_MISMATCH_OUTCOME = "hash_mismatch"
+POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
+    {
+        "cache_miss_fetch_fail",
+        "garbage_response",
+        POLICY_HASH_MISMATCH_OUTCOME,
+        "incomplete_chain",
+        "malformed",
+    }
+)
+
+
 # Outcomes that honour the project-side ``policy.fetch_failure_default``
 # knob.  Despite the historical name "fetch failure", this set ALSO
 # includes the no-policy outcomes ``no_git_remote`` / ``absent`` /
@@ -60,6 +73,7 @@ _NON_FOUND_LOGGED_OUTCOMES = (
     "malformed",
     "cache_miss_fetch_fail",
     "garbage_response",
+    "incomplete_chain",
 )
 
 
@@ -123,6 +137,22 @@ def route_discovery_outcome(
                 "does not match fetched policy bytes "
                 f"(source={source or 'unknown'}). "
                 "Update apm.yml policy.hash or contact your org admin.",
+                policy_source=source or "unknown",
+            )
+        return None
+
+    if outcome == "incomplete_chain":
+        if logger is not None:
+            logger.policy_discovery_miss(
+                outcome=outcome,
+                source=source,
+                error=fetch_result.error or fetch_result.fetch_error,
+            )
+        if raise_blocking_errors:
+            raise PolicyViolationError(
+                "Install blocked: org policy inheritance chain is incomplete "
+                f"(source={source or 'unknown'}). Restore the unreachable parent "
+                "policy before retrying.",
                 policy_source=source or "unknown",
             )
         return None

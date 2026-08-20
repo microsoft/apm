@@ -10,7 +10,7 @@
 # Pre-agent-steps then download all bundles and restore them in one apm-action call.
 #
 # Source of truth: https://github.com/microsoft/apm/blob/main/.github/workflows/shared/apm.md
-# apm-action pin:  microsoft/apm-action@v1.7.2
+# apm-action pin:  microsoft/apm-action@v1.10.0
 # To check whether a vendored copy is current, compare these two lines.
 #
 # Documentation: https://microsoft.github.io/apm/integrations/gh-aw/
@@ -63,6 +63,16 @@
 #    imports:
 #      - uses: shared/apm.md
 #        with:
+#          target: copilot
+#          packages:
+#            - microsoft/apm-sample-package
+#
+# 5. Pin a specific apm CLI version (overrides the action's built-in default):
+#
+#    imports:
+#      - uses: shared/apm.md
+#        with:
+#          apm-version: '0.20.0'
 #          target: copilot
 #          packages:
 #            - microsoft/apm-sample-package
@@ -157,6 +167,29 @@ import-schema:
       faster bundles. The shared workflow runs apm-action in isolated mode,
       so any apm.yml in the consumer repo is intentionally ignored -- this
       input is the sole target signal.
+
+  # apm CLI version (overrides apm-action's pinned default)
+  apm-version:
+    type: string
+    required: false
+    # MAINTENANCE: this is the apm CLI version gh-aw substitutes when a
+    # consumer omits apm-version. It is forwarded to BOTH the Pack and
+    # Restore steps below, so it alone decides the produced archive format
+    # (an empty string would float apm-action to 'latest' -- never emit
+    # one). It does NOT need to equal apm-action's own apm-version default:
+    # Pack and Restore receive this one value so the CLI cannot skew between
+    # them, and apm-action restores whatever format it detects. The binding
+    # contract (verify-shared-apm-matrix Job C) is that the format THIS
+    # version produces is in the pinned apm-action's detected set. Keep it on
+    # the repo's current CLI line so the default path exercises the shipped
+    # pack format.
+    default: '0.21.0'
+    description: >
+      apm CLI version for apm-action to install, as a bare semver tag (e.g.
+      '0.21.0'); pass 'latest' to opt into floating to the newest release.
+      Omit to use this workflow's pinned default. Applied to both the Pack
+      and Restore apm-action steps so the CLI version cannot skew between
+      packing and restoring.
 
 jobs:
   apm-prep:
@@ -366,10 +399,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Pack APM packages
         id: pack
-        uses: microsoft/apm-action@v1.7.2
+        uses: microsoft/apm-action@v1.10.0
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
+          apm-version: ${{ github.aw.import-inputs.apm-version }}
           dependencies: ${{ steps.list.outputs.deps }}
           isolated: 'true'
           pack: 'true'
@@ -444,12 +478,13 @@ steps:
     id: bundles
     run: |
       set -euo pipefail
-      mapfile -t list < <(find /tmp/gh-aw/apm-bundles -name '*.tar.gz' | sort)
+      mapfile -t list < <(find /tmp/gh-aw/apm-bundles \( -name '*.tar.gz' -o -name '*.zip' \) | sort)
       [ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }
       printf '%s\n' "${list[@]}" > /tmp/gh-aw/apm-bundle-list.txt
   - name: Restore APM packages (all bundles)
-    uses: microsoft/apm-action@v1.7.2
+    uses: microsoft/apm-action@v1.10.0
     with:
+      apm-version: ${{ github.aw.import-inputs.apm-version }}
       bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 ---
 
@@ -461,7 +496,7 @@ in parallel one matrix replica per credential group, packs each group's packages
 with `microsoft/apm-action`, and uploads a per-group bundle artifact. The agent
 job's pre-agent-steps then download all bundles and restore them in a single
 `apm-action` invocation (using the `bundles-file:` input shipped in
-`microsoft/apm-action@v1.7.2`).
+`microsoft/apm-action@v1.10.0`).
 
 ### How it works
 
@@ -475,7 +510,7 @@ job's pre-agent-steps then download all bundles and restore them in a single
 3. **Restore** (agent pre-agent-steps): all `apm-*` artifacts are downloaded,
    validated against the matrix manifest (defends against same-run artifact-name
    collision attacks), and restored in one call via the `bundles-file:` input
-   on `microsoft/apm-action@v1.7.2`.
+   on `microsoft/apm-action@v1.10.0`.
 
 ### Authentication
 

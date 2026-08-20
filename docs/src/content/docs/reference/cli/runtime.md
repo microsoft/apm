@@ -23,6 +23,11 @@ It does not install APM packages and does not deploy primitives. For that, see [
 
 A runtime here is the AI CLI itself (`copilot`, `codex`, `llm`, `gemini`) -- the program that consumes the prompts and skills APM deploys. For the broader concept of harness targets that receive primitives, see [Primitives and targets](../../../concepts/primitives-and-targets/).
 
+Workflow runtime adapters enforce wall-clock deadlines while output streams:
+600 seconds for Copilot and 300 seconds for Codex. On expiry, APM terminates
+and reaps the process instead of waiting for stdout to close first. The LLM
+adapter has no fixed deadline.
+
 ## Subcommands
 
 | Command | Purpose |
@@ -41,6 +46,8 @@ apm runtime setup RUNTIME [--version VERSION] [--vanilla]
 ```
 
 Downloads the runtime binary from its official source and writes a default APM configuration that points at GitHub Models (free) where applicable. On Windows, setup scripts run through PowerShell automatically.
+
+For Codex, APM verifies the GitHub Releases SHA-256 asset digest before extracting the archive and fails if the digest is missing or mismatched.
 
 | Flag | Default | Description |
 |---|---|---|

@@ -1,11 +1,11 @@
 ---
 title: apm view
-description: Inspect package metadata or list remote versions
+description: Inspect package metadata or list package versions
 sidebar:
   order: 5
 ---
 
-Show local metadata for an installed package, or query remote refs without cloning.
+Show local metadata for an installed package, or query package versions without cloning.
 
 ## Synopsis
 
@@ -20,7 +20,7 @@ apm view PACKAGE [FIELD] [OPTIONS]
 `apm view` has two modes, selected by the optional `FIELD` argument:
 
 - **No field** -- read installed package metadata from `apm_modules/` (or `~/.apm/apm_modules/` with `-g`). Local-only; the package must be installed.
-- **`versions` field** -- query the remote for available tags and branches. No local install required.
+- **`versions` field** -- query available versions. Git packages list remote tags and branches without requiring a local install. Registry packages list version and published-timestamp columns. See the `apm view <package> versions` subcommand below for the full registry-routing precedence and escape-hatch details.
 
 When `PACKAGE` matches the `NAME@MARKETPLACE` pattern, `apm view` resolves the plugin against the marketplace manifest and prints its entry (name, version, description, source, tags) instead of a Git repository view. This applies whether or not `versions` is passed.
 
@@ -36,9 +36,9 @@ Output includes: name, version, description, author, source, install path, lockf
 
 ### `apm view <package> versions`
 
-Lists remote tags and branches for the package. Calls the remote -- requires network access, and for private repositories requires `GITHUB_APM_PAT` (see [authentication](../../../consumer/authentication/)).
+Lists available versions for the package. Calls the remote -- requires network access.
 
-Output is a table with name, type (`tag` or `branch`), and short commit SHA.
+For git packages, output is a table with name, type (`tag` or `branch`), and short commit SHA. For registry packages, output is a version and published-timestamp table. Registry packages are identified by three signals checked in order: (1) the `--registry [NAME]` flag forces the registry path; (2) a `source: registry` entry in `apm.lock.yaml` routes the package to the registry that installed it; (3) a configured default registry causes plain shorthands (e.g., `owner/repo`) to route to the registry even without a lockfile entry -- use a full git URL to override this. Private git repositories require `GITHUB_APM_PAT`; private registries use the registry token configured for that registry (see [authentication](../../../consumer/authentication/)).
 
 ## Arguments
 
@@ -49,9 +49,10 @@ Output is a table with name, type (`tag` or `branch`), and short commit SHA.
 
 ## Options
 
-| Option           | Description                                  |
-| ---------------- | -------------------------------------------- |
-| `-g`, `--global` | Inspect a package installed in user scope (`~/.apm/apm_modules/`) |
+| Option              | Description                                  |
+| ------------------- | -------------------------------------------- |
+| `-g`, `--global`    | Inspect a package installed in user scope (`~/.apm/apm_modules/`) |
+| `--registry [NAME]` | List versions from a registry. Omit a value to use the lockfile entry or configured default; provide `NAME` to force a specific named registry. Only valid with the `versions` field. |
 
 ## Examples
 
@@ -67,10 +68,34 @@ Short-name lookup (resolves against `apm_modules/`):
 apm view apm-sample-package
 ```
 
-List remote tags and branches without cloning:
+List git tags and branches without cloning:
 
 ```bash
 apm view microsoft/apm-sample-package versions
+```
+
+List registry versions for an installed registry package:
+
+```bash
+apm view acme/web-skills versions
+```
+
+List versions from the configured default registry (for an unlocked shorthand):
+
+```bash
+apm view acme/web-skills versions --registry
+```
+
+List versions from a specific named registry:
+
+```bash
+apm view acme/web-skills versions --registry my-registry
+```
+
+Force the git path even when a default registry is configured:
+
+```bash
+apm view https://github.com/acme/web-skills versions
 ```
 
 Inspect a package installed at user scope:

@@ -28,6 +28,7 @@ import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -36,6 +37,7 @@ import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate, _debug
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
@@ -62,10 +64,21 @@ def _make_host(
     # Shared auth_resolver mock
     auth = MagicMock()
     ctx = MagicMock()
-    ctx.token = github_token
-    ctx.source = "GITHUB_APM_PAT_ORG" if github_token else ""
+    resolved_token = ado_token if ado_token is not None else github_token
+    ctx.token = resolved_token
+    ctx.source = (
+        "ADO_APM_PAT" if ado_token is not None else ("GITHUB_APM_PAT_ORG" if github_token else "")
+    )
+    ctx.auth_scheme = "basic"
+    ctx.git_env = {}
     auth.resolve.return_value = ctx
     auth.resolve_for_dep.return_value = ctx
+    auth.execute_with_bearer_fallback.side_effect = (
+        lambda _dep, primary_op, _bearer_op, _is_auth_failure: SimpleNamespace(
+            outcome=primary_op(),
+            bearer_attempted=False,
+        )
+    )
     auth.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",
@@ -121,6 +134,7 @@ def _fake_response(
     resp.content = content
     resp.headers = headers or {}
     resp.text = content.decode("utf-8", errors="replace")
+    resp.iter_content.return_value = iter([content] if content else [])
     http_error = requests.exceptions.HTTPError(response=resp)
     resp.raise_for_status.side_effect = http_error if status_code >= 400 else None
     return resp
@@ -178,19 +192,26 @@ class TestResilientGet:
         assert result is resp
         assert mock_get.call_count == 1
 
-    def test_429_triggers_retry_after_wait(self) -> None:
-        """A 429 response should sleep and retry; second attempt succeeds."""
+    def test_passes_stream_flag_to_requests(self) -> None:
+        resp = _fake_response(200, b"ok")
+        with patch("requests.get", return_value=resp) as mock_get:
+            result = self.delegate.resilient_get("https://example.com", {}, stream=True)
+        assert result is resp
+        assert mock_get.call_args.kwargs["stream"] is True
+
+    def test_429_returns_immediately_without_sleep(self) -> None:
+        """A confirmed throttle is returned for the typed caller decision."""
         rate_resp = _fake_response(429, b"slow", headers={"Retry-After": "0.01"})
         ok_resp = _fake_response(200, b"ok")
         with (
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        mock_sleep.assert_called_once()
-        # Wait value should be capped by float("0.01") → ≤ 0.01
-        assert mock_sleep.call_args[0][0] <= 0.02
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
     def test_503_triggers_retry(self) -> None:
         rate_resp = _fake_response(503, b"unavail", headers={})
@@ -199,19 +220,24 @@ class TestResilientGet:
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep"),
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
         assert result is ok_resp
 
-    def test_403_with_rate_limit_remaining_zero_triggers_retry(self) -> None:
-        """403 + X-RateLimit-Remaining: 0 is treated as rate-limited."""
+    def test_403_with_rate_limit_remaining_zero_returns_immediately(self) -> None:
+        """The rate classifier owns this response; transport does not retry it."""
         rate_resp = _fake_response(403, b"rate", headers={"X-RateLimit-Remaining": "0"})
         ok_resp = _fake_response(200, b"ok")
         with (
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
-            patch("time.sleep"),
+            patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
     def test_403_without_rate_limit_header_is_returned_immediately(self) -> None:
         """403 without rate-limit header must NOT trigger retry."""
@@ -221,18 +247,21 @@ class TestResilientGet:
         assert result is forbidden_resp
         assert mock_get.call_count == 1
 
-    def test_rate_limit_exhausts_retries_returns_last_response(self) -> None:
-        """If every attempt is rate-limited, the last rate-limit response is returned."""
+    def test_rate_limit_returns_first_response_without_retry(self) -> None:
+        """A throttle never spends a retry budget."""
         rate_resp = _fake_response(429, b"rate", headers={"Retry-After": "0.001"})
         with (
             patch("requests.get", return_value=rate_resp),
-            patch("time.sleep"),
+            patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=2)
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=2, retry_throttles=False
+            )
         assert result is rate_resp
+        mock_sleep.assert_not_called()
 
-    def test_retry_after_invalid_falls_back_to_backoff(self) -> None:
-        """Non-numeric Retry-After header falls back to exponential back-off."""
+    def test_429_with_invalid_retry_after_still_returns_immediately(self) -> None:
+        """HTTP 429 itself is a confirmed throttle regardless of headers."""
         rate_resp = _fake_response(
             429, b"rate", headers={"Retry-After": "Thu, 01 Jan 2099 00:00:00 GMT"}
         )
@@ -241,14 +270,14 @@ class TestResilientGet:
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        # backoff formula: min(2^0, 30) * (0.5+random) → between 0.5 and 1.5
-        wait_used = mock_sleep.call_args[0][0]
-        assert 0 < wait_used <= 31.0
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
-    def test_reset_at_header_used_when_no_retry_after(self) -> None:
-        """X-RateLimit-Reset is used when Retry-After is absent."""
+    def test_reset_header_does_not_create_a_retry(self) -> None:
+        """Reset metadata is not a retry directive for this transport."""
         import time as _time
 
         future_reset = int(_time.time()) + 2
@@ -258,22 +287,25 @@ class TestResilientGet:
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        # Wait should be ≤ 60 and ≥ 0
-        assert 0 <= mock_sleep.call_args[0][0] <= 60
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
-    def test_reset_at_invalid_falls_back_to_backoff(self) -> None:
-        """Non-numeric X-RateLimit-Reset falls back to exponential back-off."""
+    def test_invalid_reset_header_does_not_create_a_retry(self) -> None:
+        """No header parsing outside the classifier can select a retry."""
         rate_resp = _fake_response(429, b"rate", headers={"X-RateLimit-Reset": "not-a-number"})
         ok_resp = _fake_response(200, b"ok")
         with (
             patch("requests.get", side_effect=[rate_resp, ok_resp]),
             patch("time.sleep") as mock_sleep,
         ):
-            result = self.delegate.resilient_get("https://example.com", {}, max_retries=3)
-        assert result is ok_resp
-        assert mock_sleep.called
+            result = self.delegate.resilient_get(
+                "https://example.com", {}, max_retries=3, retry_throttles=False
+            )
+        assert result is rate_resp
+        mock_sleep.assert_not_called()
 
     def test_connection_error_retries_then_raises(self) -> None:
         """ConnectionError should retry and re-raise after exhaustion."""
@@ -313,8 +345,10 @@ class TestResilientGet:
             with pytest.raises(requests.exceptions.RequestException):
                 self.delegate.resilient_get("https://example.com", {}, max_retries=2)
 
-    def test_rate_limit_remaining_low_debug(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Low but non-zero remaining triggers a debug message."""
+    def test_rate_limit_remaining_low_is_not_logged_by_transport(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Header interpretation remains exclusively in the classifier."""
         resp = _fake_response(200, b"ok", headers={"X-RateLimit-Remaining": "5"})
         with (
             patch("requests.get", return_value=resp),
@@ -322,7 +356,7 @@ class TestResilientGet:
         ):
             self.delegate.resilient_get("https://example.com", {})
         captured = capsys.readouterr()
-        assert "rate limit low" in captured.err.lower()
+        assert "rate limit low" not in captured.err.lower()
 
     def test_rate_limit_remaining_invalid_is_ignored(self) -> None:
         """Non-numeric X-RateLimit-Remaining on success path is silently ignored."""
@@ -524,7 +558,7 @@ class TestDownloadArtifactoryArchive:
     def test_success_extracts_files_stripping_root_prefix(self, tmp_path: Path) -> None:
         zip_bytes = _make_zip({"apm.yml": b"name: test"}, root_prefix="repo-main/")
         resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([resp])
+        d, host = self._delegate([resp])
         with patch(
             "apm_cli.deps.download_strategies.build_artifactory_archive_url",
             return_value=["https://art.example.com/repo.zip"],
@@ -533,6 +567,7 @@ class TestDownloadArtifactoryArchive:
                 "art.example.com", "apm", "owner", "repo", "main", tmp_path
             )
         assert (tmp_path / "apm.yml").read_bytes() == b"name: test"
+        assert host._resilient_get.call_args.kwargs["stream"] is True
 
     def test_http_non_200_tries_next_url(self, tmp_path: Path) -> None:
         zip_bytes = _make_zip({"apm.yml": b"name: test"})
@@ -584,15 +619,10 @@ class TestDownloadArtifactoryArchive:
         assert (tmp_path / "apm.yml").exists()
 
     def test_archive_too_large_skips_to_next(self, tmp_path: Path) -> None:
-        # Use a bytes subclass whose __len__ reports > 500 MB so the guard
-        # triggers the `continue` path without actually allocating 500 MB.
-        class _HugeContent(bytes):
-            def __len__(self) -> int:  # type: ignore[override]
-                return 600 * 1024 * 1024  # 600 MB > default 500 MB limit
-
         huge_resp = MagicMock()
         huge_resp.status_code = 200
-        huge_resp.content = _HugeContent()
+        huge_resp.headers = {"Content-Length": str(600 * 1024 * 1024)}
+        huge_resp.iter_content.return_value = iter(())
 
         zip_bytes = _make_zip({"apm.yml": b"ok"})
         ok_resp = _fake_response(200, zip_bytes)
@@ -603,6 +633,29 @@ class TestDownloadArtifactoryArchive:
                 "https://art.example.com/huge.zip",
                 "https://art.example.com/ok.zip",
             ],
+        ):
+            d.download_artifactory_archive(
+                "art.example.com", "apm", "owner", "repo", "main", tmp_path
+            )
+        assert (tmp_path / "apm.yml").exists()
+
+    def test_archive_stream_limit_skips_to_next_url(self, tmp_path: Path) -> None:
+        huge_resp = MagicMock()
+        huge_resp.status_code = 200
+        huge_resp.headers = {}
+        huge_resp.iter_content.return_value = iter([b"x" * (2 * 1024 * 1024)])
+
+        ok_resp = _fake_response(200, _make_zip({"apm.yml": b"ok"}))
+        d, _ = self._delegate([huge_resp, ok_resp])
+        with (
+            patch.dict("os.environ", {"ARTIFACTORY_MAX_ARCHIVE_MB": "1"}),
+            patch(
+                "apm_cli.deps.download_strategies.build_artifactory_archive_url",
+                return_value=[
+                    "https://art.example.com/huge.zip",
+                    "https://art.example.com/ok.zip",
+                ],
+            ),
         ):
             d.download_artifactory_archive(
                 "art.example.com", "apm", "owner", "repo", "main", tmp_path
@@ -642,6 +695,40 @@ class TestDownloadArtifactoryArchive:
                 "art.example.com", "apm", "owner", "repo", "main", tmp_path
             )
         assert (tmp_path / "README.md").exists()
+
+    def test_single_file_archive_rejects_path_traversal(self, tmp_path: Path) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("../escape.txt", b"nope")
+        resp = _fake_response(200, buf.getvalue())
+        d, _ = self._delegate([resp])
+        with patch(
+            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
+            return_value=["https://art.example.com/single.zip"],
+        ):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                d.download_artifactory_archive(
+                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
+                )
+        assert not (tmp_path.parent / "escape.txt").exists()
+
+    def test_archive_rejects_uncompressed_size_limit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        zip_bytes = _make_zip({"big.bin": b"x" * 2048}, root_prefix="repo-main/")
+        resp = _fake_response(200, zip_bytes)
+        d, _ = self._delegate([resp])
+        monkeypatch.setitem(safe_extract_zip.__kwdefaults__, "max_uncompressed", 1024)
+        with patch(
+            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
+            return_value=["https://art.example.com/repo.zip"],
+        ):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                d.download_artifactory_archive(
+                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
+                )
 
     def test_request_exception_tries_next(self, tmp_path: Path) -> None:
         d, host_mock = self._delegate()
@@ -1331,7 +1418,7 @@ class TestDownloadGithubFile:
         with pytest.raises(RuntimeError, match="File not found"):
             d.download_github_file(self._dep(), "apm.yml", ref="feature/x")
 
-    def test_401_rate_limit_raises_runtime(self) -> None:
+    def test_401_with_rate_headers_remains_an_auth_failure(self) -> None:
         host_mock = _make_host(github_token=None)
         ctx = MagicMock()
         ctx.token = None
@@ -1343,7 +1430,7 @@ class TestDownloadGithubFile:
         host_mock._resilient_get.return_value = resp
 
         with patch.object(d, "try_raw_download", return_value=None):
-            with pytest.raises(RuntimeError, match="rate limit"):
+            with pytest.raises(RuntimeError, match="Authentication failed"):
                 d.download_github_file(self._dep(), "apm.yml")
 
     def test_403_with_token_tries_unauth_retry(self) -> None:

@@ -2,7 +2,7 @@
 
 import os
 
-import frontmatter
+from apm_cli.utils.yaml_io import load_frontmatter
 
 
 class WorkflowDefinition:
@@ -50,7 +50,7 @@ def parse_workflow_file(file_path):
     """
     try:
         with open(file_path, encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            post = load_frontmatter(f)
 
         # Extract name based on file structure
         name = _extract_workflow_name(file_path)

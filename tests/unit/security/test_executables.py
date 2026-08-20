@@ -13,19 +13,23 @@ Covers:
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
+    EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_MCP,
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
+    filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
     parse_allow_executables,
@@ -51,9 +55,9 @@ class TestExecutableDeclaration:
         assert decl.has_executables
 
     def test_has_executables_true_with_mcp_only(self) -> None:
-        """MCP-only packages are not flagged (MCP enforcement deferred)."""
+        """MCP-only packages are now flagged (MCP enforcement is active)."""
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", mcp_count=1)
-        assert not decl.has_executables
+        assert decl.has_executables
 
     def test_has_executables_true_with_bin(self) -> None:
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", bin_count=3)
@@ -64,7 +68,7 @@ class TestExecutableDeclaration:
         assert decl.exec_types == []
 
     def test_exec_types_all(self) -> None:
-        """exec_types only includes enforced types (hooks, bin); MCP is excluded."""
+        """exec_types includes all enforced types (hooks, mcp, bin, canvas)."""
         decl = ExecutableDeclaration(
             package_key="a#1.0",
             package_name="a",
@@ -72,7 +76,9 @@ class TestExecutableDeclaration:
             mcp_count=1,
             bin_count=1,
         )
-        assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
+        assert EXEC_TYPE_HOOKS in decl.exec_types
+        assert EXEC_TYPE_BIN in decl.exec_types
+        assert EXEC_TYPE_MCP in decl.exec_types
 
     def test_exec_types_partial(self) -> None:
         decl = ExecutableDeclaration(
@@ -81,7 +87,7 @@ class TestExecutableDeclaration:
         assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
 
     def test_summary_line(self) -> None:
-        """summary_line only shows enforced types (hooks, bin)."""
+        """summary_line shows all enforced types (hooks, mcp, bin, canvas)."""
         decl = ExecutableDeclaration(
             package_key="a#1.0",
             package_name="a",
@@ -91,7 +97,7 @@ class TestExecutableDeclaration:
         )
         summary = decl.summary_line()
         assert "2 hook(s)" in summary
-        assert "MCP" not in summary
+        assert "1 MCP server(s)" in summary
         assert "3 bin executable(s)" in summary
 
     def test_summary_line_hooks_only(self) -> None:
@@ -249,8 +255,8 @@ class TestScanPackageExecutables:
             )
             decl = scan_package_executables(Path(tmpdir), "mcp-pkg", "1.0")
             assert decl.mcp_count == 2
-            # MCP is scanned but not included in enforced exec_types.
-            assert EXEC_TYPE_MCP not in decl.exec_types
+            # MCP is now enforced so it appears in exec_types.
+            assert EXEC_TYPE_MCP in decl.exec_types
             assert "server-a" in decl.mcp_details
 
     def test_transitive_flag(self) -> None:
@@ -279,6 +285,19 @@ class TestScanPackageExecutables:
             assert decl.hook_count == 1
             assert decl.bin_count == 1
             assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
+
+    def test_detects_canvas_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ext_dir = Path(tmpdir) / ".apm" / "extensions" / "widget"
+            ext_dir.mkdir(parents=True)
+            (ext_dir / "extension.mjs").write_text("export default {};")
+            # A sibling directory without the marker is ignored.
+            (Path(tmpdir) / ".apm" / "extensions" / "nomarker").mkdir()
+
+            decl = scan_package_executables(Path(tmpdir), "canvas-pkg", "1.0")
+            assert decl.canvas_count == 1
+            assert "widget" in decl.canvas_details
+            assert EXEC_TYPE_CANVAS in decl.exec_types
 
 
 # ---------------------------------------------------------------------------
@@ -516,3 +535,136 @@ class TestPromptExecutableApproval:
         decl = self._make_decl()
         result = prompt_executable_approval([decl])
         assert "pkg#1.0" not in result
+
+    @patch("apm_cli.security.executables._is_interactive", return_value=False)
+    def test_non_interactive_message_uses_unified_vocab(self, _mock, capsys) -> None:
+        # M4 (#1873): the live install-gate message must drop the retired
+        # ``allowExecutables`` noun, lead with the bulk one-liner, and offer
+        # the introspection hatch.
+        decl = self._make_decl()
+        with pytest.raises(SystemExit):
+            prompt_executable_approval([decl])
+        out = capsys.readouterr().out
+        assert "allowExecutables" not in out
+        assert "apm approve --recommended" in out
+        assert "apm policy explain" in out
+
+
+class TestAliasDeprecationWarning:
+    """S1 (#1873): the allowExecutables alias warns once, not per-package."""
+
+    def test_warns_once(self, capsys) -> None:
+        import apm_cli.security.executables as ex
+
+        ex._ALIAS_DEPRECATION_WARNED = False
+        ex.warn_allow_executables_alias_once()
+        ex.warn_allow_executables_alias_once()
+        out = capsys.readouterr().out
+        assert out.count("allowExecutables") == 1
+        assert "deprecated" in out
+        assert "executables.allow" in out
+
+    def test_uses_logger_when_given(self) -> None:
+        import apm_cli.security.executables as ex
+
+        ex._ALIAS_DEPRECATION_WARNED = False
+        calls = []
+
+        class _Logger:
+            def warning(self, msg, symbol=None):
+                calls.append(msg)
+
+        ex.warn_allow_executables_alias_once(_Logger())
+        assert len(calls) == 1
+        assert "deprecated" in calls[0]
+
+
+class TestSaveUserExecutablesAtomic:
+    """S3 (#1873): personal consent writes are atomic and owner-only."""
+
+    def test_atomic_write_sets_owner_only_mode(self, tmp_path, monkeypatch) -> None:
+        import json
+
+        import apm_cli.security.executables as ex
+
+        cfg = tmp_path / "config.json"
+        monkeypatch.setattr(ex, "_user_config_file", lambda: cfg)
+        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
+        assert cfg.is_file()
+        # Owner-only perms on the freshly-created file. POSIX mode bits are not
+        # enforced on Windows, where atomic_write_text documents that the mode
+        # hint is silently ignored, so only assert the permission contract on
+        # platforms that honour it.
+        if os.name != "nt":
+            assert (cfg.stat().st_mode & 0o777) == 0o600
+        # Content round-trips and preserves co-resident keys on rewrite.
+        cfg.write_text(json.dumps({"default_client": "vscode"}), encoding="utf-8")
+        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        assert data["default_client"] == "vscode"
+        assert data["executables"]["allow"]["pkg#1.0"]["hooks"] is True
+        # No leftover temp files in the dir.
+        assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
+
+
+# ---------------------------------------------------------------------------
+# filter_mcp_by_allow_executables (fail-closed under v1 deny-wins)
+# ---------------------------------------------------------------------------
+
+
+class _FakeMcpDep:
+    """Minimal stand-in for an MCP dependency exposing ``.name``."""
+
+    def __init__(self, name: str | None) -> None:
+        self.name = name
+
+
+class _RecordingLogger:
+    """Captures verbose_detail / warning calls for assertions."""
+
+    def __init__(self) -> None:
+        self.verbose: list[str] = []
+        self.warnings: list[str] = []
+
+    def verbose_detail(self, message: str, *args, **kwargs) -> None:
+        self.verbose.append(message)
+
+    def warning(self, message: str, *args, **kwargs) -> None:
+        self.warnings.append(message)
+
+
+class TestFilterMcpFailClosed:
+    """filter_mcp_by_allow_executables stays fail-closed under v1 deny-wins.
+
+    The v1 resolver drives the effective map from the project-level
+    ``executables`` block (personal consent merges in elsewhere); these
+    tests confirm the gate filters unapproved and unnamed deps regardless.
+    """
+
+    def test_none_gate_passes_all(self) -> None:
+        deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, None, logger) == deps
+        assert logger.warnings == []
+
+    def test_unapproved_filtered_out(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == []
+        assert logger.warnings  # surfaced a remediation warning
+
+    def test_project_allowed_slug_passes(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
+        assert result == deps
+        assert logger.warnings == []
+
+    def test_unnamed_dep_is_fail_closed(self) -> None:
+        # A falsy/missing name must never bypass the gate.
+        deps = [_FakeMcpDep(None), _FakeMcpDep("")]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
+        assert result == []
+        assert logger.warnings

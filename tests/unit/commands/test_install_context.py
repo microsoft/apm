@@ -29,7 +29,7 @@ class TestInstallContextIsDataclass:
         )
 
     def test_is_not_frozen(self):
-        """The CLI context is mutable (snapshot fields are set after construction)."""
+        """The CLI context remains a mutable command parameter bundle."""
         assert not InstallContext.__dataclass_params__.frozen
 
 
@@ -58,16 +58,14 @@ class TestInstallContextFields:
         "protocol_pref",
         "allow_protocol_fallback",
         "trust_transitive_mcp",
-        "trust_canvas",
         "no_policy",
         "install_mode",
         "packages",
+        "transaction",
         "refresh",
         "legacy_skill_paths",
         # optional (default=None)
         "only_packages",
-        "manifest_snapshot",
-        "snapshot_manifest_path",
         # issue #1203: --frozen + plan-callback for `apm update`
         "frozen",
         "plan_callback",
@@ -75,6 +73,10 @@ class TestInstallContextFields:
         "skill_subset",
         "skill_subset_from_cli",
         "audit_override",
+        "install_result",
+        "target_decision",
+        # issue #1620: per-invocation bin/ consent flag (--trust-bin/--no-trust-bin)
+        "trust_bin",
     )
 
     def test_all_required_fields_present(self):
@@ -122,10 +124,10 @@ class TestInstallContextDefaults:
             protocol_pref=sentinel.PROTO,
             allow_protocol_fallback=False,
             trust_transitive_mcp=False,
-            trust_canvas=False,
             no_policy=False,
             install_mode=sentinel.MODE,
             packages=(),
+            transaction=sentinel.TRANSACTION,
         )
         defaults.update(overrides)
         return InstallContext(**defaults)
@@ -133,14 +135,6 @@ class TestInstallContextDefaults:
     def test_only_packages_defaults_to_none(self):
         ctx = self._build_minimal()
         assert ctx.only_packages is None
-
-    def test_manifest_snapshot_defaults_to_none(self):
-        ctx = self._build_minimal()
-        assert ctx.manifest_snapshot is None
-
-    def test_snapshot_manifest_path_defaults_to_none(self):
-        ctx = self._build_minimal()
-        assert ctx.snapshot_manifest_path is None
 
 
 class TestInstallContextRoundTrip:
@@ -169,10 +163,10 @@ class TestInstallContextRoundTrip:
             protocol_pref=sentinel.PROTO,
             allow_protocol_fallback=True,
             trust_transitive_mcp=True,
-            trust_canvas=True,
             no_policy=True,
             install_mode=sentinel.MODE,
             packages=("owner/repo",),
+            transaction=sentinel.TRANSACTION,
         )
 
         assert ctx.scope is sentinel.SCOPE
@@ -199,6 +193,7 @@ class TestInstallContextRoundTrip:
         assert ctx.no_policy is True
         assert ctx.install_mode is sentinel.MODE
         assert ctx.packages == ("owner/repo",)
+        assert ctx.transaction is sentinel.TRANSACTION
 
     def test_round_trip_optional_fields(self):
         ctx = InstallContext(
@@ -223,15 +218,11 @@ class TestInstallContextRoundTrip:
             protocol_pref=sentinel.PROTO,
             allow_protocol_fallback=False,
             trust_transitive_mcp=False,
-            trust_canvas=False,
             no_policy=False,
             install_mode=sentinel.MODE,
             packages=(),
+            transaction=sentinel.TRANSACTION,
             only_packages=["pkg-a"],
-            manifest_snapshot=b"raw-yml-bytes",
-            snapshot_manifest_path=Path("/proj/apm.yml"),
         )
 
         assert ctx.only_packages == ["pkg-a"]
-        assert ctx.manifest_snapshot == b"raw-yml-bytes"
-        assert ctx.snapshot_manifest_path == Path("/proj/apm.yml")

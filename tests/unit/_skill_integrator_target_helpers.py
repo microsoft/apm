@@ -1,4 +1,8 @@
-"""Shared target doubles for skill integrator unit tests."""
+"""Shared target doubles for skill integrator tests.
+
+The unbound production method intentionally reads the mock's target-profile
+attributes so path behavior stays owned by :class:`TargetProfile`.
+"""
 
 from __future__ import annotations
 

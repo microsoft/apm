@@ -678,6 +678,24 @@ class TestPrivateRepoAuth:
             )
 
 
+def _streamed_json(text: str, status: int = 200):
+    """Fake HTTP response matching the streamed ``iter_content`` + ``stream=True``
+    contract the capped API reader now requires.
+
+    ``headers`` must be a real dict so the Content-Length precheck reads "" rather
+    than a truthy MagicMock that would raise a non-suppressed ``TypeError``.
+    """
+    m = MagicMock()
+    m.status_code = status
+    m.text = text
+    m.headers = {}
+    m.iter_content.side_effect = lambda chunk_size=65536: iter(
+        [text.encode("utf-8")] if text else []
+    )
+    m.close.side_effect = lambda: None
+    return m
+
+
 class TestDirectFetchHostRouting:
     """GitLab v4 Files API vs GitHub Contents; proxy-first unchanged."""
 
@@ -699,12 +717,9 @@ class TestDirectFetchHostRouting:
         )
         captured_urls = []
 
-        def fake_get(url, headers=None, timeout=None):
+        def fake_get(url, headers=None, timeout=None, **kwargs):
             captured_urls.append((url, dict(headers or {})))
-            m = MagicMock()
-            m.status_code = 200
-            m.text = json.dumps(self._JSON)
-            return m
+            return _streamed_json(json.dumps(self._JSON))
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
@@ -734,16 +749,12 @@ class TestDirectFetchHostRouting:
         )
         captured = []
 
-        def fake_get(url, headers=None, timeout=None):
+        def fake_get(url, headers=None, timeout=None, **kwargs):
             hdrs = dict(headers or {})
             captured.append(hdrs)
-            m = MagicMock()
             if hdrs.get("PRIVATE-TOKEN"):
-                m.status_code = 200
-                m.text = json.dumps(self._JSON)
-            else:
-                m.status_code = 404
-            return m
+                return _streamed_json(json.dumps(self._JSON), 200)
+            return _streamed_json("", 404)
 
         with (
             patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-test"}, clear=False),
@@ -766,12 +777,9 @@ class TestDirectFetchHostRouting:
         )
         captured_urls = []
 
-        def fake_get(url, headers=None, timeout=None):
+        def fake_get(url, headers=None, timeout=None, **kwargs):
             captured_urls.append(url)
-            m = MagicMock()
-            m.status_code = 200
-            m.text = json.dumps(self._JSON)
-            return m
+            return _streamed_json(json.dumps(self._JSON))
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
@@ -786,12 +794,9 @@ class TestDirectFetchHostRouting:
         source = _make_source()
         captured_urls = []
 
-        def fake_get(url, headers=None, timeout=None):
+        def fake_get(url, headers=None, timeout=None, **kwargs):
             captured_urls.append(url)
-            m = MagicMock()
-            m.status_code = 200
-            m.json.return_value = self._JSON
-            return m
+            return _streamed_json(json.dumps(self._JSON))
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
@@ -814,12 +819,9 @@ class TestDirectFetchHostRouting:
             )
             captured_urls = []
 
-            def fake_get(url, headers=None, timeout=None):
+            def fake_get(url, headers=None, timeout=None, **kwargs):
                 captured_urls.append(url)
-                m = MagicMock()
-                m.status_code = 200
-                m.json.return_value = self._JSON
-                return m
+                return _streamed_json(json.dumps(self._JSON))
 
             with (
                 patch(

@@ -91,7 +91,7 @@ class PackageValidator:
         # HYBRID and CLAUDE_SKILL layouts may ship without .apm/, so the
         # "no primitives" warning would be misleading for those shapes.
         if apm_dir.exists() and apm_dir.is_dir():
-            primitive_types = ["instructions", "chatmodes", "contexts", "prompts"]
+            primitive_types = ["instructions", "agents", "contexts", "prompts"]
             has_primitives = False
 
             for primitive_type in primitive_types:
@@ -152,7 +152,7 @@ class PackageValidator:
             issues.append("Missing .apm directory")
             return issues
 
-        primitive_types = ["instructions", "chatmodes", "contexts", "prompts"]
+        primitive_types = ["instructions", "agents", "contexts", "prompts"]
         found_primitives = False
 
         for primitive_type in primitive_types:
@@ -182,7 +182,7 @@ class PackageValidator:
 
         Args:
             filename: The filename to validate
-            primitive_type: Type of primitive (instructions, chatmodes, etc.)
+            primitive_type: Type of primitive (instructions, agents, etc.)
 
         Returns:
             bool: True if filename is valid
@@ -199,7 +199,7 @@ class PackageValidator:
         name_without_ext = filename[:-3]  # Remove .md
         suffix_map = {
             "instructions": ".instructions",
-            "chatmodes": ".chatmode",
+            "agents": ".agent",
             "contexts": ".context",
             "prompts": ".prompt",
         }
@@ -233,7 +233,7 @@ class PackageValidator:
         apm_dir = package_path / ".apm"
         if apm_dir.exists():
             primitive_count = 0
-            for primitive_type in ["instructions", "chatmodes", "contexts", "prompts"]:
+            for primitive_type in ["instructions", "agents", "contexts", "prompts"]:
                 primitive_dir = apm_dir / primitive_type
                 if primitive_dir.exists():
                     primitive_count += len(list(primitive_dir.glob("*.md")))

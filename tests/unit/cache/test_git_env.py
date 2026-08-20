@@ -13,6 +13,13 @@ from apm_cli.utils.git_env import (
     reset_git_cache,
 )
 
+# Entire module: this is the canonical owner of resolved,
+# PATH-independent git executable lookup (microsoft/apm#2233's bare
+# ["git", ...] argv WinError 2 class). Selected by the PR-time Windows
+# Compatibility Gate via `pytest -m windows_compat`; also runs on
+# every other OS.
+pytestmark = pytest.mark.windows_compat
+
 
 class TestGetGitExecutable:
     """Test cached git binary lookup."""
@@ -42,15 +49,14 @@ class TestGetGitExecutable:
         with pytest.raises(FileNotFoundError, match=r"git executable not found"):
             get_git_executable()
 
-    @patch("shutil.which", return_value=None)
-    def test_cached_failure(self, mock_which) -> None:
-        """Once git is determined missing, subsequent calls raise immediately."""
+    @patch("shutil.which", side_effect=[None, "/usr/bin/git"])
+    def test_transient_failure_does_not_poison_later_resolution(self, mock_which) -> None:
+        """A transient PATH miss raises but remains retryable."""
         with pytest.raises(FileNotFoundError):
             get_git_executable()
-        # Second call should also raise without calling which again
-        with pytest.raises(FileNotFoundError):
-            get_git_executable()
-        mock_which.assert_called_once()
+
+        assert get_git_executable() == "/usr/bin/git"
+        assert mock_which.call_count == 2
 
 
 class TestGitSubprocessEnv:

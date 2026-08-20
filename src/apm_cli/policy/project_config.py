@@ -37,6 +37,8 @@ from typing import Any
 
 import yaml
 
+from apm_cli.utils.yaml_io import load_yaml_str
+
 _VALID_FETCH_FAILURE_DEFAULT = {"warn", "block"}
 _DEFAULT = "warn"
 
@@ -98,7 +100,7 @@ def _read_or_default(project_root: Path, default: str) -> str:
         return default
     try:
         raw = apm_yml.read_text(encoding="utf-8")
-        data = yaml.safe_load(raw)
+        data = load_yaml_str(raw)
     except (OSError, yaml.YAMLError):
         return default
     if not isinstance(data, dict):
@@ -191,7 +193,7 @@ def read_project_policy_hash_pin(
         return None
     try:
         raw_text = apm_yml.read_text(encoding="utf-8")
-        data = yaml.safe_load(raw_text)
+        data = load_yaml_str(raw_text)
     except (OSError, yaml.YAMLError):
         return None
     if not isinstance(data, dict):

@@ -217,9 +217,9 @@ class TestParseVirtualPackages:
         assert ref.is_virtual_file() is True
 
     def test_virtual_file_chatmode(self) -> None:
-        ref = _DR().parse("owner/repo/chatmodes/review.chatmode.md")
+        ref = _DR().parse("owner/repo/agents/review.agent.md")
         assert ref.is_virtual is True
-        assert ref.virtual_path == "chatmodes/review.chatmode.md"
+        assert ref.virtual_path == "agents/review.agent.md"
 
     def test_virtual_file_agent(self) -> None:
         ref = _DR().parse("owner/repo/agents/my-agent.agent.md")
@@ -811,19 +811,19 @@ class TestDownloadVirtualFilePackage:
             with pytest.raises(RuntimeError, match="Failed to download virtual package"):
                 dl.download_virtual_file_package(dep, tmp_path / "out")
 
-    def test_chatmode_extension_placed_in_chatmodes_dir(self, tmp_path: Path) -> None:
+    def test_chatmode_extension_placed_in_agents_dir(self, tmp_path: Path) -> None:
         dl = _make_downloader()
         dep = _make_dep_ref(
             repo_url="owner/repo",
             is_virtual=True,
-            virtual_path="chatmodes/review.chatmode.md",
+            virtual_path="agents/review.agent.md",
         )
         with (
             patch.object(dl, "_resolve_commit_sha_for_ref", return_value=None),
             patch.object(dl, "download_raw_file", return_value=b"# Chatmode"),
         ):
             dl.download_virtual_file_package(dep, tmp_path / "out")
-        assert (tmp_path / "out" / ".apm" / "chatmodes" / "review.chatmode.md").exists()
+        assert (tmp_path / "out" / ".apm" / "agents" / "review.agent.md").exists()
 
 
 # ============================================================================
@@ -1154,6 +1154,7 @@ class TestRunInstallPipelineEarlyExits:
                 pkg,
                 update_refs=False,
                 plan_callback=_cancel_callback,
+                target="copilot",
             )
         assert isinstance(result, InstallResult)
 
@@ -1440,9 +1441,7 @@ class TestDiffScratchAgainstProject:
             p.parent.mkdir(parents=True)
             p.write_bytes(content)
 
-        mock_lf = MagicMock()
-        mock_lf.dependencies = {}
-        mock_lf.local_deployed_files = []
+        mock_lf = self._make_lockfile({".apm/instructions/rules.instructions.md": "pkg"})
         findings = diff_scratch_against_project(scratch, project, mock_lf, targets=[])
         assert findings == []
 
@@ -1722,15 +1721,17 @@ class TestDriftDataClasses:
 class TestMaterializeInstallPath:
     """_materialize_install_path returns correct paths and raises on misses."""
 
-    def test_not_implemented_for_non_cache_only(self, tmp_path: Path) -> None:
-        from apm_cli.install.drift import _materialize_install_path
+    def test_non_cache_only_requires_downloader(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import CacheMissError, _materialize_install_path
 
         lock_dep = MagicMock()
         lock_dep.source = "github.com"
         lock_dep.local_path = None
         lock_dep.resolved_commit = "abc123"
+        lock_dep.repo_url = "owner/repo"
+        lock_dep.to_dependency_ref.return_value = _make_dep_ref(repo_url="owner/repo")
 
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(CacheMissError, match="no downloader"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=False)
 
     def test_local_dep_returns_project_subpath(self, tmp_path: Path) -> None:

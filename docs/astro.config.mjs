@@ -10,6 +10,9 @@ import mermaid from 'astro-mermaid';
 export default defineConfig({
 	site: 'https://microsoft.github.io',
 	base: '/apm/',
+	markdown: {
+		gfm: true,
+	},
 	trailingSlash: 'always',
 	prefetch: {
 		prefetchAll: true,
@@ -28,6 +31,10 @@ export default defineConfig({
 		// Legacy enterprise slugs
 		'/enterprise/teams': '/apm/enterprise/making-the-case',
 		'/enterprise/governance': '/apm/enterprise/governance-guide',
+		// Enterprise IA consolidation: retired pages -> merged canonicals
+		'/enterprise/governance-overview': '/apm/enterprise',
+		'/enterprise/security-and-supply-chain': '/apm/enterprise/security',
+		'/enterprise/apm-policy-getting-started': '/apm/enterprise/apm-policy',
 		// Legacy intro section -> concepts
 		'/introduction/what-is-apm': '/apm/concepts/what-is-apm',
 		'/introduction/why-apm': '/apm/concepts/the-three-promises',
@@ -200,21 +207,44 @@ export default defineConfig({
 					label: 'Govern at scale (Enterprise)',
 					items: [
 						{ label: 'Overview', slug: 'enterprise' },
-						{ label: 'Making the case', slug: 'enterprise/making-the-case' },
-						{ label: 'Adoption playbook', slug: 'enterprise/adoption-playbook' },
-						{ label: 'Governance overview', slug: 'enterprise/governance-overview' },
-						{ label: 'Governance guide', slug: 'enterprise/governance-guide' },
-						{ label: 'Policy: getting started', slug: 'enterprise/apm-policy-getting-started' },
-						{ label: 'Policy pilot', slug: 'enterprise/policy-pilot' },
-						{ label: 'Policy files', slug: 'enterprise/apm-policy' },
-						{ label: 'Policy reference', slug: 'enterprise/policy-reference' },
-						{ label: 'Enforce in CI', slug: 'enterprise/enforce-in-ci' },
-						{ label: 'Security model', slug: 'enterprise/security' },
-						{ label: 'Security and supply chain', slug: 'enterprise/security-and-supply-chain' },
-						{ label: 'Drift detection', slug: 'enterprise/drift-detection' },
-						{ label: 'Registry proxy and air-gapped', slug: 'enterprise/registry-proxy' },
-						{ label: 'Registries', slug: 'guides/registries' },
-						{ label: 'GitHub rulesets', slug: 'enterprise/github-rulesets' },
+						{
+							label: 'Decide',
+							items: [
+								{ label: 'Making the case', slug: 'enterprise/making-the-case' },
+								{ label: 'Adoption playbook', slug: 'enterprise/adoption-playbook' },
+							],
+						},
+						{
+							label: 'Secure',
+							items: [
+								{ label: 'Security model', slug: 'enterprise/security' },
+								{ label: 'Lifecycle scripts', slug: 'enterprise/lifecycle-scripts' },
+							],
+						},
+						{
+							label: 'Author policy',
+							items: [
+								{ label: 'Policy files', slug: 'enterprise/apm-policy' },
+								{ label: 'Policy pilot', slug: 'enterprise/policy-pilot' },
+								{ label: 'Policy reference', slug: 'enterprise/policy-reference' },
+							],
+						},
+						{
+							label: 'Enforce',
+							items: [
+								{ label: 'Enforce in CI', slug: 'enterprise/enforce-in-ci' },
+								{ label: 'Drift detection', slug: 'enterprise/drift-detection' },
+								{ label: 'GitHub rulesets', slug: 'enterprise/github-rulesets' },
+							],
+						},
+						{
+							label: 'Operate',
+							items: [
+								{ label: 'Registry proxy and air-gapped', slug: 'enterprise/registry-proxy' },
+								{ label: 'Registries', slug: 'guides/registries' },
+								{ label: 'Governance deep-dive', slug: 'enterprise/governance-guide' },
+							],
+						},
 					],
 				},
 				{

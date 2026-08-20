@@ -143,12 +143,12 @@ class TestSchemaHelpers:
         with pytest.raises(MarketplaceYmlError, match="traversal"):
             _validate_source(source, index=0)
 
-    @pytest.mark.parametrize("pattern", ["v{version}", "release-{name}"])
+    @pytest.mark.parametrize("pattern", ["v{version}", "release-{name}-{version}"])
     def test_validate_tag_pattern_accepts_placeholder(self, pattern: str) -> None:
         _validate_tag_pattern(pattern, context="build.tagPattern")
 
     def test_validate_tag_pattern_rejects_missing_placeholder(self) -> None:
-        with pytest.raises(MarketplaceYmlError, match="must contain at least one"):
+        with pytest.raises(MarketplaceYmlError, match="exactly one"):
             _validate_tag_pattern("release", context="build.tagPattern")
 
     def test_check_unknown_keys_allows_clean_mapping(self) -> None:
@@ -191,7 +191,7 @@ class TestBuildAndVersioningParsers:
             _parse_build({"tagPattern": "   "})
 
     def test_parse_build_rejects_pattern_without_placeholder(self) -> None:
-        with pytest.raises(MarketplaceYmlError, match="must contain at least one"):
+        with pytest.raises(MarketplaceYmlError, match="exactly one"):
             _parse_build({"tagPattern": "release"})
 
     def test_parse_build_accepts_valid_pattern(self) -> None:

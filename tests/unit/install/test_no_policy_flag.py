@@ -121,7 +121,9 @@ class TestHelpTextShowsNoPolicy:
         result = self.runner.invoke(cli, ["install", "--help"])
         assert result.exit_code == 0
         normalized = " ".join(result.output.split())
-        assert "gemini, antigravity, intellij, kiro" in normalized
+        assert "Target a specific runtime only." in normalized
+        assert "intellij" in normalized
+        assert "kiro" in normalized
         assert "Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf" in normalized
 
     def test_help_text_is_plain_ascii(self):
@@ -295,6 +297,8 @@ class TestInstallMcpNoPolicy:
                     "test-server",
                     "--url",
                     "https://example.com/mcp",
+                    "--target",
+                    "claude",
                     "--no-policy",
                 ],
             )
@@ -313,7 +317,15 @@ class TestInstallMcpNoPolicy:
 
             self.runner.invoke(
                 cli,
-                ["install", "--mcp", "test-server", "--url", "https://example.com/mcp"],
+                [
+                    "install",
+                    "--mcp",
+                    "test-server",
+                    "--url",
+                    "https://example.com/mcp",
+                    "--target",
+                    "claude",
+                ],
             )
 
             mock_preflight.assert_called_once()

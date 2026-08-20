@@ -42,6 +42,22 @@ class TestDetectOutputs:
         )
         assert detect_outputs(apm) == {OutputKind.BUNDLE}
 
+    def test_empty_dependencies_mapping_returns_bundle(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\nversion: 0.1.0\ndescription: y\ndependencies: {}\n",
+        )
+        assert detect_outputs(apm) == {OutputKind.BUNDLE}
+
+    def test_null_dependencies_does_not_return_bundle(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\nversion: 0.1.0\ndescription: y\ndependencies:\n",
+        )
+        assert detect_outputs(apm) == set()
+
     def test_marketplace_only_returns_marketplace(self, tmp_path: Path):
         apm = tmp_path / "apm.yml"
         _write(

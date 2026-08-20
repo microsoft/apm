@@ -394,7 +394,7 @@ class TestRunInstallPipelineExceptionContracts:
             mock_phase.side_effect = _phase_side
 
             with pytest.raises(AuthenticationError):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
 
     def test_generic_exception_wrapped_in_runtime_error(self) -> None:
         """Unexpected exceptions must be wrapped in RuntimeError."""
@@ -425,4 +425,33 @@ class TestRunInstallPipelineExceptionContracts:
             mock_phase.side_effect = _phase_side
 
             with pytest.raises(RuntimeError, match="Failed to resolve APM dependencies"):
-                run_install_pipeline(pkg)
+                run_install_pipeline(pkg, target="claude")
+
+    def test_materialization_collision_is_not_double_wrapped(self) -> None:
+        """Actionable package-directory collisions propagate unchanged."""
+        from apm_cli.install.pipeline import run_install_pipeline
+        from apm_cli.models.dependency.materialization import (
+            MaterializationPathCollisionError,
+        )
+
+        pkg = self._make_pkg_with_deps()
+        collision = MaterializationPathCollisionError(
+            "Found multiple package directories; inspect duplicates."
+        )
+
+        with (
+            patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls,
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=None),
+            patch("apm_cli.core.scope.get_deploy_root", return_value=MagicMock()),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=None),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.install.pipeline._run_phase", side_effect=collision),
+            patch("apm_cli.utils.install_tui.InstallTui"),
+        ):
+            mock_lf_cls.read.return_value = None
+            with pytest.raises(MaterializationPathCollisionError) as raised:
+                run_install_pipeline(pkg, target="claude")
+        assert raised.value is collision

@@ -6,9 +6,7 @@ including simple skills and skills with bundled resources.
 These tests require network access to GitHub.
 """
 
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -40,28 +38,14 @@ dependencies:
     return project_dir
 
 
-@pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    # Prefer binary on PATH (CI uses the PR artifact there)
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    # Fallback to local dev venv
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
-
-
 class TestSimpleClaudeSkillInstall:
     """Test installing a simple Claude Skill (SKILL.md only)."""
 
-    def test_install_brand_guidelines_skill(self, temp_project, apm_command):
+    def test_install_brand_guidelines_skill(self, temp_project, apm_binary_path):
         """Install brand-guidelines skill from anthropics/skills."""
         # Install the skill
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines", "--verbose"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines", "--verbose"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -85,11 +69,11 @@ class TestSimpleClaudeSkillInstall:
         skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
         assert skill_integrated.exists(), "Skill not integrated to .agents/skills/"
 
-    def test_install_skill_updates_apm_yml(self, temp_project, apm_command):
+    def test_install_skill_updates_apm_yml(self, temp_project, apm_binary_path):
         """Verify the skill is added to project's apm.yml."""
         # Install the skill
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -103,10 +87,10 @@ class TestSimpleClaudeSkillInstall:
         # Verify dependency was added
         assert "anthropics/skills/skills/brand-guidelines" in content
 
-    def test_skill_detection_in_output(self, temp_project, apm_command):
+    def test_skill_detection_in_output(self, temp_project, apm_binary_path):
         """Verify CLI output shows skill integration message."""
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines", "--verbose"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines", "--verbose"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -124,10 +108,10 @@ class TestSimpleClaudeSkillInstall:
 class TestClaudeSkillWithResources:
     """Test installing Claude Skills with bundled resources."""
 
-    def test_install_skill_with_scripts(self, temp_project, apm_command):
+    def test_install_skill_with_scripts(self, temp_project, apm_binary_path):
         """Install skill-creator which has scripts/ folder."""
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/skill-creator", "--verbose"],
+            [apm_binary_path, "install", "anthropics/skills/skills/skill-creator", "--verbose"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -153,10 +137,10 @@ class TestClaudeSkillWithResources:
         skill_integrated = temp_project / ".agents" / "skills" / "skill-creator" / "SKILL.md"
         assert skill_integrated.exists(), "Skill not integrated to .agents/skills/"
 
-    def test_resources_stay_in_apm_modules(self, temp_project, apm_command):
+    def test_resources_stay_in_apm_modules(self, temp_project, apm_binary_path):
         """Verify bundled resources stay in apm_modules, not copied to .github/."""
         subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/skill-creator", "--verbose"],
+            [apm_binary_path, "install", "anthropics/skills/skills/skill-creator", "--verbose"],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -179,13 +163,13 @@ class TestClaudeSkillWithResources:
 class TestSkillInstallIdempotency:
     """Test that skill installation is idempotent."""
 
-    def test_reinstall_same_skill_is_idempotent(self, temp_project, apm_command):
+    def test_reinstall_same_skill_is_idempotent(self, temp_project, apm_binary_path):
         """Installing the same skill twice should work without errors."""
         skill_ref = "anthropics/skills/skills/brand-guidelines"
 
         # First install
         result1 = subprocess.run(
-            [apm_command, "install", skill_ref],
+            [apm_binary_path, "install", skill_ref],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -195,7 +179,7 @@ class TestSkillInstallIdempotency:
 
         # Second install (should succeed, possibly from cache)
         result2 = subprocess.run(
-            [apm_command, "install", skill_ref],
+            [apm_binary_path, "install", skill_ref],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -207,7 +191,7 @@ class TestSkillInstallIdempotency:
         skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
         assert skill_integrated.exists()
 
-    def test_reinstall_does_not_leak_apm_pin_to_deploy_targets(self, temp_project, apm_command):
+    def test_reinstall_does_not_leak_apm_pin_to_deploy_targets(self, temp_project, apm_binary_path):
         """Installing a skill twice must not copy .apm-pin into deploy targets.
 
         Regression test for https://github.com/microsoft/apm/issues/1150.
@@ -221,7 +205,7 @@ class TestSkillInstallIdempotency:
         skill_ref = "anthropics/skills/skills/brand-guidelines"
 
         result1 = subprocess.run(
-            [apm_command, "install", skill_ref],
+            [apm_binary_path, "install", skill_ref],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -230,7 +214,7 @@ class TestSkillInstallIdempotency:
         assert result1.returncode == 0, f"First install failed: {result1.stderr}"
 
         result2 = subprocess.run(
-            [apm_command, "install", skill_ref],
+            [apm_binary_path, "install", skill_ref],
             cwd=temp_project,
             capture_output=True,
             text=True,
@@ -258,7 +242,7 @@ class TestSkillInstallIdempotency:
 class TestSkillInstallWithoutVSCodeTarget:
     """Test skill installation when VSCode is not the target."""
 
-    def test_skill_install_without_github_folder(self, tmp_path, apm_command):
+    def test_skill_install_without_github_folder(self, tmp_path, apm_binary_path):
         """Skill installs but no agent.md generated without .github/ folder."""
         project_dir = tmp_path / "no-vscode-project"
         project_dir.mkdir()
@@ -274,7 +258,7 @@ dependencies:
 
         # Install skill
         result = subprocess.run(
-            [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
+            [apm_binary_path, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=project_dir,
             capture_output=True,
             text=True,

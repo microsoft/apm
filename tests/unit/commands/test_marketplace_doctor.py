@@ -782,3 +782,67 @@ class TestDoctorMarketplaceYmlError:
         result = runner.invoke(cli, ["doctor"])
         # Either passes or fails gracefully
         assert result.exit_code in (0, 1, 2)
+
+
+# ---------------------------------------------------------------------------
+# Executable-trust drift check (apm doctor Check 8)
+# ---------------------------------------------------------------------------
+
+
+class TestExecutableTrustDriftCheck:
+    """The fleet-level executable-trust drift probe in ``apm doctor``."""
+
+    def _make_hook_pkg(self, tmp_path, name: str = "hook-pkg") -> None:
+        import yaml
+
+        hooks = tmp_path / "apm_modules" / name / ".apm" / "hooks"
+        hooks.mkdir(parents=True)
+        (hooks / "pre-tool-use.json").write_text("{}")
+        (tmp_path / "apm_modules" / name / "apm.yml").write_text(
+            yaml.dump({"name": name, "version": "1.0"})
+        )
+
+    def test_no_manifest_returns_none(self, tmp_path) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+
+        assert _executable_trust_drift_check(tmp_path) is None
+
+    def test_gate_disabled_is_informational_pass(self, tmp_path) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+
+        (tmp_path / "apm.yml").write_text("name: t\nversion: 0.0.1\n")
+        check = _executable_trust_drift_check(tmp_path)
+        assert check is not None
+        assert check.passed is True
+        assert check.informational is True
+        assert "disabled" in check.detail.lower()
+
+    def test_no_conflict_passes(self, tmp_path) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+        from apm_cli.policy.schema import ApmPolicy
+
+        (tmp_path / "apm.yml").write_text(
+            "name: t\nversion: 0.0.1\nexecutables:\n  allow:\n    hook-pkg:\n      hooks: true\n"
+        )
+        self._make_hook_pkg(tmp_path)
+        with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
+            check = _executable_trust_drift_check(tmp_path)
+        assert check is not None
+        assert check.passed is True
+        assert check.informational is True
+
+    def test_org_deny_shadowing_project_allow_flags_drift(self, tmp_path) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+        from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
+
+        (tmp_path / "apm.yml").write_text(
+            "name: t\nversion: 0.0.1\nexecutables:\n  allow:\n    hook-pkg:\n      hooks: true\n"
+        )
+        self._make_hook_pkg(tmp_path)
+        org = ApmPolicy(executables=ExecutablesPolicy(deny=["hook-pkg"]))
+        with patch("apm_cli.commands.approve._load_org_policy", return_value=org):
+            check = _executable_trust_drift_check(tmp_path)
+        assert check is not None
+        assert check.passed is False
+        assert check.informational is True
+        assert "apm policy explain hook-pkg" in check.detail

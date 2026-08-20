@@ -152,6 +152,19 @@ class TestCreateMinimalConfig:
         assert config is not None
         assert config.get("version") == "1.0.0"
 
+    def test_root_directory_uses_valid_default_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Zero-config execution must not write an empty manifest name."""
+        _chdir(monkeypatch, tmp_path)
+        runner = ScriptRunner()
+        with patch("apm_cli.core.script_runner.Path.cwd", return_value=Path("/")):
+            runner._create_minimal_config()
+
+        config = runner._load_config()
+        assert config is not None
+        assert config["name"] == "my-project"
+
 
 # ---------------------------------------------------------------------------
 # ScriptRunner._add_dependency_to_config

@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..021, req-ext-001..002, req-sc-001..008,
-req-tg-001..004, req-cf-001..002.
+Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
+req-tg-001..008, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -11,9 +11,25 @@ or (c) a real apm_cli loader call where the surface exists.
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import jsonschema
 import pytest
 
+from apm_cli.adapters.client.base import MCPClientAdapter
+from apm_cli.install.phases.finalize import _hint_project_compile_needed
+from apm_cli.install.target_filter import resolve_effective_package_targets
+from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.models.apm_package import APMPackage
+from apm_cli.utils.diagnostics import (
+    CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_WARNING,
+    DiagnosticCollector,
+)
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     load_schema,
@@ -62,7 +78,7 @@ def test_manifest_version_is_semver_2_0_0():
 def test_manifest_target_enum_is_pinned():
     """req-mf-005 says producer MUST reject unknown target values."""
     assert_spec_contains(
-        "copilot, claude, cursor, codex, gemini, opencode, windsurf, agent-skills, all"
+        "copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all"
     )
     assert_spec_contains("x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*")
 
@@ -205,10 +221,123 @@ def test_consumer_enforces_yaml_safe_subset():
     assert_spec_contains("YAML safe", "&anchor", "MUST be rejected", "YAML 1.1 octal")
 
 
+@pytest.mark.req("req-mf-023")
+def test_consumer_resolves_runtime_argument_templates_without_secret_leakage():
+    """Runtime templates resolve completely and keep secret bytes target-native."""
+    assert_spec_contains(
+        "every `{name}` occurrence",
+        "MUST NOT write a literal unresolved `{name}` template",
+        "Secret\nclassification is package-scoped",
+        "VS Code secret input\nreference",
+    )
+    assert (
+        MCPClientAdapter._substitute_runtime_variables(
+            "{workdir}:{workdir}",
+            {"workdir": {"default": "/default"}},
+            {"workdir": "/override"},
+        )
+        == "/override:/override"
+    )
+    assert (
+        MCPClientAdapter._substitute_runtime_variables(
+            "{token}:{token}",
+            {"token": {"isSecret": True}},
+            {"token": "raw-secret"},
+            secret_variable_fallbacks={"token": "${input:token}"},
+        )
+        == "${input:token}:${input:token}"
+    )
+
+
 @pytest.mark.req("req-mf-021")
 def test_producer_workspaces_must_not_use_in_v0_1():
     """req-mf-021 forbids workspaces in v0.1."""
     assert_spec_contains("workspaces", "v0.1")
+
+
+@pytest.mark.req("req-mf-022")
+def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
+    """A stale persisted skill subset must identify the mismatch."""
+    skills_dir = tmp_path / "skills"
+    available_dir = skills_dir / "available"
+    available_dir.mkdir(parents=True)
+    (available_dir / "SKILL.md").write_text("# Available", encoding="utf-8")
+    diagnostics = DiagnosticCollector()
+
+    SkillIntegrator._warn_no_skill_filter_match(
+        SkillIntegrator._skill_names_in_directory(skills_dir),
+        ("missing",),
+        "owner/bundle",
+        diagnostics=diagnostics,
+    )
+
+    warnings = diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].package == "owner/bundle"
+    assert "Requested: missing" in warnings[0].message
+    assert "Available: available" in warnings[0].message
+
+    empty_diagnostics = DiagnosticCollector()
+    SkillIntegrator._warn_no_skill_filter_match(
+        frozenset(),
+        ("missing",),
+        "owner/empty-bundle",
+        diagnostics=empty_diagnostics,
+    )
+    empty_warnings = empty_diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(empty_warnings) == 1
+    assert empty_warnings[0].package == "owner/empty-bundle"
+    assert "Available: (none)" in empty_warnings[0].message
+
+    assert_spec_contains(
+        "a non-empty `skills:` subset",
+        "a dependency that exposes selectable",
+        "container currently yields zero or more entries",
+        "Skill-subset selection for dependencies that expose selectable skills",
+        "Selected skill names for dependencies that expose selectable skills",
+        "MUST emit a default-visible diagnostic",
+        "requested skill names, and the available skill names",
+    )
+
+
+@pytest.mark.req("req-mf-024")
+def test_consumer_preserves_registry_identity_on_structured_rewrite(monkeypatch):
+    """req-mf-024: a registry-sourced (`id:`) entry MUST NOT be silently
+    rewritten to `git:` form when persisting a CLI-driven manifest update
+    (e.g. an additive `--skill` pin) for the same identity."""
+    import apm_cli.config as _conf
+    from apm_cli.install.package_resolution import merge_structured_entry_into_current_deps
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"registries": True}})
+
+    current_deps = [{"id": "acme/demo-pkg", "version": "1.0.0"}]
+
+    with pytest.raises(ValueError, match="already declared as a registry dependency"):
+        merge_structured_entry_into_current_deps(
+            current_deps,
+            {"git": "acme/demo-pkg", "ref": "1.0.0", "skills": ["some-skill"]},
+            "acme/demo-pkg",
+            "acme/demo-pkg#1.0.0",
+            dependency_reference_cls=DependencyReference,
+        )
+    # Refused before mutation -- original registry-form entry untouched.
+    assert current_deps == [{"id": "acme/demo-pkg", "version": "1.0.0"}]
+
+    # A registry-shaped replacement (the correct outcome) is still permitted.
+    merge_structured_entry_into_current_deps(
+        current_deps,
+        {"id": "acme/demo-pkg", "version": "1.0.0", "skills": ["some-skill"]},
+        "acme/demo-pkg",
+        "acme/demo-pkg#1.0.0",
+        dependency_reference_cls=DependencyReference,
+    )
+    assert current_deps == [{"id": "acme/demo-pkg", "version": "1.0.0", "skills": ["some-skill"]}]
+
+    assert_spec_contains(
+        "silently rewrite an existing",
+        "implementation MUST reject the update with a diagnostic naming the",
+    )
 
 
 # --- req-ext-001..002 --------------------------------------------------
@@ -240,6 +369,32 @@ def test_spec_reserves_x_prefix_for_vendor_extensions_only():
 @pytest.mark.req("req-sc-001")
 def test_sha256_content_hash_on_deployed_files():
     assert_spec_contains("SHA-256 content hash for every deployed file", "MUST re-verify")
+
+
+@pytest.mark.req("req-sc-001")
+def test_deployed_file_missing_from_deployed_files_is_reported(tmp_path):
+    """req-sc-001: "record ... for EVERY deployed file" is half the MUST.
+
+    The re-verification half is scoped to "files present in
+    ``deployed_files``", so it can never reach a deployed file the lockfile
+    omits: such a file carries no recorded hash, and the audit's scope
+    silently narrows to whatever the lockfile happens to list. This binds the
+    completeness half to the surface that detects a violation of it, so an
+    under-recording lockfile cannot pass silently again (apm#2379).
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.drift import diff_scratch_against_project
+
+    payload = b"deployed by install, claimed by no lockfile entry\n"
+    for root in ("scratch", "project"):
+        deployed = tmp_path / root / ".apm" / "skills" / "unclaimed.md"
+        deployed.parent.mkdir(parents=True, exist_ok=True)
+        deployed.write_bytes(payload)
+
+    findings = diff_scratch_against_project(
+        tmp_path / "scratch", tmp_path / "project", LockFile(), targets=[]
+    )
+    assert [(f.kind, f.path) for f in findings] == [("unrecorded", ".apm/skills/unclaimed.md")]
 
 
 @pytest.mark.req("req-sc-002")
@@ -277,6 +432,8 @@ def test_host_class_collapse_constrained_to_psl_or_aliases():
         "Public Suffix List",
         "explicit `aliases:` entry",
         "MUST NOT collapse two",
+        "configuration signal exercised",
+        "under [req-sc-013](#req-sc-013) is not subject to this prohibition",
     )
 
 
@@ -307,7 +464,105 @@ def test_consumer_should_refuse_credential_on_non_https_git_over_http():
     )
 
 
-# --- req-tg-001..004: targets -----------------------------------------
+@pytest.mark.req("req-sc-009")
+def test_consumer_must_deny_executable_primitive_without_allowexecutables_approval():
+    assert_spec_contains(
+        "deny deployment of any executable primitive",
+        "allowExecutables",
+        "fail closed",
+    )
+
+
+@pytest.mark.req("req-sc-010")
+def test_consumer_must_persist_approvals_user_locally_not_in_project_manifest():
+    assert_spec_contains(
+        "persist per-user approval decisions",
+        "isolated from the project manifest",
+        "MUST NOT write interactive approval decisions into the project",
+    )
+
+
+@pytest.mark.req("req-sc-011")
+def test_consumer_must_resolve_executable_trust_through_deny_wins_precedence():
+    # Verbatim single-line substrings of the Section 10.14 normative text
+    # (the authored sentences are line-wrapped; these needles fit one line each).
+    assert_spec_contains(
+        "through a single deny-wins",
+        "overrides any project-level or user-level grant for the same package",
+        "identical allow-or-deny",
+    )
+
+
+@pytest.mark.req("req-sc-012")
+def test_consumer_required_package_audit_asserts_presence_not_deployment():
+    assert_spec_contains(
+        "evaluates a governance requirement mandating the presence of a package",
+        "satisfaction of that requirement from the presence of the package in",
+        "distinct from any missing-package violation",
+    )
+
+
+@pytest.mark.req("req-sc-013")
+def test_configured_host_class_precedence_is_credential_isolated(monkeypatch):
+    import base64
+
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.core.host_providers import classify_host_provider
+
+    host = "ado.corp.example.com"
+    ado_pat = "ado-pat-sentinel"
+    github_pat = "github-pat-sentinel"
+    monkeypatch.setenv("ADO_HOST", host)
+    monkeypatch.setenv("GITHUB_HOST", host)
+    monkeypatch.setenv("ADO_APM_PAT", ado_pat)
+    monkeypatch.setenv("GITHUB_APM_PAT", github_pat)
+    monkeypatch.setenv("GITHUB_TOKEN", github_pat)
+    monkeypatch.setenv("GH_TOKEN", github_pat)
+
+    provider = classify_host_provider(host)
+    assert provider.kind == "ado"
+    assert provider.credential_purpose == "ado_modules"
+
+    resolver = AuthResolver()
+    context = resolver.resolve(host, org="DefaultCollection", port=8443)
+    assert context.source == "ADO_APM_PAT"
+    assert context.token == ado_pat
+    assert context.host_info.port == 8443
+    assert context.host_info.api_base == f"https://{host}:8443"
+
+    env = resolver.git_env_for_context(
+        context,
+        base_env={
+            "GITHUB_APM_PAT": github_pat,
+            "GITHUB_TOKEN": github_pat,
+            "GH_TOKEN": github_pat,
+        },
+    )
+    assert env["GITHUB_APM_PAT"] == ""
+    assert env["GITHUB_TOKEN"] == ""
+    assert env["GH_TOKEN"] == ""
+    headers = [
+        env[f"GIT_CONFIG_VALUE_{index}"]
+        for index in range(int(env["GIT_CONFIG_COUNT"]))
+        if env[f"GIT_CONFIG_KEY_{index}"] == "http.extraheader"
+    ]
+    assert len(headers) == 1
+    scheme, encoded = headers[0].removeprefix("Authorization: ").split()
+    assert scheme == "Basic"
+    assert base64.b64decode(encoded).decode() == f":{ado_pat}"
+    assert_spec_contains(
+        "(a) it MUST select exactly one effective host class",
+        "(b) If two or more configuration signals",
+        "(c) it MUST resolve, attach, and expose",
+        "(d) credential material belonging",
+        "(e) An explicit non-default port",
+        "MUST NOT be resolved, attached, or inherited",
+        "MUST actively suppress ambient credential",
+        "redaction obligation of [req-sc-007]",
+        "descriptors MAY appear in the diagnostic surface",
+        "| **Configuration signal** |",
+        "operator overrides to this default assignment",
+    )
 
 
 @pytest.mark.req("req-tg-001")
@@ -340,6 +595,284 @@ def test_consumer_routes_vendor_target_identifiers_to_handlers():
         "x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*",
         "MUST route detection",
         "MUST NOT silently",
+    )
+
+
+@pytest.mark.req("req-tg-005")
+def test_consumer_deploys_antigravity_rules_with_expected_dedup():
+    # Needles updated for the v0.1.11 spec-guardian fold on req-tg-005:
+    # the anchor was reworded to (a) lowercase the `antigravity`
+    # identifier, (b) pin a canonical `globs` scalar-vs-sequence
+    # representation for hash reproducibility, and (c) redefine the
+    # deduplication scope to filenames derived from the resolved
+    # instruction primitives (fail-closed non-suppression). See
+    # Appendix D revision 0.1.11.
+    assert_spec_contains(
+        "For the `antigravity` target, instruction rules MUST be written under",
+        "`.agents/rules/<name>.md`",
+        "`trigger: glob` plus a `globs` field",
+        "emitted as a YAML scalar when `applyTo` resolves to exactly one glob",
+        "as a YAML block sequence when it resolves to two or more",
+        "names derive from the currently-resolved",
+        "MUST NOT be treated as a deployed rule and MUST NOT",
+    )
+
+
+@pytest.mark.req("req-tg-006")
+def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
+    source = tmp_path / "scoped.agent.md"
+    source.write_text(
+        "---\nname: scoped\ntools: [read]\n---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "scoped.toml"
+    diagnostics = DiagnosticCollector()
+
+    AgentIntegrator._write_codex_agent(
+        source,
+        target,
+        diagnostics=diagnostics,
+        package_name="spec-fixture",
+    )
+
+    losses = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert len(losses) == 1
+    assert "scoped.agent.md" in losses[0].message
+    assert "field 'tools' was dropped" in losses[0].message
+    assert "may inherit all project/session MCP servers" in losses[0].message
+    assert losses[0].detail.startswith("Fix:")
+    diagnostics.render_summary()
+    output = capsys.readouterr().out
+    assert "[!]" in output
+    assert "scoped.agent.md" in output
+    assert "Fix:" in output
+
+    non_mapping = tmp_path / "non-mapping.agent.md"
+    non_mapping.write_text(
+        "---\n- tools: [read]\n---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    unverified = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        non_mapping,
+        tmp_path / "non-mapping.toml",
+        diagnostics=unverified,
+        package_name="spec-fixture",
+    )
+    warnings = unverified.by_category().get(CATEGORY_WARNING, [])
+    assert len(warnings) == 1
+    assert "could not be verified" in warnings[0].message
+
+    assert_spec_contains(
+        "same\neffective capability ceiling",
+        "source agent and each discarded field",
+        "may have broader capability access",
+        # Spec-guardian fold standardized the visibility term while retaining
+        # the parenthetical definition in the normative requirement.
+        "default-visible",
+        "MUST be rendered before\nthe overall operation returns",
+        "does not mandate a nonzero\nexit status",
+    )
+
+
+@pytest.mark.req("req-tg-007")
+def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp_path):
+    apm_modules = tmp_path / "apm_modules"
+    instruction_dir = apm_modules / "example" / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (instruction_dir / "example.instructions.md").write_text(
+        "Apply this instruction.\n",
+        encoding="ascii",
+    )
+    target = SimpleNamespace(name="Gemini CLI", compile_family="gemini")
+    target.for_scope = MagicMock(return_value=target)
+    logger = MagicMock()
+    ctx = SimpleNamespace(
+        apm_modules_dir=apm_modules,
+        dry_run=False,
+        installed_count=1,
+        logger=logger,
+        project_root=tmp_path,
+        targets=[target],
+    )
+
+    _hint_project_compile_needed(ctx)
+
+    logger.info.assert_called_once_with(
+        "Instructions installed for Gemini CLI. Run 'apm compile' to update AGENTS.md / GEMINI.md.",
+        symbol="info",
+    )
+    assert_spec_contains(
+        "default-visible, actionable\ndiagnostic",
+        "follow-up compilation operation",
+        "MUST NOT emit this diagnostic for a dry run",
+    )
+
+
+@pytest.mark.req("req-tg-008")
+def test_dependency_package_targets_are_restriction_only() -> None:
+    """Package intent can narrow, but never expand, consumer authorization."""
+    active = [KNOWN_TARGETS["claude"], KNOWN_TARGETS["cursor"]]
+    claude_package = APMPackage(
+        name="claude-hooks",
+        version="1.0.0",
+        target="claude",
+    )
+
+    disjoint = resolve_effective_package_targets(
+        active,
+        ["cursor"],
+        claude_package,
+        DiagnosticCollector(),
+        "owner/claude-hooks",
+    )
+    universal = resolve_effective_package_targets(
+        active,
+        ["cursor"],
+        APMPackage(name="universal-hooks", version="1.0.0"),
+        DiagnosticCollector(),
+        "owner/universal-hooks",
+    )
+
+    assert disjoint.targets == ()
+    assert tuple(target.name for target in universal.targets) == ("cursor",)
+    schema = load_schema("manifest-v0.1.schema.json")
+    jsonschema.Draft202012Validator.check_schema(schema)
+    validate_against(
+        "manifest-v0.1.schema.json",
+        {"name": "claude-hooks", "version": "1.0.0", "targets": ["claude"]},
+    )
+    validate_against(
+        "manifest-v0.1.schema.json",
+        {"name": "legacy-null", "version": "1.0.0", "target": None},
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "manifest-v0.1.schema.json",
+            {
+                "name": "conflicting-hooks",
+                "version": "1.0.0",
+                "target": "claude",
+                "targets": ["cursor"],
+            },
+        )
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against(
+            "manifest-v0.1.schema.json",
+            {"name": "blank-target", "version": "1.0.0", "targets": [""]},
+        )
+    for malformed_token in ("Cursor", "../cursor"):
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against(
+                "manifest-v0.1.schema.json",
+                {
+                    "name": "malformed-target",
+                    "version": "1.0.0",
+                    "targets": [malformed_token],
+                },
+            )
+    for invalid_fields in (
+        {"target": ""},
+        {"target": []},
+        {"targets": None},
+        {"targets": []},
+    ):
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against(
+                "manifest-v0.1.schema.json",
+                {"name": "invalid-target", "version": "1.0.0", **invalid_fields},
+            )
+    assert_spec_contains(
+        "MUST integrate target-scoped primitives only into the",
+        "mechanism for (b) is implementation-defined",
+        "restriction-only: it MUST NOT activate a target",
+        "literal no-restriction sentinel",
+        "auto-detectable target set during this intersection",
+        "MUST be rejected before target-scoped",
+        "MUST be reconciled under",
+        "[req-lk-021](#req-lk-021)",
+        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-tg-010](#req-tg-010), [req-sc-001](#req-sc-001),",
+    )
+
+
+@pytest.mark.req("req-tg-009")
+def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None:
+    """Fail-closed evaluation precedes any content-identity adoption fast-path.
+
+    req-tg-009: An agent with tools outside the target's approved capability
+    set MUST NOT be written or adopted -- even when the on-disk target has
+    byte-identical content to the source.
+    """
+    from datetime import datetime
+
+    from apm_cli.integration.agent_integrator import AgentIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import (
+        APMPackage,
+        GitReferenceType,
+        PackageInfo,
+        ResolvedReference,
+    )
+    from apm_cli.utils.diagnostics import CATEGORY_ERROR, DiagnosticCollector
+
+    project_root = tmp_path
+    (project_root / ".kiro").mkdir()
+
+    package_dir = tmp_path / "pkg"
+    apm_agents = package_dir / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    # Source agent with an unsupported tool.
+    bad_source = apm_agents / "hacked.agent.md"
+    bad_content = "---\ntools:\n- read\n- execute_arbitrary_code\n---\n\n# Hacked\n"
+    bad_source.write_text(bad_content, encoding="utf-8")
+
+    # Pre-place a target with byte-identical content to the source.
+    kiro_agents = project_root / ".kiro" / "agents"
+    kiro_agents.mkdir(parents=True)
+    target_path = kiro_agents / "hacked.md"
+    target_path.write_text(bad_content, encoding="utf-8")
+
+    package = APMPackage(
+        name="test-pkg",
+        version="1.0.0",
+        package_path=package_dir,
+        source="github.com/test/test-pkg",
+    )
+    resolved_ref = ResolvedReference(
+        original_ref="main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit="abc123",
+        ref_name="main",
+    )
+    pi = PackageInfo(
+        package=package,
+        install_path=package_dir,
+        resolved_reference=resolved_ref,
+        installed_at=datetime.now().isoformat(),
+    )
+
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["kiro"],
+        pi,
+        project_root,
+        managed_files={".kiro/agents/hacked.md"},
+        diagnostics=diagnostics,
+    )
+
+    # The invalid agent must be skipped, never adopted.
+    assert result.files_integrated == 0
+    assert result.files_adopted == 0
+    assert target_path not in result.target_paths
+    errors = [d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR]
+    assert errors, "Expected an error diagnostic for incompatible tools"
+    assert "execute_arbitrary_code" in errors[0].message
+
+    assert_spec_contains(
+        "MUST fail closed: if any source-declared tool falls",
+        "MUST NOT\nwrite the agent's target artifact (zero bytes, no partial file)",
+        "MUST\nemit an actionable diagnostic identifying the unsupported tool value(s)",
+        "MUST be performed prior to any\ncontent-identity adoption fast-path",
     )
 
 
@@ -377,4 +910,25 @@ def test_implementations_publish_conformance_statement():
     assert_spec_contains(
         "publish a conformance statement",
         "MUST\nlist, for each `req-XXX` in scope",
+    )
+
+
+@pytest.mark.req("req-tg-010")
+def test_project_scoped_native_hook_command_is_portably_anchored() -> None:
+    """Claude project hooks retain project-relative paths outside the project CWD."""
+    assert_spec_contains(
+        "anchor\nthe generated command to the consumer project",
+        "`CLAUDE_PROJECT_DIR` in POSIX commands",
+        "`$env:CLAUDE_PROJECT_DIR` in\n> PowerShell commands",
+        "MUST NOT embed an absolute consumer",
+        "MUST reject a\nhook path containing a dollar sign or backtick",
+    )
+
+
+@pytest.mark.req("req-sc-014")
+def test_bin_deployment_defaults_to_deny_in_non_interactive_context() -> None:
+    """Per-invocation consent: non-TTY defaults to deny; explicit opt-in overrides."""
+    assert_spec_contains(
+        "MUST deny\nthat deployment by default when its standard output is not connected to a",
+        "explicitly opted in for that invocation",
     )

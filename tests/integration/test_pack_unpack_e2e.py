@@ -5,25 +5,11 @@ Round-trip tests: install -> pack -> install bundle -> verify files match.
 Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.requires_github_token
-
-
-@pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 @pytest.fixture
@@ -47,10 +33,10 @@ def temp_project(tmp_path):
     return project_dir
 
 
-def _run_apm(apm_command, args, cwd, timeout=120):
+def _run_apm(apm_binary_path, args, cwd, timeout=120):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -59,7 +45,7 @@ def _run_apm(apm_command, args, cwd, timeout=120):
 
 
 class TestPackUnpackE2E:
-    def test_full_round_trip(self, apm_command, temp_project, tmp_path):
+    def test_full_round_trip(self, apm_binary_path, temp_project, tmp_path):
         """Install -> pack --archive -> install <bundle> in fresh dir -> files match.
 
         Note: ``apm unpack`` was deprecated in favor of ``apm install <bundle-path>``
@@ -69,12 +55,12 @@ class TestPackUnpackE2E:
         round-trip uses the supported ``apm install <archive>`` flow instead.
         """
         # 1. Install
-        result = _run_apm(apm_command, ["install"], cwd=temp_project)
+        result = _run_apm(apm_binary_path, ["install"], cwd=temp_project)
         assert result.returncode == 0, f"install failed: {result.stderr}"
         assert (temp_project / "apm.lock.yaml").exists()
 
         # 2. Pack
-        result = _run_apm(apm_command, ["pack", "--archive"], cwd=temp_project)
+        result = _run_apm(apm_binary_path, ["pack", "--archive"], cwd=temp_project)
         assert result.returncode == 0, f"pack failed: {result.stderr}"
 
         build_dir = temp_project / "build"
@@ -89,7 +75,7 @@ class TestPackUnpackE2E:
         (consumer / ".github" / "copilot-instructions.md").write_text("# test\n")
         archive = archives[0]
 
-        result = _run_apm(apm_command, ["install", str(archive)], cwd=consumer)
+        result = _run_apm(apm_binary_path, ["install", str(archive)], cwd=consumer)
         assert result.returncode == 0, (
             f"bundle install failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
@@ -97,12 +83,12 @@ class TestPackUnpackE2E:
         # 4. Verify .github/ files are present
         assert (consumer / ".github").exists(), ".github/ missing after bundle install"
 
-    def test_pack_dry_run_no_side_effects(self, apm_command, temp_project):
+    def test_pack_dry_run_no_side_effects(self, apm_binary_path, temp_project):
         """Dry run should not create any files."""
-        result = _run_apm(apm_command, ["install"], cwd=temp_project)
+        result = _run_apm(apm_binary_path, ["install"], cwd=temp_project)
         assert result.returncode == 0
 
-        result = _run_apm(apm_command, ["pack", "--dry-run"], cwd=temp_project)
+        result = _run_apm(apm_binary_path, ["pack", "--dry-run"], cwd=temp_project)
         assert result.returncode == 0
 
         assert not (temp_project / "build").exists()

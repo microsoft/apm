@@ -22,10 +22,7 @@ Two invariants are load-bearing:
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
-
-_COMPILE = [sys.executable, "-m", "apm_cli.cli", "compile"]
 
 
 def _make_project(root: Path) -> None:
@@ -39,19 +36,24 @@ def _make_project(root: Path) -> None:
     )
 
 
-def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run([*_COMPILE, *args], cwd=str(cwd), capture_output=True, text=True)
+def _run(apm_binary_path: Path, args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(apm_binary_path), "compile", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_root_redirect_is_byte_identical_and_keeps_sources_in_pwd(
-    tmp_path: Path,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     src = tmp_path / "src"
     src.mkdir()
     _make_project(src)
 
     # Baseline: plain compile writes AGENTS.md into the source tree.
-    baseline = _run([], cwd=src)
+    baseline = _run(apm_binary_path, [], cwd=src)
     assert baseline.returncode == 0, baseline.stderr or baseline.stdout
     baseline_agents = src / "AGENTS.md"
     assert baseline_agents.exists(), "baseline compile did not emit AGENTS.md"
@@ -61,7 +63,7 @@ def test_root_redirect_is_byte_identical_and_keeps_sources_in_pwd(
     # --root: sources still read from ``src`` ($PWD), writes land in deploy.
     deploy = tmp_path / "deploy"
     deploy.mkdir()
-    redirected = _run(["--root", str(deploy)], cwd=src)
+    redirected = _run(apm_binary_path, ["--root", str(deploy)], cwd=src)
     assert redirected.returncode == 0, redirected.stderr or redirected.stdout
 
     # Source tree stays clean -- no artifact leaked back into $PWD.
@@ -76,7 +78,9 @@ def test_root_redirect_is_byte_identical_and_keeps_sources_in_pwd(
     )
 
 
-def test_root_override_does_not_leak_into_next_invocation(tmp_path: Path) -> None:
+def test_root_override_does_not_leak_into_next_invocation(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
     src = tmp_path / "src"
     src.mkdir()
     _make_project(src)
@@ -84,7 +88,7 @@ def test_root_override_does_not_leak_into_next_invocation(tmp_path: Path) -> Non
     deploy = tmp_path / "deploy"
     deploy.mkdir()
 
-    first = _run(["--root", str(deploy)], cwd=src)
+    first = _run(apm_binary_path, ["--root", str(deploy)], cwd=src)
     assert first.returncode == 0, first.stderr or first.stdout
     assert (deploy / "AGENTS.md").exists()
     assert not (src / "AGENTS.md").exists()
@@ -92,7 +96,7 @@ def test_root_override_does_not_leak_into_next_invocation(tmp_path: Path) -> Non
     # A subsequent plain compile (separate process, but the override is a
     # process-global so this also guards the in-process unwind contract)
     # must once again write into $PWD, not the previous deploy root.
-    second = _run([], cwd=src)
+    second = _run(apm_binary_path, [], cwd=src)
     assert second.returncode == 0, second.stderr or second.stdout
     assert (src / "AGENTS.md").exists(), (
         "plain compile after --root failed to write into $PWD -- "

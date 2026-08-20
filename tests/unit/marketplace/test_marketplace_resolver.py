@@ -1,9 +1,12 @@
 """Tests for marketplace resolver -- regex and source type resolution."""
 
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.cache.url_normalize import normalize_repo_url
+from apm_cli.install.package_resolution import dependency_reference_to_yaml_entry
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -546,6 +549,29 @@ class TestResolveMarketplacePluginGitLabMonorepo:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_ssh_registration_is_preserved_in_serialized_dependency(self, mock_get, mock_fetch):
+        source = MarketplaceSource(
+            name="apm-reg",
+            url="git@gitlab.mycompany.com:team/packages/toolkit.git",
+        )
+        plugin = MarketplacePlugin(name="some-skill", source="skills/some-skill")
+        mock_get.return_value = source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        resolution = resolve_marketplace_plugin("some-skill", "apm-reg")
+        dep = resolution.dependency_reference
+        assert dep is not None
+
+        entry = dependency_reference_to_yaml_entry(dep)
+        parsed = urlparse(normalize_repo_url(entry["git"]))
+        assert parsed.scheme == "ssh"
+        assert parsed.username == "git"
+        assert parsed.hostname == "gitlab.mycompany.com"
+        assert parsed.path == "/team/packages/toolkit"
+        assert entry["path"] == "skills/some-skill"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
     def test_self_managed_fqdn_not_in_gitlab_env_still_gets_dependency_reference(
         self, mock_get, mock_fetch, self_managed_git_fqdn_source
     ):
@@ -721,8 +747,8 @@ class TestResolveMarketplacePluginGitLabMonorepo:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_url_source_on_github_no_dep_ref(self, mock_get, mock_fetch):
-        """url-type source on github.com marketplace should NOT build dep_ref (existing behaviour)."""
+    def test_cross_host_url_source_on_github_preserves_package_host(self, mock_get, mock_fetch):
+        """A package URL owns its host even when the marketplace is on github.com."""
         github_source = MarketplaceSource(
             name="gh-mkt",
             owner="owner",
@@ -734,15 +760,218 @@ class TestResolveMarketplacePluginGitLabMonorepo:
             name="pkg",
             source={
                 "source": "url",
-                "url": "https://github.com/other/repo",
+                "url": "https://github.enterprise.example.invalid/other/repo",
+                "ref": "a" * 40,
             },
         )
         mock_get.return_value = github_source
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
         result = resolve_marketplace_plugin("pkg", "gh-mkt")
-        # github.com marketplace does not need explicit git path -> no dep_ref built
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.host == "github.enterprise.example.invalid"
+        assert dep.repo_url == "other/repo"
+        assert dep.reference == "a" * 40
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_pack_emitted_git_subdir_url_builds_structured_reference(self, mock_get, mock_fetch):
+        """A git-subdir URL emitted by pack routes through the dependency parser."""
+        local_source = MarketplaceSource(
+            name="local-mkt",
+            url="file:///tmp/local-mkt",
+        )
+        plugin = MarketplacePlugin(
+            name="pkg",
+            source={
+                "source": "git-subdir",
+                "url": "https://gitlab.example.invalid/team/platform/repo",
+                "path": "packages/pkg",
+                "ref": "b" * 40,
+            },
+        )
+        mock_get.return_value = local_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("pkg", "local-mkt")
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.host == "gitlab.example.invalid"
+        assert dep.repo_url == "team/platform/repo"
+        assert dep.virtual_path == "packages/pkg"
+        assert dep.reference == "b" * 40
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_hand_authored_git_subdir_repo_keeps_repo_precedence(self, mock_get, mock_fetch):
+        """The existing repo field owner wins over the pack-specific url route."""
+        local_source = MarketplaceSource(
+            name="local-mkt",
+            url="file:///tmp/local-mkt",
+        )
+        plugin = MarketplacePlugin(
+            name="pkg",
+            source={
+                "source": "git-subdir",
+                "repo": "owner/primary",
+                "url": "https://fallback.example.invalid/owner/fallback",
+                "path": "packages/pkg",
+                "ref": "main",
+            },
+        )
+        mock_get.return_value = local_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("pkg", "local-mkt")
         assert result.dependency_reference is None
+        assert result.canonical == "owner/primary/packages/pkg#main"
+
+    @pytest.mark.parametrize(
+        "source",
+        (
+            {
+                "source": "url",
+                "url": "../local-package",
+            },
+            {
+                "source": "git-subdir",
+                "url": "~/local-monorepo",
+                "path": "packages/pkg",
+            },
+        ),
+        ids=("url", "git-subdir"),
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_remote_source_rejects_local_path(self, mock_get, mock_fetch, source):
+        """Remote marketplace source objects cannot read consumer-local packages."""
+        local_source = MarketplaceSource(
+            name="local-mkt",
+            url="file:///tmp/local-mkt",
+        )
+        mock_get.return_value = local_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(name="pkg", source=source)
+        )
+
+        with pytest.raises(ValueError, match="resolves to a local path"):
+            resolve_marketplace_plugin("pkg", "local-mkt")
+
+    @pytest.mark.parametrize(
+        "source",
+        (
+            {
+                "source": "url",
+                "url": "https://git.example.invalid/team/repo",
+                "ref": "old-ref",
+            },
+            {
+                "source": "git-subdir",
+                "url": "https://git.example.invalid/team/monorepo",
+                "path": "packages/pkg",
+                "ref": "old-ref",
+            },
+        ),
+        ids=("url", "git-subdir"),
+    )
+    @patch(
+        "apm_cli.marketplace.version_resolver.resolve_version_constraint",
+        return_value=("pkg--v1.0.0", "c" * 40),
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_remote_source_resolves_marketplace_version_constraint(
+        self,
+        mock_get,
+        mock_fetch,
+        mock_resolve_version,
+        source,
+    ):
+        """Bare marketplace versions resolve to tags before structured install."""
+        marketplace_source = MarketplaceSource(
+            name="remote-mkt",
+            owner="catalog",
+            repo="remote-mkt",
+            host="git.example.invalid",
+        )
+        mock_get.return_value = marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(name="pkg", source=source)
+        )
+
+        result = resolve_marketplace_plugin(
+            "pkg",
+            "remote-mkt",
+            version_spec="1.0.0",
+        )
+
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference == "pkg--v1.0.0"
+        assert result.canonical.endswith("#pkg--v1.0.0")
+        mock_resolve_version.assert_called_once_with(
+            "pkg",
+            "catalog/remote-mkt",
+            "1.0.0",
+            tag_pattern="{name}--v{version}",
+            host="git.example.invalid",
+            token=None,
+            auth_scheme="basic",
+            auth_resolver=None,
+        )
+
+    @pytest.mark.parametrize(
+        "source",
+        (
+            {
+                "source": "url",
+                "url": "https://git.example.invalid/team/repo",
+            },
+            {
+                "source": "git-subdir",
+                "url": "https://git.example.invalid/team/monorepo",
+                "path": "packages/pkg",
+            },
+        ),
+        ids=("url", "git-subdir"),
+    )
+    @pytest.mark.parametrize("version_spec", ("1.0.0", "~9.9.9"), ids=("bare", "range"))
+    @patch("apm_cli.marketplace.version_resolver.resolve_version_constraint")
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_remote_source_version_constraint_no_match(
+        self,
+        mock_get,
+        mock_fetch,
+        mock_resolve_version,
+        version_spec,
+        source,
+    ):
+        """Bare and range constraints both fail closed when no tag matches."""
+        from apm_cli.marketplace.errors import NoMatchingVersionError
+
+        marketplace_source = MarketplaceSource(
+            name="remote-mkt",
+            owner="catalog",
+            repo="remote-mkt",
+            host="git.example.invalid",
+        )
+        mock_get.return_value = marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(name="pkg", source=source)
+        )
+        mock_resolve_version.side_effect = NoMatchingVersionError(
+            "pkg",
+            version_spec,
+        )
+
+        with pytest.raises(NoMatchingVersionError):
+            resolve_marketplace_plugin(
+                "pkg",
+                "remote-mkt",
+                version_spec=version_spec,
+            )
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -1507,102 +1736,141 @@ class TestGitLabShorthandParseVsStructuredRef:
         assert good.virtual_path == "agents/reverse-architect"
 
 
-class TestMarketplaceRefPropagation:
-    """Registered --ref must propagate to relative string plugin sources (#1811)."""
+class TestMarketplaceRegisteredRefPropagation:
+    """Registered marketplace ``--ref`` must propagate to plugin canonicals.
+
+    When a marketplace is added with ``apm marketplace add --ref feat/x owner/repo``,
+    subsequent ``apm install plugin@marketplace`` must download the plugin from
+    ``feat/x`` -- not from the repo's default branch.  This applies to both:
+
+    - GitHub-family marketplaces (no ``dependency_reference``; ref embedded in canonical)
+    - GitLab / non-GitHub marketplaces (ref embedded in ``dependency_reference``)
+    """
 
     @staticmethod
-    def _manifest_with_plugin(plugin: MarketplacePlugin) -> MarketplaceManifest:
-        return MarketplaceManifest(name="mkt", plugins=(plugin,), plugin_root="")
+    def _github_source(ref: str = "main") -> MarketplaceSource:
+        return MarketplaceSource(
+            name="my-marketplace",
+            owner="acme",
+            repo="plugins",
+            host="github.com",
+            ref=ref,
+        )
+
+    @staticmethod
+    def _gitlab_source(ref: str = "main") -> MarketplaceSource:
+        return MarketplaceSource(
+            name="my-marketplace",
+            owner="acme",
+            repo="plugins",
+            host="gitlab.com",
+            ref=ref,
+        )
+
+    @staticmethod
+    def _manifest(plugin: MarketplacePlugin) -> MarketplaceManifest:
+        return MarketplaceManifest(name="my-marketplace", plugins=(plugin,), plugin_root="")
+
+    # -- GitHub-family: ref embedded in canonical ---------------------------------
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_github_relative_source_propagates_registered_ref(self, mock_get, mock_fetch):
-        """A GitHub marketplace registered with --ref feat/xxx appends #feat/xxx."""
-        source = MarketplaceSource(
-            name="mkt",
-            owner="acme",
-            repo="catalog",
-            host="github.com",
-            ref="feat/my-feature",
-        )
+    def test_github_string_source_registered_ref_appended(self, mock_get, mock_fetch):
+        """Non-main marketplace ref must appear as ``#ref`` suffix in the canonical."""
         plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
-        mock_get.return_value = source
-        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+        mock_get.return_value = self._github_source(ref="feat/my-feature")
+        mock_fetch.return_value = self._manifest(plugin)
 
-        result = resolve_marketplace_plugin("my-plugin", "mkt")
-        assert result.canonical == "acme/catalog/plugins/my-plugin#feat/my-feature"
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
+
+        assert result.canonical == "acme/plugins/plugins/my-plugin#feat/my-feature"
         assert result.dependency_reference is None
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_github_relative_source_main_ref_not_appended(self, mock_get, mock_fetch):
-        """ref='main' is the default -- do not append #main to the canonical."""
-        source = MarketplaceSource(
-            name="mkt",
-            owner="acme",
-            repo="catalog",
-            host="github.com",
-            ref="main",
-        )
+    def test_github_string_source_main_ref_not_appended(self, mock_get, mock_fetch):
+        """Default ``main`` ref must NOT be embedded (implicit; avoids cluttering canonicals)."""
         plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
-        mock_get.return_value = source
-        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+        mock_get.return_value = self._github_source(ref="main")
+        mock_fetch.return_value = self._manifest(plugin)
 
-        result = resolve_marketplace_plugin("my-plugin", "mkt")
-        assert result.canonical == "acme/catalog/plugins/my-plugin"
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
+
+        assert "#" not in result.canonical
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_version_spec_overrides_registered_ref(self, mock_get, mock_fetch):
-        """Explicit version_spec takes precedence over registered ref."""
-        source = MarketplaceSource(
-            name="mkt",
-            owner="acme",
-            repo="catalog",
-            host="github.com",
-            ref="feat/my-feature",
-        )
+    def test_github_string_source_head_ref_not_appended(self, mock_get, mock_fetch):
+        """``HEAD`` ref, like ``main``, must not be embedded."""
         plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
-        mock_get.return_value = source
-        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+        mock_get.return_value = self._github_source(ref="HEAD")
+        mock_fetch.return_value = self._manifest(plugin)
 
-        result = resolve_marketplace_plugin("my-plugin", "mkt", version_spec="v2.0.0")
-        assert result.canonical == "acme/catalog/plugins/my-plugin#v2.0.0"
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
 
-    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
-    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_gitlab_relative_source_propagates_registered_ref(self, mock_get, mock_fetch):
-        """A GitLab marketplace registered with --ref feat/xxx sets ref in dep_ref."""
-        source = MarketplaceSource(
-            name="mkt",
-            owner="acme",
-            repo="catalog",
-            host="gitlab.com",
-            ref="feat/my-feature",
-        )
-        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
-        mock_get.return_value = source
-        mock_fetch.return_value = self._manifest_with_plugin(plugin)
-
-        result = resolve_marketplace_plugin("my-plugin", "mkt")
-        assert result.dependency_reference is not None
-        assert result.dependency_reference.reference == "feat/my-feature"
+        assert "#" not in result.canonical
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_gitlab_relative_source_main_ref_not_propagated(self, mock_get, mock_fetch):
-        """ref='main' should not be propagated to the GitLab dep_ref."""
-        source = MarketplaceSource(
-            name="mkt",
-            owner="acme",
-            repo="catalog",
-            host="gitlab.com",
-            ref="main",
-        )
-        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
-        mock_get.return_value = source
-        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+    def test_github_string_source_version_spec_overrides_registered_ref(self, mock_get, mock_fetch):
+        """Explicit ``version_spec`` (``apm install plugin@mkt#v2``) must win over source.ref."""
+        plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
+        mock_get.return_value = self._github_source(ref="feat/my-feature")
+        mock_fetch.return_value = self._manifest(plugin)
 
-        result = resolve_marketplace_plugin("my-plugin", "mkt")
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace", version_spec="v2.0.0")
+
+        assert result.canonical.endswith("#v2.0.0")
+        assert "feat/my-feature" not in result.canonical
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_github_dict_source_registered_ref_not_propagated(self, mock_get, mock_fetch):
+        """Dict sources with an explicit ``ref`` must not be overwritten by source.ref."""
+        plugin = MarketplacePlugin(
+            name="dict-plugin",
+            source={"type": "github", "repo": "acme/plugins", "path": "p", "ref": "v1.0.0"},
+        )
+        mock_get.return_value = self._github_source(ref="feat/my-feature")
+        mock_fetch.return_value = self._manifest(plugin)
+
+        result = resolve_marketplace_plugin("dict-plugin", "my-marketplace")
+
+        assert result.canonical.endswith("#v1.0.0"), (
+            "Explicit plugin ref must survive; marketplace ref must not overwrite it"
+        )
+
+    # -- GitLab: ref embedded in dependency_reference ----------------------------
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_string_source_registered_ref_propagated(self, mock_get, mock_fetch):
+        """GitLab monorepo: marketplace ref must reach dep_ref when path_ref is None."""
+        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
+        mock_get.return_value = self._gitlab_source(ref="feat/my-feature")
+        mock_fetch.return_value = self._manifest(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
+
         assert result.dependency_reference is not None
-        assert result.dependency_reference.reference is None
+        dep = result.dependency_reference
+        assert dep.reference == "feat/my-feature", (
+            "Registered marketplace ref must be threaded into the DependencyReference"
+        )
+        assert dep.virtual_path == "registry/my-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_string_source_main_ref_not_propagated(self, mock_get, mock_fetch):
+        """Default ``main`` ref on a GitLab marketplace must not produce a dep_ref ref field."""
+        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
+        mock_get.return_value = self._gitlab_source(ref="main")
+        mock_fetch.return_value = self._manifest(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
+
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference is None, (
+            "Default 'main' ref must not be embedded in DependencyReference"
+        )

@@ -219,6 +219,7 @@ class GitSemverResolver:
         owner_repo: str,
         package_name: str,
         constraint: str,
+        remote_url: str | None = None,
         tag_patterns: Sequence[str] = DEFAULT_TAG_PATTERNS,
         now_iso: str | None = None,
     ) -> GitSemverResolution:
@@ -235,6 +236,8 @@ class GitSemverResolver:
         constraint:
             Semver range (e.g. ``"^1.2.0"``, ``"~2.1"``, ``">=1.0 <2.0"``)
             or exact version (``"1.2.3"``).
+        remote_url:
+            Canonical ADO URL supplied by ``DependencyReference``.
         tag_patterns:
             Ordered tag patterns to try.  Defaults to
             :data:`DEFAULT_TAG_PATTERNS`.  A bare-version fallback
@@ -256,7 +259,10 @@ class GitSemverResolver:
             When no tag on the remote satisfies the constraint after
             trying the default patterns and the bare-version fallback.
         """
-        refs = self._ref_resolver.list_remote_refs(owner_repo)
+        if remote_url is None:
+            refs = self._ref_resolver.list_remote_refs(owner_repo)
+        else:
+            refs = self._ref_resolver.list_remote_refs(owner_repo, remote_url=remote_url)
         primary_patterns = tuple(tag_patterns)
         # Two-pass: try the author-supplied patterns first; only if they
         # find zero candidates do we widen to the bare-version fallback.

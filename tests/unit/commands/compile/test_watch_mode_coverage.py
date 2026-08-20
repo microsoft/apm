@@ -175,7 +175,6 @@ class TestWatchModeFullLoop:
         (tmp_path / ".github").mkdir()
         (tmp_path / ".github" / "instructions").mkdir()
         (tmp_path / ".github" / "agents").mkdir()
-        (tmp_path / ".github" / "chatmodes").mkdir()
         (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
 
         old_cwd = os.getcwd()
@@ -210,7 +209,7 @@ class TestWatchModeFullLoop:
                 )
 
             # All watch paths should have been scheduled
-            assert mock_observer.schedule.call_count >= 5
+            assert mock_observer.schedule.call_count >= 4
         finally:
             os.chdir(old_cwd)
 

@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
+from apm_cli.utils.github_host import build_ssh_url
 
 GIT_PARENT_USER_SCOPE_ERROR = (
     "git: parent dependencies are not supported at user scope. "
@@ -22,7 +23,15 @@ GIT_PARENT_USER_SCOPE_ERROR = (
 
 def dependency_reference_to_yaml_entry(dep_ref: Any) -> dict:
     """Serialize a structured dependency reference for ``apm.yml`` storage."""
-    entry = {"git": dep_ref.to_github_url()}
+    git_url = dep_ref.to_github_url()
+    if dep_ref.explicit_scheme == "ssh":
+        git_url = build_ssh_url(
+            dep_ref.host,
+            dep_ref.repo_url,
+            port=dep_ref.port,
+            user=dep_ref.ssh_user or "git",
+        )
+    entry = {"git": git_url}
     if dep_ref.virtual_path:
         entry["path"] = dep_ref.virtual_path
     if dep_ref.reference:
@@ -129,13 +138,13 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     return None
 
 
-def get_existing_skill_subset(
+def get_existing_dep_ref_for_identity(
     current_deps: builtins.list,
     identity: str,
     *,
     dependency_reference_cls: Any,
-) -> builtins.list[str] | None:
-    """Return the persisted ``skills:`` list for *identity*, or None."""
+) -> Any | None:
+    """Return the parsed existing manifest entry matching *identity*, or None."""
     for dep_entry in current_deps:
         try:
             if isinstance(dep_entry, builtins.str):
@@ -147,9 +156,58 @@ def get_existing_skill_subset(
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
         if existing_ref.get_identity() == identity:
-            subset = getattr(existing_ref, "skill_subset", None)
-            return list(subset) if subset else None
+            return existing_ref
     return None
+
+
+def propagate_existing_registry_source(
+    dep_ref: Any,
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+    logger: Any | None = None,
+) -> bool:
+    """Carry an existing registry-sourced entry's source onto a fresh dep_ref.
+
+    A bare CLI positional (e.g. ``owner/repo#1.0.0``) always parses with
+    ``source=None``/``"git"`` -- the string parser has no registry
+    awareness. When *identity* is already declared as a registry
+    dependency in apm.yml, propagate that onto *dep_ref* in place so
+    downstream serialization (``to_apm_yml_entry``) doesn't silently
+    convert it to a git dependency.
+
+    Returns True when the existing entry was registry-sourced, so the
+    caller can also short-circuit its probe-skip decision the same way.
+    """
+    existing_ref = get_existing_dep_ref_for_identity(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    is_registry = existing_ref is not None and getattr(existing_ref, "source", None) == "registry"
+    if is_registry:
+        dep_ref.source = "registry"
+        dep_ref.registry_name = existing_ref.registry_name
+        if logger:
+            logger.verbose_detail(
+                f"[i] {identity}: registry source propagated from existing manifest entry"
+            )
+    return is_registry
+
+
+def get_existing_skill_subset(
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str] | None:
+    """Return the persisted ``skills:`` list for *identity*, or None."""
+    existing_ref = get_existing_dep_ref_for_identity(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    if existing_ref is None:
+        return None
+    subset = getattr(existing_ref, "skill_subset", None)
+    return list(subset) if subset else None
 
 
 def normalize_and_merge_skill_subset(
@@ -178,6 +236,87 @@ def normalize_and_merge_skill_subset(
     if existing:
         seen.update(existing)
     return sorted(seen)
+
+
+def effective_deploy_skill_subset(
+    *,
+    skill_subset_from_cli: bool,
+    cli_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+    persisted_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+) -> builtins.tuple[str, ...] | None:
+    """Resolve the skill subset to *deploy* for a SKILL_BUNDLE.
+
+    ``--skill`` is additive (issue #1786): a targeted ``--skill B`` install must
+    land on top of skills already pinned for the bundle instead of erasing them.
+    The deployment therefore uses the union of the persisted manifest subset and
+    the current CLI ``--skill`` values -- not the raw CLI subset alone.
+
+    ``--skill '*'`` (signalled by ``skill_subset_from_cli`` True with an empty
+    ``cli_subset``) resets the bundle to its full set, so this returns ``None``
+    meaning "deploy all skills".
+
+    Returns a sorted, deduplicated tuple, or ``None`` for "deploy all".
+    """
+    if skill_subset_from_cli and not cli_subset:
+        return None  # --skill '*' -> full bundle
+    merged: builtins.set[str] = builtins.set()
+    if persisted_subset:
+        merged.update(persisted_subset)
+    if cli_subset:
+        merged.update(cli_subset)
+    return builtins.tuple(sorted(merged)) or None
+
+
+def cli_skill_subset(
+    skill_names: builtins.tuple[str, ...],
+) -> builtins.tuple[str, ...] | None:
+    """Resolve raw CLI ``--skill`` names to a subset, or None for absent / ``'*'``.
+
+    ``--skill '*'`` means "all skills" (same as absent); the resolver still
+    learns the flag was present via a separate CLI-origin flag, so this
+    collapses both the absent and ``'*'`` cases to None.
+    """
+    if skill_names and not any(s == "*" for s in skill_names):
+        return builtins.tuple(skill_names)
+    return None
+
+
+def apply_cli_skill_pin(
+    dep_ref: Any,
+    cli_subset: builtins.tuple[str, ...] | None,
+    skill_subset_from_cli: bool,
+    current_deps: builtins.list,
+    apm_yml_entries: dict,
+    *,
+    dependency_reference_cls: Any,
+    logger: Any | None = None,
+) -> None:
+    """Attach, merge, or reset a CLI ``--skill`` pin on ``dep_ref`` in place.
+
+    With an explicit ``cli_subset``, merge it additively with any persisted
+    ``skills:`` so repeated ``--skill`` invocations union rather than replace
+    (issue #1771). With ``--skill '*'`` (``skill_subset_from_cli`` True and an
+    empty ``cli_subset``), reset the pin back to the full bundle and record the
+    refreshed plain-string ``apm.yml`` entry under the reference's canonical key
+    so manifest and on-disk state agree on the whole bundle (issue #1786 reset).
+    """
+    identity = dep_ref.get_identity()
+    if cli_subset:
+        dep_ref.skill_subset = normalize_and_merge_skill_subset(
+            cli_subset,
+            current_deps,
+            identity,
+            dependency_reference_cls=dependency_reference_cls,
+        )
+        return
+    if skill_subset_from_cli:
+        dep_ref.skill_subset = None
+        apm_yml_entries[dep_ref.to_canonical()] = dep_ref.to_apm_yml_entry()
+        if logger:
+            logger.verbose_detail(
+                f"    [i] {identity}: skill pin reset to full bundle "
+                "(--skill '*'); a later bare 'apm install' deploys all skills"
+            )
 
 
 def manifest_has_different_entry_for_identity(
@@ -239,6 +378,36 @@ def update_existing_dependency_entry_if_needed(
     return should_update
 
 
+def try_update_existing_dependency_entry(
+    current_deps: builtins.list,
+    *,
+    already_in_deps: bool,
+    apm_yml_entries: dict,
+    canonical: str,
+    dep_ref: Any,
+    identity: str,
+    dependency_reference_cls: Any,
+    logger: Any = None,
+) -> tuple[bool, str | None]:
+    """Like update_existing_dependency_entry_if_needed, but returns
+    (updated, error) instead of raising, so callers can report a refused
+    registry-to-git conversion as an ordinary invalid-package outcome."""
+    try:
+        updated = update_existing_dependency_entry_if_needed(
+            current_deps,
+            already_in_deps=already_in_deps,
+            apm_yml_entries=apm_yml_entries,
+            canonical=canonical,
+            dep_ref=dep_ref,
+            identity=identity,
+            dependency_reference_cls=dependency_reference_cls,
+            logger=logger,
+        )
+    except ValueError as e:
+        return False, str(e)
+    return updated, None
+
+
 def merge_structured_entry_into_current_deps(
     current_deps: builtins.list,
     structured_entry: dict,
@@ -261,11 +430,22 @@ def merge_structured_entry_into_current_deps(
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
         if existing_ref.get_identity() == identity:
+            if getattr(existing_ref, "source", None) == "registry" and not (
+                isinstance(structured_entry, dict)
+                and ("id" in structured_entry or "registry" in structured_entry)
+            ):
+                raise ValueError(
+                    f"'{identity}' is already declared as a registry dependency; "
+                    f"refusing to silently convert it to a git dependency. Use the "
+                    f"object form ('- id: ...' / '- registry: ...') to change its "
+                    f"version, or an explicit '- git:' entry to intentionally "
+                    f"switch resolvers."
+                )
             current_deps[idx] = structured_entry
             replaced = True
             if logger:
                 logger.verbose_detail(
-                    f"Updated existing dependency entry to structured git+path form: {canonical}"
+                    f"Updated existing dependency entry to structured form: {canonical}"
                 )
             break
     if not replaced:
@@ -289,9 +469,9 @@ def persist_dependency_list_if_changed(
         return
     data[dep_section]["apm"] = current_deps
     try:
-        from apm_cli.utils.yaml_io import dump_yaml
+        from apm_cli.utils.yaml_io import dump_yaml_roundtrip
 
-        dump_yaml(data, apm_yml_path)
+        dump_yaml_roundtrip(data, apm_yml_path)
         if logger:
             logger.success(f"Updated {apm_yml_filename} dependency entries")
     except Exception as e:

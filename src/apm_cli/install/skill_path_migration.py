@@ -54,7 +54,12 @@ _log = logging.getLogger(__name__)
 # Legacy per-client skill prefixes that have been converged into .agents/skills/.
 # .claude/skills/ is excluded (Claude is not in the convergence set).
 # .codex/skills/ was never a legacy path (Codex always used .agents/).
-_LEGACY_SKILL_PATTERN = re.compile(r"^\.(github|cursor|opencode|gemini)/skills/([^/]+)/.+$")
+# .windsurf/skills/ is included: windsurf converged onto .agents/skills/ after
+# previously deploying skills under .windsurf/skills/ (see targets.py windsurf
+# profile deploy_root=".agents").
+_LEGACY_SKILL_PATTERN = re.compile(
+    r"^\.(github|cursor|opencode|gemini|windsurf)/skills/([^/]+)/.+$"
+)
 
 # ------------------------------------------------------------------
 # Shared message templates (single source of truth — H6)
@@ -229,6 +234,10 @@ def execute_migration(
 
         _update_lockfile_entry(lockfile, plan, result)
 
+    if result.updated_deps:
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        DeploymentLedgerCodec.refresh_from_legacy(lockfile)
     return result
 
 
@@ -260,16 +269,8 @@ def _update_lockfile_entry(
         if plan.dst_path not in hashes:
             hashes[plan.dst_path] = hash_val
 
-    # Also update the flat local_deployed_files / local_deployed_file_hashes
-    # that the lockfile serializer uses as source of truth.
-    if plan.src_path in lockfile.local_deployed_files:
-        lockfile.local_deployed_files.remove(plan.src_path)
-        if plan.dst_path not in lockfile.local_deployed_files:
-            lockfile.local_deployed_files.append(plan.dst_path)
-    if plan.src_path in lockfile.local_deployed_file_hashes:
-        h = lockfile.local_deployed_file_hashes.pop(plan.src_path)
-        if plan.dst_path not in lockfile.local_deployed_file_hashes:
-            lockfile.local_deployed_file_hashes[plan.dst_path] = h
+    # Keep the flat local ownership view in sync through its canonical owner.
+    lockfile.rename_local_deployed_path(plan.src_path, plan.dst_path)
 
     result.updated_deps.add(plan.dep_name)
 

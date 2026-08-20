@@ -68,8 +68,9 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
 ```
   TARGET       STATUS     SOURCE                                   DEPLOY DIR
   ------------ ---------- ---------------------------------------- ----------
-  claude       active     CLAUDE.md                                .claude/
   copilot      inactive   needs .github/copilot-instructions.md    .github/
+  claude       active     CLAUDE.md                                .claude/
+  grok-build   inactive   needs .grok/                             .grok/
   cursor       active     .cursor/                                 .cursor/
   codex        inactive   needs .codex/                            .codex/
   gemini       inactive   needs GEMINI.md                          .gemini/
@@ -92,8 +93,9 @@ match per target is enough to activate it.
 
 | Target | Signal(s) APM looks for | Deploy directory |
 |--------|-------------------------|------------------|
-| `claude` | `.claude/` directory, or `CLAUDE.md` file | `.claude/` |
 | `copilot` | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory | `.github/` |
+| `claude` | `.claude/` directory, or `CLAUDE.md` file | `.claude/` |
+| `grok-build` | `.grok/` directory | `.grok/` |
 | `cursor` | `.cursor/` directory, or `.cursorrules` file (legacy) | `.cursor/` |
 | `codex` | `.codex/` directory | `.codex/` |
 | `gemini` | `.gemini/` directory, or `GEMINI.md` file | `.gemini/` |

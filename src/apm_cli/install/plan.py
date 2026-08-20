@@ -55,20 +55,31 @@ _ACTION_UNCHANGED = "unchanged"
 
 
 def _dep_ref_key(dep: DependencyReference) -> str:
-    """Compute the unique key for a manifest dependency.
+    """Compute the lockfile-compatible unique key for a manifest dependency.
 
-    Mirrors :meth:`LockedDependency.get_unique_key` so that manifest and
-    lockfile entries can be matched 1:1 without round-tripping through
-    a full resolution.
-
-    Local refs use ``local_path``; virtual subdirectory refs use
-    ``repo_url/virtual_path``; everything else is keyed on ``repo_url``.
+    Delegates to the same identity function as
+    :meth:`LockedDependency.get_unique_key` so that manifest and lockfile
+    entries can be matched 1:1 without round-tripping through a full
+    resolution.  Non-default git hosts must be part of this key, because
+    lockfile entries use host-qualified identity for those repos.
     """
-    if getattr(dep, "is_local", False) and dep.local_path:
-        return dep.local_path
-    if getattr(dep, "is_virtual", False) and dep.virtual_path:
-        return f"{dep.repo_url}/{dep.virtual_path}"
-    return dep.repo_url
+    get_unique_key = getattr(dep, "get_unique_key", None)
+    if callable(get_unique_key):
+        return get_unique_key()
+
+    from apm_cli.models.dependency.identity import build_dependency_unique_key
+
+    # Test fakes in the integration suite are intentionally lightweight.
+    # Keep this mapping in sync with DependencyReference.get_unique_key().
+    return build_dependency_unique_key(
+        getattr(dep, "repo_url", ""),
+        host=getattr(dep, "host", None),
+        source="local" if getattr(dep, "is_local", False) else getattr(dep, "source", None),
+        local_path=getattr(dep, "local_path", None),
+        is_virtual=getattr(dep, "is_virtual", False),
+        virtual_path=getattr(dep, "virtual_path", None),
+        registry_prefix=getattr(dep, "artifactory_prefix", None),
+    )
 
 
 def _short_sha(commit: str | None, length: int = 7) -> str:
@@ -166,6 +177,8 @@ def _display_name(dep_key: str, locked: LockedDependency | None) -> str:
 def build_update_plan(
     old_lockfile: LockFile | None,
     resolved_deps: Iterable[DependencyReference],
+    *,
+    complete_resolved_dep_keys: Iterable[str] | None = None,
 ) -> UpdatePlan:
     """Compare an existing lockfile against freshly-resolved deps.
 
@@ -176,6 +189,11 @@ def build_update_plan(
             ``DependencyReference`` carries a ``resolved_reference``
             populated by the resolver.  Typically
             ``InstallContext.deps_to_install``.
+        complete_resolved_dep_keys: Optional dep keys from the complete
+            post-update dependency graph before selective-update filtering.
+            When present, locked entries missing from ``resolved_deps`` but
+            still present in this set are retained as unchanged instead of
+            being reported as removals.
 
     Returns:
         A frozen :class:`UpdatePlan` summarising the diff.
@@ -190,12 +208,41 @@ def build_update_plan(
 
     seen_keys: set[str] = set()
     plan_entries: list[PlanEntry] = []
+    complete_key_set = (
+        set(complete_resolved_dep_keys) if complete_resolved_dep_keys is not None else None
+    )
 
     for dep in resolved_deps:
         key = _dep_ref_key(dep)
         seen_keys.add(key)
         old = old_entries.get(key)
         new_ref, new_commit = _extract_new_ref_and_commit(dep)
+        # Unannotated registry dep (cached, not re-downloaded): no concrete
+        # version was resolved this run, so treat the locked value as current.
+        # Require the locked entry to also be registry-sourced -- otherwise a
+        # dep that transitions sources (e.g. git -> registry) while keeping the
+        # same key would be masked as unchanged.
+        if (
+            new_ref is None
+            and old is not None
+            and getattr(dep, "source", None) == "registry"
+            and old.source == "registry"
+        ):
+            new_ref = old.resolved_ref
+
+        # Cached git-semver dep at its locked tag: the resolver rewrote
+        # ``dep.reference`` but did not attach the resolved SHA to
+        # ``dep.resolved_reference``, so ``new_commit`` is None. If the ref still
+        # matches a tag-pinned lock entry, borrow its locked SHA, which remains
+        # the integrity anchor. ``resolved_tag`` distinguishes tag resolutions
+        # from movable branches, whose freshly resolved SHAs must remain visible.
+        if (
+            new_commit is None
+            and old is not None
+            and getattr(old, "resolved_tag", None)
+            and new_ref == old.resolved_ref
+        ):
+            new_commit = old.resolved_commit
 
         if old is None:
             plan_entries.append(
@@ -246,6 +293,21 @@ def build_update_plan(
     for key, old in old_entries.items():
         if key in seen_keys:
             continue
+        if complete_key_set is not None and key in complete_key_set:
+            plan_entries.append(
+                PlanEntry(
+                    dep_key=key,
+                    action=_ACTION_UNCHANGED,
+                    display_name=_display_name(key, old),
+                    old_resolved_ref=old.resolved_ref,
+                    old_resolved_commit=old.resolved_commit,
+                    old_content_hash=old.content_hash,
+                    new_resolved_ref=old.resolved_ref,
+                    new_resolved_commit=old.resolved_commit,
+                    deployed_files=tuple(old.deployed_files),
+                )
+            )
+            continue
         plan_entries.append(
             PlanEntry(
                 dep_key=key,
@@ -280,6 +342,11 @@ def _extract_new_ref_and_commit(dep: DependencyReference) -> tuple[str | None, s
     """
     resolved = getattr(dep, "resolved_reference", None)
     if resolved is None:
+        # Registry deps identify by resolved version, not the manifest range.
+        # Return None so the caller can fall back to the locked concrete version
+        # rather than treating the range as a ref change.
+        if getattr(dep, "source", None) == "registry":
+            return (None, None)
         return (getattr(dep, "reference", None), None)
     new_ref = (
         getattr(resolved, "ref_name", None)
@@ -309,7 +376,11 @@ def _format_ref_change(entry: PlanEntry) -> str:
     old_ref = entry.old_resolved_ref or "-"
     new_ref = entry.new_resolved_ref or old_ref
     ref_part = old_ref if old_ref == new_ref else f"{old_ref} -> {new_ref}"
-    return f"{ref_part} ({entry.short_old_commit} -> {entry.short_new_commit})"
+    old_c = entry.short_old_commit
+    new_c = entry.short_new_commit
+    if old_c == "-" and new_c == "-":
+        return ref_part
+    return f"{ref_part} ({old_c} -> {new_c})"
 
 
 def render_plan_text(plan: UpdatePlan, *, verbose: bool = False) -> str:

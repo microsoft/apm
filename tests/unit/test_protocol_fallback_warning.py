@@ -383,6 +383,7 @@ class TestConcurrentFallbackWarning:
         import shutil
         import threading
 
+        original_environment = dict(os.environ)
         dl = _make_downloader()
         dl._allow_fallback = True
 
@@ -403,48 +404,49 @@ class TestConcurrentFallbackWarning:
         errors_lock = threading.Lock()
 
         def _worker():
-            with (
-                patch.dict(os.environ, {}, clear=True),
-                patch(
-                    "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                    return_value=None,
-                ),
-                patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
-                patch(
-                    "apm_cli.deps.github_downloader._rich_warning",
-                    side_effect=_capture,
-                ),
-            ):
-                MockRepo.clone_from.side_effect = _fake_clone
-                try:
-                    barrier.wait(timeout=10)
-                except threading.BrokenBarrierError as exc:
-                    with errors_lock:
-                        worker_errors.append(exc)
-                    return
-                target = Path(tempfile.mkdtemp())
-                try:
-                    dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
-                except (RuntimeError, GitCommandError):
-                    pass
-                finally:
-                    shutil.rmtree(target, ignore_errors=True)
+            try:
+                barrier.wait(timeout=10)
+            except threading.BrokenBarrierError as exc:
+                with errors_lock:
+                    worker_errors.append(exc)
+                return
+            target = Path(tempfile.mkdtemp())
+            try:
+                dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
+            except (RuntimeError, GitCommandError):
+                pass
+            finally:
+                shutil.rmtree(target, ignore_errors=True)
 
-        threads = [threading.Thread(target=_worker) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+            patch(
+                "apm_cli.deps.github_downloader._rich_warning",
+                side_effect=_capture,
+            ),
+        ):
+            MockRepo.clone_from.side_effect = _fake_clone
+            threads = [threading.Thread(target=_worker) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
 
-        assert not worker_errors, (
-            f"Worker(s) failed to reach the barrier within the timeout "
-            f"(barrier broken or slow start): {worker_errors}"
-        )
-        for t in threads:
-            assert not t.is_alive(), (
-                f"Thread {t.name!r} is still alive after join(timeout=10); "
-                "the worker may have hung inside _clone_with_fallback"
+            assert not worker_errors, (
+                f"Worker(s) failed to reach the barrier within the timeout "
+                f"(barrier broken or slow start): {worker_errors}"
             )
+            for t in threads:
+                assert not t.is_alive(), (
+                    f"Thread {t.name!r} is still alive after join(timeout=10); "
+                    "the worker may have hung inside _clone_with_fallback"
+                )
+        assert dict(os.environ) == original_environment
 
         port_warnings = [msg for msg, sym in captured if "Custom port" in msg]
         assert len(port_warnings) == 1, (

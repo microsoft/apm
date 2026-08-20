@@ -90,6 +90,7 @@ class SafeMCPInstaller:
         env_overrides: dict[str, str] = None,  # noqa: RUF013
         server_info_cache: dict[str, Any] = None,  # noqa: RUF013
         runtime_vars: dict[str, str] = None,  # noqa: RUF013
+        replace_existing: bool = False,
     ) -> InstallationSummary:
         """Install MCP servers with conflict detection.
 
@@ -98,6 +99,7 @@ class SafeMCPInstaller:
             env_overrides: Optional dictionary of environment variable overrides.
             server_info_cache: Optional pre-fetched server info to avoid duplicate registry calls.
             runtime_vars: Optional dictionary of runtime variable values.
+            replace_existing: Configure matching entries instead of skipping them.
 
         Returns:
             InstallationSummary with detailed results.
@@ -105,7 +107,7 @@ class SafeMCPInstaller:
         summary = InstallationSummary()
 
         for server_ref in server_references:
-            if self.conflict_detector.check_server_exists(server_ref):
+            if not replace_existing and self.conflict_detector.check_server_exists(server_ref):
                 summary.add_skipped(server_ref, "already configured")
                 self._log_skip(server_ref)
                 continue

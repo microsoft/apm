@@ -25,7 +25,7 @@ from ..policy.discovery import (
     MAX_STALE_TTL,
     PolicyFetchResult,
     _read_cache_entry,
-    discover_policy,
+    _redact_policy_ref,
     discover_policy_with_chain,
 )
 from ..policy.schema import ApmPolicy
@@ -135,13 +135,18 @@ def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> list[s
         return []
 
     # Try cache lookup first (org / URL paths populate chain_refs in meta).
-    repo_ref = _strip_source_prefix(result.source)
+    repo_ref = result.cache_ref or _strip_source_prefix(result.source)
     if repo_ref and not result.source.startswith("file:"):
         try:
             entry = _read_cache_entry(repo_ref, project_root, ttl=MAX_STALE_TTL)
             if entry is not None and entry.chain_refs:
                 # Drop the leaf itself from the visible chain.
-                tail = [r for r in entry.chain_refs if r != repo_ref]
+                safe_repo_ref = _redact_policy_ref(repo_ref)
+                tail = [
+                    _redact_policy_ref(ref)
+                    for ref in entry.chain_refs
+                    if _redact_policy_ref(ref) != safe_repo_ref
+                ]
                 if tail:
                     return tail
         except Exception:
@@ -149,7 +154,7 @@ def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> list[s
 
     # Fallback: declared extends on the merged/leaf policy.
     if result.policy.extends:
-        return [result.policy.extends]
+        return [_redact_policy_ref(result.policy.extends)]
     return []
 
 
@@ -185,7 +190,7 @@ def _build_report(
     counts: dict[str, int],
 ) -> dict[str, Any]:
     """Assemble the structured report consumed by both renderers."""
-    source_label = result.source if result.source else "n/a"
+    source_label = _redact_policy_ref(result.source) if result.source else "n/a"
     if result.outcome in ("absent", "no_git_remote", "disabled"):
         source_label = source_label or "n/a"
 
@@ -199,6 +204,7 @@ def _build_report(
         "cached": bool(result.cached),
         "fetch_error": result.fetch_error,
         "error": result.error,
+        "warnings": result.warnings,
         "extends_chain": chain,
         "rule_counts": counts,
         "rule_summary": _summarize_rules(counts),
@@ -227,6 +233,10 @@ def _render_table(report: dict[str, Any]) -> None:
         (
             "Effective rules",
             "; ".join(report["rule_summary"]) if report["rule_summary"] else "none",
+        ),
+        (
+            "Warnings",
+            "; ".join(report["warnings"]) if report["warnings"] else "none",
         ),
     ]
 
@@ -324,18 +334,11 @@ def status(policy_source, no_cache, as_json, output_format, check):
     project_root = Path.cwd()
 
     try:
-        if policy_source is not None:
-            result = discover_policy(
-                project_root,
-                policy_override=policy_source,
-                no_cache=no_cache,
-            )
-        elif no_cache:
-            # discover_policy_with_chain has no `no_cache` knob, so go
-            # through the lower-level entry point when the user opts out.
-            result = discover_policy(project_root, no_cache=True)
-        else:
-            result = discover_policy_with_chain(project_root)
+        result = discover_policy_with_chain(
+            project_root,
+            policy_override=policy_source,
+            no_cache=no_cache,
+        )
     except Exception as e:
         # Diagnostic must never exit non-zero; surface the failure as a
         # synthetic ``cache_miss_fetch_fail`` report and continue.
@@ -368,3 +371,26 @@ def status(policy_source, no_cache, as_json, output_format, check):
     if check and report["outcome"] != "found":
         sys.exit(1)
     sys.exit(0)
+
+
+@policy.command(
+    "explain",
+    help="Explain the effective executable-trust decision for an installed package",
+)
+@click.argument("package")
+def explain(package):
+    """Explain the effective executable-trust decision for PACKAGE.
+
+    Prints, per executable type the package declares, whether it is allowed,
+    the deciding precedence layer (org / project / user), and any
+    lower-authority layers that decision shadowed. This is the per-package
+    companion to ``apm policy status`` (the policy-chain view) and the
+    fleet-level executable-trust drift check in ``apm doctor``.
+
+    Note: only resolves packages that are installed in the current project.
+    """
+    from .approve import explain_decision
+
+    logger = CommandLogger("policy explain")
+    explain_decision(package, logger=logger)
+    logger.render_summary()

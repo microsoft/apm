@@ -250,7 +250,11 @@ def collect_mcp_servers(project_root: Path, *, logger: Any = None) -> dict:
             if not isinstance(servers, dict):
                 return {}
             return _sanitize_mcp_servers(dict(servers), logger=logger)
-    except (json.JSONDecodeError, OSError):
+    except (OSError, ValueError, RecursionError):
+        # Untrusted .mcp.json: an oversized-int literal raises bare ValueError
+        # (int_max_str_digits), a deeply nested doc raises RecursionError --
+        # neither is a JSONDecodeError. Fail closed to an empty server map
+        # rather than crash the pack/plugin read on a hostile clone.
         pass
     return {}
 
@@ -314,7 +318,7 @@ def find_or_synthesize_plugin_json(
     if plugin_json_path is not None:
         try:
             return json.loads(plugin_json_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             _warn_msg = (
                 f"Found plugin.json at {plugin_json_path} but could not parse it: {exc}. "
                 "Falling back to synthesis from apm.yml."

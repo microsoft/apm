@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import pytest
 import requests as requests_lib
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import (
     APMPackage,
@@ -1761,7 +1762,6 @@ class TestVirtualFilePackageYamlGeneration:
         dep_ref.VIRTUAL_FILE_EXTENSIONS = [
             ".prompt.md",
             ".instructions.md",
-            ".chatmode.md",
             ".agent.md",
         ]
         return dep_ref
@@ -1837,6 +1837,81 @@ class TestVirtualFilePackageYamlGeneration:
         content = (target_path / "apm.yml").read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         assert parsed["description"] == "A simple agent without special chars"
+
+    def test_synthetic_manifest_is_canonical_before_package_hash(self, tmp_path):
+        """Synthetic metadata is LF-stable while source bytes stay hash-visible."""
+        from apm_cli.utils.content_hash import compute_package_hash
+
+        source_bytes = b"# Fixture\nsame payload\n"
+        original_write_text = Path.write_text
+
+        def materialize(
+            label: str,
+            newline_domain: str,
+            content: bytes = source_bytes,
+        ) -> tuple[str, bytes, bytes]:
+            target_path = tmp_path / label
+            dep_ref = self._make_dep_ref("instructions/fixture.instructions.md")
+            downloader = GitHubPackageDownloader()
+
+            def write_with_platform_newlines(
+                path,
+                data,
+                encoding=None,
+                errors=None,
+                newline=None,
+            ):
+                canonical = data.replace("\r\n", "\n")
+                rendered = (
+                    canonical.replace("\n", "\r\n") if newline_domain == "crlf" else canonical
+                )
+                return original_write_text(
+                    path,
+                    rendered,
+                    encoding=encoding,
+                    errors=errors,
+                    newline="",
+                )
+
+            with (
+                patch.object(
+                    downloader,
+                    "_resolve_commit_sha_for_ref",
+                    return_value="a" * 40,
+                ),
+                patch.object(downloader, "download_raw_file", return_value=content),
+                patch.object(Path, "write_text", new=write_with_platform_newlines),
+            ):
+                downloader.download_virtual_file_package(dep_ref, target_path)
+
+            return (
+                compute_package_hash(target_path),
+                (target_path / "apm.yml").read_bytes(),
+                (target_path / ".apm" / "instructions" / "fixture.instructions.md").read_bytes(),
+            )
+
+        lf_hash, lf_manifest, lf_source = materialize("lf", "lf")
+        crlf_hash, crlf_manifest, crlf_source = materialize("crlf", "crlf")
+
+        assert lf_source == crlf_source == source_bytes
+        assert b"\r\n" not in lf_manifest
+        assert crlf_manifest == lf_manifest
+        assert crlf_hash == lf_hash
+
+        changed_hash, _, _ = materialize(
+            "changed-content",
+            "lf",
+            b"# Fixture\nchanged payload\n",
+        )
+        assert changed_hash != lf_hash
+
+        user_crlf_hash, _, user_crlf_source = materialize(
+            "user-crlf",
+            "lf",
+            source_bytes.replace(b"\n", b"\r\n"),
+        )
+        assert user_crlf_source != lf_source
+        assert user_crlf_hash != lf_hash
 
 
 class TestRefExistsViaLsRemote:
@@ -2495,7 +2570,7 @@ class TestGiteaGogsApiVersionNegotiation:
         with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
             self.downloader = GitHubPackageDownloader()
 
-    def test_object_form_type_gitlab_routes_bespoke_host_to_gitlab_api(self):
+    def test_object_form_type_gitlab_routes_untrusted_host_without_global_pat(self):
         dep_ref = DependencyReference.parse_from_dict(
             {"git": "https://code.acme.com/group/sub/repo.git", "type": "gitlab"}
         )
@@ -2503,8 +2578,51 @@ class TestGiteaGogsApiVersionNegotiation:
         response = _make_resp(200, expected)
 
         with patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-bespoke"}, clear=True):
-            downloader = GitHubPackageDownloader()
-            with patch.object(downloader, "_resilient_get", return_value=response) as mock_get:
+            downloader = GitHubPackageDownloader(
+                auth_resolver=AuthResolver(allow_external_fallback=False)
+            )
+            with (
+                patch.object(
+                    downloader._strategies,
+                    "_download_gitlab_file_via_git",
+                    side_effect=RuntimeError("force REST fallback"),
+                ),
+                patch.object(downloader, "_resilient_get", return_value=response) as mock_get,
+            ):
+                result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
+
+        assert result == expected
+        request_url = mock_get.call_args[0][0]
+        parsed = urlparse(request_url)
+        assert parsed.hostname == "code.acme.com"
+        assert parsed.path.endswith("/repository/files/SKILL.md/raw")
+        headers = mock_get.call_args[1]["headers"]
+        assert "PRIVATE-TOKEN" not in headers
+        assert dep_ref.host_type == "gitlab"
+
+    def test_object_form_type_gitlab_routes_trusted_host_with_token(self):
+        dep_ref = DependencyReference.parse_from_dict(
+            {"git": "https://code.acme.com/group/sub/repo.git", "type": "gitlab"}
+        )
+        expected = b"gitlab raw"
+        response = _make_resp(200, expected)
+        env = {
+            "APM_GITLAB_HOSTS": "code.acme.com",
+            "GITLAB_APM_PAT": "glpat-bespoke",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            downloader = GitHubPackageDownloader(
+                auth_resolver=AuthResolver(allow_external_fallback=False)
+            )
+            with (
+                patch.object(
+                    downloader._strategies,
+                    "_download_gitlab_file_via_git",
+                    side_effect=RuntimeError("force REST fallback"),
+                ),
+                patch.object(downloader, "_resilient_get", return_value=response) as mock_get,
+            ):
                 result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
 
         assert result == expected

@@ -39,6 +39,8 @@ def _stub_downloader_for_lockfile(mock_dl_cls) -> None:
     pkg_info.resolved_reference.is_tag = False
     pkg_info.resolved_reference.is_sha = False
     pkg_info.package_type.value = "apm_package"
+    pkg_info.package.name = "stub-package"
+    pkg_info.package.version = "0.0.0"
     instance.download_package.return_value = pkg_info
 
 

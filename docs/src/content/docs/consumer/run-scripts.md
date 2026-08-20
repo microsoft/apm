@@ -55,9 +55,10 @@ short form `-p`); they are interpolated into any `.prompt.md` files the
 command references, not exported as shell environment variables.
 
 Before launching the command, APM auto-compiles any `.prompt.md` argument
-in the command line into `.apm/compiled/<name>.txt` and rewrites the
-argument to the compiled path. Commands that reference no `.prompt.md`
-file run as-is.
+in the command line into `.apm/compiled/<name>.txt`. Non-runtime commands
+get the compiled path; runtime commands such as `copilot`, `codex`, `llm`,
+and `gemini` receive the compiled prompt content directly. Commands that
+reference no `.prompt.md` file run as-is.
 
 To see exactly what would run without executing it, use `apm preview
 <name>` -- it prints the original command, the rewritten command, and the

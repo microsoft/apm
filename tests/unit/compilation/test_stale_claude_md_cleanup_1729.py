@@ -490,7 +490,7 @@ class TestNoDedupPreventsRemoval:
             "--no-dedup must produce a CLAUDE.md; stale-removal must not fire"
         )
         body = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
-        assert "# Project Standards" in body or "global guidance" in body.lower(), (
+        assert "## Project Standards" in body or "global guidance" in body.lower(), (
             "--no-dedup CLAUDE.md must contain instruction content"
         )
 

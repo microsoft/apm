@@ -1,6 +1,6 @@
 ---
 title: apm marketplace
-description: Register marketplaces, author manifests, and publish updates to consumer repositories.
+description: Register marketplaces, author manifests, and validate updates for consumer repositories.
 sidebar:
   order: 20
 ---
@@ -8,7 +8,7 @@ sidebar:
 Manage marketplaces -- both **consuming** them (registering a remote
 marketplace so packages resolve by `package@marketplace` shorthand)
 and **authoring** one (editing `apm.yml`'s `marketplace:` block,
-validating it, and publishing updates to consumer repositories).
+validating it, and preparing artifacts for consumer repositories).
 
 ## Synopsis
 
@@ -26,9 +26,7 @@ apm marketplace init [--force] [--name N] [--owner O]
 apm marketplace migrate [--force | --dry-run]
 apm marketplace check [--offline]
 apm marketplace audit NAME [--strict] [-v]
-apm marketplace doctor
 apm marketplace outdated [--offline] [--include-prerelease]
-apm marketplace publish [--targets FILE] [--dry-run] [--no-pr] [...]
 
 # Edit packages in the authoring config
 apm marketplace package add SOURCE [...]
@@ -45,8 +43,7 @@ interact with this command:
   can resolve by short name (`my-pkg@my-marketplace`) instead of a
   full git URL. See [`apm install`](../install/).
 - **Authors** maintain a marketplace's `apm.yml` (`marketplace:`
-  block) and ship updates to consumer repositories via
-  `apm marketplace publish`.
+  block) and build marketplace artifacts with [`apm pack`](../pack/).
 
 The authoring config is the `marketplace:` block of `apm.yml` in the
 current working directory. Legacy `marketplace.yml` files are still
@@ -61,9 +58,9 @@ Register a marketplace from a source reference. Accepted forms:
 - `OWNER/REPO` -- GitHub shorthand (`acme/marketplace`).
 - `HOST/OWNER/.../REPO` -- non-GitHub host shorthand
   (`gitlab.com/team/marketplace`).
-- HTTPS git URL -- any git host, including Azure DevOps, GitLab,
-  Gitea, Bitbucket Server, or a self-hosted git server. Add `#ref`
-  to pin the marketplace, for example
+- HTTPS git URL -- Azure DevOps Services, a configured Azure DevOps Server,
+  GitLab, Gitea, Bitbucket Server, or another self-hosted git server. Add
+  `#ref` to pin the marketplace, for example
   `https://gitlab.com/acme/marketplace.git#v1.0.0`.
 - Hosted `marketplace.json` URL --
   `https://catalog.example.com/marketplace.json`.
@@ -80,8 +77,15 @@ apm marketplace add my-org/awesome-agents
 # GitLab via host shorthand
 apm marketplace add gitlab.com/my-org/awesome-agents --host gitlab.com
 
-# Azure DevOps (auth via ADO_APM_PAT, same as `apm install`)
+# Azure DevOps Services
 apm marketplace add https://dev.azure.com/contoso/eng/_git/agent-forge \
+    --name agent-forge
+
+# Azure DevOps Server
+export ADO_HOST=ado.contoso.com
+export ADO_APM_PAT=your_ado_pat
+apm marketplace add \
+    https://ado.contoso.com:8443/DefaultCollection/eng/_git/agent-forge \
     --name agent-forge
 
 # Gitea / Bitbucket Server / self-hosted git, pinned with #ref
@@ -110,23 +114,24 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--verbose`, `-v` | Show detailed output. |
 
 **Trust boundary.** APM forwards its authentication tokens
-(`GITHUB_APM_PAT`, `GITLAB_APM_PAT`) only when the marketplace
-host is classified as GitHub or GitLab family. For any other git
-host -- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
-marketplace is fetched via subprocess `git` through `GitCache`,
-and authentication falls through to the host's local git credential
-helper and matching `*_APM_PAT` variables such as `ADO_APM_PAT`.
-Hosted `marketplace.json` URLs are public HTTPS only: APM sends no auth
-headers. Use a git-backed marketplace for private catalogs. When packages
-are installed from a hosted JSON URL, the lockfile records the source URL and
-fetched content digest. See
+(`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
+marketplace host is classified as GitHub, GitLab, or Azure DevOps.
+Other git hosts -- generic HTTPS, SSH, self-hosted -- are fetched via
+subprocess `git` through `GitCache`, and authentication falls through
+to the host's local git credential helper. Hosted `marketplace.json`
+URLs are public HTTPS only: APM sends no auth headers. Use a
+git-backed marketplace for private catalogs. When packages are
+installed from a hosted JSON URL, the lockfile records the source URL
+and fetched content digest. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
 
-**Azure DevOps.** ADO-hosted marketplaces fetch `marketplace.json`
-via a sparse-cone git clone (not the ADO REST API), so authentication
-uses `ADO_APM_PAT` -- identical to how `apm install` handles
-ADO-hosted package dependencies. See
-[`consumer/private-and-org-packages`](../../../consumer/private-and-org-packages/).
+**Azure DevOps.** Services (`dev.azure.com`, `*.visualstudio.com`) use
+`ADO_APM_PAT`, then the Azure CLI bearer. Server hosts registered through
+`ADO_HOST` or `APM_ADO_HOSTS` use `ADO_APM_PAT` only. A Server source URL may
+include an explicit HTTPS port but must use a root-hosted collection path;
+APM rejects `/tfs/` prefixes. APM tries the Azure DevOps Items API first,
+then subprocess git. See
+[Authentication](../../../getting-started/authentication/#azure-devops).
 
 ### `apm marketplace list`
 
@@ -166,7 +171,14 @@ Unregister a marketplace.
 
 ### `apm marketplace validate NAME`
 
-Validate the manifest of a registered marketplace against the schema.
+Validate a registered marketplace's raw manifest structure, plugin schema, and
+duplicate plugin names.
+`apm marketplace add` remains tolerant of malformed entries; validation reports
+them by JSON path (for example, `plugins[0].source: expected a string or
+object`) and exits 1 without rewriting the source manifest or its registered
+marketplace entry. A structural failure is reported without downstream plugin
+count, schema, or duplicate-name success lines. Tolerant registration warns
+when it retains malformed entries and points to the validation command.
 
 ### `apm marketplace init`
 
@@ -192,8 +204,11 @@ Fold a legacy `marketplace.yml` into the `marketplace:` block of
 
 ### `apm marketplace check`
 
-Validate the schema of the authoring config and verify that every
-package entry resolves to a reachable git ref.
+Validate the schema of the authoring config and verify that every package
+entry resolves to a reachable git ref. For an Azure DevOps `sourceBase`
+ending in `/_git`, package names are appended without a `.git` suffix.
+Services uses `ADO_APM_PAT`, then the Azure CLI bearer. Server hosts
+registered through `ADO_HOST` or `APM_ADO_HOSTS` use `ADO_APM_PAT` only.
 
 | Flag | Description |
 |---|---|
@@ -203,14 +218,18 @@ package entry resolves to a reachable git ref.
 
 Run after adding or updating a marketplace, or in CI, to verify no
 plugin escapes marketplace pinning. Audit a registered marketplace for
-plugin dependencies that bypass marketplace pinning. The command fetches each plugin's `apm.yml` at
-its pinned ref and warns when `dependencies.apm` uses direct git
-URLs, repo shorthands, or `{ git: ... }` entries instead of
-`name@marketplace` refs.
+plugin dependencies that bypass marketplace pinning. For git-backed sources,
+the command fetches each plugin's `apm.yml` at its pinned ref. For local
+marketplaces, it reads each string-source plugin's `apm.yml` from the
+registered marketplace root. Local plugin paths that traverse outside that
+root, including through symlinks, and missing manifests are skipped without
+being read. Malformed or unreadable manifests are verification errors. The
+command warns when `dependencies.apm` uses direct git URLs, repo shorthands,
+or `{ git: ... }` entries instead of `name@marketplace` refs.
 
 | Flag | Description |
 |---|---|
-| `--strict` | Exit 1 when bypass warnings or unverifiable plugins are found. |
+| `--strict` | Exit 1 on bypasses, skipped sources, verification errors, or when no plugin can be verified. |
 | `--verbose`, `-v` | Show clean plugins and skipped reasons. |
 
 For the top-level content/integrity scan, see [`apm audit`](../audit/).
@@ -218,6 +237,8 @@ For the top-level content/integrity scan, see [`apm audit`](../audit/).
 ```bash
 apm marketplace audit my-marketplace
 apm marketplace audit my-marketplace --strict
+apm marketplace add ./local-marketplace --name local
+apm marketplace audit local --strict
 ```
 
 ### `apm marketplace outdated`
@@ -249,8 +270,10 @@ layout.
 
 ### `apm marketplace package add SOURCE`
 
-Add a package entry to the authoring config. `SOURCE` is a git repo
-reference. Mutable refs (`HEAD`, branches) are auto-resolved to a
+Add a package entry to the authoring config. `SOURCE` may be an
+`owner/repo` shorthand, a `host.tld/owner/repo` shorthand, or a full
+`https://host.tld/path/to/repo[.git]` URL with two or more repository
+path segments. Mutable refs (`HEAD`, branches) are auto-resolved to a
 concrete SHA at write time.
 
 | Flag | Description |
@@ -301,11 +324,11 @@ apm marketplace package add my-org/code-reviewer --version '>=1.0.0'
 apm marketplace check
 ```
 
-Preview a publish, then ship it as drafts:
+Check marketplace metadata before packaging:
 
 ```bash
-apm marketplace publish --dry-run
-apm marketplace publish --draft
+apm marketplace check
+apm marketplace check --offline
 ```
 
 ## Related

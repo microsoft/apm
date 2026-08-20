@@ -20,8 +20,6 @@ from click.testing import CliRunner
 # ---------------------------------------------------------------------------
 from apm_cli.commands.install import (
     _check_package_conflicts,
-    _maybe_rollback_manifest,
-    _restore_manifest_from_snapshot,
     _split_argv_at_double_dash,
     install,
 )
@@ -46,6 +44,10 @@ from apm_cli.deps.plugin_parser import (
     parse_plugin_manifest,
     synthesize_plugin_json_from_apm_yml,
     validate_plugin_package,
+)
+from apm_cli.install.transaction import (
+    _maybe_rollback_manifest,
+    _restore_manifest_from_snapshot,
 )
 from apm_cli.models.apm_package import clear_apm_yml_cache
 

@@ -548,7 +548,7 @@ class TestResolvePackageReferencesProbeSkipProvenance:
                 return_value=(dep_ref, False),
             ),
             patch(
-                "apm_cli.commands.install.update_existing_dependency_entry_if_needed",
+                "apm_cli.install.package_resolution.update_existing_dependency_entry_if_needed",
                 return_value=False,
             ),
         ):

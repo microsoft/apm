@@ -23,6 +23,8 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
 from tests.unit._skill_integrator_target_helpers import attach_skill_deploy_path
 
+pytestmark = [pytest.mark.integration, pytest.mark.component]
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

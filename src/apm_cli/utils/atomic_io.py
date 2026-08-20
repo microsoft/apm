@@ -17,6 +17,36 @@ import tempfile
 from pathlib import Path
 
 
+def _replace_atomic_file(source: str, destination: Path) -> None:
+    """Replace one atomic temp file, with a narrow installed-binary test seam."""
+    if os.environ.get("APM_TEST_FAIL_LOCK_REPLACE") == "1" and destination.name == "apm.lock.yaml":
+        raise OSError("lockfile replace blocked by test")
+    os.replace(source, destination)
+
+
+def normalize_crlf_to_lf(data: str) -> str:
+    """Normalize CRLF to LF (leaves bare CR alone, like the drift normalizer).
+
+    Mirrors :func:`apm_cli.utils.normalization._normalize_line_endings` at the
+    string level. Combined with ``newline=""`` on the open() call, this keeps
+    written bytes platform-independent so deployed-file hashes do not diverge
+    between Windows (which would otherwise translate ``\\n`` -> ``\\r\\n``) and
+    POSIX.
+    """
+    return data.replace("\r\n", "\n")
+
+
+def write_text_lf(path: Path, data: str) -> None:
+    """Write ``data`` to ``path`` as UTF-8 with deterministic LF line endings.
+
+    Non-atomic counterpart to :func:`atomic_write_text`. Caller must ensure
+    ``path.parent`` exists. ``newline=""`` disables the platform newline
+    translation that ``Path.write_text`` performs in text mode, so the on-disk
+    bytes (and therefore their content hash) are identical on every OS.
+    """
+    path.write_text(normalize_crlf_to_lf(data), encoding="utf-8", newline="")
+
+
 def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None) -> None:
     """Atomically write ``data`` (UTF-8) to ``path``.
 
@@ -42,11 +72,11 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
         if new_file_mode is not None and not existed and hasattr(os, "fchmod"):
             with contextlib.suppress(OSError):
                 os.fchmod(fd, new_file_mode)
-        fh = os.fdopen(fd, "w", encoding="utf-8")
+        fh = os.fdopen(fd, "w", encoding="utf-8", newline="")
         fd_wrapped = True
         with fh:
-            fh.write(data)
-        os.replace(tmp_name, path)
+            fh.write(normalize_crlf_to_lf(data))
+        _replace_atomic_file(tmp_name, path)
     except Exception:
         if not fd_wrapped:
             # fdopen never took ownership of the descriptor; close it so

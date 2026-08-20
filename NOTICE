@@ -334,6 +334,43 @@ Copyright 2019 Kenneth Reitz
 
 ---
 
+## Component. truststore
+
+- Version requirement: `>=0.10.0`
+- Upstream: https://github.com/sethmlarson/truststore
+- SPDX: `MIT`
+- Notes: Verifies HTTPS against the operating-system trust store by default so `apm` works behind a corporate CA / TLS-inspecting proxy.
+
+### Open Source License/Copyright Notice.
+
+_Copyright (c) 2022 Seth Michael Larson_
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2022 Seth Michael Larson
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+---
+
 ## Component. python-frontmatter
 
 - Version requirement: `>=1.0.0`
@@ -372,7 +409,7 @@ THE SOFTWARE.
 
 ## Component. llm
 
-- Version requirement: `>=0.17.0`
+- Version requirement: `>=0.28`
 - Upstream: https://github.com/simonw/llm
 - SPDX: `Apache-2.0`
 - Notes: No NOTICE or AUTHORS file present upstream; nothing additional to forward.
@@ -589,7 +626,7 @@ _Copyright Simon Willison (per PyPI author metadata; LICENSE file is the unmodif
 
 ## Component. llm-github-models
 
-- Version requirement: `>=0.1.0`
+- Version requirement: `>=0.18.0`
 - Upstream: https://github.com/tonybaloney/llm-github-models
 - SPDX: `Apache-2.0`
 - Notes: Upstream LICENSE file declares MIT license text but PyPI metadata + classifiers say Apache-2.0. See Open Issues.
@@ -699,6 +736,41 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+---
+
+## Component. tomlkit
+
+- Version requirement: `>=0.13`
+- Upstream: https://github.com/python-poetry/tomlkit
+- SPDX: `MIT`
+
+### Open Source License/Copyright Notice.
+
+_Copyright (c) 2018 Sébastien Eustace_
+
+```
+Copyright (c) 2018 Sébastien Eustace
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ---

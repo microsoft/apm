@@ -24,9 +24,8 @@ import shutil
 
 from apm_cli.utils.subprocess_env import external_process_env
 
-# Module-level cached git executable path (resolved once per process)
+# Module-level cached git executable path (successful resolutions only).
 _git_executable: str | None = None
-_git_resolved: bool = False
 
 # Variables that represent ambient git state -- strip these to avoid
 # biasing APM's git operations when invoked from within another repo
@@ -52,9 +51,11 @@ _STRIP_GIT_VARS: frozenset[str] = frozenset(
 
 
 def get_git_executable() -> str:
-    """Return the path to the git executable (cached after first lookup).
+    """Return the path to the git executable (cached after a successful lookup).
 
     Uses ``shutil.which("git")`` to locate git on PATH.
+    Failed lookups are not cached because PATH can change within a
+    long-lived process.
 
     Returns:
         Absolute or relative path to the git binary.
@@ -62,21 +63,16 @@ def get_git_executable() -> str:
     Raises:
         FileNotFoundError: If git is not found on PATH.
     """
-    global _git_executable, _git_resolved
-    if _git_resolved:
-        if _git_executable is None:
-            raise FileNotFoundError(
-                "git executable not found on PATH. "
-                "Please install git: https://git-scm.com/downloads"
-            )
+    global _git_executable
+    if _git_executable is not None:
         return _git_executable
 
-    _git_executable = shutil.which("git")
-    _git_resolved = True
-    if _git_executable is None:
+    resolved = shutil.which("git")
+    if resolved is None:
         raise FileNotFoundError(
             "git executable not found on PATH. Please install git: https://git-scm.com/downloads"
         )
+    _git_executable = resolved
     return _git_executable
 
 
@@ -96,9 +92,8 @@ def git_subprocess_env() -> dict[str, str]:
 
 def reset_git_cache() -> None:
     """Reset the cached git executable (for testing purposes only)."""
-    global _git_executable, _git_resolved
+    global _git_executable
     _git_executable = None
-    _git_resolved = False
 
 
 def git_long_paths_args() -> list[str]:

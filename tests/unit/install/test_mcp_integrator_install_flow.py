@@ -21,9 +21,12 @@ Covers branches not hit by existing MCP tests:
 from __future__ import annotations
 
 import contextlib
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import toml
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -91,6 +94,127 @@ def _patch_mcp_install(
         )
 
     return mock_integrator_cls, mock_manager
+
+
+def test_self_defined_partial_runtime_failure_is_explicit() -> None:
+    """A selected runtime failure must not be hidden by a sibling success."""
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import _install_self_defined_deps
+
+    dependency = _make_self_defined_dep("managed-server", transport="http")
+    managed: dict[str, set[str]] = {}
+    logger = MagicMock()
+
+    with (
+        patch.object(
+            MCPIntegrator,
+            "_check_self_defined_servers_needing_installation",
+            return_value=["managed-server"],
+        ),
+        patch.object(MCPIntegrator, "_build_self_defined_info", return_value={}),
+        patch.object(
+            MCPIntegrator,
+            "_install_for_runtime",
+            side_effect=lambda runtime, *_args, **_kwargs: runtime == "claude",
+        ) as install_runtime,
+        pytest.raises(RuntimeError, match=r"managed-server \(intellij\)"),
+    ):
+        _install_self_defined_deps(
+            self_defined_deps=[dependency],
+            target_runtimes=["claude", "intellij"],
+            stored_mcp_configs={},
+            servers_to_update=set(),
+            successful_updates=set(),
+            project_root=None,
+            user_scope=False,
+            verbose=False,
+            console=None,
+            logger=logger,
+            managed_target_servers=managed,
+        )
+
+    assert install_runtime.call_count == 2
+    assert managed == {"claude": {"managed-server"}}
+    logger.error.assert_any_call(
+        "MCP configuration failed for selected runtime(s): managed-server (intellij). "
+        "Fix the failed runtime MCP config and rerun apm install."
+    )
+
+
+def test_registry_group_partial_runtime_failure_is_explicit() -> None:
+    """Registry installs enforce the same strict IntelliJ failure contract."""
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import _install_registry_group
+
+    operations = MagicMock()
+    operations.validate_servers_exist.return_value = (["managed-server"], [])
+    operations.check_servers_needing_installation.return_value = ["managed-server"]
+    operations.batch_fetch_server_info.return_value = {"managed-server": {}}
+    operations.collect_environment_variables.return_value = {}
+    operations.collect_runtime_variables.return_value = {}
+    managed: dict[str, set[str]] = {}
+    logger = MagicMock()
+
+    with (
+        patch.object(
+            MCPIntegrator,
+            "_install_for_runtime",
+            side_effect=lambda runtime, *_args, **_kwargs: runtime == "claude",
+        ) as install_runtime,
+        pytest.raises(RuntimeError, match=r"managed-server \(intellij\)"),
+    ):
+        _install_registry_group(
+            operations=operations,
+            group_dep_names=["managed-server"],
+            group_dep_map={},
+            group_deps=["managed-server"],
+            target_runtimes=["claude", "intellij"],
+            stored_mcp_configs={},
+            servers_to_update=set(),
+            successful_updates=set(),
+            project_root=None,
+            user_scope=False,
+            verbose=False,
+            console=None,
+            logger=logger,
+            managed_target_servers=managed,
+        )
+
+    assert install_runtime.call_count == 2
+    assert managed == {"claude": {"managed-server"}}
+    logger.error.assert_any_call(
+        "MCP configuration failed for selected runtime(s): managed-server (intellij). "
+        "Fix the failed runtime MCP config and rerun apm install."
+    )
+
+
+def test_intellij_migration_error_is_already_rendered() -> None:
+    """Migration errors preserve their actionable message without generic wrapping."""
+    from apm_cli.adapters.client.intellij import IntelliJConfigError
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+    from apm_cli.integration.mcp_integrator_install import _migrate_intellij_managed_config
+
+    client = MagicMock()
+    client.migrate_legacy_managed_servers.side_effect = IntelliJConfigError(
+        "Fix the legacy IntelliJ config, then rerun apm install."
+    )
+    logger = MagicMock()
+    with (
+        patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
+        pytest.raises(
+            InstallFailureAlreadyRendered,
+            match="Fix the legacy IntelliJ config",
+        ),
+    ):
+        _migrate_intellij_managed_config(
+            ["intellij"],
+            {"intellij": {"managed-server"}},
+            project_root=None,
+            user_scope=False,
+            logger=logger,
+        )
+
+    logger.error.assert_called_once_with("Fix the legacy IntelliJ config, then rerun apm install.")
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +432,88 @@ class TestRunMcpInstallSelfDefined:
             run_mcp_install([sd_dep], runtime="copilot", logger=logger)
 
         # Function reached without crash is the assertion
+
+    @pytest.mark.parametrize(
+        ("runtime", "signal_dir", "config_relpath"),
+        [
+            ("claude", ".claude", ".mcp.json"),
+            ("codex", ".codex", ".codex/config.toml"),
+        ],
+    )
+    def test_self_defined_stdio_env_placeholders_resolve_from_process_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        runtime: str,
+        signal_dir: str,
+        config_relpath: str,
+    ) -> None:
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        (tmp_path / signal_dir).mkdir()
+        monkeypatch.setenv("MY_TOKEN", "repro-secret-not-a-real-token")
+        dep = MCPDependency(
+            name="env-demo",
+            registry=False,
+            transport="stdio",
+            command="npx",
+            args=["-y", "example-mcp"],
+            env={
+                "MY_TOKEN": "${MY_TOKEN}",
+                "LITERAL_VALUE": "literal-value",
+            },
+        )
+
+        result = run_mcp_install(
+            [dep],
+            runtime=runtime,
+            project_root=tmp_path,
+            logger=MagicMock(),
+        )
+
+        assert result == 1
+        config_path = tmp_path / config_relpath
+        if runtime == "claude":
+            env_block = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"][
+                "env-demo"
+            ]["env"]
+        else:
+            env_block = toml.load(config_path)["mcp_servers"]["env-demo"]["env"]
+        assert env_block["MY_TOKEN"] == "repro-secret-not-a-real-token"
+        assert env_block["LITERAL_VALUE"] == "literal-value"
+
+    def test_self_defined_non_stdio_env_remains_env_overrides(self) -> None:
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        dep = MCPDependency(
+            name="http-demo",
+            registry=False,
+            transport="http",
+            url="https://example.test/mcp",
+            env={"HTTP_TOKEN": "${HTTP_TOKEN}"},
+        )
+
+        with (
+            patch(
+                "apm_cli.integration.mcp_integrator_install._resolve_target_runtimes",
+                return_value=["claude"],
+            ),
+            patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
+            patch.object(
+                MCPIntegrator,
+                "_check_self_defined_servers_needing_installation",
+                return_value={"http-demo"},
+            ),
+            patch.object(MCPIntegrator, "_install_for_runtime", return_value=True) as install_mock,
+        ):
+            result = run_mcp_install([dep], runtime="claude", logger=MagicMock())
+
+        assert result == 1
+        install_mock.assert_called_once()
+        assert install_mock.call_args.args[2] == {"HTTP_TOKEN": "${HTTP_TOKEN}"}
 
 
 # ---------------------------------------------------------------------------

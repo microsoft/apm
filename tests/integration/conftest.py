@@ -24,6 +24,12 @@ from functools import lru_cache
 from pathlib import Path
 
 import pytest
+import rich
+
+from tests.utils.hermetic_packaged_sample import (
+    HermeticPackagedSample,
+    create_hermetic_packaged_sample,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -47,7 +53,7 @@ def _integration_process_cwd_guard():
 
 @pytest.fixture(autouse=True)
 def _reset_console_state():
-    """Reset the console singleton after each test.
+    """Reset APM and Rich console singletons before and after each test.
 
     Several commands (e.g. ``pack --json``) call
     ``set_console_stderr(True)`` to route rich/click output to stderr.
@@ -56,14 +62,24 @@ def _reset_console_state():
     tests see empty stdout because ``click.echo(..., err=True)``
     silently diverts output.
 
-    This fixture is a safety net -- it yields first (so the test runs
-    with whatever state it sets up) and unconditionally resets
-    afterwards.
+    Tests that initialize Rich's process-global console while its
+    ``Console`` class is patched can also leave a ``MagicMock`` clock
+    behind. Rich progress then compares mock timestamps in later tests.
+
+    This fixture resets both singletons before and after each test so an
+    xdist worker cannot carry console state across test boundaries.
     """
-    yield
     from apm_cli.utils.console import _reset_console
 
+    # ``rich._console`` is Rich's process-global default console (the one
+    # ``rich.get_console()``/``rich.print`` lazily create). Nulling it forces
+    # a fresh real console next call. The attribute has lived at this name
+    # since Rich 10.0; the project pins ``rich>=13.0.0`` (verified on 15.x).
     _reset_console()
+    rich._console = None
+    yield
+    _reset_console()
+    rich._console = None
     try:
         os.getcwd()
     except (FileNotFoundError, OSError):
@@ -158,7 +174,8 @@ def _resolve_apm_binary() -> Path | None:
     """Resolve the apm binary used by integration tests.
 
     Resolution order (prefers the build under test over a system install):
-      1. ``APM_BINARY_PATH`` env var (CI sets this after the build step).
+      1. ``APM_BINARY_PATH`` env var (CI sets this after the build step). When
+         set, this path is authoritative and invalid values fail closed.
       2. ``./dist/<platform>/apm`` (local build convention).
       3. ``shutil.which("apm")`` lookup on ``PATH``.
 
@@ -167,10 +184,24 @@ def _resolve_apm_binary() -> Path | None:
     contributor is trying to validate.
     """
     env_path = os.environ.get("APM_BINARY_PATH")
-    if env_path:
+    if env_path is not None:
+        if not env_path:
+            raise pytest.UsageError(
+                "APM_BINARY_PATH is set but empty. "
+                "Set it to the expected executable or remove the variable."
+            )
         candidate = Path(env_path)
-        if candidate.is_file():
-            return candidate.resolve()
+        if not candidate.is_file():
+            raise pytest.UsageError(
+                f"APM_BINARY_PATH does not exist or is not a file: {candidate}. "
+                "Build the expected artifact or correct APM_BINARY_PATH."
+            )
+        if not os.access(candidate, os.X_OK):
+            raise pytest.UsageError(
+                f"APM_BINARY_PATH is not executable: {candidate}. "
+                "Make the expected artifact executable and rerun the test."
+            )
+        return candidate.resolve()
 
     local = _local_dist_apm_binary()
     if local is not None:
@@ -193,6 +224,10 @@ def _is_network_integration() -> bool:
 
 def _is_inference_mode() -> bool:
     return os.environ.get("APM_RUN_INFERENCE_TESTS") == "1"
+
+
+def _is_windows() -> bool:
+    return _platform.system() == "Windows"
 
 
 def _has_apm_binary() -> bool:
@@ -221,6 +256,7 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
         _is_network_integration,
         "APM_RUN_INTEGRATION_TESTS=1 not set",
     ),
+    "requires_windows": (_is_windows, "Windows required"),
     "requires_apm_binary": (
         _has_apm_binary,
         "apm binary not found on PATH (set APM_BINARY_PATH or build via scripts/build-binary.sh)",
@@ -272,3 +308,28 @@ def apm_binary_path() -> Path:
 
     pytest.skip("No apm binary found (set APM_BINARY_PATH or build via scripts/build-binary.sh)")
     raise RuntimeError("unreachable")  # for type-checker
+
+
+@pytest.fixture
+def hermetic_packaged_sample(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> HermeticPackagedSample:
+    """Create the owned GitHub-shaped package fixture for packaged E2E tests."""
+    return create_hermetic_packaged_sample(
+        tmp_path,
+        apm_binary_path=apm_binary_path,
+        project_name="hermetic-packaged-consumer",
+    )
+
+
+@pytest.fixture
+def packaged_sample(
+    hermetic_packaged_sample: HermeticPackagedSample,
+) -> HermeticPackagedSample:
+    """Back-compat alias for established lifecycle suites.
+
+    Prefer ``hermetic_packaged_sample`` in new tests; this alias only preserves the
+    shorter name used by the pre-hermetic deployed-files and silent-adopt suites.
+    """
+    return hermetic_packaged_sample

@@ -1,10 +1,16 @@
-"""Audit report serialization — JSON and SARIF output for apm audit."""
+"""Audit report serialization -- JSON and SARIF output for apm audit."""
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from .content_scanner import ScanFinding
+
+if TYPE_CHECKING:
+    from ..core.deployment_ledger import DeploymentOwnerViolation
 
 
 def relative_path_for_report(file_path: str) -> str:
@@ -25,8 +31,9 @@ _SARIF_SCHEMA = (
 )
 _TOOL_NAME = "apm-audit"
 _TOOL_INFO_URI = "https://apm.github.io/apm/enterprise/security/"
+_DEPLOYMENT_OWNER_RULE = "apm/lockfile/deployment-owner"
 
-# Severity mapping: APM → SARIF
+# Severity mapping: APM -> SARIF
 _SEVERITY_MAP = {
     "critical": "error",
     "warning": "warning",
@@ -39,18 +46,54 @@ def _rule_id(category: str) -> str:
     return f"apm/hidden-unicode/{category}"
 
 
+def _owner_description(violation: DeploymentOwnerViolation) -> str:
+    invalid = ", ".join(violation.invalid_owners)
+    active = (
+        f"; invalid active owner {violation.invalid_active_owner}"
+        if violation.invalid_active_owner is not None
+        else ""
+    )
+    return f"Deployment {violation.locator.key} references invalid owner(s) {invalid}{active}."
+
+
+def _owner_json(violation: DeploymentOwnerViolation) -> dict[str, Any]:
+    locator = violation.locator
+    return {
+        "severity": "critical",
+        "file": "apm.lock.yaml",
+        "category": "deployment-owner",
+        "locator": {
+            "key": locator.key,
+            "kind": locator.kind.value,
+            "target": locator.target,
+            "value": locator.value,
+            "runtime": locator.runtime,
+            "scope": locator.scope,
+        },
+        "owners": list(violation.owners),
+        "active_owner": violation.active_owner,
+        "invalid_owners": list(violation.invalid_owners),
+        "invalid_active_owner": violation.invalid_active_owner,
+        "description": _owner_description(violation),
+        "remediation": DEPLOYMENT_OWNER_REMEDIATION,
+    }
+
+
 def findings_to_json(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
     exit_code: int,
+    owner_violations: tuple[DeploymentOwnerViolation, ...] = (),
 ) -> dict:
     """Convert scan findings to APM's JSON report format."""
     all_findings = [f for ff in findings_by_file.values() for f in ff]
 
     summary = {
         "files_scanned": files_scanned,
-        "files_affected": len(findings_by_file),
-        "critical": sum(1 for f in all_findings if f.severity == "critical"),
+        "files_affected": len(findings_by_file) + bool(owner_violations),
+        "critical": (
+            sum(1 for f in all_findings if f.severity == "critical") + len(owner_violations)
+        ),
         "warning": sum(1 for f in all_findings if f.severity == "warning"),
         "info": sum(1 for f in all_findings if f.severity == "info"),
     }
@@ -68,9 +111,11 @@ def findings_to_json(
                 "description": finding.description,
             }
         )
+    items.extend(_owner_json(violation) for violation in owner_violations)
 
     return {
         "version": "1",
+        "passed": exit_code == 0,
         "exit_code": exit_code,
         "summary": summary,
         "findings": items,
@@ -80,6 +125,7 @@ def findings_to_json(
 def findings_to_sarif(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
+    owner_violations: tuple[DeploymentOwnerViolation, ...] = (),
 ) -> dict:
     """Convert scan findings to SARIF 2.1.0 format.
 
@@ -103,6 +149,15 @@ def findings_to_sarif(
                 },
                 "helpUri": _TOOL_INFO_URI,
             }
+    if owner_violations:
+        seen_rules[_DEPLOYMENT_OWNER_RULE] = {
+            "id": _DEPLOYMENT_OWNER_RULE,
+            "shortDescription": {
+                "text": "Invalid deployment ledger owner reference",
+            },
+            "defaultConfiguration": {"level": "error"},
+            "helpUri": _TOOL_INFO_URI,
+        }
 
     # Build results
     results = []
@@ -130,6 +185,39 @@ def findings_to_sarif(
             },
         }
         results.append(result)
+    for violation in owner_violations:
+        locator = violation.locator
+        results.append(
+            {
+                "ruleId": _DEPLOYMENT_OWNER_RULE,
+                "level": "error",
+                "message": {
+                    "text": (f"{_owner_description(violation)} {DEPLOYMENT_OWNER_REMEDIATION}")
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": "apm.lock.yaml"},
+                        }
+                    }
+                ],
+                "properties": {
+                    "locator": {
+                        "key": locator.key,
+                        "kind": locator.kind.value,
+                        "target": locator.target,
+                        "value": locator.value,
+                        "runtime": locator.runtime,
+                        "scope": locator.scope,
+                    },
+                    "owners": list(violation.owners),
+                    "activeOwner": violation.active_owner,
+                    "invalidOwners": list(violation.invalid_owners),
+                    "invalidActiveOwner": violation.invalid_active_owner,
+                    "category": "deployment-owner",
+                },
+            }
+        )
 
     return {
         "$schema": _SARIF_SCHEMA,
@@ -174,6 +262,7 @@ def serialize_report(report: dict) -> str:
 def findings_to_markdown(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
+    owner_violations: tuple[DeploymentOwnerViolation, ...] = (),
 ) -> str:
     """Convert scan findings to GitHub-Flavored Markdown.
 
@@ -181,17 +270,16 @@ def findings_to_markdown(
     """
     all_findings = [f for ff in findings_by_file.values() for f in ff]
 
-    if not all_findings:
+    if not all_findings and not owner_violations:
         return (
             f"## APM Audit Report\n\n"
-            f"**Clean** — no security findings across {files_scanned} files.\n"
+            f"**Clean** - no security findings across {files_scanned} files.\n"
         )
 
-    # Count severities
-    critical = sum(1 for f in all_findings if f.severity == "critical")
+    critical = sum(1 for f in all_findings if f.severity == "critical") + len(owner_violations)
     warning = sum(1 for f in all_findings if f.severity == "warning")
     info = sum(1 for f in all_findings if f.severity == "info")
-    affected = len(findings_by_file)
+    affected = len(findings_by_file) + bool(owner_violations)
 
     # Summary line
     parts = []
@@ -201,38 +289,66 @@ def findings_to_markdown(
         parts.append(f"{warning} warning{'s' if warning != 1 else ''}")
     if info:
         parts.append(f"{info} info")
-    total = len(all_findings)
+    total = len(all_findings) + len(owner_violations)
     count_label = f"**{total} finding{'s' if total != 1 else ''}**"
     summary = (
         f"{count_label} across {affected} file{'s' if affected != 1 else ''}"
         f" ({', '.join(parts)}) | {files_scanned} files scanned"
     )
 
-    # Sort: severity (critical first), then file, then line
     severity_order = {"critical": 0, "warning": 1, "info": 2}
     sorted_findings = sorted(
         all_findings,
         key=lambda f: (severity_order.get(f.severity, 3), f.file, f.line),
     )
 
-    # Table
     lines = [
         "## APM Audit Report",
         "",
         summary,
-        "",
-        "| Severity | File | Location | Codepoint | Description |",
-        "|----------|------|----------|-----------|-------------|",
     ]
-    for f in sorted_findings:
-        sev = f.severity.upper()
-        escaped_desc = f.description.replace("|", "\\|")
-        lines.append(
-            f"| {sev} | `{relative_path_for_report(f.file)}` | {f.line}:{f.column}"
-            f" | `{f.codepoint}` | {escaped_desc} |"
+    if owner_violations:
+        lines.extend(
+            [
+                "",
+                "### Lockfile integrity",
+                "",
+                "| Severity | Locator | Owners | Active owner |",
+                "|----------|---------|--------|--------------|",
+            ]
+        )
+        for violation in owner_violations:
+            owners = ", ".join(violation.owners).replace("|", "\\|")
+            lines.append(
+                f"| CRITICAL | `{violation.locator.key}` | `{owners}` | "
+                f"`{violation.active_owner}` |"
+            )
+        lines.extend(["", DEPLOYMENT_OWNER_REMEDIATION])
+    if sorted_findings:
+        lines.extend(
+            [
+                "",
+                "### Content findings",
+                "",
+                "| Severity | File | Location | Codepoint | Description |",
+                "|----------|------|----------|-----------|-------------|",
+            ]
+        )
+        for finding in sorted_findings:
+            severity = finding.severity.upper()
+            escaped_desc = finding.description.replace("|", "\\|")
+            lines.append(
+                f"| {severity} | `{relative_path_for_report(finding.file)}` | "
+                f"{finding.line}:{finding.column} | `{finding.codepoint}` | "
+                f"{escaped_desc} |"
+            )
+        lines.extend(
+            [
+                "",
+                "Run `apm audit --strip` to remove flagged characters.",
+            ]
         )
     lines.append("")
-    lines.append("Run `apm audit --strip` to remove flagged characters.\n")
 
     return "\n".join(lines)
 

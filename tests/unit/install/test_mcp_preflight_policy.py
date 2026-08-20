@@ -31,6 +31,8 @@ from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import (
     ApmPolicy,
+    CompilationPolicy,
+    CompilationTargetPolicy,
     DependencyPolicy,  # noqa: F401
     McpPolicy,
     McpTransportPolicy,  # noqa: F401
@@ -138,7 +140,7 @@ class TestEscapeHatches:
             # the dep is denied under block enforcement.
             with pytest.raises(PolicyBlockError):
                 run_policy_preflight(
-                    project_root=Path("/tmp/fake"),
+                    project_root=Path("fake"),
                     mcp_deps=[_make_mcp_dep("io.github.untrusted/evil-mcp")],
                     no_policy=False,
                     logger=logger,
@@ -165,6 +167,24 @@ class TestAllowedMCPProceeds:
 
         assert result is not None
         assert active is True
+
+    def test_direct_mcp_plural_targets_are_policy_checked(self):
+        """Direct --mcp applies compilation policy to the whole target set."""
+        policy = ApmPolicy(
+            enforcement="block",
+            compilation=CompilationPolicy(
+                target=CompilationTargetPolicy(allow=("copilot",)),
+            ),
+        )
+        fetch = _make_fetch_result(policy=policy)
+
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError):
+            run_policy_preflight(
+                project_root=Path("/tmp/fake"),
+                mcp_deps=[_make_mcp_dep("test-server", transport="http")],
+                effective_target=["copilot", "claude"],
+                logger=_make_logger(),
+            )
 
     def test_allowed_mcp_under_warn_proceeds(self):
         """Allowed MCP proceeds under warn enforcement too."""

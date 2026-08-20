@@ -131,11 +131,11 @@ class TestCheckLogger:
 
 
 class TestMaterializeInstallPath:
-    def test_not_cache_only_raises_not_implemented(self, tmp_path: Path) -> None:
+    def test_not_cache_only_without_downloader_fails_closed(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import _materialize_install_path
 
         dep = LockedDependency(repo_url="example/pkg", resolved_commit="abc")
-        with pytest.raises(NotImplementedError, match="no-cache"):
+        with pytest.raises(CacheMissError, match="no downloader"):
             _materialize_install_path(dep, tmp_path, tmp_path, cache_only=False)
 
     def test_local_dep_no_local_path_raises_cache_miss(self, tmp_path: Path) -> None:
@@ -277,16 +277,16 @@ class TestReadApmYmlTarget:
         result = _read_apm_yml_target(tmp_path)
         assert result is None
 
-    def test_apm_yml_with_target_returns_value(self, tmp_path: Path) -> None:
+    def test_apm_yml_with_singular_target_returns_list(self, tmp_path: Path) -> None:
+        # Singular 'target: copilot' form -- returns a one-element list.
         (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
-        with patch("apm_cli.core.target_detection.parse_target_field", return_value="copilot"):
-            result = _read_apm_yml_target(tmp_path)
-        assert result == "copilot"
+        result = _read_apm_yml_target(tmp_path)
+        assert result == ["copilot"]
 
-    def test_parse_target_field_exception_returns_none(self, tmp_path: Path) -> None:
-        (tmp_path / "apm.yml").write_text("name: pkg\ntarget: invalid\n", encoding="utf-8")
+    def test_parse_targets_field_exception_returns_none(self, tmp_path: Path) -> None:
+        (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
         with patch(
-            "apm_cli.core.target_detection.parse_target_field",
+            "apm_cli.core.apm_yml.parse_targets_field",
             side_effect=ValueError("bad"),
         ):
             result = _read_apm_yml_target(tmp_path)

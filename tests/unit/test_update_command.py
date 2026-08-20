@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from urllib.parse import urlparse
 
 from click.testing import CliRunner
 
@@ -91,7 +92,9 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Successfully updated to version 0.7.0", result.output)
         mock_get.assert_called_once()
-        self.assertTrue(mock_get.call_args.args[0].endswith("apm-windows"))
+        installer_url = urlparse(mock_get.call_args.args[0])
+        self.assertEqual(installer_url.hostname, "github.com")
+        self.assertEqual(installer_url.path, "/microsoft/apm/raw/v0.7.0/install.ps1")
         mock_run.assert_called_once()
         run_command = mock_run.call_args.args[0]
         self.assertEqual(run_command[:3], ["powershell.exe", "-ExecutionPolicy", "Bypass"])
@@ -102,6 +105,7 @@ class TestUpdateCommand(unittest.TestCase):
         # passing env= unconditionally keeps one code path across platforms.
         self.assertIn("env", mock_run.call_args.kwargs)
         self.assertIsNotNone(mock_run.call_args.kwargs["env"])
+        self.assertEqual(mock_run.call_args.kwargs["env"]["VERSION"], "v0.7.0")
 
     @patch("requests.get")
     @patch("subprocess.run")
@@ -125,17 +129,19 @@ class TestUpdateCommand(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "darwin"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch.object(update_module.shutil, "which", return_value="/usr/bin/bash"),
         ):
             result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Successfully updated to version 0.7.0", result.output)
         mock_get.assert_called_once()
-        self.assertTrue(mock_get.call_args.args[0].endswith("apm-unix"))
+        installer_url = urlparse(mock_get.call_args.args[0])
+        self.assertEqual(installer_url.hostname, "github.com")
+        self.assertEqual(installer_url.path, "/microsoft/apm/raw/v0.7.0/install.sh")
         mock_run.assert_called_once()
         run_command = mock_run.call_args.args[0]
-        self.assertEqual(run_command[0], "/bin/sh")
+        self.assertEqual(run_command[0], "/usr/bin/bash")
         self.assertEqual(run_command[1][-3:], ".sh")
         mock_chmod.assert_called_once()
         # Regression guard for issue #894: the installer must be spawned with
@@ -143,6 +149,7 @@ class TestUpdateCommand(unittest.TestCase):
         # LD_LIBRARY_PATH pointing at the bundle's _internal directory.
         self.assertIn("env", mock_run.call_args.kwargs)
         self.assertIsNotNone(mock_run.call_args.kwargs["env"])
+        self.assertEqual(mock_run.call_args.kwargs["env"]["VERSION"], "v0.7.0")
 
 
 class TestUpdatePlatformHelpers(unittest.TestCase):
@@ -186,21 +193,31 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
         self.assertIn("aka.ms/apm-unix", command)
         self.assertIn("curl", command)
 
-    def test_installer_run_command_unix_bin_sh_exists(self):
+    def test_installer_run_command_unix_bash_found(self):
         with (
             patch.object(update_module.sys, "platform", "linux"),
+            patch.object(update_module.shutil, "which", return_value="/usr/bin/bash"),
+        ):
+            cmd = update_module._get_installer_run_command("/tmp/install.sh")
+        self.assertEqual(cmd, ["/usr/bin/bash", "/tmp/install.sh"])
+
+    def test_installer_run_command_unix_fallback_to_bin_bash(self):
+        with (
+            patch.object(update_module.sys, "platform", "linux"),
+            patch.object(update_module.shutil, "which", return_value=None),
             patch.object(update_module.os.path, "exists", return_value=True),
         ):
             cmd = update_module._get_installer_run_command("/tmp/install.sh")
-        self.assertEqual(cmd, ["/bin/sh", "/tmp/install.sh"])
+        self.assertEqual(cmd, ["/bin/bash", "/tmp/install.sh"])
 
-    def test_installer_run_command_unix_fallback_to_sh(self):
+    def test_installer_run_command_unix_no_bash_raises(self):
         with (
             patch.object(update_module.sys, "platform", "linux"),
+            patch.object(update_module.shutil, "which", return_value=None),
             patch.object(update_module.os.path, "exists", return_value=False),
         ):
-            cmd = update_module._get_installer_run_command("/tmp/install.sh")
-        self.assertEqual(cmd, ["sh", "/tmp/install.sh"])
+            with self.assertRaises(FileNotFoundError):
+                update_module._get_installer_run_command("/tmp/install.sh")
 
     def test_installer_run_command_windows_powershell_not_found(self):
         with (
@@ -349,7 +366,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
     @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_network_error_exits_1(self, mock_latest, mock_chmod, mock_version, mock_get):
-        mock_get.side_effect = Exception("Network error")
+        mock_get.side_effect = OSError("Network error")
 
         with patch.object(update_module.sys, "platform", "linux"):
             result = self.runner.invoke(cli, ["self-update"])

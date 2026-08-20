@@ -1,11 +1,11 @@
 ---
 title: apm update
-description: Re-resolve dependencies in apm.yml against the latest matching Git refs, with a plan and consent gate before writing.
+description: Re-resolve dependencies in apm.yml against the latest matching versions or Git refs, with a plan and consent gate before writing.
 sidebar:
   order: 4
 ---
 
-Refresh the dependencies declared in `apm.yml` to the latest matching Git refs, after showing you the plan and asking for consent.
+Refresh the dependencies declared in `apm.yml` to the latest matching versions or Git refs, after showing you the plan and asking for consent.
 
 ## Synopsis
 
@@ -15,14 +15,16 @@ apm update [OPTIONS] [PACKAGES...]
 
 ## Description
 
-`apm update` re-resolves every dependency in your project's `apm.yml` against the newest Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
+`apm update` re-resolves every dependency in your project's `apm.yml` against the newest version or Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before changing refs. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
+
+When every ref is already current but the locked `apm_modules/` cache is empty, `apm update` restores the cache from the same resolved refs without prompting. It uses the normal dependency materialization path without changing `apm.yml` or `apm.lock.yaml`. `--dry-run` remains read-only and does not restore files.
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
 This is the dependency-refresh command. To upgrade the APM CLI binary itself, see [`apm self-update`](../self-update/).
 
 :::note[Consent gate]
-The interactive prompt defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to proceed; otherwise `apm update` aborts without modifying the manifest, lockfile, or workspace.
+The interactive prompt for ref changes defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to apply ref changes. Restoring an empty cache from unchanged locked refs does not require consent.
 :::
 
 For a read-only install that pins to whatever is already in `apm.lock.yaml` -- the right command for CI -- use [`apm install --frozen`](../install/).
@@ -41,9 +43,9 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 | `--dry-run` | off | Compute and print the plan without prompting and without writing the manifest, lockfile, or filesystem. |
 | `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
 | `--global`, `-g` | off | Refresh user-scope dependencies under `~/.apm/` instead of the current project (mirrors `apm install -g`). |
-| `--force` | off | Overwrite locally-authored files on collision. |
+| `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
-| `--target TARGET`, `-t TARGET` | auto-detect | Agent harness(es) to update for. Accepts a single value (`claude`, `copilot`, `cursor`, `windsurf`, `kiro`, `codex`, `opencode`, `gemini`) or comma-separated list (`--target claude,cursor`). Overrides `apm.yml targets:` and auto-detection. |
+| `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |
 
 ## Examples
 
@@ -88,15 +90,21 @@ apm update
 
 ## Behavior
 
-- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest ref allowed by the constraint (branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
+- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
+- **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
+- **Registry deps.** Registry semver deps are re-resolved against their configured registry. Deps already at the latest version satisfying their constraint appear as **unchanged** in the plan.
 - **Structured plan.** Output is grouped into four sections:
   - **added** -- present in the new resolution but not in the previous lockfile.
   - **updated** -- ref or version moved.
   - **removed** -- previously locked, no longer required by `apm.yml`.
-  - **unchanged** -- already at the latest matching ref.
+  - **unchanged** -- already at the latest matching version or ref.
 - **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the manifest, lockfile, and workspace are untouched.
 - **No partial consent.** A single prompt covers both revision-pin manifest rewrites and the normal update plan; declining leaves everything unchanged.
 - **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
+- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files, lockfile ownership, and merge-hook config/sidecar entries for targets no longer declared in `apm.yml`, even when no dependency ref changes -- same contract as [`apm install`'s target-contraction note](../install/#notes); see [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for what the merge-hook config/sidecar files are.
+- **One target decision covers services.** The effective target used for package deployment is reused for MCP and LSP reconciliation. Saved config targets are not re-detected or dropped after package updates. Required native config failures exit non-zero.
+- **No-op and service-only repair.** An accepted update with no dependency ref changes still reconciles missing MCP/LSP config. A manifest with only MCP/LSP dependencies also uses `apm update` as a configuration repair pass; `--dry-run` previews this without writing.
+- **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update restores the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
 
 ## Back-compat: `apm update` used to be the self-updater
 

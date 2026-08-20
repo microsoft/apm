@@ -214,6 +214,55 @@ class TestDetectOrphans(unittest.TestCase):
         result = detect_orphans(lf, set(), only_packages=None)
         self.assertEqual(result, {"a.md"})
 
+    def test_self_entry_never_orphaned(self):
+        """The synthesized self-entry (key ".") must never be reported as orphan.
+
+        from_yaml() injects a virtual ``_SELF_KEY`` dependency carrying the
+        project's own includes:auto content. That key can never appear in the
+        manifest-derived intended set, and the real install re-deploys it
+        (drift.py replay guards ``local_path == _SELF_KEY``). Reporting it here
+        over-counts self-includes as removals in the dry-run preview.
+        """
+        from apm_cli.deps.lockfile import _SELF_KEY
+
+        self_dep = _LockedDep(
+            repo_url="<self>",
+            source="local",
+            local_path=_SELF_KEY,
+            deployed_files=["self_a.md", "self_b.md"],
+        )
+        orphan = _LockedDep(repo_url="owner/gone", deployed_files=["gone.md"])
+        lf = _LockFile(dependencies={_SELF_KEY: self_dep, "owner/gone": orphan})
+        result = detect_orphans(lf, set(), only_packages=[])
+        # Only the genuinely dropped package is an orphan; self-includes are not.
+        self.assertEqual(result, {"gone.md"})
+
+    def test_self_include_survives_real_from_yaml_roundtrip(self):
+        """End-to-end guard using the real LockFile.from_yaml synthesis.
+
+        The stub-based test above could drift from how from_yaml actually
+        synthesizes the self-entry. This exercises the real parse -> detect
+        path so a change to either side (self-key value, synthesis shape)
+        that reintroduces the dry-run false alarm fails here. from_yaml is a
+        pure string parse -- no I/O.
+        """
+        from apm_cli.deps.lockfile import LockFile
+
+        lock = LockFile.from_yaml(
+            "lockfile_version: '2'\n"
+            "generated_at: ''\n"
+            "dependencies:\n"
+            "  - repo_url: owner/kept\n"
+            "    source: git\n"
+            "    deployed_files: ['.apm/x.md']\n"
+            "local_deployed_files:\n"
+            "  - .claude/skills/self/SKILL.md\n"
+        )
+        # Manifest now empty -> only the real dropped package is an orphan;
+        # the synthesized self-entry's includes are never reported.
+        result = detect_orphans(lock, set(), only_packages=[])
+        self.assertEqual(result, {".apm/x.md"})
+
 
 # ---------------------------------------------------------------------------
 # detect_config_drift

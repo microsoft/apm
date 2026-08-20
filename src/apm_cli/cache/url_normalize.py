@@ -108,8 +108,8 @@ def normalize_repo_url(url: str) -> str:
         if port:
             authority = f"{authority}:{port}"
 
-    # Step 1: Strip trailing .git from path
-    path = parsed.path or ""
+    # Step 1: Strip trailing slash and one trailing .git suffix from path.
+    path = (parsed.path or "").rstrip("/")
     if path.endswith(".git"):
         path = path[:-4]
 
@@ -121,9 +121,6 @@ def normalize_repo_url(url: str) -> str:
     _CASE_INSENSITIVE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
     if hostname in _CASE_INSENSITIVE_HOSTS:
         path = path.lower()
-
-    # Strip trailing slash from path
-    path = path.rstrip("/")
 
     # Reconstruct normalized URL
     return f"{scheme}://{authority}{path}"

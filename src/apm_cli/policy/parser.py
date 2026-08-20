@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from ..utils.yaml_io import load_yaml_str
 from .schema import (
     ApmPolicy,
     AuditPolicy,
@@ -16,6 +17,7 @@ from .schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    ExecutablesPolicy,
     IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
@@ -52,15 +54,18 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "manifest",
     "unmanaged_files",
     "security",
+    "registry_source",
     "bin_deploy",
+    "executables",
 }
 
 
 class PolicyValidationError(Exception):
     """Raised when policy YAML is malformed or violates schema constraints."""
 
-    def __init__(self, errors: list[str]):
+    def __init__(self, errors: list[str], warnings: list[str] | None = None):
         self.errors = errors
+        self.warnings = warnings or []
         super().__init__(f"Policy validation failed: {'; '.join(errors)}")
 
 
@@ -80,6 +85,11 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
     unknown = set(data.keys()) - _KNOWN_TOP_LEVEL_KEYS
     for key in sorted(unknown):
         warnings.append(f"Unknown top-level policy key: '{key}'")
+
+    for key in ("mcp", "manifest", "compilation", "registry_source", "bin_deploy"):
+        value = data.get(key)
+        if value is not None and not isinstance(value, dict):
+            errors.append(f"{key} must be a YAML mapping")
 
     # enforcement (coerce YAML booleans: off → "off")
     enforcement = data.get("enforcement")
@@ -104,7 +114,9 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
 
     # cache.ttl
     cache = data.get("cache")
-    if isinstance(cache, dict):
+    if cache is not None and not isinstance(cache, dict):
+        errors.append("cache must be a YAML mapping")
+    elif isinstance(cache, dict):
         ttl = cache.get("ttl")
         if ttl is not None:
             if not isinstance(ttl, int) or isinstance(ttl, bool):
@@ -114,7 +126,15 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
 
     # dependencies
     deps = data.get("dependencies")
-    if isinstance(deps, dict):
+    if deps is not None and not isinstance(deps, dict):
+        errors.append("dependencies must be a YAML mapping")
+    elif isinstance(deps, dict):
+        for key in ("allow", "deny", "require"):
+            value = deps.get(key)
+            if value is not None and (
+                not isinstance(value, list) or not all(isinstance(item, str) for item in value)
+            ):
+                errors.append(f"dependencies.{key} must be a YAML list of package patterns")
         rr = deps.get("require_resolution")
         if rr is not None and rr not in _VALID_REQUIRE_RESOLUTION:
             errors.append(
@@ -210,7 +230,42 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                     f"security.integrity.require_hashes must be a boolean, got '{require_hashes}'"
                 )
 
+    # executables (issue #1873, Gap A): org grant/deny trust block.
+    _validate_executables(data, errors, warnings)
+
     return errors, warnings
+
+
+def _validate_executables(data: dict, errors: list[str], warnings: list[str]) -> None:
+    """Validate the ``executables:`` block and warn on deprecated ``bin_deploy``."""
+    if data.get("bin_deploy") is not None:
+        warnings.append(
+            "'bin_deploy' is deprecated; use 'executables' (deny_all/deny) instead. "
+            "bin_deploy is still honored as a bin-scoped deny alias for one minor cycle."
+        )
+
+    execs = data.get("executables")
+    if execs is None:
+        return
+    if not isinstance(execs, dict):
+        errors.append("executables must be a YAML mapping")
+        return
+    deny_all = execs.get("deny_all")
+    if deny_all is not None and not isinstance(deny_all, bool):
+        errors.append(f"executables.deny_all must be a boolean, got '{deny_all}'")
+    for key in ("deny", "require", "recommend", "enforce"):
+        val = execs.get(key)
+        if val is not None and not isinstance(val, list):
+            errors.append(
+                f"executables.{key} must be a YAML list of package strings "
+                f"(got {type(val).__name__})"
+            )
+    if execs.get("enforce"):
+        warnings.append(
+            "executables.enforce is accepted but INERT in v1: it degrades to "
+            "'recommend' (no force-execute; a user deny still overrides). "
+            "Full mandate ships in v2."
+        )
 
 
 def _build_policy(data: dict) -> ApmPolicy:
@@ -283,7 +338,11 @@ def _build_policy(data: dict) -> ApmPolicy:
     else:
         uf_data = raw_uf
         action = uf_data.get("action")
-        directories = _parse_tuple(uf_data.get("directories")) if "directories" in uf_data else None
+        directories = (
+            None
+            if ("directories" not in uf_data or uf_data["directories"] is None)
+            else _parse_tuple(uf_data["directories"])
+        )
         exclude = (
             None
             if ("exclude" not in uf_data or uf_data["exclude"] is None)
@@ -327,6 +386,17 @@ def _build_policy(data: dict) -> ApmPolicy:
         deny=_parse_tuple(bd_data.get("deny")) if bd_data.get("deny") is not None else (),
     )
 
+    ex_data = data.get("executables") or {}
+    executables = ExecutablesPolicy(
+        deny_all=bool(ex_data.get("deny_all", False)),
+        deny=_parse_tuple(ex_data.get("deny")) if ex_data.get("deny") is not None else (),
+        require=_parse_tuple(ex_data.get("require")) if ex_data.get("require") is not None else (),
+        recommend=_parse_tuple(ex_data.get("recommend"))
+        if ex_data.get("recommend") is not None
+        else (),
+        enforce=_parse_tuple(ex_data.get("enforce")) if ex_data.get("enforce") is not None else (),
+    )
+
     return ApmPolicy(
         name=data.get("name", "") or "",
         version=data.get("version", "") or "",
@@ -342,6 +412,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         registry_source=registry_source,
         security=security,
         bin_deploy=bin_deploy,
+        executables=executables,
     )
 
 
@@ -390,7 +461,7 @@ def load_policy(source: str | Path) -> tuple[ApmPolicy, list[str]]:
             raw = source
 
     try:
-        data = yaml.safe_load(raw)
+        data = load_yaml_str(raw)
     except yaml.YAMLError as exc:
         raise PolicyValidationError([f"YAML parse error: {exc}"]) from exc
 
@@ -402,7 +473,7 @@ def load_policy(source: str | Path) -> tuple[ApmPolicy, list[str]]:
 
     errors, warnings = validate_policy(data)
     if errors:
-        raise PolicyValidationError(errors)
+        raise PolicyValidationError(errors, warnings)
 
     return _build_policy(data), warnings
 

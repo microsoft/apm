@@ -42,19 +42,22 @@ from __future__ import annotations
 
 import builtins
 import contextlib
-import sys
 import time
+from functools import wraps
 from typing import TYPE_CHECKING
 
-from ..models.results import InstallResult
+from ..models.dependency.materialization import MaterializationPathCollisionError
+from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
-from .errors import AuthenticationError, DirectDependencyError
+from .errors import AuthenticationError, DirectDependencyError, InstallFailureAlreadyRendered
+from .transaction import InstallTransaction
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
     from ..core.command_logger import InstallLogger
+    from ..core.target_detection import EffectiveTargetDecision
 
 
 # CRITICAL: Shadow Python builtins that share names with Click commands.
@@ -117,7 +120,6 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     Raises :class:`AuthenticationError` (with ``build_error_context``
     payload) on the first auth failure that survives the fallback.
     """
-    import os
     import subprocess as _sp
 
     from ..utils.github_host import (
@@ -142,7 +144,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         if not host or is_github_hostname(host):
             continue  # github.com uses API probe with unauth fallback
         org = dep.repo_url.split("/")[0] if dep.repo_url and "/" in dep.repo_url else None
-        key = (host, org)
+        key = (host, dep.port, org)
         if key in seen:
             continue
         seen.add(key)
@@ -174,27 +176,24 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             token=dep_ctx.token,
             auth_scheme=_auth_scheme,
         )
-        _ctx_env = getattr(dep_ctx, "git_env", {}) or {}
-        probe_env = {**os.environ, **_dl.git_env, **_ctx_env}
+        probe_env = auth_resolver.git_env_for_context(
+            dep_ctx,
+            base_env=_dl.git_env,
+        )
         # GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM carve-out: GitAuthEnvBuilder
         # forces an empty global gitconfig for ALL hosts to prevent a user's
         # ~/.gitconfig insteadOf rewrites or credential helpers from leaking
         # tokens during a clone. But for preflight probes (a single ls-remote
         # against the same host the dep targets), the redirection surface is
         # nil and killing the user's global config kills Git Credential
-        # Manager along with it -- the helper most Windows ADO users rely on
-        # for Entra-cached credentials. For ADO specifically that matters
-        # because bearer acquisition can fail for reasons unrelated to login
-        # state (sandbox, proxy, microsoft/apm#1430-style PATH quirks), and
-        # GCM is the only remaining channel that can save us. Generic hosts
-        # have the same logic; widening the carve-out to ADO keeps the
-        # actual clone path isolated (it builds its own clean env) while
-        # giving the preflight probe the best chance to succeed.
-        if is_generic or is_azure_devops_hostname(host):
+        # Manager along with it. This carve-out applies only to generic hosts;
+        # ADO credentials come exclusively from AuthResolver.
+        if is_generic:
             for _key in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ASKPASS"):
                 probe_env.pop(_key, None)
 
-        host_display = host if not org else f"{host}/{org}"
+        endpoint = dep_ctx.host_info.display_name
+        host_display = endpoint if not org else f"{endpoint}/{org}"
 
         def _run_ls_remote(url, env):
             # auth-delegated: invoked via _primary_op/_bearer_op below, both
@@ -224,7 +223,12 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             # rejected PAT into the child-process env table even though the
             # GIT_CONFIG_VALUE_0 header carries the bearer. _build_git_env
             # explicitly skips GIT_TOKEN for scheme="bearer".
-            bearer_env = auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
+            bearer_env = auth_resolver._build_git_env(
+                bearer,
+                scheme="bearer",
+                host_kind="ado",
+                base_env=_dl.git_env,
+            )
             bearer_url = _dl._build_repo_url(
                 dep.repo_url,
                 use_ssh=False,
@@ -331,7 +335,9 @@ def _enforce_require_hashes(ctx) -> None:
     policy = getattr(policy_fetch, "policy", None) if policy_fetch else None
     if policy is None:
         return
-    if not policy.security.integrity.require_hashes:
+    from .integrity import require_hashes_enabled
+
+    if not require_hashes_enabled(policy.security.integrity):
         return
 
     from ..deps.lockfile import LockFile, get_lockfile_path
@@ -356,45 +362,48 @@ def _enforce_require_hashes(ctx) -> None:
         raise PolicyViolationError(str(exc)) from exc
 
 
-def _write_empty_lockfile_only(apm_dir: Path) -> None:
-    """Materialise an empty ``apm.lock.yaml`` for a depless ``apm lock`` run.
+def _transactional_pipeline(run):
+    """Supply a compatibility transaction and rollback every exceptional exit."""
 
-    ``apm lock`` promises to always produce a lockfile, even when the
-    project declares zero dependencies (mirroring ``cargo
-    generate-lockfile``). The write is skipped when an equivalent
-    lockfile already exists so repeat runs don't churn ``generated_at``.
-    """
-    from ..deps.lockfile import LockFile, get_lockfile_path
+    @wraps(run)
+    def wrapped(*args, **kwargs):
+        transaction = kwargs.get("transaction")
+        owns_transaction = transaction is None
+        if transaction is None:
+            from ..core.scope import InstallScope, get_manifest_path, get_modules_dir
 
-    lock_path = get_lockfile_path(apm_dir)
-    new_lock = LockFile.from_installed_packages([], None)
-    existing_lock = LockFile.read(lock_path) if lock_path.exists() else None
-    if not (existing_lock and new_lock.is_semantically_equivalent(existing_lock)):
-        new_lock.save(lock_path)
+            scope = kwargs.get("scope") or InstallScope.PROJECT
+            try:
+                manifest_path = get_manifest_path(scope)
+                modules_dir = get_modules_dir(scope)
+            except (AttributeError, TypeError):
+                from pathlib import Path
+
+                manifest_path = Path.cwd() / "apm.yml"
+                modules_dir = Path.cwd() / "apm_modules"
+            transaction = InstallTransaction(
+                manifest_path=manifest_path,
+                apm_modules_dir=modules_dir,
+                validation=None,
+                logger=kwargs.get("logger"),
+            )
+            kwargs["transaction"] = transaction
+        try:
+            result = run(*args, **kwargs)
+        except BaseException:
+            transaction.rollback()
+            raise
+        if result is None:
+            result = InstallResult()
+        if owns_transaction:
+            result = transaction.complete(result)
+        return result
+
+    return wrapped
 
 
-def _is_no_work_install(
-    *,
-    all_apm_deps,
-    root_has_local_primitives: bool,
-    old_local_deployed,
-    has_orphan_deps: bool,
-    lockfile_only: bool,
-    apm_dir: Path | None,
-) -> bool:
-    """Return True when there is genuinely no install/cleanup work to do.
-
-    In ``lockfile_only`` mode (``apm lock``) an empty lockfile is written
-    before returning so the command always materialises its artefact.
-    """
-    if all_apm_deps or root_has_local_primitives or old_local_deployed or has_orphan_deps:
-        return False
-    if lockfile_only and apm_dir:
-        _write_empty_lockfile_only(apm_dir)
-    return True
-
-
-def run_install_pipeline(  # noqa: PLR0913, RUF100
+@_transactional_pipeline
+def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     apm_package: APMPackage,
     update_refs: bool = False,
     verbose: bool = False,
@@ -404,7 +413,8 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     logger: InstallLogger = None,
     scope=None,
     auth_resolver: AuthResolver = None,
-    target: str = None,  # noqa: RUF013
+    target: str | list[str] | None = None,
+    target_decision: EffectiveTargetDecision | None = None,
     allow_insecure: bool = False,
     allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
@@ -418,7 +428,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
-    trust_canvas: bool = False,
+    transaction: InstallTransaction | None = None,
 ):
     """Install APM package dependencies.
 
@@ -444,6 +454,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         scope: InstallScope controlling project vs user deployment
         auth_resolver: Shared auth resolver for caching credentials
         target: Explicit target override from --target CLI flag
+        target_decision: Canonical effective target decision when already resolved
         allow_insecure: Whether direct HTTP dependencies are approved
         allow_insecure_hosts: Extra approved hosts for transitive HTTP dependencies
         marketplace_provenance: Marketplace provenance data for packages
@@ -503,7 +514,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         _early_lockfile and any(k != _SELF_KEY for k in _early_lockfile.dependencies)
     )
 
-    if _is_no_work_install(
+    from .helpers.no_work import is_no_work_install
+
+    if is_no_work_install(
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
@@ -512,6 +525,21 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         apm_dir=apm_dir,
     ):
         return InstallResult()
+
+    if target_decision is None:
+        from apm_cli.core.target_detection import resolve_effective_target_decision
+        from apm_cli.models.apm_package import package_target_selection
+
+        defer_auto_detection = lockfile_only or bool(
+            plan_callback is not None and logger is not None and logger.dry_run
+        )
+        target_decision = resolve_effective_target_decision(
+            project_root,
+            explicit_target=target,
+            manifest_target=package_target_selection(apm_package),
+            user_scope=scope is InstallScope.USER,
+            auto_detect=not defer_auto_detection,
+        )
 
     # ------------------------------------------------------------------
     # Build InstallContext from function args + computed state
@@ -531,7 +559,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         logger=logger,
         scope=scope,
         auth_resolver=auth_resolver,
-        target_override=target,
+        target_override=target_decision.value,
+        target_decision=target_decision,
+        target_override_source=target_decision.source,
         allow_insecure=allow_insecure,
         allow_insecure_hosts=allow_insecure_hosts,
         marketplace_provenance=marketplace_provenance,
@@ -548,7 +578,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
         lockfile_only=lockfile_only,
-        trust_canvas=trust_canvas,
+        transaction=transaction,
     )
 
     # ------------------------------------------------------------------
@@ -597,10 +627,32 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     if plan_callback is not None:
         from .plan import build_update_plan
 
-        plan = build_update_plan(_early_lockfile, ctx.deps_to_install)
+        complete_dep_keys = ctx.update_plan_complete_dep_keys if ctx.only_packages else None
+        plan = build_update_plan(
+            _early_lockfile,
+            ctx.deps_to_install,
+            complete_resolved_dep_keys=complete_dep_keys,
+        )
         proceed = plan_callback(plan)
         if not proceed:
-            return InstallResult()
+            transaction.rollback()
+            return InstallResult(
+                disposition=InstallDisposition.CANCELLED,
+                target_decision=target_decision,
+            )
+
+    if target_decision.value is None and scope is InstallScope.PROJECT and not lockfile_only:
+        from apm_cli.core.target_detection import resolve_effective_target_decision
+        from apm_cli.models.apm_package import package_target_selection
+
+        target_decision = resolve_effective_target_decision(
+            project_root,
+            explicit_target=target,
+            manifest_target=package_target_selection(apm_package),
+        )
+        ctx.target_decision = target_decision
+        ctx.target_override = target_decision.value
+        ctx.target_override_source = target_decision.source
 
     ctx.tui.__enter__()
     try:
@@ -720,7 +772,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
                         "Re-run with 'apm install --update' to re-resolve "
                         "through the registry, or unset PROXY_REGISTRY_ONLY."
                     )
-                    sys.exit(1)
+                    raise InstallFailureAlreadyRendered(
+                        "Proxy-only lockfile contains direct VCS dependencies"
+                    )
 
             # Supply chain warning: registry-proxy entries without a
             # content_hash cannot be verified on re-install.
@@ -781,6 +835,12 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
             raise DirectDependencyError(
                 "One or more direct dependencies failed validation. Run with --verbose for details."
             )
+
+        from .outcome import result_from_install_context
+
+        precommit_result = result_from_install_context(ctx)
+        if precommit_result.disposition is InstallDisposition.FAILED:
+            return precommit_result
 
         # Update .gitignore only for project-scoped installs, not in lockfile_only mode.
         if scope == InstallScope.PROJECT and not lockfile_only:
@@ -924,9 +984,11 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # #946: same pattern -- surface the message as-is instead of
         # double-wrapping it through the generic RuntimeError below.
         raise
-    except PathTraversalError:
-        # Path-safety violation in SKILL_BUNDLE or other nested
-        # resolution -- surface as-is for actionable user guidance.
+    except InstallFailureAlreadyRendered:
+        raise
+    except (PathTraversalError, MaterializationPathCollisionError):
+        # Path-safety and package-directory collision errors already include
+        # actionable guidance; preserve them instead of adding generic wrappers.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904

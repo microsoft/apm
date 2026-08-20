@@ -7,6 +7,7 @@ from .dispatch import PrimitiveDispatch, get_dispatch_table
 from .hook_integrator import HookIntegrator
 from .instruction_integrator import InstructionIntegrator
 from .lsp_integrator import LSPIntegrator
+from .mcp_config_view import CurrentMcpConfigView, McpConfigDiff, McpSourceProblem
 from .mcp_integrator import MCPIntegrator
 from .prompt_integrator import PromptIntegrator
 from .skill_integrator import (
@@ -32,11 +33,14 @@ __all__ = [
     "KNOWN_TARGETS",
     "AgentIntegrator",
     "BaseIntegrator",
+    "CurrentMcpConfigView",
     "HookIntegrator",
     "InstructionIntegrator",
     "IntegrationResult",
     "LSPIntegrator",
     "MCPIntegrator",
+    "McpConfigDiff",
+    "McpSourceProblem",
     "PrimitiveDispatch",
     "PrimitiveMapping",
     "PromptIntegrator",

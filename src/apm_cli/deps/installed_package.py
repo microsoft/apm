@@ -68,3 +68,7 @@ class InstalledPackage:
     registry_config: RegistryConfig | None = None
     registry_resolution: RegistryResolution | None = None
     git_semver_resolution: GitSemverResolution | None = None
+    # Package-declared metadata read from apm.yml at resolution time (#1888).
+    # Prefixed package_ to avoid collision with dep_ref identity fields.
+    package_name: str | None = None
+    package_version: str | None = None

@@ -23,7 +23,7 @@ migrate later by moving directories and re-running the same commands.
 | Monorepo-hybrid (advanced) | Root `apm.yml` plus per-plugin `apm.yml` subdirs | Many plugins live alongside the marketplace in one repo. Composition of the two postures above. |
 
 When the layout is ready, ship it with the recipe in
-[Releasing from any CI](./releasing-from-any-ci/).
+[Releasing from any CI](../releasing-from-any-ci/).
 
 ## Single-plugin
 
@@ -97,8 +97,8 @@ marketplace:
 ```
 
 `apm pack` resolves every remote entry against `git ls-remote` and
-writes `marketplace.json` only. No bundle is produced because there
-is no `dependencies:` block.
+writes `marketplace.json` only. No bundle is produced because
+`dependencies:` is omitted.
 
 ## Monorepo-hybrid
 
@@ -134,14 +134,15 @@ my-monorepo/
 ```
 
 > **Important -- use `.apm/<type>/` for every primitive in each plugin.**
-> `apm pack` accepts primitives from both `.apm/<type>/` and root
-> convention directories (e.g. `instructions/` at the plugin root), but
-> `apm install` only discovers instructions, commands, and prompts under
-> `.apm/<type>/`. Authoring `packages/plugin-a/instructions/style.instructions.md`
-> instead of `packages/plugin-a/.apm/instructions/style.instructions.md`
-> will produce a bundle that packs correctly but installs silently
+> When `.apm/` exists, it is the authoritative local pack source. Without
+> `.apm/`, supported plugin-native root directories remain pack sources,
+> including after `apm init` writes `includes: auto`. Mixed layouts pack from
+> `.apm/` and warn about each skipped root source. `apm install` only discovers
+> instructions, commands, and prompts under `.apm/<type>/`, so authoring
+> `packages/plugin-a/instructions/style.instructions.md` instead of
+> `packages/plugin-a/.apm/instructions/style.instructions.md` can install
 > incomplete. See [Pack a bundle -- source layout and install-time
-> discovery](./pack-a-bundle/#source-layout-and-install-time-discovery)
+> discovery](../pack-a-bundle/#source-layout-and-install-time-discovery)
 > for the full per-primitive scan-path reference.
 
 Scaffold:
@@ -182,7 +183,7 @@ marketplace:
 Local-path entries skip remote resolution. Each plugin's own
 `apm.yml` controls its build; the root `apm.yml` controls the
 marketplace index. Pick a versioning strategy that matches how you
-tag releases -- see [Versioning strategies](./versioning-strategies/).
+tag releases -- see [Versioning strategies](../versioning-strategies/).
 
 ## Shipping `bin/` executables (Claude Code only)
 
@@ -207,21 +208,26 @@ Claude Code skills target. Authoring rules:
 
 - Deploy is **user-scope only**. A project-scope install (without `-g`)
   skips `bin/` and prints a hint to re-run with `-g`.
-- APM sets **user-only execute** on deployed files (owner +x; group and
-  other execute bits are cleared). Do not rely on a specific umask.
+- APM tightens deployed executable files to **`0o700` on POSIX systems**.
+  Do not rely on source-file permissions or a specific umask.
 - Deployed executables sit on Claude Code's `PATH` and are invoked
   **without per-call confirmation**. Treat them as trusted code: keep
   them minimal, audited, and free of network side effects you would not
   want an agent to trigger unprompted.
-- Enterprises can deny deployment per-package or globally via the
-  `bin_deploy` policy rule -- see the
-  [policy schema](../../reference/policy-schema/#bin_deploy).
+- Enterprises can deny deployment per-package or globally via the org
+  `executables.deny` policy (the legacy `bin_deploy` rule remains a
+  deprecated alias) -- see the
+  [policy schema](../../reference/policy-schema/#executables).
+- Consumers can pass `--trust-bin` on `apm install` to explicitly
+  consent (suppresses the trust-posture warning) or `--no-trust-bin`
+  to skip bin/ deployment for a single invocation. Without either
+  flag, bin/ deploys with a prominent warning.
 
 ## What to read next
 
-- [Versioning strategies](./versioning-strategies/) -- lockstep vs
+- [Versioning strategies](../versioning-strategies/) -- lockstep vs
   per-package and how `apm pack --check-versions` enforces them.
-- [Releasing from any CI](./releasing-from-any-ci/) -- the canonical
+- [Releasing from any CI](../releasing-from-any-ci/) -- the canonical
   release pipeline that ships any of the shapes above.
-- [Publish to a marketplace](./publish-to-a-marketplace/) -- the
+- [Publish to a marketplace](../publish-to-a-marketplace/) -- the
   `apm marketplace init` walkthrough and the registry schema.

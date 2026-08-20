@@ -74,7 +74,7 @@ class TestGitHubDownloaderTokenPrecedence:
 
             # Build URL should work for public repos
             public_url = downloader._build_repo_url("octocat/Hello-World", use_ssh=False)
-            expected_public = f"https://{github_host.default_host()}/octocat/Hello-World"
+            expected_public = f"https://{github_host.default_host()}/octocat/Hello-World.git"
             assert public_url == expected_public
 
     def test_private_repo_url_building_with_token(self):

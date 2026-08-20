@@ -5,10 +5,12 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-import toml
+import tomlkit
+from tomlkit.exceptions import TOMLKitError
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_success, _rich_warning
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
@@ -94,9 +96,7 @@ class CodexClientAdapter(MCPClientAdapter):
         # Ensure directory exists
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            toml.dump(current_config, f)
-        os.chmod(config_path, 0o600)
+        atomic_write_text(config_path, tomlkit.dumps(current_config), new_file_mode=0o600)
         _log.debug("Codex config written to %s", config_path)
         return True
 
@@ -104,8 +104,9 @@ class CodexClientAdapter(MCPClientAdapter):
         """Get the current Codex CLI MCP configuration.
 
         Returns:
-            dict | None: Current configuration, empty dict if file doesn't
-                exist, or None when an existing config cannot be parsed safely.
+            MutableMapping | None: Round-trip-preserving mapping when the file
+                exists, empty mapping if it does not exist, or None when an
+                existing config cannot be parsed safely.
         """
         config_path = self.get_config_path()
 
@@ -113,12 +114,14 @@ class CodexClientAdapter(MCPClientAdapter):
             return {}
 
         try:
-            with open(config_path, encoding="utf-8") as f:
-                return toml.load(f)
-        except toml.TomlDecodeError as exc:
+            with open(config_path, encoding="utf-8") as config_file:
+                return tomlkit.load(config_file)
+        except (TOMLKitError, UnicodeDecodeError) as exc:
             _log.debug("Failed to parse Codex config at %s", config_path, exc_info=True)
             _rich_warning(
-                f"Could not parse {config_path}: {exc} -- skipping config write to avoid data loss",
+                f"Could not read or parse {config_path}: {exc} "
+                "-- skipping config write to avoid data loss; inspect the file "
+                "or delete it to reset Codex configuration",
                 symbol="warning",
             )
             return None
@@ -351,12 +354,25 @@ class CodexClientAdapter(MCPClientAdapter):
                         config["env"] = resolved_env
                 elif registry_name == "docker":
                     config["command"] = "docker"
+                    runtime_args = processed_runtime_args or ["run", "-i", "--rm"]
 
                     # For Docker packages in Codex TOML format:
                     # - Ensure all environment variables from resolved_env are represented as -e flags in args
                     # - Put actual environment variable values in separate [env] section
-                    config["args"] = self._ensure_docker_env_flags(
-                        processed_runtime_args + processed_package_args, resolved_env
+                    # _ensure_docker_env_flags inserts -e flags immediately
+                    # before the trailing operand on the assumption that it is
+                    # the image, so it must run while the image IS trailing.
+                    # Package arguments are the container's own argv and are
+                    # appended afterwards, keeping them behind the image per
+                    # `docker run [OPTIONS] IMAGE [ARG...]`; folding them in
+                    # first pushed the env flags past the image into the
+                    # container argv, where docker never applies them.
+                    config["args"] = (
+                        self._ensure_docker_env_flags(
+                            self._ensure_docker_image_arg(runtime_args, package_name),
+                            resolved_env,
+                        )
+                        + processed_package_args
                     )
 
                     # Environment variables go in separate env section for Codex TOML format
@@ -409,16 +425,20 @@ class CodexClientAdapter(MCPClientAdapter):
                         )
                         processed.append(processed_value)
                 elif arg_type == "named":
-                    # For named arguments, the flag name is in the "value" field
-                    flag_name = arg.get("value", "")
+                    name = arg.get("name", "")
+                    value = arg.get("value", arg.get("default", ""))
+                    if isinstance(name, str) and name.startswith("-"):
+                        flag_name = name
+                        additional_value = value
+                    else:
+                        flag_name = value
+                        additional_value = name
                     if flag_name:
                         processed.append(flag_name)
-                        # Some named arguments might have additional values (rare)
-                        additional_value = arg.get("name", "")
                         if (
                             additional_value
                             and additional_value != flag_name
-                            and not additional_value.startswith("-")
+                            and not str(additional_value).startswith("-")
                         ):
                             processed_value = self._resolve_variable_placeholders(
                                 str(additional_value), resolved_env, runtime_vars

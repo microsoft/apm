@@ -63,6 +63,21 @@ The APM compilation target is automatically inferred from the configured `engine
 
 Packages are fetched using gh-aw's cascading token fallback: `GH_AW_PLUGINS_TOKEN` -> `GH_AW_GITHUB_TOKEN` -> `GITHUB_TOKEN`.
 
+**Pinning the apm CLI version (optional):**
+
+By default the import installs the apm CLI version that the pinned `microsoft/apm-action` ships. To install a specific version instead -- for example to opt into a newer CLI for a packaging fix -- set the optional `apm-version` input. It is threaded into both the pack and restore steps so the version cannot skew between them, and it survives `gh aw update` (no need to hand-edit the vendored `shared/apm.md`):
+
+```yaml
+imports:
+  - uses: shared/apm.md
+    with:
+      apm-version: '0.20.0'
+      packages:
+        - microsoft/apm-sample-package
+```
+
+Use a bare semver tag (e.g. `'0.20.0'`). Pass `'latest'` to opt into floating to the newest release; omit the input entirely to keep the action's pinned default.
+
 :::note[Isolated install by default]
 `shared/apm.md` invokes `microsoft/apm-action` with `isolated: true`. Only the packages listed under `packages:` are installed -- any host-repo primitives under `.apm/` or `.github/` (instructions, prompts, skills, agents) are ignored and pre-existing primitive directories are cleared. To merge host-repo primitives with imported ones, use the [apm-action Pre-Step](#apm-action-pre-step) approach below, which leaves `isolated` at its default of `false`.
 :::
@@ -135,7 +150,7 @@ See the [CI/CD Integration guide](../ci-cd/) and [Pack and distribute](../../pro
 
 APM automatically scans dependencies for hidden Unicode characters during installation. Critical findings block deployment. This applies to both direct `apm install` and when gh-aw resolves packages via `shared/apm.md`.
 
-For CI visibility into scan results (SARIF reports, step summaries), see the [CI/CD Integration guide](../../integrations/ci-cd/#content-scanning-in-ci).
+For CI visibility into scan results (SARIF reports, step summaries), see the [CI/CD Integration guide](../ci-cd/#governance-with-apm-audit).
 
 For details on what APM detects, see [Content scanning](../../enterprise/security/#content-scanning).
 

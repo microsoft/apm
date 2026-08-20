@@ -8,6 +8,8 @@ Covers docs/proposals/registry-api.md §4.5:
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.marketplace.models import (
     parse_marketplace_json,
 )
@@ -59,63 +61,54 @@ class TestRegistryFieldParsing:
         assert plugin.registry == "corp-main"
         assert plugin.version == "^3.0.0"
 
-    def test_invalid_registry_field_downgrades_silently(self):
-        # Empty string, non-string, or invalid types: log + downgrade.
-        manifest = parse_marketplace_json(
-            {
-                "name": "acme",
-                "plugins": [
-                    {
-                        "name": "x",
-                        "repository": "a/b",
-                        "registry": 123,  # not a string
-                    }
-                ],
-            },
-            source_name="acme",
-        )
-        assert manifest.plugins[0].registry == ""
+    def test_invalid_registry_field_fails_closed(self):
+        with pytest.raises(ValueError, match="invalid 'registry' field"):
+            parse_marketplace_json(
+                {
+                    "name": "acme",
+                    "plugins": [
+                        {
+                            "name": "x",
+                            "repository": "a/b",
+                            "registry": 123,
+                        }
+                    ],
+                },
+                source_name="acme",
+            )
 
-    def test_invalid_semver_disables_registry_routing(self):
-        # If registry is set but version isn't a semver range, drop the
-        # routing to "" so the plugin doesn't silently mis-resolve.
-        manifest = parse_marketplace_json(
-            {
-                "name": "acme",
-                "plugins": [
-                    {
-                        "name": "x",
-                        "repository": "a/b",
-                        "registry": "corp",
-                        "version": "main",  # branch, not semver
-                    }
-                ],
-            },
-            source_name="acme",
-        )
-        assert manifest.plugins[0].registry == ""
+    def test_invalid_semver_fails_closed(self):
+        with pytest.raises(ValueError, match="not a valid semver selector"):
+            parse_marketplace_json(
+                {
+                    "name": "acme",
+                    "plugins": [
+                        {
+                            "name": "x",
+                            "repository": "a/b",
+                            "registry": "corp",
+                            "version": "main",
+                        }
+                    ],
+                },
+                source_name="acme",
+            )
 
     def test_registry_with_no_version(self):
-        # Registry set, no version: parser keeps registry routing but
-        # leaves version="" — the resolver will reject it later. This
-        # matches "fail at resolve time, not at parse time" since the
-        # marketplace parser is permissive by design.
-        manifest = parse_marketplace_json(
-            {
-                "name": "acme",
-                "plugins": [
-                    {
-                        "name": "x",
-                        "repository": "a/b",
-                        "registry": "corp",
-                    }
-                ],
-            },
-            source_name="acme",
-        )
-        plugin = manifest.plugins[0]
-        assert plugin.registry == "corp"
-        assert plugin.version == ""
+        with pytest.raises(ValueError, match="declares no version selector"):
+            parse_marketplace_json(
+                {
+                    "name": "acme",
+                    "plugins": [
+                        {
+                            "name": "x",
+                            "repository": "a/b",
+                            "registry": "corp",
+                        }
+                    ],
+                },
+                source_name="acme",
+            )
 
     def test_existing_source_field_unchanged_alongside_registry(self):
         # The new ``registry`` field MUST NOT collide with the existing

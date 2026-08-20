@@ -1,8 +1,10 @@
 """LLM runtime adapter for APM."""
 
+import os
 import subprocess
 from typing import Any
 
+from ..core.tls_trust import build_child_tls_env
 from .base import RuntimeAdapter, _stream_subprocess_output
 
 
@@ -20,7 +22,12 @@ class LLMRuntime(RuntimeAdapter):
         # Verify llm CLI is available
         try:
             result = subprocess.run(  # noqa: F841
-                ["llm", "--version"], capture_output=True, text=True, encoding="utf-8", check=True
+                ["llm", "--version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+                env=build_child_tls_env(os.environ),
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise RuntimeError("llm CLI not found. Please install: pip install llm")  # noqa: B904
@@ -74,6 +81,7 @@ class LLMRuntime(RuntimeAdapter):
                 text=True,
                 encoding="utf-8",
                 check=True,
+                env=build_child_tls_env(os.environ),
             )
             models = {}
             for line in result.stdout.strip().split("\n"):
@@ -121,7 +129,12 @@ class LLMRuntime(RuntimeAdapter):
         """
         try:
             subprocess.run(
-                ["llm", "--version"], capture_output=True, text=True, encoding="utf-8", check=True
+                ["llm", "--version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+                env=build_child_tls_env(os.environ),
             )
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):

@@ -447,7 +447,7 @@ class TestAuditContentScanBranches:
         with pytest.raises(SystemExit) as exc_info:
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = tmp_path / "apm.lock.yaml"
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 3)
                     _audit_content_scan(cfg, None, None, strip=True, dry_run=False)
         assert exc_info.value.code == 0
@@ -482,12 +482,12 @@ class TestAuditContentScanBranches:
 
         # Create the lockfile so the scan proceeds past the "no lockfile" early-exit
         lock_file = tmp_path / "apm.lock.yaml"
-        lock_file.write_text("dependencies: {}\n")
+        lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
 
         with pytest.raises(SystemExit) as exc_info:
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = lock_file
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 1)
                     with patch(
                         "apm_cli.commands.audit._has_actionable_findings", return_value=False
@@ -499,7 +499,7 @@ class TestAuditContentScanBranches:
     def test_package_not_found_warning_and_exit(self, tmp_path: Path) -> None:
         logger = _make_logger()
         lock_file = tmp_path / "apm.lock.yaml"
-        lock_file.write_text("dependencies: {}\n")
+        lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
         cfg = _AuditConfig(
             project_root=tmp_path,
             logger=logger,
@@ -512,7 +512,7 @@ class TestAuditContentScanBranches:
         with pytest.raises(SystemExit) as exc_info:
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = lock_file
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 0)
                     _audit_content_scan(cfg, "owner/repo", None, strip=False, dry_run=False)
         assert exc_info.value.code == 0
@@ -521,7 +521,7 @@ class TestAuditContentScanBranches:
     def test_dry_run_without_strip_warns(self, tmp_path: Path) -> None:
         logger = _make_logger()
         lock_file = tmp_path / "apm.lock.yaml"
-        lock_file.write_text("dependencies: {}\n")
+        lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
         cfg = _AuditConfig(
             project_root=tmp_path,
             logger=logger,
@@ -534,7 +534,7 @@ class TestAuditContentScanBranches:
         with pytest.raises(SystemExit):
             with patch("apm_cli.commands.audit.get_lockfile_path") as mock_lf:
                 mock_lf.return_value = lock_file
-                with patch("apm_cli.commands.audit.scan_lockfile_packages") as mock_scan:
+                with patch("apm_cli.commands.audit.scan_project_files") as mock_scan:
                     mock_scan.return_value = ({}, 1)
                     with patch(
                         "apm_cli.commands.audit._has_actionable_findings", return_value=False

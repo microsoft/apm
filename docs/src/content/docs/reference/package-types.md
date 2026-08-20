@@ -128,7 +128,10 @@ installing N separate CLAUDE_SKILL packages.
 from the bundle (repeatable). The selection is **persisted** in `apm.yml`
 (as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
 subsequent bare `apm install` commands are deterministic.
-Use `--skill '*'` to reset and install all skills.
+Use `--skill '*'` to reset and install all skills. `--skill` is additive
+across separate installs (a later `--skill X` unions onto the existing pin
+and never removes already-deployed skills) -- see
+[apm install](../cli/install/).
 
 ```bash
 # Install only two skills (persisted to apm.yml):
@@ -151,6 +154,10 @@ dependencies:
         - cosmos-db
         - functions
 ```
+
+The sibling per-dependency `targets:` list uses the same object form to
+limit which active harnesses receive a dependency's target-scoped
+primitives.
 
 **Validation rules:**
 - Frontmatter `name` field (if present) must match the directory name.
@@ -204,13 +211,25 @@ the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
 to cherry-pick plugin skills by leaf name or manifest path, such as
 `skills/productivity/grill-me`.
 
+**Marketplace version checks:** a local Plugin collection may omit `apm.yml`.
+For `apm pack --check-versions`, APM uses `plugin.json`'s `version` only when
+`apm.yml` is absent. See [Versioning strategies](../../producer/versioning-strategies/)
+for manifest precedence, failure behavior, and a plugin-only example.
+
+Declared component paths are requirements, not hints. If an `agents`,
+`skills`, `commands`, or `hooks` entry is missing or escapes the plugin
+root, install exits non-zero before deployment or lockfile commit. Likewise,
+`--skill` exits non-zero when none of the manifest-declared skills match.
+Omit an optional field or use an empty list when the plugin has no component
+of that type.
+
 **When to choose:** you already have a Claude plugin and want APM to
 consume it without restructuring.
 
 ## See also
 
-- [Your First Package](../getting-started/first-package/) -- hands-on
+- [Your First Package](../../getting-started/first-package/) -- hands-on
   walkthrough for scaffolding and publishing.
-- [`apm install`](./cli/install/) and [`apm pack`](./cli/pack/) -- install,
+- [`apm install`](../cli/install/) and [`apm pack`](../cli/pack/) -- install,
   package, and validation options.
-- [Manifest Schema](./manifest-schema/) -- full `apm.yml` field reference.
+- [Manifest Schema](../manifest-schema/) -- full `apm.yml` field reference.

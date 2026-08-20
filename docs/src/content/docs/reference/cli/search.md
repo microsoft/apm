@@ -67,6 +67,6 @@ apm install code-review@skills
 
 ## Related
 
-- [`apm marketplace`](../marketplace/) -- full marketplace command group (`add`, `list`, `browse`, `refresh`, `remove`)
+- [`apm marketplace`](../marketplace/) -- full marketplace command group (`add`, `list`, `browse`, `update`, `remove`)
 - [`apm install`](../install/) -- install a plugin returned by search
 - [Install from marketplaces](../../../consumer/installing-from-marketplaces/) -- consumer guide for registering and consuming marketplaces

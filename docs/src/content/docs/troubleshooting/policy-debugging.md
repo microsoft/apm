@@ -17,7 +17,7 @@ This page walks the diagnosis end to end.
 A policy block looks roughly like this:
 
 ```text
-[x] policy: dependency.allow
+[x] policy: dependency-allowlist
     severity: error
     message:  Dependency 'acme-corp/internal-skills' is not on the
               org allowlist.
@@ -27,7 +27,7 @@ A policy block looks roughly like this:
 
 Three things to extract before doing anything else:
 
-- **Rule id** (`dependency.allow`) -- pin it; you will reuse it in the
+- **Rule id** (`dependency-allowlist`) -- pin it; you will reuse it in the
   next steps.
 - **Severity** (`error` blocks; `warning` does not).
 - **Source** -- the org policy file that owns the rule. If you do not
@@ -67,7 +67,7 @@ failed. Common causes: missing GitHub token, private `.github` repo,
 network egress blocked. The `Notice:` line at the bottom of the report
 explains which.
 
-For the full command surface, see [`apm policy`](../reference/cli/policy/).
+For the full command surface, see [`apm policy`](../../reference/cli/policy/).
 
 ## 3. Inheritance and merge
 
@@ -89,7 +89,7 @@ Common surprises:
 - Severity can only be raised by a child, never lowered.
 
 The full merge semantics live in
-[Policy schema -> Merge rules (tighten-only)](../reference/policy-schema/#merge-rules-tighten-only).
+[Policy schema -> Merge rules (tighten-only)](../../reference/policy-schema/#merge-rules-tighten-only).
 Read that section before arguing with a parent policy.
 
 ## 4. Discovery surprises
@@ -131,21 +131,21 @@ install`) -- never `export` it in a shell profile.
 :::
 
 Both flags are documented in
-[Environment variables](../reference/environment-variables/).
+[Environment variables](../../reference/environment-variables/).
 
 ## 5. Common rules that block
 
 These cover most real-world failures. Each lists the symptom and the
 shortest path to green.
 
-### `dependency.allow` / `dependency.deny`
+### `dependency-allowlist` / `dependency-denylist`
 
 - **Symptom:** `Dependency '<owner>/<repo>' is not on the org
   allowlist` (or `is on the org denylist`).
 - **Fix:** Replace the dep with an allowed equivalent, or open a PR
   against the org policy file to add it (see step 6).
 
-### `mcp.transport.allow` excluding `stdio`
+### `mcp-transport` excluding `stdio`
 
 - **Symptom:** `MCP server '<name>' uses transport 'stdio' which is
   not on the allowed transport list`.
@@ -154,7 +154,7 @@ shortest path to green.
 - **Fix:** Re-install the server from the registry with `--url` (HTTP
   endpoint). If no remote endpoint exists, escalate to the org admin.
 
-### `mcp.self_defined: deny`
+### `mcp-self-defined`
 
 - **Symptom:** `Self-defined MCP server '<name>' is not allowed; only
   registry-resolved servers are permitted`.
@@ -163,15 +163,15 @@ shortest path to green.
 - **Fix:** Find the server in the registry and `apm install
   mcp:<name>`. Remove the hand-rolled entry.
 
-### `manifest.required_fields` missing
+### `required-manifest-fields`
 
 - **Symptom:** `Required manifest field 'description' is missing from
   apm.yml`.
 - **Fix:** Edit `apm.yml` and add the listed field. Org policy
   defines the required set; check
-  [Policy schema](../reference/policy-schema/).
+  [Policy schema](../../reference/policy-schema/).
 
-### `unmanaged_files.action: deny`
+### `unmanaged-files`
 
 - **Symptom:** `Unmanaged file detected in target directory:
   .github/instructions/extra.md`.
@@ -179,7 +179,7 @@ shortest path to green.
   `action: deny`, any file APM did not write blocks the build.
 - **Fix:** Either move the file out of the target directory, or
   promote it to a real APM primitive in a package. See
-  [Baseline checks](../reference/baseline-checks/) for the underlying
+  [Baseline checks](../../reference/baseline-checks/) for the underlying
   CI check.
 
 ## 6. Working with org admins
@@ -200,14 +200,14 @@ When you open the PR against the org policy repo:
    to hunt for it.
 
 For org-side context (who owns the policy, how rollouts work),
-see [Governance overview](../enterprise/governance-overview/) and
-[APM policy: getting started](../enterprise/apm-policy-getting-started/).
+see [Governance deep-dive](../../enterprise/governance-guide/) and
+[APM policy: getting started](../../enterprise/apm-policy/).
 
 ## See also
 
-- [`apm policy`](../reference/cli/policy/) -- command reference.
-- [Policy schema](../reference/policy-schema/) -- every rule, every
+- [`apm policy`](../../reference/cli/policy/) -- command reference.
+- [Policy schema](../../reference/policy-schema/) -- every rule, every
   field, merge semantics.
-- [Baseline checks](../reference/baseline-checks/) -- the CI checks
+- [Baseline checks](../../reference/baseline-checks/) -- the CI checks
   invoked by `apm audit --ci`.
-- [Common errors](./common-errors/) -- non-policy install failures.
+- [Common errors](../common-errors/) -- non-policy install failures.

@@ -1,12 +1,14 @@
 """Regression tests for the windsurf uninstall-cleanup bug (#1481):
 ``apm uninstall`` silently failed to remove deployed skill directories
-under ``.windsurf/skills/``.
+under the windsurf skills deploy path.
 
-The fix dropped the ``agents`` primitive from the windsurf
-``TargetProfile`` so that the deploy path ``.windsurf/skills/<name>/``
-is owned exclusively by the ``skills`` primitive.  These tests pin the
-post-fix shape of the windsurf profile and the directory-aware cleanup
-path so a future regression -- e.g. re-introducing an ``agents``
+The #1481 fix dropped the ``agents`` primitive from the windsurf
+``TargetProfile`` so that the skills deploy path is owned exclusively
+by the ``skills`` primitive.  Since #1520 windsurf skills converge onto
+the cross-tool ``.agents/skills/<name>/`` path (``deploy_root=".agents"``),
+matching copilot/cursor/codex/gemini/opencode; these tests pin the
+post-convergence shape of the windsurf profile and the directory-aware
+cleanup path so a future regression -- e.g. re-introducing an ``agents``
 primitive that aliases the same deploy path -- is caught here instead
 of silently corrupting an end-user workspace.
 """
@@ -24,41 +26,43 @@ class TestWindsurfTargetProfileShape:
     def test_windsurf_does_not_expose_agents_primitive(self):
         """windsurf intentionally has no 'agents' primitive: Cascade reads
         SKILL.md uniformly, so a separate agents primitive would re-create
-        the .windsurf/skills/ path collision."""
+        the skills deploy-path collision."""
         windsurf = KNOWN_TARGETS["windsurf"]
         assert "agents" not in windsurf.primitives, (
             "windsurf must not declare an 'agents' primitive: it shares the "
-            "deploy path '.windsurf/skills/' with the 'skills' primitive and "
-            "would re-introduce the silent uninstall-cleanup bug."
+            "skills deploy path ('.agents/skills/') with the 'skills' "
+            "primitive and would re-introduce the silent uninstall-cleanup bug."
         )
 
     def test_windsurf_skills_primitive_uses_standard_format(self):
         """windsurf 'skills' primitive uses the standard skill_standard
-        format (deployed as SKILL.md under .windsurf/skills/)."""
+        format (deployed as SKILL.md under .agents/skills/ since #1520)."""
         windsurf = KNOWN_TARGETS["windsurf"]
         skills = windsurf.primitives["skills"]
         assert skills.subdir == "skills"
         assert skills.extension == "/SKILL.md"
         assert skills.format_id == "skill_standard"
+        assert skills.deploy_root == ".agents"
 
 
 class TestWindsurfPartitionRouting:
-    """partition_managed_files must route .windsurf/skills/ paths to the
-    cross-target 'skills' bucket -- not to a windsurf-specific agents bucket."""
+    """partition_managed_files must route windsurf's converged skills deploy
+    path (.agents/skills/) to the cross-target 'skills' bucket -- not to a
+    windsurf-specific agents bucket."""
 
     def test_windsurf_skill_path_routes_to_skills_bucket(self):
-        """The lockfile path '.windsurf/skills/<name>' must land in the
+        """The lockfile path '.agents/skills/<name>' must land in the
         'skills' bucket so SkillIntegrator (directory-aware) handles it."""
         managed = {
-            ".windsurf/skills/code-review",
-            ".windsurf/skills/grill-me",
+            ".agents/skills/code-review",
+            ".agents/skills/grill-me",
         }
         buckets = BaseIntegrator.partition_managed_files(managed)
 
-        assert ".windsurf/skills/code-review" in buckets["skills"], (
+        assert ".agents/skills/code-review" in buckets["skills"], (
             "windsurf skill path must be in the cross-target 'skills' bucket"
         )
-        assert ".windsurf/skills/grill-me" in buckets["skills"]
+        assert ".agents/skills/grill-me" in buckets["skills"]
 
     def test_no_agents_windsurf_bucket_is_created(self):
         """The 'agents_windsurf' bucket must not exist: windsurf no longer
@@ -70,25 +74,25 @@ class TestWindsurfPartitionRouting:
         """A windsurf skill path must NOT leak into instructions/commands/
         hooks buckets (which would mean the prefix trie matched the wrong
         primitive)."""
-        managed = {".windsurf/skills/my-skill"}
+        managed = {".agents/skills/my-skill"}
         buckets = BaseIntegrator.partition_managed_files(managed)
 
         for bucket_name, paths in buckets.items():
             if bucket_name == "skills":
                 continue
-            assert ".windsurf/skills/my-skill" not in paths, (
+            assert ".agents/skills/my-skill" not in paths, (
                 f"windsurf skill path leaked into bucket '{bucket_name}'"
             )
 
 
 class TestWindsurfSkillUninstallCleanup:
     """End-to-end: SkillIntegrator.sync_integration must remove the
-    .windsurf/skills/<name>/ directories that install deployed."""
+    .agents/skills/<name>/ directories that install deployed."""
 
     def test_sync_removes_windsurf_skill_directories(self, tmp_path: Path):
-        """Regression: skill dirs under .windsurf/skills/ created at install
+        """Regression: skill dirs under .agents/skills/ created at install
         time must be removed when listed in managed_files."""
-        skills_root = tmp_path / ".windsurf" / "skills"
+        skills_root = tmp_path / ".agents" / "skills"
         skills_root.mkdir(parents=True)
 
         managed_a = skills_root / "code-review"
@@ -105,8 +109,8 @@ class TestWindsurfSkillUninstallCleanup:
         (user_skill / "SKILL.md").write_text("authored by user\n")
 
         managed = {
-            ".windsurf/skills/code-review",
-            ".windsurf/skills/grill-me",
+            ".agents/skills/code-review",
+            ".agents/skills/grill-me",
         }
         stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
 
@@ -125,13 +129,13 @@ class TestWindsurfSkillUninstallCleanup:
     def test_sync_handles_trailing_slash_in_managed_path(self, tmp_path: Path):
         """Lockfile entries may carry a trailing slash on directory paths;
         cleanup must work either way."""
-        skills_root = tmp_path / ".windsurf" / "skills"
+        skills_root = tmp_path / ".agents" / "skills"
         skills_root.mkdir(parents=True)
         skill = skills_root / "code-review"
         skill.mkdir()
         (skill / "SKILL.md").write_text("managed")
 
-        managed = {".windsurf/skills/code-review/"}
+        managed = {".agents/skills/code-review/"}
         stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
 
         # Primary assertion: the directory is gone regardless of how the

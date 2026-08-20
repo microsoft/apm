@@ -9,10 +9,12 @@ Validates that:
 
 import shutil
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from apm_cli.commands.install import _integrate_package_primitives
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
@@ -307,10 +309,11 @@ class TestExhaustivenessChecks:
             "agents_github",  # was agents_copilot, aliased
             "agents_claude",
             "agents_cursor",
+            "agents_kiro",
             "agents_opencode",
             "agents_codex",
             # NOTE: windsurf no longer exposes an 'agents' primitive
-            # (its content deploys as skills under .windsurf/skills/).
+            # (its content deploys as skills under .agents/skills/).
             "commands",  # was commands_claude, aliased
             "commands_cursor",
             "commands_gemini",
@@ -324,6 +327,9 @@ class TestExhaustivenessChecks:
             "rules_claude",  # was instructions_claude, aliased
             "skills",  # cross-target bucket
             "hooks",  # cross-target bucket
+            "agents_grok-build",
+            "commands_grok-build",
+            "instructions_grok-build",
             "prompts_copilot-app",  # copilot-app uses dedicated prompts bucket
             "canvas_copilot",  # canvas extensions (copilot-only, experimental)
         }
@@ -357,7 +363,12 @@ class TestSyntheticTargetProfile:
         from apm_cli.integration.command_integrator import CommandIntegrator
 
         synthetic = TargetProfile(
-            name="newcode",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="newcode",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".newcode",
             primitives={
                 "commands": PrimitiveMapping("cmds", ".md", "newcode_cmd"),
@@ -405,7 +416,12 @@ class TestSyntheticTargetProfile:
         from apm_cli.integration.command_integrator import CommandIntegrator
 
         synthetic = TargetProfile(
-            name="newcode",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="newcode",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".newcode",
             primitives={
                 "commands": PrimitiveMapping("cmds", ".md", "newcode_cmd"),
@@ -606,7 +622,16 @@ class TestGetIntegrationPrefixesTargetsParam:
 
         prefixes = get_integration_prefixes()
         assert ".github/" in prefixes
+        assert ".copilot/" not in prefixes
         assert ".claude/" in prefixes
+
+    def test_user_scope_prefixes_include_copilot_user_root(self):
+        """User cleanup may validate static Copilot user-scope paths."""
+        from apm_cli.integration.targets import get_integration_prefixes
+
+        prefixes = get_integration_prefixes(user_scope=True)
+        assert ".github/" in prefixes
+        assert ".copilot/" in prefixes
 
 
 # ===================================================================
@@ -677,6 +702,11 @@ class TestScopeResolvedPartition:
         assert not BaseIntegrator.validate_deploy_path(
             ".copilot/agents/my-agent.md",
             root,
+        )
+        assert BaseIntegrator.validate_deploy_path(
+            ".copilot/agents/my-agent.md",
+            root,
+            user_scope=True,
         )
 
     def test_validate_deploy_path_backward_compat(self):

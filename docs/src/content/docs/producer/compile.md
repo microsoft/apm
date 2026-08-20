@@ -17,7 +17,7 @@ aggregated `AGENTS.md` / `copilot-instructions.md` it produces are a
 nice-to-have, not a requirement.
 
 Compile is **recommended for every other target** (`claude`,
-`cursor`, `codex`, `gemini`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
+`cursor`, `codex`, `gemini`, `grok-build`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
 harnesses load instructions through the root context file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
 folder that compile generates. Kiro receives `.kiro/steering/` files;
@@ -31,11 +31,11 @@ apm compile
 ```
 
 Concretely, that command rolls your `instructions/*.instructions.md`
-(see [Instructions](./author-primitives/instructions-and-agents/#1-instructions))
+(see [Instructions](../author-primitives/instructions-and-agents/#1-instructions))
 into the native rules surface each target expects:
 
 - `AGENTS.md` -- the cross-harness root context file. Copilot, Codex,
-  OpenCode, and Windsurf read it directly; Kiro primarily uses the
+  Grok Build, OpenCode, and Windsurf read it directly; Kiro primarily uses the
   `.kiro/steering/` files that compile also emits.
 - `CLAUDE.md` -- Claude Code's root context file.
 - `GEMINI.md` -- Gemini CLI's root context file.
@@ -43,14 +43,14 @@ into the native rules surface each target expects:
   `applyTo:` glob: `.github/instructions/`, `.claude/rules/`,
   `.cursor/rules/*.mdc`, `.windsurf/rules/`, `.kiro/steering/`.
 
-Other primitive types -- prompts, skills, agents, chatmodes, hooks,
+Other primitive types -- prompts, skills, agents, hooks,
 commands -- are NOT compiled by this command. They are deployed by
 `apm install` directly into the harness directories that consume them
 (`.github/prompts/`, `.agents/skills/`, `.claude/commands/`, etc.).
 For the full reach map, see
-[Primitives and targets](../concepts/primitives-and-targets/). For
+[Primitives and targets](../../concepts/primitives-and-targets/). For
 the place compile takes in the broader flow, see
-[Lifecycle](../concepts/lifecycle/).
+[Lifecycle](../../concepts/lifecycle/).
 
 ## The authoring loop
 
@@ -73,7 +73,7 @@ apm compile --dry-run            # print placement decisions without writing fil
 loop while you edit prose.
 
 To preview a script that wraps a `.prompt.md` file, use
-[`apm preview`](./preview-and-validate/) instead. `apm compile` builds
+[`apm preview`](../preview-and-validate/) instead. `apm compile` builds
 the root context files; `apm preview` shows the rewritten command line
 your script will execute.
 
@@ -86,21 +86,27 @@ By default `apm compile` detects targets from your workspace (see
 ```bash
 apm compile --target claude
 apm compile --target copilot,cursor          # comma-separated
-apm compile --all                            # every canonical target
+apm compile --all                            # default stable target set
 ```
 
-Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `all`. The `agent-skills` slug
-is a no-op for compile (skills are deployed by `apm install`); it is
-accepted in target lists for symmetry only. Unknown slugs are
+Canonical targets are `copilot`, `claude`, `grok-build`, `cursor`, `opencode`,
+`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`.
+The `all` selector is not a target; it expands to every canonical target except
+the explicit-only `antigravity` and `agent-skills` targets. Compiling for
+`agent-skills` is a successful no-op because `apm install` deploys skills.
+
+The accepted `intellij` entry is MCP-only, not a canonical target, and excluded
+from `all`. Compile uses the Copilot profile for its file primitives and produces
+`AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs are
 rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
-`copilot-app`) are also accepted once their flag is enabled via
-`apm experimental enable <flag>`, but are excluded from `--all`.
-`apm compile -t hermes` emits `AGENTS.md` (the `hermes` target shares
-the `agents` compile family). See
-[Hermes Agent](../integrations/hermes/).
+`copilot-app`, `grok-cloud`) are deployment targets for `apm install --target <flag>`
+once enabled via `apm experimental enable <flag>`, and are excluded
+from `--all`. `apm compile` does not emit harness-specific output for
+them: Hermes and the other agents-family harnesses read the standard
+`AGENTS.md` your normal `apm compile` flow already produces. See
+[Hermes Agent](../../integrations/hermes/).
 
 ## Detection cascade
 
@@ -109,15 +115,14 @@ order:
 
 1. Explicit `--target <slug>` flag.
 2. The `targets:` field in your `apm.yml`.
-3. Auto-detect: any harness root directory (`.github/`, `.claude/`,
-   `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) that
-   already exists.
+3. Auto-detect from the
+   [documented filesystem signals](../../reference/cli/targets/#detection-signals).
 4. Fallback: `minimal` -- writes a single `AGENTS.md` and skips per-
    harness rules folders.
 
 Pin `targets:` in `apm.yml` if you want the same compile output on
 every machine. Full rules and the per-target output map live in
-[Primitives and targets](../concepts/primitives-and-targets/#how-a-target-is-selected).
+[Primitives and targets](../../concepts/primitives-and-targets/#how-a-target-is-selected).
 
 ## Where instructions land
 
@@ -127,6 +132,7 @@ Per target, with the rules shape on disk after compile:
 |---|---|---|---|
 | `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively; deduplicates with `.github/instructions/` (see [below](#copilot-deduplication)) |
 | `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
+| `grok-build` | `AGENTS.md` (folded) | `.grok/rules/*.md` | Yes -- folded into `AGENTS.md` |
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
@@ -140,15 +146,14 @@ Per target, with the rules shape on disk after compile:
 | You want to... | Run |
 |---|---|
 | Iterate on instructions in `.apm/instructions/` | `apm compile` |
-| Deploy prompts, skills, agents, hooks, commands, MCP | `apm install` (see [Install packages](../consumer/install-packages/)) |
+| Deploy prompts, skills, agents, hooks, commands, MCP | `apm install` (see [Install packages](../../consumer/install-packages/)) |
 | Add a dependency or refresh `apm_modules/` | `apm install` |
 | Verify deployed bytes match the lockfile | `apm audit` |
 
-`apm install` runs compile internally as part of its integrate phase,
-so a normal `apm install` on a clean checkout already produces
-correct AGENTS.md / CLAUDE.md / GEMINI.md output. Reach for
-`apm compile` directly when you are iterating on instructions and
-do not want install's side effects.
+`apm install` deploys individual primitives but does not generate aggregate
+context files. On a clean checkout, run `apm install && apm compile` when you
+need `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. Run `apm compile` by itself
+when iterating on instructions without install's dependency side effects.
 
 :::note[Copilot deduplication]
 <a id="copilot-deduplication"></a>
@@ -166,10 +171,10 @@ AGENTS.md consumer is Copilot. When compiling for targets that do not read
 `.github/instructions/` (Codex, OpenCode, Windsurf, etc.), instructions
 are always included in `AGENTS.md` regardless of whether
 `.github/instructions/` exists. To opt out of deduplication even for
-Copilot-only compiles, pass `--no-dedup` (alias: `--force-instructions`):
+Copilot-only compiles, pass `--force-instructions` (alias: `--no-dedup`):
 
 ```bash
-apm compile --target copilot --no-dedup
+apm compile --target copilot --force-instructions
 ```
 :::
 
@@ -188,10 +193,10 @@ re-running `apm compile` restores the instructions section to
 
 To opt out of the deduplication and always include the instructions
 section in `CLAUDE.md` (for debugging or when you intentionally want
-both copies), pass `--no-dedup` (alias: `--force-instructions`):
+both copies), pass `--force-instructions` (alias: `--no-dedup`):
 
 ```bash
-apm compile --target claude --no-dedup
+apm compile --target claude --force-instructions
 ```
 
 This flag affects both the Claude and Copilot deduplication paths (see
@@ -206,7 +211,7 @@ use **managed-section mode** to update only the APM-owned block while
 leaving everything else untouched.
 
 For the full `apm.yml` key reference for `compilation.agents_md`, see
-[the `compilation.agents_md` section in the manifest schema](../reference/manifest-schema/#62-compilationagents_md).
+[the `compilation.agents_md` section in the manifest schema](../../reference/manifest-schema/#62-compilationagents_md).
 
 **1. Add markers to `AGENTS.md`:**
 
@@ -244,10 +249,50 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 - In distributed compile mode, subdirectory `AGENTS.md` files remain fully
   APM-owned and are overwritten on each run.
 
+## Global compilation (-g)
+
+Install a package once globally and root-context tools on your machine can pick
+up its instructions without per-project setup. For user-scope instructions, use
+the `--global` or `-g` flag:
+
+```bash
+apm compile --global
+apm compile -g --dry-run
+```
+
+This reads **global instructions** from `~/.apm/apm_modules/` (instructions
+without `applyTo:` frontmatter) and writes user-scope root context files for
+root-context targets:
+
+- `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
+- `~/.codex/AGENTS.md`
+- `~/.config/opencode/AGENTS.md`
+- `~/.copilot/AGENTS.md`
+- `~/.cursor/AGENTS.md`
+- `~/.gemini/GEMINI.md`
+
+### Overwrite protection
+
+When a root file exists but contains no APM marker, it is treated as
+hand-authored and never overwritten. Use `--dry-run` to preview what would
+be written without modifying files.
+
+### Constraints
+
+- Compilation is explicit. `apm install -g` (see
+  [Install packages](../../consumer/install-packages/)) does not write root context
+  files; it prints a one-line hint pointing at `apm compile -g` when global
+  instructions land on a root-context-only target.
+- `--global` cannot be combined with project-output flags such as `--target`,
+  `--all`, `--watch`, `--root`, or `--output`.
+- Compiled output is security-scanned before it is written. Critical findings
+  stop the write and make `apm compile -g` exit non-zero.
+- Skills-only packages (no global instructions) do not write root files.
+
 ## Pitfalls
 
 - **Confusing compile's scope.** Compile only handles **instructions**
-  (and optionally a single chatmode to prepend). If you edit a prompt,
+  (and optionally a single agent to prepend via `--chatmode`). If you edit a prompt,
   skill, agent, hook, or command, `apm compile` will not redeploy it
   -- run `apm install` for that.
 - **Forgetting `--target` on a clean workspace.** With no harness
@@ -267,12 +312,12 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 - **Hand-edited primitives skip the security scan.** `apm compile`
   does not run the install-time hidden-Unicode scan. After hand-edits,
   run `apm audit` before publishing. See
-  [drift and secure-by-default](../consumer/drift-and-secure-by-default/).
+  [drift and secure-by-default](../../consumer/drift-and-secure-by-default/).
 - **Zero-output success.** If compile reports success but writes no
   files, your project either has no instructions, or every requested
   target was rejected. The CLI surfaces this as a warning -- check
   `targets:` and the contents of `.apm/instructions/`.
 
 Once your instructions compile cleanly into the harnesses you care
-about, package the result with [`apm pack`](./pack-a-bundle/) and
-share it via [a marketplace](./publish-to-a-marketplace/).
+about, package the result with [`apm pack`](../pack-a-bundle/) and
+share it via [a marketplace](../publish-to-a-marketplace/).

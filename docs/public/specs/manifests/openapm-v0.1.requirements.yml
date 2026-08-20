@@ -107,6 +107,18 @@ requirements:
     keyword: MUST
     section: "4.8"
     conformance_class: producer
+  - id: req-mf-022
+    keyword: MUST
+    section: "4.3.2"
+    conformance_class: consumer
+  - id: req-mf-023
+    keyword: MUST
+    section: "4.5"
+    conformance_class: consumer
+  - id: req-mf-024
+    keyword: MUST
+    section: "4.3.2"
+    conformance_class: consumer
   - id: req-ext-001
     keyword: MUST
     section: "4.1"
@@ -127,6 +139,7 @@ requirements:
     keyword: MUST
     section: "5.2"
     conformance_class: consumer
+    notes: "full-SHA manifest pins must match resolved_commit during conformance audit"
   - id: req-lk-004
     keyword: MUST
     section: "5.4"
@@ -139,6 +152,7 @@ requirements:
     keyword: MUST
     section: "5.5"
     conformance_class: consumer
+    notes: "frozen validation covers direct package pins and MCP state before durable mutation"
   - id: req-lk-007
     keyword: SHOULD
     section: "5.5"
@@ -187,6 +201,26 @@ requirements:
     keyword: SHOULD
     section: "5.5"
     conformance_class: consumer
+  - id: req-lk-019
+    keyword: MUST
+    section: "5.2"
+    conformance_class: consumer
+    notes: "name and dependency-apm.yml-derived version are self-asserted inventory metadata, never trust anchors"
+  - id: req-lk-020
+    keyword: MUST
+    section: "5.2"
+    conformance_class: consumer
+    notes: "target and identity reconciliation preserves legitimate, indeterminate, and freshly redeployed paths while dropping inactive-target ghosts"
+  - id: req-lk-021
+    keyword: MUST
+    section: "5.2"
+    conformance_class: consumer
+    notes: "extends req-lk-020's preserve/remove decision to merge-based hook configuration and its ownership record"
+  - id: req-lk-022
+    keyword: MUST
+    section: "5.2"
+    conformance_class: consumer
+    notes: "source-cased materialization_repo_url remains non-identity metadata and drives rollback-safe, collision-closed materialization/link spelling"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"
@@ -247,6 +281,11 @@ requirements:
     keyword: MUST
     section: "6.3.5"
     conformance_class: governance
+  - id: req-pl-016
+    keyword: MUST
+    section: "6.8"
+    conformance_class: governance
+    notes: "a canonical deployment-ledger owner absent from apm.lock.yaml is a hard integrity failure independent of security.audit.fail_on_drift; audit exits non-zero in both default and CI modes and refuses to mutate deployed bytes while ownership is invalid"
   - id: req-rs-001
     keyword: MUST
     section: "7.2"
@@ -303,6 +342,15 @@ requirements:
     keyword: MUST
     section: "7.3.1"
     conformance_class: consumer
+  - id: req-rs-015
+    keyword: MUST
+    section: "7.5"
+    conformance_class: consumer
+  - id: req-rs-016
+    keyword: MUST
+    section: "7.2"
+    conformance_class: consumer
+    notes: "minimum repository identity binds every cache layer; distinct identities must not share source material"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"
@@ -339,6 +387,31 @@ requirements:
     keyword: MUST
     section: "4.2.1"
     conformance_class: consumer
+  - id: req-tg-005
+    keyword: MUST
+    section: "8.5"
+    conformance_class: consumer
+  - id: req-tg-006
+    keyword: MUST
+    section: "8.5"
+    conformance_class: consumer
+  - id: req-tg-007
+    keyword: MUST
+    section: "8.5"
+    conformance_class: consumer
+  - id: req-tg-008
+    keyword: MUST
+    section: "8.5.3"
+    conformance_class: consumer
+  - id: req-tg-009
+    keyword: MUST
+    section: "8.5.1"
+    conformance_class: consumer
+  - id: req-tg-010
+    keyword: MUST
+    section: "8.5.4"
+    conformance_class: consumer
+    notes: "project-scoped native hooks use a portable project-directory environment anchor and reject shell-expansion path syntax"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"
@@ -371,6 +444,32 @@ requirements:
     keyword: SHOULD
     section: "10.3"
     conformance_class: consumer
+  - id: req-sc-009
+    keyword: MUST
+    section: "10.13"
+    conformance_class: consumer
+  - id: req-sc-010
+    keyword: MUST
+    section: "10.13"
+    conformance_class: consumer
+  - id: req-sc-011
+    keyword: MUST
+    section: "10.14"
+    conformance_class: consumer
+  - id: req-sc-012
+    keyword: MUST
+    section: "10.14"
+    conformance_class: consumer
+  - id: req-sc-013
+    keyword: MUST
+    section: "10.3"
+    conformance_class: consumer
+    notes: "configured authority overlap selects one documented host class before credential resolution; only that class's credentials reach requests and child processes; explicit non-default ports remain scoped"
+  - id: req-sc-014
+    keyword: MUST
+    section: "10.15"
+    conformance_class: consumer
+    notes: "per-invocation consent for bin/ deployment defaults to deny when stdout is not a TTY; explicit opt-in overrides; allowExecutables policy gate evaluated first"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

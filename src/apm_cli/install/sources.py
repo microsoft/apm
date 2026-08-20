@@ -26,19 +26,19 @@ substantially different shape (no PackageInfo, dedicated tracking on
 
 from __future__ import annotations
 
-import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.registry_wiring import (
     get_registry_resolver,
     registry_resolution_for_cached_registry_dep,
     resolver_last_registry_resolution,
 )
-from apm_cli.utils.console import _rich_error, _rich_success
+from apm_cli.utils.console import _rich_success
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
@@ -307,6 +307,8 @@ class LocalDependencySource(DependencySource):
                 resolved_by=resolved_by,
                 is_dev=_is_dev,
                 registry_config=None,
+                package_name=local_info.package.name if local_info.package else None,
+                package_version=local_info.package.version if local_info.package else None,
             )
         )
         if install_path.is_dir() and not dep_ref.is_local:
@@ -396,7 +398,12 @@ class CachedDependencySource(DependencySource):
             if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
                 cached_commit = locked_dep.resolved_commit
         if not cached_commit:
-            cached_commit = dep_ref.reference
+            # Registry deps identify by resolved_hash+version, not a commit SHA.
+            # dep_ref.reference is a semver range (e.g. "^1.0.0") for registry
+            # deps -- storing it as resolved_commit would corrupt the lockfile
+            # and cause the update plan to show a spurious "^1.0.0 -> -" diff.
+            if dep_ref.source != "registry":
+                cached_commit = dep_ref.reference
         return cached_commit
 
     def acquire(self) -> Materialization | None:
@@ -406,9 +413,10 @@ class CachedDependencySource(DependencySource):
             APMPackage,
             GitReferenceType,
             PackageInfo,
+            PackageType,
             ResolvedReference,
         )
-        from apm_cli.models.validation import detect_package_type
+        from apm_cli.models.validation import detect_package_type, validate_apm_package
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
@@ -420,7 +428,21 @@ class CachedDependencySource(DependencySource):
         logger = ctx.logger
 
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
-        _ref = dep_ref.reference or ""
+        _rref = getattr(dep_ref, "resolved_reference", None)
+        if _rref and getattr(_rref, "ref_name", None):
+            _ref = _rref.ref_name
+        elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
+            _ref = dep_locked_chk.resolved_ref
+        elif dep_ref.source == "registry":
+            # Fresh install: exact version lives in the resolver's last_resolutions
+            # map (populated by the BFS callback). Fall back to dep_ref.reference
+            # only if the resolver has no record (should not normally happen).
+            from apm_cli.install.registry_wiring import resolver_last_registry_resolution
+
+            _reg_res = resolver_last_registry_resolution(ctx, dep_key)
+            _ref = _reg_res.version if _reg_res else (dep_ref.reference or "")
+        else:
+            _ref = dep_ref.reference or ""
         # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
         # Prefer the lockfile-recorded SHA when present; otherwise fall
         # back to the SHA captured by the parallel resolver callback in
@@ -458,12 +480,20 @@ class CachedDependencySource(DependencySource):
         # so transitive ``local_path`` deps inside this remote package resolve
         # from there (#857).
         apm_yml_path = install_path / APM_YML_FILENAME
+        pkg_type, _ = detect_package_type(install_path)
         if apm_yml_path.exists():
             cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
             # TODO(#940): see note in _materialize_local for the same caveat
             # about post-construction mutation of .source.
             if not cached_package.source:
                 cached_package.source = dep_ref.repo_url
+        elif pkg_type == PackageType.CLAUDE_SKILL:
+            validation_result = validate_apm_package(install_path)
+            if not validation_result.is_valid or validation_result.package is None:
+                details = "; ".join(validation_result.errors) or "validator returned no package"
+                raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
+            cached_package = validation_result.package
+            cached_package.source = dep_ref.repo_url
         else:
             cached_package = APMPackage(
                 name=dep_ref.repo_url.split("/")[-1],
@@ -491,7 +521,6 @@ class CachedDependencySource(DependencySource):
             dependency_ref=dep_ref,
         )
 
-        pkg_type, _ = detect_package_type(install_path)
         cached_package_info.package_type = pkg_type
 
         # Collect for lockfile
@@ -544,6 +573,12 @@ class CachedDependencySource(DependencySource):
                 registry_config=_cached_registry,
                 registry_resolution=_cached_resolution,
                 git_semver_resolution=_cached_semver,
+                package_name=cached_package_info.package.name
+                if cached_package_info.package
+                else None,
+                package_version=cached_package_info.package.version
+                if cached_package_info.package
+                else None,
             )
         )
         if install_path.is_dir():
@@ -572,10 +607,8 @@ class CachedDependencySource(DependencySource):
 class FreshDependencySource(DependencySource):
     """Fresh dependency: needs a network download.
 
-    Performs supply-chain hash verification (#763) and, on mismatch,
-    aborts the entire process via ``sys.exit(1)`` -- this matches the
-    legacy behaviour because content drift from the lockfile is treated
-    as a possible tampering event.
+    Performs supply-chain hash verification (#763) and raises on mismatch
+    because content drift from the lockfile is treated as possible tampering.
     """
 
     # Inherits the default "Failed to integrate primitives" prefix.
@@ -641,6 +674,10 @@ class FreshDependencySource(DependencySource):
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
+                if dep_key in ctx.callback_failures:
+                    # Resolve already surfaced the registry failure; do not
+                    # retry through the git fallback path.
+                    return None
                 from apm_cli.deps.registry.feature_gate import (
                     require_package_registry_enabled,
                 )
@@ -781,6 +818,12 @@ class FreshDependencySource(DependencySource):
                     registry_config=(ctx.registry_config if not dep_ref.is_local else None),
                     registry_resolution=_registry_resolution,
                     git_semver_resolution=_git_semver_resolution,
+                    package_name=package_info.package.name
+                    if package_info and package_info.package
+                    else None,
+                    package_version=package_info.package.version
+                    if package_info and package_info.package
+                    else None,
                 )
             )
             if install_path.is_dir():
@@ -807,18 +850,13 @@ class FreshDependencySource(DependencySource):
                 _fresh_hash = ctx.package_hashes[dep_key]
                 if _fresh_hash != dep_locked_chk.content_hash:
                     safe_rmtree(install_path, ctx.apm_modules_dir)
-                    _rich_error(
-                        f"Content hash mismatch for "
-                        f"{dep_key}: "
-                        f"expected {dep_locked_chk.content_hash}, "
-                        f"got {_fresh_hash}. "
-                        "The downloaded content differs from the "
-                        "lockfile record. This may indicate a "
-                        "supply-chain attack. Use 'apm install "
-                        "--update' to accept new content and "
-                        "update the lockfile."
+                    raise DirectDependencyError(
+                        f"Content hash mismatch for {dep_key}: "
+                        f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
+                        "The downloaded content differs from the lockfile record. "
+                        "This may indicate a supply-chain attack. Use "
+                        "'apm install --update' to accept new content and update the lockfile."
                     )
-                    sys.exit(1)
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
@@ -846,6 +884,8 @@ class FreshDependencySource(DependencySource):
                 deltas=deltas,
             )
 
+        except DirectDependencyError:
+            raise
         except Exception as e:
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             # task_id may not exist if progress.add_task failed; guard it.

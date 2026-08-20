@@ -427,8 +427,9 @@ class TestRenderPostInstallSummary:
             )
         mock_blank.assert_called_once()
 
-    def test_critical_security_exits_without_force(self) -> None:
+    def test_critical_security_returns_failed_result_without_force(self) -> None:
         from apm_cli.install.summary import render_post_install_summary
+        from apm_cli.models.results import InstallDisposition
 
         logger = self._make_logger()
         diag = MagicMock()
@@ -436,18 +437,16 @@ class TestRenderPostInstallSummary:
         diag.has_critical_security = True
         diag.error_count = 0
 
-        with (
-            patch("apm_cli.install.summary._rich_blank_line"),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            render_post_install_summary(
+        with patch("apm_cli.install.summary._rich_blank_line"):
+            result = render_post_install_summary(
                 logger=logger,
                 apm_count=0,
                 mcp_count=0,
                 apm_diagnostics=diag,
                 force=False,
             )
-        assert exc_info.value.code == 1
+        assert result.disposition is InstallDisposition.FAILED
+        assert result.exit_code == 1
 
     def test_critical_security_no_exit_with_force(self) -> None:
         from apm_cli.install.summary import render_post_install_summary

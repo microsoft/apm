@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../getting-started/migration/) and come back here for upgrade-time issues.
+This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../../getting-started/migration/) and come back here for upgrade-time issues.
 
 [i] Throughout: replace `<your-version>` with the version you currently have installed (`apm --version`) and `<target>` with the version you are moving to.
 
@@ -25,7 +25,7 @@ git commit -m "Adopt APM"
 
 [!] Do not commit `apm_modules/` -- add it to `.gitignore`. The lockfile is the reproducibility contract, not the installed tree.
 
-See [`apm init`](../reference/cli/init/) and [`apm install`](../reference/cli/install/) for full flag references.
+See [`apm init`](../../reference/cli/init/) and [`apm install`](../../reference/cli/install/) for full flag references.
 
 ## 2. From `awd-cli` (previous project name)
 
@@ -41,7 +41,7 @@ Migration steps:
    which awd && rm "$(which awd)"
    ```
 
-2. Install APM via the documented [installation flow](../getting-started/installation/).
+2. Install APM via the documented [installation flow](../../getting-started/installation/).
 
 3. In your scripts, CI workflows, and docs, replace `awd ` with `apm `. The subcommand surface (`init`, `install`, `compile`, `run`, `audit`) is the same.
 
@@ -57,7 +57,7 @@ Migration steps:
 
 ## 3. Lockfile schema upgrades
 
-The current lockfile schema is `lockfile_version: "1"`. When APM bumps this, an older binary reading a newer lockfile (or vice versa) will refuse to proceed and print upgrade instructions.
+The current lockfile schemas are `lockfile_version: "1"` for plain Git projects and `"2"` when registry or Git semver resolution fields are present. When APM bumps this, an older binary reading a newer lockfile (or vice versa) will refuse to proceed and print upgrade instructions.
 
 ```text
 [x] apm.lock.yaml uses lockfile_version "2", this binary supports "1"
@@ -75,7 +75,35 @@ Decision matrix:
 
 [i] Migrating in place preserves resolved versions where compatible. Deleting and regenerating re-resolves from `apm.yml` and may bump transitive dependencies. Review the diff before committing.
 
-Schema details: [Lockfile spec](../reference/lockfile-spec/).
+Schema details: [Lockfile spec](../../reference/lockfile-spec/).
+
+### Mixed-case GitHub package paths
+
+APM keeps GitHub lock and deduplication identity lowercase, but preserves the
+repository display spelling from `apm.yml` in `apm_modules/` and generated
+links. After upgrading, run:
+
+```bash
+apm install --verbose
+apm audit --ci
+```
+
+One stale case-only package directory is renamed transactionally and appears in
+verbose output. APM-managed links are rewritten; files you authored remain
+untouched.
+
+If install reports multiple package directories for one dependency:
+
+1. Stop and back up every named directory.
+2. Compare the directories and the matching `apm.yml` / `apm.lock.yaml` entry.
+3. Keep the directory whose spelling matches `apm.yml`. Remove another only
+   after confirming it is a duplicate and contains no unique edits.
+4. Run `apm install --verbose`, then `apm audit --ci`.
+
+An interrupted case-only rename can leave a hidden
+`.apm-case-migration-<id>` entry beside the package directory. Inspect its
+contents before renaming it back or removing it; APM does not delete an
+unverified recovery entry automatically.
 
 ## 4. Compile strategy migration
 
@@ -90,7 +118,7 @@ To switch:
 
 [!] Hand-edited files inside an APM-managed output directory will be lost on recompile. APM owns the output tree; author content lives in source packages.
 
-Reference: [`apm compile`](../reference/cli/compile/) and [`apm prune`](../reference/cli/prune/).
+Reference: [`apm compile`](../../reference/cli/compile/) and [`apm prune`](../../reference/cli/prune/).
 
 ## 5. Target migration
 
@@ -144,7 +172,7 @@ Recommended rollout:
 
 5. **Publish or remove** — deps that must stay on Git use `- git:`; deps moving to the registry need a published version before the team enables the default org-wide.
 
-See [Registries guide — pitfalls](../guides/registries/#pitfalls) for env-var typos and name-sanitization collisions.
+See [Registries guide — pitfalls](../../guides/registries/#pitfalls) for env-var typos and name-sanitization collisions.
 
 ## 7. Marketplace switchover (hand-rolled MCP -> APM-managed)
 
@@ -155,7 +183,7 @@ If your project has a hand-edited `.mcp.json` (or VS Code `mcp.json`) declaring 
 3. Diff the generated MCP config against your previous hand-rolled version and reconcile any custom env vars or args using the marketplace package's documented inputs.
 4. Delete the legacy hand-rolled config once the APM-managed version is verified.
 
-For publishing your own marketplace entries, see [Publish to a marketplace](../producer/publish-to-a-marketplace/).
+For publishing your own marketplace entries, see [Publish to a marketplace](../../producer/publish-to-a-marketplace/).
 
 ## 8. Breaking-change checklist when upgrading APM
 
@@ -170,6 +198,6 @@ Before bumping `apm` across major or minor versions in a project that other peop
 
 ## Related
 
-- [Common errors](./common-errors/) -- diagnostic flowcharts for failures hit during migration.
-- [Lockfile spec](../reference/lockfile-spec/) -- schema reference.
-- [`apm init`](../reference/cli/init/), [`apm install`](../reference/cli/install/), [`apm compile`](../reference/cli/compile/), [`apm prune`](../reference/cli/prune/).
+- [Common errors](../common-errors/) -- diagnostic flowcharts for failures hit during migration.
+- [Lockfile spec](../../reference/lockfile-spec/) -- schema reference.
+- [`apm init`](../../reference/cli/init/), [`apm install`](../../reference/cli/install/), [`apm compile`](../../reference/cli/compile/), [`apm prune`](../../reference/cli/prune/).

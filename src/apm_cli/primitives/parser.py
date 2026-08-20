@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-import frontmatter
+from apm_cli.utils.patterns import normalize_apply_to
+from apm_cli.utils.yaml_io import load_frontmatter
 
 from .models import Chatmode, Context, Instruction, Primitive, Skill
 
@@ -27,7 +28,7 @@ def parse_skill_file(file_path: str | Path, source: str = None) -> Skill:  # noq
 
     try:
         with open(file_path, encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            post = load_frontmatter(f)
 
         metadata = post.metadata
         content = post.content
@@ -67,7 +68,7 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
 
     try:
         with open(file_path, encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            post = load_frontmatter(f)
 
         # Extract name based on file structure
         name = _extract_primitive_name(file_path)
@@ -75,7 +76,7 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
         content = post.content
 
         # Determine primitive type based on file extension
-        if file_path.name.endswith(".chatmode.md") or file_path.name.endswith(".agent.md"):
+        if file_path.name.endswith(".agent.md"):
             return _parse_chatmode(name, file_path, metadata, content, source)
         elif file_path.name.endswith(".instructions.md"):
             return _parse_instruction(name, file_path, metadata, content, source)
@@ -90,33 +91,6 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
 
     except Exception as e:
         raise ValueError(f"Failed to parse primitive file {file_path}: {e}")  # noqa: B904
-
-
-def _normalize_apply_to(value: object, default: str = "") -> str:
-    """Normalize an applyTo frontmatter value to a string.
-
-    YAML allows list-valued applyTo (e.g. ``applyTo: ['**/*.py']``).
-    The rest of the compilation pipeline expects a plain string and treats
-    apply_to as a single glob pattern -- it has no mechanism to split a
-    comma-joined multi-pattern string back into individual globs.
-
-    When a list is encountered, only the first non-null element is used.
-    Multi-pattern support (``list[str]`` migration across all consumers)
-    is tracked separately.
-
-    Args:
-        value: The raw value returned by the YAML parser (str, list, or None).
-        default: Fallback when value is None or an empty list.
-
-    Returns:
-        str: Normalized glob pattern string.
-    """
-    if isinstance(value, list):
-        non_null = [str(v) for v in value if v is not None]
-        return non_null[0] if non_null else default
-    if value is None:
-        return default
-    return str(value)
 
 
 def _parse_chatmode(
@@ -139,7 +113,7 @@ def _parse_chatmode(
         Chatmode: Parsed chatmode primitive.
     """
     raw_apply_to = metadata.get("applyTo")
-    normalized_apply_to = _normalize_apply_to(raw_apply_to, default="") or None
+    normalized_apply_to = normalize_apply_to(raw_apply_to, default="") or None
     raw_handoffs = metadata.get("handoffs")
     handoffs: list[str | dict] | None = None
     if isinstance(raw_handoffs, list):
@@ -183,7 +157,7 @@ def _parse_instruction(
         name=name,
         file_path=file_path,
         description=metadata.get("description", ""),
-        apply_to=_normalize_apply_to(metadata.get("applyTo"), default=""),
+        apply_to=normalize_apply_to(metadata.get("applyTo"), default=""),
         content=content,
         author=metadata.get("author"),
         version=metadata.get("version"),
@@ -242,19 +216,16 @@ def _extract_primitive_name(file_path: Path) -> str:
             else:
                 base_idx = path_parts.index(".github")
 
-            # For structured directories like .apm/chatmodes/name.chatmode.md
+            # For structured directories like .apm/agents/name.agent.md
             if base_idx + 2 < len(path_parts) and path_parts[base_idx + 1] in [
-                "chatmodes",
                 "instructions",
                 "context",
                 "memory",
                 "agents",
             ]:
                 basename = file_path.name
-                # Remove the double extension (.chatmode.md, .instructions.md, .agent.md, etc.)
-                if basename.endswith(".chatmode.md"):
-                    return basename.replace(".chatmode.md", "")
-                elif basename.endswith(".instructions.md"):
+                # Remove the double extension (.instructions.md, .agent.md, etc.)
+                if basename.endswith(".instructions.md"):
                     return basename.replace(".instructions.md", "")
                 elif basename.endswith(".context.md"):
                     return basename.replace(".context.md", "")
@@ -269,14 +240,14 @@ def _extract_primitive_name(file_path: Path) -> str:
 
     # Fallback: extract from filename
     basename = file_path.name
-    if basename.endswith(".chatmode.md"):
-        return basename.replace(".chatmode.md", "")
-    elif basename.endswith(".instructions.md"):
+    if basename.endswith(".instructions.md"):
         return basename.replace(".instructions.md", "")
     elif basename.endswith(".context.md"):
         return basename.replace(".context.md", "")
     elif basename.endswith(".memory.md"):
         return basename.replace(".memory.md", "")
+    elif basename.endswith(".agent.md"):
+        return basename.replace(".agent.md", "")
     elif basename.endswith(".md"):
         return basename.replace(".md", "")
 

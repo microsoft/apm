@@ -123,6 +123,47 @@ class TestLockfileEnrichment:
         assert ".claude/skills/my-plugin/SKILL.md" in deployed
         assert all(f.startswith(".claude/") for f in deployed)
 
+    def test_cross_target_mapping_github_to_grok_cloud(self):
+        """Skills under .github/ are remapped for grok-cloud."""
+        lf = LockFile()
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            resolved_commit="abc123",
+            version="1.0.0",
+            deployed_files=[
+                ".github/skills/my-plugin/",
+                ".github/skills/my-plugin/SKILL.md",
+            ],
+        )
+        lf.add_dependency(dep)
+
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="grok-cloud")
+        parsed = yaml.safe_load(result)
+
+        deployed = parsed["dependencies"][0]["deployed_files"]
+        assert ".grok/skills/my-plugin/" in deployed
+        assert ".grok/skills/my-plugin/SKILL.md" in deployed
+        assert all(f.startswith(".grok/") for f in deployed)
+
+    @pytest.mark.parametrize("target", ["cursor", "opencode", "windsurf"])
+    def test_converged_targets_map_github_skills_to_agents_skills(self, target):
+        """Converged targets remap GitHub skills through the shared .agents path."""
+        lf = LockFile()
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            resolved_commit="abc123",
+            version="1.0.0",
+            deployed_files=[".github/skills/shared/SKILL.md"],
+        )
+        lf.add_dependency(dep)
+
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target=target)
+        parsed = yaml.safe_load(result)
+
+        deployed = parsed["dependencies"][0]["deployed_files"]
+        assert deployed == [".agents/skills/shared/SKILL.md"]
+        assert parsed["pack"]["mapped_from"] == [".github/skills/"]
+
     def test_cross_target_mapping_records_mapped_from(self):
         """When mapping occurs, pack section records mapped_from."""
         lf = LockFile()
@@ -217,6 +258,62 @@ class TestFilterFilesByTarget:
         assert ".claude/skills/x/SKILL.md" in filtered
         assert ".claude/agents/a.md" in filtered
         assert mappings[".claude/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
+
+    def test_cross_map_github_to_grok_cloud(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md"]
+        filtered, mappings = _filter_files_by_target(files, "grok-cloud")
+        assert ".grok/skills/x/SKILL.md" in filtered
+        assert mappings[".grok/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
+
+    def test_cross_map_github_to_grok_build(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [
+            ".github/agents/reviewer.md",
+            ".github/skills/x/SKILL.md",
+        ]
+        filtered, mappings = _filter_files_by_target(files, "grok-build")
+
+        assert set(filtered) == {
+            ".grok/agents/reviewer.md",
+            ".grok/skills/x/SKILL.md",
+        }
+        assert mappings == {
+            ".grok/agents/reviewer.md": ".github/agents/reviewer.md",
+            ".grok/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
+
+    def test_single_target_preserves_distinct_cross_maps(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [
+            ".github/skills/x/SKILL.md",
+            ".github/agents/a.agent.md",
+        ]
+        filtered, mappings = _filter_files_by_target(files, "codex")
+
+        assert set(filtered) == {
+            ".agents/skills/x/SKILL.md",
+            ".codex/agents/a.agent.md",
+        }
+        assert mappings == {
+            ".agents/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+            ".codex/agents/a.agent.md": ".github/agents/a.agent.md",
+        }
+
+    def test_multi_target_cross_map_preserves_each_destination(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md"]
+        filtered, mappings = _filter_files_by_target(files, ["claude", "grok-cloud"])
+
+        assert {".claude/skills/x/SKILL.md", ".grok/skills/x/SKILL.md"} <= set(filtered)
+        assert mappings == {
+            ".claude/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+            ".grok/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
 
     def test_dedup_direct_over_mapped(self):
         """If a file exists under both .github/ and .claude/, direct wins."""
@@ -315,6 +412,35 @@ class TestFilterFilesByTarget:
             parts = f.split("/")
             assert ".." not in parts, f"traversal segment leaked for payload {payload!r}: {f}"
 
+    # -- windsurf convergence onto .agents/skills/ (#1802) ----------------
+
+    def test_filter_files_windsurf_includes_agents_skills_prefix(self):
+        """``apm pack --target windsurf`` must keep converged ``.agents/skills/``
+        entries.
+
+        Post-convergence, windsurf skills deploy to ``.agents/skills/`` via
+        ``deploy_root='.agents'``.  Without ``pack_prefixes=('.windsurf/',
+        '.agents/')`` on the windsurf TargetProfile, ``effective_pack_prefixes``
+        falls back to ``('.windsurf/',)`` and the ``.agents/skills/`` entries are
+        silently dropped from the produced bundle.  This is a regression trap for
+        that omission.
+        """
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [
+            ".agents/skills/x/SKILL.md",
+            ".windsurf/rules/r.md",
+        ]
+        filtered, _mappings = _filter_files_by_target(files, "windsurf")
+
+        # The converged skills entry must survive the windsurf prefix filter.
+        assert ".agents/skills/x/SKILL.md" in filtered, (
+            "windsurf pack dropped converged .agents/skills/ entry -- "
+            "pack_prefixes likely missing '.agents/'"
+        )
+        # Native windsurf-rooted entries still survive.
+        assert ".windsurf/rules/r.md" in filtered
+
 
 class TestFilterFilesByTargetList:
     """Tests for _filter_files_by_target with list targets."""
@@ -361,16 +487,19 @@ class TestFilterFilesByTargetList:
         assert mappings == {}
 
     def test_list_cross_map_github_to_claude_and_cursor(self):
-        """When both claude and cursor are targets, cross-mapped files go to one dest."""
+        """Each selected target retains its cross-mapped skill destination."""
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 
         files = [".github/skills/x/SKILL.md"]
         filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])
-        # Both claude and cursor have cross-maps from .github/skills/
-        # Dict.update means cursor map overwrites claude map for same key
-        # So the result maps to cursor's destination
-        assert len(filtered) == 1
-        assert len(mappings) == 1
+        assert set(filtered) == {
+            ".claude/skills/x/SKILL.md",
+            ".agents/skills/x/SKILL.md",
+        }
+        assert mappings == {
+            ".claude/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+            ".agents/skills/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
 
 
 class TestEnrichLockfileListTarget:
@@ -455,11 +584,11 @@ class TestWindsurfTargetParity:
         assert ".unrelated/foo" not in deployed
 
     def test_windsurf_cross_map_skills_from_github(self):
-        """``.github/skills/`` files are remapped under ``.windsurf/skills/``."""
+        """``.github/skills/`` files are remapped under ``.agents/skills/``."""
         lf = self._lockfile_with([".github/skills/x/SKILL.md"])
         result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
         deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
-        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".agents/skills/x/SKILL.md" in deployed
 
     def test_windsurf_cross_map_agents_collapse_to_skills(self):
         """``.github/agents/`` is intentionally remapped to ``.windsurf/skills/``

@@ -15,6 +15,45 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+
+
+class TestSkillSubsetFilterTokens:
+    """Canonical matching tokens for declared and flattened skill names."""
+
+    @pytest.mark.parametrize(
+        ("skill_subset", "expected"),
+        [
+            pytest.param(None, None, id="none"),
+            pytest.param([], None, id="empty"),
+            pytest.param(["   "], None, id="blank"),
+            pytest.param(
+                [" category\\grill-me "],
+                {"category\\grill-me", "category/grill-me", "grill-me"},
+                id="backslash-prefixed",
+            ),
+        ],
+    )
+    def test_normalizes_subset_tokens(
+        self,
+        skill_subset: list[str] | None,
+        expected: set[str] | None,
+    ) -> None:
+        assert skill_subset_filter_tokens(skill_subset) == expected
+
+    def test_shared_leaf_name_is_one_flattened_token(self) -> None:
+        assert skill_subset_filter_tokens(["one/foo", "two/foo"]) == {
+            "one/foo",
+            "two/foo",
+            "foo",
+        }
+
+    def test_blank_name_does_not_hide_later_names(self) -> None:
+        assert skill_subset_filter_tokens([" ", "category/reviewer"]) == {
+            "category/reviewer",
+            "reviewer",
+        }
+
 
 # ============================================================================
 # DependencyReference — parse_from_dict with skills: field
@@ -48,6 +87,11 @@ class TestDependencyReferenceSkillSubset:
         with pytest.raises(ValueError, match="must contain at least one"):
             DependencyReference.parse_from_dict(entry)
 
+    @pytest.mark.parametrize("invalid_name", [None, 7, " "])
+    def test_parse_skills_rejects_non_string_or_blank_name(self, invalid_name: object) -> None:
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict({"git": "owner/repo", "skills": [invalid_name]})
+
     def test_parse_skills_path_traversal_rejects(self):
         """Skill name with path traversal is rejected."""
         entry = {"git": "owner/repo", "skills": ["../evil"]}
@@ -78,7 +122,7 @@ class TestDependencyReferenceSkillSubset:
         assert "owner/repo" in result
 
     def test_round_trip_parse_emit(self):
-        """Parse dict with skills, emit, re-parse → same value."""
+        """Parse dict with skills, emit, re-parse -> same value."""
         entry = {"git": "owner/repo#main", "skills": ["web", "cli"]}
         ref = DependencyReference.parse_from_dict(entry)
         emitted = ref.to_apm_yml_entry()
@@ -93,6 +137,19 @@ class TestDependencyReferenceSkillSubset:
         ref = DependencyReference.parse_from_dict(entry)
         assert ref.skill_subset == ["my-skill"]
         assert ref.reference == "v2.0.0"
+
+    def test_local_path_parse_skills(self):
+        """skills: on a path: dep populates skill_subset (regression for issue #1982)."""
+        entry = {"path": "./local", "skills": ["reviewer"]}
+        ref = DependencyReference.parse_from_dict(entry)
+        assert ref.skill_subset == ["reviewer"]
+        assert ref.is_local
+
+    def test_local_path_skills_round_trip(self):
+        """path: dep with skills: emits dict form, not git: form."""
+        entry = {"path": "./local", "skills": ["reviewer"]}
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+        assert emitted == {"path": "./local", "skills": ["reviewer"]}
 
 
 # ============================================================================
@@ -311,6 +368,73 @@ class TestApmYmlWriter:
         entry = data["dependencies"]["apm"][0]
         assert entry["skills"] == ["alpha", "gamma"]
 
+    def test_set_target_subset_promotes_string_entry(self, tmp_path):
+        """Target writer promotes string entries and persists sorted targets."""
+        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
+        from apm_cli.utils.yaml_io import load_yaml
+
+        manifest = self._write_manifest(
+            tmp_path,
+            """\
+            dependencies:
+              apm:
+                - owner/repo#main
+            """,
+        )
+
+        assert set_target_subset_for_entry(manifest, "owner/repo", ["codex", "claude"]) is True
+        data = load_yaml(manifest)
+        entry = data["dependencies"]["apm"][0]
+        assert entry["git"] == "owner/repo"
+        assert entry["ref"] == "main"
+        assert entry["targets"] == ["claude", "codex"]
+
+    def test_set_target_subset_clears_field_and_preserves_skills(self, tmp_path):
+        """Clearing targets leaves existing skills untouched."""
+        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
+        from apm_cli.utils.yaml_io import load_yaml
+
+        manifest = self._write_manifest(
+            tmp_path,
+            """\
+            dependencies:
+              apm:
+                - git: owner/repo
+                  skills:
+                    - reviewer
+                  targets:
+                    - codex
+            """,
+        )
+
+        assert set_target_subset_for_entry(manifest, "owner/repo", None) is True
+        data = load_yaml(manifest)
+        entry = data["dependencies"]["apm"][0]
+        assert entry["skills"] == ["reviewer"]
+        assert "targets" not in entry
+
+    def test_set_target_subset_preserves_existing_skills(self, tmp_path):
+        """Setting targets does not remove the existing skills field."""
+        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
+        from apm_cli.utils.yaml_io import load_yaml
+
+        manifest = self._write_manifest(
+            tmp_path,
+            """\
+            dependencies:
+              apm:
+                - git: owner/repo
+                  skills:
+                    - reviewer
+            """,
+        )
+
+        assert set_target_subset_for_entry(manifest, "owner/repo", ["codex"]) is True
+        data = load_yaml(manifest)
+        entry = data["dependencies"]["apm"][0]
+        assert entry["skills"] == ["reviewer"]
+        assert entry["targets"] == ["codex"]
+
     def test_no_dependencies_key_returns_false(self, tmp_path):
         """Manifest with no 'dependencies' key at all returns False (line 30: deps_section={})."""
         from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
@@ -365,6 +489,8 @@ class TestSkillSubsetConsistencyCheck:
         """Create a manifest mock with given dep_refs."""
         manifest = Mock()
         manifest.get_apm_dependencies.return_value = deps
+        manifest.get_dev_apm_dependencies.return_value = []
+        manifest.get_all_apm_dependencies.return_value = deps
         return manifest
 
     def _make_lock_mock(self, locked_deps):
@@ -623,3 +749,82 @@ class TestSkillSubsetAdditiveMerge:
 
         entry = apm_yml_entries["owner/repo"]
         assert entry["skills"] == ["qa"]
+
+
+# ============================================================================
+# _resolve_package_references -- registry identity must not silently convert
+# to git form (regression: PR #2166 review)
+# ============================================================================
+
+
+class TestResolvePackageReferencesPreservesRegistryForm:
+    """A CLI positional matching an existing registry-longhand identity must
+    not be silently rewritten to git form when combined with --skill."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_package_registry(self, monkeypatch):
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"registries": True}})
+
+    def test_cli_skill_flag_preserves_registry_form(self):
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"id": "testorg/demo-pkg", "version": "1.0.0"}]
+        existing_identities = {"testorg/demo-pkg"}
+
+        with patch(
+            "apm_cli.commands.install._validate_package_exists",
+            return_value=True,
+        ):
+            (
+                valid_outcomes,
+                invalid_outcomes,
+                _validated,
+                _mktplace,
+                apm_yml_entries,
+                _changed,
+            ) = _resolve_package_references(
+                ["testorg/demo-pkg#1.0.0"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("skill-gamma",),
+            )
+
+        assert invalid_outcomes == []
+        assert len(valid_outcomes) == 1
+        entry = apm_yml_entries["testorg/demo-pkg#1.0.0"]
+        assert isinstance(entry, dict)
+        assert entry.get("id") == "testorg/demo-pkg"
+        assert "git" not in entry
+        assert entry["skills"] == ["skill-gamma"]
+
+    def test_current_deps_not_converted_to_git(self):
+        """The persisted current_deps list itself must keep the registry shape."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"id": "testorg/demo-pkg", "version": "1.0.0"}]
+        existing_identities = {"testorg/demo-pkg"}
+
+        with patch(
+            "apm_cli.commands.install._validate_package_exists",
+            return_value=True,
+        ):
+            _resolve_package_references(
+                ["testorg/demo-pkg#1.0.0"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("skill-gamma",),
+            )
+
+        # update_existing_dependency_entry_if_needed only rewrites current_deps
+        # when apm_yml_entries already holds a merged entry for this canonical;
+        # the assertion that matters is that IF it rewrites, it keeps registry shape.
+        assert all("git" not in dep for dep in current_deps if isinstance(dep, dict))
+        assert any(
+            isinstance(dep, dict) and dep.get("id") == "testorg/demo-pkg" for dep in current_deps
+        )

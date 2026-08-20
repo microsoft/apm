@@ -40,7 +40,7 @@ mcp:
 
 compilation:
   target:
-    allow: []                   # copilot | claude | cursor | opencode | codex | gemini | vscode | windsurf | kiro | agent-skills | all
+    allow: []                   # copilot | claude | grok-build | cursor | opencode | codex | gemini | antigravity | windsurf | kiro | agent-skills
     enforce: null               # Enforce specific target (must be present in list)
   strategy:
     enforce: null               # distributed | single-file
@@ -49,16 +49,29 @@ compilation:
 manifest:
   required_fields: []           # Required apm.yml fields
   scripts: allow                # allow | deny
+  require_explicit_includes: false  # Require includes: to be explicit
   content_types:
     allow: []                   # instructions | skill | hybrid | prompts
 
 unmanaged_files:
   action: ignore                # ignore | warn | deny
   directories: []               # Directories to monitor
+  exclude: []                   # Workspace path globs to suppress
 
 registry_source:
   require: []                   # Registry names required for dependencies
   allow_non_registry: true      # false = block git/local sources
+
+security:
+  audit: {on_install: null, fail_on_drift: false}
+  integrity: {require_hashes: false}
+
+executables:
+  deny_all: false
+  deny: []
+  require: []
+  recommend: []
+  enforce: []                   # accepted but inert in v1
 ```
 
 ## Top-level fields
@@ -87,7 +100,7 @@ Inherit from a parent policy. See [Inheritance](#inheritance).
 
 | Value | Source |
 |-------|--------|
-| `org` | Parent org's `.github/apm-policy.yml` |
+| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`) |
 | `owner/repo` | Cross-org policy from a specific repository |
 | `https://...` | Direct URL to a policy file |
 
@@ -100,7 +113,7 @@ Org-side posture when consumers cannot fetch this policy AND have a stale cached
 | `warn` | Loud warning emitted; install proceeds with the cached policy (or with no policy if cache is empty). Default. |
 | `block` | Fail-closed when a cached policy is available but a refresh fails. |
 
-Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../reference/manifest-schema/#39-policy) for the consumer-side fields.
+Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../../reference/manifest-schema/#39-policy) for the consumer-side fields.
 
 ---
 
@@ -178,7 +191,7 @@ dependencies:
   require_pinned_constraint: true
 ```
 
-Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
+Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
@@ -235,14 +248,14 @@ Whether to trust MCP servers declared by transitive dependencies. Default: `fals
 
 Control which compilation targets are permitted. With multi-target support, these policies apply to every item in the target list:
 
-- **`enforce`**: The enforced target must be present in the target list. Fails if missing (e.g., `enforce: vscode` requires `vscode` to appear in `target: [claude, vscode]`).
+- **`enforce`**: The enforced target must be present in the target list. Fails if missing (e.g., `enforce: copilot` requires `copilot` to appear in `target: [claude, copilot]`).
 - **`allow`**: Every target in the list must be in the allowed set. Rejects any target not listed.
 
 ```yaml
 compilation:
   target:
-    allow: [vscode, claude]  # Only these targets allowed
-    enforce: vscode           # Must be present in the target list
+    allow: [copilot, claude]  # Only these targets allowed
+    enforce: copilot          # Must be present in the target list
 ```
 
 `enforce` takes precedence over `allow`. Use one or the other.
@@ -402,7 +415,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 
 ### Policy checks (run with `--ci --policy`)
 
-There are 19 policy checks in APM 0.16.0.
+There are 21 policy checks.
 
 **Dependencies:**
 
@@ -412,10 +425,17 @@ There are 19 policy checks in APM 0.16.0.
 | `dependency-denylist` | No dependency matches the deny list |
 | `required-packages` | Every required package is in the manifest |
 | `required-packages-deployed` | Required packages appear in lockfile with deployed files |
+| `required-executable-untrusted` | Required executable packages are present and trusted |
 | `required-package-version` | Required packages with version pins match per `require_resolution` |
 | `transitive-depth` | No dependency exceeds `max_depth` |
 | `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
 | `registry-source` | Dependencies come from required registries when `registry_source` is configured |
+
+**Integrity:**
+
+| Check | Validates |
+|-------|-----------|
+| `dependency-content-hashes` | Every non-local locked dependency has `content_hash` when `security.integrity.require_hashes: true`; local dependencies are exempt |
 
 **MCP:**
 
@@ -583,7 +603,7 @@ dependencies:
 ## Install-time enforcement
 
 :::note[Non-goal: structured output]
-Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../reference/cli/audit/) in the CLI reference.
+Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli/audit/) in the CLI reference.
 :::
 
 ### 1. What APM policy is
@@ -592,7 +612,11 @@ Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-re
 
 ### 2. Discovery and applicability
 
-APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub remote — both `github.com` and GitHub Enterprise (GHE). Repositories on non-GitHub remotes (ADO, GitLab, plain git) currently fall through with no policy applied; this is tracked as a follow-up. Repositories with no detectable git remote (unpacked bundles, temp directories) emit an explicit "could not determine org" line and skip discovery.
+APM auto-discovers policy from `<org>/.github/apm-policy.yml` for GitHub and
+GitHub Enterprise remotes. Azure DevOps remotes use the org `_apm` project and
+`_apm` repository. GitLab and plain git remotes currently fall through with no
+policy applied. Repositories with no detectable git remote emit an explicit
+"could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
 
@@ -600,7 +624,7 @@ The `--policy <override>` flag is **audit-only today** — it works on `apm audi
 
 Policy resolves through the chain documented in [Inheritance](#inheritance) above: enterprise hub -> org -> repo override. The merge is **tighten-only**: a child can narrow allow lists, add deny entries, and escalate enforcement, but never relax a parent constraint. The full merge rule table is in [Tighten-only merge rules](#tighten-only-merge-rules).
 
-Install-time enforcement and `apm audit --ci` both resolve the **full multi-level `extends:` chain** (enterprise hub -> org -> repo, or any depth up to `MAX_CHAIN_DEPTH = 5`). The walker fetches each parent via the same single-policy fetcher used for direct discovery, so caching, retries, and source-prefix handling are consistent across levels. Cycles (`A extends B`, `B extends A`) are detected by tracking visited refs and abort the walk with a clear error. If a parent fetch fails midway, APM merges the policies it already resolved and emits a `[!] Policy chain incomplete: <ref> unreachable, using <N> of <M> policies` warning so the operator learns that an upstream policy was unreachable.
+Install-time enforcement and `apm audit --ci` both resolve the **full multi-level `extends:` chain** (enterprise hub -> org -> repo, or any depth up to `MAX_CHAIN_DEPTH = 5`). The walker fetches each parent via the same single-policy fetcher used for direct discovery, so caching, retries, and source-prefix handling are consistent across levels. Cycles (`A extends B`, `B extends A`) abort the walk. If any parent is unreachable, APM rejects the incomplete chain instead of enforcing a weaker subset.
 
 ### 4. What gets enforced
 
@@ -758,7 +782,7 @@ $ echo $?
 
 | Hatch | Scope |
 |-------|-------|
-| `--no-policy` flag | Available on `apm install`, `apm install <pkg>`, and `apm install --mcp`. Skips discovery and enforcement for one invocation; emits a loud warning. Not currently exposed on `apm deps update`. |
+| `--no-policy` flag | Available on `apm install`, `apm install <pkg>`, `apm install <bundle>`, and `apm install --mcp`. Skips discovery and enforcement for one invocation; emits a loud warning. Not currently exposed on `apm deps update`. |
 | `APM_POLICY_DISABLE=1` env var | Equivalent to `--no-policy`. Same loud warning. |
 
 `APM_POLICY` is reserved for a future override env var and is **not** equivalent to `APM_POLICY_DISABLE`.
@@ -929,7 +953,7 @@ All violation messages above flow through `InstallLogger.policy_violation`; unde
 
 Checklist to publish a policy:
 
-1. Create `<org>/.github/apm-policy.yml` in the org's `.github` repository.
+1. Create `<org>/.github-private/apm-policy.yml` (or `<org>/.github/apm-policy.yml`) in the org's policy repository.
 2. Start from the [Standard org policy](#standard-org-policy) example above and trim it to the minimum that reflects your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming repos for one cycle without breaking installs.
 4. When the warn-cycle is clean, switch to `enforcement: block`. Communicate the change in your org's CHANGELOG/announcements channel — `apm install` will start failing for any non-compliant repo.
@@ -958,6 +982,6 @@ manifest:
 
 ## Related
 
-- [Governance](./governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
-- [Enforce in CI](./enforce-in-ci/) -- step-by-step CI setup tutorial
-- [GitHub Rulesets](../integrations/github-rulesets/) -- enforce policy as a required status check
+- [Governance](../governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
+- [Enforce in CI](../enforce-in-ci/) -- step-by-step CI setup tutorial
+- [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check

@@ -7,6 +7,11 @@ from unittest.mock import Mock
 
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.utils.diagnostics import (
+    CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_WARNING,
+    DiagnosticCollector,
+)
 
 
 class TestAgentIntegrator:
@@ -49,17 +54,17 @@ class TestAgentIntegrator:
         assert all(p.name.endswith(".agent.md") for p in agents)
 
     def test_find_agent_files_in_root_legacy_format(self):
-        """Test finding .chatmode.md files in package root (legacy)."""
+        """Test finding .agent.md files in package root."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
 
-        # Create legacy chatmode files
-        (package_dir / "default.chatmode.md").write_text("# Default Chatmode")
-        (package_dir / "backend.chatmode.md").write_text("# Backend Chatmode")
+        # Create agent files in the package root
+        (package_dir / "default.agent.md").write_text("# Default Chatmode")
+        (package_dir / "backend.agent.md").write_text("# Backend Chatmode")
 
         agents = self.integrator.find_agent_files(package_dir)
         assert len(agents) == 2
-        assert all(p.name.endswith(".chatmode.md") for p in agents)
+        assert all(p.name.endswith(".agent.md") for p in agents)
 
     def test_find_agent_files_in_apm_agents(self):
         """Test finding .agent.md files in .apm/agents/ (new standard)."""
@@ -74,29 +79,29 @@ class TestAgentIntegrator:
         assert agents[0].name == "security.agent.md"
 
     def test_find_agent_files_in_apm_chatmodes(self):
-        """Test finding .chatmode.md files in .apm/chatmodes/ (legacy)."""
+        """Test finding .agent.md files in .apm/agents/."""
         package_dir = self.project_root / "package"
-        apm_chatmodes = package_dir / ".apm" / "chatmodes"
+        apm_chatmodes = package_dir / ".apm" / "agents"
         apm_chatmodes.mkdir(parents=True)
 
-        (apm_chatmodes / "default.chatmode.md").write_text("# Default Chatmode")
+        (apm_chatmodes / "default.agent.md").write_text("# Default Chatmode")
 
         agents = self.integrator.find_agent_files(package_dir)
         assert len(agents) == 1
-        assert agents[0].name == "default.chatmode.md"
+        assert agents[0].name == "default.agent.md"
 
     def test_find_agent_files_mixed_formats(self):
-        """Test finding both .agent.md and .chatmode.md files."""
+        """Test finding multiple .agent.md files."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
 
         (package_dir / "new.agent.md").write_text("# New Agent")
-        (package_dir / "old.chatmode.md").write_text("# Old Chatmode")
+        (package_dir / "old.agent.md").write_text("# Old Chatmode")
 
         agents = self.integrator.find_agent_files(package_dir)
         assert len(agents) == 2
         extensions = {tuple(p.name.split(".")[-2:]) for p in agents}
-        assert extensions == {("agent", "md"), ("chatmode", "md")}
+        assert extensions == {("agent", "md")}
 
     def test_copy_agent_verbatim(self):
         """Test copying agent file verbatim (no metadata injection)."""
@@ -121,8 +126,8 @@ class TestAgentIntegrator:
         assert target == "security.agent.md"
 
     def test_get_target_filename_chatmode_format(self):
-        """Test target filename generation renames .chatmode.md to .agent.md."""
-        source = Path("/package/default.chatmode.md")
+        """Test target filename generation renames .agent.md to .agent.md."""
+        source = Path("/package/default.agent.md")
         package_name = "microsoft/apm-sample-package"
 
         target = self.integrator.get_target_filename(source, package_name)
@@ -569,7 +574,7 @@ class TestAgentSuffixPattern:
 
     def test_clean_naming_chatmode_to_agent(self):
         """Test clean naming renames chatmode to agent format."""
-        source = Path("default.chatmode.md")
+        source = Path("default.agent.md")
         result = self.integrator.get_target_filename(source, "pkg")
         assert result == "default.agent.md"
 
@@ -630,8 +635,8 @@ class TestClaudeAgentIntegration:
         assert result == "security.md"
 
     def test_get_target_filename_claude_from_chatmode_md(self):
-        """Test Claude filename from .chatmode.md uses .md extension."""
-        source = Path("default.chatmode.md")
+        """Test Claude filename from .agent.md uses .md extension."""
+        source = Path("default.agent.md")
         result = self.integrator.get_target_filename_claude(source, "pkg")
         assert result == "default.md"
 
@@ -672,10 +677,10 @@ class TestClaudeAgentIntegration:
         assert "Review code for vulnerabilities" in content
 
     def test_integrate_handles_chatmode_files(self):
-        """Test .chatmode.md files are integrated to .claude/agents/."""
+        """Test .agent.md files are integrated to .claude/agents/."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
-        (package_dir / "backend.chatmode.md").write_text("# Backend Mode")
+        (package_dir / "backend.agent.md").write_text("# Backend Mode")
 
         package_info = self._create_package_info(package_dir)
         result = self.integrator.integrate_package_agents_claude(package_info, self.project_root)
@@ -690,7 +695,7 @@ class TestClaudeAgentIntegration:
         package_dir.mkdir()
         (package_dir / "security.agent.md").write_text("# Security")
         (package_dir / "planner.agent.md").write_text("# Planner")
-        (package_dir / "default.chatmode.md").write_text("# Default")
+        (package_dir / "default.agent.md").write_text("# Default")
 
         package_info = self._create_package_info(package_dir)
         result = self.integrator.integrate_package_agents_claude(package_info, self.project_root)
@@ -828,8 +833,8 @@ class TestCursorAgentIntegration:
         assert result == "security.md"
 
     def test_get_target_filename_cursor_from_chatmode_md(self):
-        """Test Cursor filename from .chatmode.md uses .md extension."""
-        source = Path("default.chatmode.md")
+        """Test Cursor filename from .agent.md uses .md extension."""
+        source = Path("default.agent.md")
         result = self.integrator.get_target_filename_cursor(source, "pkg")
         assert result == "default.md"
 
@@ -894,7 +899,7 @@ class TestCursorAgentIntegration:
         package_dir.mkdir()
         (package_dir / "security.agent.md").write_text("# Security")
         (package_dir / "planner.agent.md").write_text("# Planner")
-        (package_dir / "default.chatmode.md").write_text("# Default")
+        (package_dir / "default.agent.md").write_text("# Default")
 
         package_info = self._create_package_info(package_dir)
         result = self.integrator.integrate_package_agents_cursor(package_info, self.project_root)
@@ -1101,6 +1106,21 @@ class TestCodexAgentIntegration:
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def _create_package_info(self, package_dir: Path, *, name: str = "test-pkg") -> PackageInfo:
+        package = APMPackage(name=name, version="1.0.0", package_path=package_dir)
+        resolved_ref = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        return PackageInfo(
+            package=package,
+            install_path=package_dir,
+            resolved_reference=resolved_ref,
+            installed_at=datetime.now().isoformat(),
+        )
+
     def test_agent_md_to_toml_with_frontmatter(self):
         """Agent .md with YAML frontmatter is converted to .toml."""
         import toml
@@ -1146,6 +1166,156 @@ class TestCodexAgentIntegration:
         source = Path("/fake/test.agent.md")
         filename = integrator.get_target_filename_for_target(source, "pkg", codex)
         assert filename == "test.toml"
+
+    def test_codex_agent_tools_scope_emits_lossy_compilation_warning(self, capsys):
+        """Codex installs must not silently discard agent tool restrictions."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "scoped.agent.md").write_text(
+            "---\n"
+            "name: scoped\n"
+            "description: Scoped agent\n"
+            "tools: [read, search, 'allowed-demo/*']\n"
+            "---\n"
+            "Review changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "scoped.agent.md" in diagnostic.message
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].package == "test-pkg"
+        assert "tools" in warnings[0].message
+        assert "Codex" in warnings[0].message
+        assert "project/session MCP servers" in warnings[0].message
+        assert warnings[0].detail.startswith("Fix:")
+
+        diagnostics.render_summary()
+        rendered = capsys.readouterr()
+        output = rendered.out + rendered.err
+        assert "[!]" in output
+        assert "test-pkg" in output
+        assert "scoped.agent.md" in output
+
+        import toml
+
+        generated = toml.loads(
+            (self.root / ".codex" / "agents" / "scoped.toml").read_text(encoding="utf-8")
+        )
+        assert "tools" not in generated
+        assert "unrestricted access" in warnings[0].detail
+
+    def test_codex_agent_non_mapping_frontmatter_emits_warning(self):
+        """Valid YAML with the wrong shape must not bypass scope diagnostics."""
+        source = self.root / "list-frontmatter.agent.md"
+        source.write_text(
+            "---\n- name: list-frontmatter\n- tools: [read]\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "list-frontmatter.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert len(warnings) == 1
+        assert "must be a mapping and was ignored" in warnings[0].message
+        assert "may inherit broader tool access" in warnings[0].message
+        assert "rerun 'apm install'" in warnings[0].message
+
+    def test_codex_agent_invalid_frontmatter_emits_warning(self):
+        """Invalid YAML must not make Codex conversion fail open silently."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "broken.agent.md").write_text(
+            "---\nname: broken\ntools: [read, 'allowed-demo/*'\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert len(warnings) == 1
+        assert "broken.agent.md" in warnings[0].message
+        assert "invalid YAML frontmatter" in warnings[0].message
+        assert "tool access" in warnings[0].message
+
+    def test_codex_agent_warning_sanitizes_package_name(self, capsys):
+        """Package attribution must not inject terminal control sequences."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "scoped.agent.md").write_text(
+            "---\nname: scoped\ntools: [read]\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir, name="evil\x1b[31mpkg\nnext"),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        diagnostics.render_summary()
+        rendered = capsys.readouterr()
+        output = rendered.out + rendered.err
+        assert "\x1b" not in output
+        assert "pkg\nnext" not in output
+
+    def test_codex_agent_without_tools_does_not_warn(self):
+        """Supported Codex fields should not produce a lossy warning."""
+        source = self.root / "plain.agent.md"
+        source.write_text(
+            "---\nname: plain\ndescription: Plain agent\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "plain.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
 
 
 # ==================================================================

@@ -171,6 +171,57 @@ class TestResolveMarketplacePlugin:
         ):
             resolve_marketplace_plugin("nonexistent", "test-mkt")
 
+    def test_semver_range_uses_custom_tag_pattern(self):
+        """Semver range resolution passes plugin.tag_pattern to resolve_version_constraint."""
+        plugin = MarketplacePlugin(
+            name="apm-skill-creator",
+            source={
+                "type": "github",
+                "repo": "lsp-infra-hub/hub",
+                "ref": "apm-skill-creator/0.1.4",
+                "tag_pattern": "{name}/{version}",
+            },
+            tag_pattern="{name}/{version}",
+            source_marketplace="test-mkt",
+        )
+        manifest = _make_manifest(plugin)
+        source = _make_source()
+
+        captured_kwargs: dict = {}
+
+        def _fake_resolve(pname, owner_repo, vspec, **kwargs):
+            captured_kwargs.update(kwargs)
+            return ("apm-skill-creator/0.1.4", "a" * 40)
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=source,
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=manifest,
+            ),
+            patch(
+                "apm_cli.marketplace.version_resolver.resolve_version_constraint",
+                side_effect=_fake_resolve,
+            ),
+            patch("apm_cli.marketplace.version_pins.check_ref_pin", return_value=None),
+            patch("apm_cli.marketplace.version_pins.record_ref_pin"),
+            patch(
+                "apm_cli.marketplace.shadow_detector.detect_shadows",
+                return_value=[],
+            ),
+        ):
+            canonical, _resolved = resolve_marketplace_plugin(
+                "apm-skill-creator",
+                "test-mkt",
+                version_spec="^0.1.0",
+            )
+
+        assert captured_kwargs.get("tag_pattern") == "{name}/{version}"
+        assert "apm-skill-creator/0.1.4" in canonical
+
 
 # ---------------------------------------------------------------------------
 # Canonical string correctness

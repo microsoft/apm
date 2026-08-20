@@ -5,9 +5,14 @@ file-length guardrail. These are pure, stateless helpers with no dependency on
 ``DependencyReference`` internals; both ``DependencyReference`` and
 ``LockedDependency`` reuse them so the two identity models share one body shape
 without collapsing their distinct local-detection semantics.
+
+``normalize_package_repo_url`` is the single casing-normalization boundary for
+comparison identity. It must never be used as a display or filesystem path.
 """
 
 import re
+
+from ...utils.github_host import default_host, is_github_hostname
 
 # Allowed character set for a single repository path segment.
 #
@@ -24,6 +29,64 @@ _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
+
+
+def _split_shorthand_host_port(host_segment: str) -> tuple[str, int | None]:
+    """Split and validate the host segment used by DependencyReference shorthand."""
+    if ":" not in host_segment:
+        return host_segment, None
+    host, _, raw_port = host_segment.rpartition(":")
+    error = "Invalid shorthand port. Expected an integer from 1 to 65535"
+    if not host or not re.fullmatch(r"[0-9]{1,5}", raw_port):
+        raise ValueError(error)
+    port = int(raw_port)
+    if not 1 <= port <= 65535:
+        raise ValueError(error)
+    return host, None if port == _DEFAULT_SCHEME_PORTS["https"] else port
+
+
+def normalize_package_repo_url(
+    repo_url: str,
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> str:
+    """Return the canonical repository path for package identity.
+
+    GitHub and package-registry identifiers are case-insensitive, so their
+    owner/repository path is lowercase at the model boundary. Unknown git
+    hosts retain their path casing because their repository semantics may be
+    case-sensitive.
+    """
+    if is_local or source == "local" or is_marketplace:
+        return repo_url
+    if source == "registry" or registry_prefix:
+        return repo_url.lower()
+    effective_host = host or default_host()
+    if is_github_hostname(effective_host):
+        return repo_url.lower()
+    return repo_url
+
+
+def is_case_insensitive_package_identity(
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> bool:
+    """Return whether repository casing is excluded from package identity."""
+    if is_local or source == "local" or is_marketplace:
+        return False
+    if source == "registry" or registry_prefix:
+        return True
+    effective_host = host or default_host()
+    return is_github_hostname(effective_host)
 
 
 def build_dependency_unique_key(
@@ -35,12 +98,18 @@ def build_dependency_unique_key(
     is_virtual: bool = False,
     virtual_path: str | None = None,
     registry_prefix: str | None = None,
+    declaring_parent: str | None = None,
+    anchored_local_path: str | None = None,
+    is_marketplace: bool = False,
 ) -> str:
     """Return the lockfile/dedup key for a dependency identity.
 
     github.com remains the implicit default so existing lockfiles keep bare
     ``owner/repo`` keys. Non-default hosts include the host segment to avoid
     collisions between the same ``owner/repo`` on different servers.
+    This deliberately uses the literal ``github.com`` default rather than
+    environment-specific host overrides, so lockfile keys stay portable across
+    machines with different GitHub Enterprise defaults.
 
     Registry-proxy deps (``registry_prefix`` set, e.g. an Artifactory mirror)
     keep the bare logical key: the proxy host is a transport detail, not the
@@ -49,9 +118,18 @@ def build_dependency_unique_key(
     lockfile key correspondence used by re-install and orphan detection.
     """
     if source == "local" and local_path:
+        if anchored_local_path:
+            return f"local:{anchored_local_path}"
         return local_path
 
-    key = repo_url
+    key = normalize_package_repo_url(
+        repo_url,
+        host=host,
+        source=source,
+        registry_prefix=registry_prefix,
+        is_local=source == "local",
+        is_marketplace=is_marketplace,
+    )
     if is_virtual and virtual_path:
         key = f"{key}/{virtual_path}"
 

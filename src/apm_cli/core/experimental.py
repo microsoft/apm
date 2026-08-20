@@ -82,6 +82,12 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "Workflows tab."
         ),
     ),
+    "grok_cloud": ExperimentalFlag(
+        name="grok_cloud",
+        description="Deploy skills to xAI Grok Cloud.",
+        default=False,
+        hint="Use '--target grok-cloud' to deploy skills.",
+    ),
     "marketplace_authoring": ExperimentalFlag(
         name="marketplace_authoring",
         description="Enable marketplace authoring commands (init, build, publish, etc.).",
@@ -101,8 +107,8 @@ FLAGS: dict[str, ExperimentalFlag] = {
         hint=(
             "Author a canvas under .apm/extensions/<name>/extension.mjs, then "
             "'apm install' deploys it to .github/extensions/. Dependency-provided "
-            "canvases are executable and blocked unless you pass "
-            "'--trust-canvas-extensions'. See "
+            "canvases are executable and blocked unless approved via allowExecutables "
+            "in apm.yml and 'apm approve <pkg>'. See "
             "https://microsoft.github.io/apm/integrations/canvas/"
         ),
     ),

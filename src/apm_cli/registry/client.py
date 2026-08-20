@@ -1,5 +1,7 @@
 """Simple MCP Registry client for server discovery."""
 
+import contextlib
+import json
 import logging
 import os
 import re
@@ -11,6 +13,18 @@ import requests
 
 _log = logging.getLogger(__name__)
 
+# Hard byte ceiling for an MCP registry HTTP body. The registry URL can come
+# from an untrusted cloned apm.yml (``MCPDependency.registry``), so the
+# discovery client must bound the body BEFORE buffering it -- a multi-GB body
+# would otherwise exhaust memory on ``apm install``. Mirrors the round-26 cap
+# on the sibling ``deps/registry/client.py``.
+_MAX_REGISTRY_JSON_BYTES = 10 * 1024 * 1024  # 10 MiB
+_REGISTRY_CHUNK_BYTES = 64 * 1024
+# Decode failures that must fail CLOSED (a deep-nested body raises
+# ``RecursionError``, an oversized int ``ValueError``, non-UTF-8
+# ``UnicodeDecodeError``) rather than escape the client raw.
+_REGISTRY_JSON_ERRORS = (ValueError, json.JSONDecodeError, RecursionError, UnicodeDecodeError)
+
 
 def _safe_headers(response) -> dict[str, str]:
     """Return response headers as a plain dict, tolerating Mock objects in tests."""
@@ -18,6 +32,55 @@ def _safe_headers(response) -> dict[str, str]:
         return dict(response.headers)
     except (TypeError, AttributeError):
         return {}
+
+
+def _read_capped_body(
+    response: requests.Response,
+    *,
+    max_bytes: int = _MAX_REGISTRY_JSON_BYTES,
+) -> bytes:
+    """Read a response body incrementally, capping total bytes.
+
+    Rejects off the advertised ``Content-Length`` BEFORE buffering, then
+    enforces the same cap on the actual stream. Fails closed as
+    ``requests.RequestException`` (the documented contract of this client).
+    Always closes the response.
+    """
+    with contextlib.suppress(ValueError, TypeError):
+        declared = int(response.headers.get("Content-Length", ""))
+        if declared > max_bytes:
+            raise requests.RequestException(
+                f"registry body exceeds {max_bytes} byte cap (declared {declared})"
+            )
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        for chunk in response.iter_content(chunk_size=_REGISTRY_CHUNK_BYTES):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > max_bytes:
+                raise requests.RequestException(f"registry body exceeds {max_bytes} byte cap")
+            chunks.append(chunk)
+    finally:
+        with contextlib.suppress(Exception):
+            response.close()
+    return b"".join(chunks)
+
+
+def _decode_registry_json(raw: bytes) -> Any:
+    """Decode capped registry bytes as JSON, failing closed.
+
+    Empty body (e.g. 204 No Content) decodes to ``None``. Any decode failure
+    -- including a deep-nest ``RecursionError`` -- is remapped to
+    ``requests.RequestException`` so the discovery path never crashes raw.
+    """
+    if not raw:
+        return None
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except _REGISTRY_JSON_ERRORS as exc:
+        raise requests.RequestException(f"registry returned non-JSON body: {exc}") from exc
 
 
 _DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
@@ -204,26 +267,25 @@ class SimpleRegistryClient:
         # default; the MCP registry path is anonymous in practice.
         session_auth = bool(self.session.headers.get("Authorization"))
         if session_auth or self._http_cache is None:
-            kwargs0: dict[str, Any] = {"timeout": self._timeout}
+            kwargs0: dict[str, Any] = {"timeout": self._timeout, "stream": True}
             if params:
                 kwargs0["params"] = params
             response = self.session.get(url, **kwargs0)
             response.raise_for_status()
-            return response.json(), _safe_headers(response)
+            raw = _read_capped_body(response)
+            return _decode_registry_json(raw), _safe_headers(response)
 
         # Fresh cache hit
         cached = self._http_cache.get(cache_key)
         if cached is not None:
             try:
-                import json as _json
-
-                return _json.loads(cached.body.decode("utf-8")), {}
-            except (ValueError, UnicodeDecodeError):
+                return json.loads(cached.body.decode("utf-8")), {}
+            except _REGISTRY_JSON_ERRORS:
                 pass  # fall through to network
 
         # Expired or missing: send conditional headers if we have an ETag
         request_headers = self._http_cache.conditional_headers(cache_key)
-        kwargs: dict[str, Any] = {"timeout": self._timeout}
+        kwargs: dict[str, Any] = {"timeout": self._timeout, "stream": True}
         if params:
             kwargs["params"] = params
         if request_headers:
@@ -235,20 +297,18 @@ class SimpleRegistryClient:
             cached = self._http_cache.get(cache_key)
             if cached is not None:
                 try:
-                    import json as _json
-
-                    return _json.loads(cached.body.decode("utf-8")), _safe_headers(response)
-                except (ValueError, UnicodeDecodeError):
+                    return json.loads(cached.body.decode("utf-8")), _safe_headers(response)
+                except _REGISTRY_JSON_ERRORS:
                     pass  # fall through to a fresh fetch
             # Stored entry vanished between revalidate and read: refetch
-            kwargs2: dict[str, Any] = {"timeout": self._timeout}
+            kwargs2: dict[str, Any] = {"timeout": self._timeout, "stream": True}
             if params:
                 kwargs2["params"] = params
             response = self.session.get(url, **kwargs2)
 
         response.raise_for_status()
+        body = _read_capped_body(response)
         try:
-            body = response.content
             self._http_cache.store(
                 cache_key,
                 body,
@@ -257,7 +317,7 @@ class SimpleRegistryClient:
             )
         except Exception as exc:  # pragma: no cover - defensive
             _log.debug("HTTP cache store failed for %s: %s", cache_key, exc)
-        return response.json(), _safe_headers(response)
+        return _decode_registry_json(body), _safe_headers(response)
 
     def list_servers(
         self, limit: int = 100, cursor: str | None = None

@@ -41,8 +41,10 @@ MAX_MODULE_LOC = 1000
 KNOWN_LARGE_MODULES = {
     # services.py grew past 1000 when exec-gate delegation helpers (main)
     # and canvas integration helpers (canvas PR) merged concurrently.
+    # Further growth from target-reconcile warning helper extraction (#2362).
+    # Added _resolve_bin_skip helper for trust-bin gate (#1620).
     # Decomposition tracked as follow-up.
-    "services.py": 1100,
+    "services.py": 1140,
 }
 
 
@@ -210,13 +212,14 @@ def test_install_py_under_legacy_budget():
     boundary; the chdir + source-root-override mechanism lives in
     ``apm_cli/install/root_redirect.py`` and ``apm_cli/core/scope.py``.
 
-    Experimental canvas support raised 2085 -> 2110 to add the
-    ``--trust-canvas-extensions`` Click option plus its signature param,
-    the ``trust_canvas`` ``InstallContext`` field, and the trust-signal
-    wiring through ``_install_apm_dependencies`` / ``InstallRequest`` and
-    the local-bundle handler. All glue at the handler boundary; the
-    integrator and its trust gate live in
-    ``apm_cli/integration/canvas_integrator.py``.
+    ``allowExecutables`` MCP gate raised 2100 -> 2130 to add the
+    MCP filtering loop after ``collect_transitive`` that filters out MCP
+    servers from packages not approved in ``allowExecutables``.  The gate
+    also removed ``--trust-canvas-extensions`` Click option and the
+    ``trust_canvas`` ``InstallContext`` field; canvas trust is now unified
+    under ``allowExecutables``.  All logic at the handler boundary; the
+    actual approval check delegates to ``is_package_approved`` in
+    ``apm_cli/security/executables.py``.
 
     Default-registry CLI routing raised 2110 -> 2128 to wire
     ``_default_registry_for_cli`` into ``_validate_and_add_packages_to_apm_yml``
@@ -242,6 +245,12 @@ def test_install_py_under_legacy_budget():
     recording block between the registry bypass path and the normal GitHub
     probe path, eliminating duplicated ``update_existing_dependency_entry_if_needed``
     + ``valid_outcomes.append`` + provenance blocks.
+
+    Argv-boundary extraction reduced 2111 -> 2080 by moving
+    ``_get_invocation_argv`` / ``_split_argv_at_double_dash`` (and their
+    explanatory block comment) into ``apm_cli/install/argv.py``, which
+    ``commands/mcp.py`` already consumed through this module.  Budget
+    tightened 2150 -> 2100 to match the CI file-length guardrail.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()

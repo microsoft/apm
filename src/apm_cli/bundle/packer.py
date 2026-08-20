@@ -13,6 +13,7 @@ from ..utils.archive import (
     write_tar_archive,
     write_zip_archive,
 )
+from .attest import verify_attested_file
 from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
 
 
@@ -92,7 +93,9 @@ def pack_bundle(
         package = APMPackage.from_apm_yml(apm_yml_path)
         pkg_name = package.name
         pkg_version = package.version or "0.0.0"
-        config_target = package.target
+        from apm_cli.models.apm_package import package_target_selection
+
+        config_target = package_target_selection(package)
 
         # HYBRID author guard: apm.yml.description and SKILL.md
         # description serve different consumers (human-facing CLI/search
@@ -104,10 +107,10 @@ def pack_bundle(
         # at pack time -- this is the publish gate for the AUTHOR.
         if is_hybrid_root and not package.description and logger:
             try:
-                import frontmatter as _frontmatter
+                from apm_cli.utils.yaml_io import load_frontmatter
 
                 with open(skill_md_path, encoding="utf-8") as _f:
-                    _skill_post = _frontmatter.load(_f)
+                    _skill_post = load_frontmatter(_f)
                 _skill_desc = _skill_post.metadata.get("description")
             except Exception:
                 _skill_desc = None
@@ -140,7 +143,7 @@ def pack_bundle(
         # List from CLI (e.g. --target claude,copilot) passes through directly
         effective_target = target
     elif isinstance(config_target, list) and target is None:
-        # List from apm.yml target: [claude, copilot]
+        # Canonical list from either apm.yml target spelling.
         effective_target = config_target
     else:
         effective_target, _reason = detect_target(
@@ -158,10 +161,19 @@ def pack_bundle(
     #    not portable and is bundled separately via the project's own files
     #    (or rejected outright at L89-97 for manifest-declared local deps).
     all_deployed: list[str] = []
+    # Provenance map: deployed-path -> (attested SHA-256, dependency label).
+    # ``deployed_file_hashes`` is keyed by the on-disk deployed path recorded
+    # at install time (see install/phases/lockfile.compute_deployed_hashes), so
+    # verification below must look up the on-disk path, not the bundle path.
+    deployed_hashes: dict[str, str] = {}
+    hash_dep_labels: dict[str, str] = {}
     for dep in lockfile.get_all_dependencies():
         if dep.source == "local":
             continue
         all_deployed.extend(dep.deployed_files)
+        for _dpath, _dhash in dep.deployed_file_hashes.items():
+            deployed_hashes[_dpath] = _dhash
+            hash_dep_labels[_dpath] = dep.repo_url
 
     filtered_files, path_mappings = _filter_files_by_target(all_deployed, effective_target)
     # Deduplicate while preserving order
@@ -250,7 +262,12 @@ def pack_bundle(
     bundle_dir.mkdir(parents=True, exist_ok=True)
     bundle_dir_resolved = bundle_dir.resolve()
 
-    # 7. Copy files preserving directory structure
+    # 7. Copy files preserving directory structure.
+    #    Provenance gate (#2013): each dependency file recorded in the lockfile
+    #    is verified against its attested SHA-256 before it enters the bundle --
+    #    the same integrity guarantee the plugin format enforces, applied to the
+    #    default/most-used ``apm`` format. Files with no recorded hash (older
+    #    lockfiles) pack without verification; a mismatch fails loud.
     for rel_path in unique_files:
         # For cross-target mapped files, read from the original disk path
         disk_path = path_mappings.get(rel_path, rel_path)
@@ -264,8 +281,35 @@ def pack_bundle(
         if src.is_dir():
             from ..security.gate import ignore_non_content
 
+            # Verify each contained file's attested hash and re-assert
+            # containment per child. copytree already drops symlinks via
+            # ignore_non_content, but the walk guards against a directory
+            # symlink whose target escapes the project root regardless of the
+            # walker's version-specific symlink-following behaviour.
+            disk_base = disk_path.rstrip("/")
+            for child in sorted(src.rglob("*")):
+                if not child.is_file() or child.is_symlink():
+                    continue
+                if not child.resolve().is_relative_to(project_root_resolved):
+                    raise ValueError(
+                        f"Refusing to pack path that escapes project root: "
+                        f"{child.relative_to(project_root)!r}"
+                    )
+                child_key = f"{disk_base}/{child.relative_to(src).as_posix()}"
+                verify_attested_file(
+                    child,
+                    deployed_hashes.get(child_key),
+                    hash_dep_labels.get(child_key, "dependency"),
+                    child_key,
+                )
             shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_non_content)
         else:
+            verify_attested_file(
+                src,
+                deployed_hashes.get(disk_path),
+                hash_dep_labels.get(disk_path, "dependency"),
+                disk_path,
+            )
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest, follow_symlinks=False)
 

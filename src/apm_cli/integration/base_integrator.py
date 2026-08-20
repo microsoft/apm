@@ -5,10 +5,55 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
+from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.primitives.discovery import discover_primitives
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+
+def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
+    """Return the managed root for *candidate*, or ``None`` if unmanaged."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    source = targets
+    if source is None:
+        source = []
+        for profile in KNOWN_TARGETS.values():
+            if not profile.user_supported or profile.user_root_resolver is not None:
+                continue
+            scoped = profile.for_scope(user_scope=True)
+            if scoped is not None:
+                source.append(scoped)
+    try:
+        resolved = candidate.resolve()
+        for target_profile in source:
+            if target_profile is None:
+                continue
+            deploy_root = target_profile.managed_deploy_root
+            if deploy_root is None:
+                continue
+            resolved_root = deploy_root.resolve()
+            for mapping in target_profile.primitives.values():
+                if not mapping.subdir:
+                    continue
+                primitive_root = (resolved_root / mapping.subdir).resolve()
+                try:
+                    contained = ensure_path_within(resolved, primitive_root)
+                except PathTraversalError:
+                    continue
+                if contained != primitive_root:
+                    return resolved_root
+            if target_profile.hooks_config_display:
+                hooks_file = resolved_root / Path(target_profile.hooks_config_display).name
+                if resolved == hooks_file.resolve():
+                    return resolved_root
+    except (ValueError, OSError):
+        return None
+    return None
 
 
 class _SymlinkRaceError(OSError):
@@ -31,6 +76,7 @@ class IntegrationResult:
     files_skipped: int
     target_paths: list[Path]
     links_resolved: int = 0
+    materializations: tuple[MaterializationResult, ...] = ()
 
     # Hook-specific (default 0 when not applicable)
     scripts_copied: int = 0
@@ -95,6 +141,15 @@ class BaseIntegrator:
     detection, sync removal, and link resolution logic is
     handled here.
     """
+
+    # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
+    # ``False`` = byte-preserving identity (the safe default any future
+    # byte-preserving integrator inherits). Integrators that deploy via
+    # ``write_text_lf`` (instruction / command / agent) override this to
+    # ``True`` so a CRLF-source file already deployed as LF is adopted rather
+    # than churned. Making the mode an explicit, named class attribute keeps
+    # it out of a hardcoded literal buried inside the predicate.
+    _LF_NORMALIZED_DEPLOY = False
 
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
@@ -164,11 +219,41 @@ class BaseIntegrator:
         return {p.replace("\\", "/") for p in managed_files}
 
     @staticmethod
-    def is_content_identical_to_source(target_path: Path, source_path: Path) -> bool:
-        """Return True if *target_path* is byte-identical to *source_path*.
+    def is_content_identical_to_source(
+        target_path: Path,
+        source_path: Path,
+        *,
+        lf_normalized_deploy: bool = False,
+    ) -> bool:
+        """Return True if *target_path* matches what APM would deploy from *source_path*.
 
         Used by non-skill integrators to silently *adopt* a pre-existing
         on-disk file that already matches what APM would deploy.
+
+        The comparison depends on *how the calling integrator deploys*, which
+        the caller declares via ``lf_normalized_deploy``:
+
+        * ``lf_normalized_deploy=False`` (default) -- *byte-preserving*
+          deployers (the hook, kiro-hook, and canvas integrators copy the
+          source verbatim with ``shutil.copy2`` / ``shutil.copyfile``). The
+          deployed bytes equal the source bytes exactly, so "identical" is
+          raw byte identity.
+        * ``lf_normalized_deploy=True`` -- *LF-normalizing* deployers (the
+          agent, instruction, prompt, and command integrators write through
+          ``write_text_lf``). The deployed bytes equal the *LF-normalized*
+          source, so the on-disk *target* is identical iff it equals what
+          ``write_text_lf`` would write. Without this, a package whose source
+          carries CRLF line endings (Windows text-mode checkout,
+          ``core.autocrlf``, or a text-mode write) would never match the LF
+          target, so every reinstall would needlessly re-integrate the file
+          and report it as freshly installed (apm#1916).
+
+        In the LF-normalizing mode only the *source* side is normalized and
+        there is no raw-byte short-circuit: a stale CRLF *target* left by a
+        pre-LF install -- even one whose raw bytes happen to equal a CRLF
+        source on a ``core.autocrlf`` checkout -- still mismatches the LF
+        bytes ``write_text_lf`` would emit and is rewritten to LF rather than
+        adopted (apm#1889).
 
         Why this exists
         ---------------
@@ -194,12 +279,13 @@ class BaseIntegrator:
 
         Conservative by design
         ----------------------
-        Only fires for *byte-identical* matches. Format-transforming
-        targets (``codex_agent``, ``cursor_rules``, ``claude_rules``,
+        Only fires when the deployed bytes match the source content (modulo
+        CRLF->LF normalization). Format-transforming targets
+        (``codex_agent``, ``cursor_rules``, ``claude_rules``,
         ``windsurf_rules``, ``gemini_command``, ...) won't match -- they
         keep the existing skip behavior. This means we never silently
         adopt content that *might* have come from somewhere else; we only
-        adopt files that are demonstrably the package's own bytes already
+        adopt files that are demonstrably the package's own content already
         on disk.
 
         TOCTOU hardening
@@ -236,23 +322,54 @@ class BaseIntegrator:
                 # an optimisation; the user-authored skip path is the
                 # safe fallback.
                 return False
-            return target_bytes == source_bytes
+            if not lf_normalized_deploy:
+                # Byte-preserving deployer: deployed bytes equal source
+                # bytes verbatim, so "identical" is raw byte identity.
+                return target_bytes == source_bytes
+            # LF-normalizing deployer: the target is identical iff it equals
+            # what ``write_text_lf`` would write -- the LF-normalized source.
+            # No raw-byte short-circuit: a stale CRLF target whose raw bytes
+            # match a CRLF source must still be rewritten to LF, not adopted
+            # (apm#1889).
+            try:
+                normalized_source = normalize_crlf_to_lf(source_bytes.decode("utf-8")).encode(
+                    "utf-8"
+                )
+            except UnicodeDecodeError:
+                # Non-UTF-8 source can't be line-normalized and
+                # ``write_text_lf`` could not have produced it; fall back to
+                # raw byte identity.
+                return target_bytes == source_bytes
+            return target_bytes == normalized_source
         except OSError:
             return False
 
     @staticmethod
-    def try_adopt_identical(target_path: Path, source_path: Path, target_paths: list) -> bool:
-        """Adopt *target_path* when it is byte-identical to *source_path*.
+    def try_adopt_identical(
+        target_path: Path,
+        source_path: Path,
+        target_paths: list,
+        *,
+        lf_normalized_deploy: bool = False,
+    ) -> bool:
+        """Adopt *target_path* when it is identical to what would be deployed.
 
         Encapsulates the ``is_content_identical_to_source`` + append pattern
         so secondary call sites in agent/prompt/hook integrators share a
         single predicate call instead of repeating the three-line block.
 
+        ``lf_normalized_deploy`` is forwarded to
+        :meth:`is_content_identical_to_source`: LF-normalizing deployers
+        (agent, prompt) pass ``True``; byte-preserving deployers (hook,
+        kiro-hook) keep the ``False`` default.
+
         Returns ``True`` and appends *target_path* to *target_paths* when the
         files are identical; returns ``False`` and leaves *target_paths*
         unchanged otherwise.
         """
-        if BaseIntegrator.is_content_identical_to_source(target_path, source_path):
+        if BaseIntegrator.is_content_identical_to_source(
+            target_path, source_path, lf_normalized_deploy=lf_normalized_deploy
+        ):
             target_paths.append(target_path)
             return True
         return False
@@ -276,9 +393,16 @@ class BaseIntegrator:
         When adopting, *target_path* is appended to *target_paths* as a
         side effect so the caller's bookkeeping stays correct.
 
+        The adopt comparison runs in this integrator's deploy mode
+        (:attr:`_LF_NORMALIZED_DEPLOY`): LF-normalizing integrators compare
+        the on-disk target against the LF-normalized source, while
+        byte-preserving integrators compare raw bytes.
+
         Args:
             target_path: Destination path on disk.
-            source_file: Source file to compare against for byte-identity.
+            source_file: Source file to compare against; the file is adopted
+                when the on-disk target already matches the deployed form of
+                this source.
             rel_path: Relative path string used for collision detection and
                 diagnostics.
             managed_files: Set of APM-managed relative paths; ``None`` means
@@ -289,12 +413,14 @@ class BaseIntegrator:
             target_paths: Mutable list; *target_path* is appended on adopt.
 
         Returns:
-            ``(skip, adopted)`` — when ``skip`` is ``True`` the caller must
+            ``(skip, adopted)`` -- when ``skip`` is ``True`` the caller must
             ``continue`` (or otherwise skip writing this file); ``adopted``
-            is ``True`` only when the existing file was byte-identical and
-            has been silently adopted.
+            is ``True`` only when the existing file already matched the
+            deployed content and has been silently adopted.
         """
-        if self.is_content_identical_to_source(target_path, source_file):
+        if self.is_content_identical_to_source(
+            target_path, source_file, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
+        ):
             target_paths.append(target_path)
             return True, True
         if self.check_collision(
@@ -306,10 +432,10 @@ class BaseIntegrator:
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
     @staticmethod
-    def _get_integration_prefixes(targets=None) -> tuple:
+    def _get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple:
         from apm_cli.integration.targets import get_integration_prefixes
 
-        return get_integration_prefixes(targets=targets)
+        return get_integration_prefixes(targets=targets, user_scope=user_scope)
 
     @staticmethod
     def validate_deploy_path(
@@ -317,6 +443,7 @@ class BaseIntegrator:
         project_root: Path,
         allowed_prefixes: tuple | None = None,
         targets=None,
+        user_scope: bool = False,
     ) -> bool:
         """Return True if *rel_path* is safe for APM to deploy or remove.
 
@@ -325,20 +452,28 @@ class BaseIntegrator:
 
         When *targets* is provided, allowed prefixes are derived from
         those (scope-resolved) profiles.  Otherwise uses all known
-        target prefixes.
+        project prefixes, plus known user roots when *user_scope* is true.
 
         Checks:
         1. No path-traversal components (``..``)
         2. Starts with an allowed integration prefix
-        3. Resolves within *project_root* (or within the cowork root
-           for ``cowork://`` paths)
+        3. Resolves within *project_root*, a configured absolute target root,
+           or the cowork root for ``cowork://`` paths
         """
         from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
-        if allowed_prefixes is None:
-            allowed_prefixes = BaseIntegrator._get_integration_prefixes(targets=targets)
         if ".." in rel_path:
             return False
+
+        candidate = Path(rel_path)
+        if candidate.is_absolute():
+            return _managed_absolute_target_root(candidate, targets) is not None
+
+        if allowed_prefixes is None:
+            allowed_prefixes = BaseIntegrator._get_integration_prefixes(
+                targets=targets,
+                user_scope=user_scope,
+            )
 
         # --- cowork:// paths: validate against cowork root ---
         if rel_path.startswith(COWORK_URI_SCHEME):
@@ -534,8 +669,16 @@ class BaseIntegrator:
         # Collect unique parents (skip stop_at itself)
         candidates: set = set()
         for p in deleted_paths:
+            cleanup_boundary = stop_resolved
+            try:
+                if not p.resolve().is_relative_to(stop_resolved):
+                    cleanup_boundary = _managed_absolute_target_root(p, targets=None)
+                    if cleanup_boundary is None:
+                        cleanup_boundary = p.parent.resolve()
+            except (ValueError, OSError):
+                cleanup_boundary = p.parent.resolve()
             parent = p.parent
-            while parent != stop_at and parent.resolve() != stop_resolved:
+            while parent not in (parent.parent, stop_at) and parent.resolve() != cleanup_boundary:
                 candidates.add(parent)
                 parent = parent.parent
         # Sort deepest-first for safe bottom-up removal
@@ -612,6 +755,9 @@ class BaseIntegrator:
             if install_path.resolve() != home_root.resolve() and install_path.is_dir():
                 if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
                     self.link_resolver.package_root = Path(install_path)
+                    self.link_resolver.deployment_package_root = Path(
+                        package_info.deployment_package_root or install_path
+                    )
         except Exception:
             self.link_resolver = None
 

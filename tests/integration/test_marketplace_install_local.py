@@ -101,3 +101,24 @@ def test_install_resolves_local_marketplace_to_on_disk_path(tmp_path: Path) -> N
     dep_ref = DependencyReference.parse(canonical)
     assert dep_ref.is_local
     assert Path(dep_ref.local_path).resolve() == skill_path.resolve()
+
+
+def test_install_rejects_local_marketplace_symlink_escape(tmp_path: Path) -> None:
+    repo = tmp_path / "mkt"
+    _seed_marketplace(repo)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("# outside\n")
+    skill_path = repo / "skills" / "skill-a"
+    shutil.rmtree(skill_path)
+    try:
+        skill_path.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    runner = CliRunner()
+    result = runner.invoke(marketplace_group, ["add", str(repo), "--name", "local-mkt"])
+    assert result.exit_code == 0, result.output
+
+    with pytest.raises(ValueError, match="outside"):
+        resolve_marketplace_plugin("skill-a", "local-mkt")

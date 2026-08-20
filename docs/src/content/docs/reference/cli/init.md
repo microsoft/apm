@@ -26,7 +26,7 @@ and [`apm marketplace init`](../marketplace/) instead.
 
 | Argument | Description |
 |---|---|
-| `PROJECT_NAME` | Optional. Name of a new directory to create and `cd` into. Pass `.` to initialize in the current directory (same as omitting). Must not contain `/`, `\`, or be `..`. |
+| `PROJECT_NAME` | Optional. Name of a new directory to create and `cd` into. Pass `.` to initialize in the current directory (same as omitting). Must be non-blank (not empty or whitespace-only), must not contain `/` or `\`, and must not be `..`. |
 
 ## Options
 
@@ -35,11 +35,18 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `-y`, `--yes` | off | Skip interactive prompts; use auto-detected defaults. Overwrites an existing `apm.yml` without confirmation. |
 | `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
 | `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
-| `--target` | (prompt) | Comma-separated target list. Skips the interactive target prompt and writes targets directly. Valid values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`. |
+| `--target` | (prompt) | Comma-separated target list. Skips the interactive target prompt. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`; `all` expands the default stable set. |
 | `-v`, `--verbose` | off | Show detailed output. |
 
 Target precedence: `--target` flag > interactive prompt > auto-detect at
 compile time (used with `--yes` or in non-TTY shells).
+
+`init` writes only manifest-safe stable targets. For example, `--target agents`,
+`--target vscode`, and the MCP-only `--target intellij` persist the canonical
+`copilot` identifier, while `--target all` expands to the default stable set.
+Experimental selectors such as `grok-cloud` are accepted by the shared CLI
+target parser but are not persisted in `apm.yml`; enable them, then select them
+with `apm install --target grok-cloud`.
 
 ## Examples
 
@@ -94,7 +101,9 @@ $ apm init --yes --target copilot,claude,cursor
   set. The `marketplace:` block is appended to `apm.yml` when
   `--marketplace` is set.
 - **Auto-detected fields:**
-  - `name` -- from `PROJECT_NAME` or current directory name.
+  - `name` -- from `PROJECT_NAME` or the current directory name. Falls back
+    to `my-project` if the derived name is invalid (filesystem roots and
+    other edge cases).
   - `author` -- from `git config user.name`, fallback `Developer`.
   - `description` -- generated from project name.
   - `version` -- `1.0.0` (or `0.1.0` with `--plugin --yes`).
@@ -104,6 +113,10 @@ $ apm init --yes --target copilot,claude,cursor
   pre-checks targets read from its existing `target:` field.
 - **Codex hint:** if `.codex/` is present, suggests
   `--target agent-skills` to also deploy skills to `.agents/skills/`.
+- **Existing plugin sources:** when plugin-native directories such as
+  `skills/`, `agents/`, or `commands/` exist at the project root and `.apm/`
+  does not, warns that they remain packable. `apm init` does not create
+  `.apm/` automatically.
 - **agentrc suggestion:** when no agent instruction files are found
   (`.github/copilot-instructions.md`, `AGENTS.md`, `.github/instructions/`),
   the Next Steps panel suggests generating agent instructions:

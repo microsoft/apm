@@ -2,13 +2,15 @@
 
 ## Supported package layouts
 
-APM recognizes three layouts. The shape of the package root tells APM
+APM recognizes five layouts. The shape of the package root tells APM
 how to install it:
 
 | Root signal | Author intent | Install semantic |
 |---|---|---|
 | `.apm/` (with or without apm.yml) | Multiple independent primitives | Hoist each primitive into the consumer runtime dirs |
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
+| `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
+| `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
 | `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
@@ -29,6 +31,13 @@ backfills one from the other:
   is no apm.yml-side equivalent.
 - `name`, `version`, `license`, `dependencies`, `scripts` live
   exclusively in `apm.yml`.
+- `name` and `version` must be non-empty strings. Quote numeric versions so
+  YAML does not parse them as numbers.
+
+Use the standard `$schema` key when authoring against normative OpenAPM v0.1:
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json`.
+Omitting `$schema` selects APM's current working draft. Unknown schema
+identities fail closed rather than being interpreted as the working draft.
 
 Populate both descriptions when you ship a HYBRID package. `apm pack`
 warns when `apm.yml.description` is missing so listings do not
@@ -43,8 +52,8 @@ my-package/
     instructions/
       security.instructions.md
       python.instructions.md
-    chatmodes/
-      architect.chatmode.md
+    agents/
+      architect.agent.md
     contexts/
       codebase.context.md
     prompts/
@@ -60,12 +69,14 @@ my-package/
 
 ## Install-time discovery rules
 
-`apm pack` (export) is liberal: it collects primitives from both
-`.apm/<type>/` and root convention directories (`agents/`, `skills/`,
-`instructions/`, etc.). `apm install` (integration) is per-primitive
-and stricter. Authors who rely on root convention directories for
-instructions or prompts will produce bundles that pack but install
-silently incomplete.
+When `.apm/` exists, `apm pack` sources local primitives and hooks from
+`.apm/`. Without `.apm/`, supported plugin-native root directories
+(`agents/`, `skills/`, `commands/`, `instructions/`, `extensions/`, and
+hooks) remain pack sources, including after `apm init` writes
+`includes: auto`. Mixed layouts pack from `.apm/` and warn about skipped
+root sources. An explicit `includes:` list is exhaustive; invalid listed
+paths fail instead of falling back to implicit discovery. Prefer
+`.apm/<type>/` so pack and install use the same source layout.
 
 Per-primitive scan paths for `apm install`:
 
@@ -74,45 +85,73 @@ Per-primitive scan paths for `apm install`:
 | instruction | `.apm/instructions/` | No |
 | command (prompt) | `.apm/prompts/` | No |
 | hook | `.apm/hooks/` | Yes: `hooks/` |
-| agent | `.apm/agents/`, `.apm/chatmodes/` | Yes: `*.agent.md` and `*.chatmode.md` at root |
+| agent | `.apm/agents/` | Yes: `*.agent.md` at root |
 | skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
-`apm pack` and `apm install`. Authoring `instructions/` at the plugin
-root will pack cleanly but instructions will be silently dropped when
-consumers run `apm install`.
+`apm pack` and `apm install`.
+
+## Development MCP scope
+
+Put consumer-facing MCP servers in `dependencies.mcp`. Put local mocks,
+debug bridges, and other author-only servers in
+`devDependencies.mcp`. The root package receives both sections in its
+authoring environment; consumers of that package receive only
+`dependencies.mcp`, including when the package is nested transitively.
+See [MCP dependency formats](dependencies.md#mcp-dependency-formats).
 
 ## Hook files
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
-files under `hooks/` or `.apm/hooks/`.  When a package targets multiple
-tools, use target-specific filenames so each tool receives only its own
-hooks:
+files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
+(`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
 
-| Filename pattern | Deployed to |
-|---|---|
-| `*-copilot-hooks.json` | GitHub Copilot only |
-| `*-cursor-hooks.json` | Cursor only |
-| `*-claude-hooks.json` | Claude Code only |
-| `*-codex-hooks.json` | Codex CLI only |
-| `*-gemini-hooks.json` | Gemini CLI only |
-| `*-antigravity-hooks.json` | Antigravity CLI only |
-| `*-windsurf-hooks.json` | Windsurf only |
-| `*-kiro-hooks.json` | Kiro only |
-| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
+APM computes hook reach with one restriction-only intersection:
 
-Example directory tree for a multi-target hook package:
+`effective hook targets = project active targets INTERSECT consumer
+per-dependency targets (when set) INTERSECT package targets (when
+restrictive)`
 
+Package declarations never activate targets or expand consumer authorization.
+Omitting package `target:` / `targets:`, or using legacy `all`, adds no package
+restriction; `all` remains a no-restriction sentinel and is not expanded into
+an additional target set at this gate.
+
+```yaml
+name: claude-hooks
+version: "1.0.0"
+target: claude
 ```
-my-hooks-pkg/
-  hooks/
-    hooks.json              # deployed to all targets
-    copilot-hooks.json      # Copilot only
-    cursor-hooks.json       # Cursor only
-    claude-hooks.json       # Claude Code only
-    kiro-hooks.json         # Kiro only
+
+This package cannot write to `.cursor/hooks.json`, even when Cursor is active.
+A consumer can narrow it further with per-dependency `targets:`; see
+`dependencies.md`.
+
+### Migrating filename-routed hooks
+
+When renaming a target-specific hook file to generic `hooks.json`, preserve
+producer intent with an explicit package `target:` declaration -- consumers
+may narrow it further but cannot expand it:
+
+```yaml
+name: codex-hooks
+version: "1.0.0"
+target: codex
 ```
+
+Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
+After: rename to `hooks.json` and add `target: codex` to the package's own
+`apm.yml`. The consumer can still narrow further with per-dependency `targets:`.
+Combined deprecated stems such as `claude-codex-hooks.json` route to every
+named target token during the migration window.
+Stems with target tokens outside the trailing target suffix (for example
+`codex-launch-hooks.json`) fall back to universal or suffix routing and print a
+warning naming the ignored token.
+
+During the deprecation window, suffix routing remains an additional
+restriction inside the effective target set and emits an install-time warning.
+Consumer per-dependency `targets:` can narrow that set further.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
@@ -120,17 +159,50 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
+<!-- Keep this table synchronized with docs/src/content/docs/producer/author-primitives/hooks-and-commands.md. -->
+
+### Session lifecycle event aliases
+
+| Source aliases | Copilot native key | Claude native key |
+|----------------|---------------------|-------------------|
+| `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
+| `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
+
+Event names absent from this table are preserved unchanged. Only an unmapped
+camelCase or PascalCase name that conflicts with the target convention emits
+an install warning. All-lowercase names such as `stop` pass through silently;
+`stop` is not a native Copilot or Claude event and will not fire.
+
+When a hook command references a script inside `hooks/` or `.apm/hooks/`,
+APM deploys that hook source bundle so sibling helper files resolve at
+runtime. Claude-family merged targets (Claude, Cursor, Codex, Gemini,
+Antigravity, and Windsurf), Copilot, and Kiro receive the same bundle.
+Root hook JSON descriptors, symlinks, and `.apm-pin` markers are not
+deployed. JavaScript and TypeScript hook bundles get a minimal
+`package.json` sidecar with the source package's Node `type` (defaulting
+to `commonjs`); shell-only bundles do not get a sidecar. **Exception --
+Copilot and VS Code:** APM omits the sidecar for these targets because
+Copilot's hook loader scans project `.github/hooks/` and user
+`~/.copilot/hooks/` recursively and rejects JSON files that lack a
+`hooks` key. APM also omits nested JSON bundle assets for these targets;
+use a non-JSON format for hook runtime configuration. Use the `.mjs`
+extension for ES module scripts targeting Copilot or VS Code.
+
 ### Hook command paths: project-scope stays repo-relative
 
 `apm install` (project-scope, no `-g`) keeps hook `command` paths
 **repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
-`<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
-sidecar, and equivalents for Cursor / Gemini / Antigravity / Windsurf / Kiro) so clones,
-contributors, and CI runners do not see the installer's machine-local
-absolute prefix. `apm install -g` (user-scope, e.g.
+`<repo>/.codex/hooks.json`, and equivalents for Cursor / Gemini / Antigravity /
+Windsurf / Kiro). Native hook files contain only upstream schema fields; each
+merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
+sidecar, so clones, contributors, and CI runners do not see the installer's
+machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
 references to absolute paths because the user-scope config is read
-without a fixed cwd. If a referenced hook script is missing at install
+without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+`./hooks/<script>`, APM first resolves it from the hook file directory,
+then falls back to the package root to avoid deploying a doubled
+`hooks/hooks/` path. If a referenced hook script is missing at install
 time the installer emits a warning either way; user-scope additionally
 rewrites the unexpanded variable to an absolute source path so the hook
 fails loudly at runtime, while project-scope leaves the variable in
@@ -144,26 +216,45 @@ repo-relative.
 Two keys control which output runtimes a package compiles and installs to:
 
 - **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
+  A scalar remains accepted as a one-item compatibility input.
 - **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
 
-Setting both keys in the same `apm.yml` is a parse error (`ConflictingTargetsError`); pick one. An empty `targets: []` is also a parse error -- omit the line if you mean auto-detect.
+Setting both keys in the same `apm.yml` is a parse error
+(`ConflictingTargetsError`), even when either value is null. A null or empty
+`targets:` value is also a parse error. Under singular `target:`, null is
+treated as omission for legacy compatibility; an empty string or list is a
+parse error.
 
-Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same validator, so identical input is rejected or accepted the same way at every entry point. Invalid values fail at parse time with a message naming the apm.yml path and the offending token -- they do **not** silently fall through to auto-detect.
+Both manifest keys validate target names. The canonical `targets:` form accepts
+canonical names only. The legacy `target:` form also accepts CLI aliases such
+as `vscode` and normalizes them. Invalid values fail at parse time -- they do
+**not** silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
-| `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
+| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
+| `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
+| `target: vscode` | Legacy alias; normalizes to `copilot` |
+| `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
+| `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
+| `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
-| `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
+| `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |
+| `target: null` | Legacy omission spelling; adds no package restriction |
+| `target: []` or `target: ""` | **Parse error** -- remove the line if you meant auto-detect |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.claude/`, `CLAUDE.md`, `.grok/`, `.cursor/`, `.cursorrules`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). For MCP, this makes lockfile runtime ownership intentionally machine-dependent; declare targets for portable ownership. |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
-Error messages always name the `apm.yml` path and the offending token, so the fix point is unambiguous. The list form (`targets: [a, b]`) is the recommended shape; the singular `target:` and CSV-string forms are supported indefinitely as sugar.
+Validation errors identify the conflicting key, empty list, or unknown token.
+The list form (`targets: [a, b]`) is recommended; singular `target:` and
+CSV-string forms remain supported compatibility spellings.
 
 The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
+
+For one dependency's target-scoped primitive reach, use per-dependency
+`targets:` inside `dependencies.apm`; see `dependencies.md`.
 
 ## Manifest fields: `license:` (declared license for SBOM)
 
@@ -210,16 +301,29 @@ tags: [security, validation]
 ```
 
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
-(`"**/src/**,**/api/**"`). A YAML sequence (`applyTo: ['**/*.py']`) is also
-accepted; when multiple sequence elements are given, the first is used.
+(`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
+way to specify multiple patterns, as it is portably expanded into target-specific
+YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
+Claude, Cursor, Windsurf, Kiro, and Antigravity.
+
+A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
+normalized to the same comma-separated OR expression for distributed
+placement and target-native installation. Use a sequence when its source
+readability matters. To match a literal comma in a filename, escape it as
+`\,`.
+
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
-the value is preserved verbatim; on Claude/Cursor/Windsurf/Kiro comma-lists are
-expanded to a YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
+the value is preserved verbatim.
 
-### 2. Chatmode (`*.chatmode.md`)
+During distributed compilation, explicitly scoped patterns may match files in
+supported top-level harness directories: `.agents`, `.apm`, `.claude`,
+`.codex`, `.cursor`, `.gemini`, `.github`, `.kiro`, `.opencode`, and
+`.windsurf`. Other hidden directories remain excluded.
 
-Chat persona configuration.
+### 2. Agent (`*.agent.md`)
+
+Chat persona configuration. Place in `.apm/agents/`.
 
 ```yaml
 ---
@@ -359,8 +463,35 @@ it in place, but OpenCode will fail to start until you do.
 
 If you target multiple agent runtimes from one source file, keep the
 frontmatter to the intersection of their schemas (or maintain
-target-specific copies) until APM ships a per-target frontmatter
-transformer (tracked as Phase 2 of #581 -- contributions welcome).
+target-specific copies). For Kiro, only `description`, `model`, and `tools`
+are forwarded; `name` and unknown fields are silently stripped; tools are
+permission-bearing and APM fails closed if any unsupported value is present
+(supported: `read`, `write`, `shell`, `web`, `subagent`, `knowledge`,
+`context`, `todo_list`, `@mcp`, `@builtin`, `*`).
+
+#### Kiro target: tools constraint
+
+Kiro (`target: kiro`, deploys to `.kiro/agents/<relative-stem>.md`) treats
+`tools` as permission-bearing capability tags. APM fails closed -- the agent
+is NOT deployed -- if any `tools` value is outside the approved set:
+
+```yaml
+# OK
+tools:
+  - read
+  - write
+  - shell
+
+# Fails closed -- apm install emits an error, file is NOT written:
+# tools:
+#   - execute_arbitrary_code
+#   - read
+```
+
+The approved tags are: `read`, `write`, `shell`, `web`, `subagent`,
+`knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`, `*`.
+Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
+(accessed 2026-08-03).
 
 ### 6. Skill (folder-based, `SKILL.md`)
 
@@ -398,8 +529,9 @@ target is present. Authoring rules:
 - Deployed executables land on Claude Code's PATH and are invoked
   **without per-call confirmation** -- treat them as trusted code and
   keep them minimal.
-- Governance: a `bin_deploy` policy rule can deny deployment per package.
-  See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
+- Governance: the org `executables.deny` policy can deny deployment per
+  package (the legacy `bin_deploy` rule remains a deprecated alias).
+  See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#executables).
 
 ## Canvas extensions (experimental, Copilot-only)
 
@@ -412,7 +544,9 @@ On `apm install --target copilot`, APM deploys it verbatim to
 `.github/extensions/<name>/`. The `<name>` segment is validated strictly
 (`[A-Za-z0-9._-]+`, no leading/trailing dot, no `..`, no separators, no reserved
 names). It is **Copilot-only**. Dependency-provided canvases are executable code
-and are blocked unless the consumer passes `--trust-canvas-extensions`; a
+and are blocked unless the consumer adds the package to the `executables.allow`
+block in `apm.yml` (`allowExecutables` is a deprecated alias) and runs
+`apm approve <pkg>`; a
 first-party canvas in the root package deploys once the flag is on. With
 `--global`, a dependency canvas deploys to `~/.copilot/extensions/<name>/`
 (always requiring the trust flag; default `~/.copilot` only; first-party root
@@ -438,14 +572,17 @@ marketplace:
 
 Relative `packages[].source` values compose onto the base, including
 `owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
-URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+URLs with nested repository paths, and local `./` paths remain per-entry
+overrides. Without `sourceBase`,
 existing `owner/repo` source behavior is unchanged. The manifest schema
 Section 7.5 is canonical for the full validation and override rules.
 
 The base may target any supported host -- GitHub.com, GitHub Enterprise,
 self-hosted GitLab, or Azure DevOps. For Azure DevOps, use a
 `https://dev.azure.com/{org}/{project}/_git` base; the `dev.azure.com` host is
-preserved through to the consumer and authenticated with `ADO_APM_PAT`:
+preserved through to the consumer. APM appends each repository name without a
+`.git` suffix. Authentication uses `ADO_APM_PAT` when set, or an Azure CLI
+bearer credential when the PAT is unset and `az` is signed in:
 
 ```yaml
 marketplace:
@@ -455,6 +592,12 @@ marketplace:
       source: agent-skills          # -> contoso/platform/_git/agent-skills
       ref: 3f2a9b1c
 ```
+
+`apm pack` emits remote repositories as `source: url` and remote
+subdirectories as `source: git-subdir`.
+`apm install <package>@<marketplace>` accepts both generated forms and preserves the
+package host, subdirectory, and ref even when the marketplace itself is
+registered from another host or a local path.
 
 ## Step-by-step: create and publish
 
@@ -608,7 +751,8 @@ Schema rules:
   emits the path verbatim into `marketplace.json`.
 - `source` accepts three remote forms: `owner/repo` (default host),
   `host.tld/owner/repo` (non-default host shorthand), or
-  `https://host.tld/owner/repo[.git]` (full URL).  Non-default hosts
+  `https://host.tld/path/to/repo[.git]` (full URL with two or more path
+  segments). Non-default hosts
   resolve auth via the standard APM token chain
   (`docs/getting-started/authentication.md`); the default-host token is
   never forwarded.
@@ -661,15 +805,18 @@ The compiler:
 
 1. Emits `plugins:` verbatim (Anthropic's key name).
 2. Copies `metadata:` byte-for-byte.
-3. Strips `build:`, per-plugin `version`, `tag_pattern`, `include_prerelease`.
+3. Strips authoring-only `build:`, per-plugin `version`, and
+   `include_prerelease`; emits the effective package-over-build tag convention
+   as remote `source.tag_pattern`.
 4. Omits empty `tags:` and inherited top-level `description`/`version`
    from the output (matches Anthropic's canonical hand-authored shape,
    e.g. microsoft/azure-skills).
 5. Does not emit `versions[]` -- each plugin carries a single resolved ref.
 
-`apm pack` also produces a bundle if `apm.yml` declares `dependencies:`. With
-only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`,
-`--target`, `--force`) are silent no-ops.
+`apm pack` also produces a bundle when `apm.yml` declares a `dependencies:`
+mapping, including an empty mapping (`dependencies: {}`). With an omitted or
+null `dependencies:` value and only a `marketplace:` block present, bundle
+flags (`--archive`, `-o`, `--format`, `--target`, `--force`) are silent no-ops.
 
 Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
 `--include-prerelease`, `--marketplace-path FORMAT=PATH`, `-v`.

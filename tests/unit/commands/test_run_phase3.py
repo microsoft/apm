@@ -25,15 +25,19 @@ def _make_script_runner(
     *,
     run_success: bool = True,
     scripts: dict[str, str] | None = None,
-    auto_compile_result: tuple[str, list[str]] | None = None,
+    auto_compile_result: tuple[str, list[str], str | None] | None = None,
 ) -> MagicMock:
     """Build a MagicMock that looks like a ScriptRunner instance."""
     runner = MagicMock()
     runner.run_script.return_value = run_success
     runner.list_scripts.return_value = scripts or {"start": "echo hello"}
     if auto_compile_result is not None:
-        compiled_cmd, prompt_files = auto_compile_result
-        runner._auto_compile_prompts.return_value = (compiled_cmd, prompt_files)
+        compiled_cmd, prompt_files, runtime_content = auto_compile_result
+        runner._auto_compile_prompts.return_value = (
+            compiled_cmd,
+            prompt_files,
+            runtime_content,
+        )
     return runner
 
 
@@ -239,7 +243,7 @@ class TestPreviewNoScriptName:
         """'start' script is used automatically when no name given."""
         mock_runner = _make_script_runner(
             scripts={"start": "echo hi"},
-            auto_compile_result=("echo hi", []),
+            auto_compile_result=("echo hi", [], None),
         )
         with (
             patch("apm_cli.commands.run._get_default_script", return_value="start"),
@@ -258,7 +262,7 @@ class TestPreviewScriptFound:
         """When no .prompt.md files compiled, shows 'no compilation' panel."""
         mock_runner = _make_script_runner(
             scripts={"build": "make all"},
-            auto_compile_result=("make all", []),
+            auto_compile_result=("make all", [], None),
         )
         with (
             patch("apm_cli.core.script_runner.ScriptRunner", MagicMock(return_value=mock_runner)),
@@ -274,7 +278,7 @@ class TestPreviewScriptFound:
         """When .prompt.md files are compiled, shows compiled command panel."""
         mock_runner = _make_script_runner(
             scripts={"run": "apm run my.prompt.md"},
-            auto_compile_result=("apm run compiled.txt", ["my.prompt.md"]),
+            auto_compile_result=("apm run compiled.txt", ["my.prompt.md"], None),
         )
         with (
             patch("apm_cli.core.script_runner.ScriptRunner", MagicMock(return_value=mock_runner)),
@@ -299,7 +303,7 @@ class TestPreviewScriptFound:
         """--param values are forwarded to _auto_compile_prompts."""
         mock_runner = _make_script_runner(
             scripts={"s": "cmd"},
-            auto_compile_result=("cmd", []),
+            auto_compile_result=("cmd", [], None),
         )
         with (
             patch("apm_cli.core.script_runner.ScriptRunner", MagicMock(return_value=mock_runner)),
@@ -313,7 +317,7 @@ class TestPreviewScriptFound:
         """Output filename is stem with .prompt removed + .txt extension."""
         mock_runner = _make_script_runner(
             scripts={"s": "cmd agent.prompt.md"},
-            auto_compile_result=("cmd compiled.txt", ["agent.prompt.md"]),
+            auto_compile_result=("cmd compiled.txt", ["agent.prompt.md"], None),
         )
         with (
             patch("apm_cli.core.script_runner.ScriptRunner", MagicMock(return_value=mock_runner)),
@@ -334,7 +338,7 @@ class TestPreviewFallbackRendering:
         """Fallback path (no rich) prints command via click.echo."""
         mock_runner = _make_script_runner(
             scripts={"s": "make all"},
-            auto_compile_result=("make all", []),
+            auto_compile_result=("make all", [], None),
         )
         with (
             patch("apm_cli.core.script_runner.ScriptRunner", MagicMock(return_value=mock_runner)),
@@ -352,7 +356,7 @@ class TestPreviewFallbackRendering:
         """Fallback path (no rich) prints compiled command and file list."""
         mock_runner = _make_script_runner(
             scripts={"s": "run a.prompt.md"},
-            auto_compile_result=("run compiled.txt", ["a.prompt.md"]),
+            auto_compile_result=("run compiled.txt", ["a.prompt.md"], None),
         )
         with (
             patch("apm_cli.core.script_runner.ScriptRunner", MagicMock(return_value=mock_runner)),
@@ -387,7 +391,7 @@ class TestPreviewFallbackRendering:
         """--verbose flag is accepted by preview command."""
         mock_runner = _make_script_runner(
             scripts={"s": "cmd"},
-            auto_compile_result=("cmd", []),
+            auto_compile_result=("cmd", [], None),
         )
         with (
             patch("apm_cli.core.script_runner.ScriptRunner", MagicMock(return_value=mock_runner)),

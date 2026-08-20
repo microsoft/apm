@@ -30,6 +30,9 @@ def _make_resolver():
     ctx = MagicMock(source="env", token_type="pat", token=None)
     resolver.resolve.return_value = ctx
     resolver.resolve_for_dep.return_value = ctx
+    resolver.build_noninteractive_git_env.return_value = {
+        "GIT_TERMINAL_PROMPT": "0",
+    }
     return resolver
 
 

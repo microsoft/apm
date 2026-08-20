@@ -8,6 +8,7 @@ Covers:
 - ``validate_registry_url`` allowlist / length / scheme behaviour.
 """
 
+import typing
 from unittest.mock import MagicMock
 
 import pytest
@@ -411,6 +412,7 @@ class TestRegistryClientTimeout:
         from apm_cli.registry.client import SimpleRegistryClient
 
         client = SimpleRegistryClient("https://api.mcp.github.com")
+        client._http_cache = None  # assert the network-call contract, not the cache
         captured = {}
 
         def fake_get(url, **kw):
@@ -418,12 +420,17 @@ class TestRegistryClientTimeout:
 
             class R:
                 status_code = 200
+                headers: typing.ClassVar = {"Content-Type": "application/json"}
+                url = "https://api.mcp.github.com/v0.1/servers"
 
                 def raise_for_status(self):
                     pass
 
-                def json(self):
-                    return {"servers": [], "metadata": {}}
+                def iter_content(self, chunk_size=None):
+                    return iter([b'{"servers": [], "metadata": {}}'])
+
+                def close(self):
+                    pass
 
             return R()
 

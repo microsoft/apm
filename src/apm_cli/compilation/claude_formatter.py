@@ -302,7 +302,7 @@ class ClaudeFormatter:
 
         # Dependencies section (only for root CLAUDE.md)
         if placement.dependencies:
-            sections.append("# Dependencies")
+            sections.append("## Dependencies")
             for dep in placement.dependencies:
                 sections.append(dep)
             sections.append("")
@@ -311,7 +311,7 @@ class ClaudeFormatter:
         if placement.is_root:
             constitution = read_constitution(self.source_dir)
             if constitution:
-                sections.append("# Constitution")
+                sections.append("## Constitution")
                 sections.append("")
                 sections.append(constitution.strip())
                 sections.append("")
@@ -321,7 +321,7 @@ class ClaudeFormatter:
         # `apm install`, since Claude Code reads both locations and would see
         # duplicate content.
         if placement.instructions and not skip_instructions:
-            sections.append("# Project Standards")
+            sections.append("## Project Standards")
             sections.append("")
 
             sections.extend(
@@ -329,6 +329,7 @@ class ClaudeFormatter:
                     placement.instructions,
                     placement.source_attribution,
                     self.source_dir,
+                    section_heading_prefix="###",
                 )
             )
 

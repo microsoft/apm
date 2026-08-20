@@ -435,7 +435,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 echo -e "${YELLOW}Downloading APM...${NC}"
 
 # Try downloading without authentication first (for public repos)
-if curl -L --fail --silent --show-error "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
+if curl -L --fail --progress-bar "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
     echo -e "${GREEN}[+] Download successful${NC}"
 else
     # If unauthenticated download fails, try with authentication if available.
@@ -448,14 +448,14 @@ else
         # For private repositories, use GitHub API with proper headers
         if [ -n "$ASSET_URL" ]; then
             echo -e "${BLUE}Using GitHub API for private repository access...${NC}"
-            if curl -L --fail --silent --show-error \
+            if curl -L --fail --progress-bar \
                 -H "Authorization: token $AUTH_HEADER_VALUE" \
                 -H "Accept: application/octet-stream" \
                 "$ASSET_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
                 echo -e "${GREEN}[+] Download successful via GitHub API${NC}"
             else
                 echo -e "${BLUE}GitHub API download failed, trying direct URL with auth...${NC}"
-                if curl -L --fail --silent --show-error -H "Authorization: token $AUTH_HEADER_VALUE" "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
+                if curl -L --fail --progress-bar -H "Authorization: token $AUTH_HEADER_VALUE" "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
                     echo -e "${GREEN}[+] Download successful with authentication${NC}"
                 else
                     echo -e "${RED}Error: Failed to download APM CLI even with authentication${NC}"
@@ -476,7 +476,7 @@ else
             fi
         else
             echo -e "${BLUE}No API URL available, trying direct URL with auth...${NC}"
-            if curl -L --fail --silent --show-error -H "Authorization: token $AUTH_HEADER_VALUE" "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
+            if curl -L --fail --progress-bar -H "Authorization: token $AUTH_HEADER_VALUE" "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
                 echo -e "${GREEN}[+] Download successful with authentication${NC}"
             else
                 if [ -n "$APM_RELEASE_BASE_URL" ]; then

@@ -78,8 +78,8 @@ _SEMVER_RE = re.compile(
 # Source field accepts:
 #   - ``owner/repo`` (remote, default host)
 #   - ``host.tld/owner/repo`` (remote on a non-default host, shorthand)
-#   - ``https://host.tld/owner/repo`` (remote on a non-default host, full URL)
-#   - ``https://host.tld/owner/repo.git`` (same, with optional ``.git`` suffix)
+#   - ``https://host.tld/path/to/repo`` (remote full URL)
+#   - ``https://host.tld/path/to/repo.git`` (same, with optional ``.git`` suffix)
 #   - ``./...`` (local path within the same repo)
 #
 # Used by both yml_schema and yml_editor for source field validation.
@@ -95,11 +95,12 @@ _HOST_PAT = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-
 # validate_path_segments(), which rejects empty, '.', and '..' path segments.
 _SEGMENT_PAT = r"[A-Za-z0-9._-]+"
 _OWNER_REPO_PAT = rf"{_SEGMENT_PAT}/{_SEGMENT_PAT}"
+_HTTPS_REPOSITORY_PAT = rf"{_SEGMENT_PAT}(?:/{_SEGMENT_PAT})+"
 _RELATIVE_SOURCE_PAT = rf"{_SEGMENT_PAT}(?:/{_SEGMENT_PAT})*"
 
 SOURCE_RE = re.compile(
     r"^(?:"
-    rf"https://{_HOST_PAT}/{_OWNER_REPO_PAT}(?:\.git)?"
+    rf"https://{_HOST_PAT}/{_HTTPS_REPOSITORY_PAT}(?:\.git)?"
     rf"|{_HOST_PAT}/{_OWNER_REPO_PAT}"
     rf"|{_OWNER_REPO_PAT}"
     r"|\./.*"
@@ -110,8 +111,8 @@ SOURCE_BASE_RE = re.compile(rf"^https://{_HOST_PAT}/{_RELATIVE_SOURCE_PAT}$")
 _RELATIVE_SOURCE_RE = re.compile(rf"^{_RELATIVE_SOURCE_PAT}$")
 # Matches ``host.tld/owner/repo`` (3 segments, first is FQDN-ish).
 _HOST_PREFIXED_SOURCE_RE = re.compile(rf"^({_HOST_PAT})/({_OWNER_REPO_PAT})$")
-# Matches ``https://host.tld/owner/repo[.git]`` and captures host + owner/repo.
-_HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(?:\.git)?$")
+# Matches ``https://host.tld/path/to/repo[.git]`` and captures host + repository path.
+_HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_HTTPS_REPOSITORY_PAT})(?:\.git)?$")
 
 
 def split_source_base(source_base: str) -> tuple[str, str]:
@@ -122,14 +123,14 @@ def split_source_base(source_base: str) -> tuple[str, str]:
 
 
 def split_host_from_source(source: str) -> tuple[str | None, str]:
-    """Split a host-qualified source into ``(host, owner/repo)``.
+    """Split a host-qualified source into ``(host, repository path)``.
 
     Accepts both shorthand (``host.tld/owner/repo``) and full HTTPS URL
-    (``https://host.tld/owner/repo[.git]``) forms.  Returns ``(None, source)``
+    (``https://host.tld/path/to/repo[.git]``) forms. Returns ``(None, source)``
     for the plain ``owner/repo`` shorthand or local ``./...`` paths.
 
-    A trailing ``.git`` suffix on the repo segment is stripped so the
-    returned ``owner/repo`` is normalized regardless of input form.
+    A trailing ``.git`` suffix on the final path segment is stripped so the
+    returned repository path is normalized regardless of input form.
     """
     m = _HTTPS_URL_SOURCE_RE.match(source)
     if m:
@@ -349,8 +350,8 @@ class PackageEntry:
     author: Mapping[str, str] | None = None
     license: str | None = None
     repository: str | None = None
-    # Marketplace category metadata. Emitted only by output formats that
-    # consume categories, currently Codex repo marketplace output.
+    # Marketplace category metadata. Emitted by both the Claude and Codex
+    # outputs when present; the Codex output additionally requires it.
     category: str | None = None
     # Derived (set by loader, not by user)
     is_local: bool = False
@@ -458,7 +459,7 @@ def _source_error(ctx: str, source: str, *, source_base: str | None) -> Marketpl
     forms = [
         "'<owner>/<repo>'",
         "'<host.tld>/<owner>/<repo>'",
-        "'https://<host.tld>/<owner>/<repo>[.git]'",
+        "'https://<host.tld>/<owner>/<repo>[.git]' (nested paths allowed)",
         "'./<path>'",
     ]
     if source_base is not None:
@@ -554,12 +555,13 @@ def parse_source_base(raw: Any) -> str | None:
 
 
 def _validate_tag_pattern(pattern: str, *, context: str) -> None:
-    """Ensure *pattern* contains at least one recognised placeholder."""
-    if not any(ph in pattern for ph in _TAG_PLACEHOLDERS):
-        raise MarketplaceYmlError(
-            f"'{context}' must contain at least one of "
-            f"{', '.join(_TAG_PLACEHOLDERS)}, got '{pattern}'"
-        )
+    """Route producer tag-pattern validation through its canonical owner."""
+    from .tag_pattern import TagPatternError, validate_tag_pattern
+
+    try:
+        validate_tag_pattern(pattern, context=context)
+    except TagPatternError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
 
 
 def _check_unknown_keys(
@@ -945,8 +947,8 @@ def _parse_package_entry(
             raise MarketplaceYmlError(f"'packages[{index}].repository' must be a non-empty string")
         repository = repository.strip()
 
-    # Optional marketplace category. Claude output strips this; Codex output
-    # requires and emits it.
+    # Optional marketplace category. Emitted by both the Claude and Codex
+    # outputs when set; the Codex output additionally requires it.
     category: str | None = None
     raw_category = raw.get("category")
     if raw_category is not None:

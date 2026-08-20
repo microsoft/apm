@@ -70,6 +70,7 @@ from apm_cli.core.errors import (
 from apm_cli.core.target_detection import (
     detect_signals,
     expand_all_targets,
+    manifest_targets_from_target_option,
     resolve_targets,
 )
 
@@ -160,6 +161,24 @@ def test_resolution_priority_flag_over_yaml(tmp_path):
     assert "--target flag" in resolved.source
 
 
+def test_flag_source_label_overrides_default_provenance(tmp_path):
+    """A config-supplied flag value labels provenance as its own source.
+
+    When the resolved flag value originated from a configured default rather
+    than the CLI, the caller passes ``flag_source`` so the provenance line is
+    not misattributed to ``--target``.
+    """
+    resolved = resolve_targets(tmp_path, flag="claude", flag_source="apm config target")
+    assert resolved.targets == ["claude"]
+    assert resolved.source == "apm config target"
+
+
+def test_flag_source_defaults_to_cli_flag(tmp_path):
+    """Omitting ``flag_source`` keeps the explicit --target provenance label."""
+    resolved = resolve_targets(tmp_path, flag="claude")
+    assert resolved.source == "--target flag"
+
+
 def test_resolution_priority_yaml_over_autodetect(tmp_path):
     _touch(tmp_path / "CLAUDE.md")
     resolved = resolve_targets(tmp_path, flag=None, yaml_targets=["copilot"])
@@ -190,6 +209,32 @@ def test_resolution_autodetect_multi_signals_error(tmp_path):
 # ---------------------------------------------------------------------------
 # apm.yml schema
 # ---------------------------------------------------------------------------
+
+
+def test_manifest_targets_from_target_option_none_preserves_autodetect():
+    assert manifest_targets_from_target_option(None) is None
+
+
+def test_manifest_targets_from_target_option_aliases_to_manifest_names():
+    assert manifest_targets_from_target_option(["claude", "vscode"]) == ["claude", "copilot"]
+
+
+def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
+    targets = manifest_targets_from_target_option("all")
+    assert targets is not None
+    assert "all" not in targets
+    assert "vscode" not in targets
+    assert "copilot" in targets
+    assert parse_targets_field({"targets": targets}) == targets
+
+
+def test_manifest_targets_from_target_option_filters_non_manifest_targets():
+    assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) is None
+
+
+def test_manifest_targets_from_target_option_preserves_grok_build():
+    assert manifest_targets_from_target_option(["grok-build"]) == ["grok-build"]
+    assert parse_targets_field({"targets": ["grok-build"]}) == ["grok-build"]
 
 
 def test_schema_targets_list_valid():
@@ -275,10 +320,61 @@ def test_target_singular_with_yaml_list_non_string_coerced():
         parse_targets_field({"target": [42]})
 
 
-def test_target_singular_with_all_token_in_list_rejected():
-    """'all' is a CLI flag-only meta-target; must not validate inside YAML."""
+def test_target_singular_with_all_token_folds_to_auto_detect():
+    """Legacy 'all' folds the field to auto-detect (deprecation bridge, #2271).
+
+    'all' stays a CLI flag-only meta-target by design, but manifests
+    published before the canonical catalog (#1154) carry it inside
+    already-released tags. The parser treats such a field as omitted
+    (fall through to --target / auto-detect) instead of hard-failing,
+    until the deprecation window closes.
+    """
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
+    # Mutation guard: deleting the legacy-all fold makes this raise UnknownTargetError.
+    assert parse_targets_field({"target": ["all", "claude"]}) == []
+
+
+def test_targets_plural_with_all_folds_to_auto_detect(capsys):
+    """`targets: [all]` returns [] and warns once per process."""
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
+    assert parse_targets_field({"targets": ["all"]}) == []
+    out = capsys.readouterr()
+    combined = out.out + out.err
+    assert "deprecated" in combined
+    # Second parse in the same process stays silent (once-per-process guard).
+    assert parse_targets_field({"targets": ["all"]}) == []
+    out = capsys.readouterr()
+    assert "deprecated" not in (out.out + out.err)
+
+
+def test_target_csv_with_all_folds_to_auto_detect():
+    """CSV sugar containing 'all' folds the whole field to auto-detect."""
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
+    assert parse_targets_field({"target": "all"}) == []
+    assert parse_targets_field({"target": "all,claude"}) == []
+
+
+def test_targets_with_all_still_validates_siblings(capsys):
+    """Unknown sibling tokens are still rejected even when 'all' folds.
+
+    The hard-failing manifest must not consume the once-per-process
+    warning latch: a later valid legacy manifest still warns.
+    """
+    from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+    _reset_legacy_all_warning()
     with pytest.raises(UnknownTargetError):
-        parse_targets_field({"target": ["all", "claude"]})
+        parse_targets_field({"targets": ["all", "nonsense"]})
+    capsys.readouterr()
+    assert parse_targets_field({"targets": ["all"]}) == []
+    out = capsys.readouterr()
+    assert "deprecated" in (out.out + out.err)
 
 
 def test_target_singular_with_yaml_list_preserves_duplicates():

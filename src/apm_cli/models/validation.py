@@ -451,30 +451,26 @@ def _validate_claude_skill(
     Returns:
         ValidationResult: Updated validation result
     """
-    import frontmatter
+    from apm_cli.utils.yaml_io import load_frontmatter
 
     from .apm_package import APMPackage
 
     try:
-        # Parse SKILL.md to extract metadata
         with open(skill_md_path, encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            post = load_frontmatter(f)
 
         skill_name = post.metadata.get("name", package_path.name)
         skill_description = post.metadata.get("description", f"Claude Skill: {skill_name}")
         skill_license = post.metadata.get("license")
 
-        # Create APMPackage directly from SKILL.md metadata - no file generation needed
-        package = APMPackage(
+        result.package = APMPackage(
             name=skill_name,
-            version="1.0.0",
+            version="unknown",
             description=skill_description,
             license=skill_license,
             package_path=package_path,
             type=PackageContentType.SKILL,
         )
-        result.package = package
-
     except Exception as e:
         result.add_error(f"Failed to process {SKILL_MD_FILENAME}: {e}")
         return result
@@ -502,9 +498,8 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
     Returns:
         ValidationResult: Updated validation result
     """
-    import frontmatter as _frontmatter
-
     from ..utils.path_security import ensure_path_within, validate_path_segments
+    from ..utils.yaml_io import load_frontmatter
     from .apm_package import APMPackage
 
     skills_dir = package_path / "skills"
@@ -544,7 +539,7 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
         # Validate frontmatter
         try:
             with open(skill_md_path, encoding="utf-8") as f:
-                post = _frontmatter.load(f)
+                post = load_frontmatter(f)
         except Exception as e:
             result.add_error(f"skills/{name}/SKILL.md: failed to parse frontmatter: {e}")
             continue
@@ -645,10 +640,10 @@ def _validate_hybrid_package(
         return result
 
     try:
-        import frontmatter
+        from apm_cli.utils.yaml_io import load_frontmatter
 
         with open(skill_md_path, encoding="utf-8") as f:
-            frontmatter.load(f)  # Parse only to surface malformed frontmatter.
+            load_frontmatter(f)  # Parse only to surface malformed frontmatter.
 
         # Metadata model for HYBRID packages: apm.yml.description and
         # SKILL.md frontmatter description are INDEPENDENT fields with
@@ -793,7 +788,7 @@ def _validate_apm_package_with_yml(
             "Canvas extension(s) found (experimental, Copilot-only): "
             f"{', '.join(canvas_names)}. These ship executable extension.mjs "
             "code; consumers must enable the 'canvas' experimental flag, and "
-            "dependents must pass --trust-canvas-extensions to install them."
+            "dependents must approve the package via 'apm approve <pkg>' to install them."
         )
 
     if not has_primitives:

@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -1830,7 +1831,7 @@ Use this skill for comprehensive guidance.
         assert all(e.package != "humanizer" for e in entries), (
             "diagnostics.overwrite() was called with package=skill_name instead of package=current_key"
         )
-        assert any(e.package == "Serendeep/humanizer" for e in entries)
+        assert any(e.package == "serendeep/humanizer" for e in entries)
 
 
 # =============================================================================
@@ -3965,6 +3966,131 @@ class TestPromoteSubSkillsCowork:
         assert not (cowork_root / "my-skill" / ".apm").exists()
 
 
+class TestSubSkillOwnershipIdentity:
+    """Regression tests: sub-skill self-overwrite detection must key on the
+    durable unique dependency identity (owner/repo), not the leaf install
+    directory name. Two different packages can share a repo/leaf name (e.g.
+    two orgs each publishing a "shared-skill" or "utils" repo) -- comparing
+    only the leaf would falsely treat the second as the first re-installing
+    itself, silently suppressing the cross-package collision warning exactly
+    when it matters most."""
+
+    def test_same_leaf_name_different_owner_is_flagged_as_collision(self, tmp_path: Path) -> None:
+        from apm_cli.utils.diagnostics import CATEGORY_OVERWRITE, DiagnosticCollector
+
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        # Two packages from DIFFERENT owners that happen to share the same
+        # leaf/repo name ("shared-skill") -- package_path.name is identical
+        # for both, but they are unrelated packages.
+        pkg_a_dir = tmp_path / "orga" / "shared-skill"
+        sub_a = pkg_a_dir / ".apm" / "skills" / "topic"
+        sub_a.mkdir(parents=True)
+        (sub_a / "SKILL.md").write_text("# From Org A")
+
+        pkg_b_dir = tmp_path / "orgb" / "shared-skill"
+        sub_b = pkg_b_dir / ".apm" / "skills" / "topic"
+        sub_b.mkdir(parents=True)
+        (sub_b / "SKILL.md").write_text("# From Org B")
+
+        pkg_a = _make_package_info(pkg_a_dir)
+        pkg_a.dependency_ref = MagicMock()
+        pkg_a.dependency_ref.get_unique_key.return_value = "orga/shared-skill"
+
+        pkg_b = _make_package_info(pkg_b_dir)
+        pkg_b.dependency_ref = MagicMock()
+        pkg_b.dependency_ref.get_unique_key.return_value = "orgb/shared-skill"
+
+        integrator = SkillIntegrator()
+        count_a, _ = integrator._promote_sub_skills_standalone(
+            pkg_a, project_root, targets=[cowork_target]
+        )
+        assert count_a == 1
+        assert (cowork_root / "topic" / "SKILL.md").read_text() == "# From Org A"
+
+        diag = DiagnosticCollector()
+        # Simulate the lockfile recording org A's install from a prior run --
+        # the real _build_skill_ownership_map would return the durable key
+        # "orga/shared-skill" (see _build_ownership_maps), not "shared-skill".
+        with patch.object(
+            SkillIntegrator,
+            "_build_skill_ownership_map",
+            return_value={"topic": "orga/shared-skill"},
+        ):
+            count_b, _ = integrator._promote_sub_skills_standalone(
+                pkg_b,
+                project_root,
+                targets=[cowork_target],
+                diagnostics=diag,
+                force=True,
+            )
+
+        assert count_b == 1
+        # Org B's content must have actually landed (force=True) ...
+        assert (cowork_root / "topic" / "SKILL.md").read_text() == "# From Org B"
+        # ... and the collision must be reported as cross-package, not
+        # silently swallowed as org A "re-installing itself".
+        groups = diag.by_category()
+        assert CATEGORY_OVERWRITE in groups
+        assert any(e.package == "orgb/shared-skill" for e in groups[CATEGORY_OVERWRITE])
+
+    def test_same_leaf_name_different_owner_without_force_is_protected(
+        self, tmp_path: Path
+    ) -> None:
+        """Without --force, org B's colliding sub-skill must be skipped (not
+        silently treated as org A's own content), matching the existing
+        collision-skip behavior for genuinely foreign packages."""
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        pkg_a_dir = tmp_path / "orga" / "shared-skill"
+        sub_a = pkg_a_dir / ".apm" / "skills" / "topic"
+        sub_a.mkdir(parents=True)
+        (sub_a / "SKILL.md").write_text("# From Org A")
+
+        pkg_b_dir = tmp_path / "orgb" / "shared-skill"
+        sub_b = pkg_b_dir / ".apm" / "skills" / "topic"
+        sub_b.mkdir(parents=True)
+        (sub_b / "SKILL.md").write_text("# From Org B")
+
+        pkg_a = _make_package_info(pkg_a_dir)
+        pkg_a.dependency_ref = MagicMock()
+        pkg_a.dependency_ref.get_unique_key.return_value = "orga/shared-skill"
+
+        pkg_b = _make_package_info(pkg_b_dir)
+        pkg_b.dependency_ref = MagicMock()
+        pkg_b.dependency_ref.get_unique_key.return_value = "orgb/shared-skill"
+
+        integrator = SkillIntegrator()
+        integrator._promote_sub_skills_standalone(pkg_a, project_root, targets=[cowork_target])
+
+        with patch.object(
+            SkillIntegrator,
+            "_build_skill_ownership_map",
+            return_value={"topic": "orga/shared-skill"},
+        ):
+            # managed_files=set() means nothing is APM-managed from this
+            # run's perspective, exercising the "not managed, protect it"
+            # skip path rather than the cross-package overwrite path.
+            integrator._promote_sub_skills_standalone(
+                pkg_b,
+                project_root,
+                targets=[cowork_target],
+                managed_files=set(),
+                force=False,
+            )
+
+        # Org A's content must survive untouched.
+        assert (cowork_root / "topic" / "SKILL.md").read_text() == "# From Org A"
+
+
 class TestAgentSkillsDedupAndSecurity:
     """Dedup and security tests for the agent-skills target (#737)."""
 
@@ -4109,7 +4235,7 @@ class TestCopySkillToTargetSymlinkContainment:
         from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
         target = TargetProfile(
-            name="agent-skills",
+            capability=TARGET_CAPABILITIES["agent-skills"],
             root_dir=".agents",
             auto_create=True,
             primitives={
@@ -4169,6 +4295,11 @@ class TestPluginBinDeploy:
         bin_dir = pkg_dir / "bin"
         bin_dir.mkdir()
         (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        import os
+        import stat as _stat
+
+        if os.name == "posix":
+            (bin_dir / "myplugin").chmod(0o777)
         plugin_manifest_dir = pkg_dir / ".claude-plugin"
         plugin_manifest_dir.mkdir()
         (plugin_manifest_dir / "plugin.json").write_text('{"name": "myplugin"}')
@@ -4200,17 +4331,16 @@ class TestPluginBinDeploy:
         assert deployed_bin in tp_files, "deployed bin not in target_paths"
         assert deployed_manifest in tp_files, "plugin.json not in target_paths"
 
-        # Verify user-only execute: S_IXUSR set, S_IXGRP and S_IXOTH cleared.
-        import os
-        import stat as _stat
-
+        # Verify full user-only (0o700-style) permissions: owner rwx, and no
+        # group/other read/write/execute bits at all.
         if os.name == "posix":
             mode = deployed_bin.stat().st_mode
-            assert mode & _stat.S_IXUSR, "owner execute bit must be set"
-            assert not (mode & _stat.S_IXGRP), "group execute bit must NOT be set"
-            assert not (mode & _stat.S_IXOTH), "other execute bit must NOT be set"
+            assert _stat.S_IMODE(mode) == 0o700, "deployed bin permissions must be 0o700"
 
-    def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("previous_mode", [0o644, 0o755, 0o777, 0o4755])
+    def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(
+        self, tmp_path: Path, previous_mode: int
+    ) -> None:
         """Re-install of content-identical bin/ file still applies user-only execute.
 
         Guard against a regression where the hash-match early-return path skips
@@ -4247,10 +4377,12 @@ class TestPluginBinDeploy:
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert deployed_bin.is_file()
 
-        # Simulate a file previously deployed with loose permissions (0o755).
-        deployed_bin.chmod(0o755)
+        # Simulate a file previously deployed with loose permissions and,
+        # for one case, a special bit preserved from the shipped package.
+        deployed_bin.chmod(previous_mode)
         mode_before = deployed_bin.stat().st_mode
-        assert mode_before & _stat.S_IXGRP, "pre-condition: group-execute set"
+        assert _stat.S_IMODE(mode_before) == previous_mode, "pre-condition: loose mode set"
+        assert mode_before & (0o077 | _stat.S_ISUID), "pre-condition: loose bits set"
 
         # Second install with identical content -- must harden permissions.
         integrator.integrate_package_skill(
@@ -4260,9 +4392,7 @@ class TestPluginBinDeploy:
         )
 
         mode_after = deployed_bin.stat().st_mode
-        assert mode_after & _stat.S_IXUSR, "owner execute bit must be set"
-        assert not (mode_after & _stat.S_IXGRP), "group execute bit must be cleared on re-install"
-        assert not (mode_after & _stat.S_IXOTH), "other execute bit must be cleared on re-install"
+        assert _stat.S_IMODE(mode_after) == 0o700, "re-install must harden permissions to 0o700"
 
     def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
         """bin_deploy.deny list suppresses deployment for the matching package."""
@@ -4293,6 +4423,38 @@ class TestPluginBinDeploy:
 
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert not deployed_bin.exists(), "bin/myplugin should NOT be deployed when in deny list"
+        assert result.skill_created is False
+
+    def test_bin_deploy_deny_normalizes_case_and_github_prefix(self, tmp_path: Path) -> None:
+        """bin_deploy.deny accepts common GitHub URL/prefix forms."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir, pkg_name="MyOwner/MyPlugin")
+        policy = ApmPolicy(
+            bin_deploy=BinDeployPolicy(deny=("https://github.com/myowner/myplugin.git",))
+        )
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            policy=policy,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert not deployed_bin.exists(), "normalized bin_deploy.deny should suppress deployment"
         assert result.skill_created is False
 
     def test_bin_deploy_suppressed_by_deny_all(self, tmp_path: Path) -> None:

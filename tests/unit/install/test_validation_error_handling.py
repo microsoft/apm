@@ -7,6 +7,10 @@ Covers branches not hit by existing validation tests:
 * ``_log_tls_failure`` -- non-verbose and verbose branches
 * ``_local_path_failure_reason`` -- all branches (non-local, not-exists,
   not-dir, no-markers)
+* ``_generic_host_ambiguous_subpath_hint`` -- unrecognised FQDN with an
+  ambiguous multi-segment repo path (issue #2066), and the guard branches
+  that suppress the hint (local, virtual, GitHub, ADO, GitLab-recognised,
+  two-segment repo path)
 * ``_local_path_no_markers_hint`` -- no found, with logger, without logger,
   > 5 items
 * ``_validate_package_exists`` -- local exists with apm.yml, with SKILL.md,
@@ -168,6 +172,109 @@ class TestLocalPathFailureReason:
         reason = _local_path_failure_reason(dep)
         assert reason is not None
         assert "apm.yml" in reason or "SKILL.md" in reason
+
+
+# ---------------------------------------------------------------------------
+# _generic_host_ambiguous_subpath_hint
+# ---------------------------------------------------------------------------
+
+
+class TestGenericHostAmbiguousSubpathHint:
+    """Issue #2066: an unrecognised self-hosted FQDN silently swallows a
+    monorepo subpath into ``repo_url`` instead of splitting it, then fails
+    validation with a misleading "not accessible" error. This hint should
+    fire only for that exact shape and point the user at GITLAB_HOST /
+    APM_GITLAB_HOSTS instead.
+    """
+
+    def _dep(self, **overrides):
+        dep = MagicMock()
+        dep.host = "gitlab.company.com"
+        dep.is_local = False
+        dep.is_virtual = False
+        dep.is_azure_devops.return_value = False
+        dep.repo_url = "my-org/my-monorepo/primitives/skills/my-skill"
+        for key, value in overrides.items():
+            setattr(dep, key, value)
+        return dep
+
+    def test_no_host_returns_none(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep(host=None)) is None
+
+    def test_local_dep_returns_none(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep(is_local=True)) is None
+
+    def test_virtual_dep_returns_none(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep(is_virtual=True)) is None
+
+    def test_github_host_returns_none(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep(host="github.com")) is None
+
+    def test_ado_host_returns_none(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        dep = self._dep(host="dev.azure.com")
+        dep.is_azure_devops.return_value = True
+        assert _generic_host_ambiguous_subpath_hint(dep) is None
+
+    def test_gitlab_com_returns_none(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep(host="gitlab.com")) is None
+
+    def test_selfhosted_host_already_registered_via_env_returns_none(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.setenv("GITLAB_HOST", "gitlab.company.com")
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep()) is None
+
+    def test_two_segment_repo_path_returns_none(self, monkeypatch) -> None:
+        """A plain owner/repo on a generic host isn't ambiguous -- don't hint."""
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep(repo_url="owner/repo")) is None
+
+    def test_two_segment_repo_path_with_trailing_slash_returns_none(self, monkeypatch) -> None:
+        """Empty segments from a trailing/double slash must not inflate the count."""
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        assert _generic_host_ambiguous_subpath_hint(self._dep(repo_url="owner/repo/")) is None
+        assert _generic_host_ambiguous_subpath_hint(self._dep(repo_url="owner//repo")) is None
+
+    def test_unrecognised_selfhosted_ambiguous_path_returns_hint(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        reason = _generic_host_ambiguous_subpath_hint(self._dep())
+        assert reason is not None
+        assert "GITLAB_HOST=gitlab.company.com" in reason
+        assert "APM_GITLAB_HOSTS" in reason
 
 
 # ---------------------------------------------------------------------------

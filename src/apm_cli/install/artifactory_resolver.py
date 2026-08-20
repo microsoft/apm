@@ -93,6 +93,7 @@ def _candidate_archive_status(
     """
     urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
     saw_auth = False
+    saw_non_auth_4xx = False
     saw_any_response = False
     last_exc: BaseException | None = None
     for url in urls:
@@ -111,9 +112,14 @@ def _candidate_archive_status(
             return _CandidateStatus.EXISTS, None
         if r.status_code in (401, 403):
             saw_auth = True
+        else:
+            saw_non_auth_4xx = True
     if not saw_any_response:
         return _CandidateStatus.INCONCLUSIVE, last_exc
-    if saw_auth:
+    # AUTH only when *every* response was 401/403 -- no non-auth 4xx seen.
+    # A mixed 401+404 means at least one URL shape was definitively absent;
+    # report MISSING so the user-facing error stays accurate (per module spec).
+    if saw_auth and not saw_non_auth_4xx:
         return _CandidateStatus.AUTH, None
     return _CandidateStatus.MISSING, None
 

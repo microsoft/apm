@@ -7,7 +7,7 @@
 #   $env:VERSION = 'v1.2.3'; irm https://aka.ms/apm-windows | iex
 #   .\install.ps1 v1.2.3
 #
-# Custom install location (directory that will contain apm.cmd):
+# Custom install location (contains apm.cmd; sibling current contains apm.exe):
 #   $env:APM_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\apm\bin"; irm ... | iex
 #
 # Fork or private mirror:
@@ -265,14 +265,20 @@ function Install-ViaPip {
     }
     $pipIndexArgs = Get-PipIndexArgs
     try {
-        if ($pipCmd -like "* -m pip") {
-            $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
-            $pipExitCode = $LASTEXITCODE
-            $output | Write-Host
-        } else {
-            $output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1
-            $pipExitCode = $LASTEXITCODE
-            $output | Write-Host
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            if ($pipCmd -like "* -m pip") {
+                $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
+                $pipExitCode = $LASTEXITCODE
+                $output | Write-Host
+            } else {
+                $output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1
+                $pipExitCode = $LASTEXITCODE
+                $output | Write-Host
+            }
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
         }
         if ($pipExitCode -ne 0) {
             Write-ErrorText "pip install failed (exit code $pipExitCode)."
@@ -533,12 +539,46 @@ if ($pinnedVersion) {
 }
 
 $releaseDir = Join-Path $releasesDir $tagName
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("apm-install-" + [System.Guid]::NewGuid().ToString("N"))
+$tempRootInput = if ($env:APM_TEMP_DIR) {
+    $env:APM_TEMP_DIR.Trim().Trim('"').TrimEnd('\', '/')
+} else {
+    [System.IO.Path]::GetTempPath()
+}
+
+$tempRootDir = $null
+try {
+    $tempRootDir = [System.IO.Path]::GetFullPath($tempRootInput)
+    New-Item -ItemType Directory -Force -Path $tempRootDir | Out-Null
+} catch {
+    Write-ErrorText "Failed to prepare temporary staging root: $_"
+    if ($tempRootDir) {
+        Write-Host "Temporary staging root was: $tempRootDir"
+    } else {
+        Write-Host "Temporary staging root was: $tempRootInput"
+    }
+    Write-Host "Set APM_TEMP_DIR to a writable directory allowed by endpoint policy, then retry:"
+    Write-Host "  `$env:APM_TEMP_DIR = `"`$env:LOCALAPPDATA\Programs\apm\tmp`""
+    Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+    exit 1
+}
+
+$tempDir = Join-Path $tempRootDir ("apm-install-" + [System.Guid]::NewGuid().ToString("N"))
 $zipPath = Join-Path $tempDir $assetName
 
-New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
+try {
+    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
+} catch {
+    Write-ErrorText "Failed to prepare installer directories: $_"
+    Write-Host "Temporary staging directory: $tempDir"
+    Write-Host "Install bin directory: $binDir"
+    Write-Host "Releases directory: $releasesDir"
+    Write-Host "If temporary staging was denied, set APM_TEMP_DIR to a writable directory allowed by endpoint policy, then retry:"
+    Write-Host "  `$env:APM_TEMP_DIR = `"`$env:LOCALAPPDATA\Programs\apm\tmp`""
+    Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+    exit 1
+}
 
 try {
     # ------------------------------------------------------------------
@@ -868,6 +908,48 @@ try {
         Remove-Item -Recurse -Force $backupDir -ErrorAction SilentlyContinue
     }
 
+    # Expose the complete onedir bundle through a version-stable junction.
+    # Putting this directory on PATH lets CreateProcess callers resolve the
+    # real apm.exe while keeping its sibling PyInstaller runtime files intact.
+    $currentDir = Join-Path $installRoot "current"
+    $currentExe = Join-Path $currentDir "apm.exe"
+    $newCurrentDir = "$currentDir.new-" + [System.Guid]::NewGuid().ToString("N")
+    $oldCurrentDir = $null
+    try {
+        New-Item -ItemType Junction -Path $newCurrentDir -Target $releaseDir | Out-Null
+
+        if (Test-Path $currentDir) {
+            $currentItem = Get-Item -Force $currentDir
+            if (($currentItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+                throw "Refusing to replace non-junction path. Move or remove it if safe, then rerun the installer."
+            }
+            $oldCurrentDir = "$currentDir.old-" + [System.Guid]::NewGuid().ToString("N")
+            Move-Item -Path $currentDir -Destination $oldCurrentDir -Force
+        }
+
+        Move-Item -Path $newCurrentDir -Destination $currentDir -Force
+    } catch {
+        Write-ErrorText "Failed to update stable executable path ${currentDir}: $_"
+        if (Test-Path $newCurrentDir) {
+            try { [System.IO.Directory]::Delete($newCurrentDir) } catch { Write-ErrorText "Could not remove temp junction ${newCurrentDir}: $_" }
+        }
+        if ($oldCurrentDir -and (Test-Path $oldCurrentDir) -and -not (Test-Path $currentDir)) {
+            Move-Item -Path $oldCurrentDir -Destination $currentDir -Force -ErrorAction SilentlyContinue
+        }
+        Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+        exit 1
+    }
+    if ($oldCurrentDir -and (Test-Path $oldCurrentDir)) {
+        # Directory.Delete removes only the junction. Windows PowerShell 5.1
+        # Remove-Item prompts for its non-empty target in NonInteractive mode.
+        [System.IO.Directory]::Delete($oldCurrentDir)
+    }
+    if (-not (Test-Path $currentExe)) {
+        Write-ErrorText "Stable executable path is missing apm.exe: $currentExe"
+        Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+        exit 1
+    }
+
     $shimPath = Join-Path $binDir "apm.cmd"
     # Prefer the literal %LOCALAPPDATA% token over the expanded profile path
     # so cmd.exe resolves the shim target at runtime. This avoids "The
@@ -919,10 +1001,16 @@ try {
     Set-Content -Path $shimPath -Value $shimContent -Encoding ASCII -NoNewline
 
     Add-ToUserPath -PathEntry $binDir
+    # The onedir bundle must stay intact beside apm.exe. Add its stable
+    # junction so bare executable lookup finds apm.exe where PATHEXT is absent
+    # (CreateProcess, Git Bash). Add-ToUserPath prepends, so this entry
+    # precedes bin in PATH.
+    Add-ToUserPath -PathEntry $currentDir
 
     Write-Host ""
     Write-Success "APM $tagName installed successfully!"
     Write-Info "Command shim: $shimPath"
+    Write-Info "Stable executable: $currentExe"
     Write-Host ""
     Write-Info "Quick start:"
     Write-Host "  apm init my-app          # Create a new APM project"
