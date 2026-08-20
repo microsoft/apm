@@ -465,6 +465,11 @@ requirements:
     section: "10.3"
     conformance_class: consumer
     notes: "configured authority overlap selects one documented host class before credential resolution; only that class's credentials reach requests and child processes; explicit non-default ports remain scoped"
+  - id: req-sc-014
+    keyword: MUST
+    section: "10.15"
+    conformance_class: consumer
+    notes: "per-invocation consent for bin/ deployment defaults to deny when stdout is not a TTY; explicit opt-in overrides; allowExecutables policy gate evaluated first"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

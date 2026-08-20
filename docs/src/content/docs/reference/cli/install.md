@@ -66,6 +66,7 @@ auto-detection only when `apm.yml` declares no targets.
 | `--audit <off\|warn\|block>` | (config/policy) | Run a content audit over the files this install deploys. `warn` records findings in the summary; `block` halts the install on critical findings. Overrides your `audit-on-install` config but cannot relax an org policy floor. Requires the `external-scanners` experimental flag. |
 | `--no-audit` | off | Disable the install-time audit for this invocation (equivalent to `--audit off`). Cannot relax an org policy `block` floor. |
 | `--trust-transitive-mcp` | off | Trust self-defined MCP servers shipped by transitive packages without re-declaring them in your `apm.yml`. |
+| `--trust-bin` / `--no-trust-bin` | (warn) | Per-invocation consent for marketplace-plugin `bin/` executable deployment. `--trust-bin` explicitly approves deployment and suppresses the trust-posture warning. `--no-trust-bin` skips `bin/` deployment even when policy permits it. Default (neither flag): deploys `bin/` and emits a warning. In non-interactive contexts (piped output or `--frozen`), the default is equivalent to `--no-trust-bin`. The `allowExecutables` policy gate always takes precedence; `--trust-bin` cannot override a policy-level deny. For persistent per-package trust, use [`apm approve`](../approve/). |
 | `--allow-insecure` | off | Permit direct `http://` (non-TLS) dependencies. |
 | `--allow-insecure-host HOSTNAME` | unset | Permit transitive `http://` dependencies from `HOSTNAME`. Repeatable. |
 

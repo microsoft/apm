@@ -4,19 +4,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.integration import test_live_generic_gitlab_install as live_gitlab
+import pytest
+
+from tests.utils.live_subprocess_environment import (
+    LIVE_SUBPROCESS_ENV_DENYLIST,
+    OUTPUT_TAIL_CHARS,
+    isolated_live_subprocess_env,
+    tail_output,
+)
+
+pytestmark = pytest.mark.unit
 
 
-def test_env_with_isolated_home_strips_token_vars(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("PATH", "/usr/bin")
-    monkeypatch.setenv("GITLAB_APM_PAT", "glpat-secret")
-    monkeypatch.setenv("GITLAB_TOKEN", "glpat-fallback")
-    monkeypatch.setenv("GITHUB_TOKEN", "gh-actions-token")
-    monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", "actions-runtime-token")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/tmp/leaky-gitconfig")
-    monkeypatch.setenv("APM_RUN_INTEGRATION_TESTS", "1")
+def test_env_with_isolated_home_strips_credentials_and_git_controls(tmp_path: Path) -> None:
+    base_env = {
+        "PATH": "/usr/bin",
+        "APM_RUN_INTEGRATION_TESTS": "1",
+        **{name: "secret-or-unsafe" for name in LIVE_SUBPROCESS_ENV_DENYLIST},
+        "GITHUB_APM_PAT_EXAMPLE": "prefixed-secret",
+    }
 
-    env = live_gitlab._env_with_isolated_home(tmp_path)
+    env = isolated_live_subprocess_env(tmp_path, base_env=base_env)
 
     assert env["HOME"] == str(tmp_path)
     assert env["GIT_TERMINAL_PROMPT"] == "0"
@@ -25,17 +33,14 @@ def test_env_with_isolated_home_strips_token_vars(monkeypatch, tmp_path: Path) -
     assert env["APM_E2E_TESTS"] == "1"
     assert env["APM_RUN_INTEGRATION_TESTS"] == "1"
     assert env["PATH"] == "/usr/bin"
-    assert "GITLAB_APM_PAT" not in env
-    assert "GITLAB_TOKEN" not in env
-    assert "GITHUB_TOKEN" not in env
-    assert "ACTIONS_RUNTIME_TOKEN" not in env
-    assert "GIT_CONFIG_GLOBAL" not in env
+    assert LIVE_SUBPROCESS_ENV_DENYLIST.isdisjoint(env)
+    assert "GITHUB_APM_PAT_EXAMPLE" not in env
 
 
 def test_tail_output_truncates_long_output() -> None:
-    text = "a" * (live_gitlab._OUTPUT_TAIL_CHARS + 10)
+    text = "a" * (OUTPUT_TAIL_CHARS + 10)
 
-    result = live_gitlab._tail_output(text)
+    result = tail_output(text)
 
     assert result.startswith("[truncated to last")
-    assert result.endswith("a" * live_gitlab._OUTPUT_TAIL_CHARS)
+    assert result.endswith("a" * OUTPUT_TAIL_CHARS)

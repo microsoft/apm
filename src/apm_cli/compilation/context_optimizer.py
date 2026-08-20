@@ -1420,18 +1420,9 @@ class ContextOptimizer:
         # Only check direct files in this directory (not subdirectories for simplicity)
         matching_files = 0
 
-        try:
-            for file in os.listdir(resolved_working_dir):
-                if file.startswith("."):
-                    continue
-
-                file_path = resolved_working_dir / file
-                if file_path.is_file():
-                    if self._file_matches_pattern(file_path, pattern):
-                        matching_files += 1
-        except (OSError, PermissionError):
-            # Handle case where directory doesn't exist or can't be read
-            pass
+        for file_path in self._files_by_directory.get(resolved_working_dir, ()):
+            if self._file_matches_pattern(file_path, pattern):
+                matching_files += 1
 
         # Cache the result
         analysis.pattern_matches[pattern] = matching_files

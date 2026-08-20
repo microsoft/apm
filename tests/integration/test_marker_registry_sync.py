@@ -192,6 +192,7 @@ def test_integration_tests_use_pytestmark_not_runtime_self_skip() -> None:
     """
     gate_env_vars = (
         "APM_E2E_TESTS",
+        "APM_LIVE_GENERIC_EXPECTED_SHA",
         "APM_LIVE_GENERIC_PACKAGE",
         "APM_RUN_INTEGRATION_TESTS",
         "APM_RUN_INFERENCE_TESTS",

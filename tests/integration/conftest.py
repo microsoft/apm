@@ -223,7 +223,10 @@ def _is_network_integration() -> bool:
 
 
 def _has_live_generic_fixture() -> bool:
-    return bool(os.environ.get("APM_LIVE_GENERIC_PACKAGE", "").strip())
+    return all(
+        os.environ.get(name, "").strip()
+        for name in ("APM_LIVE_GENERIC_PACKAGE", "APM_LIVE_GENERIC_EXPECTED_SHA")
+    )
 
 
 def _is_inference_mode() -> bool:
@@ -263,7 +266,7 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
     "requires_windows": (_is_windows, "Windows required"),
     "requires_live_generic_fixture": (
         _has_live_generic_fixture,
-        "APM_LIVE_GENERIC_PACKAGE not set (example: gitlab.com/<group>/<repo>)",
+        "APM_LIVE_GENERIC_PACKAGE and APM_LIVE_GENERIC_EXPECTED_SHA must both be set",
     ),
     "requires_apm_binary": (
         _has_apm_binary,

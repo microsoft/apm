@@ -9,10 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Live GitLab install smoke-test infrastructure for `apm install
-  gitlab.com/<group>/<repo>`, gated by `APM_LIVE_GENERIC_PACKAGE` and pinned by
-  `APM_LIVE_GENERIC_EXPECTED_SHA` for scheduled/manual CI activation. (#1663,
-  tracks #1229)
+- `apm install` now accepts `--trust-bin` / `--no-trust-bin` for per-invocation
+  consent over marketplace-plugin `bin/` executable deployment. `--trust-bin`
+  approves deployment silently; `--no-trust-bin` skips `bin/` even when policy
+  permits it. The `allowExecutables` policy gate still takes precedence. (closes #1620)
+- Internal: added opt-in GitLab install smoke-test infrastructure, pinned to an
+  expected fixture commit. The scheduled/manual smoke remains skipped until
+  maintainers publish and configure the public fixture. (#1663, tracks #1229)
+
+### Fixed
+
+- Windows binary is now Authenticode-signed in the release workflow, eliminating
+  the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
+  PyInstaller bundles. (#2435)
+- Multi-target `apm compile` now avoids repeating expensive project analysis
+  for each target, making multi-target runs scale like single-target runs
+  without changing generated output. (closes #2482)
+- `deployed-files-present` no longer false-positives on gitignored deploy
+  paths (e.g. `.agents/`), enabling `apm audit --ci` to pass on a fresh
+  checkout when deployed outputs are intentionally not committed. (closes
+  #2452, thanks @sergio-sisternes-epam)
+- YAML expansion guard no longer rejects large anchor-free lockfiles (150K+
+  entries) with a false-positive "billion-laughs" error. APM-generated
+  lockfiles with no anchors or aliases now load without error. (#2389)
+
+### Changed
+
+- `apm install` now emits a trust-posture warning (via `[!]`) when a marketplace
+  plugin deploys executables to Claude Code's PATH without an explicit `--trust-bin`
+  flag. In non-interactive (non-TTY) contexts the default is `--no-trust-bin`.
+  Pass `--trust-bin` to suppress the warning and deploy, or `apm approve` for
+  persistent per-package approval.
 
 ## [0.28.0] - 2026-08-04
 
@@ -38,6 +65,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now re-downloads an aliased dependency after its `ref:` changes
+  in `apm.yml`. Previously the pinned-ref and already-resolved cache-reuse
+  shortcuts skipped the fetch, so `apm_modules/<alias>/` and every primitive
+  deployed from it stayed on the old revision. (#2484)
+- `apm install --target all` no longer aborts on targets that have no MCP
+  client, such as `grok-build`. Non-MCP targets are skipped with a note instead
+  of raising `Unsupported client type`. (#2484)
+- `apm outdated` no longer exits 1 when the Rich progress renderer fails. The
+  command now owns its own `Console` instead of borrowing Rich's process-global
+  singleton, and falls back to plain-text progress if rendering still raises.
+  (#2507)
 - `apm init` and install-time auto-bootstrap now reject empty or
   whitespace-only project names, falling back to `my-project` at a filesystem
   root. APM no longer writes an `apm.yml` that every later install, lock, or
@@ -63,6 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supported hidden tool roots. (#2441)
 - `apm pack --check-clean` now honors `--marketplace-path` overrides.
   (closes #2427, #2461)
+- `apm marketplace validate` now reports malformed plugin structures without
+  rewriting the registered marketplace or its source manifest. (#2445)
+- Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
+- Release promotions now run marker-bounded lifecycle integration on macOS Intel
+  while retaining the full corpus on macOS ARM and Linux, preventing Intel
+  runner capacity timeouts. (#2423)
 - Public `github.com` dependency installs now preserve caller-owned Git URL
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in

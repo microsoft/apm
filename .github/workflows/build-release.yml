@@ -121,6 +121,16 @@ jobs:
         run: |
           uv run pwsh scripts/windows/build-binary.ps1
 
+      - name: Sign Windows binary (Authenticode)
+        if: matrix.platform == 'windows' && env.WINDOWS_CERT_PFX != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          BINARY_DIR: dist\apm-windows-x86_64
+        run: |
+          uv run pwsh scripts/windows/sign-binary.ps1
+
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
         with:

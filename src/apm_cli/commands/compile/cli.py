@@ -19,6 +19,7 @@ from ...core.target_catalog import (
     TARGET_CAPABILITIES,
     expand_all,
     get_target_capability,
+    target_all_exclusion_help,
     target_help_fragment,
 )
 from ...core.target_detection import TargetParamType
@@ -947,7 +948,7 @@ def _run_compilation(
     default=None,
     help=f"Target platform (comma-separated). {target_help_fragment('compile')} "
     "'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. "
-    "'all' excludes antigravity and experimental targets; "
+    f"{target_all_exclusion_help()}; "
     "combine explicit-only targets when needed.",
 )
 @click.option(

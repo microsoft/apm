@@ -165,3 +165,5 @@ def log_bin_status(
             f"  |-- bin/ executables skipped (not approved in allowExecutables). "
             f"Run 'apm approve {_pkg_label}' to approve."
         )
+    elif skill_result.bin_skipped_reason == "not_trusted":
+        log_fn("  |-- bin/ executables skipped (--no-trust-bin). Pass --trust-bin to deploy.")

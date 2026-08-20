@@ -78,12 +78,12 @@ what the test family you want actually requires.
 | `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
 | `requires_ado_bearer` | Azure CLI signed in + opt-in flag | `az login` and `export APM_TEST_ADO_BEARER=1` |
 | `requires_apm_binary` | A built `apm` binary on disk or `PATH` | `scripts/build-binary.sh` (or set `APM_BINARY_PATH`) |
-| `requires_live_generic_fixture` | A live non-GitHub/non-ADO git fixture package is configured | `export APM_LIVE_GENERIC_PACKAGE=gitlab.com/<group>/<repo>` and `export APM_LIVE_GENERIC_EXPECTED_SHA=<40-char-sha>` |
+| `requires_live_generic_fixture` | A live GitLab fixture package and pinned commit are configured | Set `APM_LIVE_GENERIC_PACKAGE` and `APM_LIVE_GENERIC_EXPECTED_SHA` |
 | `requires_runtime_codex` | The `codex` runtime installed under `~/.apm/runtimes/` | `apm runtime setup codex` |
 | `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
 | `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
 | `live` | Tests that hit real remote repos via live network cloning; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
-| `live_generic` | Live smoke tests for non-GitHub/non-ADO git-host install paths; deselected by default | Set the fixture env vars, then run `pytest -m live_generic tests/integration -v` |
+| `live_generic` | Live smoke tests for the GitLab install path; deselected by default | Set the fixture env vars, then run `pytest -m live_generic tests/integration/test_live_generic_gitlab_install.py -o addopts='' -v` |
 
 Without any of those env vars or runtimes a `pytest tests/integration`
 invocation is silent rather than red: every test is collected and
@@ -173,15 +173,24 @@ uv run pytest tests/integration/test_golden_scenario_e2e.py -v
 # Run only a marker family
 uv run pytest tests/integration -m requires_github_token -v
 
-# Run the live GitLab smoke after maintainers publish and pin the fixture
+# Run the live GitLab smoke after maintainers publish and pin the fixture.
+# Replace both example values and point APM_BINARY_PATH at a built executable.
+export APM_BINARY_PATH="$PWD/dist/apm"
 export APM_RUN_INTEGRATION_TESTS=1
-export APM_LIVE_GENERIC_PACKAGE=gitlab.com/<group>/<repo>
-export APM_LIVE_GENERIC_EXPECTED_SHA=<40-char-sha>
+export APM_LIVE_GENERIC_PACKAGE=gitlab.com/example-org/example-repo
+export APM_LIVE_GENERIC_EXPECTED_SHA=0123456789abcdef0123456789abcdef01234567
 uv run pytest tests/integration/test_live_generic_gitlab_install.py -m live_generic -o addopts='' -v
 ```
 
-`APM_LIVE_GENERIC_HOST` is optional and defaults to `gitlab.com`. Set it only
-when validating the same live-generic fixture flow against another GitLab host.
+:::note[Planned fixture]
+The public GitLab fixture has not been published yet. The scheduled/manual CI
+smoke remains skipped until maintainers configure both fixture variables. Track
+fixture publication and activation in [issue #1229](https://github.com/microsoft/apm/issues/1229).
+:::
+
+Advanced: `APM_LIVE_GENERIC_HOST` is optional and defaults to `gitlab.com`. Set
+it only when validating the same fixture flow against a self-hosted GitLab
+instance.
 `APM_LIVE_GENERIC_EXPECTED_SHA` is required whenever
 `APM_LIVE_GENERIC_PACKAGE` is set, so the smoke test proves a known fixture
 commit rather than trusting whatever the remote default branch currently serves.

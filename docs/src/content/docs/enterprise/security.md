@@ -442,6 +442,16 @@ executables are untrusted. Manage trust with
 with `apm policy explain <pkg>`, and surface fleet-wide layer conflicts with
 `apm doctor`.
 
+### Per-invocation consent (--trust-bin / --no-trust-bin)
+
+For one-shot installs without changing persisted policy, `apm install` accepts
+`--trust-bin` (deploy bin/ executables silently) and `--no-trust-bin` (skip bin/
+deployment for this invocation). These flags only apply when the policy ladder
+would otherwise permit deployment -- they cannot override an org or project deny.
+In non-interactive contexts (piped output, `--frozen`) the default is
+`--no-trust-bin`. For persistent trust decisions that apply to the whole team,
+use `apm approve` or `apm deny`.
+
 ## MCP server trust model
 
 APM integrates MCP (Model Context Protocol) server configurations from packages. Trust is explicit and scoped by dependency depth.

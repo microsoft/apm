@@ -749,6 +749,10 @@ def _is_ssh_key_auth_failure(error_text: str, last_attempt_scheme: str | None) -
         "bad passphrase",
         "read_passphrase",
         "permission denied (publickey)",
+        # OpenSSH BatchMode=yes output when all keys are skipped (e.g. an
+        # encrypted key with no ssh-agent loaded).
+        "no supported authentication methods remain",
+        "no more authentication methods to try",
     )
     return any(marker in text for marker in markers)
 

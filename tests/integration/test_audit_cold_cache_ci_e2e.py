@@ -334,3 +334,46 @@ def test_cold_cache_audit_stays_green_for_gitignored_clean_deployments_when_comp
     assert "skipped" not in drift["message"].lower()
     assert drift["message"] == "no drift detected against lockfile"
     assert payload["drift"]["drift"] == []
+
+
+def test_deployed_files_present_passes_when_gitignored_paths_absent_even_if_drift_runs(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """deployed-files-present passes independently of drift when gitignored paths are absent.
+
+    Regression guard for #2452: when a deployed path is gitignored and absent
+    on disk, deployed-files-present must pass (exit green for that specific
+    check) regardless of whether the overall audit exits 0 or 1 due to drift.
+
+    This exercises the E2E path where _filter_gitignored() is called from
+    _check_deployed_files_present inside the real apm binary.
+    """
+    scenario = _seed_consumer(
+        tmp_path,
+        apm_binary_path,
+        track_deployments=False,  # .github/instructions/ added to .gitignore
+    )
+    # Simulate a fresh checkout: delete apm_modules/ (like any CI checkout)
+    # AND delete the gitignored deployed directory (git never committed it).
+    _evict_live_modules_and_cache(scenario)
+    deployed_dir = scenario.project_root / ".github" / "instructions"
+    if deployed_dir.exists():
+        shutil.rmtree(deployed_dir)
+
+    # Accept returncode 0 (drift skipped due to cache miss) or 1 (drift found
+    # the missing file -- note drift skips absent files, so this path depends
+    # on whether self-hydration succeeds in this environment). Either way the
+    # deployed-files-present check itself must pass.
+    audit_args = (*_AUDIT_BASE_ARGS, "--format", "json")
+    result = scenario.runner.run(
+        audit_args,
+        scenario_id="gitignored-absent-deployed-fresh-checkout",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    payload = json.loads(result.stdout)
+    deployed_check = _check(payload, "deployed-files-present")
+    assert deployed_check["passed"] is True, (
+        "deployed-files-present must pass when missing files are gitignored"
+    )

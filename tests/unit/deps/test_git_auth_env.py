@@ -57,8 +57,9 @@ class TestSetupEnvironment:
         assert env["GIT_CONFIG_NOSYSTEM"] == "1"
         # Token-manager-provided keys preserved.
         assert env["GITHUB_TOKEN"] == "ghp_xxx"
-        # ConnectTimeout always added.
+        # ConnectTimeout and BatchMode always added.
         assert "ConnectTimeout=30" in env["GIT_SSH_COMMAND"]
+        assert "BatchMode=yes" in env["GIT_SSH_COMMAND"]
 
     def test_bearer_path_preserves_token_manager_env(self):
         # ADO bearer flow: token_manager publishes Authorization-style
@@ -81,13 +82,26 @@ class TestSetupEnvironment:
         assert env["GIT_ASKPASS"] == "echo"
         assert env["GIT_CONFIG_NOSYSTEM"] == "1"
         assert "GIT_CONFIG_GLOBAL" in env
+        assert "BatchMode=yes" in env["GIT_SSH_COMMAND"]
 
     def test_existing_ssh_command_preserves_existing_connecttimeout(self):
         tm = _FakeTokenManager()
         with patch.dict(os.environ, {"GIT_SSH_COMMAND": "ssh -o ConnectTimeout=5"}, clear=False):
             env = GitAuthEnvBuilder(tm).setup_environment()
-        # Existing ConnectTimeout NOT overridden (case-insensitive check).
-        assert env["GIT_SSH_COMMAND"] == "ssh -o ConnectTimeout=5"
+        # Existing ConnectTimeout NOT overridden (case-insensitive check),
+        # but BatchMode=yes is still appended since it was absent.
+        assert "ConnectTimeout=5" in env["GIT_SSH_COMMAND"]
+        assert "ConnectTimeout=30" not in env["GIT_SSH_COMMAND"]
+        assert "BatchMode=yes" in env["GIT_SSH_COMMAND"]
+
+    def test_existing_ssh_command_preserves_existing_batchmode(self):
+        tm = _FakeTokenManager()
+        with patch.dict(os.environ, {"GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}, clear=False):
+            env = GitAuthEnvBuilder(tm).setup_environment()
+        # User-set BatchMode preserved; ConnectTimeout appended; no duplicate BatchMode.
+        # Use case-insensitive count to match the production idempotency contract.
+        assert env["GIT_SSH_COMMAND"].lower().count("batchmode") == 1
+        assert "ConnectTimeout=30" in env["GIT_SSH_COMMAND"]
 
     def test_existing_ssh_command_appends_connecttimeout(self):
         tm = _FakeTokenManager()
@@ -97,6 +111,7 @@ class TestSetupEnvironment:
             env = GitAuthEnvBuilder(tm).setup_environment()
         assert "StrictHostKeyChecking=no" in env["GIT_SSH_COMMAND"]
         assert "ConnectTimeout=30" in env["GIT_SSH_COMMAND"]
+        assert "BatchMode=yes" in env["GIT_SSH_COMMAND"]
 
     def test_git_config_global_set_to_devnull_on_unix(self):
         if sys.platform == "win32":

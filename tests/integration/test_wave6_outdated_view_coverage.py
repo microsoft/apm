@@ -672,6 +672,45 @@ class TestOutdatedParallel:
         assert result.exit_code == 0
         assert "unknown" in result.output.lower()
 
+    def test_poisoned_rich_console_singleton_degrades(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A poisoned ``rich._console`` must not fail ``outdated``.
+
+        Regression for a CI-only failure where an earlier test in the same
+        xdist worker left a ``MagicMock`` in Rich's process-global console.
+        Rich progress then compared mock timestamps and raised ``TypeError:
+        '<' not supported between instances of 'MagicMock' and 'MagicMock'``,
+        which propagated out of ``outdated`` as exit 1. Progress rendering is
+        a display concern and must degrade to the plain path instead.
+        """
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(tmp_path)
+        sha = "aabbccdd11223344"
+        _write_lockfile(
+            tmp_path,
+            f"  - repo_url: test-org/repo-one\n"
+            f"    resolved_ref: main\n"
+            f"    resolved_commit: {sha}\n"
+            f"  - repo_url: test-org/repo-two\n"
+            f"    resolved_ref: main\n"
+            f"    resolved_commit: {sha}\n",
+        )
+
+        branch_ref = _make_remote_ref("main", GitReferenceType.BRANCH, sha)
+
+        def _list_remote_refs(_downloader: object, _dep_ref: object) -> list[RemoteRef]:
+            return [branch_ref]
+
+        monkeypatch.setattr(rich, "_console", MagicMock(), raising=False)
+        with patch(
+            "apm_cli.deps.github_downloader.GitHubPackageDownloader.list_remote_refs",
+            new=_list_remote_refs,
+        ):
+            result = runner.invoke(cli, ["outdated", "-j", "2"])
+
+        assert result.exit_code == 0
+
 
 # ---------------------------------------------------------------------------
 # outdated -- mixed local+remote deps

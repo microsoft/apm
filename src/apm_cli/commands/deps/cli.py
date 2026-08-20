@@ -12,6 +12,7 @@ import click
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
+from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
 from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
@@ -918,7 +919,15 @@ def clean(dry_run: bool, yes: bool):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork').",
+    help=(
+        f"Target platform (comma-separated). {target_help_fragment('update')} "
+        "'agent-skills' deploys to .agents/skills/ (cross-client). "
+        "'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. "
+        f"{target_all_exclusion_help()}; "
+        "combine explicit-only targets when needed. "
+        "Experimental targets require their feature flags. "
+        "Deprecated: run 'apm update --target' instead."
+    ),
 )
 @click.option(
     "--parallel-downloads",
