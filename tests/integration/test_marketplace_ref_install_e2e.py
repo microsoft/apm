@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -42,14 +41,18 @@ from apm_cli.models.apm_package import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.component]
 
+# Marketplace fixture data.
 _MARKETPLACE_NAME = "acme-market"
 _OWNER = "acme"
 _REPO = "plugin-marketplace"
 _PLUGIN_NAME = "reviewer"
 _PLUGIN_PATH = "plugins/reviewer"
 _REGISTERED_REF = "release/feature-ref"
+_RESOLVED_COMMIT = "a" * 40
+
+# External I/O seams kept out of this hermetic component test.
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 _PATCH_VALIDATE_EXISTS = "apm_cli.commands.install._validate_package_exists"
 
@@ -57,7 +60,6 @@ _PATCH_VALIDATE_EXISTS = "apm_cli.commands.install._validate_package_exists"
 @dataclass
 class _DownloadCall:
     dep_ref: DependencyReference
-    clone_url: str
 
 
 class _DownloadRecorder:
@@ -69,18 +71,13 @@ class _DownloadRecorder:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         recorder = self
 
-        def _fake_download(self, repo_ref, target_path, *args, **kwargs):
+        def _fake_download(_downloader, repo_ref, target_path, *args, **kwargs):
             dep_ref = (
                 repo_ref
                 if isinstance(repo_ref, DependencyReference)
                 else DependencyReference.parse(str(repo_ref))
             )
-            clone_url = self._build_repo_url(
-                dep_ref.repo_url,
-                dep_ref=dep_ref,
-                token="",
-            )
-            recorder.calls.append(_DownloadCall(dep_ref=dep_ref, clone_url=clone_url))
+            recorder.calls.append(_DownloadCall(dep_ref=dep_ref))
 
             target = Path(target_path)
             target.mkdir(parents=True, exist_ok=True)
@@ -105,7 +102,7 @@ class _DownloadRecorder:
                 resolved_reference=ResolvedReference(
                     original_ref=ref,
                     ref_type=GitReferenceType.BRANCH,
-                    resolved_commit="a" * 40,
+                    resolved_commit=_RESOLVED_COMMIT,
                     ref_name=ref,
                 ),
             )
@@ -133,13 +130,25 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def _source(host: str) -> MarketplaceSource:
+def _source(host: str, *, ref: str = _REGISTERED_REF) -> MarketplaceSource:
     return MarketplaceSource(
         name=_MARKETPLACE_NAME,
         owner=_OWNER,
         repo=_REPO,
         host=host,
-        ref=_REGISTERED_REF,
+        ref=ref,
+    )
+
+
+def _source_from_registry_without_ref(host: str) -> MarketplaceSource:
+    """Model a persisted registry row that omitted the optional ref field."""
+    return MarketplaceSource.from_dict(
+        {
+            "name": _MARKETPLACE_NAME,
+            "owner": _OWNER,
+            "repo": _REPO,
+            "host": host,
+        }
     )
 
 
@@ -211,13 +220,6 @@ def _read_locked_dep(project: Path) -> dict:
     raise AssertionError(f"locked dependency for {_PLUGIN_PATH!r} not found: {data}")
 
 
-def _assert_clone_url(call: _DownloadCall, *, host: str) -> None:
-    parsed = urlparse(call.clone_url)
-    assert parsed.scheme == "https"
-    assert parsed.hostname == host
-    assert parsed.path == f"/{_OWNER}/{_REPO}"
-
-
 def test_github_family_marketplace_registered_ref_reaches_downloader(
     runner: CliRunner,
     tmp_path: Path,
@@ -237,7 +239,7 @@ def test_github_family_marketplace_registered_ref_reaches_downloader(
     assert call.dep_ref.repo_url == f"{_OWNER}/{_REPO}"
     assert call.dep_ref.virtual_path == _PLUGIN_PATH
     assert call.dep_ref.reference == _REGISTERED_REF
-    _assert_clone_url(call, host="github.com")
+    assert "Installed 1 APM dependency" in result.output
 
     deps = _read_apm_deps(project)
     assert deps == [f"{_OWNER}/{_REPO}/{_PLUGIN_PATH}#{_REGISTERED_REF}"]
@@ -245,7 +247,21 @@ def test_github_family_marketplace_registered_ref_reaches_downloader(
     locked = _read_locked_dep(project)
     assert locked["repo_url"] == f"{_OWNER}/{_REPO}"
     assert locked["resolved_ref"] == _REGISTERED_REF
-    assert locked["resolved_commit"] == "a" * 40
+    assert locked["resolved_commit"] == _RESOLVED_COMMIT
+
+    manifest_after_first_install = (project / "apm.yml").read_bytes()
+    lock_after_first_install = (project / "apm.lock.yaml").read_bytes()
+    second_result = _run_install(
+        runner,
+        project,
+        monkeypatch,
+        _source("github.com"),
+        recorder,
+    )
+
+    assert second_result.exit_code == 0, second_result.output
+    assert (project / "apm.yml").read_bytes() == manifest_after_first_install
+    assert (project / "apm.lock.yaml").read_bytes() == lock_after_first_install
 
 
 def test_gitlab_marketplace_registered_ref_reaches_structured_downloader(
@@ -267,7 +283,7 @@ def test_gitlab_marketplace_registered_ref_reaches_structured_downloader(
     assert call.dep_ref.repo_url == f"{_OWNER}/{_REPO}"
     assert call.dep_ref.virtual_path == _PLUGIN_PATH
     assert call.dep_ref.reference == _REGISTERED_REF
-    _assert_clone_url(call, host="gitlab.com")
+    assert "Installed 1 APM dependency" in result.output
 
     deps = _read_apm_deps(project)
     assert deps == [
@@ -283,4 +299,40 @@ def test_gitlab_marketplace_registered_ref_reaches_structured_downloader(
     assert locked["repo_url"] == f"{_OWNER}/{_REPO}"
     assert locked["virtual_path"] == _PLUGIN_PATH
     assert locked["resolved_ref"] == _REGISTERED_REF
-    assert locked["resolved_commit"] == "a" * 40
+    assert locked["resolved_commit"] == _RESOLVED_COMMIT
+
+
+def test_marketplace_without_registered_ref_uses_default_branch(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "default-branch-consumer"
+    _write_consumer_project(project)
+    recorder = _DownloadRecorder()
+    source = _source_from_registry_without_ref("gitlab.com")
+
+    assert source.ref == "main"
+    result = _run_install(runner, project, monkeypatch, source, recorder)
+
+    assert result.exit_code == 0, result.output
+    assert len(recorder.calls) == 1
+    assert "Installed 1 APM dependency" in result.output
+
+    dep_ref = recorder.calls[0].dep_ref
+    assert dep_ref.host == "gitlab.com"
+    assert dep_ref.repo_url == f"{_OWNER}/{_REPO}"
+    assert dep_ref.virtual_path == _PLUGIN_PATH
+    assert dep_ref.reference is None
+
+    deps = _read_apm_deps(project)
+    assert deps == [
+        {
+            "git": f"https://gitlab.com/{_OWNER}/{_REPO}",
+            "path": _PLUGIN_PATH,
+        }
+    ]
+
+    locked = _read_locked_dep(project)
+    assert "resolved_ref" not in locked
+    assert locked["resolved_commit"] == _RESOLVED_COMMIT
