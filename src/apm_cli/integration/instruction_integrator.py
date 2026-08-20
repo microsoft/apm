@@ -19,7 +19,7 @@ from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.patterns import parse_apply_to, yaml_double_quote
+from apm_cli.utils.patterns import normalize_apply_to, parse_apply_to, yaml_double_quote
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -48,6 +48,17 @@ class InstructionIntegrator(BaseIntegrator):
         "kiro_steering": "_convert_to_kiro_steering",
         "antigravity_rules": "_convert_to_antigravity_rules",
     }
+
+    @staticmethod
+    def _normalize_frontmatter_apply_to(frontmatter: str) -> str:
+        """Return canonical applyTo text from a bounded YAML frontmatter block."""
+        from apm_cli.utils.yaml_io import load_yaml_str
+
+        try:
+            metadata = load_yaml_str(frontmatter) or {}
+        except Exception:
+            return ""
+        return normalize_apply_to(metadata.get("applyTo"), default="")
 
     def find_instruction_files(self, package_path: Path) -> list[Path]:
         """Find all .instructions.md files in a package.
@@ -488,12 +499,11 @@ class InstructionIntegrator(BaseIntegrator):
         if fm_match:
             fm_block = fm_match.group(1)
             body = content[fm_match.end() :]
+            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
 
             for line in fm_block.splitlines():
                 line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
-                elif line_stripped.startswith("description:"):
+                if line_stripped.startswith("description:"):
                     description = line_stripped[len("description:") :].strip().strip("'\"")
 
         # Generate description from first content sentence if missing
@@ -580,8 +590,6 @@ class InstructionIntegrator(BaseIntegrator):
 
         Ref: https://docs.windsurf.com/windsurf/cascade/memories
         """
-        from ..utils.yaml_io import load_yaml_str
-
         body = content
         apply_to = ""
 
@@ -590,11 +598,7 @@ class InstructionIntegrator(BaseIntegrator):
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
             body = content[fm_match.end() :]
-            try:
-                fm = load_yaml_str(fm_match.group(1)) or {}
-            except Exception:
-                fm = {}
-            apply_to = str(fm.get("applyTo", "")).strip()
+            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_match.group(1))
 
         # Build Windsurf rules frontmatter
         parts = ["---"]
@@ -641,7 +645,7 @@ class InstructionIntegrator(BaseIntegrator):
         from ..utils.yaml_io import load_yaml_str
 
         body = content
-        apply_to = ""
+        globs = []
 
         fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
         if fm_match:
@@ -652,12 +656,14 @@ class InstructionIntegrator(BaseIntegrator):
                 fm = {}
             raw_apply_to = fm.get("applyTo", "")
             if isinstance(raw_apply_to, list):
-                apply_to = ",".join(str(item) for item in raw_apply_to)
+                globs = [
+                    s
+                    for item in raw_apply_to
+                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
+                ]
             else:
-                apply_to = str(raw_apply_to).strip()
-
-        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
-        globs = parse_apply_to(safe_apply_to)
+                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
+                globs = parse_apply_to(safe_apply_to)
 
         parts = ["---"]
         if globs:
@@ -696,11 +702,7 @@ class InstructionIntegrator(BaseIntegrator):
         if fm_match:
             fm_block = fm_match.group(1)
             body = content[fm_match.end() :]
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
+            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
 
         # Build Claude rules frontmatter (only when path-scoped)
         globs = parse_apply_to(apply_to)
@@ -717,13 +719,52 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_antigravity_rules(content: str) -> str:
         """Convert APM instruction content to Antigravity CLI rules format.
 
-        Strips YAML frontmatter (Antigravity rules are plain markdown with
-        no frontmatter) and returns the body as-is.
+        Parses existing YAML frontmatter, maps ``applyTo`` to Antigravity's
+        ``trigger: glob`` + ``globs`` frontmatter.
         """
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        from ..utils.yaml_io import load_yaml_str
+
+        body = content
+        globs = []
+
+        # Parse existing frontmatter
+        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
         if fm_match:
-            return fm_match.string[fm_match.end() :].lstrip("\n")
-        return content
+            body = content[fm_match.end() :]
+            try:
+                fm = load_yaml_str(fm_match.group(1)) or {}
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Failed to parse instruction frontmatter YAML: %s", e
+                )
+                fm = {}
+            raw_apply_to = fm.get("applyTo", "")
+            if isinstance(raw_apply_to, list):
+                globs = [
+                    s
+                    for item in raw_apply_to
+                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
+                ]
+            else:
+                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
+                globs = parse_apply_to(safe_apply_to)
+
+        # Build Antigravity rules frontmatter
+        parts = ["---"]
+        if globs:
+            parts.append("trigger: glob")
+            if len(globs) == 1:
+                parts.append(f"globs: {yaml_double_quote(globs[0])}")
+            else:
+                parts.append("globs:")
+                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
+            parts.append("---")
+            return "\n".join(parts) + "\n\n" + body.lstrip("\r\n")
+
+        # No applyTo -> unconditional rule, return body without frontmatter
+        return body.lstrip("\r\n")
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.

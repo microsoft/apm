@@ -7,12 +7,18 @@ from pathlib import Path
 
 import click
 
+from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..core.project_name import (
+    resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
+)
+from ..core.project_name import validate_project_name as _validate_project_name
 from ..core.target_detection import (
     EXPLICIT_ONLY_TARGETS,
     TargetParamType,
     detect_signals,
+    manifest_targets_from_target_option,
 )
 from ..utils.console import (
     _create_files_table,
@@ -27,7 +33,6 @@ from ._helpers import (
     _get_default_config,
     _rich_blank_line,
     _validate_plugin_name,
-    _validate_project_name,
 )
 
 
@@ -144,10 +149,11 @@ def _perform_init(
             project_name = None
 
         # Reject names containing path separators before any filesystem use
-        if project_name and not _validate_project_name(project_name):
+        if project_name is not None and not _validate_project_name(project_name):
             logger.error(
                 f"Invalid project name '{project_name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'."
+                "project names must not be empty or whitespace-only and must not contain "
+                "path separators ('/' or '\\\\') or be '..'."
             )
             sys.exit(1)
 
@@ -160,7 +166,14 @@ def _perform_init(
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
-            final_project_name = project_dir.name
+            # A filesystem root has no directory name, so resolve a valid fallback.
+            derived_project_name = project_dir.name
+            final_project_name = _resolve_bootstrap_project_name(derived_project_name)
+            if final_project_name != derived_project_name:
+                logger.verbose_detail(
+                    f'Using default project name "{final_project_name}" because '
+                    f"derived name {derived_project_name!a} is invalid"
+                )
         project_root = Path.cwd()
 
         # Validate plugin name early
@@ -219,6 +232,17 @@ def _perform_init(
 
         # Create apm.yml (with devDependencies for plugin mode)
         _create_minimal_apm_yml(config, plugin=plugin)
+        native_sources = find_plugin_root_sources(project_root)
+        if native_sources and not (project_root / ".apm").is_dir():
+            rendered_sources = ", ".join(
+                source if source.endswith(".json") else f"{source}/" for source in native_sources
+            )
+            logger.warning(
+                "Found plugin-native sources at the project root: "
+                f"{rendered_sources}. They remain included by apm pack. "
+                "Move publishable files under .apm/ when you want apm pack "
+                "to source from that directory.",
+            )
 
         # Create plugin.json for plugin mode
         if plugin:
@@ -382,7 +406,8 @@ def _interactive_project_setup(default_name, logger):
                 break
             console.print(
                 f"[error]Invalid project name '{name}': "
-                "project names must not contain path separators ('/' or '\\\\') or be '..'.[/error]"
+                "project names must not be empty or whitespace-only and must not contain "
+                "path separators ('/' or '\\\\') or be '..'.[/error]"
             )
 
         version = Prompt.ask("Version", default="1.0.0").strip()
@@ -399,7 +424,8 @@ def _interactive_project_setup(default_name, logger):
                 break
             click.echo(
                 f"{ERROR}Invalid project name '{name}': "
-                f"project names must not contain path separators ('/' or '\\\\') or be '..'.{RESET}"
+                f"project names must not be empty or whitespace-only and must not contain "
+                f"path separators ('/' or '\\\\') or be '..'.{RESET}"
             )
 
         version = click.prompt("Version", default="1.0.0").strip()
@@ -481,7 +507,9 @@ def _resolve_init_targets(
     """
     # Case 1: --target flag provided -- wins unconditionally
     if target_flag is not None:
-        targets = [target_flag] if isinstance(target_flag, str) else list(target_flag)
+        targets = manifest_targets_from_target_option(target_flag)
+        if not targets:
+            return None
         logger.progress(f"Targets set: {', '.join(targets)} (via --target flag)", symbol="info")
         return targets
 

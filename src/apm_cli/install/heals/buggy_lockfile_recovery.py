@@ -88,7 +88,7 @@ class BuggyLockfileRecoveryHeal:
         # will produce NEW bytes whose hash differs from the OLD
         # lockfile hash. Tell the FreshDependencySource that this
         # change is LEGITIMATE -- otherwise the supply-chain hard-block
-        # would call sys.exit(1) before we can repair the lockfile.
+        # would abort before we can repair the lockfile.
         hctx.add_bypass_key(hctx.package_key)
         hctx.emit(
             HealMessageLevel.WARN,

@@ -105,6 +105,6 @@ class TestGitignoreScopeGuard:
 
             mock_run_phase.side_effect = _resolve_sets_deps
 
-            run_install_pipeline(pkg, scope=InstallScope.PROJECT)
+            run_install_pipeline(pkg, scope=InstallScope.PROJECT, target="claude")
 
         mock_gitignore.assert_called_once()

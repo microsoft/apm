@@ -13,9 +13,7 @@ GITHUB_TOKEN to be configured in CI.
 """
 
 import os
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml
@@ -24,18 +22,6 @@ pytestmark = pytest.mark.requires_apm_binary
 
 CANARY = "github_pat_BOGUS_REDACTION_CANARY_DO_NOT_LEAK"
 CANARY_CORE = "BOGUS_REDACTION_CANARY_DO_NOT_LEAK"
-
-
-@pytest.fixture
-def apm_command():
-    """Get the path to the APM CLI executable."""
-    apm_on_path = shutil.which("apm")
-    if apm_on_path:
-        return apm_on_path
-    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
-    if venv_apm.exists():
-        return str(venv_apm)
-    return "apm"
 
 
 @pytest.fixture
@@ -59,9 +45,9 @@ def _bogus_env():
     return env
 
 
-def _run_apm_with_env(apm_command, args, cwd, env, timeout=60):
+def _run_apm_with_env(apm_binary_path, args, cwd, env, timeout=60):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -108,14 +94,14 @@ def _assert_install_failed(result):
 class TestVerboseInstallTokenRedaction:
     """Regression guard for PR #764 -- verbose install must redact tokens."""
 
-    def test_verbose_install_does_not_leak_token_on_404_repo(self, temp_project, apm_command):
+    def test_verbose_install_does_not_leak_token_on_404_repo(self, temp_project, apm_binary_path):
         """API-probe path: nonexistent shorthand repo ref, auth fails."""
         _write_apm_yml(
             temp_project,
             ["microsoft/this-repo-definitely-does-not-exist-xyz123"],
         )
         result = _run_apm_with_env(
-            apm_command,
+            apm_binary_path,
             ["install", "--verbose"],
             temp_project,
             _bogus_env(),
@@ -123,14 +109,14 @@ class TestVerboseInstallTokenRedaction:
         _assert_install_failed(result)
         _assert_no_canary(result)
 
-    def test_verbose_install_does_not_leak_token_in_url_form(self, temp_project, apm_command):
+    def test_verbose_install_does_not_leak_token_in_url_form(self, temp_project, apm_binary_path):
         """URL-probe path: explicit git+https URL, auth fails."""
         _write_apm_yml(
             temp_project,
             [{"git": "https://github.com/microsoft/this-also-does-not-exist-xyz789.git"}],
         )
         result = _run_apm_with_env(
-            apm_command,
+            apm_binary_path,
             ["install", "--verbose"],
             temp_project,
             _bogus_env(),

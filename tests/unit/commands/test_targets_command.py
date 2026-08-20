@@ -70,6 +70,17 @@ class TestTargetsTableOutput:
         assert "active" in result.output
         assert "claude" in result.output
 
+    def test_grok_build_directory_is_displayed_as_active(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".grok").mkdir()
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(targets, [])
+        assert result.exit_code == 0, result.output
+        grok_row = next(line for line in result.output.splitlines() if "grok-build" in line)
+        assert "active" in grok_row
+        assert ".grok/" in grok_row
+
     def test_inactive_target_shows_needs(self, runner: CliRunner, tmp_path: Path) -> None:
         """Inactive targets show 'needs <signal>' in the source column."""
         with (

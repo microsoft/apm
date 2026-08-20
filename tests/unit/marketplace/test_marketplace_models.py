@@ -22,6 +22,14 @@ class TestMarketplaceSource:
         assert src.branch == "main"
         assert src.path == "marketplace.json"
 
+    def test_explicit_url_port_is_preserved(self):
+        src = MarketplaceSource(
+            name="ado-server",
+            url=("https://ado.example.test:8443/DefaultCollection/Platform/_git/catalog"),
+        )
+        assert src.host == "ado.example.test"
+        assert src.port == 8443
+
     def test_frozen(self):
         src = MarketplaceSource(name="x", owner="o", repo="r")
         with pytest.raises(AttributeError):
@@ -122,6 +130,14 @@ class TestMarketplacePlugin:
 class TestMarketplaceManifest:
     """Frozen dataclass for parsed marketplace content."""
 
+    def test_positional_optional_fields_remain_compatible(self):
+        """Structural diagnostics append to, rather than reorder, the DTO."""
+        manifest = MarketplaceManifest("test", (), "owner", "description")
+
+        assert manifest.owner_name == "owner"
+        assert manifest.description == "description"
+        assert manifest.structural_errors == ()
+
     def test_find_plugin(self):
         plugins = (
             MarketplacePlugin(name="alpha"),
@@ -196,6 +212,46 @@ class TestParseMarketplaceJson:
         assert p.source["repo"] == "owner/plugin-repo"
         assert p.source_marketplace == "claude-mkt"
 
+    def test_claude_format_validates_tag_pattern(self):
+        data = {
+            "name": "Claude Plugins",
+            "plugins": [
+                {
+                    "name": "my-plugin",
+                    "source": {
+                        "type": "github",
+                        "repo": "owner/plugin-repo",
+                        "tag_pattern": "{name}/{version}",
+                    },
+                }
+            ],
+        }
+        manifest = parse_marketplace_json(data, "claude-mkt")
+        assert manifest.plugins[0].tag_pattern == "{name}/{version}"
+
+    @pytest.mark.parametrize(
+        "tag_pattern",
+        ["", "release-{name}", "v{version}-{version}", "release-{channel}-{version}"],
+    )
+    def test_claude_format_retains_invalid_tag_pattern_as_structural_error(self, tag_pattern):
+        data = {
+            "name": "Claude Plugins",
+            "plugins": [
+                {
+                    "name": "my-plugin",
+                    "source": {
+                        "type": "github",
+                        "repo": "owner/plugin-repo",
+                        "tag_pattern": tag_pattern,
+                    },
+                }
+            ],
+        }
+        manifest = parse_marketplace_json(data, "claude-mkt")
+        assert manifest.plugins == ()
+        assert len(manifest.structural_errors) == 1
+        assert manifest.structural_errors[0].startswith("plugins[0].source.tag_pattern:")
+
     def test_claude_format_relative(self):
         data = {
             "name": "Test",
@@ -239,6 +295,28 @@ class TestParseMarketplaceJson:
         manifest = parse_marketplace_json(data)
         assert len(manifest.plugins) == 1
         assert manifest.plugins[0].source["type"] == "git-subdir"
+
+    def test_packed_git_subdir_url_is_preserved(self):
+        """Pack-emitted git-subdir URL sources remain valid parser input."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "Test",
+                "plugins": [
+                    {
+                        "name": "subdir-plugin",
+                        "source": {
+                            "source": "git-subdir",
+                            "url": "https://git.example.invalid/team/monorepo",
+                            "path": "packages/plugin-a",
+                        },
+                    }
+                ],
+            }
+        )
+
+        assert manifest.structural_errors == ()
+        assert manifest.plugins[0].source["type"] == "git-subdir"
+        assert manifest.plugins[0].source["url"] == "https://git.example.invalid/team/monorepo"
 
     def test_npm_source_skipped(self):
         data = {
@@ -305,6 +383,108 @@ class TestParseMarketplaceJson:
         manifest = parse_marketplace_json(data)
         assert len(manifest.plugins) == 1
         assert manifest.plugins[0].name == "valid"
+        assert manifest.structural_errors == (
+            "plugins[1].name: expected a non-empty string",
+            "plugins[2]: expected an object",
+            "plugins[3].source: expected a source or repository field",
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "error"),
+        [
+            ({}, "source: expected a supported source type or an owner/repository field"),
+            ({"type": "bogus"}, "source: unsupported source type 'bogus'"),
+            ({"type": "github"}, "source: github requires an owner/repository field"),
+            ({"type": "url"}, "source: url requires a non-empty url field"),
+            (
+                {"type": "github", "repo": "/tmp/local-plugin"},
+                "source: github requires a valid non-local owner/repository field",
+            ),
+            (
+                {"type": "url", "url": "../local-plugin"},
+                "source: url requires a valid non-local url field",
+            ),
+            (
+                {"type": "git-subdir", "url": "~/local-monorepo"},
+                "source: git-subdir requires a valid non-local owner/repository or url field",
+            ),
+            (
+                {"type": "url", "url": "file:/tmp/local-plugin"},
+                "source: url requires a valid non-local url field",
+            ),
+            (
+                {"type": "url", "url": r".\local-plugin"},
+                "source: url requires a valid non-local url field",
+            ),
+            (
+                {"type": "git-subdir", "url": r"\\server\share"},
+                "source: git-subdir requires a valid non-local owner/repository or url field",
+            ),
+            (
+                {"type": "url", "url": ":::invalid:::"},
+                "source: url requires a valid non-local url field",
+            ),
+        ],
+    )
+    def test_malformed_dict_sources_are_retained_as_diagnostics(
+        self, source: dict[str, str], error: str
+    ) -> None:
+        """Dict sources that resolution would reject must not validate as clean."""
+        manifest = parse_marketplace_json(
+            {"name": "Test", "plugins": [{"name": "invalid", "source": source}]}
+        )
+
+        assert manifest.plugins == ()
+        assert manifest.structural_errors == (f"plugins[0].{error}",)
+
+    def test_typeless_repository_source_is_normalized_for_resolution(self):
+        """Source objects with repository syntax must use the resolver's github shape."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "Test",
+                "plugins": [{"name": "plugin", "source": {"repository": "owner/repo"}}],
+            }
+        )
+
+        assert manifest.structural_errors == ()
+        assert manifest.plugins[0].source["type"] == "github"
+        assert manifest.plugins[0].source["repo"] == "owner/repo"
+
+    def test_invalid_source_tag_pattern_is_retained_as_a_diagnostic(self):
+        """Tolerant parsing must leave tag-pattern repair to validate."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "Test",
+                "plugins": [
+                    {
+                        "name": "plugin",
+                        "source": {
+                            "type": "github",
+                            "repo": "owner/repo",
+                            "tag_pattern": "latest",
+                        },
+                    }
+                ],
+            }
+        )
+
+        assert manifest.plugins == ()
+        assert manifest.structural_errors == (
+            "plugins[0].source.tag_pattern: "
+            "'Plugin 'plugin' source.tag_pattern' must contain exactly one {version} placeholder, "
+            "got 'latest'",
+        )
+
+    def test_invalid_source_type_is_safe_for_diagnostics(self):
+        """Control characters in untrusted types must not reach CLI output."""
+        manifest = parse_marketplace_json(
+            {
+                "name": "Test",
+                "plugins": [{"name": "plugin", "source": {"type": "bad\x1b"}}],
+            }
+        )
+
+        assert manifest.structural_errors == ("plugins[0].source: unsupported source type 'bad?'",)
 
     def test_empty_plugins_list(self):
         data = {"name": "Empty"}

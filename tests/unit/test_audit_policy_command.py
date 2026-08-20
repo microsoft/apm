@@ -50,6 +50,12 @@ def _setup_clean_project(project: Path) -> None:
     """)
     (project / "apm.yml").write_text(apm_yml, encoding="utf-8")
     (project / "apm.lock.yaml").write_text(lockfile, encoding="utf-8")
+    package = project / "apm_modules" / "owner" / "repo"
+    package.mkdir(parents=True)
+    (package / "apm.yml").write_text(
+        "name: repo\nversion: 1.0.0\n",
+        encoding="utf-8",
+    )
     prompts_dir = project / ".github" / "prompts"
     prompts_dir.mkdir(parents=True)
     (prompts_dir / "test.md").write_text("Clean content\n", encoding="utf-8")
@@ -127,6 +133,42 @@ class TestCiWithPolicyFlag:
             catch_exceptions=False,
         )
         assert result.exit_code == 1
+
+    def test_require_hashes_stays_fail_closed_in_warn_mode(
+        self,
+        runner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Integrity hash failures are not downgraded by warn enforcement."""
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(
+            tmp_path,
+            enforcement="warn",
+            security={"integrity": {"require_hashes": True}},
+        )
+
+        result = runner.invoke(
+            audit,
+            [
+                "--ci",
+                "--no-drift",
+                "--no-fail-fast",
+                "--policy",
+                str(policy_path),
+                "--format",
+                "json",
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        hash_check = next(
+            check for check in payload["checks"] if check["name"] == "dependency-content-hashes"
+        )
+        assert hash_check["passed"] is False
 
 
 class TestCiWithPolicyOrg:
@@ -244,5 +286,5 @@ class TestCiWithoutPolicy:
         # found; JSON is on stdout. Read stdout explicitly so the warning does
         # not corrupt JSON parsing.
         data = json.loads(result.stdout)
-        # Only baseline checks (max 8 incl. skill-subset + includes-consent)
-        assert data["summary"]["total"] <= 8
+        # Only the nine baseline checks, including deployment ownership.
+        assert data["summary"]["total"] == 9

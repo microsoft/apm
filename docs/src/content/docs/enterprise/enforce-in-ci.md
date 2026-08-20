@@ -11,8 +11,8 @@ pull request itself. That is defence in depth: a developer can pass
 `--no-policy`, `--force`, or `APM_POLICY_DISABLE=1` locally; CI cannot.
 
 This page is the recipe set. For the full schema and the rollout
-playbook, see [Governance deep-dive](./governance-guide/) and
-[apm-policy getting started](./apm-policy/).
+playbook, see [Governance deep-dive](../governance-guide/) and
+[apm-policy getting started](../apm-policy/).
 
 ## The gate
 
@@ -20,12 +20,12 @@ playbook, see [Governance deep-dive](./governance-guide/) and
 apm audit --ci
 ```
 
-One command. It runs the eight baseline lockfile checks
-(`lockfile-exists`, `ref-consistency`, `deployed-files-present`,
-`no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`,
-`content-integrity`, `includes-consent`), the install-replay drift
-check, and -- if an `apm-policy.yml` is discovered -- the org policy
-checks. Exit code is `0` clean, `1` on any violation.
+One command. It runs the nine baseline lockfile checks
+(`lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`,
+`deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`,
+`config-consistency`, `content-integrity`, `includes-consent`), the
+install-replay drift check, and -- if an `apm-policy.yml` is discovered --
+the org policy checks. Exit code is `0` clean, `1` on any violation.
 
 Useful flags:
 
@@ -74,14 +74,17 @@ jobs:
 
 `microsoft/apm-action@v1` runs `apm install` by default, so by the time
 `apm audit --ci` runs, the lockfile and deployed files are present.
+That remains the right default for repos that gitignore their deployed
+outputs, because `deployed-files-present` still expects those files on disk.
 Make this job a required status check via
-[GitHub Rulesets](./github-rulesets/) and a violating PR cannot merge.
+[GitHub Rulesets](../github-rulesets/) and a violating PR cannot merge.
 
 ## Audit-only CI pattern
 
 The default `microsoft/apm-action@v1` runs `apm install` before any
-subsequent steps. That is the right default for most workflows: it ensures
-the lockfile and deployed files are present before the audit reads them.
+subsequent steps. That is still the right default for most workflows:
+it ensures the lockfile and deployed files are present before the audit
+reads them.
 
 However, `apm install` overwrites every managed file with a fresh copy
 before `apm audit --ci` runs. If a managed file was modified on disk after
@@ -90,8 +93,14 @@ the install step silently restores the clean copy. The `content-integrity`
 check then compares the freshly restored file against a hash that matches,
 and the tampering goes undetected.
 
-To detect post-install file modification, run the action in setup-only mode
-so it only adds the CLI to `PATH` without touching deployed files:
+For repos that **commit** their deployed files, the CI gate can now run in
+setup-only mode and still execute drift plus `config-consistency` from a cold
+cache. `apm audit --ci` self-hydrates a lock-pinned scratch install, compares
+the tracked checkout against that replay, and never rewrites the working tree
+or live `apm_modules/`.
+
+Use this pattern when the committed deployed files are the contract you want
+the PR to satisfy:
 
 ```yaml
 jobs:
@@ -104,26 +113,28 @@ jobs:
       - uses: microsoft/apm-action@v1
         with:
           setup-only: true     # CLI only; does not run apm install
-      - run: apm audit --ci --no-drift
+      - run: apm audit --ci
         env:
           GITHUB_APM_PAT: ${{ secrets.APM_PAT }}
 ```
 
 `setup-only: true` leaves every deployed file exactly as checked out.
-`--no-drift` skips the install-replay check because no warm cache exists;
-the `content-integrity` check still verifies that every deployed file's
-SHA-256 hash matches the `deployed_file_hashes` recorded in `apm.lock.yaml`.
-Any file whose content was changed after the last install fails this check
+`apm audit --ci` now self-hydrates its scratch replay from `apm.lock.yaml`,
+so drift and `config-consistency` still run even when the checkout has no
+live `apm_modules/` tree. If the scratch replay itself cannot be materialized,
+the audit fails closed instead of reporting a green skip. The
+`content-integrity` check still verifies that every deployed file's SHA-256
+hash matches the `deployed_file_hashes` recorded in `apm.lock.yaml`
 (line-ending-only differences are normalized away per req-lk-012).
 
 The two patterns serve different goals:
 
 | Pattern | Use when |
 |---|---|
-| Full install then audit | Catching developers who skipped `apm install` after editing `apm.yml`; ensuring deployed files are present on a fresh runner |
-| Audit-only (`setup-only: true`) | Detecting modification of deployed files after install; committed files and lockfile are the ground truth |
+| Full install then audit | Catching developers who skipped `apm install` after editing `apm.yml`; ensuring gitignored deployed files are present on a fresh runner |
+| Audit-only (`setup-only: true`) | Zero-install CI gate for repos that commit deployed files: compare the checked-out commit against a lock-pinned scratch replay without rewriting the checkout |
 
-Both patterns enforce policy and the eight baseline lockfile checks. The
+Both patterns enforce policy and the nine baseline lockfile checks. The
 difference is only in whether content-integrity can see tampered bytes.
 
 ## Recipe: SARIF for GitHub Code Scanning
@@ -183,7 +194,7 @@ jobs:
 ```
 
 `--no-fail-fast` lets the sweep report every finding rather than the
-first one. See [drift detection](./drift-detection/) for what the
+first one. See [drift detection](../drift-detection/) for what the
 replay actually checks and how to debug a finding locally.
 
 ## When the gate blocks a PR
@@ -194,6 +205,12 @@ The fix path depends on which check failed.
   The author skipped `apm install` after editing `apm.yml`. They run
   `apm install`, commit `apm.lock.yaml` and the integrated files, and
   push.
+- **`deployment-ledger-owners`.** A canonical deployment row references
+  an owner no longer in the lockfile (typically a dependency removed
+  without running `apm prune`). Run `apm prune`, then rerun `apm audit`.
+  Prune repairs the stale ownership record; it never deletes a file on the
+  strength of a ghost row alone -- untrusted bytes it cannot verify are
+  preserved for manual review.
 - **`content-integrity` or a hidden-Unicode finding.** A primitive was
   hand-edited. The author runs `apm audit --strip` to clean it (or
   reverts the edit), then `apm install` to refresh the lockfile.
@@ -216,12 +233,12 @@ must be visible in the policy file's history.
 
 ## Next steps
 
-- [drift detection](./drift-detection/) -- what the replay actually
+- [drift detection](../drift-detection/) -- what the replay actually
   catches and how to read its output.
-- [security model](./security/) -- the
+- [security model](../security/) -- the
   built-in install-time scan that complements the CI gate.
-- [github rulesets](./github-rulesets/) -- make the audit job a
+- [github rulesets](../github-rulesets/) -- make the audit job a
   required status check across an org.
-- [APM in CI/CD](../integrations/ci-cd/) -- deeper patterns for
+- [APM in CI/CD](../../integrations/ci-cd/) -- deeper patterns for
   Azure Pipelines, GitLab, Jenkins, air-gapped runners, and bundle
   caching across jobs.

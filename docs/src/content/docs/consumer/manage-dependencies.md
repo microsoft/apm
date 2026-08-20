@@ -63,10 +63,21 @@ parser. The supported forms:
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
 | Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name>, type: gitlab }` | Aliases, nested groups, monorepo subpaths, bespoke GitLab hosts, or anything string forms cannot express. |
-| Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). Resolved to a concrete git ref at install time. |
+| Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). The publisher controls the tag naming convention. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
 | Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
 
+GitHub and package-registry owner/repository identifiers are normalized to
+lowercase only for comparison, lock keys, and cache identity. APM retains the
+**repository display spelling** selected by the first declaration in `apm.yml`,
+`apm_modules/`, and generated links: `Owner/Repo` installs at
+`apm_modules/Owner/Repo`, while `owner/repo` still compares as the same package.
+A reinstall migrates one stale APM-created case variant before rewriting managed
+links. If multiple case-equivalent package directories exist, install stops for
+manual inspection; follow the
+[migration recovery steps](../../troubleshooting/migration/#mixed-case-github-package-paths).
+Repository path casing remains identity-significant for unknown git hosts
+because a self-hosted backend may be case-sensitive.
 
 Object form in YAML — three mutually exclusive keys select the variant
 (`git`, `path`, or `marketplace`):
@@ -110,6 +121,13 @@ dependencies:
       version: 1.4.0
 
 ```
+
+Remote Git objects accept only `git`, `path`, `ref`, `alias`, `type`,
+`allow_insecure`, `skills`, and `targets`. Unknown keys fail closed. In
+particular, `version` reports `use 'ref' for a branch, tag, or commit`;
+`version` belongs to registry and marketplace objects. The special
+`git: parent` form accepts only `git`, `path`, `ref`, and `alias`. See the
+[full field table](../../reference/manifest-schema/#412-object-form).
 
 A `path:` declared inside a remote package is allowed only when the resolved
 path stays inside that same cloned repo. APM expands it to the parent's remote
@@ -242,10 +260,18 @@ override the marketplace entry's default `source.ref`:
 apm install plugin@marketplace#v2.0.0
 ```
 
-In `apm.yml`, use the `version` field in the marketplace object form.
-Semver ranges and bare versions (e.g. `~2.1.0`, `^2.0`, `2.1.0`) are
-resolved against git tags matching `{name}--v{version}` on the
-marketplace repository. The highest matching tag is used.
+In `apm.yml`, use the `version` field in the marketplace object form. Semver
+ranges and bare versions (for example `~2.1.0`, `^2.0`, or `2.1.0`) resolve
+against the publisher's effective tag pattern: the package override first,
+then the marketplace build default. Old marketplace metadata without a
+`tag_pattern` field keeps the legacy `{name}--v{version}` convention.
+Malformed patterns and ranges with no match fail instead of becoming raw refs.
+
+`apm install` resolves and locks the highest matching tag. Re-running it
+replays the locked version without changes. After the producer adds tags and
+republishes the marketplace metadata, run `apm marketplace update <name>`;
+`apm outdated` then reports the new resolved ref and `apm update --yes`
+applies it.
 
 ### Pin a semver range
 
@@ -295,9 +321,13 @@ apm prune             # delete orphaned packages from apm_modules/
 ```
 
 `apm prune` removes any directory in `apm_modules/` that no longer
-corresponds to a declared dependency. It does not touch your manifest,
-your lockfile entries are rewritten on the next `apm install`, and
-deployed files in `.github/`, `.claude/`, etc. are reconciled then too.
+corresponds to a declared dependency or a transitive dependency still
+required by another package. It does not touch your manifest.
+Lockfile entries, deployed harness files (`.github/`, `.claude/`, etc.),
+and merged hook configuration owned by the pruned package are all
+reconciled immediately by `apm prune` itself -- remaining direct and
+transitive packages keep their hooks; no follow-up `apm install` is
+required.
 
 If you also want to refresh remaining deps to their latest versions or refs, see
 [Update and refresh](../update-and-refresh/).

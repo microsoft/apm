@@ -6,6 +6,67 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.subsets import _levenshtein_distance
+
+
+class TestLocalPathDepTargets:
+    """Regression tests for issue #1982: targets: ignored on path: deps."""
+
+    def test_local_path_parse_targets(self) -> None:
+        dep = DependencyReference.parse_from_dict({"path": "./local", "targets": ["claude"]})
+
+        assert dep.target_subset == ["claude"]
+        assert dep.is_local
+
+    def test_local_path_parse_no_targets(self) -> None:
+        dep = DependencyReference.parse_from_dict({"path": "./local"})
+
+        assert dep.target_subset is None
+
+    def test_local_path_targets_round_trip(self) -> None:
+        entry = {"path": "./local", "targets": ["codex", "claude"]}
+
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+
+        assert emitted == {"path": "./local", "targets": ["claude", "codex"]}
+
+    def test_local_path_targets_and_skills_coexist(self) -> None:
+        entry = {"path": "./local", "targets": ["claude"], "skills": ["reviewer"]}
+
+        dep = DependencyReference.parse_from_dict(entry)
+
+        assert dep.target_subset == ["claude"]
+        assert dep.skill_subset == ["reviewer"]
+        assert dep.to_apm_yml_entry() == {
+            "path": "./local",
+            "skills": ["reviewer"],
+            "targets": ["claude"],
+        }
+
+    def test_local_path_unknown_target_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown target"):
+            DependencyReference.parse_from_dict({"path": "./local", "targets": ["notarealthing"]})
+
+    def test_local_path_parse_alias(self) -> None:
+        dep = DependencyReference.parse_from_dict({"path": "./local", "alias": "my-skills"})
+
+        assert dep.alias == "my-skills"
+        assert dep.is_local
+
+    def test_local_path_alias_round_trip(self) -> None:
+        entry = {"path": "./local", "alias": "my-skills"}
+
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+
+        assert emitted == {"path": "./local", "alias": "my-skills"}
+
+    def test_local_path_alias_invalid_chars_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid alias"):
+            DependencyReference.parse_from_dict({"path": "./local", "alias": "bad alias!"})
+
+    def test_local_path_unknown_field_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported field"):
+            DependencyReference.parse_from_dict({"path": "./local", "target": ["claude"]})
 
 
 def test_parse_targets_field() -> None:
@@ -36,6 +97,42 @@ def test_parse_targets_empty_list_raises() -> None:
 def test_parse_targets_unknown_name_raises() -> None:
     with pytest.raises(ValueError, match=r"Valid targets: .* Did you mean 'codex'"):
         DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["codx"]})
+
+
+def test_parse_targets_suggests_name_at_edit_distance_boundary() -> None:
+    with pytest.raises(ValueError, match=r"Did you mean 'codex'"):
+        DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coexx"]})
+
+
+def test_parse_targets_omits_suggestion_beyond_edit_distance_boundary() -> None:
+    with pytest.raises(ValueError, match=r"^((?!Did you mean).)*$"):
+        DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coexxx"]})
+
+
+def test_parse_targets_rejects_non_string_name() -> None:
+    with pytest.raises(ValueError, match="non-empty string"):
+        DependencyReference.parse_from_dict({"git": "owner/repo", "targets": [7]})
+
+
+def test_parse_targets_tie_break_prefers_lexicographically_first_match() -> None:
+    # "coade" is distance 2 from both "claude" and "codex"; "claude" sorts first.
+    with pytest.raises(ValueError, match=r"Did you mean 'claude'"):
+        DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["coade"]})
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ("same", "same", 0),
+        ("", "codex", 5),
+        ("codex", "", 5),
+        ("codexx", "codex", 1),
+        ("kitten", "sitting", 3),
+        ("flaw", "lawn", 2),
+    ],
+)
+def test_target_edit_distance_contract(left: str, right: str, expected: int) -> None:
+    assert _levenshtein_distance(left, right) == expected
 
 
 def test_to_apm_yml_entry_with_targets() -> None:

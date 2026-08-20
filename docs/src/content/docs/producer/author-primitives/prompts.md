@@ -5,12 +5,12 @@ description: Ship a parameterized, single-purpose AI workflow as a .prompt.md pr
 
 A prompt is a single-purpose, parameterized AI workflow. Write one
 Markdown file with frontmatter; `apm install` deploys it as a Copilot prompt,
-a Claude `/command`, a Cursor command, an OpenCode command, a Gemini
-TOML command, and a Windsurf workflow.
+a Claude `/command`, a Grok Build command, a Cursor command, an OpenCode
+command, a Gemini TOML command, and a Windsurf workflow.
 
 Use a prompt when the consumer invokes the workflow on demand
 ("review this PR", "draft a release note"). Use a
-[skill](./skills/) when the harness should auto-discover a
+[skill](../skills/) when the harness should auto-discover a
 meta-guide mid-conversation. Prompts are called; skills are reached
 for.
 
@@ -88,6 +88,7 @@ and `command_integrator.py`.
 |---|---|---|
 | copilot | `.github/prompts/<name>.prompt.md` | verbatim copy |
 | claude | `.claude/commands/<name>.md` | `/command`, inputs become `$arg` |
+| grok-build | `.grok/commands/<name>.md` | Grok command |
 | cursor | `.cursor/commands/<name>.md` | shared command transform |
 | opencode | `.opencode/commands/<name>.md` | shared command transform |
 | gemini | `.gemini/commands/<name>.toml` | TOML command |
@@ -95,7 +96,7 @@ and `command_integrator.py`.
 | codex | (none) | Codex has no prompts or commands primitive |
 
 For the broader primitive-by-target reach map, see
-[Primitives and targets](../../concepts/primitives-and-targets/).
+[Primitives and targets](../../../concepts/primitives-and-targets/).
 
 ## How a consumer invokes it
 
@@ -121,13 +122,13 @@ scripts:
 
 `apm run review --param pr_url=https://...` compiles the prompt with
 the parameter bound and invokes the harness. See
-[Lifecycle: RUN](../../concepts/lifecycle/) for the rewrite rules.
+[Lifecycle: RUN](../../../concepts/lifecycle/) for the rewrite rules.
 
 ## Pitfalls
 
 - **Non-preserved frontmatter is dropped.** Keys like `author`,
   `mcp`, or `parameters` survive on Copilot (verbatim copy) but are
-  stripped on Claude/Cursor/OpenCode/Gemini/Windsurf. APM logs a
+  stripped on Claude/Cursor/OpenCode/Gemini/Grok Build/Windsurf. APM logs a
   diagnostic at install time. Keep authoritative metadata to the
   five preserved keys.
 - **Input names must match `[A-Za-z][\w-]{0,63}`.** Other entries
@@ -135,7 +136,7 @@ the parameter bound and invokes the harness. See
   command frontmatter.
 - **Codex receives nothing.** Do not assume a prompt is universal.
   If Codex coverage matters, ship the same workflow as a
-  [skill](./skills/) -- skills route to all canonical skill targets.
+  [skill](../skills/) -- skills route to all canonical skill targets.
 - **One file, one command name.** Two prompts with the same base
   filename in `.apm/prompts/` and at the package root collide; the
   later writer wins on copilot and the transform fails on

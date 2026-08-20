@@ -642,7 +642,10 @@ class TestErrorOnWrite:
                 "apm_cli.primitives.discovery.discover_primitives",
                 return_value=primitives,
             ),
-            patch.object(Path, "write_text", side_effect=OSError("disk full")),
+            patch(
+                "apm_cli.compilation.output_writer.CompiledOutputWriter.write_many",
+                side_effect=OSError("disk full"),
+            ),
         ):
             result = compile_user_root_contexts([target], source_root)
 

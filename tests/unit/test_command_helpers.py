@@ -448,6 +448,27 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         orphaned = _check_orphaned_packages()
         assert orphaned == [], f"Whole-repo package should not be orphaned; got: {orphaned}"
 
+    def test_dev_dependency_not_orphaned(self, tmp_path, monkeypatch):
+        """A package declared only as a dev dependency is not orphaned."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "devDependencies:\n"
+            "  apm:\n"
+            "    - github.example.com/org/dev-package\n",
+            encoding="utf-8",
+        )
+
+        pkg_dir = tmp_path / "apm_modules" / "org" / "dev-package"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: dev-package\nversion: 1.0.0\n",
+            encoding="utf-8",
+        )
+
+        assert _check_orphaned_packages() == []
+
     def test_whole_repo_with_unrelated_orphan(self, tmp_path, monkeypatch):
         """Whole-repo dep is fine; an unrelated stale package IS orphaned."""
         monkeypatch.chdir(tmp_path)

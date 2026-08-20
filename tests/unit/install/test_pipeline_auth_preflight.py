@@ -1,18 +1,23 @@
 """Unit tests for --update auth pre-flight probe in pipeline.py (#1015)."""
 
+import os
 import subprocess  # noqa: F401
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
 from apm_cli.install.errors import AuthenticationError
 
 
-def _make_dep(host="dev.azure.com", repo_url="myorg/myproject/_git/myrepo"):
+def _make_dep(
+    host="dev.azure.com",
+    repo_url="myorg/myproject/_git/myrepo",
+    port=None,
+):
     dep = MagicMock()
     dep.host = host
     dep.repo_url = repo_url
-    dep.port = None
+    dep.port = port
     dep.is_azure_devops.return_value = True
     dep.explicit_scheme = None
     dep.is_insecure = False
@@ -115,7 +120,7 @@ class TestPreflightSkippedForGitHubDeps:
 
 
 class TestPreflightClustersDeduplicate:
-    """Multiple deps on the same (host, org) only probe once."""
+    """Multiple deps on the same (host, port, org) only probe once."""
 
     @patch("subprocess.run")
     def test_deduplication(self, mock_run):
@@ -130,6 +135,41 @@ class TestPreflightClustersDeduplicate:
 
         _preflight_auth_check(ctx, resolver, verbose=False)
         assert mock_run.call_count == 1
+
+    @patch("subprocess.run")
+    def test_same_host_and_org_on_distinct_ports_probe_twice(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        dep1 = _make_dep(
+            host="ado.example.test",
+            repo_url="DefaultCollection/projA/_git/repoA",
+            port=8443,
+        )
+        dep2 = _make_dep(
+            host="ado.example.test",
+            repo_url="DefaultCollection/projB/_git/repoB",
+            port=9443,
+        )
+        ctx = _make_ctx(deps=[dep1, dep2])
+        resolver = _make_resolver()
+        resolver.resolve_for_dep.side_effect = (
+            MagicMock(
+                token="pat",
+                auth_scheme="basic",
+                host_info=MagicMock(display_name="ado.example.test:8443"),
+            ),
+            MagicMock(
+                token="pat",
+                auth_scheme="basic",
+                host_info=MagicMock(display_name="ado.example.test:9443"),
+            ),
+        )
+
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        with patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False):
+            _preflight_auth_check(ctx, resolver, verbose=False)
+
+        assert mock_run.call_count == 2
 
 
 def _make_generic_dep(host="gitlab.internal.corp", repo_url="org/repo"):
@@ -312,7 +352,10 @@ class TestAdoBearerFallback:
         assert resolver.execute_with_bearer_fallback.called
         # _build_git_env was used for bearer env (no leak of GIT_TOKEN).
         resolver._build_git_env.assert_called_with(
-            "dummy.jwt.token", scheme="bearer", host_kind="ado"
+            "dummy.jwt.token",
+            scheme="bearer",
+            host_kind="ado",
+            base_env=ANY,
         )
 
     @patch("subprocess.run")

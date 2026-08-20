@@ -85,15 +85,15 @@ Any public repo that works with `npx skills add owner/repo` also works with
 layouts (the [agentskills.io](https://agentskills.io) convention) as a
 first-class package type; `apm.yml` is optional.
 
-See [Package Types](../reference/package-types/#skill-collection-skillsnameskillmd) for the full
+See [Package Types](../../reference/package-types/#skill-collection-skillsnameskillmd) for the full
 skill collection layout reference.
 
 ## Next steps
 
 - [Quickstart](/apm/quickstart/) -- first-time setup walkthrough
 - [Dependencies](/apm/consumer/manage-dependencies/) -- managing external packages
-- [Manifest schema](../reference/manifest-schema/) -- full `apm.yml` reference
-- [CLI commands](../reference/cli/install/) -- complete command reference
+- [Manifest schema](../../reference/manifest-schema/) -- full `apm.yml` reference
+- [CLI commands](../../reference/cli/install/) -- complete command reference
 
 ## Deprecated targets
 

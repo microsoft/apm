@@ -727,20 +727,15 @@ class TestListValuedFrontmatterNormalization(unittest.TestCase):
         self.assertIsInstance(primitive.apply_to, str)
         self.assertIn("**/*.py", primitive.apply_to)
 
-    def test_apply_to_multi_element_list_uses_first_element(self):
-        """applyTo with multiple patterns uses only the first element.
-
-        Downstream glob consumers treat apply_to as a single pattern string;
-        comma-joining multiple patterns produces a string no consumer can split.
-        Multi-pattern support is tracked separately.
-        """
+    def test_apply_to_multi_element_list_preserves_all_patterns(self):
+        """A YAML applyTo list becomes the canonical comma-separated OR expression."""
         path = self._write(
             "multi.instructions.md",
             "---\ndescription: Test\napplyTo:\n  - '**/*.py'\n  - '**/*.ts'\n---\n\n# c\n",
         )
         primitive = parse_primitive_file(path)
         self.assertIsInstance(primitive, Instruction)
-        self.assertEqual(primitive.apply_to, "**/*.py")
+        self.assertEqual(primitive.apply_to, "**/*.py,**/*.ts")
 
     def test_apply_to_string_unchanged(self):
         """Scalar applyTo strings pass through unchanged."""

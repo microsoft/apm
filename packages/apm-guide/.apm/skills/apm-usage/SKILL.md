@@ -26,7 +26,7 @@ agents, skills, and MCP server configurations across projects.
 
 ## Key rules
 
-- **Commit these files:** apm.yml, apm.lock.yaml, .apm/, .github/, .claude/, .cursor/
+- **Commit these files:** apm.yml, apm.lock.yaml, .apm/, deployed harness directories including .grok/, and AGENTS.md
 - **Never commit:** apm_modules/ (add to .gitignore)
 - **Team sync:** after `git clone`, run `apm install` to restore dependencies
 - **Update deps:** `apm install --update` refreshes to latest refs

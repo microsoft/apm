@@ -4,11 +4,15 @@ import io
 
 import pytest
 import yaml
+from ruamel.yaml import YAMLError as RuamelYAMLError
 
 from apm_cli.utils.yaml_io import (
+    _roundtrip_yaml,
     dump_yaml,
+    dump_yaml_roundtrip,
     load_frontmatter,
     load_yaml,
+    load_yaml_roundtrip,
     load_yaml_str,
     yaml_to_str,
 )
@@ -208,6 +212,45 @@ class TestLoadYamlStr:
         data = load_yaml_str(doc)
         assert data["use1"] == {"x": 1}
         assert data["use2"] == {"x": 1}
+
+
+class TestLoadYamlRoundtrip:
+    """Tests for comment-preserving YAML round-trip helpers."""
+
+    def test_roundtrip_preserves_comments(self, tmp_path):
+        """A load/mutate/dump cycle preserves existing comments."""
+        p = tmp_path / "apm.yml"
+        p.write_text(
+            "# project note\nname: demo\n# deps note\ndependencies: []\n", encoding="utf-8"
+        )
+
+        data = load_yaml_roundtrip(p)
+        data["dependencies"].append("github:owner/new-skill@v1")
+        dump_yaml_roundtrip(data, p)
+
+        rendered = p.read_text(encoding="utf-8")
+        assert "# project note" in rendered
+        assert "# deps note" in rendered
+        assert "github:owner/new-skill@v1" in rendered
+
+    def test_alias_expansion_bomb_fails_closed(self, tmp_path):
+        """The round-trip path keeps the bounded-loader expansion guard."""
+        p = tmp_path / "apm.yml"
+        lines = ["l0: &l0 [x]"]
+        prev = "l0"
+        for i in range(1, 25):
+            cur = f"l{i}"
+            lines.append(f"{cur}: &{cur} [*{prev}, *{prev}]")
+            prev = cur
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        with pytest.raises(yaml.YAMLError):
+            load_yaml_roundtrip(p)
+
+    def test_roundtrip_parser_rejects_python_tags(self):
+        """The ruamel layer also fails closed on unsafe Python tags."""
+        with pytest.raises(RuamelYAMLError):
+            _roundtrip_yaml().load("x: !!python/name:os.system ''\n")
 
 
 class TestLoadFrontmatter:

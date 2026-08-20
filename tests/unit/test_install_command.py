@@ -6,6 +6,7 @@ import tempfile
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -78,6 +79,8 @@ class TestInstallCommandAutoBootstrap:
                 MagicMock(repo_url="test/package", reference="main")
             ]
             mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_pkg_instance.get_all_mcp_dependencies.return_value = []
+            mock_pkg_instance.get_lsp_dependencies.return_value = []
             mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
 
             # Mock the install function to avoid actual installation
@@ -88,7 +91,7 @@ class TestInstallCommandAutoBootstrap:
             )
 
             result = self.runner.invoke(cli, ["install", "test/package"])
-            assert result.exit_code == 0
+            assert result.exit_code == 0, (result.output, result.exception)
             assert "Created apm.yml" in result.output
             assert Path("apm.yml").exists()
 
@@ -129,7 +132,7 @@ class TestInstallCommandAutoBootstrap:
 
             result = self.runner.invoke(cli, ["install", "org1/pkg1", "org2/pkg2"])
 
-            assert result.exit_code == 0
+            assert result.exit_code == 0, (result.output, result.exception)
             assert "Created apm.yml" in result.output
             assert Path("apm.yml").exists()
 
@@ -298,10 +301,18 @@ class TestInstallCommandAutoBootstrap:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
+    @patch(
+        "apm_cli.commands.install._resolve_bootstrap_project_name",
+        return_value="resolved-name",
+    )
     def test_install_auto_created_apm_yml_has_correct_metadata(
-        self, mock_install_apm, mock_apm_package, mock_validate
+        self,
+        mock_resolve_project_name,
+        mock_install_apm,
+        mock_apm_package,
+        mock_validate,
     ):
-        """Test that auto-created apm.yml has correct metadata."""
+        """Auto-bootstrap must write the centrally resolved project name."""
         with self._chdir_tmp() as tmp_dir:
             # Create a directory with a specific name to test project name detection
             project_dir = tmp_dir / "my-awesome-project"
@@ -324,18 +335,78 @@ class TestInstallCommandAutoBootstrap:
                 )
             )
 
-            result = self.runner.invoke(cli, ["install", "test/package"])
+            result = self.runner.invoke(cli, ["install", "test/package", "--verbose"])
 
             assert result.exit_code == 0
             assert Path("apm.yml").exists()
 
-            # Verify auto-detected project name
+            mock_resolve_project_name.assert_called_once_with("my-awesome-project")
+            assert (
+                'Using default project name "resolved-name" because '
+                "derived name 'my-awesome-project' is invalid"
+            ) in " ".join(result.output.split())
+
+            # Verify centrally resolved project name
             with open("apm.yml", encoding="utf-8") as f:
                 config = yaml.safe_load(f)
-                assert config["name"] == "my-awesome-project"
+                assert config["name"] == "resolved-name"
                 assert "version" in config
                 assert "description" in config
                 assert "APM project" in config["description"]
+
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_install_auto_bootstrap_at_root_writes_valid_name(
+        self,
+        mock_install_apm,
+        mock_apm_package,
+        mock_validate,
+    ):
+        """A filesystem-root candidate must produce a valid manifest name."""
+        with self._chdir_tmp():
+            mock_validate.return_value = True
+            mock_pkg_instance = MagicMock()
+            mock_pkg_instance.get_apm_dependencies.return_value = [
+                MagicMock(repo_url="test/package", reference="main")
+            ]
+            mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
+            )
+
+            real_path = Path
+
+            class RootCwdPath:
+                def __new__(cls, *args):
+                    return real_path(*args)
+
+                @classmethod
+                def cwd(cls):
+                    return real_path("/")
+
+            with patch("apm_cli.commands.install.Path", RootCwdPath):
+                result = self.runner.invoke(cli, ["install", "test/package"])
+
+            assert result.exit_code == 0, f"{result.output}\n{result.exception!r}"
+            with open("apm.yml", encoding="utf-8") as f:
+                assert yaml.safe_load(f)["name"] == "my-project"
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_install_positional_url_total_validation_failure_exits_one(self, mock_validate):
+        """A positional URL that cannot be validated must fail the command."""
+        with self._chdir_tmp():
+            result = self.runner.invoke(cli, ["install", "https://127.0.0.1:1/org/repo.git"])
+
+            assert result.exit_code == 1
+            assert "All packages failed validation" in result.output
+            assert "Install interrupted" not in result.output
+            assert not Path("apm.yml").exists()
+            mock_validate.assert_called()
 
     @patch("apm_cli.commands.install._validate_package_exists")
     def test_install_invalid_package_format_with_no_apm_yml(self, mock_validate):
@@ -344,8 +415,8 @@ class TestInstallCommandAutoBootstrap:
             # Don't mock validation - let it handle invalid format
             result = self.runner.invoke(cli, ["install", "invalid-package"])
 
-            # Should create apm.yml but fail to add invalid package
-            assert Path("apm.yml").exists()
+            # Failed first installs must not leave the bootstrap manifest.
+            assert not Path("apm.yml").exists()
             assert "invalid format" in result.output
 
     @patch("apm_cli.commands.install._validate_package_exists")
@@ -390,7 +461,7 @@ class TestInstallCommandAutoBootstrap:
             # Should show what would be added
             assert result.exit_code == 0
             assert "Would add" in result.output or "Dry run" in result.output
-            # apm.yml should still be created (for dry-run to work)
+            # Dry-run preserves the bootstrap configuration for the next run.
             assert Path("apm.yml").exists()
 
 
@@ -470,22 +541,36 @@ class TestValidationFailureReasonMessages:
             # user is already in verbose mode.
             assert "run with --verbose for the full probe log" not in output
 
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_selfhosted_gitlab_like_host_hints_gitlab_host_env(self, mock_validate, monkeypatch):
+        """Issue #2066: an unrecognised self-hosted FQDN with a multi-segment
+        path is folded into a single (non-existent) repo path at parse time.
+        The failure reason should point at GITLAB_HOST/APM_GITLAB_HOSTS
+        instead of the generic "not accessible" message.
+        """
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(
+                cli,
+                [
+                    "install",
+                    "gitlab.company.com/my-org/my-monorepo/primitives/skills/my-skill#v1.0.0",
+                ],
+            )
+            output = " ".join(result.output.split())
+            assert "GITLAB_HOST=gitlab.company.com" in output
+            assert "APM_GITLAB_HOSTS" in output
+
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
         return_value=None,
     )
-    @patch("urllib.request.urlopen")
-    def test_verbose_validation_failure_calls_build_error_context(self, mock_urlopen, _mock_cred):
+    @patch("apm_cli.install.validation.requests.get")
+    def test_verbose_validation_failure_calls_build_error_context(self, mock_get, _mock_cred):
         """When GitHub validation fails in verbose mode, build_error_context should be invoked."""
-        import urllib.error
-
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="https://api.github.com/repos/owner/repo",
-            code=404,
-            msg="Not Found",
-            hdrs={},
-            fp=None,
-        )
+        mock_get.return_value = MagicMock(ok=False, status_code=404, reason="Not Found", headers={})
 
         with patch.object(
             __import__("apm_cli.core.auth", fromlist=["AuthResolver"]).AuthResolver,
@@ -523,11 +608,8 @@ class TestValidationFailureReasonMessages:
         ):
             result = _validate_package_exists("owner/repo/skills/my-skill", verbose=True)
             assert result is False
-            mock_resolve.assert_called_once()
-            mock_build_ctx.assert_called_once()
-            call_args = mock_build_ctx.call_args
-            assert call_args[0][0] == "github.com"  # host
-            assert "owner/repo/skills/my-skill" in call_args[0][1]  # operation
+            mock_resolve.assert_not_called()
+            mock_build_ctx.assert_not_called()
 
     def test_virtual_package_validation_reuses_auth_resolver(self):
         """Virtual package validation should pass its AuthResolver to the downloader."""
@@ -721,7 +803,7 @@ class TestDevMcpDependenciesInstall:
             patch("apm_cli.commands.install.MCPIntegrator.install", return_value=1) as install,
             patch("apm_cli.commands.install.MCPIntegrator.update_lockfile"),
         ):
-            result = CliRunner().invoke(cli, ["install"])
+            result = CliRunner().invoke(cli, ["install", "--target", "claude"])
 
         assert result.exit_code == 0, result.output
         assert install.call_count == 1
@@ -1194,18 +1276,11 @@ class TestGenericHostSshFirstValidation:
     def test_github_host_skips_ssh_attempt(self, mock_run):
         """GitHub.com repositories do NOT go through the SSH-first ls-remote path."""
 
-        import urllib.error
-        import urllib.request
-
         from apm_cli.commands.install import _validate_package_exists
 
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = urllib.error.HTTPError(
-                url="https://api.github.com/repos/owner/repo",
-                code=404,
-                msg="Not Found",
-                hdrs={},
-                fp=None,
+        with patch("apm_cli.install.validation.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(
+                ok=False, status_code=404, reason="Not Found", headers={}
             )
             result = _validate_package_exists("owner/repo", verbose=False)
 
@@ -1437,19 +1512,14 @@ class TestAllowInsecureFlag:
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
-    @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
     def test_http_dep_addition_passes_with_allow_insecure_flag(
-        self, mock_install_apm, mock_apm_package, mock_validate
+        self, mock_install_apm, mock_validate
     ):
-        """HTTP dependency can be added when the CLI flag is passed."""
+        """CLI install persists and reloads the custom HTTP port."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 os.chdir(tmp_dir)
-                mock_pkg_instance = MagicMock()
-                mock_pkg_instance.get_apm_dependencies.return_value = []
-                mock_pkg_instance.get_mcp_dependencies.return_value = []
-                mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
                 mock_install_apm.return_value = InstallResult(
                     diagnostics=MagicMock(
                         has_diagnostics=False, has_critical_security=False, error_count=0
@@ -1457,19 +1527,43 @@ class TestAllowInsecureFlag:
                 )
 
                 result = self.runner.invoke(
-                    cli, ["install", "--allow-insecure", "http://my-server.example.com/owner/repo"]
+                    cli,
+                    [
+                        "install",
+                        "--allow-insecure",
+                        "http://my-server.example.com:8080/owner/repo",
+                    ],
                 )
 
                 assert result.exit_code == 0
                 with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
 
-                assert config["dependencies"]["apm"] == [
-                    {
-                        "git": "http://my-server.example.com/owner/repo",
-                        "allow_insecure": True,
-                    }
-                ]
+                persisted_entry = config["dependencies"]["apm"][0]
+                persisted_url = urlparse(persisted_entry["git"])
+                assert (
+                    persisted_url.scheme,
+                    persisted_url.hostname,
+                    persisted_url.port,
+                    persisted_url.path,
+                ) == ("http", "my-server.example.com", 8080, "/owner/repo")
+                assert persisted_entry["allow_insecure"] is True
+                installed_package = mock_install_apm.call_args.args[0]
+                installed_ref = installed_package.get_apm_dependencies()[0]
+                assert installed_ref.get_identity() == "my-server.example.com:8080/owner/repo"
+                assert installed_ref.port == 8080
+                from apm_cli.core.auth import AuthResolver
+                from apm_cli.deps.host_backends import backend_for
+
+                clone_url = urlparse(
+                    backend_for(installed_ref, AuthResolver()).build_clone_http_url(installed_ref)
+                )
+                assert (
+                    clone_url.scheme,
+                    clone_url.hostname,
+                    clone_url.port,
+                    clone_url.path,
+                ) == ("http", "my-server.example.com", 8080, "/owner/repo.git")
                 assert mock_install_apm.call_args.kwargs["allow_insecure"] is True
                 assert mock_install_apm.call_args.kwargs["allow_insecure_hosts"] == ()
             finally:
@@ -1794,6 +1888,7 @@ class TestInstallMcpFlag:
                             "version": "0.1.0",
                             "description": "",
                             "author": "",
+                            "targets": ["claude"],
                             "dependencies": {"apm": [], "mcp": []},
                             "scripts": {},
                         },

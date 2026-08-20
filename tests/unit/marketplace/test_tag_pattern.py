@@ -13,6 +13,7 @@ from apm_cli.marketplace.tag_pattern import (
     is_version_tag_ref,
     parse_tag_version,
     render_tag,
+    validate_tag_pattern,
 )
 
 # ---------------------------------------------------------------------------
@@ -204,6 +205,30 @@ class TestBuildTagRegex:
         m = rx.match("v+1.0.0")
         assert m is not None
         assert rx.match("vv1.0.0") is None  # '+' is not a quantifier
+
+
+class TestValidateTagPattern:
+    """Consumer-safe pattern validation is owned by tag_pattern.py."""
+
+    @pytest.mark.parametrize(
+        "pattern",
+        ["v{version}", "{version}", "{name}/{version}", "release-{version}"],
+    )
+    def test_accepts_supported_patterns(self, pattern: str) -> None:
+        assert validate_tag_pattern(f" {pattern} ") == pattern
+
+    @pytest.mark.parametrize(
+        ("pattern", "error"),
+        [
+            ("", "non-empty"),
+            ("release-{name}", "exactly one"),
+            ("v{version}-{version}", "exactly one"),
+            ("release-{channel}-{version}", "unsupported placeholder"),
+        ],
+    )
+    def test_rejects_unsupported_patterns(self, pattern: str, error: str) -> None:
+        with pytest.raises(ValueError, match=error):
+            validate_tag_pattern(pattern)
 
 
 # ---------------------------------------------------------------------------

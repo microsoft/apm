@@ -22,6 +22,11 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands.update import _handle_service_only_update, _module_cache_needs_rehydration
+from apm_cli.core.scope import InstallScope
+from apm_cli.core.target_detection import EffectiveTargetDecision
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.install.plan import PlanEntry, UpdatePlan
 
 
@@ -50,6 +55,44 @@ def _make_apm_yml(project_dir: Path) -> None:
     (project_dir / "apm.yml").write_text(
         "name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - microsoft/apm\n"
     )
+
+
+def test_service_only_required_failure_renders_before_exit(tmp_path: Path) -> None:
+    """Service-only updates must not expose an unhandled integration error."""
+    package = MagicMock()
+    package.has_any_apm_dependencies.return_value = False
+    package.get_all_mcp_dependencies.return_value = [MagicMock()]
+    package.get_lsp_dependencies.return_value = []
+    logger = MagicMock()
+    decision = EffectiveTargetDecision("claude", "apm config target")
+
+    with (
+        patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path),
+        patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
+        patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"),
+        patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+        patch(
+            "apm_cli.core.target_detection.resolve_package_target_decision",
+            return_value=decision,
+        ),
+        patch(
+            "apm_cli.commands.update._run_mcp_lsp_integration",
+            side_effect=RequiredIntegrationError("required write failed"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _handle_service_only_update(
+            apm_package=package,
+            scope=InstallScope.PROJECT,
+            target=None,
+            dry_run=False,
+            logger=logger,
+            verbose=False,
+        )
+
+    assert exc_info.value.code == 1
+    logger.error.assert_called_once_with("required write failed")
+    logger.render_summary.assert_called_once_with()
 
 
 # -----------------------------------------------------------------------------
@@ -388,6 +431,113 @@ class TestUpdateNonTty:
 
 
 class TestUpdateNoChanges:
+    def test_locked_local_dependency_rehydrates_canonical_cache_once(
+        self,
+        runner,
+        tmp_path,
+    ) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            project = Path.cwd()
+            local_source = project / "packages" / "local-pkg"
+            local_source.mkdir(parents=True)
+            (local_source / "apm.yml").write_text(
+                "name: local-pkg\nversion: 1.0.0\n",
+                encoding="utf-8",
+            )
+            (project / "apm.yml").write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - path: ./packages/local-pkg\n",
+                encoding="utf-8",
+            )
+            locked = LockedDependency(
+                repo_url="_local/local-pkg",
+                source="local",
+                local_path="./packages/local-pkg",
+            )
+            lockfile = LockFile()
+            lockfile.add_dependency(locked)
+            lockfile.write(project / "apm.lock.yaml")
+            modules_dir = project / "apm_modules"
+            install_path = locked.to_dependency_ref().get_install_path(modules_dir)
+            install_calls = 0
+
+            def fake_install(_apm, **kwargs):
+                nonlocal install_calls
+                install_calls += 1
+                assert kwargs["plan_callback"](UpdatePlan(entries=())) is True
+                install_path.mkdir(parents=True)
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult(installed_count=1)
+
+            with (
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.install.manifest_reconcile.reconcile_project_deployed_state"),
+                patch(
+                    "apm_cli.commands.update.click.confirm",
+                    side_effect=AssertionError("unchanged local refs must not prompt"),
+                ),
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert install_calls == 1
+            assert install_path == modules_dir / "_local" / "local-pkg"
+            assert install_path.is_dir()
+            assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+            assert "Restored dependency cache without changing refs." in result.output
+            assert "Apply these changes?" not in result.output
+
+    def test_locked_empty_module_cache_rehydrates_without_prompt(
+        self,
+        runner,
+        tmp_path,
+    ) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            project = Path.cwd()
+            _make_apm_yml(project)
+            modules_dir = project / "apm_modules"
+            modules_dir.mkdir()
+            lockfile = LockFile(
+                dependencies={
+                    "microsoft/apm": LockedDependency(
+                        repo_url="microsoft/apm",
+                        host="github.com",
+                        resolved_ref="main",
+                        resolved_commit="a" * 40,
+                    )
+                }
+            )
+            lockfile.write(project / "apm.lock.yaml")
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["proceeded"] = kwargs["plan_callback"](UpdatePlan(entries=()))
+                (modules_dir / "microsoft" / "apm").mkdir(parents=True)
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult(installed_count=1)
+
+            with (
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.install.manifest_reconcile.reconcile_project_deployed_state"),
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["proceeded"] is True
+            assert "Restored dependency cache without changing refs." in result.output
+            assert "Apply these changes?" not in result.output
+
     def test_unchanged_plan_short_circuits(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
             _make_apm_yml(Path.cwd())
@@ -407,6 +557,104 @@ class TestUpdateNoChanges:
 
             assert result.exit_code == 0, result.output
             assert "already at their latest" in result.output
+
+
+def test_module_cache_rehydration_requires_locked_dependencies(tmp_path: Path) -> None:
+    """An empty cache is actionable only when the lock expects packages."""
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+
+    assert _module_cache_needs_rehydration(None, modules_dir) is False
+    assert _module_cache_needs_rehydration(LockFile(), modules_dir) is False
+
+
+def test_module_cache_rehydration_ignores_empty_resolution_staging(
+    tmp_path: Path,
+) -> None:
+    """A transaction staging directory is not a materialized package cache."""
+    modules_dir = tmp_path / "apm_modules"
+    (modules_dir / ".apm-resolution-staging").mkdir(parents=True)
+    lockfile = LockFile(dependencies={"org/pkg": LockedDependency(repo_url="org/pkg")})
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+    (modules_dir / "org" / "pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+
+
+def test_module_cache_rehydration_local_dependency_uses_canonical_local_path(
+    tmp_path: Path,
+) -> None:
+    """A local-only locked dep's absent cache lives under ``_local/<name>``.
+
+    Local (filesystem) dependencies have no host/repo segments, so their
+    canonical install path is ``apm_modules/_local/<pkg_name>``
+    (``DependencyReference.get_install_path``), not a naive
+    ``apm_modules/<repo_url>`` split. This guards against a regression
+    that would check the wrong path and either loop (never see the cache
+    as present) or misfire (treat an absent cache as present).
+    """
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+    lockfile = LockFile(
+        dependencies={
+            "_local/my-pkg": LockedDependency(
+                repo_url="_local/my-pkg",
+                source="local",
+                local_path="./my-pkg",
+            )
+        }
+    )
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # A misclassified path (e.g. splitting repo_url naively) must not
+    # satisfy the check.
+    (modules_dir / "_local" / "wrong-name").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # Only the canonical path resolves the absent cache.
+    (modules_dir / "_local" / "my-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
+
+
+def test_module_cache_rehydration_transitive_local_dependency_uses_hashed_parent_slot(
+    tmp_path: Path,
+) -> None:
+    """A transitive local dep's cache lives under a hashed parent slot.
+
+    When a local dependency is declared by another package rather than
+    the root project (``declaring_parent`` set), its canonical path is
+    ``apm_modules/_local/<sha256(identity)[:12]>/<pkg_name>`` -- distinct
+    from the top-level ``_local/<pkg_name>`` shape. The rehydration check
+    must follow this exact same canonical path, not a flattened one.
+    """
+    import hashlib
+
+    modules_dir = tmp_path / "apm_modules"
+    modules_dir.mkdir()
+    parent_identity = "../sibling-parent"
+    parent_slot = hashlib.sha256(parent_identity.encode("utf-8")).hexdigest()[:12]
+    lockfile = LockFile(
+        dependencies={
+            "_local/nested-pkg": LockedDependency(
+                repo_url="_local/nested-pkg",
+                source="local",
+                local_path="../nested-pkg",
+                declaring_parent=parent_identity,
+                anchored_local_path=parent_identity,
+            )
+        }
+    )
+
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # The flattened (non-hashed) path must not be mistaken for the cache.
+    (modules_dir / "_local" / "nested-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is True
+
+    # Only the hashed parent-slot path is canonical.
+    (modules_dir / "_local" / parent_slot / "nested-pkg").mkdir(parents=True)
+    assert _module_cache_needs_rehydration(lockfile, modules_dir) is False
 
 
 # -----------------------------------------------------------------------------

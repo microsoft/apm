@@ -64,6 +64,7 @@ class _FakeDepRef:
         local_path: str | None = None,
         is_virtual: bool = False,
         virtual_path: str | None = None,
+        host: str | None = None,
         resolved_reference: Any = None,
     ) -> None:
         self.repo_url = repo_url
@@ -72,6 +73,7 @@ class _FakeDepRef:
         self.local_path = local_path
         self.is_virtual = is_virtual
         self.virtual_path = virtual_path
+        self.host = host
         self.resolved_reference = resolved_reference
 
 
@@ -304,6 +306,12 @@ class TestBuildUpdatePlan:
             virtual_path="packages/skill-a",
         )
         assert _dep_ref_key(dep) == "https://github.com/a/b/packages/skill-a"
+
+    def test_non_default_host_dep_key(self) -> None:
+        from apm_cli.install.plan import _dep_ref_key
+
+        dep = _FakeDepRef(repo_url="org/r", host="ghe.example.com")
+        assert _dep_ref_key(dep) == "ghe.example.com/org/r"
 
     def test_self_key_excluded(self) -> None:
         from apm_cli.install.plan import build_update_plan

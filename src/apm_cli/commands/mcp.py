@@ -26,23 +26,29 @@ def _build_registry_with_diag(console, logger):
     """
     from ..registry.integration import RegistryIntegration
 
-    registry = RegistryIntegration()
     override = os.environ.get(MCP_REGISTRY_ENV)
+    config_url = None
+    if not override:
+        from ..config import get_mcp_registry_url as _get_mcp_registry_url
+
+        config_url = _get_mcp_registry_url()
+    registry = (
+        RegistryIntegration(config_url)
+        if config_url
+        else RegistryIntegration()  # architecture-authority-exempt: env/default fallback
+    )
     if override:
         url = registry.client.registry_url
         if console:
             console.print(f"[muted]Registry: {url} (from MCP_REGISTRY_URL)[/muted]")
         else:
             logger.progress(f"Registry: {url} (from MCP_REGISTRY_URL)")
-    else:
-        from ..config import get_mcp_registry_url as _get_mcp_registry_url
-
-        config_url = _get_mcp_registry_url()
-        if config_url:
-            if console:
-                console.print(f"[muted]Registry: {config_url} (from apm config)[/muted]")
-            else:
-                logger.progress(f"Registry: {config_url} (from apm config)")
+    elif config_url:
+        url = registry.client.registry_url
+        if console:
+            console.print(f"[muted]Registry: {url} (from apm config)[/muted]")
+        else:
+            logger.progress(f"Registry: {url} (from apm config)")
     return registry
 
 
@@ -89,18 +95,19 @@ def mcp():
         "Add an MCP server to apm.yml. Alias for 'apm install --mcp'.\n\n"
         "Examples:\n\n"
         "  apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch\n\n"
-        "  apm mcp install api --transport http --url https://example.com/mcp"
-    ),
-    epilog=(
+        "  apm mcp install api --transport http --url https://example.com/mcp\n\n"
         "\b\n"
-        "Common options (see 'apm install --help' for full list):\n"
+        "Forwarded install options (see 'apm install --help' for the full list):\n"
         "  --transport [stdio|http|sse|streamable-http]\n"
-        "  --url URL           Server URL for remote transports\n"
-        "  --env KEY=VALUE     Environment variable (repeatable)\n"
-        "  --header KEY=VALUE  HTTP header (repeatable)\n"
-        "  --registry URL      Custom registry URL\n"
-        "  --mcp-version VER   Pin registry entry to a specific version\n"
-        "  --dev / --dry-run / --force / --verbose / --no-policy\n"
+        "  --url URL              Server URL for remote transports\n"
+        "  --env KEY=VALUE        Environment variable (repeatable)\n"
+        "  --header KEY=VALUE     HTTP header (repeatable)\n"
+        "  -t, --target TARGET    Agent target(s) to deploy to\n"
+        "  --registry URL         Custom registry URL\n"
+        "  --mcp-version VER      Pin registry entry to a specific version\n"
+        "  -g, --global           Install to user scope (~/.apm/)\n"
+        "  --trust-transitive-mcp Trust MCP servers from transitive dependencies\n"
+        "  --dev / --dry-run / --force / --verbose / --no-policy"
     ),
 )
 @click.argument("name", required=True)

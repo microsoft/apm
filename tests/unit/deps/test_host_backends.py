@@ -128,9 +128,9 @@ class TestGitHubFamilyCloneUrls:
     def test_https_no_token(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
         url = backend.build_clone_https_url(_dep_ref(), token=None)
-        # build_https_clone_url omits the ".git" suffix on the unauthenticated
-        # path (preserved behavior from main).
-        assert url == "https://github.com/owner/repo"
+        # The unauthenticated path keeps the ".git" suffix, same as the token,
+        # SSH, and plain-HTTP builders (#1995).
+        assert url == "https://github.com/owner/repo.git"
 
     def test_https_with_token(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
@@ -165,7 +165,7 @@ class TestGitHubFamilyCloneUrls:
     def test_ghe_cloud_https(self):
         backend = GHECloudBackend(host_info=_info("octo.ghe.com", "ghe_cloud"))
         url = backend.build_clone_https_url(_dep_ref(host="octo.ghe.com"), token=None)
-        assert url == "https://octo.ghe.com/owner/repo"
+        assert url == "https://octo.ghe.com/owner/repo.git"
 
     def test_https_with_custom_port(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
@@ -236,10 +236,10 @@ class TestADOBackend:
     def test_https_with_pat(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
         url = backend.build_clone_https_url(self._ado_dep(), token="ado_pat_xyz")
-        # ADO embeds the PAT as basic auth.
-        assert "ado_pat_xyz" in url
-        assert "myorg" in url
-        assert "myproj" in url
+        parsed = urlparse(url)
+        assert parsed.username is None
+        assert parsed.hostname == "dev.azure.com"
+        assert parsed.path == "/myorg/myproj/_git/myrepo"
 
     def test_https_bearer_scheme_drops_token(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
@@ -315,6 +315,7 @@ class TestGenericGitBackend:
         assert "some_token" not in url
         assert parsed.username is None and parsed.password is None
         assert parsed.hostname == "gitea.example.com"
+        assert parsed.path == "/owner/repo.git"
 
     def test_ssh_url(self):
         backend = GenericGitBackend(host_info=_info("gitea.example.com", "generic"))

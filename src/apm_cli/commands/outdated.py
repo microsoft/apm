@@ -473,7 +473,10 @@ def outdated(global_, verbose, parallel_checks):
     try:
         from ..cache.git_cache import GitCache
         from ..cache.paths import get_cache_root
-        from ..deps.tiered_ref_resolver import build_tiered_ref_resolver
+        from ..deps.tiered_ref_resolver import (
+            RefFreshnessPolicy,
+            build_tiered_ref_resolver,
+        )
 
         _git_cache = None
         if not os.environ.get("APM_NO_CACHE"):
@@ -485,6 +488,7 @@ def outdated(global_, verbose, parallel_checks):
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=_git_cache,
+            freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
         )
         if _tiered is not None:
             downloader._tiered_resolver = _tiered
@@ -518,6 +522,14 @@ def outdated(global_, verbose, parallel_checks):
         from ..deps.registry.outdated import load_registry_outdated_context
 
         registry_ctx = load_registry_outdated_context(project_root, lockfile)
+
+    # Dedupe redundant ``git ls-remote`` across same-repo deps for the span
+    # of this invocation (e.g. many virtual-subdirectory packages from one
+    # monorepo). Mirrors the install-path RefResolver reuse (#1975); fresh
+    # per run, so a newer upstream ref is still seen on the next invocation.
+    from ..deps.outdated_ref_cache import OutdatedRefCache
+
+    downloader = OutdatedRefCache(downloader)
 
     # Check deps with progress feedback and optional parallelism
     rows = _check_deps_with_progress(
@@ -609,6 +621,7 @@ def _check_deps_with_progress(
     total = len(checkable)
 
     try:
+        from rich.console import Console
         from rich.progress import (
             BarColumn,
             Progress,
@@ -617,12 +630,16 @@ def _check_deps_with_progress(
             TextColumn,
         )
 
+        # Own the Console instead of borrowing Rich's process-global singleton:
+        # a caller (or a leaked test double) that poisons ``rich._console`` must
+        # not be able to crash ``apm outdated``.
         with Progress(
             SpinnerColumn(),
             TextColumn("[cyan]{task.description}[/cyan]"),
             BarColumn(),
             TaskProgressColumn(),
             transient=True,
+            console=Console(),
         ) as progress:
             if parallel_checks > 0 and total > 1:
                 rows = _check_parallel(
@@ -648,8 +665,10 @@ def _check_deps_with_progress(
                         result = _unknown_row(dep)
                     rows.append(result)
                     progress.advance(task_id)
-    except ImportError:
-        # No Rich -- plain text feedback
+    except Exception:
+        # No Rich, or the progress renderer itself blew up -- degrade to plain
+        # text rather than failing the whole command over a display concern.
+        rows = []
         logger.progress(f"Checking {total} dependencies...")
         if parallel_checks > 0 and total > 1:
             rows = _check_parallel_plain(

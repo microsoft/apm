@@ -132,6 +132,7 @@ class TestRunLspIntegration:
             logger=logger,
             diagnostics=None,
             target_runtimes=["copilot"],
+            fail_on_write_error=False,
         )
 
     @patch(_PATCH_TARGET)

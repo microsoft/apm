@@ -98,7 +98,7 @@ class TestBuildExecTrustContext:
     def test_legacy_bin_deploy_maps_to_bin_deny(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "c.json")
         monkeypatch.setattr(ex, "_legacy_approvals_path", lambda: tmp_path / "a.yml")
-        policy = ApmPolicy(bin_deploy=BinDeployPolicy(deny=("bad/pkg",)))
+        policy = ApmPolicy(bin_deploy=BinDeployPolicy(deny=("https://github.com/BAD/PKG.git",)))
         ctx = build_exec_trust_context(policy=policy, project_data={})
         assert "bad/pkg" in ctx.org_bin_deny
 

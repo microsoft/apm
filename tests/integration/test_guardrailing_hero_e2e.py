@@ -4,7 +4,7 @@ End-to-end test for a typical 2-Minute Guardrailing flow.
 Exercises a guardrailing workflow with mixed package types:
 1. apm init my-project && cd my-project
 2. apm install microsoft/apm-sample-package
-3. apm install github/awesome-copilot/instructions/code-review-generic.instructions.md
+3. apm install microsoft/apm/.apm/instructions/encoding.instructions.md
 4. apm compile
 5. apm run design-review
 
@@ -22,15 +22,13 @@ from pathlib import Path
 
 import pytest
 
-# Skip all tests in this module if not in E2E mode
-E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
-
-# Token detection for test requirements
-GITHUB_APM_PAT = os.environ.get("GITHUB_APM_PAT")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-PRIMARY_TOKEN = GITHUB_APM_PAT or GITHUB_TOKEN
-
-pytestmark = pytest.mark.requires_e2e_mode
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.live,
+    pytest.mark.requires_e2e_mode,
+    pytest.mark.requires_github_token,
+    pytest.mark.requires_apm_binary,
+]
 
 
 def run_command(
@@ -43,18 +41,6 @@ def run_command(
             result = subprocess.run(
                 cmd,
                 shell=True,
-                check=check,
-                capture_output=False,
-                text=True,
-                timeout=timeout,
-                cwd=cwd,
-                env=env,
-                encoding="utf-8",
-                errors="replace",
-            )
-            result_capture = subprocess.run(
-                cmd,
-                shell=True,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -64,8 +50,11 @@ def run_command(
                 encoding="utf-8",
                 errors="replace",
             )
-            result.stdout = result_capture.stdout
-            result.stderr = result_capture.stderr
+            print(result.stdout, end="")
+            if result.stderr:
+                print(result.stderr, end="")
+            if check:
+                result.check_returncode()
         else:
             result = subprocess.run(
                 cmd,
@@ -86,38 +75,16 @@ def run_command(
         pytest.fail(f"Command failed: {cmd}\nStdout: {e.stdout}\nStderr: {e.stderr}")
 
 
-@pytest.fixture(scope="module")
-def apm_binary():
-    """Get path to APM binary for testing."""
-    possible_paths = [
-        "apm",
-        "./apm",
-        "./dist/apm",
-        Path(__file__).parent.parent.parent / "dist" / "apm",
-    ]
-
-    for path in possible_paths:
-        try:
-            result = subprocess.run([str(path), "--version"], capture_output=True, text=True)
-            if result.returncode == 0:
-                return str(path)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-
-    pytest.skip("APM binary not found. Build it first with: python -m build")
-
-
 class TestGuardrailingHeroScenario:
     """Test README Hero Scenario 2: 2-Minute Guardrailing"""
 
-    @pytest.mark.skipif(not PRIMARY_TOKEN, reason="GitHub token required for E2E tests")
-    def test_2_minute_guardrailing_flow(self, apm_binary):
+    def test_2_minute_guardrailing_flow(self, apm_binary_path):
         """Test the exact 2-minute guardrailing flow from README.
 
         Validates:
         1. apm init my-project creates minimal project
         2. apm install microsoft/apm-sample-package succeeds
-        3. apm install github/awesome-copilot/instructions/code-review-generic.instructions.md succeeds
+        3. apm install microsoft/apm/.apm/instructions/encoding.instructions.md succeeds
         4. apm compile produces combined instructions from both packages
         5. apm run design-review executes prompt from first installed package
         """
@@ -126,7 +93,7 @@ class TestGuardrailingHeroScenario:
             # Step 1: apm init my-project
             print("\n=== Step 1: apm init my-project ===")
             result = run_command(
-                f"{apm_binary} init my-project --yes --target copilot",
+                f"{apm_binary_path} init my-project --yes --target copilot",
                 cwd=workspace,
                 show_output=True,
             )
@@ -142,7 +109,7 @@ class TestGuardrailingHeroScenario:
             print("\n=== Step 2: apm install microsoft/apm-sample-package ===")
             env = os.environ.copy()
             result = run_command(
-                f"{apm_binary} install microsoft/apm-sample-package",
+                f"{apm_binary_path} install microsoft/apm-sample-package",
                 cwd=project_dir,
                 show_output=True,
                 env=env,
@@ -156,12 +123,12 @@ class TestGuardrailingHeroScenario:
 
             print("[OK] design-guidelines installed")
 
-            # Step 3: apm install github/awesome-copilot/instructions/code-review-generic.instructions.md
+            # Step 3: install a virtual instruction from this SSO-authorized repository
             print(
-                "\n=== Step 3: apm install github/awesome-copilot/instructions/code-review-generic.instructions.md ==="
+                "\n=== Step 3: apm install microsoft/apm/.apm/instructions/encoding.instructions.md ==="
             )
             result = run_command(
-                f"{apm_binary} install github/awesome-copilot/instructions/code-review-generic.instructions.md",
+                f"{apm_binary_path} install microsoft/apm/.apm/instructions/encoding.instructions.md",
                 cwd=project_dir,
                 show_output=True,
                 env=env,
@@ -169,9 +136,7 @@ class TestGuardrailingHeroScenario:
             assert result.returncode == 0, f"instruction package install failed: {result.stderr}"
 
             # Verify installation - virtual file packages use flattened name: owner/repo-name-file-stem
-            instruction_pkg = (
-                project_dir / "apm_modules" / "github" / "awesome-copilot-code-review-generic"
-            )
+            instruction_pkg = project_dir / "apm_modules" / "microsoft" / "apm-encoding"
             assert instruction_pkg.exists(), "instruction package not installed"
 
             # Verify the instruction file was actually downloaded
@@ -180,11 +145,11 @@ class TestGuardrailingHeroScenario:
                 "instruction file not downloaded into virtual package"
             )
 
-            print("[OK] code-review-generic instruction installed")
+            print("[OK] encoding instruction installed")
 
             # Step 4: apm compile
             print("\n=== Step 4: apm compile ===")
-            result = run_command(f"{apm_binary} compile", cwd=project_dir, show_output=True)
+            result = run_command(f"{apm_binary_path} compile", cwd=project_dir, show_output=True)
             assert result.returncode == 0, f"Compilation failed: {result.stderr}"
 
             # Copilot compile suppresses empty AGENTS.md shells when installed
@@ -211,14 +176,14 @@ class TestGuardrailingHeroScenario:
             assert "design" in compiled_content, (
                 "Compiled instructions don't contain design-related content from apm-sample-package"
             )
-            assert "review" in compiled_content or "code" in compiled_content, (
-                "Compiled instructions don't contain code-review content from awesome-copilot"
+            assert "printable ascii" in compiled_content, (
+                "Compiled instructions don't contain content from the encoding instruction"
             )
 
             compiled_bytes = sum(p.stat().st_size for p in compiled_sources if p.exists())
             print(f"[OK] Copilot instructions generated ({compiled_bytes} bytes)")
             print("  Contains design instructions: [OK]")
-            print("  Contains code-review instructions: [OK]")
+            print("  Contains encoding instructions: [OK]")
 
             # Step 5: apm run design-review
             print("\n=== Step 5: apm run design-review ===")
@@ -226,7 +191,7 @@ class TestGuardrailingHeroScenario:
             # Use early termination pattern - we only need to verify prompt starts correctly
             # Don't wait for full Copilot CLI execution (takes minutes)
             process = subprocess.Popen(
-                f"{apm_binary} run design-review",
+                f"{apm_binary_path} run design-review",
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -290,10 +255,3 @@ class TestGuardrailingHeroScenario:
             print("[OK] Multiple APM package installation")
             print("[OK] Copilot instruction compilation with combined instructions")
             print("[OK] Prompt execution from installed package")
-
-
-if __name__ == "__main__":
-    if E2E_MODE:
-        pytest.main([__file__, "-v", "-s"])
-    else:
-        print("E2E mode not enabled. Set APM_E2E_TESTS=1 to run these tests.")

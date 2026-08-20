@@ -5,7 +5,7 @@ Centralizes the three flavours of git env the downloader needs:
 1. ``setup_environment`` -- the auth-bearing env used for the
    downloader's primary git ops (clone, fetch, ls-remote with token).
    Sets up GIT_TERMINAL_PROMPT, GIT_ASKPASS, GIT_CONFIG_NOSYSTEM,
-   GIT_SSH_COMMAND (with ConnectTimeout), and GIT_CONFIG_GLOBAL
+   GIT_SSH_COMMAND (with ConnectTimeout and BatchMode), and GIT_CONFIG_GLOBAL
    to a sentinel empty file.
 
 2. ``noninteractive_env`` -- a non-auth env for fallback attempts
@@ -50,18 +50,38 @@ class GitAuthEnvBuilder:
         env["GIT_ASKPASS"] = "echo"
         env["GIT_CONFIG_NOSYSTEM"] = "1"
 
-        # Ensure SSH connections fail fast instead of hanging indefinitely
-        # when a firewall silently drops packets.
-        ssh_timeout = "-o ConnectTimeout=30"
+        # Ensure SSH connections fail fast instead of hanging indefinitely.
+        # ConnectTimeout=30 guards the TCP connection phase.
+        # BatchMode=yes prevents SSH from issuing an interactive passphrase
+        # prompt when the key is encrypted and no ssh-agent is running --
+        # without it, git hangs until the server closes the connection
+        # (LoginGraceTime, typically 120 s), which looks like a network
+        # timeout rather than an auth failure.  Users with a passphrase-
+        # protected key should load it into ssh-agent before running APM
+        # (e.g. 'ssh-add <key-file>'); BatchMode=yes converts the
+        # confusing timeout into an immediate, diagnosable failure.
         existing_ssh_cmd = os.environ.get("GIT_SSH_COMMAND", "").strip()
         if existing_ssh_cmd:
+            base_cmd = existing_ssh_cmd
+            extra_opts: list[str] = []
             if "connecttimeout" not in existing_ssh_cmd.lower():
-                env["GIT_SSH_COMMAND"] = f"{existing_ssh_cmd} {ssh_timeout}"
+                extra_opts.append("-o ConnectTimeout=30")
+            if "batchmode" not in existing_ssh_cmd.lower():
+                extra_opts.append("-o BatchMode=yes")
+            if extra_opts:
+                env["GIT_SSH_COMMAND"] = f"{base_cmd} {' '.join(extra_opts)}"
             else:
-                env["GIT_SSH_COMMAND"] = existing_ssh_cmd
+                env["GIT_SSH_COMMAND"] = base_cmd
         else:
-            env["GIT_SSH_COMMAND"] = f"ssh {ssh_timeout}"
+            env["GIT_SSH_COMMAND"] = "ssh -o ConnectTimeout=30 -o BatchMode=yes"
 
+        env.setdefault("GIT_CONFIG_GLOBAL", self.isolated_global_config_path())
+
+        return env
+
+    @staticmethod
+    def isolated_global_config_path() -> str:
+        """Return a cross-platform empty Git config path."""
         if sys.platform == "win32":
             import tempfile
 
@@ -69,15 +89,26 @@ class GitAuthEnvBuilder:
 
             temp_base = get_apm_temp_dir() or tempfile.gettempdir()
             empty_cfg = os.path.join(temp_base, ".apm_empty_gitconfig")
-            with open(empty_cfg, "w") as f:  # noqa: F841
+            with open(empty_cfg, "w", encoding="ascii"):
                 pass
-            env["GIT_CONFIG_GLOBAL"] = empty_cfg
-        else:
-            env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-
-        return env
+            return empty_cfg
+        return os.devnull
 
     # -- noninteractive (fallback) env ----------------------------------
+
+    @staticmethod
+    def _apply_credential_suppression_fence(env: dict[str, str]) -> None:
+        """Remove inherited Git auth overrides and install an empty helper."""
+        env.pop("GIT_CONFIG_PARAMETERS", None)
+        env.pop("GIT_HTTP_EXTRAHEADER", None)
+        env.pop("GIT_CONFIG_COUNT", None)
+        for key in tuple(env):
+            if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+                env.pop(key, None)
+        env["GIT_ASKPASS"] = "echo"
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "credential.helper"
+        env["GIT_CONFIG_VALUE_0"] = ""
 
     @staticmethod
     def noninteractive_env(
@@ -97,9 +128,9 @@ class GitAuthEnvBuilder:
            Windows credential manager, SSH agent) to resolve naturally.
         2. Then re-set the full credential-helper *suppression* fence ONLY
            when ``suppress_credential_helpers=True`` (HTTP transport). This
-           blocks all four credential channels: ``GIT_ASKPASS``,
-           ``GIT_TERMINAL_PROMPT``, ``GIT_CONFIG_NOSYSTEM``, and
-           ``credential.helper=`` (via ``GIT_CONFIG_COUNT/KEY/VALUE``).
+           blocks askpass, terminal prompts, system/global config, inherited
+           ``GIT_CONFIG_PARAMETERS`` / extra headers, and indexed
+           ``credential.helper`` overrides.
 
         Do NOT invert or flatten this pop-then-conditionally-restore pattern
         without re-auditing every caller: removing step 1 would leak
@@ -112,17 +143,16 @@ class GitAuthEnvBuilder:
 
         if preserve_config_isolation or suppress_credential_helpers:
             env["GIT_CONFIG_NOSYSTEM"] = "1"
-            if "GIT_CONFIG_GLOBAL" in base_git_env:
-                env["GIT_CONFIG_GLOBAL"] = base_git_env["GIT_CONFIG_GLOBAL"]
+            env.setdefault(
+                "GIT_CONFIG_GLOBAL",
+                GitAuthEnvBuilder.isolated_global_config_path(),
+            )
         else:
             env.pop("GIT_CONFIG_GLOBAL", None)
             env.pop("GIT_CONFIG_NOSYSTEM", None)
 
         if suppress_credential_helpers:
-            env["GIT_ASKPASS"] = "echo"
-            env["GIT_CONFIG_COUNT"] = "1"
-            env["GIT_CONFIG_KEY_0"] = "credential.helper"
-            env["GIT_CONFIG_VALUE_0"] = ""
+            GitAuthEnvBuilder._apply_credential_suppression_fence(env)
         else:
             env.pop("GIT_CONFIG_COUNT", None)
             env.pop("GIT_CONFIG_KEY_0", None)

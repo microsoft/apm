@@ -8,13 +8,13 @@ sidebar:
 `apm audit --ci` runs a fixed set of baseline checks against the project on
 disk. Baseline checks are always on -- they need no `apm-policy.yml`. With
 policy discovery active, the org policy contributes additional checks on
-top (see [`apm policy`](./cli/policy/) and the
-[policy schema](./policy-schema/)).
+top (see [`apm policy`](../cli/policy/) and the
+[policy schema](../policy-schema/)).
 
 This page documents the baseline set defined in
 `src/apm_cli/policy/ci_checks.py`. For the command surface, see
-[`apm audit`](./cli/audit/). For the CI wiring, see
-[Enforce in CI](../enterprise/enforce-in-ci/).
+[`apm audit`](../cli/audit/). For the CI wiring, see
+[Enforce in CI](../../enterprise/enforce-in-ci/).
 
 ## Exit-code contract
 
@@ -33,6 +33,7 @@ first failure to skip expensive I/O.
 | `manifest-parse` | block | `ci_checks.py` | only when `apm.yml` cannot be parsed |
 | `lockfile-exists` | block | `ci_checks.py` | yes |
 | `ref-consistency` | block | `ci_checks.py` | yes |
+| `deployment-ledger-owners` | block | `ci_checks.py` | yes |
 | `deployed-files-present` | block | `ci_checks.py` | yes |
 | `no-orphaned-packages` | block | `ci_checks.py` | yes |
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
@@ -46,7 +47,7 @@ Policy checks (`dependency-allowlist`, `dependency-denylist`,
 `required-package-version`, `transitive-depth`, and others in
 `policy/policy_checks.py`) only run when an `apm-policy.yml` is resolved
 through discovery or `--policy`. They are out of scope for this page; see
-the [policy schema](./policy-schema/).
+the [policy schema](../policy-schema/).
 
 ## Baseline checks
 
@@ -59,26 +60,59 @@ the [policy schema](./policy-schema/).
 
 ### `lockfile-exists`
 
-- **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM or MCP dependencies, or whenever an existing lockfile records local content under the synthesized self-entry.
-- **Fails when.** `apm.yml` declares dependencies but no lockfile is on disk.
+- **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM or MCP dependencies (including `devDependencies`), or whenever an existing lockfile records local content under the synthesized self-entry.
+- **Fails when.** `apm.yml` declares dependencies (production or dev) but no lockfile is on disk.
 - **Effect.** Subsequent checks are skipped (the lockfile is required input).
 - **Remediation.** Run `apm install` to generate `apm.lock.yaml` and commit it.
 
 ### `ref-consistency`
 
-- **What it verifies.** That every dependency's `reference` in `apm.yml` matches the `resolved_ref` recorded in the lockfile.
+- **What it verifies.** That every dependency's `reference` in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`) matches the `resolved_ref` recorded in the lockfile.
 - **Fails when.** A manifest ref differs from the lockfile entry, or the manifest declares a dependency that is missing from the lockfile.
-- **Remediation.** Run `apm install` so the lockfile re-resolves to the manifest, then commit `apm.lock.yaml`.
+- **Remediation.** Run the command the check message names: `apm install --update`
+  when the lockfile already holds a resolution that must be refreshed or re-keyed
+  (the source-identity rewrite and commit-pin mismatch cases), or plain `apm install`
+  for a first resolution -- so the lockfile re-resolves to the manifest, then commit
+  `apm.lock.yaml`.
+- **Runs before `deployment-ledger-owners`.** This external manifest-versus-lockfile
+  identity check is evaluated ahead of the internal ledger-owner check on purpose.
+  A source-identity tamper (a rewritten dependency `host`/`repo_url` in the lockfile)
+  trips both, but only `ref-consistency` points at the safe fix -- re-resolving from
+  the trusted manifest via `apm install --update`. The ledger-owner remedy (`apm prune`)
+  reconciles ownership toward the *current* lockfile, so it must never be the surfaced
+  cause when the manifest and lockfile disagree about a dependency's identity.
+
+### `deployment-ledger-owners`
+
+- **What it verifies.** That every canonical `deployments` row's `owners` and
+  `active_owner` resolve to a member of the valid owner universe: a current
+  key in `apm.lock.yaml`'s `dependencies`, the workspace self-owner `.`, or
+  `local-bundle`.
+- **Fails when.** A row references a dependency key that has since been
+  removed from the lockfile (a stale, "ghost" owner), or `active_owner`
+  itself is invalid. This is a hard integrity failure, distinct from
+  ordinary drift -- unlike hand-edits or missing files, it fails in both
+  bare `apm audit` and `apm audit --ci`.
+- **Effect.** Findings render in text, JSON, SARIF, and markdown output
+  alike, naming the locator and its invalid owner(s). `apm audit --strip`
+  refuses to modify content while any reference is invalid.
+- **Remediation.** Run `apm prune`, then rerun `apm audit`. Prune repairs
+  the stale ownership metadata; it does not delete files based on a ghost
+  row alone. See [`apm prune`](../cli/prune/#canonical-deployment-ownership)
+  and [Lockfile spec](../lockfile-spec/#canonical-deployment-rows).
 
 ### `deployed-files-present`
 
-- **What it verifies.** That every path in each lockfile entry's `deployed_files` exists on disk under the project root.
-- **Fails when.** One or more deployed files are missing (e.g. a developer ran `apm install` then deleted integrated files, or skipped install entirely).
-- **Remediation.** Run `apm install` to restore the integrated files.
+- **What it verifies.** That every path in each lockfile entry's `deployed_files` exists on disk under the project root. Gitignored paths are considered expected-absent and do not cause a failure.
+- **Fails when.** One or more non-gitignored deployed files are missing (e.g. a developer ran `apm install` then deleted integrated files, or skipped install entirely).
+- **Remediation.** Run `apm install` to restore integrated files. When
+  `apm.yml` declares targets, install also removes stale entries outside the
+  declared, gated, and dynamic target set. Then commit the updated lockfile:
+  `git add apm.lock.yaml && git commit`.
 
 ### `no-orphaned-packages`
 
-- **What it verifies.** That every dependency in the lockfile is still declared in `apm.yml`. The synthesized self-entry is excluded.
+- **What it verifies.** That every dependency in the lockfile is still declared in `apm.yml` (in either `dependencies.apm` or `devDependencies.apm`). The synthesized self-entry is excluded.
 - **Fails when.** The lockfile holds a package that the manifest no longer lists.
 - **Remediation.** Run `apm install` to prune the orphan, then commit `apm.lock.yaml`.
 
@@ -90,15 +124,15 @@ the [policy schema](./policy-schema/).
 
 ### `config-consistency`
 
-- **What it verifies.** That MCP server configs derived from `apm.yml` match the `mcp_configs` baseline stored in the lockfile.
-- **Fails when.** A server's resolved config differs from the lockfile, a server is in the lockfile but not the manifest, or a server is in the manifest but not the lockfile.
-- **Remediation.** Run `apm install` to reconcile the MCP configuration.
+- **What it verifies.** That MCP server configs derived from the root `dependencies.mcp` and `devDependencies.mcp`, plus `dependencies.mcp` from every current local or installed-remote package manifest bounded by the lockfile, match the `mcp_configs` baseline. Dependency-package `devDependencies.mcp` is author-only and is excluded from the consumer baseline.
+- **Fails when.** A server's resolved config differs from the lockfile, a server exists on only one side, or a locked package manifest is unreadable. In `apm audit --ci`, when `apm_modules/` is absent but the lockfile is present, APM first self-hydrates a lock-pinned scratch install and derives the current MCP truth from that isolated modules tree; if the scratch replay itself fails, `config-consistency` fails closed with the replay error. A missing manifest also fails unless the lockfile records a skill bundle, or declares a virtual subdirectory whose lock metadata and materialized shape both identify it as a Claude skill. `mcp_config_provenance` identifies the package in lock-only diagnostics but never exempts a removed declaration.
+- **Remediation.** Run `apm install` to reconcile the MCP configuration or restore an unreadable package source.
 
 ### `content-integrity`
 
-- **What it verifies.** Two signals across every deployed file (including local `.apm/` content via the synthesized self-entry):
-  1. Critical hidden Unicode (tag characters, bidi overrides, variation selectors 17-256, and similar steganographic markers).
-  2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time.
+- **What it verifies.** Two signals across every deployed file (including local `.apm/` content via the synthesized self-entry), each with the scope its evidence allows:
+  1. Critical hidden Unicode (tag characters, bidi overrides, variation selectors 17-256, and similar steganographic markers), over **every file under the deploy trees the project's targets govern**. This signal needs no recorded baseline, so it is deliberately not limited to `deployed_files` -- otherwise a deployed file the lockfile omits would be exempt from scanning for as long as it stayed unrecorded.
+  2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against.
 - **Fails when.** Any deployed file contains a critical Unicode finding or its hash no longer matches the lockfile entry. Missing files are intentionally not reported here -- `deployed-files-present` owns that signal. Symlinks and entries without a recorded hash are skipped.
 - **Remediation.** Run `apm audit --strip` to clean Unicode findings, and `apm install` to restore hash-drifted files. Both may be needed.
 
@@ -112,20 +146,21 @@ the [policy schema](./policy-schema/).
 ### `drift`
 
 - **What it verifies.** That the working tree matches what an install from the current lockfile would produce. The check replays the install pipeline into a scratch tree and diffs the result against the project.
-- **Fails when.** Any deployed file differs from the replay output (hand-edits, missing integrations, orphaned files).
-- **Skips when.** The install cache has not been warmed (the replay is cache-only by design so audit stays deterministic). The check returns a pass with an informational message advising the user to run `apm install` first.
+- **Fails when.** Any deployed file differs from the replay output (hand-edits, missing integrations, orphaned files). In `apm audit --ci`, a cold cache no longer yields a green skip: if `apm_modules/` is absent, APM self-hydrates a lock-pinned scratch install first and then diffs against the checkout. If that scratch replay cannot be materialized, the drift check fails closed with the replay error.
+- **Skips when.** Only in bare `apm audit`, where the replay remains cache-only and a missing cache yields an informational skip advising the user to run `apm install` first.
 - **Skip with.** `apm audit --ci --no-drift` (reduces coverage; reserve for performance-constrained CI loops).
 - **Remediation.** Run `apm install` to restore the deployed state, or revert the hand-edit. For a cache-miss skip, the same `apm install` warms the cache and enables the check on the next run.
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 
 ## Related
 
-- [`apm audit`](./cli/audit/) -- the command surface and modes.
-- [`apm policy`](./cli/policy/) -- inspect, validate, and resolve org policy.
-- [Policy schema](./policy-schema/) -- the policy-gated checks layered on top of this baseline.
-- [Enforce in CI](../enterprise/enforce-in-ci/) -- wiring the gate into branch protection.
+- [`apm audit`](../cli/audit/) -- the command surface and modes.
+- [`apm prune`](../cli/prune/) -- reconciles `deployment-ledger-owners` findings.
+- [`apm policy`](../cli/policy/) -- inspect, validate, and resolve org policy.
+- [Policy schema](../policy-schema/) -- the policy-gated checks layered on top of this baseline.
+- [Enforce in CI](../../enterprise/enforce-in-ci/) -- wiring the gate into branch protection.

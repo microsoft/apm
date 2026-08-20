@@ -309,6 +309,7 @@ class TestCollectTransitiveMCPDeps:
                             "repo_url": "org/monorepo",
                             "host": "github.com",
                             "virtual_path": "skills/azure",
+                            "is_virtual": True,
                         },
                     ],
                 }
@@ -352,8 +353,10 @@ class TestCollectTransitiveMCPDeps:
         assert len(result) == 1
         assert result[0].name == "ghcr.io/locked/server"
 
-    def test_invalid_lockfile_falls_back_to_rglob_scan(self, tmp_path):
-        """If lock parsing fails, function falls back to scanning all apm.yml files."""
+    def test_invalid_lockfile_fails_closed(self, tmp_path):
+        """A malformed lock graph must not broaden discovery to every package."""
+        from apm_cli.deps.lockfile import LockfileFormatError
+
         apm_modules = tmp_path / "apm_modules"
         pkg_dir = apm_modules / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
@@ -370,9 +373,8 @@ class TestCollectTransitiveMCPDeps:
         lock_path = tmp_path / "apm.lock.yaml"
         lock_path.write_text("dependencies: [")
 
-        result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
-        assert len(result) == 1
-        assert result[0].name == "ghcr.io/a/server"
+        with pytest.raises(LockfileFormatError):
+            MCPIntegrator.collect_transitive(apm_modules, lock_path)
 
     def test_skips_self_defined_by_default(self, tmp_path):
         """Self-defined servers from transitive packages are skipped without the flag."""
@@ -1295,7 +1297,7 @@ class TestCodexProjectScopedMCP:
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.factory.ClientFactory.create_client")
     @patch("apm_cli.runtime.manager.RuntimeManager")
-    def test_explicit_codex_runtime_still_requires_active_project_target(
+    def test_explicit_codex_runtime_overrides_missing_project_signal(
         self,
         mock_manager_cls,
         mock_create_client,
@@ -1305,7 +1307,7 @@ class TestCodexProjectScopedMCP:
         _console,
         tmp_path,
     ):
-        """Explicit runtime selection should not bypass Codex project gating."""
+        """Explicit runtime selection outranks absent project target signals."""
         mock_manager = mock_manager_cls.return_value
         mock_manager.is_runtime_available.side_effect = lambda runtime: runtime == "codex"
         mock_create_client.return_value = MagicMock()
@@ -1324,8 +1326,8 @@ class TestCodexProjectScopedMCP:
             apm_config={},
         )
 
-        assert count == 0
-        mock_install_runtime.assert_not_called()
+        assert count == 1
+        mock_install_runtime.assert_called_once()
 
     @patch("apm_cli.core.null_logger._rich_info")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
@@ -1334,7 +1336,7 @@ class TestCodexProjectScopedMCP:
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.factory.ClientFactory.create_client")
     @patch("apm_cli.runtime.manager.RuntimeManager")
-    def test_codex_gating_silently_skips_when_not_active(
+    def test_explicit_codex_runtime_does_not_emit_inactive_target_skip(
         self,
         mock_manager_cls,
         mock_create_client,
@@ -1345,7 +1347,7 @@ class TestCodexProjectScopedMCP:
         mock_info,
         tmp_path,
     ):
-        """Codex gating should silently skip (vendor-neutral, like Cursor/OpenCode/Gemini)."""
+        """Explicit runtime selection must not emit an inactive-target skip."""
         mock_manager = mock_manager_cls.return_value
         mock_manager.is_runtime_available.side_effect = lambda runtime: runtime == "codex"
         mock_create_client.return_value = MagicMock()
@@ -1364,9 +1366,8 @@ class TestCodexProjectScopedMCP:
             apm_config={},
         )
 
-        assert count == 0
-        mock_install_runtime.assert_not_called()
-        # Vendor-neutral: no Codex-specific hint emitted (silent skip)
+        assert count == 1
+        mock_install_runtime.assert_called_once()
         for call in mock_info.call_args_list:
             assert "Codex not an active project target" not in str(call)
 

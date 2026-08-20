@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.apm_package import APMPackage
 
 
-def run_lsp_integration(
+def run_lsp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
     apm_modules_path: Path,
@@ -29,6 +30,8 @@ def run_lsp_integration(
     explicit_target: str | list[str] | None = None,
     scope=None,
     target_context: tuple[dict | None, str | list[str] | None, object] | None = None,
+    target_decision: "EffectiveTargetDecision | None" = None,
+    fail_on_write_error: bool = False,
 ) -> int:
     """Run LSP server integration after APM package installation.
 
@@ -64,6 +67,9 @@ def run_lsp_integration(
     from apm_cli.integration.lsp_integrator import LSPIntegrator
 
     lsp_deps = apm_package.get_lsp_dependencies()
+    if not isinstance(lsp_deps, list):
+        logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
+        lsp_deps = []
 
     # Capture old LSP servers from lockfile
     old_lsp_servers: builtins.set = builtins.set()
@@ -98,11 +104,19 @@ def run_lsp_integration(
             exclude=exclude,
             apm_config=apm_config,
             explicit_target=explicit_target,
+            target_decision=target_decision,
             scope=scope,
             logger=logger,
         )
 
     if should_install and lsp_deps:
+        if not target_runtimes and fail_on_write_error:
+            from apm_cli.install.errors import RequiredIntegrationError
+
+            raise RequiredIntegrationError(
+                "LSP dependencies are declared, but no effective target supports "
+                "LSP configuration. Choose --target claude or --target copilot, then retry."
+            )
         lsp_count = LSPIntegrator.install(
             lsp_deps,
             project_root=project_root,
@@ -110,6 +124,7 @@ def run_lsp_integration(
             logger=logger,
             diagnostics=diagnostics,
             target_runtimes=target_runtimes,
+            fail_on_write_error=fail_on_write_error,
         )
         new_lsp_servers = LSPIntegrator.get_server_names(lsp_deps)
         new_lsp_configs = LSPIntegrator.get_server_configs(lsp_deps)
@@ -123,10 +138,16 @@ def run_lsp_integration(
                 user_scope=user_scope,
                 logger=logger,
                 target_runtimes=target_runtimes,
+                fail_on_write_error=fail_on_write_error,
             )
 
         # Persist LSP servers in lockfile
-        LSPIntegrator.update_lockfile(new_lsp_servers, lock_path, lsp_configs=new_lsp_configs)
+        LSPIntegrator.update_lockfile(
+            new_lsp_servers,
+            lock_path,
+            lsp_configs=new_lsp_configs,
+            fail_on_write_error=fail_on_write_error,
+        )
 
     elif should_install and not lsp_deps:
         # No LSP deps -- remove any old APM-managed servers
@@ -137,12 +158,23 @@ def run_lsp_integration(
                 user_scope=user_scope,
                 logger=logger,
                 target_runtimes=target_runtimes,
+                fail_on_write_error=fail_on_write_error,
             )
-            LSPIntegrator.update_lockfile(builtins.set(), lock_path, lsp_configs={})
+            LSPIntegrator.update_lockfile(
+                builtins.set(),
+                lock_path,
+                lsp_configs={},
+                fail_on_write_error=fail_on_write_error,
+            )
         logger.verbose_detail("No LSP dependencies found in apm.yml")
 
     elif not should_install and old_lsp_servers:
         # --only=apm: restore old LSP servers
-        LSPIntegrator.update_lockfile(old_lsp_servers, lock_path, lsp_configs=old_lsp_configs)
+        LSPIntegrator.update_lockfile(
+            old_lsp_servers,
+            lock_path,
+            lsp_configs=old_lsp_configs,
+            fail_on_write_error=fail_on_write_error,
+        )
 
     return lsp_count

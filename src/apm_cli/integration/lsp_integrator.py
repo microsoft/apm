@@ -12,12 +12,16 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import write_text_lf
+
+if TYPE_CHECKING:
+    from apm_cli.core.target_detection import EffectiveTargetDecision
 
 _log = logging.getLogger(__name__)
 
@@ -223,6 +227,7 @@ class LSPIntegrator:
         exclude: str | None = None,
         apm_config: dict | None = None,
         explicit_target: str | list[str] | None = None,
+        target_decision: EffectiveTargetDecision | None = None,
         scope=None,
         logger=None,
     ) -> list[str]:
@@ -243,7 +248,23 @@ class LSPIntegrator:
                 pass
 
         if runtime:
-            candidates = [runtime] if runtime in _LSP_TARGET_SPECS else []
+            try:
+                from apm_cli.core.target_detection import EffectiveTargetDecision
+
+                runtime_targets = (
+                    EffectiveTargetDecision(
+                        runtime,
+                        "--target flag",
+                    ).lsp_targets
+                    or ()
+                )
+            except KeyError:
+                runtime_targets = ()
+            candidates = [target for target in runtime_targets if target in _LSP_TARGET_SPECS]
+        elif target_decision is not None and target_decision.lsp_targets is not None:
+            candidates = [
+                target for target in target_decision.lsp_targets if target in _LSP_TARGET_SPECS
+            ]
         else:
             candidates = []
             if find_runtime_binary("copilot") is not None:
@@ -254,7 +275,16 @@ class LSPIntegrator:
                 candidates.append("claude")
 
         if exclude:
-            candidates = [target for target in candidates if target != exclude]
+            exclusions = {exclude}
+            try:
+                from apm_cli.core.target_detection import EffectiveTargetDecision
+
+                exclusions.update(
+                    EffectiveTargetDecision(exclude, "--exclude").canonical_targets or ()
+                )
+            except KeyError:
+                pass
+            candidates = [target for target in candidates if target not in exclusions]
 
         if not candidates:
             return []
@@ -267,6 +297,7 @@ class LSPIntegrator:
             project_root=project_root_path,
             apm_config=apm_config,
             explicit_target=explicit_target,
+            target_decision=target_decision,
         )
 
         if not target_runtimes:
@@ -301,13 +332,15 @@ class LSPIntegrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _read_json_object(config_path: Path) -> dict:
+    def _read_json_object(config_path: Path, *, fail_on_error: bool = False) -> dict:
         """Read a JSON object from disk, returning an empty object on malformed input."""
         if not config_path.exists():
             return {}
         try:
             data = json.loads(config_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            if fail_on_error:
+                raise
             return {}
         return data if isinstance(data, dict) else {}
 
@@ -352,12 +385,16 @@ class LSPIntegrator:
         *,
         project_root: Path,
         user_scope: bool,
+        fail_on_write_error: bool = False,
     ) -> list[str]:
         """Remove stale names from one target config and return removed names."""
         config_path = spec.path(project_root, user_scope=user_scope)
         if not config_path.exists():
             return []
-        config = LSPIntegrator._read_json_object(config_path)
+        config = LSPIntegrator._read_json_object(
+            config_path,
+            fail_on_error=fail_on_write_error,
+        )
         servers_key = spec.servers_key(user_scope=user_scope)
 
         servers = config if servers_key is None else config.get(servers_key, {})
@@ -384,6 +421,7 @@ class LSPIntegrator:
         user_scope: bool = False,
         logger=None,
         target_runtimes: list[str] | None = None,
+        fail_on_write_error: bool = False,
     ) -> None:
         """Remove LSP server entries no longer required by any dependency."""
         if logger is None:
@@ -404,17 +442,25 @@ class LSPIntegrator:
                     stale_names,
                     project_root=project_root_path,
                     user_scope=user_scope,
+                    fail_on_write_error=fail_on_write_error,
                 )
                 for name in removed:
                     logger.progress(
                         f"Removed stale LSP server '{name}' from {spec.label(user_scope=user_scope)}"
                     )
-            except Exception:
+            except Exception as exc:
                 _log.debug(
                     "Failed to clean stale LSP servers from %s",
                     spec.label(user_scope=user_scope),
                     exc_info=True,
                 )
+                if fail_on_write_error:
+                    from apm_cli.install.errors import RequiredIntegrationError
+
+                    raise RequiredIntegrationError(
+                        f"LSP cleanup failed for target '{runtime}'. "
+                        "Check the target config path and permissions, then retry."
+                    ) from exc
 
     # ------------------------------------------------------------------
     # Lockfile persistence
@@ -426,26 +472,31 @@ class LSPIntegrator:
         lock_path: Path | None = None,
         *,
         lsp_configs: builtins.dict | None = None,
+        fail_on_write_error: bool = False,
     ) -> None:
         """Update the lockfile with the current set of APM-managed LSP servers."""
         if lock_path is None:
             lock_path = get_lockfile_path(Path.cwd())
-        if not lock_path.exists():
-            return
         try:
-            lockfile = LockFile.read(lock_path)
+            lockfile = LockFile.read(lock_path) if lock_path.exists() else LockFile()
             if lockfile is None:
-                return
+                lockfile = LockFile()
             lockfile.lsp_servers = sorted(lsp_server_names)
             if lsp_configs is not None:
                 lockfile.lsp_configs = lsp_configs
             lockfile.save(lock_path)
-        except Exception:
+        except Exception as exc:
             _log.debug(
                 "Failed to update LSP servers in lockfile at %s",
                 lock_path,
                 exc_info=True,
             )
+            if fail_on_write_error:
+                from apm_cli.install.errors import RequiredIntegrationError
+
+                raise RequiredIntegrationError(
+                    "LSP lockfile update failed. Check apm.lock.yaml permissions, then retry."
+                ) from exc
 
     # ------------------------------------------------------------------
     # Main orchestrator
@@ -459,6 +510,7 @@ class LSPIntegrator:
         logger=None,
         diagnostics=None,
         target_runtimes: list[str] | None = None,
+        fail_on_write_error: bool = False,
     ) -> int:
         """Install LSP dependencies by writing target-specific runtime config."""
         if logger is None:
@@ -505,5 +557,12 @@ class LSPIntegrator:
                         f"Failed to write LSP config to {spec.path(project_root_path, user_scope=user_scope)}: "
                         f"{exc}. Check file permissions or run with --verbose for details."
                     )
+                if fail_on_write_error:
+                    from apm_cli.install.errors import RequiredIntegrationError
+
+                    raise RequiredIntegrationError(
+                        f"LSP configuration failed for target '{runtime}'. "
+                        "Check the target config path and permissions, then retry."
+                    ) from exc
 
         return len(changed_servers)

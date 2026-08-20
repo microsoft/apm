@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
     TargetProfile,
@@ -96,7 +97,12 @@ class TestTargetProfileForScope:
         self,
     ) -> None:
         unsupported = TargetProfile(
-            name="dummy",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="dummy",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".dummy",
             primitives={},
             user_supported=False,
@@ -346,6 +352,7 @@ class TestExplicitCoworkFlagOff:
         from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
         ctx.target_override = "copilot-cowork"
@@ -369,6 +376,7 @@ class TestExplicitCoworkFlagOff:
         from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.PROJECT
         ctx.target_override = "copilot-cowork"
@@ -389,6 +397,7 @@ class TestExplicitCoworkFlagOff:
         from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
         ctx.target_override = None
@@ -412,6 +421,7 @@ class TestExplicitCoworkFlagOff:
         from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
         ctx.target_override = ["copilot-cowork", "copilot"]
@@ -456,6 +466,7 @@ class TestExplicitCoworkUnresolvable:
         from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
         ctx.target_override = "copilot-cowork"
@@ -494,6 +505,7 @@ class TestExplicitCoworkUnresolvable:
         cowork_root = tmp_path / "cowork-skills"
         cowork_root.mkdir()
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
         ctx.target_override = "copilot-cowork"
@@ -519,6 +531,7 @@ class TestExplicitCoworkUnresolvable:
         from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
         ctx.target_override = "copilot-cowork"
@@ -543,6 +556,7 @@ class TestExplicitCoworkUnresolvable:
         from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
+        ctx.target_decision = None
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
         ctx.target_override = None

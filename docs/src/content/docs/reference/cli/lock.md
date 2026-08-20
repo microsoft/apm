@@ -1,11 +1,11 @@
 ---
 title: apm lock
-description: Resolve all dependencies and write apm.lock.yaml without deploying any files to agent targets.
+description: Resolve all dependencies and write apm.lock.yaml without deploying or deleting files in agent targets.
 sidebar:
   order: 5
 ---
 
-Resolve all dependencies declared in `apm.yml` and write `apm.lock.yaml` with pinned commit SHAs -- without copying any files to agent targets.
+Resolve all dependencies declared in `apm.yml` and write `apm.lock.yaml` with pinned commit SHAs -- without copying or deleting any files in agent targets.
 
 ## Synopsis
 
@@ -16,7 +16,9 @@ apm lock export [OPTIONS]
 
 ## Description
 
-`apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, cleanup, post-deps-local, and audit phases. The integrate phase still runs but deploys nothing because the target set is empty in lockfile-only mode -- no files are copied to `.github/`, `.agents/`, or any other harness directory.
+`apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, cleanup, post-deps-local, and audit phases. The integrate phase still runs but deploys nothing because the target set is empty in lockfile-only mode -- no files are copied to or deleted from `.github/`, `.agents/`, or any other harness directory.
+
+If a prior install already deployed files and you later narrow `targets:`, `apm lock` keeps the existing `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows for any bytes still on disk. The next normal `apm install` performs the physical prune through the usual safety gates.
 
 Use `apm lock` to:
 
@@ -32,9 +34,9 @@ This mirrors the ergonomics of `cargo generate-lockfile` and `pnpm lock`.
 | --- | --- | --- |
 | `--verbose`, `-v` | off | Show per-dependency resolution details. |
 | `--global`, `-g` | off | Operate on `~/.apm/apm.yml` instead of the current project (mirrors `apm install -g`). |
-| `--update` | off | Re-resolve deps to their latest matching SHAs before writing the lockfile (like `apm install --update`). |
+| `--update` | off | Re-resolve deps to their latest matching SHAs from upstream before writing the lockfile. Stale local bare-repository refs are not accepted. |
 | `--no-policy` | off | Skip policy enforcement during resolution. |
-| `--target TARGET`, `-t TARGET` | none | Agent target for policy enforcement during resolution. No files are deployed regardless of this value. Accepts a single target (`claude`, `copilot`, etc.) or comma-separated list. |
+| `--target TARGET`, `-t TARGET` | none | Agent target for policy enforcement during resolution. No files are deployed or deleted regardless of this value. Accepts a single target (`claude`, `copilot`, etc.) or comma-separated list. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
 
 ## Examples
@@ -66,8 +68,9 @@ apm lock --verbose
 ## Behavior
 
 - **Resolve and download.** Every dependency in `apm.yml` is resolved and, if not already cached, downloaded. Fresh downloads pin the commit SHA and compute a content hash.
-- **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. `deployed_files` entries are empty because no files are deployed.
-- **No files deployed.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
+- **Freshness under `--update`.** Mutable Git refs must resolve from upstream. If that check fails, lock generation fails instead of substituting a stale local bare-repository ref.
+- **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. Fresh lock-only runs add no deployed files, and existing deployed-file rows, hashes, and deployment-ledger entries stay recorded while those bytes remain on disk.
+- **No files deployed or deleted.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
 
 ## Export (SBOM inventory)
@@ -85,7 +88,7 @@ apm lock export [OPTIONS]
 | `--global`, `-g` | off | Read the user-scope (`~/.apm/`) lockfile instead of the current project. |
 | `--timestamp TS` | auto | Pin the SBOM timestamp (ISO 8601, e.g. `2024-06-01T00:00:00+00:00`) for reproducible output. Defaults to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`. |
 
-Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. The diagnostic line routes to stderr, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) for the full model.
+Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. Diagnostics and update notifications route to stderr from process startup, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) for the full model.
 
 Export a CycloneDX SBOM to a file:
 

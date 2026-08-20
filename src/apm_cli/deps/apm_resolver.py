@@ -5,13 +5,15 @@ import logging
 import os
 import threading
 from collections import deque
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path, PureWindowsPath
-from typing import Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
+from ..utils.paths import portable_relpath
 from .dependency_graph import (
     CircularRef,
     DependencyGraph,
@@ -19,6 +21,9 @@ from .dependency_graph import (
     DependencyTree,
     FlatDependencyMap,
 )
+
+if TYPE_CHECKING:
+    from .lockfile import LockFile
 
 _logger = logging.getLogger(__name__)
 
@@ -30,6 +35,20 @@ _logger = logging.getLogger(__name__)
 # reproduce legacy sequential ordering for diff-debugging).  It is NOT
 # a user-facing feature toggle.
 _DEFAULT_RESOLVE_PARALLEL = 4
+
+
+def _select_dependency_winners(
+    nodes: Iterable[DependencyNode],
+) -> tuple[tuple[DependencyNode, ...], dict[str, str]]:
+    """Return canonical dependency order and first-wins node IDs."""
+    ordered = tuple(sorted(nodes, key=lambda node: (node.depth, node.get_id())))
+    winner_ids: dict[str, str] = {}
+    for node in ordered:
+        winner_ids.setdefault(
+            node.dependency_ref.get_unique_key(),
+            node.get_id(),
+        )
+    return ordered, winner_ids
 
 
 # Type alias for the download callback.
@@ -64,6 +83,8 @@ class APMDependencyResolver:
         download_callback: DownloadCallback | None = None,
         max_parallel: int | None = None,
         auth_resolver: object | None = None,
+        update_refs: bool = False,
+        existing_lockfile: "LockFile | None" = None,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -81,11 +102,22 @@ class APMDependencyResolver:
                 for parity-testing against the legacy sequential path
                 -- this is a diagnostic knob, not a user toggle.
             auth_resolver: Optional auth resolver for marketplace dependency resolution.
+            update_refs: True for ``apm update`` / ``--refresh``. When set,
+                ``_should_force_recheck`` gives ``download_callback`` a
+                chance to run for a semver-ranged dep even when its
+                install path already exists, at any depth -- see that
+                method's docstring for why this can't be scoped to direct
+                deps only.
+            existing_lockfile: Existing resolved dependency state used by the
+                canonical ref-drift owner to decide whether a plain install
+                must re-enter the download callback.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
         self._download_callback = download_callback
+        self._update_refs = update_refs
+        self._existing_lockfile = existing_lockfile
         # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
         # Detected once via signature inspection so legacy callbacks that
         # predate the field still work without raising a silent TypeError
@@ -114,8 +146,15 @@ class APMDependencyResolver:
         # acquires the lock -- the overhead is negligible and the
         # symmetry simplifies reasoning.
         self._download_lock = threading.Lock()
+        self._local_materialization_locks: dict[Path, threading.Lock] = {}
         self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
+        self._marketplace_provenance: dict[str, dict[str, str]] = {}
+
+    @property
+    def marketplace_provenance(self) -> dict[str, dict[str, str]]:
+        """Return marketplace provenance captured while resolving the graph."""
+        return dict(self._marketplace_provenance)
 
     @staticmethod
     def _resolve_max_parallel(explicit: int | None) -> int:
@@ -308,6 +347,31 @@ class APMDependencyResolver:
         raw = local_path.strip()
         return Path(raw).expanduser().is_absolute() or PureWindowsPath(raw).is_absolute()
 
+    @staticmethod
+    def _portable_anchor_identity(anchored: Path, base: Path | None) -> str:
+        """Return a machine-independent identity string for a resolved local dep.
+
+        ``anchored`` is the absolute, resolved on-disk location of a local
+        package. The returned value is the package's stable identity only --
+        it feeds the ``local:`` cycle key, the lockfile
+        ``dependencies[].anchored_local_path`` field, and (via that same owner
+        identity) the deployment-ledger owner rows. It is never re-opened as a
+        filesystem path.
+
+        A lockfile is a committed, cross-machine artifact, so this identity
+        MUST NOT carry a developer's home directory or any absolute prefix.
+        Packages inside ``base`` (the project root) are recorded relative to
+        it in forward-slash POSIX form -- matching how directly-declared local
+        owners already serialize -- which keeps a regenerated lockfile
+        deterministic across machines and CI. Packages outside ``base`` (or
+        when ``base`` is unknown) fall back to the resolved absolute POSIX
+        path: such out-of-project local deps are inherently non-committable,
+        and the fallback preserves a unique identity without inventing one.
+        """
+        if base is None:
+            return anchored.resolve().as_posix()
+        return portable_relpath(anchored, base)
+
     def _remote_repo_root_for_parent(
         self,
         parent_dep: DependencyReference,
@@ -441,9 +505,16 @@ class APMDependencyResolver:
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
         )
-        if resolution.dependency_reference is not None:
-            return resolution.dependency_reference
-        return DependencyReference.parse(resolution.canonical)
+        resolved = (
+            resolution.dependency_reference
+            if resolution.dependency_reference is not None
+            else DependencyReference.parse(resolution.canonical)
+        )
+        self._marketplace_provenance[resolved.get_unique_key()] = resolution.provenance(
+            dep_ref.marketplace_name,
+            dep_ref.marketplace_plugin_name,
+        )
+        return resolved
 
     def _resolve_marketplace_or_record_error(
         self,
@@ -532,8 +603,11 @@ class APMDependencyResolver:
             deque()
         )
 
-        # Set to track queued unique keys for O(1) lookup instead of O(n) list comprehension
+        # Track full edge constraints, not package identity alone. Different
+        # refs for one package must survive until the flattening phase reports
+        # the conflict.
         queued_keys: set[str] = set()
+        winner_candidates: list[DependencyNode] = []
 
         # Add root dependencies to queue
         root_deps = root_package.get_apm_dependencies()
@@ -551,7 +625,7 @@ class APMDependencyResolver:
                 else:
                     continue
             processing_queue.append((dep_ref, 1, None, False))
-            queued_keys.add(dep_ref.get_unique_key())
+            queued_keys.add(dep_ref.get_resolution_key())
 
         # Add root devDependencies to queue (marked is_dev=True)
         root_dev_deps = root_package.get_dev_apm_dependencies()
@@ -568,7 +642,7 @@ class APMDependencyResolver:
                     dep_ref = resolved
                 else:
                     continue
-            key = dep_ref.get_unique_key()
+            key = dep_ref.get_resolution_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
                 queued_keys.add(key)
@@ -607,21 +681,23 @@ class APMDependencyResolver:
             work_items = []
             for dep_ref, depth, parent_node, is_dev in level_items:
                 # Remove from queued set since we're now processing this dependency
-                queued_keys.discard(dep_ref.get_unique_key())
+                queued_keys.discard(dep_ref.get_resolution_key())
 
                 # Check maximum depth to prevent infinite recursion
                 if depth > self.max_depth:
                     continue
 
                 # Check if we already processed this dependency at this level or higher
-                existing_node = tree.get_node(dep_ref.get_unique_key())
+                existing_node = tree.nodes.get(dep_ref.get_resolution_key())
                 if existing_node and existing_node.depth <= depth:
                     # Prod wins over dev: if existing was dev and this is prod, promote it
                     if existing_node.is_dev and not is_dev:
                         existing_node.is_dev = False
                     # We've already processed this dependency at a shallower or equal depth
                     # Create parent-child relationship if parent exists
-                    if parent_node and existing_node not in parent_node.children:
+                    if parent_node and all(
+                        child is not existing_node for child in parent_node.children
+                    ):
                         parent_node.children.append(existing_node)
                     continue
 
@@ -648,6 +724,14 @@ class APMDependencyResolver:
                     parent_node.children.append(node)
 
                 work_items.append((node, dep_ref, parent_node, is_dev))
+
+            winner_candidates.extend(item[0] for item in work_items)
+            _, winner_ids = _select_dependency_winners(winner_candidates)
+            work_items = [
+                item
+                for item in work_items
+                if winner_ids[item[1].get_unique_key()] == item[0].get_id()
+            ]
 
             # --- Phase B (workers): load packages ---
             if not work_items:
@@ -708,6 +792,37 @@ class APMDependencyResolver:
                         )
                         if sub_dep is None:
                             continue
+                        if (
+                            sub_dep.is_local
+                            and sub_dep.local_path
+                            and node.package.source_path is not None
+                        ):
+                            local_path = Path(sub_dep.local_path).expanduser()
+                            anchored = (
+                                local_path.resolve()
+                                if local_path.is_absolute()
+                                else (node.package.source_path / local_path).resolve()
+                            )
+                            sub_dep = replace(
+                                sub_dep,
+                                declaring_parent=node.get_id(),
+                                anchored_local_path=self._portable_anchor_identity(
+                                    anchored, root_package.source_path
+                                ),
+                            )
+                            ancestor: DependencyNode | None = node
+                            while ancestor is not None:
+                                if (
+                                    ancestor.dependency_ref.get_cycle_key()
+                                    == sub_dep.get_cycle_key()
+                                ):
+                                    if all(child is not ancestor for child in node.children):
+                                        node.children.append(ancestor)
+                                    sub_dep = None
+                                    break
+                                ancestor = ancestor.parent
+                            if sub_dep is None:
+                                continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
                                 sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
@@ -718,9 +833,10 @@ class APMDependencyResolver:
                                 continue
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
-                        if sub_dep.get_unique_key() not in queued_keys:
+                        queue_key = sub_dep.get_resolution_key()
+                        if queue_key not in queued_keys:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
-                            queued_keys.add(sub_dep.get_unique_key())
+                            queued_keys.add(queue_key)
 
         return tree
 
@@ -748,7 +864,7 @@ class APMDependencyResolver:
             node_id = node.get_id()
             # Use unique key (includes subdirectory path) to distinguish monorepo packages
             # e.g., vineethsoma/agent-packages/agents/X vs vineethsoma/agent-packages/skills/Y
-            unique_key = node.dependency_ref.get_unique_key()
+            unique_key = node.dependency_ref.get_cycle_key()
 
             # Check if this unique key is already in our current path (cycle detected)
             if unique_key in current_path_set:
@@ -772,7 +888,7 @@ class APMDependencyResolver:
                 # Only recurse if we haven't processed this subtree completely
                 if (
                     child_id not in visited
-                    or child.dependency_ref.get_unique_key() in current_path_set
+                    or child.dependency_ref.get_cycle_key() in current_path_set
                 ):
                     dfs_detect_cycles(child)
 
@@ -803,27 +919,15 @@ class APMDependencyResolver:
             FlatDependencyMap: Flattened dependencies ready for installation
         """
         flat_map = FlatDependencyMap()
-        seen_keys: set[str] = set()
-
-        # Process dependencies level by level (breadth-first)
-        # This ensures that dependencies declared earlier in the tree get priority
-        for depth in range(1, tree.max_depth + 1):
-            nodes_at_depth = tree.get_nodes_at_depth(depth)
-
-            # Sort nodes by their position in the tree to ensure deterministic ordering
-            # In a real implementation, this would be based on declaration order
-            nodes_at_depth.sort(key=lambda node: node.get_id())
-
-            for node in nodes_at_depth:
-                unique_key = node.dependency_ref.get_unique_key()
-
-                if unique_key not in seen_keys:
-                    # First occurrence - add without conflict
-                    flat_map.add_dependency(node.dependency_ref, is_conflict=False)
-                    seen_keys.add(unique_key)
-                else:
-                    # Conflict - record it but keep the first one
-                    flat_map.add_dependency(node.dependency_ref, is_conflict=True)
+        ordered, winner_ids = _select_dependency_winners(
+            node for node in tree.nodes.values() if node.depth >= 1
+        )
+        for node in ordered:
+            unique_key = node.dependency_ref.get_unique_key()
+            flat_map.add_dependency(
+                node.dependency_ref,
+                is_conflict=winner_ids[unique_key] != node.get_id(),
+            )
 
         return flat_map
 
@@ -861,14 +965,43 @@ class APMDependencyResolver:
         # errors can report "root > mid > failing-dep" context.
         parent_chain = node.get_ancestor_chain()
         try:
-            loaded = self._try_load_dependency_package(
-                dep_ref,
-                parent_chain=parent_chain,
-                parent_pkg=parent_node.package if parent_node else None,
-            )
+            if dep_ref.is_local and self._apm_modules_dir is not None:
+                install_path = dep_ref.get_install_path(self._apm_modules_dir)
+                with self._download_lock:
+                    materialization_lock = self._local_materialization_locks.setdefault(
+                        install_path,
+                        threading.Lock(),
+                    )
+                with materialization_lock:
+                    loaded = self._try_load_dependency_package(
+                        dep_ref,
+                        parent_chain=parent_chain,
+                        parent_pkg=parent_node.package if parent_node else None,
+                    )
+            else:
+                loaded = self._try_load_dependency_package(
+                    dep_ref,
+                    parent_chain=parent_chain,
+                    parent_pkg=parent_node.package if parent_node else None,
+                )
             return (item, loaded, None)
         except (ValueError, FileNotFoundError) as exc:
             return (item, None, exc)
+
+    def _should_force_recheck(self, dep_ref: DependencyReference) -> bool:
+        """Delegate existing-path recheck policy to the canonical drift owner."""
+        from apm_cli.drift import should_force_ref_recheck
+
+        locked_dep = (
+            self._existing_lockfile.get_dependency(dep_ref.get_unique_key())
+            if self._existing_lockfile is not None
+            else None
+        )
+        return should_force_ref_recheck(
+            dep_ref,
+            locked_dep,
+            update_refs=self._update_refs,
+        )
 
     def _try_load_dependency_package(
         self,
@@ -922,8 +1055,9 @@ class APMDependencyResolver:
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
-        # If package doesn't exist locally, try to download it
-        if not install_path.exists():
+        # If package doesn't exist locally, try to download it. Also fall
+        # through for a forced semver re-check (see _should_force_recheck).
+        if dep_ref.is_local or not install_path.exists() or self._should_force_recheck(dep_ref):
             if self._download_callback is not None:
                 unique_key = self._download_dedup_key(dep_ref, parent_pkg)
                 # Avoid re-downloading the same logical (dep_ref, anchor) pair
@@ -1088,7 +1222,8 @@ class APMDependencyResolver:
         Includes the parent's source_path so two parents anchoring the same
         local dep at different absolute locations don't collide on the first
         one's resolved path. For non-local deps, the parent anchor doesn't
-        affect resolution, so the bare unique key suffices.
+        affect resolution, so the package identity suffices. Conflicting refs
+        are reduced to one winner before worker dispatch.
         """
         base = dep_ref.get_unique_key()
         if dep_ref.is_local and parent_pkg is not None and parent_pkg.source_path:

@@ -8,6 +8,7 @@ import click
 
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import MarketplaceYmlError
+from ....marketplace.yml_schema import split_host_from_source
 from . import (
     _ensure_yml_exists,
     _parse_tags,
@@ -17,7 +18,13 @@ from . import (
 )
 
 
-@package.command(help="Add a package to marketplace authoring config")
+@package.command(
+    help=(
+        "Add a package to marketplace authoring config. SOURCE accepts "
+        "owner/repo, host.tld/owner/repo, or "
+        "https://host.tld/owner/repo (nested paths allowed)."
+    )
+)
 @click.argument("source")
 @click.option("--name", default=None, help="Package name (default: repo name)")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
@@ -49,6 +56,7 @@ def add(
 
     logger = CommandLogger("marketplace-package-add", verbose=verbose)
     yml = _ensure_yml_exists(logger)
+    source_host, source_repo = split_host_from_source(source)
 
     # --version and --ref are mutually exclusive.
     if version and ref:
@@ -61,10 +69,10 @@ def add(
 
     # Verify source reachability unless skipped.
     if not no_verify:
-        _verify_source(logger, source)
+        _verify_source(logger, source_repo, host=source_host)
 
     # Resolve mutable refs to concrete SHAs.
-    ref = _resolve_ref(logger, source, ref, version, no_verify)
+    ref = _resolve_ref(logger, source_repo, ref, version, no_verify, host=source_host)
 
     try:
         resolved_name = add_plugin_entry(

@@ -29,6 +29,7 @@ import logging
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from ..models.dependency.reference import DependencyReference
@@ -37,7 +38,7 @@ from ..utils.github_host import (
     is_github_hostname,
     is_supported_git_host,
 )
-from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .client import fetch_or_cache
 from .errors import PluginNotFoundError
 from .models import MarketplacePlugin, MarketplaceSource
@@ -542,9 +543,9 @@ def _resolve_url_source(source: dict) -> str:
 
     Delegates to ``DependencyReference.parse()`` to extract the
     ``owner/repo`` coordinate from any valid Git URL (GitHub, GHES, GitLab,
-    Bitbucket, ADO, SSH).  The URL's host is *not* preserved -- downstream
-    resolution (``RefResolver``) uses the configured ``GITHUB_HOST`` for
-    ``git ls-remote``.  True cross-host resolution is tracked in #1010.
+    Bitbucket, ADO, SSH). This legacy string projection does not preserve
+    the URL host. ``resolve_marketplace_plugin`` routes producer-emitted URL
+    objects through ``DependencyReference`` before reaching this projection.
     """
     url = source.get("url", "")
     if not url:
@@ -586,6 +587,42 @@ def _resolve_git_subdir_source(source: dict) -> str:
     if ref:
         return f"{base}#{ref}"
     return base
+
+
+def _dependency_reference_from_packed_source(
+    plugin: MarketplacePlugin,
+) -> DependencyReference | None:
+    """Parse producer-emitted remote source objects through the reference owner."""
+    source = plugin.source
+    if not isinstance(source, dict):
+        return None
+
+    source_type = _coerce_dict_plugin_type(source)
+    if source_type == "url":
+        remote = source.get("url")
+    elif source_type == "git-subdir" and not source.get("repo"):
+        # Pack emits git-subdir repository identity in ``url``. Hand-authored
+        # ``repo`` forms retain the existing marketplace-relative routing.
+        remote = source.get("url")
+    else:
+        return None
+    if not isinstance(remote, str) or not remote.strip():
+        return None
+
+    entry: dict[str, object] = {"git": remote.strip()}
+    if source_type == "git-subdir":
+        path = source.get("subdir", "") or source.get("path", "")
+        if path:
+            entry["path"] = path
+    declared_ref = source.get("ref")
+    if declared_ref:
+        entry["ref"] = declared_ref
+    dependency = DependencyReference.parse_from_dict(entry)
+    if dependency.is_local:
+        raise ValueError(
+            f"{source_type} source '{remote}' resolves to a local path, not a Git coordinate."
+        )
+    return dependency
 
 
 def _resolve_relative_source(
@@ -633,16 +670,18 @@ def _normalise_relative_plugin_source(source: str, plugin_root: str = "") -> str
     return rel
 
 
-def _resolve_local_relative_source(
+def resolve_local_plugin_path(
     source: str,
     marketplace: MarketplaceSource,
     plugin_root: str = "",
-) -> str:
-    """Resolve a relative source inside a local marketplace to a local-path canonical.
+    *,
+    relative_target: str = "",
+) -> Path:
+    """Resolve a local plugin path inside its marketplace containment boundary.
 
-    The returned string starts with ``/`` (or ``~`` / drive letter on supported
-    platforms) so :meth:`DependencyReference.is_local_path` recognises it and
-    install routes it through ``LocalDependencySource``.
+    ``relative_target`` lets a consumer resolve a file within the plugin
+    through the same symlink-aware boundary instead of appending that file
+    after the directory containment check.
     """
     rel = _normalise_relative_plugin_source(source, plugin_root=plugin_root)
     base = marketplace.local_path
@@ -652,9 +691,28 @@ def _resolve_local_relative_source(
             f"filesystem path (url={marketplace.url!r}); cannot resolve relative "
             f"plugin source '{source}'."
         )
-    if rel and rel != ".":
-        return f"{base.rstrip('/')}/{rel}"
-    return base
+    marketplace_path = Path(base)
+    marketplace_root = marketplace_path.parent if marketplace_path.is_file() else marketplace_path
+    candidate = marketplace_root if rel in ("", ".") else marketplace_root / rel
+    if relative_target:
+        try:
+            validate_path_segments(relative_target, context="local plugin target")
+        except PathTraversalError as exc:
+            raise ValueError(str(exc)) from exc
+        candidate /= relative_target
+    try:
+        return ensure_path_within(candidate, marketplace_root)
+    except PathTraversalError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _resolve_local_relative_source(
+    source: str,
+    marketplace: MarketplaceSource,
+    plugin_root: str = "",
+) -> str:
+    """Resolve a relative source to the canonical local dependency path."""
+    return str(resolve_local_plugin_path(source, marketplace, plugin_root=plugin_root))
 
 
 def resolve_plugin_source(
@@ -720,16 +778,29 @@ def resolve_plugin_source(
         raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
-def _extract_token(auth_resolver: object | None, host: str, org: str | None = None) -> str | None:
-    """Extract a token from the auth resolver for the given host."""
+def _extract_auth(
+    auth_resolver: object | None,
+    host: str,
+    org: str | None = None,
+    port: int | None = None,
+) -> tuple[str | None, str, dict[str, str] | None]:
+    """Extract token, scheme, and hardened Git env for one host."""
     if auth_resolver is None:
-        return None
+        return None, "basic", None
     try:
-        ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
-        return ctx.token if ctx and ctx.token else None
+        ctx = auth_resolver.resolve(host, org=org, port=port)  # type: ignore[union-attr]
+        if ctx is None:
+            return None, "basic", None
+        if not ctx.token and ctx.host_info.kind != "ado":
+            return None, "basic", None
+        return (
+            ctx.token,
+            ctx.auth_scheme,
+            auth_resolver.hardened_git_env_for_context(ctx),  # type: ignore[union-attr]
+        )
     except Exception as exc:
-        logger.debug("Could not extract token for host '%s': %s", host, type(exc).__name__)
-        return None
+        logger.debug("Could not extract auth for host '%s': %s", host, type(exc).__name__)
+        return None, "basic", None
 
 
 def resolve_marketplace_plugin(
@@ -788,6 +859,32 @@ def resolve_marketplace_plugin(
     if plugin is None:
         raise PluginNotFoundError(plugin_name, marketplace_name)
 
+    if plugin.registry:
+        selector = version_spec or plugin.version
+        if not selector:
+            raise ValueError(f"Registry-routed plugin {plugin.name!r} has no version selector")
+        source_data = plugin.source if isinstance(plugin.source, dict) else {}
+        package_id = source_data.get("repo") or source_data.get("repository")
+        if not isinstance(package_id, str) or package_id.count("/") != 1:
+            raise ValueError(
+                f"Registry-routed plugin {plugin.name!r} must declare an "
+                "owner/repo repository identity"
+            )
+        dep_ref = DependencyReference(
+            repo_url=package_id,
+            reference=selector,
+            source="registry",
+            registry_name=plugin.registry,
+        )
+        return MarketplacePluginResolution(
+            canonical=dep_ref.to_canonical(),
+            plugin=plugin,
+            dependency_reference=dep_ref,
+            cross_repo_misconfig_risk=None,
+            source_url=manifest.source_url,
+            source_digest=manifest.source_digest,
+        )
+
     source_kind = source.kind
 
     # ---- Local marketplace fast-path ----
@@ -808,15 +905,22 @@ def resolve_marketplace_plugin(
             source_digest=manifest.source_digest,
         )
 
-    canonical = resolve_plugin_source(
-        plugin,
-        marketplace_owner=source.owner,
-        marketplace_repo=source.repo,
-        plugin_root=manifest.plugin_root,
-    )
+    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(plugin)
+    if dep_ref is not None:
+        canonical = dep_ref.to_canonical()
+    else:
+        canonical = resolve_plugin_source(
+            plugin,
+            marketplace_owner=source.owner,
+            marketplace_repo=source.repo,
+            plugin_root=manifest.plugin_root,
+        )
 
-    dep_ref: DependencyReference | None = None
-    if _source_needs_explicit_git_path(source) and _is_in_marketplace_source(plugin, source):
+    if (
+        dep_ref is None
+        and _source_needs_explicit_git_path(source)
+        and _is_in_marketplace_source(plugin, source)
+    ):
         in_repo_path, path_ref = _extract_in_repo_path_and_ref(
             plugin, plugin_root=manifest.plugin_root
         )
@@ -826,41 +930,13 @@ def resolve_marketplace_plugin(
             # "main" / "HEAD" are excluded because they represent the default
             # branch -- appending them would be a no-op at best and misleading
             # when the repo's actual default branch has a different name.
-            effective_ref = version_spec or path_ref
+            effective_ref = path_ref
             if not effective_ref and source.ref and source.ref not in ("main", "HEAD"):
                 effective_ref = source.ref
             dep_ref = _gitlab_in_marketplace_dependency_reference(
                 source, in_repo_path, effective_ref
             )
             canonical = dep_ref.to_canonical()
-
-    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts ----
-    # When the plugin declares a ``url`` source and the marketplace is on a
-    # host that needs explicit git paths (GitLab, generic git), the URL
-    # already carries the full clone target.  Build a structured dep_ref so
-    # downstream auth resolves at the correct host instead of defaulting to
-    # github.com.
-    if dep_ref is None and _source_needs_explicit_git_path(source):
-        if isinstance(plugin.source, dict):
-            _src_type = _coerce_dict_plugin_type(plugin.source)
-            if _src_type == "url":
-                _url = (plugin.source.get("url", "") or "").strip()
-                if _url:
-                    _ref = plugin.source.get("ref", "")
-                    _effective_ref = version_spec or (
-                        _ref.strip() if isinstance(_ref, str) and _ref.strip() else ""
-                    )
-                    _entry: dict = {"git": _url}
-                    if _effective_ref:
-                        _entry["ref"] = _effective_ref
-                    dep_ref = DependencyReference.parse_from_dict(_entry)
-                    canonical = dep_ref.to_canonical()
-                    logger.debug(
-                        "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
-                        plugin_name,
-                        marketplace_name,
-                        canonical,
-                    )
 
     # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
     # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)
@@ -919,52 +995,70 @@ def resolve_marketplace_plugin(
     # ---- Version spec override ----
     # When version_spec is provided it either triggers semver-aware tag
     # resolution (for range expressions like ~2.1.0) or a raw ref override
-    # (for plain tags/branches/SHAs like v2.0.0).
-    if version_spec and dep_ref is None:
-        from .version_resolver import is_semver_range, is_version_constraint
+    # (for plain tags/branches/SHAs like v2.0.0). The tag lookup uses the
+    # marketplace catalog host; structured package fetches still use dep_ref.host.
+    if version_spec:
+        from .version_resolver import is_version_constraint
 
         base = canonical.split("#", 1)[0]
+        resolved_override = version_spec
         if is_version_constraint(version_spec):
-            from .errors import NoMatchingVersionError
-            from .version_resolver import resolve_version_constraint
+            from .version_resolver import DEFAULT_TAG_PATTERN, resolve_version_constraint
 
             owner_repo = f"{source.owner}/{source.repo}"
-            token = _extract_token(auth_resolver, source.host, org=source.owner)
-            try:
-                tag_name, _sha = resolve_version_constraint(
-                    plugin_name,
-                    owner_repo,
-                    version_spec,
-                    host=source.host,
-                    token=token,
-                )
-                canonical = f"{base}#{tag_name}"
+            token, auth_scheme, git_env = _extract_auth(
+                auth_resolver,
+                source.host,
+                org=source.owner,
+                port=source.port,
+            )
+            effective_tag_pattern = plugin.tag_pattern
+            if effective_tag_pattern is None:
                 logger.debug(
-                    "Version constraint '%s' for %s@%s resolved to tag '%s'",
-                    version_spec,
+                    "Plugin '%s' in marketplace '%s' has no tag_pattern; using legacy default '%s'",
                     plugin_name,
                     marketplace_name,
-                    tag_name,
+                    DEFAULT_TAG_PATTERN,
                 )
-            except NoMatchingVersionError:
-                if is_semver_range(version_spec):
-                    raise
-                canonical = f"{base}#{version_spec}"
-                logger.debug(
-                    "No '%s--v*' tags matched '%s' on %s@%s, falling back to raw git ref",
-                    plugin_name,
-                    version_spec,
-                    plugin_name,
-                    marketplace_name,
-                )
+                effective_tag_pattern = DEFAULT_TAG_PATTERN
+            version_auth = {
+                "host": source.host,
+                "token": token,
+                "auth_scheme": auth_scheme,
+                "auth_resolver": auth_resolver,
+                "tag_pattern": effective_tag_pattern,
+            }
+            if git_env is not None:
+                version_auth["git_env"] = git_env
+            if source.port is not None:
+                version_auth["port"] = source.port
+            tag_name, _sha = resolve_version_constraint(
+                plugin_name,
+                owner_repo,
+                version_spec,
+                **version_auth,
+            )
+            resolved_override = tag_name
+            logger.debug(
+                "Version constraint '%s' for %s@%s resolved with pattern '%s' to tag '%s'",
+                version_spec,
+                plugin_name,
+                marketplace_name,
+                effective_tag_pattern,
+                tag_name,
+            )
         else:
-            canonical = f"{base}#{version_spec}"
             logger.debug(
                 "Using raw git ref '%s' for %s@%s",
                 version_spec,
                 plugin_name,
                 marketplace_name,
             )
+        if dep_ref is not None:
+            dep_ref.reference = resolved_override
+            canonical = dep_ref.to_canonical()
+        else:
+            canonical = f"{base}#{resolved_override}"
 
     # ---- Ref immutability check (advisory) ----
     # Record the plugin -> ref mapping (scoped by version) and warn if

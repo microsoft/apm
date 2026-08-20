@@ -1,4 +1,4 @@
-"""Unit tests for apm_cli.utils.paths.portable_relpath().
+"""Unit tests for portable path helpers.
 
 Covers:
 - Normal case: path under base returns relative POSIX path
@@ -11,10 +11,40 @@ Covers:
 
 from __future__ import annotations
 
-from pathlib import Path
+import ntpath
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
-from apm_cli.utils.paths import portable_relpath
+import pytest
+
+from apm_cli.utils.paths import portable_link_relpath, portable_relpath
+
+
+@pytest.mark.windows_compat
+def test_portable_link_relpath_uses_forward_slashes_on_windows() -> None:
+    """Generated Markdown paths stay relative and POSIX-like on Windows."""
+    target = PureWindowsPath(r"C:\repo\apm_modules\MixedOrg\MixedRepo\Guide.md")
+    base = PureWindowsPath(r"C:\repo\.github\instructions")
+
+    assert portable_link_relpath(target, base, relpath=ntpath.relpath) == (
+        "../../apm_modules/MixedOrg/MixedRepo/Guide.md"
+    )
+
+
+@pytest.mark.windows_compat
+def test_portable_link_relpath_refuses_cross_drive_absolute_fallback() -> None:
+    """Different Windows drives never leak an absolute path into Markdown."""
+    target = PureWindowsPath(r"D:\modules\MixedOrg\MixedRepo\Guide.md")
+    base = PureWindowsPath(r"C:\repo\.github\instructions")
+
+    assert portable_link_relpath(target, base, relpath=ntpath.relpath) is None
+
+
+# Entire module: this is the canonical owner of platform-independent
+# relative-path formatting (microsoft/apm#2233's backslash-on-Windows
+# diagnostic class). Selected by the PR-time Windows Compatibility
+# Gate via `pytest -m windows_compat`; also runs on every other OS.
+pytestmark = pytest.mark.windows_compat
 
 
 class TestPortableRelpath:

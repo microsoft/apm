@@ -9,13 +9,13 @@ Following KISS principle - simple, pragmatic implementation.
 """
 
 import builtins
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.paths import portable_link_relpath
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -46,6 +46,9 @@ class LinkResolutionContext:
     # stay inside this subtree already resolve after copy and should remain
     # portable bundle-local links.
     preserved_source_root: Path | None = None
+    # Source package projected into the deployment output frame. Audit replay
+    # points this at scratch while package_root remains the real source tree.
+    deployment_package_root: Path | None = None
 
 
 class UnifiedLinkResolver:
@@ -76,6 +79,7 @@ class UnifiedLinkResolver:
         # rewriting (#1147). None for compile / legacy callers disables
         # the generalization safely.
         self.package_root: Path | None = None
+        self.deployment_package_root: Path | None = None
 
     def register_contexts(self, primitives) -> None:
         """Build registry of all available context files.
@@ -138,6 +142,7 @@ class UnifiedLinkResolver:
             package_root=self.package_root,
             enable_asset_rewrite=self.package_root is not None,
             preserved_source_root=preserved_source_root,
+            deployment_package_root=self.deployment_package_root,
         )
 
         return self._rewrite_markdown_links(content, ctx)
@@ -306,13 +311,8 @@ class UnifiedLinkResolver:
             return None
 
         # Calculate relative path from target location to actual source file
-        # Use os.path.relpath to support ../ for paths outside target directory
-        try:
-            relative_path = os.path.relpath(actual_file, ctx.target_location)
-            # Normalize to forward slashes for markdown link compatibility
-            return relative_path.replace(os.sep, "/")
-        except Exception:
-            return None
+        # The shared helper owns ../ handling and cross-drive refusal.
+        return portable_link_relpath(actual_file, ctx.target_location)
 
     def _resolve_to_actual_file(self, link_path: str, source_file: Path) -> Path | None:
         """Resolve a link path to the actual file on disk.
@@ -511,38 +511,37 @@ class UnifiedLinkResolver:
                 pass
 
         try:
-            ensure_path_within(candidate, ctx.package_root)
-        except PathTraversalError:
+            source_package_root = ctx.package_root.resolve()
+            ensure_path_within(candidate, source_package_root)
+        except (OSError, ValueError, PathTraversalError):
             return None
 
-        # Replay-frame translation (#1182): during audit-replay of a
-        # self-package, ``ctx.base_dir`` is the scratch tmpdir but
-        # ``ctx.package_root`` (and therefore ``candidate``) still points
-        # at the real project tree. Computing ``relpath`` directly would
-        # produce a tmpdir-traversal link (e.g. ``../../../../Users/...``)
-        # that diverges from what real install writes to disk, causing
-        # spurious drift. Detect the cross-frame case (candidate outside
-        # base_dir) and re-anchor the target onto package_root so the
-        # rewrite mirrors the install-time output.
-        relpath_anchor = ctx.target_location
-        try:
-            candidate_in_base = candidate.is_relative_to(ctx.base_dir)
-        except (OSError, ValueError):
-            candidate_in_base = True
-        if not candidate_in_base:
+        candidate_in_deployment = candidate
+        if ctx.deployment_package_root is not None:
+            # Source containment is already enforced above. This projection only
+            # changes emitted link text; it does not access the deployment path.
             try:
-                target_rel = ctx.target_location.relative_to(ctx.base_dir)
-                relpath_anchor = ctx.package_root / target_rel
+                package_relative = candidate.relative_to(source_package_root)
+                candidate_in_deployment = ctx.deployment_package_root / package_relative
             except (OSError, ValueError):
-                relpath_anchor = ctx.target_location
+                return None
+        elif not candidate.is_relative_to(ctx.base_dir):
+            # Legacy replay callers project source-relative assets under base_dir.
+            try:
+                package_relative = candidate.relative_to(source_package_root)
+                candidate_in_deployment = ctx.base_dir / package_relative
+            except (OSError, ValueError):
+                return None
 
         try:
-            relative_path = os.path.relpath(candidate, relpath_anchor)
+            relative_path = portable_link_relpath(
+                candidate_in_deployment,
+                ctx.target_location,
+            )
         except (OSError, ValueError):
             return None
 
-        rewritten = relative_path.replace(os.sep, "/")
-        return f"{rewritten}{suffix}"
+        return f"{relative_path}{suffix}" if relative_path is not None else None
 
 
 # Legacy functions for backward compatibility

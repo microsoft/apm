@@ -94,6 +94,7 @@ courtesy comment citing the principle below.
 - Verify-before-fix: {{ triage_pass_count }} / {{ candidate_count }} verified on HEAD.
 - PR-in-flight cross-reference: {{ inflight_count }} community PR(s) driven; 0 community PRs duplicated.
 - Mutation-break gate: {{ mutation_break_count }} regression-trap test(s) verified by guard deletion.
+- Canonical-owner gate: {{ architecture_gate_count }} PR(s) classified against architecture.instructions.md; {{ dual_guardrail_count }} authority-affecting fix(es) proved both guardrails (behavioral + static + architecture assertion + mutation-break); {{ architecture_blocked_count }} blocked for missing owner evidence.
 - Lint contract: {{ lint_silent_count }} push(es) gated by silent ruff pair.
 - Strategic-alignment gate: {{ strategic_gate_count }} LEGIT row(s) inspected by `apm-ceo` against `PRINCIPLES.md`; {{ strategic_aligned_count }} aligned, {{ strategic_aligned_with_reservations_count }} aligned-with-reservations (surfaced downstream), {{ strategic_deferred_count }} demoted (out-of-scope / wrong-direction). Gate failed open on {{ strategic_failed_open_count }} row(s) under infrastructure failure.
 - Mergeability gate: {{ gate_run_count }} PR(s) re-probed against current main; {{ resolved_count }} rebased to MERGEABLE; {{ author_action_count }} surfaced to author; {{ human_judgment_count }} escalated to human judgment.

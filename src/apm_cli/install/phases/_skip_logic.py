@@ -15,6 +15,7 @@ def _compute_skip_download(
     update_refs: bool,
     already_resolved: bool,
     lockfile_match: bool,
+    ref_changed: bool = False,
 ) -> bool:
     """Return True when the sequential loop should skip downloading a package.
 
@@ -27,13 +28,23 @@ def _compute_skip_download(
       the user has not requested an update.
     * The lockfile SHA matches the local checkout (``lockfile_match``).
 
+    ``ref_changed`` vetoes the two cache-reuse clauses.  When the manifest ref
+    drifted away from the lockfile the user explicitly asked for a different
+    revision, so bytes already sitting at ``install_path`` must never be
+    trusted -- not even when the BFS callback fetched this dep earlier in the
+    same run, because the callback materialises to the canonical
+    ``<org>/<repo>`` path while an aliased dep integrates from
+    ``apm_modules/<alias>`` (#2481).  ``lockfile_match`` is left untouched: it
+    is only set in normal mode when the ref did not change, and in update mode
+    after the remote SHA was confirmed identical.
+
     Callers may further override this result (e.g. content-hash verification
     or registry-only enforcement) -- this function only computes the initial
     decision.
     """
     return install_path_exists and (
-        (is_cacheable and not update_refs)
-        or (already_resolved and not update_refs)
+        (is_cacheable and not update_refs and not ref_changed)
+        or (already_resolved and not update_refs and not ref_changed)
         or lockfile_match
     )
 

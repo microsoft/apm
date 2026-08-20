@@ -85,10 +85,11 @@ def _conftest_marker_names() -> set[str]:
 
 
 def _gating_markers_in_pyproject() -> set[str]:
-    """Subset of pyproject markers that gate execution (requires_* + live).
+    """Return only execution prerequisites wired into the skip registry.
 
-    ``integration``, ``slow``, ``benchmark`` are taxonomy markers, not
-    gates, and are intentionally excluded from the docs registry.
+    Behavioral markers (unit/component/e2e) and pure scheduling markers
+    (integration/slow/benchmark) are not environment gates. ``live`` is both
+    opt-in scheduling and an external-service gate.
     """
     names = _pyproject_marker_names()
     return {n for n in names if n.startswith("requires_") or n == "live"}

@@ -7,6 +7,7 @@ from pathlib import Path
 import requests
 
 from ..core.token_manager import GitHubTokenManager
+from ..utils.console import _rich_info
 from .client import SimpleRegistryClient
 
 logger = logging.getLogger(__name__)
@@ -280,20 +281,42 @@ class MCPServerOperations:
                 if not server_info:
                     continue
 
-                # Extract runtime variables from runtime_arguments
+                # Extract variables from both registry argument phases.
                 packages = server_info.get("packages", [])
                 for package in packages:
                     if isinstance(package, dict):
-                        runtime_arguments = package.get("runtime_arguments", [])
-                        for arg in runtime_arguments:
-                            if isinstance(arg, dict) and "variables" in arg:
-                                variables = arg.get("variables", {})
-                                for var_name, var_info in variables.items():
-                                    if isinstance(var_info, dict):
-                                        collected_runtime_vars[var_name] = {
-                                            "description": var_info.get("description", ""),
-                                            "required": var_info.get("is_required", True),
-                                        }
+                        for field_name in ("runtime_arguments", "package_arguments"):
+                            for arg in package.get(field_name, []):
+                                if isinstance(arg, dict) and "variables" in arg:
+                                    variables = arg.get("variables", {})
+                                    if not isinstance(variables, dict):
+                                        continue
+                                    for var_name, var_info in variables.items():
+                                        if isinstance(var_info, dict):
+                                            configured_value = var_info.get("value")
+                                            if configured_value in (None, ""):
+                                                configured_value = var_info.get(
+                                                    "default",
+                                                    "",
+                                                )
+                                            if configured_value and not isinstance(
+                                                configured_value,
+                                                str,
+                                            ):
+                                                continue
+                                            collected_runtime_vars[var_name] = {
+                                                "description": var_info.get("description", ""),
+                                                "required": var_info.get(
+                                                    "is_required",
+                                                    var_info.get("isRequired", True),
+                                                ),
+                                                "value": configured_value,
+                                                "secret": var_info.get(
+                                                    "is_secret",
+                                                    var_info.get("isSecret", False),
+                                                )
+                                                is True,
+                                            }
 
             except Exception:  # noqa: S112
                 # Skip servers we can't analyze
@@ -301,7 +324,10 @@ class MCPServerOperations:
 
         # Prompt user for collected runtime variables.
         if collected_runtime_vars:
-            return self._prompt_for_environment_variables(collected_runtime_vars)
+            return self._prompt_for_environment_variables(
+                collected_runtime_vars,
+                prompt_defaults=True,
+            )
 
         return {}
 
@@ -387,11 +413,19 @@ class MCPServerOperations:
 
         return shared_env_vars
 
-    def _prompt_for_environment_variables(self, required_vars: dict[str, dict]) -> dict[str, str]:
-        """Prompt user for environment variables.
+    def _prompt_for_environment_variables(
+        self,
+        required_vars: dict[str, dict],
+        *,
+        prompt_defaults: bool = False,
+    ) -> dict[str, str]:
+        """Prompt user for registry-provided variables.
 
         Args:
             required_vars: Dictionary mapping var names to their metadata
+            prompt_defaults: Prompt for required defaults instead of applying
+                them silently. Runtime argument variables use this so a registry
+                default remains an overrideable suggestion.
 
         Returns:
             Dictionary mapping variable names to their values
@@ -414,9 +448,9 @@ class MCPServerOperations:
 
                 if existing_value:
                     env_vars[var_name] = existing_value
+                elif default_value:
+                    env_vars[var_name] = default_value
                 elif not required:
-                    if default_value:
-                        env_vars[var_name] = default_value
                     continue
                 else:  # noqa: PLR5501
                     # Provide sensible defaults for known variables
@@ -448,7 +482,12 @@ class MCPServerOperations:
             from rich.prompt import Prompt
 
             console = Console()
-            console.print("Environment variables needed:", style="cyan")
+            console.print(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:",
+                style="cyan",
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
@@ -462,13 +501,15 @@ class MCPServerOperations:
                 if existing_value:
                     console.print(f"  [+] {var_name}: [dim]using existing value[/dim]")
                     env_vars[var_name] = existing_value
+                elif default_value and not (prompt_defaults and required):
+                    if var_info.get("secret", False) is True:
+                        _rich_info(f"Using registry default for secret MCP variable '{var_name}'.")
+                    env_vars[var_name] = default_value
                 elif not required:
-                    if default_value:
-                        env_vars[var_name] = default_value
                     continue
                 else:
                     # Determine if this looks like a password/secret
-                    is_sensitive = any(
+                    is_sensitive = var_info.get("secret", False) is True or any(
                         keyword in var_name.lower()
                         for keyword in ["password", "secret", "key", "token", "api"]
                     )
@@ -477,7 +518,15 @@ class MCPServerOperations:
                     if description:
                         prompt_text += f" ({description})"
 
-                    value = Prompt.ask(prompt_text, password=is_sensitive)
+                    prompt_default = "" if is_sensitive else default_value
+                    value = Prompt.ask(
+                        prompt_text,
+                        default=prompt_default,
+                        show_default=bool(prompt_default),
+                        password=is_sensitive,
+                    )
+                    if not value and is_sensitive:
+                        value = default_value
 
                     env_vars[var_name] = value
 
@@ -487,7 +536,11 @@ class MCPServerOperations:
             # Fallback to simple input
             import click
 
-            click.echo("Environment variables needed:")
+            click.echo(
+                "Registry runtime variables needed:"
+                if prompt_defaults
+                else "Environment variables needed:"
+            )
 
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
@@ -500,9 +553,11 @@ class MCPServerOperations:
                 if existing_value:
                     click.echo(f"  [+] {var_name}: using existing value")
                     env_vars[var_name] = existing_value
+                elif default_value and not (prompt_defaults and required):
+                    if var_info.get("secret", False) is True:
+                        _rich_info(f"Using registry default for secret MCP variable '{var_name}'.")
+                    env_vars[var_name] = default_value
                 elif not required:
-                    if default_value:
-                        env_vars[var_name] = default_value
                     continue
                 else:
                     prompt_text = f"  {var_name}"
@@ -510,14 +565,20 @@ class MCPServerOperations:
                         prompt_text += f" ({description})"
 
                     # Simple input for fallback
-                    is_sensitive = any(
+                    is_sensitive = var_info.get("secret", False) is True or any(
                         keyword in var_name.lower()
                         for keyword in ["password", "secret", "key", "token", "api"]
                     )
+                    prompt_default = "" if is_sensitive else default_value
 
                     value = click.prompt(
-                        prompt_text, hide_input=is_sensitive, default="", show_default=False
+                        prompt_text,
+                        hide_input=is_sensitive,
+                        default=prompt_default,
+                        show_default=bool(prompt_default),
                     )
+                    if not value and is_sensitive:
+                        value = default_value
                     env_vars[var_name] = value
 
             click.echo()

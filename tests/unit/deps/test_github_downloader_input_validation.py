@@ -33,6 +33,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps import github_downloader_validation as gdv
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_downloader_validation import (
@@ -62,6 +63,11 @@ def _make_downloader(token: str = "tok", host: str = "github.com") -> GitHubPack
     dep_ctx.token = token
     dep_ctx.auth_scheme = "basic"
     resolver.resolve_for_dep.return_value = dep_ctx
+    resolver.git_env_for_context.side_effect = lambda auth_ctx, *, base_env: {
+        **base_env,
+        **auth_ctx.git_env,
+    }
+    resolver._build_git_env.side_effect = AuthResolver._build_git_env
     resolver.classify_host.return_value = MagicMock(
         kind="github", api_base="https://api.github.com"
     )
@@ -419,6 +425,30 @@ class TestBuildValidationAttempts:
         env_values = list(auth_attempts[0].env.values())
         header_values = [v for v in env_values if isinstance(v, str) and ("Bearer" in v)]
         assert any("Bearer" in v for v in header_values)
+
+    def test_token_attempt_preserves_retained_git_config(self) -> None:
+        """#2368: the auth header must not clobber indexed entries in git_env."""
+        dl = _make_downloader(token="ghp_token")
+        dl.auth_resolver.resolve_for_dep.return_value.token = "ghp_token"
+        dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
+        dl.git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.bareRepository",
+            "GIT_CONFIG_VALUE_0": "explicit",
+        }
+        dep = self._make_dep()
+        dep.is_azure_devops.return_value = False
+        dl.auth_resolver.classify_host.return_value = MagicMock(kind="github")
+
+        attempts = _build_validation_attempts(dl, dep, lambda m: None)
+        token_env = attempts[0].env
+        assert token_env["GIT_CONFIG_COUNT"] == "2"
+        assert token_env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+        assert token_env["GIT_CONFIG_VALUE_0"] == "explicit"
+        assert token_env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+        assert token_env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer ghp_token"
+        # The downloader's shared base env must not be mutated.
+        assert dl.git_env["GIT_CONFIG_COUNT"] == "1"
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,14 @@ The cache is purely a performance optimization. Removing it never
 breaks correctness; the next `apm install` re-fetches whatever it
 needs.
 
+Plain and frozen installs can replay locked SHAs and reuse local bare
+repositories or per-SHA checkouts when upstream is unavailable. Commands that
+report or change current state -- `apm install --update`, `apm install
+--refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm outdated` -- do not
+accept a persistent bare-repository ref as evidence of current upstream state.
+After establishing a fresh SHA, update may still reuse content cached for that
+SHA. `--refresh` is stronger: it also bypasses cached content.
+
 ## Subcommands
 
 ### `apm cache info`
@@ -91,11 +99,11 @@ apm cache prune --days 7     # tighter window
 | `--days N` | Remove entries not accessed within this many days. Default: `30`. |
 
 :::caution[Lockfile-blind]
-`prune` does not consult any project's `apm.lock.yaml` before
-evicting entries. A pinned commit SHA referenced by your lockfile may
-be pruned if nothing has touched its checkout recently; the next
-`apm install` will re-clone it from the remote. Safe, but can
-surprise air-gapped or rate-limited environments.
+`prune` does not consult any project's `apm.lock.yaml`. It can evict a
+per-SHA checkout that a plain or frozen install would otherwise reuse. If the
+remaining bare repository cannot rebuild that checkout, the next install
+requires remote access. Freshness-required commands require upstream ref
+resolution regardless of retained cache entries.
 :::
 
 ## Cache layout

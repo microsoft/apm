@@ -100,7 +100,8 @@ Source: `src/apm_cli/core/auth.py`.
 ### harness
 
 The agent runtime that executes primitives: GitHub Copilot (CLI + IDE),
-Claude Code, Cursor, Codex, Gemini, Antigravity, OpenCode, Windsurf, and Kiro. Each harness has
+Claude Code, Grok Build, Cursor, Codex, Gemini, Antigravity, OpenCode,
+Windsurf, and Kiro. Each harness has
 its own primitive directory layout and file format.
 
 NOT the same as a target. The target is the manifest or CLI selector for
@@ -251,8 +252,9 @@ Source: `src/apm_cli/models/apm_package.py`,
 ### target
 
 The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
-compiles for (`copilot`, `claude`, `cursor`, `codex`, `gemini`,
-`opencode`, `windsurf`, `kiro`, or `agent-skills`). `all` and `antigravity` are CLI `--target` values only. Drives which integrator runs and
+compiles for (`copilot`, `claude`, `grok-build`, `cursor`, `codex`, `gemini`,
+`antigravity`, `opencode`, `windsurf`, `kiro`, or
+`agent-skills`). `all` is a CLI `--target` value only. Drives which integrator runs and
 which directories receive output during `apm compile`.
 
 NOT the harness itself. Target is the declaration; the harness is the

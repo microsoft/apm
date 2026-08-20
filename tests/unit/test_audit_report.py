@@ -37,6 +37,7 @@ class TestJsonReport:
     def test_empty_findings(self):
         report = findings_to_json({}, files_scanned=5, exit_code=0)
         assert report["version"] == "1"
+        assert report["passed"] is True
         assert report["exit_code"] == 0
         assert report["summary"]["files_scanned"] == 5
         assert report["findings"] == []
@@ -50,6 +51,7 @@ class TestJsonReport:
             "b.md": [_make_finding(severity="info")],
         }
         report = findings_to_json(findings, files_scanned=10, exit_code=1)
+        assert report["passed"] is False
         assert report["summary"]["critical"] == 1
         assert report["summary"]["warning"] == 1
         assert report["summary"]["info"] == 1

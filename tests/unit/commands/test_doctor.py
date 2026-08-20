@@ -36,6 +36,7 @@ def test_apm_doctor_registered_at_top_level():
     result = runner.invoke(cli, ["doctor", "--help"])
     assert result.exit_code == 0
     assert "environment diagnostics" in result.output.lower()
+    assert "gh CLI" not in result.output
 
 
 def test_apm_doctor_appears_in_root_help():

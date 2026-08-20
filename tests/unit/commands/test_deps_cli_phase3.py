@@ -133,41 +133,36 @@ class TestDepsListSourceLabel:
 class TestAddTreeChildren:
     def test_no_children_does_nothing(self) -> None:
         parent = MagicMock()
-        _add_tree_children(parent, "owner/repo", {}, has_rich=False)
+        _add_tree_children(parent, "owner/repo", {})
         parent.add.assert_not_called()
 
-    def test_adds_child_dep_names_no_rich(self) -> None:
-        """With has_rich=False the parent branch add is not called (strings are used)."""
-        child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
-        parent = MagicMock()
-        children_map = {"owner/repo": [child]}
-        # has_rich=False: child_branch is a string, parent.add is NOT called
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=False)
-        parent.add.assert_not_called()
-
-    def test_adds_child_dep_names_with_rich(self) -> None:
-        """With has_rich=True the parent branch .add() is called."""
+    def test_adds_child_dep_names(self) -> None:
+        """The Rich parent branch receives each child."""
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
         parent = MagicMock()
         child_branch = MagicMock()
         parent.add.return_value = child_branch
         children_map = {"owner/repo": [child]}
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
+        _add_tree_children(parent, "owner/repo", children_map)
         parent.add.assert_called_once()
 
-    def test_depth_limit_prevents_infinite_recursion(self) -> None:
-        """Depth ≥ 5 should not recurse further."""
+    def test_cycle_guard_marks_repeated_ancestor(self) -> None:
+        """A dependency cycle is marked at the first repeated ancestor."""
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
-        grandchild = _make_dep("grand/repo", version="1.0.0", repo_url="grand/repo")
+        repeated_parent = _make_dep("owner/repo", version="1.0.0", repo_url="owner/repo")
         children_map = {
             "owner/repo": [child],
-            "child/repo": [grandchild],
+            "child/repo": [repeated_parent],
         }
         parent = MagicMock()
-        # Call at depth=5 -- should add child but NOT recurse into grandchild
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=False, depth=5)
-        # The child should be added (we're at depth=5, which is >= 5, so NOT recursed)
-        parent.add.assert_not_called()
+        child_branch = MagicMock()
+        parent.add.return_value = child_branch
+
+        _add_tree_children(parent, "owner/repo", children_map)
+
+        parent.add.assert_called_once()
+        child_branch.add.assert_called_once()
+        assert "(circular)" in child_branch.add.call_args.args[0]
 
     def test_has_rich_uses_rich_markup(self) -> None:
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
@@ -175,8 +170,7 @@ class TestAddTreeChildren:
         child_branch = MagicMock()
         parent.add.return_value = child_branch
         children_map = {"owner/repo": [child]}
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
-        # With has_rich=True the child name is wrapped in [dim] markup
+        _add_tree_children(parent, "owner/repo", children_map)
         call_args = parent.add.call_args[0][0]
         assert "[dim]" in call_args
 

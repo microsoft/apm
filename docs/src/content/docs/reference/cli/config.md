@@ -11,7 +11,8 @@ Read and write APM CLI configuration stored in `~/.apm/config.json`.
 
 ```bash
 apm config                       # show current configuration
-apm config get [KEY]             # print one key, or all keys
+apm config get [KEY]             # read a key, or print the user config summary
+apm config list                  # alias for get with no key
 apm config set KEY VALUE         # write a key
 apm config unset KEY             # remove a key
 ```
@@ -33,7 +34,15 @@ Show the merged project + global configuration as a table. Falls back to plain t
 
 ### `apm config get [KEY]`
 
-Print the value of `KEY`. With no argument, prints all user-settable keys with their effective values (defaults included).
+Print the value of `KEY`. With no argument, prints the user config summary: effective values for core user-settable keys. Noise-reduction defaults and unset optional values -- such as the stable self-update channel, unset self-update install directory, and disabled transport preferences -- are omitted until configured.
+
+### `apm config list`
+
+Alias for `apm config get` with no argument; produces the same user config summary.
+
+:::note
+Familiar with `npm config list` or `git config --list`? `apm config list` is the equivalent.
+:::
 
 ### `apm config set KEY VALUE`
 
@@ -56,8 +65,8 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
-| `target` | target token | unset | Default target for installs when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
-| `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` uses GitHub's latest stable release; `prerelease` selects the newest non-draft prerelease and pins that version for the installer run. `APM_SELF_UPDATE_CHANNEL` overrides config. |
+| `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
+| `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` selects the latest stable release; `prerelease` selects the newest non-draft prerelease. Both pass the selected release to the installer as one normalized `VERSION`. `APM_SELF_UPDATE_CHANNEL` overrides config. |
 | `self-update.install-dir` | path | installer default | Default target directory passed to the self-update installer as `APM_INSTALL_DIR`. `APM_INSTALL_DIR` overrides config. |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
 | `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH -> HTTPS or HTTPS -> SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
@@ -111,11 +120,13 @@ Default registry selection (highest wins):
 1. `registries.default` in project `apm.yml`
 2. The registry entry in `~/.apm/config.json` with `"default": true` (set via `registry.<name>.default true`)
 
-`apm self-update` installer preferences resolve as:
+`apm self-update` installer inputs resolve as:
 
-1. Environment variable (`APM_SELF_UPDATE_CHANNEL`, `APM_INSTALL_DIR`, or `VERSION`)
-2. Non-secret config value (`self-update.channel`, `self-update.install-dir`)
-3. Built-in default (`stable` channel / installer default directory)
+1. Explicit `VERSION` pins the release.
+2. Otherwise, `APM_SELF_UPDATE_CHANNEL` overrides persisted `self-update.channel`; `stable` applies when neither is set.
+3. The selected stable or prerelease release becomes the normalized installer `VERSION` and, for GitHub/GHES downloads, the raw-script tag.
+4. `APM_INSTALLER_BASE_URL` remains authoritative when set; APM appends only the platform script name.
+5. `APM_INSTALL_DIR` overrides persisted `self-update.install-dir`; otherwise the installer uses its default directory.
 
 Self-update config intentionally does **not** persist credentials, registry tokens, mirror URLs, commands, or installer arguments. Credentials continue through the existing auth path; mirror URLs remain invocation-scoped environment variables.
 

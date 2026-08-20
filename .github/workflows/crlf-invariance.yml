@@ -39,7 +39,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Run cross-platform content-hash probe
-        run: uv run --python ${{ env.PYTHON_VERSION }} python scripts/crlf_invariance_probe.py --out hash.txt
+        run: uv run --frozen --python ${{ env.PYTHON_VERSION }} python scripts/crlf_invariance_probe.py --out hash.txt
 
       - name: Upload hash artifact
         uses: actions/upload-artifact@v4

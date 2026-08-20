@@ -90,6 +90,80 @@ class TestRemoveStaleCharacterisation:
         assert result is None
 
 
+class TestCleanCodexToml:
+    def test_preserves_windows_literal_keys_while_removing_stale_server(self, tmp_path):
+        import tomlkit
+
+        from apm_cli.integration.mcp_integrator import _clean_toml_mcp_config
+
+        config_path = tmp_path / "config.toml"
+        unrelated = (
+            "[projects.'c:\\src\\projectdir\\subdir']\n"
+            'trust_level = "trusted"\n'
+            "\n"
+            "[desktop.open-in-target-preferences.perPath]\n"
+            "'C:\\Users\\me\\Documents\\Playground' = \"fileManager\"\n"
+        )
+        config_path.write_text(
+            unrelated
+            + "\n"
+            + "[mcp_servers.stale-server]\n"
+            + 'command = "old"\n'
+            + "\n"
+            + "[mcp_servers.keep-server]\n"
+            + 'command = "keep"\n',
+            encoding="utf-8",
+        )
+
+        removed = _clean_toml_mcp_config(
+            config_path,
+            {"stale-server"},
+            "Codex CLI config",
+            use_rich=False,
+        )
+
+        updated = config_path.read_text(encoding="utf-8")
+        assert removed == 1
+        assert unrelated in updated
+        parsed = tomlkit.parse(updated)
+        assert "stale-server" not in parsed["mcp_servers"]
+        assert parsed["mcp_servers"]["keep-server"]["command"] == "keep"
+
+    def test_skips_non_table_mcp_servers_without_rewriting(self, tmp_path):
+        from apm_cli.integration.mcp_integrator import _clean_toml_mcp_config
+
+        config_path = tmp_path / "config.toml"
+        original = 'mcp_servers = ["stale-server"]\n'
+        config_path.write_text(original, encoding="utf-8")
+
+        removed = _clean_toml_mcp_config(
+            config_path,
+            {"stale-server"},
+            "Codex CLI config",
+            use_rich=False,
+        )
+
+        assert removed == 0
+        assert config_path.read_text(encoding="utf-8") == original
+
+    def test_skips_non_utf8_config_without_rewriting(self, tmp_path):
+        from apm_cli.integration.mcp_integrator import _clean_toml_mcp_config
+
+        config_path = tmp_path / "config.toml"
+        original = b"\xff"
+        config_path.write_bytes(original)
+
+        removed = _clean_toml_mcp_config(
+            config_path,
+            {"stale-server"},
+            "Codex CLI config",
+            use_rich=False,
+        )
+
+        assert removed == 0
+        assert config_path.read_bytes() == original
+
+
 class TestRemoveStaleIntelliJ:
     """Fixture-backed coverage for the JetBrains (intellij) stale-cleanup block."""
 
@@ -99,7 +173,7 @@ class TestRemoveStaleIntelliJ:
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         home = tmp_path / "home"
-        config_dir = home / ".local" / "share" / "github-copilot" / "intellij"
+        config_dir = home / ".config" / "github-copilot" / "intellij"
         config_dir.mkdir(parents=True)
         mcp_json = config_dir / "mcp.json"
         mcp_json.write_text(
@@ -117,8 +191,12 @@ class TestRemoveStaleIntelliJ:
         logger.verbose = False
         with (
             patch(
-                "apm_cli.adapters.client.intellij._intellij_config_dir",
-                return_value=config_dir,
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_config_path",
+                return_value=str(mcp_json),
+            ),
+            patch(
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_legacy_config_path",
+                return_value=None,
             ),
             patch("pathlib.Path.home", return_value=home),
         ):
@@ -133,20 +211,69 @@ class TestRemoveStaleIntelliJ:
         assert "stale-server" not in data["servers"]
         assert "keep-server" in data["servers"]
 
-    def test_remove_stale_intellij_skips_when_localappdata_unset(self, tmp_path):
-        """A misconfigured env (PathTraversalError) must not crash cleanup."""
+    def test_remove_stale_intellij_fails_when_config_path_is_unavailable(self, tmp_path):
+        """A misconfigured path must fail instead of claiming cleanup success."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
         from apm_cli.utils.path_security import PathTraversalError
 
         logger = MagicMock()
         logger.verbose = False
-        with patch(
-            "apm_cli.adapters.client.intellij._intellij_config_dir",
-            side_effect=PathTraversalError("LOCALAPPDATA unset"),
+        with (
+            patch(
+                "apm_cli.adapters.client.intellij._intellij_config_root",
+                side_effect=PathTraversalError("LOCALAPPDATA unset"),
+            ),
+            pytest.raises(PathTraversalError, match="LOCALAPPDATA"),
         ):
-            result = MCPIntegrator.remove_stale(
+            MCPIntegrator.remove_stale(
                 stale_names={"stale-server"},
                 runtime="intellij",
                 logger=logger,
             )
-        assert result is None
+
+    def test_remove_stale_intellij_fails_on_malformed_json(self, tmp_path):
+        """Malformed user config fails closed instead of being overwritten."""
+        from apm_cli.adapters.client.intellij import IntelliJConfigError
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        config_path = tmp_path / "config" / "mcp.json"
+        config_path.parent.mkdir(parents=True)
+        original = b"{invalid\n"
+        config_path.write_bytes(original)
+        with (
+            patch(
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_config_path",
+                return_value=str(config_path),
+            ),
+            patch(
+                "apm_cli.adapters.client.intellij.IntelliJClientAdapter.get_legacy_config_path",
+                return_value=None,
+            ),
+            pytest.raises(IntelliJConfigError, match="malformed JSON"),
+        ):
+            MCPIntegrator.remove_stale(
+                stale_names={"stale-server"},
+                runtime="intellij",
+                logger=MagicMock(),
+            )
+
+        assert config_path.read_bytes() == original
+
+    def test_remove_stale_intellij_resolves_output_path_once(self):
+        """Multiple removal messages reuse one validated config path."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        client = MagicMock()
+        client.remove_managed_servers.return_value = {"first", "second"}
+        client.get_config_path.return_value = "/home/user/.config/github-copilot/intellij/mcp.json"
+        with (
+            patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
+            patch("apm_cli.integration.mcp_integrator._rich_success"),
+        ):
+            MCPIntegrator.remove_stale(
+                stale_names={"first", "second"},
+                runtime="intellij",
+                logger=MagicMock(),
+            )
+
+        client.get_config_path.assert_called_once_with()

@@ -722,6 +722,15 @@ def add(source, name, ref, branch, host, verbose):
             f"Marketplace '{display_name}' registered ({plugin_count} plugins)",
             symbol="check",
         )
+        if manifest.structural_errors:
+            count = len(manifest.structural_errors)
+            plural = "entry" if count == 1 else "entries"
+            logger.warning(
+                f"Marketplace '{display_name}' contains {count} unsupported or malformed plugin "
+                f"{plural}; "
+                f"run `apm marketplace validate {display_name}` for details.",
+                symbol="warning",
+            )
         if manifest.description:
             logger.verbose_detail(f"    {manifest.description}")
 

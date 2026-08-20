@@ -35,7 +35,13 @@
     "entry": {
       "type": "object",
       "properties": {
-        "repo_url": { "type": "string" },
+        "repo_url": { "type": "string", "minLength": 1 },
+        "materialization_repo_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Source-cased repository identifier for materialization; non-identity metadata per req-lk-022.",
+          "$comment": "MUST map to the same canonical identity as repo_url under req-rs-016."
+        },
         "host": { "type": "string" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "registry_prefix": { "type": "string" },

@@ -81,8 +81,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_full_sha_pin_audit_rejects_resolved_commit_mismatch",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_carries_dependencies_block"
       ]
     },
@@ -116,7 +117,7 @@
       "status": "active",
       "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_mcp_validation_fails_before_durable_mutation"
       ]
     },
     {
@@ -191,8 +192,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed"
       ]
     },
@@ -263,6 +265,43 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_inventory_metadata_is_non_trust_anchor"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-020",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::TestFinalLockfileTargetContraction::test_removes_dropped_target_instruction_file",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-021",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_target_merge_hook_state_reconciled_fail_safe"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-022",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 4,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_materialization_spelling_is_non_identity_metadata",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_collision_fails_without_deleting_candidates",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_does_not_change_lockfile_sort_order",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_migrates_one_case_variant_transactionally"
       ]
     },
     {
@@ -500,6 +539,39 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-mf-022",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-023",
+      "keyword": "MUST",
+      "section": "4.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_runtime_argument_templates_without_secret_leakage"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-024",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_preserves_registry_identity_on_structured_rewrite"
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -662,6 +734,17 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_unmanaged_files_surfacing_completeness"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-016",
+      "keyword": "MUST",
+      "section": "6.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_deployment_ledger_owner_is_hard_integrity_failure"
       ]
     },
     {
@@ -901,12 +984,41 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-rs-015",
+      "keyword": "MUST",
+      "section": "7.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_replays_locked_commit_without_network"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-016",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "active",
+      "test_count": 7,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_l0_cache_across_hosts",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_same_host_nested_repositories_through_resolver",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_normalizes_safe_syntax_dimensions",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_preserves_literal_path_distinctions",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_preserves_nondefault_port_and_path_case",
+        "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_survives_full_install_and_persistent_cache",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_cache_preserves_complete_repository_identity"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-sc-001",
       "keyword": "MUST",
       "section": "10.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_deployed_file_missing_from_deployed_files_is_reported",
         "tests/spec_conformance/test_manifest_reqs.py::test_sha256_content_hash_on_deployed_files"
       ]
     },
@@ -1033,6 +1145,28 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-013",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_configured_host_class_precedence_is_credential_isolated"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-014",
+      "keyword": "MUST",
+      "section": "10.15",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_bin_deployment_defaults_to_deny_in_non_interactive_context"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
@@ -1074,18 +1208,84 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_routes_vendor_target_identifiers_to_handlers"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-005",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_antigravity_rules_with_expected_dedup"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-006",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-007",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_project_compile_guidance_for_dependency_instructions"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-008",
+      "keyword": "MUST",
+      "section": "8.5.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-009",
+      "keyword": "MUST",
+      "section": "8.5.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-010",
+      "keyword": "MUST",
+      "section": "8.5.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_project_scoped_native_hook_command_is_portably_anchored"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 66,
+      "active": 82,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
     },
     "governance": {
-      "active": 15,
+      "active": 16,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1103,5 +1303,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 95
+  "total_requirements": 112
 }

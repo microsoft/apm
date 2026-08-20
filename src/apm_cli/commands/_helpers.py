@@ -19,6 +19,7 @@ from ..constants import (
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
+from ..core import project_name as _project_name
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
@@ -28,6 +29,10 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
 from ..version import get_build_sha, get_version
 from .deps._utils import _scan_installed_packages
+
+# Thin compatibility aliases only; core/project_name.py remains the AC18 owner.
+_resolve_bootstrap_project_name = _project_name.resolve_bootstrap_project_name
+_validate_project_name = _project_name.validate_project_name
 
 # CRITICAL: Shadow Click commands at module level to prevent namespace collision
 # When Click commands like 'config set' are defined, calling set() can invoke the command
@@ -308,7 +313,7 @@ def _check_orphaned_packages():
             from ..models.apm_package import APMPackage
 
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            declared_deps = apm_package.get_apm_dependencies()
+            declared_deps = apm_package.get_all_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
             expected = _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir)
         except Exception:
@@ -474,7 +479,7 @@ def _check_and_notify_updates():
             _rich_echo(get_update_hint_message(), color="yellow", bold=True)
 
             # Add a blank line for visual separation
-            click.echo()
+            _rich_echo("")
     except Exception:
         # Silently fail - version checking should never block CLI usage
         pass
@@ -617,22 +622,6 @@ def _validate_plugin_name(name):
     return bool(re.match(r"^[a-z][a-z0-9-]{0,63}$", name))
 
 
-def _validate_project_name(name):
-    """Validate that a project name is safe to use as a directory name.
-
-    Project names are used directly as directory names and must not contain
-    '/' or '\' so the name is not interpreted as a filesystem path,
-    and must not be '..' to prevent directory traversal.
-
-    Returns True if valid, False otherwise.
-    """
-    if "/" in name or "\\" in name:
-        return False
-    if name == "..":  # noqa: SIM103
-        return False
-    return True
-
-
 def _create_plugin_json(config):
     """Create plugin.json file with package metadata.
 
@@ -706,12 +695,14 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
     content = out_file.read_text(encoding="utf-8")
 
     if "targets" in apm_yml_data:
+        from apm_cli.core.target_catalog import manifest_target_names
+
         # Insert comment before the targets: line
+        accepted_targets = ", ".join(sorted(manifest_target_names()))
         targets_comment = (
             "# Which agent platforms to deploy to.\n"
             "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"
-            "# Accepted values: vscode, agents, copilot, claude, cursor, opencode, codex,\n"
-            "# gemini, antigravity, windsurf, kiro, agent-skills, all\n"
+            f"# Accepted values: {accepted_targets}\n"
         )
         content = content.replace("targets:", targets_comment + "targets:", 1)
     else:

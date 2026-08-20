@@ -79,10 +79,9 @@ The pipeline is deterministic. Each phase must pass before the next runs.
    for hidden Unicode (zero-width characters, bidi controls, tag
    characters). Critical findings block the install. Override with
    `--force`.
-4. **Integrate.** Write primitives into each target harness's native
-   directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`,
-   `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`) and the cross-tool
-   `.agents/skills/` directory.
+4. **Integrate.** Write primitives into each selected target's owned
+   directories, such as `.github/`, `.claude/`, `.grok/`, and the cross-tool
+   `.agents/skills/`.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
 
@@ -104,10 +103,10 @@ them. Detection priority:
 
 1. `--target <slug>` flag (highest).
 2. The `targets:` field in `apm.yml`.
-3. Auto-detect: any harness directory (`.github/`, `.claude/`,
-   `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`)
-   that already exists in the workspace.
-4. Fallback: minimal output to `AGENTS.md` only.
+3. Auto-detect from the
+   [documented filesystem signals](../../reference/cli/targets/#detection-signals).
+
+With no signal, install exits with a target-selection error.
 
 Pin targets explicitly when you want reproducibility across machines:
 
@@ -126,10 +125,10 @@ Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf
 
 ## What to commit
 
-Commit `apm.yml`, `apm.lock.yaml`, and every harness directory APM writes to
-(`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`,
-`.kiro/`). Committed deployed files give teammates and cloud Copilot instant agent
-context on clone, before they run `apm install`.
+Commit `apm.yml`, `apm.lock.yaml`, and every target-owned directory APM writes
+to. These can include `.github/`, `.claude/`, `.grok/`, and `.agents/`.
+Committed deployed files give teammates agent context on clone, before they
+run `apm install`.
 
 Add `apm_modules/` to `.gitignore` -- it is the package cache and is rebuilt from
 the lockfile on every `apm install`. APM adds the entry automatically on first install.
@@ -143,6 +142,19 @@ rationale.
 top-level entries. Versions and content hashes are pinned in
 `apm.lock.yaml` so every contributor and CI run installs the exact
 same bytes. Commit the lockfile.
+
+:::note[Lockfile replay]
+Plain `apm install` and `apm install --frozen` replay locked commits for
+unchanged dependencies, including transitive packages, and reuse matching
+[cached package content](../../reference/cli/cache/) when available. This keeps
+mutable branches and tags pinned to their recorded commits.
+
+Run [`apm update`](../../reference/cli/update/) or `apm install --refresh` to
+establish current upstream mutable refs. `apm outdated` checks the same current
+state without changing the lockfile. See the
+[lockfile specification](../../reference/lockfile-spec/) for the replay
+contract.
+:::
 
 Transitive **APM** packages flow through automatically. Transitive
 **MCP servers** are gated: if a deep dependency declares a new MCP
@@ -172,7 +184,9 @@ apm install --target claude,cursor     # only deploy to these harnesses
 apm install --exclude gemini           # deploy to all targets except gemini
 apm install --only apm                 # skip MCP server integration this run
 apm install --frozen                   # CI: lockfile-only; fail on drift
-apm install --refresh                  # bypass the cache; re-fetch everything
+apm install --update                   # resolve current upstream refs
+apm install --refresh                  # resolve refs and bypass cached content
+apm install --force                    # collision/security override; no ref refresh
 apm install --dev                      # treat positional args as devDependencies
 apm install -g <package>               # install to user scope (~/.apm/)
 apm install -v                         # verbose: show resolution and integration
@@ -183,6 +197,11 @@ during install. Targets whose user-scope instruction surface is a root context
 file require explicit
 [`apm compile --global`](../../reference/cli/compile/#global-compilation);
 `apm install -g` prints a hint and writes no root context file.
+
+For project-scope installs, targets that require
+[post-install instruction compilation](../../reference/targets-matrix/#post-install-instruction-compilation)
+print a hint when dependency instructions require `apm compile`. The hint names
+the root context files that compile will update.
 
 For the full flag reference, run `apm install --help` or see
 [CLI commands](../../reference/cli/install/).

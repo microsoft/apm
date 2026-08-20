@@ -1,13 +1,13 @@
-"""Unit tests for finalize.py install-time global-instructions hint.
+"""Unit tests for finalize.py install-time compile-hint hooks.
 
-Covers _hint_global_root_context and its integration in run():
+Covers _hint_global_root_context, _hint_project_compile_needed, and run():
 
 * hint fires when global instructions land on a root-context-only target
 * hint suppressed when no global instructions were installed
 * hint suppressed when only directory-native targets are active
 * hint suppressed on dry-run
 * hint writes NO file (read-only)
-* run(): does NOT hint for PROJECT scope
+* run(): calls _hint_project_compile_needed for PROJECT scope (regression: #2057)
 * run(): DOES hint for USER scope
 """
 
@@ -16,6 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -299,19 +301,24 @@ class TestHintGlobalRootContext:
 class TestFinalizeRunIntegration:
     """Tests for run() function's integration of the hint hook."""
 
-    def test_project_scope_no_hint(self):
-        """When ctx.scope is PROJECT, hint hook is NOT called."""
+    def test_project_scope_global_hint_not_called(self):
+        """When ctx.scope is PROJECT, _hint_global_root_context is NOT called."""
         from apm_cli.core.scope import InstallScope
         from apm_cli.install.phases.finalize import run
 
         ctx = _make_install_context(scope=InstallScope.PROJECT)
 
-        with patch(
-            "apm_cli.install.phases.finalize._hint_global_root_context",
-        ) as mock_hint:
+        with (
+            patch(
+                "apm_cli.install.phases.finalize._hint_global_root_context",
+            ) as mock_global_hint,
+            patch(
+                "apm_cli.install.phases.finalize._hint_project_compile_needed",
+            ),
+        ):
             run(ctx)
 
-        mock_hint.assert_not_called()
+        mock_global_hint.assert_not_called()
 
     def test_user_scope_hint_called(self):
         """When ctx.scope is USER, hint hook IS called with the context."""
@@ -329,17 +336,23 @@ class TestFinalizeRunIntegration:
         assert result is not None
 
     def test_none_scope_no_hint(self):
-        """When ctx.scope is None, hint hook is NOT called."""
+        """When ctx.scope is None, neither hint hook is called."""
         from apm_cli.install.phases.finalize import run
 
         ctx = _make_install_context(scope=None)
 
-        with patch(
-            "apm_cli.install.phases.finalize._hint_global_root_context",
-        ) as mock_hint:
+        with (
+            patch(
+                "apm_cli.install.phases.finalize._hint_global_root_context",
+            ) as mock_hint,
+            patch(
+                "apm_cli.install.phases.finalize._hint_project_compile_needed",
+            ) as mock_project_hint,
+        ):
             run(ctx)
 
         mock_hint.assert_not_called()
+        mock_project_hint.assert_not_called()
 
     def test_run_returns_install_result(self):
         """run() returns an InstallResult object."""
@@ -356,3 +369,261 @@ class TestFinalizeRunIntegration:
 
         assert isinstance(result, InstallResult)
         assert result.installed_count == 1
+
+
+# ---------------------------------------------------------------------------
+# _hint_project_compile_needed tests  (regression: issue #2057)
+# ---------------------------------------------------------------------------
+
+
+class TestHintProjectCompileNeeded:
+    """Tests for _hint_project_compile_needed() -- the project-scope compile hint.
+
+    Regression guard: before the fix for #2057, installing a local Gemini package
+    produced no hint.  The user had to know independently that ``apm compile``
+    was required; GEMINI.md never received the dep's instructions.
+    """
+
+    def test_hint_fires_for_compile_only_target_with_instruction_files(self, tmp_path):
+        """Gemini target + dep has instruction files -> hint is emitted."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        # Plant a dep instruction file in apm_modules
+        instr = tmp_path / "apm_modules" / "_local" / "mypkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+
+        ctx = _make_install_context(
+            scope=InstallScope.PROJECT,
+            targets=[_make_target("Gemini CLI", "gemini")],
+        )
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_called_once()
+        message = ctx.logger.info.call_args.args[0]
+        assert message == (
+            "Instructions installed for Gemini CLI. "
+            "Run 'apm compile' to update AGENTS.md / GEMINI.md."
+        )
+
+    def test_instruction_scan_ignores_symlink_outside_apm_modules(self, tmp_path):
+        """An escaping instruction symlink cannot trigger the compile hint."""
+        from apm_cli.install.phases.finalize import _has_dep_instruction_files
+
+        apm_modules = tmp_path / "apm_modules"
+        instructions = apm_modules / "pkg" / ".apm" / "instructions"
+        instructions.mkdir(parents=True)
+        outside = tmp_path / "outside.instructions.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        linked_instruction = instructions / "linked.instructions.md"
+        try:
+            linked_instruction.symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation not supported here: {exc}")
+
+        ctx = _make_install_context()
+        ctx.apm_modules_dir = apm_modules
+        ctx.project_root = tmp_path
+
+        assert _has_dep_instruction_files(ctx) is False
+        ctx.diagnostics.warn.assert_called_once_with(
+            "Ignored unsafe instruction link that resolves outside "
+            "apm_modules: pkg/.apm/instructions/linked.instructions.md"
+        )
+
+    def test_hint_lists_only_outputs_for_active_compile_families(self, tmp_path):
+        """Mixed target hints name each output that compile will produce."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        ctx = _make_install_context(
+            targets=[
+                _make_target("Gemini CLI", "gemini"),
+                _make_target("Codex", "agents"),
+                _make_target("Gemini CLI", "gemini"),
+            ]
+        )
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_called_once_with(
+            "Instructions installed for Gemini CLI, Codex. "
+            "Run 'apm compile' to update AGENTS.md / GEMINI.md.",
+            symbol="info",
+        )
+
+    def test_hint_not_fired_for_claude_target(self, tmp_path):
+        """Claude receives dependency instructions directly in .claude/rules."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        ctx = _make_install_context(targets=[_make_target("Claude Code", "claude")])
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_ignores_target_without_project_scope(self, tmp_path):
+        """A target unavailable at project scope cannot trigger the hint."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        target = _make_target("Unavailable", "agents")
+        target.for_scope = MagicMock(return_value=None)
+        ctx = _make_install_context(targets=[target])
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_not_fired_for_intellij_target(self, tmp_path):
+        """IntelliJ is MCP-only and has no verified root-context reader."""
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+        ctx = _make_install_context(targets=[_make_target("intellij", "agents")])
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_not_fired_for_copilot_target(self, tmp_path):
+        """Copilot target (native per-file rules) -> no hint."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "_local" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+
+        ctx = _make_install_context(
+            scope=InstallScope.PROJECT,
+            targets=[_make_target("GitHub Copilot", "copilot")],
+        )
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_not_fired_when_no_instruction_files(self, tmp_path):
+        """Gemini target but no dep instruction files -> no hint."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        (tmp_path / "apm_modules").mkdir()
+
+        ctx = _make_install_context(
+            scope=InstallScope.PROJECT,
+            targets=[_make_target("Gemini CLI", "gemini")],
+        )
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_not_fired_on_dry_run(self, tmp_path):
+        """Dry-run installs do not emit the hint."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "_local" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+
+        ctx = _make_install_context(
+            scope=InstallScope.PROJECT,
+            targets=[_make_target("Gemini CLI", "gemini")],
+            dry_run=True,
+        )
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_not_fired_when_nothing_installed(self, tmp_path):
+        """installed_count == 0 -> no hint (no-op install)."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "_local" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+
+        ctx = _make_install_context(
+            scope=InstallScope.PROJECT,
+            targets=[_make_target("Gemini CLI", "gemini")],
+        )
+        ctx.installed_count = 0
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_hint_not_fired_for_excluded_target_name(self, tmp_path):
+        """Targets in the exclusion set are skipped even if family matches."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_project_compile_needed
+
+        instr = tmp_path / "apm_modules" / "_local" / "pkg" / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "rules.instructions.md").write_text("# Rules\n")
+
+        # "cursor" is in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS
+        ctx = _make_install_context(
+            scope=InstallScope.PROJECT,
+            targets=[_make_target("cursor", "agents")],
+        )
+        ctx.apm_modules_dir = tmp_path / "apm_modules"
+        ctx.project_root = tmp_path
+
+        _hint_project_compile_needed(ctx)
+
+        ctx.logger.info.assert_not_called()
+
+    def test_run_calls_project_hint_for_project_scope(self):
+        """run() calls _hint_project_compile_needed (not global hint) for PROJECT scope."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import run
+
+        ctx = _make_install_context(scope=InstallScope.PROJECT)
+
+        with (
+            patch(
+                "apm_cli.install.phases.finalize._hint_project_compile_needed",
+            ) as mock_project_hint,
+            patch(
+                "apm_cli.install.phases.finalize._hint_global_root_context",
+            ) as mock_global_hint,
+        ):
+            run(ctx)
+
+        mock_project_hint.assert_called_once_with(ctx)
+        mock_global_hint.assert_not_called()

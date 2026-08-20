@@ -576,8 +576,12 @@ def _fetch_git(
     from ..cache.paths import get_cache_root
 
     org = source.owner or None
-    auth_ctx = auth_resolver.resolve(host_info.host, org)
-    git_env = auth_ctx.git_env
+    auth_ctx = (
+        auth_resolver.resolve(host_info.host, org, port=source.port)
+        if source.port is not None
+        else auth_resolver.resolve(host_info.host, org)
+    )
+    git_env = auth_resolver.hardened_git_env_for_context(auth_ctx)
 
     cache = GitCache(get_cache_root(), refresh=False)
     try:
@@ -631,8 +635,16 @@ def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
 
     ``AuthResolver.try_with_fallback`` hands the operation a ``(token, git_env)``
     pair but not the auth scheme. Bearer contexts carry the full
-    ``Authorization: Bearer <jwt>`` header in ``GIT_CONFIG_VALUE_0`` (see
-    ``AuthResolver._build_git_env``); detect that and emit the Bearer scheme.
+    ``Authorization: Bearer <jwt>`` header in a ``GIT_CONFIG_VALUE_<i>`` slot
+    (see ``AuthResolver._build_git_env``); detect that and emit the Bearer
+    scheme. The slot index is not fixed -- since #2368 the header is appended
+    after any retained non-auth entries -- so the whole indexed set is scanned.
+
+    Only indices below ``GIT_CONFIG_COUNT`` are read, because that is all git
+    itself reads. A slot above the count is either a leftover from an env this
+    process did not build or an injected one, and honouring it would send an
+    ADO PAT under the Bearer scheme, which the server rejects.
+
     Otherwise treat the token as an ADO PAT and use HTTP Basic with
     ``base64(":" + PAT)`` per ADO's convention (empty username, PAT as
     password). Returns an empty dict for an anonymous request.
@@ -641,9 +653,15 @@ def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
     """
     if not token:
         return {}
-    extra_header = (git_env or {}).get("GIT_CONFIG_VALUE_0", "").strip()
-    if extra_header.lower().startswith("authorization: bearer "):
-        return {"Authorization": f"Bearer {token}"}
+    env = git_env or {}
+    try:
+        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
+    except (TypeError, ValueError):
+        count = 0
+    for index in range(count):
+        value = str(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
+        if value.strip().lower().startswith("authorization: bearer "):
+            return {"Authorization": f"Bearer {token}"}
     encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
     return {"Authorization": f"Basic {encoded}"}
 
@@ -656,6 +674,7 @@ def _fetch_ado_rest(
     project: str,
     repo: str,
     host: str,
+    port: int | None,
     auth_resolver,
 ) -> dict | None:
     """Read a single metadata file from Azure DevOps via the REST items API.
@@ -669,7 +688,15 @@ def _fetch_ado_rest(
     """
     from ..utils.github_host import build_ado_api_url
 
-    url = build_ado_api_url(org, project, repo, file_path, source.ref, host)
+    url = build_ado_api_url(
+        org,
+        project,
+        repo,
+        file_path,
+        source.ref,
+        host,
+        port,
+    )
 
     def _do_fetch(token, git_env):
         headers = {"User-Agent": "apm-cli"}
@@ -702,12 +729,17 @@ def _fetch_ado_rest(
             if callable(close):
                 close()
 
+    fallback_kwargs = {
+        "org": org,
+        "path": f"{org}/{project}/{repo}",
+        "unauth_first": False,
+    }
+    if port is not None:
+        fallback_kwargs["port"] = port
     return auth_resolver.try_with_fallback(
         host,
         _do_fetch,
-        org=org,
-        path=f"{org}/{project}/{repo}",
-        unauth_first=False,
+        **fallback_kwargs,
     )
 
 
@@ -748,6 +780,7 @@ def _fetch_ado(
             project=project,
             repo=repo,
             host=host,
+            port=source.port,
             auth_resolver=auth_resolver,
         )
     except _AdoItemNotFound:
@@ -1045,7 +1078,7 @@ def _fetch_file(
         # For ADO and generic git, classify the host extracted from the URL so
         # each gets a correctly-typed auth context (ADO PAT/bearer routing).
         host = _host_from_url(source.url)
-        host_info = AuthResolver.classify_host(host) if host else None
+        host_info = AuthResolver.classify_host(host, port=source.port) if host else None
 
     return fetcher(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 

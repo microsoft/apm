@@ -185,6 +185,31 @@ class TestDepsListCommand(_DepsCmdBase):
         # match against unrelated 'orphan' substrings in future output).
         assert "orphaned package(s) found" in result.output
 
+    def test_list_does_not_orphan_local_transitive_dependency(self):
+        """A locked local transitive dep is keyed by its canonical install path."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "_local", "sub-package")
+            (tmp / "apm.lock.yaml").write_text(
+                'lockfile_version: "1"\n'
+                "generated_at: '2026-01-01T00:00:00+00:00'\n"
+                "dependencies:\n"
+                "  - repo_url: _local/sub-package\n"
+                "    name: sub-package\n"
+                "    source: local\n"
+                "    local_path: ../sub-package\n"
+                "    depth: 2\n"
+                "    resolved_by: _local/package\n",
+                encoding="utf-8",
+            )
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+
+        assert result.exit_code == 0, result.output
+        assert "_local/sub-package" in result.output
+        assert "local" in result.output
+        assert "orphaned package(s) found" not in result.output
+
     def test_list_version_shown(self):
         """Version from apm.yml should appear in fallback text output."""
         with self._chdir_tmp() as tmp:
@@ -511,6 +536,48 @@ class TestDepsTreeCommand(_DepsCmdBase):
         assert "realorg/realrepo" in result.output
         # The self-entry must not appear under any of its representations.
         assert "<self>" not in result.output
+
+    def test_tree_does_not_self_nest_same_repo_virtual_dependencies(self):
+        """Same-repo virtual dependencies appear once in their depth hierarchy."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+        repo_url = "example/monorepo"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: consumer\n")
+            lock = LockFile(
+                lockfile_version="1",
+                generated_at="2025-01-01T00:00:00+00:00",
+                apm_version="0.0.0-test",
+            )
+            for dependency in (
+                LockedDependency(repo_url=repo_url, depth=1, version="1.0.0"),
+                LockedDependency(
+                    repo_url=repo_url,
+                    virtual_path="packages/inner",
+                    is_virtual=True,
+                    depth=2,
+                    resolved_by=repo_url,
+                    version="1.0.0",
+                ),
+                LockedDependency(
+                    repo_url=repo_url,
+                    virtual_path="packages/leaf",
+                    is_virtual=True,
+                    depth=3,
+                    resolved_by=repo_url,
+                    version="1.0.0",
+                ),
+            ):
+                lock.add_dependency(dependency)
+            (tmp / "apm.lock.yaml").write_text(lock.to_yaml())
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp):
+                result = self.runner.invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("example/monorepo@1.0.0") == 1
+        assert result.output.count("example/monorepo/packages/inner@1.0.0") == 1
+        assert result.output.count("example/monorepo/packages/leaf@1.0.0") == 1
 
 
 class TestDepsInfoCommand(_DepsCmdBase):

@@ -22,6 +22,12 @@ import pytest
 
 from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 
+# Entire module: this is the canonical owner of platform-independent
+# atomic/LF-safe text writes (microsoft/apm#2233 CRLF-drift class).
+# Selected by the PR-time Windows Compatibility Gate via
+# `pytest -m windows_compat`; also runs on every other OS.
+pytestmark = pytest.mark.windows_compat
+
 
 class TestAtomicWriteText:
     """Tests for atomic_write_text()."""
@@ -177,6 +183,25 @@ class TestAtomicWriteText:
                 atomic_write_text(target, "data")
 
         assert not target.exists()
+
+    def test_lock_replace_fault_is_narrow_and_preserves_original(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The installed-binary seam fails only lock replacement on every OS."""
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text("original\n", encoding="ascii")
+        other_path = tmp_path / "other.yaml"
+        monkeypatch.setenv("APM_TEST_FAIL_LOCK_REPLACE", "1")
+
+        with pytest.raises(OSError, match="lockfile replace blocked by test"):
+            atomic_write_text(lock_path, "replacement\n")
+        atomic_write_text(other_path, "allowed\n")
+
+        assert lock_path.read_text(encoding="ascii") == "original\n"
+        assert other_path.read_text(encoding="ascii") == "allowed\n"
+        assert list(tmp_path.glob("apm-atomic-*")) == []
 
     # ------------------------------------------------------------------
     # Deterministic LF line endings (cross-platform hash stability)

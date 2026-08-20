@@ -5,14 +5,18 @@ import contextlib
 import click
 import pytest
 
+from apm_cli.core import target_detection
 from apm_cli.core.target_detection import (
     ALL_CANONICAL_TARGETS,
     EXPERIMENTAL_TARGETS,
+    MCP_ONLY_TARGETS,
     VALID_TARGET_VALUES,
     TargetParamType,
     can_dedup_agents_md_instructions,
     detect_target,
+    get_dedup_rules_dir,
     get_target_description,
+    normalize_policy_targets,
     normalize_target_list,
     should_compile_agents_md,
     should_compile_claude_md,
@@ -54,6 +58,16 @@ class TestDetectTarget:
         target, reason = detect_target(
             project_root=tmp_path,
             explicit_target="agents",
+        )
+
+        assert target == "vscode"
+        assert reason == "explicit --target flag"
+
+    def test_explicit_target_intellij_maps_to_vscode(self, tmp_path):
+        """Explicit --target intellij maps to vscode (MCP-only target, #1957)."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="intellij",
         )
 
         assert target == "vscode"
@@ -108,6 +122,17 @@ class TestDetectTarget:
             project_root=tmp_path,
             explicit_target=None,
             config_target="vscode",
+        )
+
+        assert target == "vscode"
+        assert reason == "apm.yml target"
+
+    def test_config_target_intellij(self, tmp_path):
+        """Config target intellij maps to the Copilot deployment profile."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="intellij",
         )
 
         assert target == "vscode"
@@ -408,9 +433,9 @@ class TestDetectTargetCursor:
         )
         assert target == "all"
 
-    def test_cursor_no_compile_agents_md(self):
-        """Cursor target should NOT compile AGENTS.md (uses .cursor/agents/)."""
-        assert should_compile_agents_md("cursor") is False
+    def test_cursor_compiles_agents_md(self):
+        """Cursor's agents compile family emits the shared root context."""
+        assert should_compile_agents_md("cursor") is True
 
     def test_cursor_no_compile_claude_md(self):
         """Cursor target should NOT compile CLAUDE.md."""
@@ -542,7 +567,15 @@ class TestTargetParamType:
 
     def test_valid_target_values_includes_canonical(self):
         """VALID_TARGET_VALUES contains all canonical targets."""
-        for name in ("vscode", "claude", "cursor", "opencode", "codex"):
+        for name in (
+            "vscode",
+            "claude",
+            "cursor",
+            "opencode",
+            "codex",
+            "grok-build",
+            "grok-cloud",
+        ):
             assert name in VALID_TARGET_VALUES
 
     def test_valid_target_values_includes_aliases(self):
@@ -554,6 +587,10 @@ class TestTargetParamType:
     def test_valid_target_values_includes_all(self):
         """VALID_TARGET_VALUES contains 'all'."""
         assert "all" in VALID_TARGET_VALUES
+
+    def test_valid_target_values_includes_intellij(self):
+        """VALID_TARGET_VALUES contains 'intellij' (MCP-only target, #1957)."""
+        assert "intellij" in VALID_TARGET_VALUES
 
     # -- None passthrough -------------------------------------------------
 
@@ -607,6 +644,10 @@ class TestTargetParamType:
         """'all' returns string 'all' for backward compat."""
         assert self.tp.convert("all", None, None) == "all"
 
+    def test_single_intellij(self):
+        """intellij is accepted as a valid MCP-only target (#1957)."""
+        assert self.tp.convert("intellij", None, None) == "intellij"
+
     def test_single_target_returns_string_type(self):
         """Single target must return str, not list."""
         result = self.tp.convert("claude", None, None)
@@ -644,6 +685,11 @@ class TestTargetParamType:
     def test_multi_three_targets(self):
         result = self.tp.convert("claude,cursor,codex", None, None)
         assert result == ["claude", "cursor", "codex"]
+
+    def test_multi_intellij_with_claude(self):
+        """intellij,claude keeps intellij as-is in multi-target (#1957)."""
+        result = self.tp.convert("intellij,claude", None, None)
+        assert result == ["intellij", "claude"]
 
     # -- Alias deduplication ----------------------------------------------
 
@@ -868,6 +914,82 @@ class TestTargetParamType:
         with pytest.raises(click.exceptions.BadParameter, match="cannot be combined"):
             self.tp.convert("all,codex", None, None)
 
+    def test_all_combined_with_intellij_allowed(self):
+        """'all,intellij' is allowed -- intellij is an MCP-only target (#1957)."""
+        from apm_cli.core.target_detection import parse_target_field
+
+        result = parse_target_field("all,intellij")
+        assert isinstance(result, list)
+        for t in ALL_CANONICAL_TARGETS:
+            assert t in result
+        assert "intellij" in result
+
+
+class TestIntelliJConstantGuards:
+    """Constant-split guards ensuring intellij stays MCP-only (#1957).
+
+    IntelliJ is an MCP-only pseudo-target -- it must be in MCP_ONLY_TARGETS
+    and VALID_TARGET_VALUES, but NOT in ALL_CANONICAL_TARGETS. The 'all'
+    expansion must never include it.
+    """
+
+    def test_intellij_not_in_all_canonical_targets(self):
+        """'intellij' must NOT appear in ALL_CANONICAL_TARGETS.
+
+        ALL_CANONICAL_TARGETS drives the 'all' expansion. IntelliJ is
+        MCP-only and must live in MCP_ONLY_TARGETS instead.
+        """
+        assert "intellij" not in ALL_CANONICAL_TARGETS
+
+    def test_intellij_in_mcp_only_targets(self):
+        """'intellij' must appear in MCP_ONLY_TARGETS (constant guard)."""
+        assert "intellij" in MCP_ONLY_TARGETS
+
+    def test_all_expansion_excludes_intellij(self):
+        """normalize_target_list('all') must NOT include 'intellij'.
+
+        'all' expands only to ALL_CANONICAL_TARGETS. MCP-only targets
+        require explicit opt-in via '--target intellij' or 'all,intellij'.
+        """
+        result = normalize_target_list("all")
+        assert isinstance(result, list)
+        assert "intellij" not in result
+        # Verify all canonical targets ARE present
+        for t in ALL_CANONICAL_TARGETS:
+            assert t in result
+
+
+class TestNormalizePolicyTargets:
+    """Direct contract tests for MCP-only policy target normalization."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, None),
+            ("intellij", "copilot"),
+            (["intellij", "claude"], ["copilot", "claude"]),
+            (["intellij", "copilot"], ["copilot"]),
+        ],
+    )
+    def test_normalizes_shape_and_deduplicates(
+        self,
+        value: str | list[str] | None,
+        expected: str | list[str] | None,
+    ) -> None:
+        """Normalize MCP-only values while preserving scalar/list shape."""
+        assert normalize_policy_targets(value) == expected
+
+    def test_unmapped_mcp_only_target_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Reject an MCP-only target without a canonical policy mapping."""
+        monkeypatch.setattr(
+            target_detection,
+            "MCP_ONLY_TARGETS",
+            frozenset({*MCP_ONLY_TARGETS, "unmapped-mcp"}),
+        )
+
+        with pytest.raises(RuntimeError, match="has no canonical policy mapping"):
+            normalize_policy_targets("unmapped-mcp")
+
 
 # ---------------------------------------------------------------------------
 # Cowork parser-layer regression tests (2f96dd5 / #926)
@@ -941,7 +1063,7 @@ class TestCoworkParserLayer:
         requires an intentional test update.
         """
         assert (
-            frozenset({"copilot-cowork", "copilot-app", "openclaw", "hermes"})
+            frozenset({"copilot-cowork", "copilot-app", "grok-cloud", "openclaw", "hermes"})
             == EXPERIMENTAL_TARGETS
         )
 
@@ -980,14 +1102,16 @@ class TestCoworkParserLayer:
 
 
 class TestCanDedupAgentsMdInstructions:
-    """Only vscode-only targets allow instruction dedup from AGENTS.md."""
+    """Only targets with dedicated local rules directories (vscode, antigravity) allow instruction dedup from AGENTS.md."""
 
     @pytest.mark.parametrize(
         ("target", "expected"),
         [
             # Copilot reads both AGENTS.md and .github/instructions/ -- safe to dedup.
             ("vscode", True),
-            # Non-Copilot targets only read AGENTS.md -- must NOT dedup.
+            # Antigravity reads both AGENTS.md and .agents/rules/ -- safe to dedup.
+            ("antigravity", True),
+            # Non-Copilot/Antigravity targets only read AGENTS.md -- must NOT dedup.
             ("codex", False),
             ("opencode", False),
             ("windsurf", False),
@@ -1005,6 +1129,7 @@ class TestCanDedupAgentsMdInstructions:
         ],
         ids=[
             "vscode-str",
+            "antigravity-str",
             "codex-str",
             "opencode-str",
             "windsurf-str",
@@ -1064,9 +1189,92 @@ class TestResolveCompileTargetMixedTargets:
         """Single codex target stays a bare string."""
         assert self._resolve(["codex"]) == "codex"
 
+    def test_antigravity_codex_keeps_agents_family_frozenset(self):
+        """Mixed Antigravity+Codex must not collapse to Antigravity."""
+        assert self._resolve(["antigravity", "codex"]) == frozenset({"agents"})
+
     def test_copilot_claude_keeps_frozenset(self):
         """[copilot, claude] produces a frozenset with vscode and claude families."""
         result = self._resolve(["copilot", "claude"])
         assert isinstance(result, frozenset)
         assert "vscode" in result
         assert "claude" in result
+
+
+class TestGetDedupRulesDir:
+    """Tests for get_dedup_rules_dir resolving canonical targets and aliases."""
+
+    @pytest.mark.parametrize(
+        ("target", "expected"),
+        [
+            ("vscode", (".github/instructions", "copilot")),
+            ("copilot", (".github/instructions", "copilot")),
+            ("agents", (".github/instructions", "copilot")),
+            ("antigravity", (".agents/rules", "antigravity")),
+            ("agy", (".agents/rules", "antigravity")),
+            ("claude", None),
+            (frozenset({"vscode"}), (".github/instructions", "copilot")),
+            (frozenset({"vscode", "agents"}), None),
+        ],
+    )
+    def test_get_dedup_rules_dir(self, target, expected):
+        assert get_dedup_rules_dir(target) == expected
+
+
+class TestDetectTargetGrokBuild:
+    """Tests for explicit, config, and auto-detection of grok-build target."""
+
+    def test_explicit_target_grok_build(self, tmp_path):
+        """Explicit --target grok-build always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="grok-build",
+        )
+        assert target == "grok-build"
+        assert reason == "explicit --target flag"
+
+    def test_config_target_grok_build(self, tmp_path):
+        """Config target grok-build is used when no explicit target."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="grok-build",
+        )
+        assert target == "grok-build"
+        assert reason == "apm.yml target"
+
+    def test_auto_detect_grok_build_only(self, tmp_path):
+        """Auto-detect grok-build when only .grok/ exists."""
+        (tmp_path / ".grok").mkdir()
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "grok-build"
+        assert "detected .grok/ folder" in reason
+
+    def test_auto_detect_grok_plus_github(self, tmp_path):
+        """Auto-detect all when .grok/ and .github/ both exist."""
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".grok").mkdir()
+        target, _ = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "all"
+
+    def test_grok_build_compiles_agents_md(self):
+        """grok-build target produces AGENTS.md root context."""
+        assert should_compile_agents_md("grok-build") is True
+
+    def test_grok_build_no_compile_claude_md(self):
+        """grok-build target does NOT compile CLAUDE.md."""
+        assert should_compile_claude_md("grok-build") is False
+
+    def test_get_target_description_grok_build(self):
+        """get_target_description returns grok-build specific paths."""
+        desc = get_target_description("grok-build")
+        assert ".grok/" in desc
+        assert desc != "unknown target"

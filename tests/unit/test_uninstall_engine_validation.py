@@ -13,6 +13,7 @@ Covers missing lines/branches identified in coverage-unit.json:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
@@ -39,6 +40,40 @@ def _make_locked_dep(key, repo_url=None, resolved_by=None):
     dep.repo_url = repo_url or key.split("/")[-1]
     dep.resolved_by = resolved_by
     return dep
+
+
+def test_reachability_verbose_diagnostics_redact_local_paths():
+    """Local reachability failures never reveal declared machine paths."""
+    from apm_cli.commands.uninstall.engine import _warn_reachability_incomplete
+
+    local_path = r"C:\Users\runner\Private Package"
+    reachability = SimpleNamespace(unverifiable=[(local_path, f"manifest missing at {local_path}")])
+    logger = _make_logger()
+    logger.verbose = True
+
+    _warn_reachability_incomplete(reachability, logger)
+
+    rendered = "\n".join(call.args[0] for call in logger.verbose_detail.call_args_list)
+    assert local_path not in rendered
+    assert "local dependency" in rendered
+
+
+def test_reintegration_verbose_detail_redacts_only_local_dependency_paths():
+    """Remote errors retain detail while local declarations remain private."""
+    from apm_cli.commands.uninstall.engine import _reintegration_error_detail
+    from apm_cli.models.dependency import DependencyReference
+
+    remote = DependencyReference.parse("owner/repo")
+    local_path = r"C:\Users\runner\Private Package"
+    local = DependencyReference.parse(local_path)
+    error = RuntimeError("failed at remote primitive")
+
+    assert _reintegration_error_detail(remote, error) == (
+        "RuntimeError: failed at remote primitive"
+    )
+    local_detail = _reintegration_error_detail(local, RuntimeError(local_path))
+    assert local_detail == "RuntimeError"
+    assert local_path not in local_detail
 
 
 # ---------------------------------------------------------------------------

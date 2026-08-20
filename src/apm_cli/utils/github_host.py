@@ -4,6 +4,63 @@ import os
 import re
 import urllib.parse
 
+_ADO_SERVER_BASE_PATH_ERROR = (
+    "Azure DevOps Server URLs mounted below '/tfs/' are not currently "
+    "supported. Use a root-hosted collection URL such as "
+    "'https://server/DefaultCollection/project/_git/repo'."
+)
+
+
+def _get_ghes_host() -> str:
+    """Return the normalised GITHUB_HOST env value."""
+    return os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+
+
+def _get_gitlab_single_host() -> str:
+    """Return the normalised GITLAB_HOST env value."""
+    return os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+
+
+def _get_gitlab_hosts_list() -> list[str]:
+    """Return normalised APM_GITLAB_HOSTS entries."""
+    raw = os.environ.get("APM_GITLAB_HOSTS", "")
+    return [part.strip().lower().split("/")[0] for part in raw.split(",") if part.strip()]
+
+
+def _normalize_configured_host(value: str) -> str:
+    """Return a lowercase hostname from one configured host value."""
+    candidate = value.strip()
+    if not candidate:
+        return ""
+    parsed = urllib.parse.urlsplit(
+        candidate if "://" in candidate else f"//{candidate}",
+        scheme="https",
+    )
+    try:
+        if parsed.port is not None:
+            return ""
+    except ValueError:
+        return ""
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment or parsed.username:
+        return ""
+    return (parsed.hostname or "").lower()
+
+
+def _get_ado_single_host() -> str:
+    """Return the normalized ADO_HOST env value."""
+    return _normalize_configured_host(os.environ.get("ADO_HOST", ""))
+
+
+def _get_ado_hosts_list() -> list[str]:
+    """Return normalized APM_ADO_HOSTS entries."""
+    raw = os.environ.get("APM_ADO_HOSTS", "")
+    return [host for part in raw.split(",") if (host := _normalize_configured_host(part))]
+
+
+def _is_valid_ado_server_fqdn(hostname: str) -> bool:
+    """Return whether an ADO Server setting is a DNS name, not an IP literal."""
+    return is_valid_fqdn(hostname) and not all(label.isdigit() for label in hostname.split("."))
+
 
 def default_host() -> str:
     """Return the default Git host (can be overridden via GITHUB_HOST env var)."""
@@ -15,17 +72,36 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
 
     Accepts:
     - dev.azure.com (Azure DevOps Services)
+    - ssh.dev.azure.com (Azure DevOps Services SSH)
     - *.visualstudio.com (legacy Azure DevOps URLs)
-    - Custom Azure DevOps Server hostnames are supported via GITHUB_HOST env var
+    - ADO_HOST -- single on-prem Azure DevOps Server hostname
+    - APM_ADO_HOSTS -- comma-separated list of on-prem Azure DevOps Server hostnames
+
+    To configure an on-prem Azure DevOps Server, set ADO_HOST (or APM_ADO_HOSTS
+    for multiple servers):
+
+      export ADO_HOST=ado.corp.example.com
+      export APM_ADO_HOSTS=ado1.corp.example.com,ado2.corp.example.com
+
+    Note: GITHUB_HOST does NOT configure ADO Server hostnames; use ADO_HOST.
     """
     if not hostname:
         return False
-    h = hostname.lower()
+    h = _normalize_configured_host(hostname)
+    if not h:
+        return False
     if h == "dev.azure.com":
         return True
     if h == "ssh.dev.azure.com":
         return True
-    return bool(h.endswith(".visualstudio.com"))
+    if h.endswith(".visualstudio.com"):
+        return True
+    ado_single = _get_ado_single_host()
+    if ado_single and ado_single == h and _is_valid_ado_server_fqdn(h):
+        return True
+    return any(
+        entry and entry == h and _is_valid_ado_server_fqdn(entry) for entry in _get_ado_hosts_list()
+    )
 
 
 def is_visualstudio_legacy_hostname(hostname: str | None) -> bool:
@@ -41,14 +117,44 @@ def is_visualstudio_legacy_hostname(hostname: str | None) -> bool:
     return hostname.lower().endswith(".visualstudio.com")
 
 
+def reject_unsupported_ado_server_base_path(dependency_str: str) -> None:
+    """Reject ADO Server URLs mounted below an unsupported path prefix."""
+    source = dependency_str.split("#", 1)[0].strip()
+    if source.lower().startswith(("ssh://", "git@")):
+        return
+    if source.lower().startswith(("https://", "http://")):
+        parsed = urllib.parse.urlsplit(source)
+        host = parsed.hostname or ""
+        segments = [segment for segment in parsed.path.split("/") if segment]
+    else:
+        parts = [segment for segment in source.split("/") if segment]
+        if len(parts) < 2:
+            return
+        try:
+            host = urllib.parse.urlsplit(f"//{parts[0]}").hostname or ""
+        except ValueError:
+            return
+        segments = parts[1:]
+    if (
+        not is_azure_devops_hostname(host)
+        or host in {"dev.azure.com", "ssh.dev.azure.com"}
+        or is_visualstudio_legacy_hostname(host)
+        or "_git" not in segments
+    ):
+        return
+    git_index = segments.index("_git")
+    if segments[0].lower() == "tfs" and git_index >= 3:
+        raise ValueError(_ADO_SERVER_BASE_PATH_ERROR)
+
+
 def is_gitlab_hostname(hostname: str | None) -> bool:
     """Return True if *hostname* is GitLab SaaS or a GitLab host from env configuration.
 
     Matches, in order of what this function checks (not full ``classify_host`` order):
 
     - ``gitlab.com`` (case-insensitive)
-    - ``GITLAB_HOST`` — single self-managed host (same pattern as ``GITHUB_HOST`` for GHES)
-    - ``APM_GITLAB_HOSTS`` — comma-separated list of self-managed hosts
+    - ``GITLAB_HOST`` -- single self-managed host (same pattern as ``GITHUB_HOST`` for GHES)
+    - ``APM_GITLAB_HOSTS`` -- comma-separated list of self-managed hosts
 
     **GHES precedence:** If ``GITHUB_HOST`` matches *hostname* under the same
     rules as ``AuthResolver.classify_host`` (GHES, not ``gitlab.com`` SaaS),
@@ -62,7 +168,7 @@ def is_gitlab_hostname(hostname: str | None) -> bool:
     # GHES precedence: GITHUB_HOST match is enterprise GitHub, not GitLab, even if
     # the same host appears in GitLab env vars (GHES takes priority over any
     # GitLab environment hint).
-    ghes_host = os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+    ghes_host = _get_ghes_host()
     if (
         ghes_host
         and ghes_host == h
@@ -74,15 +180,10 @@ def is_gitlab_hostname(hostname: str | None) -> bool:
 
     if h == "gitlab.com":
         return True
-    gitlab_single = os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+    gitlab_single = _get_gitlab_single_host()
     if gitlab_single and gitlab_single == h:
         return is_valid_fqdn(h)
-    raw_list = os.environ.get("APM_GITLAB_HOSTS", "")
-    for part in raw_list.split(","):
-        entry = part.strip().lower().split("/")[0]
-        if entry and entry == h and is_valid_fqdn(entry):
-            return True
-    return False
+    return any(entry and entry == h and is_valid_fqdn(entry) for entry in _get_gitlab_hosts_list())
 
 
 def has_github_gitlab_host_env_conflict(hostname: str | None) -> bool:
@@ -101,7 +202,7 @@ def has_github_gitlab_host_env_conflict(hostname: str | None) -> bool:
     if not is_valid_fqdn(h):
         return False
 
-    ghes_host = os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+    ghes_host = _get_ghes_host()
     github_claims_as_ghes = (
         ghes_host
         and ghes_host == h
@@ -112,17 +213,11 @@ def has_github_gitlab_host_env_conflict(hostname: str | None) -> bool:
     if not github_claims_as_ghes:
         return False
 
-    gitlab_single = os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+    gitlab_single = _get_gitlab_single_host()
     if gitlab_single and gitlab_single == h and is_valid_fqdn(h):
         return True
 
-    raw_list = os.environ.get("APM_GITLAB_HOSTS", "")
-    for part in raw_list.split(","):
-        entry = part.strip().lower().split("/")[0]
-        if entry and entry == h and is_valid_fqdn(entry):
-            return True
-
-    return False
+    return any(entry and entry == h and is_valid_fqdn(entry) for entry in _get_gitlab_hosts_list())
 
 
 def format_github_gitlab_host_conflict_error(hostname: str) -> str:
@@ -263,8 +358,9 @@ def unsupported_host_error(hostname: str, context: str | None = None) -> str:
         msg += f"But you're trying to use: '{hostname}'\n"
         msg += "\n"
 
-    msg += f"To use '{hostname}', set the GITHUB_HOST environment variable:\n"
+    msg += f"To use '{hostname}', set the appropriate environment variable:\n"
     msg += "\n"
+    msg += "  For GitHub Enterprise Server:\n"
     msg += "  # Linux/macOS:\n"
     msg += f"  export GITHUB_HOST={hostname}\n"
     msg += "\n"
@@ -273,6 +369,16 @@ def unsupported_host_error(hostname: str, context: str | None = None) -> str:
     msg += "\n"
     msg += "  # Windows (Command Prompt):\n"
     msg += f"  set GITHUB_HOST={hostname}\n"
+    msg += "\n"
+    msg += "  For on-prem Azure DevOps Server:\n"
+    msg += "  # Linux/macOS:\n"
+    msg += f"  export ADO_HOST={hostname}\n"
+    msg += "\n"
+    msg += "  # Windows (PowerShell):\n"
+    msg += f'  $env:ADO_HOST = "{hostname}"\n'
+    msg += "\n"
+    msg += "  # Windows (Command Prompt):\n"
+    msg += f"  set ADO_HOST={hostname}\n"
 
     return msg
 
@@ -372,6 +478,8 @@ def build_https_clone_url(
 
     ``port`` is embedded in the netloc (``host:port``) when set so custom
     HTTPS ports (e.g. self-hosted Git servers on 8443) are preserved.
+    Returned Git-family URLs always carry the ``.git`` suffix, matching SSH,
+    plain-HTTP, and GitLab builders.
 
     Note: callers must avoid logging raw token-bearing URLs.
     """
@@ -379,7 +487,11 @@ def build_https_clone_url(
     if token:
         # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
         return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
-    return f"https://{netloc}/{repo_ref}"
+    # Keep the .git suffix on the anonymous form too: hosts like GitBucket
+    # serve smart-HTTP only at the .git path (no redirect), while GitHub /
+    # GitLab / Bitbucket / Gitea accept both. This also keeps parity with
+    # the token, SSH, and plain-HTTP builders, which all emit .git.
+    return f"https://{netloc}/{repo_ref}.git"
 
 
 def build_gitlab_https_clone_url(
@@ -406,7 +518,12 @@ def build_gitlab_https_clone_url(
 
 
 def build_ado_https_clone_url(
-    org: str, project: str, repo: str, token: str | None = None, host: str = "dev.azure.com"
+    org: str,
+    project: str,
+    repo: str,
+    token: str | None = None,
+    host: str = "dev.azure.com",
+    port: int | None = None,
 ) -> str:
     """Build Azure DevOps HTTPS clone URL.
 
@@ -419,15 +536,18 @@ def build_ado_https_clone_url(
         repo: Repository name
         token: Optional Personal Access Token for authentication
         host: Azure DevOps host (default: dev.azure.com)
+        port: Optional non-default HTTPS port for Azure DevOps Server
 
     Returns:
         str: HTTPS clone URL for Azure DevOps
     """
     quoted_project = urllib.parse.quote(project, safe="")
+    netloc = f"{host}:{port}" if port is not None else host
+    org_path = "" if is_visualstudio_legacy_hostname(host) else f"{org}/"
     if token:
         # ADO uses PAT as password with empty username
-        return f"https://{token}@{host}/{org}/{quoted_project}/_git/{repo}"
-    return f"https://{host}/{org}/{quoted_project}/_git/{repo}"
+        return f"https://{token}@{netloc}/{org_path}{quoted_project}/_git/{repo}"
+    return f"https://{netloc}/{org_path}{quoted_project}/_git/{repo}"
 
 
 def build_authorization_header_git_env(scheme: str, credential: str) -> dict:
@@ -453,6 +573,12 @@ def build_authorization_header_git_env(scheme: str, credential: str) -> dict:
     Note:
         Callers MUST NOT log the returned dict.  ``GIT_CONFIG_VALUE_0``
         contains the credential.
+
+    Warning:
+        Do NOT dict-merge this overlay onto an env that may already carry
+        indexed ``GIT_CONFIG_*`` entries -- the hardcoded count resets the
+        set and clobbers index 0 (#2368).  Use
+        :func:`set_authorization_header_git_env` for that case.
     """
     return {
         "GIT_CONFIG_COUNT": "1",
@@ -477,6 +603,87 @@ def build_ado_bearer_git_env(bearer_token: str) -> dict:
         dict: env-var overlay for the spawned git subprocess.
     """
     return build_authorization_header_git_env("Bearer", bearer_token)
+
+
+def set_authorization_header_git_env(env: dict[str, str], scheme: str, credential: str) -> None:
+    """Make ``Authorization: <scheme> <credential>`` the sole auth header in *env*.
+
+    :func:`build_authorization_header_git_env` returns an overlay whose
+    ``GIT_CONFIG_COUNT`` is hardcoded to ``"1"``.  Dict-merging that overlay
+    onto a base env that already carries indexed git config entries
+    (``GIT_CONFIG_COUNT=N`` with keys ``0..N-1``) resets the count and
+    overwrites index 0, silently dropping non-auth entries such as
+    ``safe.bareRepository=explicit`` or ``http.sslCAInfo`` (#2368).
+
+    This helper instead rewrites the indexed set in place: existing
+    auth-channel entries (any ``*extraheader*`` key, or a value that IS an
+    ``Authorization:`` header -- the same policy as
+    ``AuthResolver._clear_git_auth_env``) are removed so layered callers
+    cannot stack duplicate Authorization headers, every other entry is
+    preserved, and the new header is appended at the end.  Orphaned
+    ``GIT_CONFIG_KEY_/VALUE_`` entries at or beyond the count are also
+    dropped so no stale credential lingers in the child-process env table.
+
+    Note:
+        The retain/reindex predicate below intentionally mirrors
+        ``AuthResolver._clear_git_auth_env`` (``core/auth.py``) rather than
+        delegating to a shared primitive.  Extracting a single owner (e.g.
+        ``utils/git_env.py``) is the right end state -- see PR discussion on
+        #2368 and follow-up #2398 -- but doing so means editing
+        ``_clear_git_auth_env``, a security-critical function this bug does
+        not otherwise touch, which deserves its own focused security review
+        rather than riding along in this fix.
+        TODO(#2398): extract a shared ``_is_auth_channel_entry`` /
+        retain-reindex helper into ``utils/git_env.py``, and delegate both
+        this function and ``AuthResolver._clear_git_auth_env`` to it.
+
+    Args:
+        env: The subprocess env dict to mutate (base env already merged in).
+        scheme: HTTP auth scheme, e.g. ``"Bearer"`` or ``"Basic"``.
+        credential: The credential value (token or base64-encoded user:pass).
+
+    Raises:
+        ValueError: If *scheme* or *credential* contains a carriage-return
+            or newline, which would let the appended git-config value smuggle
+            a second config entry or header (defense-in-depth; no known
+            caller in this codebase can trigger this today).
+
+    Note:
+        Callers MUST NOT log *env* afterwards.  The appended
+        ``GIT_CONFIG_VALUE_N`` contains the credential.
+    """
+    if "\r" in scheme or "\n" in scheme or "\r" in credential or "\n" in credential:
+        raise ValueError("scheme and credential must not contain CR or LF")
+    try:
+        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
+    except ValueError:
+        count = 0
+    retained: list[tuple[str, str]] = []
+    for index in range(count):
+        key = env.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = env.get(f"GIT_CONFIG_VALUE_{index}", "")
+        if "extraheader" in key.lower() or value.strip().lower().startswith("authorization:"):
+            continue
+        if key:
+            retained.append((key, value))
+    for key in tuple(env):
+        if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key, None)
+    retained.append(("http.extraheader", f"Authorization: {scheme} {credential}"))
+    env["GIT_CONFIG_COUNT"] = str(len(retained))
+    for index, (key, value) in enumerate(retained):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
+
+
+def set_ado_bearer_git_env(env: dict[str, str], bearer_token: str) -> None:
+    """Set an ADO AAD bearer Authorization header on *env* in place.
+
+    In-place variant of :func:`build_ado_bearer_git_env`; see
+    :func:`set_authorization_header_git_env` for why rewriting (rather
+    than dict-merging) the ``GIT_CONFIG_*`` set matters.
+    """
+    set_authorization_header_git_env(env, "Bearer", bearer_token)
 
 
 # Single source of truth for the ADO auth-failure signal set.
@@ -597,7 +804,13 @@ def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.az
 
 
 def build_ado_api_url(
-    org: str, project: str, repo: str, path: str, ref: str = "main", host: str = "dev.azure.com"
+    org: str,
+    project: str,
+    repo: str,
+    path: str,
+    ref: str = "main",
+    host: str = "dev.azure.com",
+    port: int | None = None,
 ) -> str:
     """Build Azure DevOps REST API URL for file contents.
 
@@ -610,11 +823,13 @@ def build_ado_api_url(
         path: Path to file within the repository
         ref: Git reference (branch, tag, or commit). Defaults to "main"
         host: Azure DevOps host (default: dev.azure.com)
+        port: Optional non-default HTTPS port for Azure DevOps Server
 
     Returns:
         str: API URL for retrieving file contents
     """
     api_host = "dev.azure.com" if host == "ssh.dev.azure.com" else host
+    api_netloc = f"{api_host}:{port}" if port is not None else api_host
     encoded_path = urllib.parse.quote(path, safe="")
     quoted_org = urllib.parse.quote(org, safe="")
     quoted_project = urllib.parse.quote(project, safe="")
@@ -622,7 +837,7 @@ def build_ado_api_url(
     quoted_ref = urllib.parse.quote(ref, safe="")
     org_path = "" if is_visualstudio_legacy_hostname(api_host) else f"{quoted_org}/"
     return (
-        f"https://{api_host}/{org_path}{quoted_project}/_apis/git/repositories/{quoted_repo}/items"
+        f"https://{api_netloc}/{org_path}{quoted_project}/_apis/git/repositories/{quoted_repo}/items"
         f"?path={encoded_path}&versionDescriptor.version={quoted_ref}&api-version=7.0"
     )
 
@@ -662,6 +877,13 @@ def parse_ado_repo_url(url: str | None) -> tuple[str, str, str] | None:
     if "_git" not in segments:
         return None
     git_idx = segments.index("_git")
+    if (
+        not is_visualstudio_legacy_hostname(hostname)
+        and hostname not in {"dev.azure.com", "ssh.dev.azure.com"}
+        and segments[0].lower() == "tfs"
+        and git_idx >= 3
+    ):
+        raise ValueError(_ADO_SERVER_BASE_PATH_ERROR)
     # repo is the segment immediately after the ``_git`` marker.
     if git_idx + 1 >= len(segments):
         return None

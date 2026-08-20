@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -1311,6 +1311,23 @@ class TestApplyToCommaSplitting:
 
     # ---- Claude ----
 
+    @pytest.mark.parametrize(
+        ("converter", "target_key"),
+        [
+            ("_convert_to_claude_rules", "paths:"),
+            ("_convert_to_cursor_rules", "globs:"),
+            ("_convert_to_windsurf_rules", "globs:"),
+        ],
+    )
+    def test_yaml_list_emits_all_globs(self, converter, target_key):
+        """YAML-list applyTo inputs keep every path-scoping rule."""
+        content = "---\napplyTo:\n  - '**/*.py'\n  - '**/*.pyi'\n---\n\n# Rules"
+        result = getattr(InstructionIntegrator, converter)(content)
+
+        assert target_key in result
+        assert '  - "**/*.py"' in result
+        assert '  - "**/*.pyi"' in result
+
     def test_claude_comma_list_emits_yaml_list(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Rules"
         result = InstructionIntegrator._convert_to_claude_rules(content)
@@ -1434,6 +1451,80 @@ class TestApplyToCommaSplitting:
             written = dst.read_text()
             assert "applyTo: '**/src/**,**/api/**,**/services/**'" in written
             assert "paths:" not in written
+
+    # ---- Antigravity ----
+
+    def test_antigravity_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+        assert 'globs: "**/src/**,' not in result
+
+    def test_antigravity_single_glob_stays_scalar(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert 'globs: "**/*.py"' in result
+        assert '  - "**/*.py"' not in result
+
+    def test_antigravity_comma_whitespace_trimmed(self):
+        content = '---\napplyTo: "a, b , c"\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert '  - "a"' in result
+        assert '  - "b"' in result
+        assert '  - "c"' in result
+
+    def test_antigravity_single_comma_falls_back_to_no_frontmatter(self):
+        content = '---\napplyTo: ","\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" not in result
+        assert "globs" not in result
+        assert "# R" in result
+
+    def test_antigravity_crlf_newlines_supported(self):
+        content = "---\r\napplyTo: 'src/**/*.py'\r\n---\r\n\r\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert 'globs: "src/**/*.py"' in result
+        assert result.endswith("\n\n# R")
+
+    def test_antigravity_unconditional_crlf_newlines_supported(self):
+        content = "---\r\ndescription: Test\r\n---\r\n\r\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger" not in result
+        assert result == "# R"
+
+    def test_antigravity_list_valued_apply_to(self):
+        content = "---\napplyTo:\n  - 'src/**/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "src/**/*.py"' in result
+        assert '  - "tests/**/*.py"' in result
+        assert 'globs: "[' not in result
+
+    def test_antigravity_list_valued_apply_to_with_literal_commas(self):
+        content = "---\napplyTo:\n  - 'src/foo,bar/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "src/foo,bar/*.py"' in result
+        assert '  - "tests/**/*.py"' in result
+
+    def test_antigravity_malformed_yaml_fallback(self, caplog):
+        import logging
+
+        content = "---\napplyTo: [\n---\n\n# Body"
+        with caplog.at_level(logging.WARNING):
+            result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "Failed to parse instruction frontmatter YAML" in caplog.text
+        assert "trigger: glob" not in result
+        assert "# Body" in result
 
 
 class TestWindsurfRulesIntegration:

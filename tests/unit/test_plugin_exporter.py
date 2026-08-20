@@ -18,8 +18,10 @@ from apm_cli.bundle.plugin_exporter import (
     _collect_mcp,
     _collect_root_plugin_components,
     _deep_merge,
+    _deployed_path_parts,
     _get_dev_dependency_urls,
     _merge_file_map,
+    _plugin_rel_for_deployed_path,
     _rename_prompt,
     _update_plugin_json_paths,
     _validate_output_rel,
@@ -27,6 +29,7 @@ from apm_cli.bundle.plugin_exporter import (
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.plugin_parser import synthesize_plugin_json_from_apm_yml
+from apm_cli.utils.content_hash import compute_file_hash
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -125,6 +128,42 @@ def _setup_plugin_project(
     return project
 
 
+def _write_deployed_skill(project: Path, name: str, marker: str) -> list[str]:
+    """Create a deployed skill under the project and return lockfile entries."""
+    skill_dir = project / ".agents" / "skills" / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(marker, encoding="utf-8")
+    (skill_dir / "notes.md").write_text(f"{marker} notes", encoding="utf-8")
+    return [
+        skill_dir.relative_to(project).as_posix(),
+        (skill_dir / "SKILL.md").relative_to(project).as_posix(),
+        (skill_dir / "notes.md").relative_to(project).as_posix(),
+    ]
+
+
+def _write_deployed_agent(project: Path, filename: str, marker: str) -> list[str]:
+    """Create a deployed agent file under the project and return lockfile entries."""
+    agents_dir = project / ".agents" / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    agent_file = agents_dir / filename
+    agent_file.write_text(marker, encoding="utf-8")
+    return [agent_file.relative_to(project).as_posix()]
+
+
+def _write_deployed_agent_at(project: Path, target: str, filename: str, content: str) -> list[str]:
+    """Deploy an agent under a specific target dir (e.g. ``.github``/``.claude``).
+
+    Different targets map to the same plugin-native ``agents/<filename>`` output,
+    which lets two dependencies collide on one bundle path while each has its
+    own attested on-disk deployed file.
+    """
+    agents_dir = project / target / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    agent_file = agents_dir / filename
+    agent_file.write_text(content, encoding="utf-8")
+    return [agent_file.relative_to(project).as_posix()]
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: helpers
 # ---------------------------------------------------------------------------
@@ -144,6 +183,66 @@ class TestValidateOutputRel:
 
     def test_rejects_absolute_windows(self):
         assert _validate_output_rel("C:\\Windows\\System32") is False
+
+
+class TestDeployedPathParts:
+    def test_normalizes_backslashes_to_posix_parts(self):
+        assert _deployed_path_parts(".agents\\skills\\alpha\\SKILL.md") == (
+            ".agents",
+            "skills",
+            "alpha",
+            "SKILL.md",
+        )
+
+    def test_rejects_absolute_posix_path(self):
+        with pytest.raises(ValueError, match=r"absolute deployed file path"):
+            _deployed_path_parts("/etc/passwd")
+
+    def test_rejects_absolute_windows_path(self):
+        with pytest.raises(ValueError, match=r"absolute deployed file path"):
+            _deployed_path_parts("C:\\Windows\\System32\\cmd.exe")
+
+    def test_rejects_traversal_path(self):
+        with pytest.raises(ValueError, match=r"unsafe deployed file path"):
+            _deployed_path_parts(".agents/skills/../../escape")
+
+
+class TestPluginRelForDeployedPath:
+    def test_top_level_skills_honor_subset(self):
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            skill_subset=["alpha"],
+        )
+        skill_subset = set(dep.skill_subset)
+
+        assert _plugin_rel_for_deployed_path("skills/alpha/SKILL.md", skill_subset) == (
+            "skills/alpha/SKILL.md"
+        )
+        assert _plugin_rel_for_deployed_path("skills/gamma/SKILL.md", skill_subset) is None
+
+    @pytest.mark.parametrize(
+        ("deployed_path", "expected"),
+        [
+            (".agents/skills/alpha/SKILL.md", "skills/alpha/SKILL.md"),
+            (".agents/agents/helper.agent.md", "agents/helper.agent.md"),
+            (".agents/prompts/do-thing.prompt.md", "commands/do-thing.md"),
+            (".github/instructions/team.instructions.md", "instructions/team.instructions.md"),
+            (".claude/hooks/pre-commit.sh", "hooks/pre-commit.sh"),
+            (".codex/extensions/acme/manifest.json", "extensions/acme/manifest.json"),
+            (".claude/hooks.json", "hooks.json"),
+        ],
+    )
+    def test_target_deployed_paths_map_to_plugin_layout(
+        self,
+        deployed_path: str,
+        expected: str,
+    ) -> None:
+        assert _plugin_rel_for_deployed_path(deployed_path, {"alpha"}) == expected
+
+    def test_target_deployed_skills_honor_subset(self) -> None:
+        assert _plugin_rel_for_deployed_path(".agents/skills/gamma/SKILL.md", {"alpha"}) is None
 
 
 class TestRenamePrompt:
@@ -734,11 +833,10 @@ class TestExportPluginBundle:
     def test_dependency_components_included(self, tmp_path):
         project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
 
-        # Set up a dependency in apm_modules
-        dep = LockedDependency(repo_url="acme/tools", depth=1)
+        # Dependency content is packed only from lockfile-attested deployed_files.
+        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "dep agent body")
+        dep = LockedDependency(repo_url="acme/tools", depth=1, deployed_files=deployed)
         _write_lockfile(project, [dep])
-        dep_path = project / "apm_modules" / "acme" / "tools"
-        _make_apm_dir(dep_path, agents=["dep-agent.agent.md"])
 
         out = tmp_path / "build"
         result = export_plugin_bundle(project, out)
@@ -746,27 +844,201 @@ class TestExportPluginBundle:
         assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
         assert (result.bundle_path / "agents" / "own.agent.md").exists()
 
+    def test_dependency_hash_mismatch_rejects_pack(self, tmp_path):
+        """A deployed file whose SHA-256 diverges from the lockfile must fail loud.
+
+        ``_verify_attested_hash`` is the integrity half of the provenance
+        guarantee: a deployed file tampered or corrupted after ``apm install``
+        must never enter the bundle silently. This regression trap tampers the
+        on-disk copy so its content no longer matches the recorded
+        ``deployed_file_hashes`` and asserts pack refuses.
+        """
+        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
+
+        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "attested body")
+        rel = deployed[0]
+        # Record the hash of the attested content, then tamper the file on disk
+        # so the packed bytes no longer match the lockfile attestation.
+        attested_hash = compute_file_hash(project / rel)
+        (project / rel).write_text("tampered body", encoding="utf-8")
+        dep = LockedDependency(
+            repo_url="acme/tools",
+            depth=1,
+            deployed_files=deployed,
+            deployed_file_hashes={rel: attested_hash},
+        )
+        _write_lockfile(project, [dep])
+
+        with pytest.raises(
+            ValueError,
+            match=r"does not match the hash recorded in apm\.lock\.yaml",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_dependency_hash_match_packs_successfully(self, tmp_path):
+        """A deployed file whose SHA-256 matches the lockfile packs cleanly.
+
+        Complements ``test_dependency_hash_mismatch_rejects_pack``: the same
+        verification path that rejects a tampered file must accept an intact
+        one, so the guard does not become a false-positive blocker.
+        """
+        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
+
+        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "attested body")
+        rel = deployed[0]
+        dep = LockedDependency(
+            repo_url="acme/tools",
+            depth=1,
+            deployed_files=deployed,
+            deployed_file_hashes={rel: compute_file_hash(project / rel)},
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
+
+    def test_dependency_unattested_cache_is_not_packed(self, tmp_path):
+        """apm_modules cache content with no lockfile attestation must fail loud."""
+        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
+
+        dep = LockedDependency(repo_url="acme/tools", depth=1)
+        _write_lockfile(project, [dep])
+        dep_path = project / "apm_modules" / "acme" / "tools"
+        _make_apm_dir(dep_path, agents=["dep-agent.agent.md"])
+
+        with pytest.raises(
+            ValueError,
+            match=r"installed content that cannot be verified exists in the apm_modules cache",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_dependency_deployed_skill_subset_wins_over_raw_cache(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+
+        deployed_files: list[str] = []
+        for skill in ("alpha", "beta", "gamma"):
+            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["alpha", "beta"],
+        )
+        _write_lockfile(project, [dep])
+
+        dep_path = project / "apm_modules" / "acme" / "skill-bundle"
+        _make_apm_dir(
+            dep_path,
+            skills={
+                "alpha": ["SKILL.md"],
+                "beta": ["SKILL.md"],
+                "gamma": ["SKILL.md"],
+            },
+        )
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        skills_dir = result.bundle_path / "skills"
+        assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
+        assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
+        assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
+
+    def test_dependency_prefixed_skill_subset_matches_flattened_deployment(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+
+        deployed_files: list[str] = []
+        for skill in ("grill-me", "grilling"):
+            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
+        dep = LockedDependency(
+            repo_url="mattpocock/skills",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["productivity/grill-me", "productivity/grilling"],
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        skills_dir = result.bundle_path / "skills"
+        assert {path.name for path in skills_dir.iterdir()} == {"grill-me", "grilling"}
+        assert (skills_dir / "grill-me" / "SKILL.md").read_text(
+            encoding="utf-8"
+        ) == "deployed grill-me"
+        assert (skills_dir / "grilling" / "SKILL.md").read_text(
+            encoding="utf-8"
+        ) == "deployed grilling"
+
+    def test_dependency_deployed_skills_survive_without_raw_cache(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+
+        deployed_files: list[str] = []
+        for skill in ("alpha", "beta"):
+            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["alpha", "beta"],
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        skills_dir = result.bundle_path / "skills"
+        assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
+        assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
+        assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
+
+    def test_dependency_skill_subset_empty_resolution_errors(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+        deployed_files = _write_deployed_skill(project, "gamma", "deployed gamma")
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["alpha"],
+        )
+        _write_lockfile(project, [dep])
+
+        with pytest.raises(
+            ValueError,
+            match=r"skill_subset: alpha\) were not found among its installed files",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_dependency_without_deployed_files_or_cache_skips_cleanly(self, tmp_path):
+        """A dep with no attested files and no cached primitives packs cleanly.
+
+        Such a dependency contributes no plugin primitives (e.g. an MCP-only
+        or hooks-config-only package), so pack skips it rather than failing.
+        """
+        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
+        dep = LockedDependency(repo_url="acme/missing", depth=1)
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "own.agent.md").exists()
+        assert not (result.bundle_path / "skills").exists()
+
     def test_virtual_skill_dependency_does_not_duplicate_skills_dir(self, tmp_path):
         project = _setup_plugin_project(tmp_path)
 
+        deployed_files = _write_deployed_skill(project, "javascript-typescript-jest", "# Jest")
         dep = LockedDependency(
             repo_url="github/awesome-copilot",
             depth=1,
             resolved_commit="abc123",
             virtual_path="skills/javascript-typescript-jest",
             is_virtual=True,
+            deployed_files=deployed_files,
         )
         _write_lockfile(project, [dep])
-        dep_path = (
-            project
-            / "apm_modules"
-            / "github"
-            / "awesome-copilot"
-            / "skills"
-            / "javascript-typescript-jest"
-        )
-        dep_path.mkdir(parents=True)
-        (dep_path / "SKILL.md").write_text("# Jest", encoding="utf-8")
 
         out = tmp_path / "build"
         result = export_plugin_bundle(project, out)
@@ -797,39 +1069,28 @@ class TestExportPluginBundle:
     def test_collision_first_wins(self, tmp_path):
         project = _setup_plugin_project(tmp_path)
 
-        # Two deps with the same agent file
-        dep1 = LockedDependency(repo_url="acme/first", depth=1)
-        dep2 = LockedDependency(repo_url="acme/second", depth=1)
+        # Two deps whose attested deployed files map to the same bundle path
+        deployed1 = _write_deployed_agent_at(project, ".github", "shared.agent.md", "from-first")
+        deployed2 = _write_deployed_agent_at(project, ".claude", "shared.agent.md", "from-second")
+        dep1 = LockedDependency(repo_url="acme/first", depth=1, deployed_files=deployed1)
+        dep2 = LockedDependency(repo_url="acme/second", depth=1, deployed_files=deployed2)
         _write_lockfile(project, [dep1, dep2])
-
-        dep1_path = project / "apm_modules" / "acme" / "first"
-        _make_apm_dir(dep1_path, agents=["shared.agent.md"])
-        dep2_path = project / "apm_modules" / "acme" / "second"
-        _make_apm_dir(dep2_path, agents=["shared.agent.md"])
 
         out = tmp_path / "build"
         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
             result = export_plugin_bundle(project, out)
 
         content = (result.bundle_path / "agents" / "shared.agent.md").read_text()
-        assert "shared.agent.md" in content  # From dep1
+        assert content == "from-first"  # First writer wins
 
     def test_collision_force_last_wins(self, tmp_path):
         project = _setup_plugin_project(tmp_path)
 
-        dep1 = LockedDependency(repo_url="acme/first", depth=1)
-        dep2 = LockedDependency(repo_url="acme/second", depth=1)
+        deployed1 = _write_deployed_agent_at(project, ".github", "shared.agent.md", "from-first")
+        deployed2 = _write_deployed_agent_at(project, ".claude", "shared.agent.md", "from-second")
+        dep1 = LockedDependency(repo_url="acme/first", depth=1, deployed_files=deployed1)
+        dep2 = LockedDependency(repo_url="acme/second", depth=1, deployed_files=deployed2)
         _write_lockfile(project, [dep1, dep2])
-
-        dep1_path = project / "apm_modules" / "acme" / "first"
-        agents1 = dep1_path / ".apm" / "agents"
-        agents1.mkdir(parents=True)
-        (agents1 / "shared.agent.md").write_text("from-first")
-
-        dep2_path = project / "apm_modules" / "acme" / "second"
-        agents2 = dep2_path / ".apm" / "agents"
-        agents2.mkdir(parents=True)
-        (agents2 / "shared.agent.md").write_text("from-second")
 
         out = tmp_path / "build"
         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
@@ -839,6 +1100,12 @@ class TestExportPluginBundle:
         assert content == "from-second"
 
     def test_hooks_merged(self, tmp_path):
+        """Root (first-party) hooks are packed; dependency cache hooks are not.
+
+        Dependency hooks live in the unattested apm_modules cache, so they are
+        no longer merged into the bundle (provenance guarantee). Only the
+        project's own hooks reach hooks.json.
+        """
         project = _setup_plugin_project(tmp_path)
 
         # Root hooks
@@ -846,7 +1113,7 @@ class TestExportPluginBundle:
         root_hooks_dir.mkdir(parents=True, exist_ok=True)
         (root_hooks_dir / "hooks.json").write_text(json.dumps({"preCommit": ["root-lint"]}))
 
-        # Dep hooks
+        # Dep hooks planted in the unattested cache -- must be ignored
         dep = LockedDependency(repo_url="acme/hooks-pkg", depth=1)
         _write_lockfile(project, [dep])
         dep_path = project / "apm_modules" / "acme" / "hooks-pkg"
@@ -860,12 +1127,18 @@ class TestExportPluginBundle:
         result = export_plugin_bundle(project, out)
 
         hooks = json.loads((result.bundle_path / "hooks.json").read_text())
-        # Root wins on key collision
+        # Only first-party (root) hooks are packed
         assert hooks["preCommit"] == ["root-lint"]
-        # Dep-only key preserved
-        assert hooks["postPush"] == ["deploy"]
+        # Unattested dependency-only hook keys are NOT packed
+        assert "postPush" not in hooks
 
     def test_mcp_merged(self, tmp_path):
+        """Root (first-party) MCP is packed; dependency cache MCP is not.
+
+        Dependency .mcp.json lives in the unattested apm_modules cache and is
+        not recorded in deployed_files, so it is no longer merged into the
+        bundle. Only the project's own MCP config reaches .mcp.json.
+        """
         project = _setup_plugin_project(tmp_path)
 
         # Root MCP
@@ -873,7 +1146,7 @@ class TestExportPluginBundle:
             json.dumps({"mcpServers": {"root-db": {"command": "root-server"}}})
         )
 
-        # Dep MCP
+        # Dep MCP planted in the unattested cache -- must be ignored
         dep = LockedDependency(repo_url="acme/mcp-pkg", depth=1)
         _write_lockfile(project, [dep])
         dep_path = project / "apm_modules" / "acme" / "mcp-pkg"
@@ -893,10 +1166,10 @@ class TestExportPluginBundle:
         result = export_plugin_bundle(project, out)
 
         mcp = json.loads((result.bundle_path / ".mcp.json").read_text())
-        # Root wins on name collision
+        # Only first-party (root) MCP servers are packed
         assert mcp["mcpServers"]["root-db"]["command"] == "root-server"
-        # Dep-only server preserved
-        assert mcp["mcpServers"]["dep-only"]["command"] == "extra"
+        # Unattested dependency-only server is NOT packed
+        assert "dep-only" not in mcp["mcpServers"]
 
     def test_empty_project(self, tmp_path):
         project = _setup_plugin_project(tmp_path)
@@ -956,14 +1229,314 @@ class TestExportPluginBundle:
     def test_root_level_plugin_dirs_collected(self, tmp_path):
         """Root-level agents/ commands/ etc. are picked up for plugin-native repos."""
         project = _setup_plugin_project(tmp_path)
-        # Create root-level agents dir (no .apm/)
+        (project / ".apm").rmdir()
         root_agents = project / "agents"
         root_agents.mkdir()
-        (root_agents / "root-bot.agent.md").write_text("root bot")
+        (root_agents / "root-bot.agent.md").write_text("root bot", encoding="utf-8")
 
         out = tmp_path / "build"
         result = export_plugin_bundle(project, out)
         assert (result.bundle_path / "agents" / "root-bot.agent.md").exists()
+
+    def test_apm_dir_excludes_root_level_plugin_dirs(self, tmp_path):
+        """The .apm directory makes APM-native sources authoritative."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "root-bot.agent.md").write_text("root bot", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "agents" / "root-bot.agent.md").exists()
+
+    def test_auto_includes_preserves_native_root_without_apm_dir(self, tmp_path):
+        """Auto consent does not select the local source layout."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        (project / ".apm").rmdir()
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "root-bot.agent.md").write_text("root bot", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "root-bot.agent.md").is_file()
+
+    def test_omitted_includes_with_apm_dir_skips_root_components(self, tmp_path):
+        """An omitted includes field does not weaken .apm authority."""
+        project = _setup_plugin_project(tmp_path)
+        root_skills = project / "skills" / "root-skill"
+        root_skills.mkdir(parents=True)
+        (root_skills / "SKILL.md").write_text("# Root\n", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "skills" / "root-skill").exists()
+
+    def test_explicit_includes_are_exhaustive(self, tmp_path):
+        """An explicit path list packs no unlisted local primitives."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(
+            project,
+            extra={"includes": [".apm/agents/published.agent.md"]},
+        )
+        agents = project / ".apm" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "published.agent.md").write_text("published", encoding="utf-8")
+        (agents / "private.agent.md").write_text("private", encoding="utf-8")
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "draft.agent.md").write_text("draft", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "published.agent.md").is_file()
+        assert not (result.bundle_path / "agents" / "private.agent.md").exists()
+        assert not (result.bundle_path / "agents" / "draft.agent.md").exists()
+
+    def test_explicit_includes_can_publish_deliberate_root_path(self, tmp_path):
+        """An explicit list may deliberately publish a root convention path."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": ["agents/published.agent.md"]})
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "published.agent.md").write_text("published", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "published.agent.md").is_file()
+
+    def test_missing_explicit_include_fails_pack(self, tmp_path):
+        """A missing explicit path is a configuration error."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(
+            project,
+            extra={"includes": [".apm/agents/missing.agent.md"]},
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"includes path '\.apm/agents/missing\.agent\.md' does not exist",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_symlink(self, tmp_path):
+        """An explicit path cannot publish through a symlink."""
+        project = _setup_plugin_project(tmp_path)
+        target = project / ".apm" / "agents" / "real.agent.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("real", encoding="utf-8")
+        link = project / "linked.agent.md"
+        try:
+            os.symlink(target, link)
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": ["linked.agent.md"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"includes path 'linked\.agent\.md' is a symlink",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_nested_symlink(self, tmp_path):
+        """A listed directory cannot publish a nested symlink."""
+        project = _setup_plugin_project(tmp_path)
+        agents = project / ".apm" / "agents"
+        agents.mkdir(parents=True, exist_ok=True)
+        target = agents / "real.agent.md"
+        target.write_text("real", encoding="utf-8")
+        link = agents / "linked.agent.md"
+        try:
+            os.symlink(target, link)
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": [".apm/agents"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"Symlink found inside includes path '\.apm/agents': "
+            r"linked\.agent\.md",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_nested_directory_symlink(self, tmp_path):
+        """A listed directory cannot publish through a symlinked directory."""
+        project = _setup_plugin_project(tmp_path)
+        skills = project / ".apm" / "skills"
+        skills.mkdir(parents=True, exist_ok=True)
+        external = tmp_path / "external-skill"
+        external.mkdir()
+        (external / "SKILL.md").write_text("# External\n", encoding="utf-8")
+        try:
+            os.symlink(external, skills / "linked")
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": [".apm/skills"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"Symlink found inside includes path '\.apm/skills': linked",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    @pytest.mark.parametrize(
+        ("content", "message"),
+        [
+            ("not-json", r"Explicit hook include is not valid JSON"),
+            ("[]", r"Explicit hook include must contain a JSON object"),
+        ],
+    )
+    def test_explicit_hook_include_rejects_invalid_content(
+        self,
+        tmp_path,
+        content,
+        message,
+    ):
+        """Explicit hook files must contain valid JSON objects."""
+        project = _setup_plugin_project(tmp_path)
+        hook = project / ".apm" / "hooks" / "invalid.json"
+        hook.parent.mkdir(parents=True)
+        hook.write_text(content, encoding="utf-8")
+        _write_apm_yml(project, extra={"includes": [".apm/hooks/invalid.json"]})
+
+        with pytest.raises(ValueError, match=message):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_non_packable_path(self, tmp_path):
+        """Explicit paths must map to a supported plugin primitive."""
+        project = _setup_plugin_project(tmp_path)
+        (project / "README.md").write_text("not a primitive", encoding="utf-8")
+        _write_apm_yml(project, extra={"includes": ["README.md"]})
+
+        with pytest.raises(ValueError, match=r"is not a packable primitive"):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_native_root_symlink_is_not_packed(self, tmp_path):
+        """Implicit root discovery does not follow convention-dir symlinks."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        (project / ".apm").rmdir()
+        external = tmp_path / "external-skills"
+        skill = external / "outside"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# Outside\n", encoding="utf-8")
+        try:
+            os.symlink(external, project / "skills")
+        except OSError:
+            pytest.skip("symlinks not supported")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "skills" / "outside").exists()
+
+    def test_explicit_hook_includes_are_exhaustive(self, tmp_path):
+        """Only explicitly listed hook configuration reaches the bundle."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(
+            project,
+            extra={"includes": [".apm/hooks/published.json"]},
+        )
+        hooks_dir = project / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "published.json").write_text(
+            json.dumps({"preCommit": ["published"]}),
+            encoding="utf-8",
+        )
+        (hooks_dir / "private.json").write_text(
+            json.dumps({"postPush": ["private"]}),
+            encoding="utf-8",
+        )
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+        hooks = json.loads((result.bundle_path / "hooks.json").read_text(encoding="utf-8"))
+
+        assert hooks == {"preCommit": ["published"]}
+
+    def test_apm_dir_excludes_root_hook_config(self, tmp_path):
+        """Root hooks follow the same .apm authority rule as primitives."""
+        project = _setup_plugin_project(tmp_path)
+        apm_hooks = project / ".apm" / "hooks"
+        apm_hooks.mkdir(parents=True)
+        (apm_hooks / "hooks.json").write_text(
+            json.dumps({"preCommit": ["published"]}),
+            encoding="utf-8",
+        )
+        (project / "hooks.json").write_text(
+            json.dumps({"postPush": ["draft"]}),
+            encoding="utf-8",
+        )
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+        hooks = json.loads((result.bundle_path / "hooks.json").read_text(encoding="utf-8"))
+
+        assert hooks == {"preCommit": ["published"]}
+
+    def test_apm_authority_preserves_dependency_components(self, tmp_path):
+        """Local layout authority does not affect dependency discovery."""
+        project = _setup_plugin_project(tmp_path)
+        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "dependency")
+        dep = LockedDependency(
+            repo_url="acme/tools",
+            depth=1,
+            deployed_files=deployed,
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "dep-agent.agent.md").is_file()
+
+    def test_mixed_layout_emits_actionable_warnings(self, tmp_path):
+        """Each skipped root source names the cause and next action."""
+        project = _setup_plugin_project(tmp_path)
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "draft.agent.md").write_text("draft", encoding="utf-8")
+        (project / "hooks.json").write_text("{}", encoding="utf-8")
+        captured: list[str] = []
+
+        class _StubLogger:
+            def info(self, message, symbol=None):
+                pass
+
+            def warning(self, message):
+                captured.append(message)
+
+        export_plugin_bundle(project, tmp_path / "build", logger=_StubLogger())
+
+        assert captured == [
+            "Skipping root-level agents/ because .apm/ is present. "
+            "Move publishable files to .apm/agents/ or remove agents/ "
+            "to silence this warning.",
+            "Skipping root-level hooks.json because .apm/ is present. "
+            "Move publishable hook configuration to .apm/hooks/ or remove "
+            "hooks.json to silence this warning.",
+            "No local primitives found. Expected content under .apm/. "
+            "Move plugin-native content into .apm/, or remove .apm/ to restore "
+            "root convention discovery.",
+        ]
+
+    def test_empty_apm_dir_warns_when_no_local_primitives_exist(self, tmp_path):
+        """An empty APM-native layout explains how to recover."""
+        project = _setup_plugin_project(tmp_path)
+        captured: list[str] = []
+
+        class _StubLogger:
+            def info(self, message, symbol=None):
+                pass
+
+            def warning(self, message):
+                captured.append(message)
+
+        export_plugin_bundle(project, tmp_path / "build", logger=_StubLogger())
+
+        assert captured == [
+            "No local primitives found. Expected content under .apm/. "
+            "Move plugin-native content into .apm/, or remove .apm/ to restore "
+            "root convention discovery.",
+        ]
 
 
 class TestExportPluginBundleViaPackBundle:
@@ -984,19 +1557,11 @@ class TestExportPluginBundleViaPackBundle:
         from apm_cli.bundle.packer import pack_bundle
 
         project = _setup_plugin_project(tmp_path)
-        dep1 = LockedDependency(repo_url="acme/first", depth=1)
-        dep2 = LockedDependency(repo_url="acme/second", depth=1)
+        deployed1 = _write_deployed_agent_at(project, ".github", "shared.agent.md", "from-first")
+        deployed2 = _write_deployed_agent_at(project, ".claude", "shared.agent.md", "from-second")
+        dep1 = LockedDependency(repo_url="acme/first", depth=1, deployed_files=deployed1)
+        dep2 = LockedDependency(repo_url="acme/second", depth=1, deployed_files=deployed2)
         _write_lockfile(project, [dep1, dep2])
-
-        dep1_path = project / "apm_modules" / "acme" / "first"
-        a1 = dep1_path / ".apm" / "agents"
-        a1.mkdir(parents=True)
-        (a1 / "shared.agent.md").write_text("from-first")
-
-        dep2_path = project / "apm_modules" / "acme" / "second"
-        a2 = dep2_path / ".apm" / "agents"
-        a2.mkdir(parents=True)
-        (a2 / "shared.agent.md").write_text("from-second")
 
         out = tmp_path / "build"
         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):

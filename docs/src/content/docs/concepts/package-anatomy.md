@@ -29,7 +29,8 @@ name: my-pkg
 version: 1.0.0
 ```
 
-`name` and `version` are the only required fields.
+`name` and `version` are the only required fields. Both must be non-empty
+strings; quote a numeric version so YAML does not parse it as a number.
 `apm install` will validate the manifest, generate `apm.lock.yaml`, and
 deploy `hello` to whatever harnesses you target.
 
@@ -101,8 +102,8 @@ targets:
   - copilot
   - claude
 
-# Optional. "auto" auto-publishes every primitive under .apm/, or list
-# explicit repo paths to publish a subset.
+# Optional. "auto" publishes the authoritative local source layout, or list
+# explicit repo paths to define the complete publication set.
 includes: auto
 
 # Optional. Runtime dependencies, grouped by kind.
@@ -209,25 +210,13 @@ Top-level fields:
 | `local_deployed_files`         | Files this package wrote to deployed dirs.     |
 | `local_deployed_file_hashes`   | SHA-256 of each local-deployed file.           |
 
-Per-dependency fields:
-
-| Field                  | Notes                                          |
-|------------------------|------------------------------------------------|
-| `repo_url`             | Canonical clone URL.                           |
-| `host`, `port`         | For non-github.com or non-standard ports.      |
-| `registry_prefix`      | Artifactory-style prefix.                      |
-| `resolved_commit`      | Full SHA. The thing that makes installs reproducible. |
-| `resolved_ref`         | Original tag/branch the SHA was resolved from. |
-| `version`              | SemVer, if the dep is versioned.               |
-| `virtual_path`         | Subpath for single-primitive imports.          |
-| `is_virtual`           | True for primitive-form deps.                  |
-| `depth`                | 1 = direct dependency; >1 = transitive.        |
-| `package_type`         | `apm_package`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`, `skill_bundle`. |
-| `deployed_files`       | Files this dep wrote to your tree.             |
-| `deployed_file_hashes` | SHA-256 of each deployed file.                 |
-| `source`, `local_path` | Set for `local_path:` deps.                    |
-| `content_hash`         | SHA-256 of the package file tree.              |
-| `is_dev`               | True for `devDependencies` entries.            |
+Each dependency stores canonical identity and resolution data. For
+case-insensitive providers, `repo_url` is the canonical comparison value while
+the optional `materialization_repo_url` retains the repository display spelling
+used under `apm_modules/` and in generated links. The
+[lockfile specification](../../reference/lockfile-spec/#per-entry-fields) is the
+single field reference, including package-type-specific `name` and `version`
+semantics.
 
 `apm audit` rehashes everything in `deployed_file_hashes` and
 `local_deployed_file_hashes` to detect hand-edits before they ship.

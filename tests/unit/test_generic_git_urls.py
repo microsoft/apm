@@ -358,7 +358,7 @@ class TestCloneURLBuilding:
 
     def test_gitlab_https_clone_url(self):
         url = build_https_clone_url("gitlab.com", "acme/repo")
-        assert url == "https://gitlab.com/acme/repo"
+        assert url == "https://gitlab.com/acme/repo.git"
 
     def test_gitlab_https_clone_url_with_token(self):
         url = build_https_clone_url("gitlab.com", "acme/repo", token="glpat-xxx")
@@ -366,7 +366,7 @@ class TestCloneURLBuilding:
 
     def test_bitbucket_https_clone_url(self):
         url = build_https_clone_url("bitbucket.org", "acme/repo")
-        assert url == "https://bitbucket.org/acme/repo"
+        assert url == "https://bitbucket.org/acme/repo.git"
 
     def test_gitlab_ssh_clone_url(self):
         url = build_ssh_url("gitlab.com", "acme/repo")
@@ -391,7 +391,7 @@ class TestCloneURLBuilding:
 
     def test_https_clone_url_with_custom_port(self):
         url = build_https_clone_url("bitbucket.domain.ext", "team/repo", port=8443)
-        assert url == "https://bitbucket.domain.ext:8443/team/repo"
+        assert url == "https://bitbucket.domain.ext:8443/team/repo.git"
 
     def test_ssh_clone_url_with_custom_user(self):
         """Custom SSH usernames (e.g. EMU accounts) are preserved in the SCP shorthand."""
@@ -757,6 +757,10 @@ class TestNestedGroupSupport:
 
     def test_to_github_url_nested_group(self):
         dep = DependencyReference.parse("gitlab.com/group/subgroup/repo")
+        assert dep.to_github_url() == "https://gitlab.com/group/subgroup/repo"
+
+    def test_github_url_does_not_include_https_credentials(self):
+        dep = DependencyReference.parse("https://oauth2:secret@gitlab.com/group/subgroup/repo.git")
         assert dep.to_github_url() == "https://gitlab.com/group/subgroup/repo"
 
     # --- GitHub unchanged ---

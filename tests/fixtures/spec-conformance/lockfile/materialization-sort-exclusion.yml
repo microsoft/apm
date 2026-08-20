@@ -1,0 +1,10 @@
+# Exercises: req-lk-005, req-lk-022
+# Canonical repo_url order is alpha, beta. Display spelling would sort beta first.
+lockfile_version: "1"
+dependencies:
+  - repo_url: github.com/contoso/alpha
+    materialization_repo_url: github.com/Contoso/alpha
+    resolved_commit: "1111111111111111111111111111111111111111"
+  - repo_url: github.com/contoso/beta
+    materialization_repo_url: GitHub.com/Contoso/Beta
+    resolved_commit: "2222222222222222222222222222222222222222"

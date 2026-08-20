@@ -60,7 +60,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra build
+        run: uv sync --frozen --extra dev --extra build
 
       - name: Install UPX
         run: |
@@ -113,7 +113,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
 
       # Smoke target is test_core_smoke.py: a hermetic, network-free pre-flight
       # over the README's three promises (portable / secure / governed). It
@@ -145,7 +145,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
 
       # Scaling guards are hermetic, network-free tests that catch
       # O(n^2) algorithmic regressions by comparing wall-clock ratios
@@ -197,7 +197,7 @@ jobs:
           enable-cache: true
 
       - name: Install test dependencies
-        run: uv sync --extra dev
+        run: uv sync --frozen --extra dev
 
       # APM resolves its cache dir to ~/.cache/apm by default on Linux
       # (XDG_CACHE_HOME unset -> $HOME/.cache/apm). actions/cache restores

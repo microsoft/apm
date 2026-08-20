@@ -803,6 +803,38 @@ class TestHostPrefixedSource:
         assert entry.host == "ghe.example.com"
         assert entry.source == "acme/agents"
 
+    def test_https_url_source_with_nested_path_normalized(self, tmp_path: Path):
+        """Full HTTPS URLs preserve nested repository paths after host parsing."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: https://gitlab.example.com/group/subgroup/agents.git\n"
+                "    ref: v0.3.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        entry = load_marketplace_yml(yml).packages[0]
+        assert entry.host == "gitlab.example.com"
+        assert entry.source == "group/subgroup/agents"
+
+    def test_invalid_nested_https_source_describes_supported_path_shape(self, tmp_path: Path):
+        """Invalid nested HTTPS paths advertise the accepted full URL form."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: https://gitlab.example.com/group//agents.git\n"
+                "    ref: v0.3.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError) as error:
+            load_marketplace_yml(yml)
+        assert "'https://<host.tld>/<owner>/<repo>[.git]' (nested paths allowed)" in str(
+            error.value
+        )
+
     # -- Security-relevant rejection cases ---------------------------------
 
     @pytest.mark.parametrize(
@@ -821,6 +853,10 @@ class TestHostPrefixedSource:
             "http://github.com/owner/repo",
             "ssh://git@github.com/owner/repo",
             "git://github.com/owner/repo",
+            # Nested HTTPS paths keep the same traversal protection.
+            "https://github.com/group/../owner/repo",
+            "https://github.com/group/%2e%2e/owner/repo",
+            "https://github.com/group//owner/repo",
             # Query / fragment in source.
             "github.com/owner/repo?ref=main",
             "github.com/owner/repo#frag",

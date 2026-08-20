@@ -1,8 +1,6 @@
 """Comprehensive unit tests for apm_cli.commands.install -- phase 3.
 
 Targets the uncovered branches in:
-- _restore_manifest_from_snapshot
-- _maybe_rollback_manifest
 - _split_argv_at_double_dash
 - _get_invocation_argv
 - _check_package_conflicts
@@ -22,9 +20,7 @@ from click.testing import CliRunner
 from apm_cli.commands.install import (
     _check_package_conflicts,
     _get_invocation_argv,
-    _maybe_rollback_manifest,
     _merge_packages_into_yml,
-    _restore_manifest_from_snapshot,
     _split_argv_at_double_dash,
 )
 
@@ -114,85 +110,6 @@ class TestSplitArgvAtDoubleDash:
 
 
 # ---------------------------------------------------------------------------
-# _restore_manifest_from_snapshot
-# ---------------------------------------------------------------------------
-
-
-class TestRestoreManifestFromSnapshot:
-    def test_writes_snapshot_bytes_to_path(self, tmp_path: Path) -> None:
-        manifest = tmp_path / "apm.yml"
-        original = b"name: original\n"
-        manifest.write_bytes(original)
-
-        snapshot = b"name: snapshot\n"
-        _restore_manifest_from_snapshot(manifest, snapshot)
-
-        assert manifest.read_bytes() == snapshot
-
-    def test_uses_atomic_replace(self, tmp_path: Path) -> None:
-        """The operation should be atomic (temp file + os.replace)."""
-        manifest = tmp_path / "apm.yml"
-        manifest.write_bytes(b"name: original\n")
-
-        snapshot = b"name: restored\n"
-        with patch("os.replace") as mock_replace:
-            _restore_manifest_from_snapshot(manifest, snapshot)
-        mock_replace.assert_called_once()
-
-    def test_cleans_up_temp_file_on_error(self, tmp_path: Path) -> None:
-        """Temp file should be removed if os.replace raises."""
-        manifest = tmp_path / "apm.yml"
-        snapshot = b"name: restored\n"
-
-        with patch("os.replace", side_effect=OSError("replace failed")):
-            with pytest.raises(OSError):
-                _restore_manifest_from_snapshot(manifest, snapshot)
-
-
-# ---------------------------------------------------------------------------
-# _maybe_rollback_manifest
-# ---------------------------------------------------------------------------
-
-
-class TestMaybeRollbackManifest:
-    def test_none_snapshot_is_noop(self, tmp_path: Path) -> None:
-        logger = _make_install_logger()
-        manifest = tmp_path / "apm.yml"
-        manifest.write_bytes(b"name: current\n")
-
-        _maybe_rollback_manifest(manifest, None, logger)
-
-        # File must be untouched and no progress logged
-        assert manifest.read_bytes() == b"name: current\n"
-        logger.progress.assert_not_called()
-
-    def test_valid_snapshot_restores_file(self, tmp_path: Path) -> None:
-        logger = _make_install_logger()
-        manifest = tmp_path / "apm.yml"
-        snapshot = b"name: original\n"
-        manifest.write_bytes(b"name: mutated\n")
-
-        _maybe_rollback_manifest(manifest, snapshot, logger)
-
-        assert manifest.read_bytes() == snapshot
-        logger.progress.assert_called_once()
-
-    def test_restore_failure_logs_warning_not_crash(self, tmp_path: Path) -> None:
-        """If restore itself fails, a warning is logged but no exception propagates."""
-        logger = _make_install_logger()
-        manifest = tmp_path / "apm.yml"
-        snapshot = b"name: original\n"
-
-        with patch(
-            "apm_cli.commands.install._restore_manifest_from_snapshot",
-            side_effect=OSError("disk full"),
-        ):
-            _maybe_rollback_manifest(manifest, snapshot, logger)
-
-        logger.warning.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
 # _check_package_conflicts
 # ---------------------------------------------------------------------------
 
@@ -252,7 +169,7 @@ class TestMergePackagesIntoYml:
         data = {"dependencies": {"apm": ["existing/pkg"]}}
         current_deps = data["dependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml") as mock_dump:
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip") as mock_dump:
             _merge_packages_into_yml(
                 ["new/pkg"],
                 {},
@@ -274,7 +191,7 @@ class TestMergePackagesIntoYml:
         current_deps = data["dependencies"]["apm"]
         apm_yml_entries = {"owner/repo": {"repo": "owner/repo", "ref": "main"}}
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml"):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip"):
             _merge_packages_into_yml(
                 ["owner/repo"],
                 apm_yml_entries,
@@ -293,7 +210,7 @@ class TestMergePackagesIntoYml:
         data = {"dependencies": {"apm": []}}
         current_deps = data["dependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml", side_effect=Exception("disk full")):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip", side_effect=Exception("disk full")):
             with pytest.raises(SystemExit) as exc_info:
                 _merge_packages_into_yml(
                     ["owner/repo"],
@@ -313,7 +230,7 @@ class TestMergePackagesIntoYml:
         data = {"devDependencies": {"apm": []}}
         current_deps = data["devDependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml"):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip"):
             _merge_packages_into_yml(
                 ["owner/repo"],
                 {},
@@ -570,8 +487,7 @@ class TestInstallContextDefaults:
         )
         assert ctx.refresh is False
         assert ctx.only_packages is None
-        assert ctx.manifest_snapshot is None
-        assert ctx.snapshot_manifest_path is None
+        assert ctx.transaction is None
         assert ctx.legacy_skill_paths is False
         assert ctx.frozen is False
         assert ctx.plan_callback is None

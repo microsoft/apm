@@ -22,10 +22,22 @@ are accepted as aliases and map to the same internal value.
 """
 
 import warnings
+from collections.abc import Iterator
+from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
 
 import click
+
+from apm_cli.core.target_catalog import (
+    TARGET_CAPABILITIES,
+    TargetCapability,
+    accepted_target_values,
+    expand_all,
+    get_target_capability,
+    normalize_target_name,
+    target_error_values,
+)
 
 
 class AgentsTargetDeprecationWarning(DeprecationWarning):
@@ -99,6 +111,7 @@ UserTargetType = Literal[
     "codex",
     "gemini",
     "antigravity",
+    "grok-build",
     "windsurf",
     "kiro",
     "agent-skills",
@@ -126,7 +139,10 @@ def detect_target(  # noqa: PLR0911
     """
     # Priority 1: Explicit --target flag
     if explicit_target:
-        if explicit_target in ("copilot", "vscode", "agents"):
+        if (
+            explicit_target in ("copilot", "vscode", "agents")
+            or explicit_target in MCP_ONLY_TARGETS
+        ):
             return "vscode", "explicit --target flag"
         elif explicit_target == "claude":
             return "claude", "explicit --target flag"
@@ -144,6 +160,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "explicit --target flag"
         elif explicit_target == "kiro":
             return "kiro", "explicit --target flag"
+        elif explicit_target == "grok-build":
+            return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
@@ -151,7 +169,7 @@ def detect_target(  # noqa: PLR0911
 
     # Priority 2: apm.yml target setting
     if config_target:
-        if config_target in ("copilot", "vscode", "agents"):
+        if config_target in ("copilot", "vscode", "agents") or config_target in MCP_ONLY_TARGETS:
             return "vscode", "apm.yml target"
         elif config_target == "claude":
             return "claude", "apm.yml target"
@@ -169,6 +187,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "apm.yml target"
         elif config_target == "kiro":
             return "kiro", "apm.yml target"
+        elif config_target == "grok-build":
+            return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
         elif config_target == "all":
@@ -183,6 +203,7 @@ def detect_target(  # noqa: PLR0911
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
     kiro_exists = (project_root / ".kiro").is_dir()
+    grok_exists = (project_root / ".grok").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -200,6 +221,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".windsurf/")
     if kiro_exists:
         detected.append(".kiro/")
+    if grok_exists:
+        detected.append(".grok/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -219,6 +242,8 @@ def detect_target(  # noqa: PLR0911
         return "windsurf", "detected .windsurf/ folder"
     elif kiro_exists:
         return "kiro", "detected .kiro/ folder"
+    elif grok_exists:
+        return "grok-build", "detected .grok/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -226,8 +251,9 @@ def detect_target(  # noqa: PLR0911
 def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
-    AGENTS.md is generated for vscode, codex, gemini, all, and minimal
-    targets.  Gemini needs it because GEMINI.md imports AGENTS.md.
+    AGENTS.md is generated for vscode, cursor, opencode, codex, gemini,
+    windsurf, kiro, antigravity, grok-build, hermes, all, and minimal targets.
+    Gemini needs it because GEMINI.md imports AGENTS.md.
 
     Args:
         target: The detected or configured target. May be a string or a
@@ -240,10 +266,12 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         return "agents" in target or "gemini" in target
     return target in (
         "vscode",
+        "cursor",
         "opencode",
         "codex",
         "gemini",
         "antigravity",
+        "grok-build",
         "windsurf",
         "kiro",
         "hermes",
@@ -306,16 +334,49 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
     return target in ("vscode", "all")
 
 
+def get_dedup_rules_dir(target: CompileTargetType) -> tuple[str, str] | None:
+    """Get the deployed-instruction directory and target key for dedup.
+
+    Args:
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
+
+    Returns:
+        tuple[str, str] | None: Relative path (e.g., '.agents/rules' or
+        '.github/instructions') and canonical target key for expected filename
+        mapping, or None when the target does not support instruction
+        deduplication.
+    """
+    if isinstance(target, frozenset):
+        # Conservative policy: only dedup when the target set is exactly
+        # {"vscode"} (Copilot alone). Any additional family -- including
+        # "agents" -- means at least one consumer that does not read
+        # .github/instructions/ may be present, so we keep instructions
+        # in AGENTS.md to be safe.
+        if target == frozenset({"vscode"}):
+            return ".github/instructions", "copilot"
+        return None
+    if isinstance(target, str):
+        target = TARGET_ALIASES.get(target, target)
+    if target == "vscode":
+        return ".github/instructions", "copilot"
+    if target == "antigravity":
+        return ".agents/rules", "antigravity"
+    return None
+
+
 def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
     """Check if instruction dedup is safe for AGENTS.md.
 
-    Returns True only when every target that reads AGENTS.md also reads
-    ``.github/instructions/`` -- meaning instructions can safely be omitted
-    from AGENTS.md without losing context for any consumer.
+    Returns True only when the target that reads AGENTS.md also reads its
+    respective deployed rules directory (``.github/instructions/`` for Copilot
+    or ``.agents/rules/`` for Antigravity) -- meaning instructions can safely
+    be omitted from AGENTS.md without losing context for any consumer.
 
-    Today only Copilot (vscode) reads both locations.  Codex, OpenCode,
-    Windsurf, and Gemini rely on AGENTS.md as their sole instruction source
-    and must always receive instruction content (issue #1678).
+    Today Copilot (vscode) and Antigravity support this native rules reading.
+    Codex, OpenCode, Windsurf, Gemini, and Kiro rely on AGENTS.md as
+    their sole instruction source and must always receive instruction content
+    (issue #1678).
 
     Args:
         target: The detected or configured target.  May be a string or a
@@ -324,15 +385,7 @@ def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
     Returns:
         bool: True if instructions can be omitted from AGENTS.md.
     """
-    if isinstance(target, frozenset):
-        # Conservative policy: only dedup when the target set is exactly
-        # {"vscode"} (Copilot alone).  Any additional family -- including
-        # "agents" -- means at least one consumer that does not read
-        # .github/instructions/ may be present, so we keep instructions
-        # in AGENTS.md to be safe.
-        return target == frozenset({"vscode"})
-    # Single-string targets: only "vscode" reads .github/instructions/.
-    return target == "vscode"
+    return get_dedup_rules_dir(target) is not None
 
 
 def get_target_description(target: UserTargetType) -> str:
@@ -356,6 +409,7 @@ def get_target_description(target: UserTargetType) -> str:
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
         "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
+        "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
@@ -373,16 +427,16 @@ def get_target_description(target: UserTargetType) -> str:
 
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
-ALL_CANONICAL_TARGETS = frozenset(
-    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "kiro"}
-)
+ALL_CANONICAL_TARGETS = frozenset(expand_all("install"))
 
 #: Targets that the parser must accept but that are gated at runtime by
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
 EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
-    {"copilot-cowork", "copilot-app", "openclaw", "hermes"}
+    capability.name
+    for capability in TARGET_CAPABILITIES.values()
+    if capability.experimental_flag is not None
 )
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
@@ -390,14 +444,30 @@ EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
 #: not represent a single client tool.  Antigravity is explicit-only
 #: because its workspace config lives under the SHARED ``.agents/`` root,
 #: so there is no Antigravity-unique signal to auto-detect on.
-EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills", "antigravity"})
+EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset(
+    capability.name for capability in TARGET_CAPABILITIES.values() if capability.explicit_only
+)
+
+#: MCP-only pseudo-targets that have a client adapter but no
+#: ``KNOWN_TARGETS`` entry (they map to a canonical target for primitive
+#: deployment via ``RUNTIME_TO_CANONICAL_TARGET``).  They must be accepted
+#: by ``--target`` so the CLI validates them, but they are excluded from
+#: ``"all"`` expansion and do not participate in target-profile machinery.
+MCP_ONLY_TARGETS: frozenset[str] = frozenset(
+    capability.name for capability in TARGET_CAPABILITIES.values() if capability.mcp_only
+)
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
-    "copilot": "vscode",
-    "agents": "vscode",
-    "vscode": "vscode",
-    "agy": "antigravity",
+    value: (
+        capability.compile_family
+        if capability.compile_family in capability.aliases
+        else capability.name
+    )
+    for capability in TARGET_CAPABILITIES.values()
+    for value in (capability.name, *capability.aliases)
+    if capability.aliases
+    and (value != capability.name or capability.compile_family in capability.aliases)
 }
 
 
@@ -407,15 +477,15 @@ def manifest_targets_from_target_option(target: str | list[str] | None) -> list[
         return None
 
     from apm_cli.core.apm_yml import CANONICAL_TARGETS
-    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
     raw_targets = [target] if isinstance(target, str) else list(target)
     seen: set[str] = set()
     manifest_targets: list[str] = []
     for raw_target in raw_targets:
-        expanded = sorted(ALL_CANONICAL_TARGETS) if raw_target == "all" else [str(raw_target)]
+        expanded = expand_all("install") if raw_target == "all" else [str(raw_target)]
         for item in expanded:
-            canonical = RUNTIME_TO_CANONICAL_TARGET.get(item, item)
+            capability = get_target_capability(item)
+            canonical = capability.primitive_profile if item in capability.runtimes else item
             if canonical in CANONICAL_TARGETS and canonical not in seen:
                 seen.add(canonical)
                 manifest_targets.append(canonical)
@@ -431,7 +501,7 @@ def normalize_target_list(
     - ``None`` -> ``None`` (auto-detect)
     - ``"claude"`` -> ``["claude"]``
     - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
-    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "opencode", "vscode"]``
+    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "kiro", "opencode", "vscode", "windsurf"]``
     - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
     - Deduplicates while preserving first-seen order.
 
@@ -450,16 +520,51 @@ def normalize_target_list(
     # "all" anywhere in the input means "every target" -- expand to the
     # full sorted list of canonical targets.
     if "all" in raw:
-        return sorted(ALL_CANONICAL_TARGETS)
+        return list(expand_all("install"))
 
     seen: set[str] = set()
     result: list[str] = []
     for item in raw:
-        canonical = TARGET_ALIASES.get(item, item)
+        capability = get_target_capability(item)
+        canonical = (
+            capability.compile_family
+            if capability.compile_family in capability.aliases
+            else normalize_target_name(item)
+        )
         if canonical not in seen:
             seen.add(canonical)
             result.append(canonical)
     return result
+
+
+def normalize_policy_targets(value: str | list[str] | None) -> str | list[str] | None:
+    """Normalize MCP-only selectors for compilation-target policy checks.
+
+    The return shape matches the input shape so scalar callers remain
+    backward-compatible while plural target sets are evaluated together.
+    """
+    if value is None:
+        return None
+
+    values = [value] if isinstance(value, str) else list(value)
+    normalized: list[str] = []
+    for target in values:
+        if target == "all":
+            if target not in normalized:
+                normalized.append(target)
+            continue
+        if target in MCP_ONLY_TARGETS:
+            try:
+                canonical = get_target_capability(target).primitive_profile
+            except KeyError:
+                canonical = None
+            if canonical is None:
+                raise RuntimeError(f"MCP-only target '{target}' has no canonical policy mapping")
+            target = canonical
+        if target not in normalized:
+            normalized.append(target)
+
+    return normalized[0] if isinstance(value, str) else normalized
 
 
 # ---------------------------------------------------------------------------
@@ -468,13 +573,10 @@ def normalize_target_list(
 
 #: All values accepted by the ``--target`` CLI option.
 #: Derived from canonical targets, alias keys, and the ``"all"`` keyword.
-VALID_TARGET_VALUES: frozenset[str] = (
-    ALL_CANONICAL_TARGETS
-    | EXPERIMENTAL_TARGETS
-    | EXPLICIT_ONLY_TARGETS
-    | frozenset(TARGET_ALIASES)
-    | frozenset({"all"})
-)
+VALID_TARGET_VALUES: frozenset[str] = accepted_target_values()
+
+#: Stable user-facing projection of every value accepted by ``--target``.
+TARGET_VALUES_HELP = ", ".join(sorted(accepted_target_values()))
 
 
 def parse_target_field(
@@ -563,11 +665,11 @@ def parse_target_field(
 
     # ---- validate every token ----
     for p in raw_parts:
-        if p not in VALID_TARGET_VALUES:
+        if p not in accepted_target_values():
             raise ValueError(
                 _target_error(
                     f"'{p}' is not a valid target. "
-                    f"Choose from: {', '.join(sorted(VALID_TARGET_VALUES))}",
+                    f"Choose from: {', '.join(sorted(accepted_target_values()))}",
                     source_path,
                 )
             )
@@ -586,7 +688,7 @@ def parse_target_field(
     # ---- "all" handling ----
     if "all" in raw_parts:
         non_all_tokens = {t for t in raw_parts if t != "all"}
-        if non_all_tokens - EXPLICIT_ONLY_TARGETS:
+        if non_all_tokens - EXPLICIT_ONLY_TARGETS - MCP_ONLY_TARGETS:
             raise ValueError(
                 _target_error(
                     "'all' cannot be combined with other targets",
@@ -617,7 +719,12 @@ def parse_target_field(
     seen: set[str] = set()
     result: list[str] = []
     for p in raw_parts:
-        canonical = TARGET_ALIASES.get(p, p)
+        capability = get_target_capability(p)
+        canonical = (
+            capability.compile_family
+            if capability.compile_family in capability.aliases
+            else normalize_target_name(p)
+        )
         if canonical not in seen:
             seen.add(canonical)
             result.append(canonical)
@@ -663,13 +770,17 @@ class TargetParamType(click.ParamType):
             # Use the v2 three-section error renderer for unknown targets
             # so that CLI, apm.yml, and auto-detect all share the same
             # error format (#1154).
-            from apm_cli.core.apm_yml import CANONICAL_TARGETS
             from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
 
             err_msg = str(e)
             if "is not a valid target" in err_msg:
                 target_name = value if isinstance(value, str) else ",".join(value or [])
-                rendered = render_unknown_target_error(target_name, sorted(CANONICAL_TARGETS))
+                command = ctx.command.name if ctx is not None and ctx.command.name else "install"
+                rendered = render_unknown_target_error(
+                    target_name,
+                    list(target_error_values(command)),
+                    command=command,
+                )
                 raise UnknownTargetError(rendered) from None
             # Click idiom: route validation errors through self.fail so the
             # user sees a clean "Invalid value for '--target': ..." message
@@ -701,6 +812,181 @@ class ResolvedTargets:
     auto_create: bool  # always True after resolution (three-guard collapse)
 
 
+def _target_capabilities(
+    value: str | list[str] | None,
+) -> Iterator[tuple[str, TargetCapability]]:
+    """Yield expanded target spellings with their catalog capabilities."""
+    raw_targets = [value] if isinstance(value, str) else list(value or [])
+    for raw_target in raw_targets:
+        expanded = expand_all("install") if raw_target == "all" else (raw_target,)
+        for target in expanded:
+            yield target, get_target_capability(target)
+
+
+@dataclass(frozen=True)
+class EffectiveTargetDecision:
+    """One install-time target decision shared by package, MCP, and LSP phases."""
+
+    value: str | list[str] | None
+    source: str
+
+    @cached_property
+    def canonical_targets(self) -> tuple[str, ...] | None:
+        """Return the selected native target profiles, or None when unrestricted."""
+        if self.value is None:
+            return None
+
+        canonical: list[str] = []
+        seen: set[str] = set()
+        for target, capability in _target_capabilities(self.value):
+            name = (
+                capability.primitive_profile
+                if capability.mcp_only and capability.primitive_profile is not None
+                else normalize_target_name(target)
+            )
+            if name not in seen:
+                seen.add(name)
+                canonical.append(name)
+        return tuple(canonical)
+
+    @cached_property
+    def runtime_targets(self) -> tuple[str, ...] | None:
+        """Return MCP runtime identifiers represented by this target decision."""
+        if self.value is None:
+            return None
+
+        runtimes: list[str] = []
+        seen: set[str] = set()
+        for target, capability in _target_capabilities(self.value):
+            runtime = (
+                capability.compile_family
+                if capability.compile_family in capability.runtimes
+                else target
+                if target in capability.runtimes
+                else capability.runtimes[0]
+                if capability.runtimes
+                else capability.name
+            )
+            if runtime not in seen:
+                seen.add(runtime)
+                runtimes.append(runtime)
+        return tuple(runtimes)
+
+    def runtime_targets_for_scope(self, *, user_scope: bool) -> tuple[str, ...] | None:
+        """Return MCP runtime identifiers adjusted for project or user scope."""
+        runtimes = self.runtime_targets
+        if (
+            not user_scope
+            or runtimes is None
+            or self.canonical_targets is None
+            or "copilot" not in self.canonical_targets
+        ):
+            return runtimes
+        return tuple("copilot" if target == "vscode" else target for target in runtimes)
+
+    @cached_property
+    def runtime_equivalents(self) -> tuple[str, ...] | None:
+        """Return canonical and adapter runtime spellings for exclusions."""
+        if self.value is None:
+            return None
+        equivalents: set[str] = set()
+        for _target, capability in _target_capabilities(self.value):
+            equivalents.add(capability.name)
+            equivalents.update(capability.runtimes)
+        return tuple(sorted(equivalents))
+
+    @cached_property
+    def lsp_targets(self) -> tuple[str, ...] | None:
+        """Return native target profiles eligible for LSP configuration."""
+        if self.value is None:
+            return None
+
+        targets: list[str] = []
+        seen: set[str] = set()
+        for target, capability in _target_capabilities(self.value):
+            if capability.mcp_only:
+                continue
+            canonical = normalize_target_name(target)
+            if canonical not in seen:
+                seen.add(canonical)
+                targets.append(canonical)
+        return tuple(targets)
+
+
+def resolve_effective_target_decision(
+    project_root: Path,
+    *,
+    explicit_target: str | list[str] | None,
+    manifest_target: str | list[str] | None,
+    user_scope: bool = False,
+    auto_detect: bool = True,
+) -> EffectiveTargetDecision:
+    """Choose the effective install target once using the public precedence.
+
+    Explicit CLI selection wins, followed by a validated manifest selection,
+    then the saved ``apm config target`` default. Project auto-detection runs
+    only when none of those restrictions exists. User-scope runtime discovery
+    remains unrestricted in that final case because it probes user-capable
+    runtimes rather than project harness markers.
+    """
+    if explicit_target is not None:
+        return EffectiveTargetDecision(explicit_target, "--target flag")
+
+    if manifest_target:
+        return EffectiveTargetDecision(manifest_target, "apm.yml")
+
+    from apm_cli.config import get_install_target
+
+    configured_target = get_install_target()
+    if configured_target is not None:
+        return EffectiveTargetDecision(configured_target, "apm config target")
+
+    if user_scope or not auto_detect:
+        return EffectiveTargetDecision(None, "auto-detect")
+
+    resolved = resolve_targets(project_root)
+    return EffectiveTargetDecision(list(resolved.targets), resolved.source)
+
+
+def resolve_package_target_decision(
+    project_root: Path,
+    *,
+    package: object | None,
+    explicit_target: str | list[str] | None,
+    user_scope: bool = False,
+    auto_detect: bool = True,
+) -> EffectiveTargetDecision:
+    """Resolve one effective target decision from a parsed package manifest."""
+    from apm_cli.models.apm_package import package_target_selection
+
+    return resolve_effective_target_decision(
+        project_root,
+        explicit_target=explicit_target,
+        manifest_target=package_target_selection(package) if package is not None else None,
+        user_scope=user_scope,
+        auto_detect=auto_detect,
+    )
+
+
+def resolve_manifest_target_decision(
+    project_root: Path,
+    *,
+    manifest_path: Path,
+    explicit_target: str | list[str] | None,
+) -> EffectiveTargetDecision:
+    """Resolve one effective target decision from an optional manifest path."""
+    package = None
+    if manifest_path.is_file():
+        from apm_cli.models.apm_package import APMPackage
+
+        package = APMPackage.from_apm_yml(manifest_path)
+    return resolve_package_target_decision(
+        project_root,
+        package=package,
+        explicit_target=explicit_target,
+    )
+
+
 # Detection signal whitelist.
 # (target, check_type, path)
 # check_type: 'dir' = is_dir(), 'file' = is_file()
@@ -717,6 +1003,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("codex", "dir", ".codex"),
     ("gemini", "dir", ".gemini"),
     ("gemini", "file", "GEMINI.md"),
+    ("grok-build", "dir", ".grok"),
     ("opencode", "dir", ".opencode"),
     ("windsurf", "dir", ".windsurf"),
     ("kiro", "dir", ".kiro"),
@@ -729,6 +1016,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "cursor",
     "codex",
     "gemini",
+    "grok-build",
     "opencode",
     "windsurf",
     "kiro",
@@ -741,6 +1029,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "cursor": ".cursor/",
     "codex": ".codex/",
     "gemini": ".gemini/",
+    "grok-build": ".grok/",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
@@ -754,6 +1043,7 @@ CANONICAL_SIGNAL: dict[str, str] = {
     "cursor": ".cursor/",
     "codex": ".codex/",
     "gemini": "GEMINI.md",
+    "grok-build": ".grok/",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",

@@ -525,18 +525,16 @@ class TestCleanupTransitiveOrphansEdgeCases:
         # Create lockfile where owner/orphan is resolved by owner/repo.
         # repo_url on DependencyReference.parse("owner/repo") is "owner/repo",
         # so resolved_by must also be "owner/repo" for the children_index to match.
-        child_dep = MagicMock()
-        child_dep.resolved_by = "owner/repo"
-        child_dep.repo_url = "owner/orphan"
-        child_dep.get_unique_key.return_value = "owner/orphan"
+        from apm_cli.deps.lockfile import LockedDependency
 
-        # The orphan_dep returned by lockfile.get_dependency
-        orphan_dep_full = MagicMock()
-        orphan_dep_full.get_unique_key.return_value = "owner/orphan"
+        child_dep = LockedDependency(
+            repo_url="owner/orphan",
+            resolved_by="owner/repo",
+        )
 
         lockfile = MagicMock()
         lockfile.get_package_dependencies.return_value = [child_dep]
-        lockfile.get_dependency.return_value = orphan_dep_full
+        lockfile.get_dependency.return_value = child_dep
 
         logger = MagicMock()
 
@@ -1220,7 +1218,7 @@ class TestAutoDiscover:
         from apm_cli.policy.discovery import _auto_discover
 
         with patch(
-            "apm_cli.policy.discovery._extract_org_from_git_remote",
+            "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
             return_value=None,
         ):
             result = _auto_discover(tmp_path)
@@ -1232,8 +1230,8 @@ class TestAutoDiscover:
         from apm_cli.policy.discovery import _auto_discover
 
         with patch(
-            "apm_cli.policy.discovery._extract_org_from_git_remote",
-            return_value=("contoso", "ghe.corp.com"),
+            "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
+            return_value=("contoso", "ghe.corp.com", None),
         ):
             with patch(
                 "apm_cli.policy.discovery._fetch_from_repo",

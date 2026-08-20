@@ -10,10 +10,10 @@ harness. Use this page to choose a target, debug an unexpected deploy
 location, or confirm whether a primitive is supported on a given tool.
 
 For background on the target model, see
-[Primitives and targets](../concepts/primitives-and-targets/). For
-the runtime CLI surface, see [`apm targets`](./cli/targets/) and
-[`apm compile`](./cli/compile/). For the primitive types themselves,
-see [Primitive types](./primitive-types/).
+[Primitives and targets](../../concepts/primitives-and-targets/). For
+the runtime CLI surface, see [`apm targets`](../cli/targets/) and
+[`apm compile`](../cli/compile/). For the primitive types themselves,
+see [Primitive types](../primitive-types/).
 
 ## Summary
 
@@ -21,23 +21,40 @@ see [Primitive types](./primitive-types/).
 |-----------------|------------------------|:------------:|:-------:|:------:|:------:|:--------:|:-----:|:---:|
 | copilot         | `.github/`             |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | claude          | `.claude/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
+| grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
-| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
+| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
+| intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
-below). Claude and Kiro keep target-native skill directories.
+below). Claude, Grok Build, and Kiro keep target-native skill directories.
 
-`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
-Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
-gated behind experimental flags and not listed above. See
-[Experimental](./experimental/).
+(*) For `intellij`, file primitives route through the Copilot profile:
+instructions, prompts, agents, and hooks use `.github/`, while skills use
+`.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
+
+`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
+desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
+runtime), and `hermes` are gated behind experimental flags and not listed
+above. See [Experimental](../experimental/).
+
+## Post-install instruction compilation
+
+After a project install stages dependency instructions, the APM CLI requires a
+separate root-context compile for `codex`, `gemini`, and `opencode`, plus
+experimental `hermes` when enabled. It emits the
+[`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
+All other targets in this matrix either deploy instructions as native per-file
+rules, do not support dependency instructions, or have no verified
+root-context reader, so they do not trigger that reminder. A target not
+classified here does not trigger it by default.
 
 ## Detection and resolution
 
@@ -48,32 +65,45 @@ priority:
 2. `targets:` in `apm.yml`.
 3. Auto-detection from filesystem signals (table below).
 
-If none of the above produce a target, the command falls back to
-`copilot`. Use [`apm targets`](./cli/targets/) to preview the resolved
-list before `compile` or `install`.
+For MCP installation, the equivalent explicit legacy `--runtime` flag also
+has highest priority. MCP machine discovery runs only when `targets:` is
+omitted (or legacy `all` is treated as omission). Declared targets therefore produce portable MCP ownership in `apm.lock.yaml`;
+omitted targets intentionally make that ownership machine-dependent.
+
+`apm install` fails closed when no target can be detected. `apm compile`
+retains its documented unsignalled fallback because install writes
+runtime-specific configuration while compile only generates project output. Use
+[`apm targets`](../cli/targets/) to preview the resolved list.
 
 ### Detection signal whitelist
 
 | Target   | Signals (any one activates the target)        |
 |----------|-----------------------------------------------|
+| copilot  | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory |
 | claude   | `.claude/` directory, or `CLAUDE.md` file     |
-| copilot  | `.github/copilot-instructions.md` file        |
+| grok-build | `.grok/` directory                          |
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
+| intellij | Global `github-copilot/intellij/` config directory (MCP runtime discovery only) |
 
-`agent-skills` is a canonical target key; `antigravity` is explicit-only.
-Both are available with `--target`, but only `agent-skills` can be listed in a
+IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's
+user-scope `mcp.json`. That global signal does not auto-select file-primitive
+deployment. When `intellij` is selected explicitly, package file primitives use
+the Copilot profile. `intellij` does not participate in plain `all` expansion.
+
+`agent-skills` is a canonical target key; `antigravity` is explicit-only for
+auto-detection. Both are available with `--target` and can be listed in a
 project's `apm.yml` `targets:` field so contributors running plain `apm
-install` pick it up automatically.
+install` pick them up automatically.
 
-`copilot-cowork`, `copilot-app`, `openclaw`, and `hermes` are experimental targets
-that require `apm experimental enable <name>` before use. They are selected
-with `--target` only and cannot be listed in `apm.yml` (the canonical
-targets validator will reject them).
+`copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
+experimental targets that require `apm experimental enable <name>` before use.
+They are selected with `--target` only and cannot be listed in `apm.yml` (the
+canonical targets validator will reject them).
 
 ## copilot
 
@@ -89,7 +119,12 @@ GitHub Copilot (CLI and IDE).
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.github/hooks/<name>.json`
   - generated: `.github/copilot-instructions.md` (compile output)
-- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`; `instructions` from all packages are concatenated into `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file at user scope). User-scope deploys land under `~/.copilot/`, not `~/.github/`.
+- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`;
+  `instructions` from all packages are concatenated into
+  `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file
+  at user scope). User-scope deploys land under `~/.copilot/`, not
+  `~/.github/`; hook script commands are written as absolute paths so Copilot
+  CLI can invoke them from any working directory.
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 
@@ -101,12 +136,14 @@ Claude Code.
 - **Deploy directory.** `.claude/` (project and user scope; user scope honors `CLAUDE_CONFIG_DIR` if set).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
-  - instructions: `.claude/rules/<name>.md`
+  - instructions: deployed directly by `apm install` to
+    `.claude/rules/<name>.md`
   - agents: `.claude/agents/<name>.md`
   - commands: `.claude/commands/<name>.md`
   - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
-- **Compile output.** `CLAUDE.md` and per-rule files under `.claude/rules/`.
+- **Compile output.** `CLAUDE.md`; instructions already deployed under
+  `.claude/rules/` are omitted from `CLAUDE.md` to avoid duplicate context.
 
 ## cursor
 
@@ -157,15 +194,15 @@ Gemini CLI.
 
 Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
-- **Detection.** None -- explicit-only. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity`; it is not part of `--target all` and is not accepted in `apm.yml` `targets:`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
+- **Detection.** None -- explicit-only for auto-detection. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity` or list it in `apm.yml` `targets:`; it is not part of `--target all`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
 - **Deploy directory.** `.agents/` (project scope); `~/.gemini/` (user scope).
 - **Supported primitives.** instructions, skills, hooks, mcp.
 - **File conventions.**
-  - instructions: `.agents/rules/<name>.md`
+  - instructions: `.agents/rules/<name>.md` (formatted natively with `trigger: glob` and `globs` frontmatter mapped from the package `applyTo` patterns)
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.agents/hooks.json` (Antigravity's native schema: `PreToolUse`/`PostToolUse`/`PreInvocation`/`PostInvocation`/`Stop`)
   - mcp: `.agents/mcp_config.json` (project; `mcpServers` key) or `~/.gemini/config/mcp_config.json` (user)
-- **Compile output.** `AGENTS.md`.
+- **Compile output.** `AGENTS.md`. Supports compilation deduplication: if `.agents/rules/` exists and contains at least one deployed instruction rule file (for the discovered `.apm/instructions/*.instructions.md` set), those instructions are omitted from `AGENTS.md` to avoid duplicate context.
 
 ## opencode
 
@@ -199,18 +236,46 @@ Windsurf / Cascade.
 
 ## kiro
 
-Kiro IDE.
+Kiro IDE/CLI v3 unified agent harness.
 
 - **Detection.** `.kiro/` directory.
 - **Deploy directory.** `.kiro/` (project and user scope).
-- **Supported primitives.** instructions, skills, hooks, mcp.
+- **Supported primitives.** agents, instructions, skills, hooks, mcp.
 - **File conventions.**
+  - agents: `.kiro/agents/<relative-stem>.md` -- identity derives from the
+    relative path. Only `description`, `model`, and `tools` frontmatter are
+    emitted; `name` and unknown fields are stripped. Tools are
+    permission-bearing: APM fails closed (no partial write) if any tool
+    value is outside the approved set (`read`, `write`, `shell`, `web`,
+    `subagent`, `knowledge`, `context`, `todo_list`, `@mcp`, `@builtin`,
+    `*`). Kiro may warn and fall back if the specified `model` is
+    unavailable; APM passes model values through without validation.
+    Ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/)
+    (accessed 2026-08-03).
   - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
   - skills: `.kiro/skills/<name>/SKILL.md`
   - hooks: one JSON file per hook action under `.kiro/hooks/`
   - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
-- **Scope.** This is the documented Kiro IDE layout only. Kiro CLI differences are tracked separately and are not part of this target.
+- **Scope.** Covers the documented Kiro IDE and CLI v3 layout (unified harness). Ref: [kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/) (accessed 2026-08-03).
+
+## intellij
+
+GitHub Copilot for JetBrains IDEs.
+
+- **Detection.** MCP runtime discovery uses the global
+  `github-copilot/intellij/` config directory. It does not auto-select a
+  file-primitive target.
+- **Deploy directory.** User-scope `mcp.json`; see the
+  [JetBrains integration guide](../../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
+  for OS-specific paths. macOS and Linux use `$XDG_CONFIG_HOME` (default
+  `~/.config`), while Windows uses `%LOCALAPPDATA%`.
+- **Supported primitives.** The IntelliJ-specific adapter supports MCP.
+  Instructions, prompts, agents, and hooks deploy through the Copilot profile
+  under `.github/`; skills deploy under `.agents/skills/`.
+- **Scope.** MCP configuration is user scope only. File primitives use the
+  project or user scope selected for the Copilot profile. IntelliJ does not
+  participate in plain `all` expansion.
 
 ## agent-skills
 
@@ -221,6 +286,31 @@ Cross-client shared skills directory.
 - **Supported primitives.** skills only.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
+
+## grok-build
+
+[Grok Build](https://github.com/xai-org/grok-build) native configuration.
+
+- **Detection.** Auto-detected when `.grok/` exists.
+- **Selection.** Included in `all`; no experimental flag is required.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** instructions, agents, commands, and skills.
+- **File conventions.** `.grok/rules/*.md`,
+  `.grok/agents/*.md`, `.grok/commands/*.md`, and
+  `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** Produces `AGENTS.md`.
+
+## grok-cloud (experimental)
+
+xAI Grok Cloud skills deployment.
+
+- **Detection.** Never auto-detected. After enabling the experimental flag,
+  selecting `--target grok-cloud` creates the deploy directory when needed.
+- **Enable.** `apm experimental enable grok-cloud`.
+- **Deploy directory.** `.grok/` at project scope; `~/.grok/` at user scope.
+- **Supported primitives.** skills only.
+- **File conventions.** `.grok/skills/<name>/SKILL.md`.
+- **Compile behavior.** `apm compile --target grok-cloud` is a successful no-op.
 
 ## openclaw (experimental)
 
@@ -241,7 +331,9 @@ Cross-client shared skills directory.
 
 ## Skills convergence
 
-By default, every target with a `skills` primitive deploys to `.agents/skills/<name>/SKILL.md` rather than under the target root. This matches the cross-tool agent skills convention so a single skill bundle serves every harness.
+Most targets with a `skills` primitive deploy to
+`.agents/skills/<name>/SKILL.md`. Claude, Grok Build, Kiro, and experimental
+Grok Cloud keep target-native skill directories.
 
 To restore the pre-convergence per-target layout (skills land under each target's own root), use the `--legacy-skill-paths` flag on `apm install` or set `APM_LEGACY_SKILL_PATHS=1`.
 
@@ -258,12 +350,12 @@ targets: Y)` line so the gate decision is observable. The matrix
 above marks `mcp` supported when an adapter exists; whether the
 config gets written on a given install is a function of the active
 target set, not just adapter availability. See
-[Install MCP servers](../consumer/install-mcp-servers/) for the
-gate behavior and [`apm mcp`](./cli/mcp/) for the runtime surface.
+[Install MCP servers](../../consumer/install-mcp-servers/) for the
+gate behavior and [`apm mcp`](../cli/mcp/) for the runtime surface.
 
 ## See also
 
-- [`apm targets`](./cli/targets/) - inspect resolved targets at runtime.
-- [`apm compile`](./cli/compile/) - target selection and compile flags.
-- [Primitive types](./primitive-types/) - what each primitive is.
-- [Primitives and targets](../concepts/primitives-and-targets/) - conceptual model.
+- [`apm targets`](../cli/targets/) - inspect resolved targets at runtime.
+- [`apm compile`](../cli/compile/) - target selection and compile flags.
+- [Primitive types](../primitive-types/) - what each primitive is.
+- [Primitives and targets](../../concepts/primitives-and-targets/) - conceptual model.

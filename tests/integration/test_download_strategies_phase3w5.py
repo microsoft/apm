@@ -11,6 +11,7 @@ import pytest
 import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.github_rate_limit import GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -34,11 +35,14 @@ def make_host(
     host._resilient_get = MagicMock()
 
     auth_resolver = MagicMock()
-    ctx = SimpleNamespace(token=resolved_token, source=source)
+    effective_token = resolved_token if resolved_token is not None else ado_token
+    ctx = SimpleNamespace(token=effective_token, source=source, auth_scheme="basic")
     auth_resolver.resolve.return_value = ctx
     auth_resolver.resolve_for_dep.return_value = ctx
     auth_resolver.classify_host.return_value = SimpleNamespace(kind="generic", api_base=api_base)
-    auth_resolver.build_error_context.return_value = "Set a token."
+    auth_resolver.build_error_context.return_value = (
+        "Check PAT permissions." if effective_token else "Set a token."
+    )
     host.auth_resolver = auth_resolver
     host._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
     return host
@@ -76,6 +80,7 @@ def fake_response(
     response.content = content
     response.headers = headers or {}
     response.text = content.decode("utf-8", errors="replace")
+    response.iter_content.return_value = iter([content] if content else [])
     if status_code >= 400:
         response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=response)
     else:
@@ -187,7 +192,7 @@ class TestDownloadArtifactoryArchivePhase3W5:
                     tmp_path,
                 )
 
-    def test_directory_entries_and_traversal_are_handled(self, tmp_path: Path) -> None:
+    def test_directory_entries_and_traversal_are_rejected(self, tmp_path: Path) -> None:
         host = make_host()
         delegate = DownloadDelegate(host)
         archive_bytes = make_zip(
@@ -203,17 +208,16 @@ class TestDownloadArtifactoryArchivePhase3W5:
             "apm_cli.deps.download_strategies.build_artifactory_archive_url",
             return_value=["https://art.example.com/archive.zip"],
         ):
-            delegate.download_artifactory_archive(
-                "art.example.com",
-                "proxy",
-                "owner",
-                "repo",
-                "main",
-                tmp_path,
-            )
+            with pytest.raises(RuntimeError, match=r"Unsafe zip archive.*path-traversal"):
+                delegate.download_artifactory_archive(
+                    "art.example.com",
+                    "proxy",
+                    "owner",
+                    "repo",
+                    "main",
+                    tmp_path,
+                )
 
-        assert (tmp_path / "nested").is_dir()
-        assert (tmp_path / "nested" / "file.txt").read_text() == "safe"
         assert not (tmp_path.parent / "escape.txt").exists()
 
     def test_request_exception_becomes_last_error(self, tmp_path: Path) -> None:
@@ -775,7 +779,7 @@ class TestDownloadGithubFilePhase3W5:
             with pytest.raises(RuntimeError, match="HTTP 500"):
                 delegate.download_github_file(dep, "README.md", ref="main")
 
-    def test_rate_limit_error_without_token_uses_error_context(self) -> None:
+    def test_confirmed_throttle_without_token_is_typed(self) -> None:
         host = make_host(resolved_token=None)
         delegate = DownloadDelegate(host)
         dep = make_dep("owner/repo", host="github.com")
@@ -784,10 +788,13 @@ class TestDownloadGithubFilePhase3W5:
             headers={"X-RateLimit-Remaining": "0"},
         )
 
-        with pytest.raises(RuntimeError, match="Unauthenticated requests are limited"):
+        with pytest.raises(GitHubThrottleError) as exc_info:
             delegate.download_github_file(dep, "README.md")
 
-    def test_rate_limit_error_with_token_mentions_quota(self) -> None:
+        assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
+        assert exc_info.value.throttle.signal == "remaining-zero"
+
+    def test_confirmed_throttle_with_token_is_typed(self) -> None:
         host = make_host(resolved_token="gh-token")
         delegate = DownloadDelegate(host)
         dep = make_dep("owner/repo", host="github.com")
@@ -796,8 +803,11 @@ class TestDownloadGithubFilePhase3W5:
             headers={"X-RateLimit-Remaining": "0"},
         )
 
-        with pytest.raises(RuntimeError, match="rate-limit quota"):
+        with pytest.raises(GitHubThrottleError) as exc_info:
             delegate.download_github_file(dep, "README.md")
+
+        assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
+        assert exc_info.value.throttle.signal == "remaining-zero"
 
     def test_auth_failure_retries_without_auth_and_succeeds(self) -> None:
         host = make_host(resolved_token="gh-token")

@@ -39,7 +39,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
       
       - name: Sync dependencies with uv
-        run: uv sync
+        run: uv sync --frozen
       
       - name: Verify installation
         run: uv run apm --version

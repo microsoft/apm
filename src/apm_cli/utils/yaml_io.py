@@ -7,16 +7,19 @@ default file encoding is cp1252, not UTF-8.
 
 Public API::
 
-    load_yaml(path)        -- read a .yml/.yaml file -> dict | None
-    dump_yaml(data, path)  -- write dict -> .yml/.yaml file
-    yaml_to_str(data)      -- serialize dict -> YAML string
+    load_yaml(path)                 -- read a .yml/.yaml file -> dict | None
+    dump_yaml(data, path)           -- write dict -> .yml/.yaml file
+    load_yaml_roundtrip(path)       -- read YAML while preserving comments
+    dump_yaml_roundtrip(data, path) -- write round-trip YAML data
+    yaml_to_str(data)               -- serialize dict -> YAML string
 """
 
 import os
 import secrets
 from contextlib import suppress
+from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import yaml
 from frontmatter.default_handlers import YAMLHandler as _FrontmatterYAMLHandler
@@ -61,6 +64,14 @@ class _BoundedSafeLoader(yaml.SafeLoader):
     ``load_yaml`` consumer uniformly, including the non-trust
     ``apm lifecycle validate`` / ``test`` paths that never run
     ``_is_fingerprint_safe``.
+
+    **Two-budget strategy (fix for issue #2389):** ``_guard_expansion`` now
+    pre-scans for aliases via ``_has_aliases`` before computing expansion
+    weights. Anchor-free documents (no shared node objects in the composed
+    graph) cannot amplify -- their weight scales linearly with input size -- so the
+    tight expansion budget is skipped entirely for them. Only documents that
+    contain aliases are subjected to the 5M weight cap. The merge-entry and
+    depth guards are orthogonal and unaffected.
     """
 
     _MAX_MERGE_ENTRIES = 100_000
@@ -82,36 +93,99 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             getattr(node, "start_mark", None),
         )
 
+    @staticmethod
+    def _has_aliases(root: yaml.nodes.Node) -> bool:
+        """Return True if the composed node graph contains any shared nodes.
+
+        PyYAML represents every ``*alias`` reference as a pointer to the same
+        node object.  If any node's ``id()`` is encountered more than once
+        during a full graph traversal the document contains aliases (or a
+        self-referential cycle), meaning alias-expansion amplification is
+        possible.  Anchor-free documents are pure trees whose node objects are
+        never shared, so this returns False for them.
+
+        The traversal is iterative (no Python recursion) so it is safe for
+        deeply nested anchor-free documents that would otherwise hit the
+        default 1000-frame recursion limit.  It uses two sets:
+
+        * ``active`` -- node IDs currently on the active DFS path (pre-order
+          entered, post-order not yet exited).  A hit here means a back-edge
+          (cycle / self-referential anchor).
+        * ``seen`` -- node IDs fully visited from a previous DFS path.  A hit
+          here means a cross-edge (classic alias reachable from two parents).
+
+        Both cases indicate shared nodes; we return True immediately.
+        """
+        seen: set[int] = set()
+        active: set[int] = set()
+        # Work stack entries: (node, entering).
+        #   entering=True  -> first visit; check for alias, push exit + children.
+        #   entering=False -> post-visit; move node from active to seen.
+        work: list[tuple[yaml.nodes.Node, bool]] = [(root, True)]
+        while work:
+            node, entering = work.pop()
+            nid = id(node)
+            if entering:
+                if nid in active or nid in seen:
+                    return True
+                active.add(nid)
+                # Schedule post-visit before children so it fires after them.
+                work.append((node, False))
+                if isinstance(node, yaml.nodes.MappingNode):
+                    # Push in reverse so leftmost key is processed first.
+                    for key_node, value_node in reversed(node.value):
+                        work.append((value_node, True))
+                        work.append((key_node, True))
+                elif isinstance(node, yaml.nodes.SequenceNode):
+                    for child in reversed(node.value):
+                        work.append((child, True))
+            else:
+                active.discard(nid)
+                seen.add(nid)
+        return False
+
     def _guard_expansion(self, root: Any) -> None:
-        # Bound the LOGICAL (alias-expanded) size of the composed node graph
-        # BEFORE construction. PyYAML shares one node object across every
-        # ``*alias`` reference, so a pure-alias billion-laughs graph
-        # (``lN: &lN [*l(N-1), *l(N-1)]``) is only O(N) objects yet expands
-        # to O(2^N) the moment any consumer materializes it (``str()``,
-        # deepcopy, re-serialize). It carries no ``<<`` so the merge-entry
-        # budget never engages, and non-trust consumers
-        # (``apm lifecycle validate`` / ``test``) never run the post-parse
-        # ``_is_fingerprint_safe`` guard -- so without this the bomb wedges
-        # them. We compute a memoized per-node expansion weight (shared nodes
-        # are walked once but summed per occurrence by each parent) and fail
-        # closed as a ``yaml.YAMLError`` the instant the running total crosses
-        # the budget. A self-referential anchor (``a: &a [*a]``) is a cycle in
-        # the node graph; the in-progress sentinel detects it and fails closed
-        # rather than recursing forever. The budget is orders of magnitude
-        # above any legitimate config, so real anchors/aliases still resolve.
+        # Two-budget alias-expansion guard (issue #2389):
+        #
+        # Anchor-free documents (no shared node objects in the composed graph)
+        # cannot produce alias-expansion amplification -- their total weight
+        # scales linearly with literal input size (O(N)).  Applying the tight 5M cap to
+        # them produces false-positive rejections of legitimate large lockfiles
+        # (APM's own generated output).  We therefore pre-scan with
+        # _has_aliases: if the graph is alias-free, return immediately.
+        #
+        # Only alias-containing documents proceed to the full weight check:
+        # PyYAML shares one node object across every ``*alias`` reference, so
+        # a pure-alias billion-laughs graph (``lN: &lN [*l(N-1), *l(N-1)]``)
+        # is only O(N) objects yet expands to O(2^N) the moment any consumer
+        # materializes it (``str()``, deepcopy, re-serialize).  It carries no
+        # ``<<`` so the merge-entry budget never engages, and non-trust
+        # consumers (``apm lifecycle validate`` / ``test``) never run the
+        # post-parse ``_is_fingerprint_safe`` guard -- so without this the
+        # bomb wedges them.  We compute a memoized per-node expansion weight
+        # (shared nodes are walked once but summed per occurrence by each
+        # parent) and fail closed as a ``yaml.YAMLError`` the instant the
+        # running total crosses the budget.  A self-referential anchor
+        # (``a: &a [*a]``) is detected as aliases-present by _has_aliases and
+        # then caught by the in-progress sentinel below.
         #
         # Leaf weight is BYTE-AWARE, not a flat 1: PyYAML's representer reports
         # ``ignore_aliases() == True`` for ``str`` / ``int`` / ``float`` /
         # ``bytes`` / ``bool``, so on the dump side (``dump_yaml`` /
         # ``yaml_to_str``) a shared scalar is NOT re-anchored -- its full text
-        # is re-emitted once PER alias occurrence. A single ~50KB anchored
+        # is re-emitted once PER alias occurrence.  A single ~50KB anchored
         # scalar aliased tens of thousands of times therefore composes as only
         # O(N) nodes (passing a node-count guard) yet re-serializes to ~GBs and
         # hangs/OOMs the emitter -- reachable pre-trust on the
-        # ``apm install`` / ``apm uninstall`` apm.yml round-trip. Charging each
-        # scalar occurrence its emitted byte length makes the budget model the
-        # real dump-amplification cost, so the bomb fails closed at parse while
-        # a single large scalar (referenced a handful of times) still resolves.
+        # ``apm install`` / ``apm uninstall`` apm.yml round-trip.  Charging
+        # each scalar occurrence its emitted byte length makes the budget model
+        # the real dump-amplification cost, so the bomb fails closed at parse
+        # while a single large scalar (referenced a handful of times) still
+        # resolves.
+        if not self._has_aliases(root):
+            # Anchor-free document: literal tree, no amplification possible.
+            return
+
         weights: dict[int, int] = {}
 
         def weight(node: Any) -> int:
@@ -283,6 +357,66 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     on malformed, over-budget, huge-int, or deeply-nested input.
     """
     return _bounded_load(text)
+
+
+def _roundtrip_yaml() -> Any:
+    """Return a configured ruamel.yaml round-trip parser."""
+    from ruamel.yaml import YAML
+    from ruamel.yaml.constructor import ConstructorError
+
+    def reject_python_tag(_constructor: Any, tag_suffix: str, node: Any) -> NoReturn:
+        raise ConstructorError(
+            None,
+            None,
+            f"forbidden Python YAML tag: {tag_suffix}",
+            node.start_mark,
+        )
+
+    rt = YAML(typ="rt")
+    # Class-level constructor registration is intentional: every round-trip
+    # YAML instance in this process should reject unsafe Python tags.
+    rt.Constructor.add_multi_constructor("tag:yaml.org,2002:python/", reject_python_tag)
+    rt.preserve_quotes = True
+    rt.indent(mapping=2, sequence=4, offset=2)
+    return rt
+
+
+def _raise_as_pyyaml_error(exc: Exception) -> NoReturn:
+    """Normalize ruamel parser failures to the yaml.YAMLError family."""
+    from ruamel.yaml import YAMLError as RuamelYAMLError
+
+    if isinstance(exc, RuamelYAMLError):
+        raise yaml.YAMLError(f"YAML parse failed: {exc}") from exc
+    raise exc
+
+
+def load_yaml_roundtrip(path: str | Path) -> Any:
+    """Load YAML while preserving comments and formatting metadata.
+
+    The document is first parsed by the bounded PyYAML loader so the manifest
+    update paths keep the same alias and merge-key safety budget as
+    :func:`load_yaml`. The original text is then parsed with ruamel.yaml
+    round-trip mode so callers can mutate the returned object and write it back
+    without stripping comments.
+    """
+    text = Path(path).read_text(encoding="utf-8")
+    _bounded_load(text)
+    try:
+        return _roundtrip_yaml().load(text)
+    except Exception as exc:
+        _raise_as_pyyaml_error(exc)
+
+
+def dump_yaml_roundtrip(data: Any, path: str | Path) -> None:
+    """Write ruamel round-trip YAML data with explicit UTF-8 encoding."""
+    stream = StringIO()
+    try:
+        _roundtrip_yaml().dump(data, stream)
+    except Exception as exc:
+        _raise_as_pyyaml_error(exc)
+    text = stream.getvalue()
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
 
 
 class _BoundedYAMLHandler(_FrontmatterYAMLHandler):

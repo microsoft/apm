@@ -288,6 +288,16 @@ Driver returns:
 - drive-1437 -> `completion_return.status = ready-to-merge`; no deferred
   work. CI green.
 
+Each driver also ran the canonical-owner gate (Step X.2.5) before any
+terminal return, recording `architecture_evidence` in its
+`completion_return`:
+
+- drive-1428 -> canonical-owner gate: architecture classification split-authority-repair (the AuthResolver cache is the single owner).
+  Dual guardrail proven: behavioral regression test + static boundary guard in scripts/lint-architecture-boundaries.sh + architecture assertion tests/integration/test_architecture_authorities.py, confirmed by mutation-break.
+- drive-1437 -> canonical-owner gate: architecture classification ordinary-fix; no durable decision re-owned, so no dual guardrail; boundary lint clean.
+
+Fail-closed rule honored: a driver with missing owner evidence cannot return ready-to-merge and instead stays blocked on the canonical-owner guardrail.
+
 Cross-session-message only on green; failures would stay in the driver
 session. The orchestrator never posts to a PR directly.
 

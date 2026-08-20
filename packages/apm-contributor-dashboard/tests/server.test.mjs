@@ -4,13 +4,20 @@
 
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import { createHandler } from "../.apm/extensions/issue-monitor/server-handler.mjs";
-import { join, dirname } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer, request as httpRequest } from "node:http";
+import {
+    createHandler,
+    isPathWithinRoot,
+    resolveStaticRequest,
+} from "../.apm/extensions/issue-monitor/server-handler.mjs";
+import { dirname, join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = join(__dir, "..", ".apm", "extensions", "issue-monitor", "dist");
+const REPO_ROOT = join(__dir, "..", "..", "..");
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -90,6 +97,42 @@ async function postJSON(path, body) {
     });
     const json = await res.json();
     return { res, json };
+}
+
+function listen(localServer) {
+    return new Promise((resolve) => {
+        localServer.listen(0, "127.0.0.1", () => {
+            resolve(`http://127.0.0.1:${localServer.address().port}`);
+        });
+    });
+}
+
+function close(localServer) {
+    return new Promise((resolve) => localServer.close(resolve));
+}
+
+function rawHttpRequest(origin, path) {
+    const url = new URL(origin);
+    return new Promise((resolve, reject) => {
+        const req = httpRequest({
+            hostname: url.hostname,
+            port: url.port,
+            path,
+            method: "GET",
+        }, (res) => {
+            const chunks = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => {
+                resolve({
+                    statusCode: res.statusCode,
+                    headers: res.headers,
+                    body: Buffer.concat(chunks),
+                });
+            });
+        });
+        req.on("error", reject);
+        req.end();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +438,154 @@ describe("POST /merge-when-ready", () => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/triage
+// ---------------------------------------------------------------------------
+
+function makeTriageGqlResponse(issues) {
+    return JSON.stringify({
+        data: {
+            repository: {
+                issues: {
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                    nodes: issues,
+                },
+            },
+        },
+    });
+}
+
+const TRIAGE_DECISION_BLOCK = `\`\`\`json triage-decision
+{
+  "decision": "accept",
+  "theme": "theme/governance",
+  "areas": ["area/audit"],
+  "type": "type/bug",
+  "status": "status/accepted",
+  "priority": "priority/high",
+  "milestone": "0.9.x",
+  "next_action": "Fix the bug",
+  "comment_markdown": "## Analysis\\nAccepted."
+}
+\`\`\``;
+
+describe("GET /api/triage", () => {
+    before(async () => {
+        await setupServer({
+            ghExec: async (args) => {
+                if (args[0] === "api" && args[1] === "graphql") {
+                    return makeTriageGqlResponse([
+                        {
+                            number: 100,
+                            title: "Triaged bug",
+                            url: "https://github.com/test/issues/100",
+                            body: "Issue description",
+                            labels: { nodes: [{ name: "bug" }] },
+                            comments: {
+                                nodes: [
+                                    {
+                                        body: TRIAGE_DECISION_BLOCK,
+                                        createdAt: "2025-01-01T10:00:00Z",
+                                        author: { login: "triage-bot", avatarUrl: "" },
+                                        isMinimized: false,
+                                    },
+                                    {
+                                        body: "Human follow-up comment",
+                                        createdAt: "2025-01-02T10:00:00Z",
+                                        author: { login: "alice", avatarUrl: "" },
+                                        isMinimized: false,
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            // Issue without a triage comment -- must be excluded
+                            number: 101,
+                            title: "Untriaged issue",
+                            url: "https://github.com/test/issues/101",
+                            body: "",
+                            labels: { nodes: [] },
+                            comments: { nodes: [] },
+                        },
+                    ]);
+                }
+                throw new Error("unexpected gh call");
+            },
+        });
+    });
+    after(teardownServer);
+
+    it("returns only issues that have a triage-decision block", async () => {
+        const { json } = await getJSON("/api/triage");
+        assert.equal(json.items.length, 1, "untriaged issues must be excluded");
+        assert.equal(json.total, 1);
+    });
+
+    it("parses triage-decision fields correctly", async () => {
+        const { json } = await getJSON("/api/triage");
+        const item = json.items[0];
+        assert.equal(item.number, 100);
+        assert.equal(item.title, "Triaged bug");
+        assert.equal(item.decision, "accept");
+        assert.equal(item.priority, "priority/high");
+        assert.equal(item.milestone, "0.9.x");
+        assert.equal(item.nextAction, "Fix the bug");
+        assert.equal(item.type, "type/bug");
+        assert.deepEqual(item.labels, ["bug"]);
+    });
+
+    it("enriches items with hasSession from startedSessions", async () => {
+        mockState.startedSessions.add(100);
+        // Invalidate cache so fresh response is returned
+        const handler = createHandler(mockState.deps);
+        const s = createServer(handler);
+        await new Promise(r => s.listen(0, "127.0.0.1", r));
+        const url = `http://127.0.0.1:${s.address().port}`;
+        const res = await fetch(`${url}/api/triage`);
+        const json = await res.json();
+        assert.equal(json.items[0].hasSession, true);
+        await new Promise(r => s.close(r));
+    });
+
+    it("collects non-triage comments into nonTriageComments", async () => {
+        const { json } = await getJSON("/api/triage");
+        const item = json.items[0];
+        assert.equal(item.nonTriageComments.length, 1);
+        assert.equal(item.nonTriageComments[0].author, "alice");
+        assert.equal(item.nonTriageComments[0].body, "Human follow-up comment");
+    });
+
+    it("returns cached response on second call within TTL", async () => {
+        const ghCalls = [];
+        const deps = createMockDeps({
+            ghExec: async (args) => {
+                ghCalls.push(args);
+                if (args[0] === "api" && args[1] === "graphql") {
+                    return makeTriageGqlResponse([]);
+                }
+                throw new Error("unexpected");
+            },
+        });
+        const handler = createHandler(deps.deps);
+        const s = createServer(handler);
+        await new Promise(r => s.listen(0, "127.0.0.1", r));
+        const url = `http://127.0.0.1:${s.address().port}`;
+
+        // First call -- populates cache
+        await fetch(`${url}/api/triage`);
+        const callsAfterFirst = ghCalls.length;
+
+        // Second call -- must be served from cache, no new gh api call
+        await fetch(`${url}/api/triage`);
+        assert.equal(
+            ghCalls.length,
+            callsAfterFirst,
+            "second /api/triage call within TTL must be served from cache",
+        );
+        await new Promise(r => s.close(r));
+    });
+});
+
 describe("Static file serving", () => {
     before(() => setupServer());
     after(teardownServer);
@@ -587,34 +778,293 @@ describe("CSRF protection", () => {
     });
 });
 
+describe("POST body size limits", () => {
+    before(() => setupServer());
+    after(teardownServer);
+
+    it("returns 413 for oversized payloads on default POST endpoints", async () => {
+        const oversizedBody = { number: 1, title: "x".repeat(70 * 1024) };
+        const res = await fetch(`${baseUrl}/start-session`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: JSON.stringify(oversizedBody),
+        });
+        assert.equal(res.status, 413);
+        const json = await res.json();
+        assert.equal(json.ok, false);
+        assert.ok(String(json.error).includes("limit"));
+    });
+
+    it("returns 413 for oversized refine-comment drafts", async () => {
+        const oversizedRefine = { type: "issue", number: 1, title: "big", draft: "y".repeat(1024 * 1024 + 1) };
+        const res = await fetch(`${baseUrl}/refine-comment`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: JSON.stringify(oversizedRefine),
+        });
+        assert.equal(res.status, 413);
+        const json = await res.json();
+        assert.equal(json.ok, false);
+        assert.ok(String(json.error).includes("limit"));
+    });
+});
+
 // ---------------------------------------------------------------------------
 // Path traversal protection
 // ---------------------------------------------------------------------------
 
 describe("Path traversal protection", () => {
-    before(() => setupServer());
-    after(teardownServer);
+    const SIBLING_SENTINEL = "outside-sibling-sentinel";
+    const LINK_SENTINEL = "outside-link-sentinel";
+    const SAFE_ASSET = Buffer.from("console.log('safe asset');\n", "utf8");
+    let workDir;
+    let distDir;
+    let assetServer;
+    let assetBaseUrl;
+    let linkSetupError;
+    let mimeLinkSetupError;
 
-    it("blocks path traversal attempts via encoded dots in /assets/", async () => {
-        // Use raw HTTP to send encoded path traversal that bypasses fetch URL normalization
-        const url = new URL(`${baseUrl}/assets/%2e%2e/package.json`);
-        const http = await import("node:http");
-        const res = await new Promise((resolve) => {
-            const req = http.request({
-                hostname: url.hostname,
-                port: url.port,
-                path: "/assets/%2e%2e/package.json",
-                method: "GET",
-            }, resolve);
-            req.end();
-        });
-        // The containment guard blocks paths that resolve outside dist/
-        assert.ok(res.statusCode === 403 || res.statusCode === 404,
-            `Expected 403 or 404, got ${res.statusCode}`);
+    before(async () => {
+        workDir = await mkdtemp(join(__dir, ".static-assets-"));
+        distDir = join(workDir, "dist");
+        const assetsDir = join(distDir, "assets");
+        const siblingDir = join(workDir, "dist-evil");
+        const outsideDir = join(workDir, "outside");
+
+        await mkdir(join(assetsDir, "nested"), { recursive: true });
+        await mkdir(join(assetsDir, "dist-evil"), { recursive: true });
+        await mkdir(siblingDir, { recursive: true });
+        await mkdir(outsideDir, { recursive: true });
+        await writeFile(join(assetsDir, "nested", "app..js"), SAFE_ASSET);
+        await writeFile(join(assetsDir, "dist-evil", "inside.txt"), "inside-prefix", "utf8");
+        await writeFile(join(siblingDir, "secret.txt"), SIBLING_SENTINEL, "utf8");
+        await writeFile(join(outsideDir, "secret.txt"), LINK_SENTINEL, "utf8");
+
+        try {
+            await symlink(
+                outsideDir,
+                join(assetsDir, "outside-link"),
+                process.platform === "win32" ? "junction" : "dir",
+            );
+        } catch (error) {
+            if (process.platform !== "win32" || !["EACCES", "EPERM"].includes(error.code)) {
+                throw error;
+            }
+            linkSetupError = error;
+        }
+        try {
+            await symlink(
+                join(assetsDir, "nested", "app..js"),
+                join(assetsDir, "alias.css"),
+                "file",
+            );
+        } catch (error) {
+            if (process.platform !== "win32" || !["EACCES", "EPERM"].includes(error.code)) {
+                throw error;
+            }
+            mimeLinkSetupError = error;
+        }
+
+        const state = createMockDeps({ distDir });
+        assetServer = createServer(createHandler(state.deps));
+        assetBaseUrl = await listen(assetServer);
     });
 
-    it("returns 404 for nonexistent assets", async () => {
-        const res = await fetch(`${baseUrl}/assets/nonexistent.js`);
-        assert.equal(res.status, 404);
+    after(async () => {
+        if (assetServer) await close(assetServer);
+        if (workDir) await rm(workDir, { recursive: true, force: true });
+    });
+
+    function assertRejected(response, expectedStatus, ...sentinels) {
+        const body = response.body.toString("utf8");
+        for (const sentinel of sentinels) {
+            assert.equal(body.includes(sentinel), false, `outside sentinel leaked: ${sentinel}`);
+        }
+        assert.equal(body.includes(workDir), false, "response leaked a filesystem path");
+        assert.equal(response.statusCode, expectedStatus);
+        assert.equal(body, expectedStatus === 400 ? "Bad request" : "Forbidden");
+    }
+
+    it("serves valid nested and prefix-sharing asset names exactly", async () => {
+        const nested = await rawHttpRequest(assetBaseUrl, "/assets/nested/app..js");
+        assert.equal(nested.statusCode, 200);
+        assert.deepEqual(nested.body, SAFE_ASSET);
+        assert.equal(nested.headers["content-type"], "text/javascript");
+        assert.equal(
+            nested.headers["cache-control"],
+            "public, max-age=31536000, immutable",
+        );
+
+        const cacheBusted = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/nested/app..js?v=123",
+        );
+        assert.equal(cacheBusted.statusCode, 200);
+        assert.deepEqual(cacheBusted.body, SAFE_ASSET);
+
+        const prefix = await rawHttpRequest(assetBaseUrl, "/assets/dist-evil/inside.txt");
+        assert.equal(prefix.statusCode, 200);
+        assert.equal(prefix.body.toString("utf8"), "inside-prefix");
+        assert.equal(prefix.headers["content-type"], "application/octet-stream");
+    });
+
+    it("returns a stable 404 for nonexistent assets", async () => {
+        const response = await rawHttpRequest(assetBaseUrl, "/assets/nonexistent.js");
+        assert.equal(response.statusCode, 404);
+        assert.equal(response.body.toString("utf8"), "Not found");
+
+        const fileAsDirectory = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/nested/app..js/child.js",
+        );
+        assert.equal(fileAsDirectory.statusCode, 404);
+        assert.equal(fileAsDirectory.body.toString("utf8"), "Not found");
+
+        const missingIndex = await rawHttpRequest(assetBaseUrl, "/");
+        assert.equal(missingIndex.statusCode, 404);
+        assert.equal(missingIndex.headers["content-type"], "text/plain; charset=utf-8");
+        assert.equal(missingIndex.body.toString("utf8"), "Not found");
+    });
+
+    it("uses the requested extension for MIME after canonical resolution", async (t) => {
+        if (mimeLinkSetupError) {
+            t.diagnostic(`file symlink setup denied (${mimeLinkSetupError.code}); path seam still runs`);
+            assert.ok(["EACCES", "EPERM"].includes(mimeLinkSetupError.code));
+            return;
+        }
+
+        const response = await rawHttpRequest(assetBaseUrl, "/assets/alias.css");
+        assert.equal(response.statusCode, 200);
+        assert.deepEqual(response.body, SAFE_ASSET);
+        assert.equal(response.headers["content-type"], "text/css");
+    });
+
+    it("blocks sibling prefix traversal before outside bytes are read", async () => {
+        const response = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/../../dist-evil/secret.txt",
+        );
+        assertRejected(response, 403, SIBLING_SENTINEL);
+    });
+
+    it("blocks encoded traversal before outside bytes are read", async () => {
+        const response = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/%2e%2e/%2e%2e/dist-evil/secret.txt",
+        );
+        assertRejected(response, 403, SIBLING_SENTINEL);
+    });
+
+    it("rejects malformed percent encodings and keeps serving requests", async () => {
+        for (const path of [
+            "/assets/%",
+            "/assets/%zz",
+            "/assets/%E0%A4%A",
+            "/%zz-non-asset",
+        ]) {
+            const response = await rawHttpRequest(assetBaseUrl, path);
+            assertRejected(response, 400, SIBLING_SENTINEL, LINK_SENTINEL);
+        }
+
+        const healthy = await rawHttpRequest(assetBaseUrl, "/assets/nested/app..js");
+        assert.equal(healthy.statusCode, 200);
+        assert.deepEqual(healthy.body, SAFE_ASSET);
+    });
+
+    it("rejects mixed, NUL, absolute, drive, UNC, and repeated encodings", async () => {
+        const unsafePaths = [
+            "/assets/",
+            "/assets/..\\..\\dist-evil\\secret.txt",
+            "/assets/..%5c..%5cdist-evil%5csecret.txt",
+            "/assets/%00secret.txt",
+            "/assets/%2fetc%2fpasswd",
+            "/assets/C:%5cWindows%5cwin.ini",
+            "/assets/%5c%5cserver%5cshare%5cfile.txt",
+            "/assets/%252e%252e/%252e%252e/dist-evil/secret.txt",
+        ];
+        for (const path of unsafePaths) {
+            const response = await rawHttpRequest(assetBaseUrl, path);
+            assertRejected(response, 403, SIBLING_SENTINEL, LINK_SENTINEL);
+        }
+    });
+
+    it("rejects symlinked or junction assets that resolve outside dist", async (t) => {
+        if (linkSetupError) {
+            t.diagnostic(`junction setup denied (${linkSetupError.code}); Windows seam still runs`);
+            assert.ok(["EACCES", "EPERM"].includes(linkSetupError.code));
+            return;
+        }
+
+        const response = await rawHttpRequest(
+            assetBaseUrl,
+            "/assets/outside-link/secret.txt",
+        );
+        assertRejected(response, 403, LINK_SENTINEL);
+    });
+
+    it("applies canonical containment with Windows semantics on every platform", () => {
+        const root = "C:\\dashboard\\dist";
+        const candidate = win32.resolve(root, "assets", "outside-link", "secret.txt");
+        const canonicalPaths = new Map([
+            [win32.resolve(root), "C:\\dashboard\\dist"],
+            [candidate, "C:\\dashboard\\outside\\secret.txt"],
+        ]);
+        const result = resolveStaticRequest(
+            "/assets/outside-link/secret.txt",
+            root,
+            {
+                pathApi: win32,
+                realpathSync: (path) => canonicalPaths.get(path),
+            },
+        );
+
+        assert.equal(result.kind, "forbidden");
+        assert.equal(
+            isPathWithinRoot(root, "C:\\dashboard\\dist-evil\\secret.txt", win32),
+            false,
+        );
+        assert.equal(
+            isPathWithinRoot(root, "C:\\dashboard\\dist\\assets\\app..js", win32),
+            true,
+        );
+
+        const aliasCandidate = win32.resolve(root, "assets", "alias.css");
+        canonicalPaths.set(aliasCandidate, "C:\\dashboard\\dist\\assets\\nested\\app.js");
+        const alias = resolveStaticRequest("/assets/alias.css", root, {
+            pathApi: win32,
+            realpathSync: (path) => canonicalPaths.get(path),
+        });
+        assert.equal(alias.kind, "asset");
+        assert.equal(alias.filePath, "C:\\dashboard\\dist\\assets\\nested\\app.js");
+        assert.equal(alias.mimePath, aliasCandidate);
+    });
+});
+
+describe("Package source ownership", () => {
+    it("keeps generated extension copies out of tracked source", async () => {
+        const tracked = execFileSync(
+            "git",
+            [
+                "-C",
+                REPO_ROOT,
+                "ls-files",
+                "--",
+                "packages/apm-contributor-dashboard/.github/extensions/**",
+            ],
+            { encoding: "utf8" },
+        );
+        assert.equal(tracked.trim(), "");
+
+        const ignoreFile = await readFile(
+            join(REPO_ROOT, "packages", "apm-contributor-dashboard", ".gitignore"),
+            "utf8",
+        );
+        assert.match(ignoreFile, /^\.github\/extensions\/$/m);
     });
 });

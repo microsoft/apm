@@ -124,15 +124,52 @@ class TestGetCurrentConfig:
         assert result is not None
         assert "mcp_servers" in result
 
+    def test_parses_windows_path_in_literal_quoted_key(self, tmp_path: Path) -> None:
+        config_file = tmp_path / ".codex" / "config.toml"
+        config_file.parent.mkdir()
+        config_file.write_text(
+            "[desktop.open-in-target-preferences.perPath]\n"
+            "'C:\\Users\\me\\Documents\\Playground' = \"fileManager\"\n",
+            encoding="utf-8",
+        )
+        adapter = _make_adapter(project_root=tmp_path)
+
+        result = adapter.get_current_config()
+
+        assert result is not None
+        assert (
+            result["desktop"]["open-in-target-preferences"]["perPath"][
+                r"C:\Users\me\Documents\Playground"
+            ]
+            == "fileManager"
+        )
+
     def test_returns_none_on_toml_decode_error(self, tmp_path: Path) -> None:
         codex_dir = tmp_path / ".codex"
         codex_dir.mkdir()
         config_file = codex_dir / "config.toml"
         config_file.write_text("this is ::: not valid toml !!!", encoding="utf-8")
         adapter = _make_adapter(project_root=tmp_path)
-        with patch("apm_cli.adapters.client.codex._rich_warning"):
+        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warning:
             result = adapter.get_current_config()
         assert result is None
+        warning = mock_warning.call_args.args[0]
+        assert "read or parse" in warning
+        assert "inspect the file or delete it" in warning
+
+    def test_returns_none_on_unicode_decode_error(self, tmp_path: Path) -> None:
+        config_file = tmp_path / ".codex" / "config.toml"
+        config_file.parent.mkdir()
+        config_file.write_bytes(b"\xff")
+        adapter = _make_adapter(project_root=tmp_path)
+
+        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warning:
+            result = adapter.get_current_config()
+
+        assert result is None
+        warning = mock_warning.call_args.args[0]
+        assert "read or parse" in warning
+        assert "inspect the file or delete it" in warning
 
     def test_returns_none_on_os_error(self, tmp_path: Path) -> None:
         codex_dir = tmp_path / ".codex"
@@ -185,6 +222,36 @@ class TestUpdateConfig:
         content = config_path.read_text(encoding="utf-8")
         assert "old-server" in content
         assert "new-server" in content
+
+    def test_update_preserves_windows_literal_quoted_path_keys(self, tmp_path: Path) -> None:
+        config_path = tmp_path / ".codex" / "config.toml"
+        config_path.parent.mkdir()
+        original = (
+            "[projects.'c:\\src\\projectdir\\subdir']\n"
+            'trust_level = "trusted"\n'
+            "\n"
+            "[desktop.open-in-target-preferences.perPath]\n"
+            "'C:\\Users\\me\\Documents\\Playground' = \"fileManager\"\n"
+        )
+        config_path.write_text(original, encoding="utf-8")
+        adapter = _make_adapter(project_root=tmp_path)
+
+        assert adapter.update_config({"new-server": {"command": "new"}}) is True
+        assert adapter.update_config({"second-server": {"command": "second"}}) is True
+
+        updated = config_path.read_text(encoding="utf-8")
+        assert original in updated
+        parsed = adapter.get_current_config()
+        assert parsed is not None
+        assert parsed["projects"][r"c:\src\projectdir\subdir"]["trust_level"] == "trusted"
+        assert (
+            parsed["desktop"]["open-in-target-preferences"]["perPath"][
+                r"C:\Users\me\Documents\Playground"
+            ]
+            == "fileManager"
+        )
+        assert parsed["mcp_servers"]["new-server"]["command"] == "new"
+        assert parsed["mcp_servers"]["second-server"]["command"] == "second"
 
 
 # ---------------------------------------------------------------------------

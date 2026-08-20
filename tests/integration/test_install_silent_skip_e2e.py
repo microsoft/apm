@@ -86,6 +86,8 @@ def _write_block_project(project: Path) -> None:
         textwrap.dedent("""\
             name: test-project
             version: '1.0.0'
+            targets:
+              - copilot
             dependencies:
               apm:
                 - owner/repo#v1.0.0
@@ -150,6 +152,8 @@ class TestInstallNoGitRemoteBlockE2E:
             textwrap.dedent("""\
                 name: test-project
                 version: '1.0.0'
+                targets:
+                  - copilot
                 dependencies:
                   apm:
                     - owner/repo#v1.0.0

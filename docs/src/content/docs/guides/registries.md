@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-A **registry** is a REST endpoint that hosts APM packages. Install from a public registry with zero auth, or point at a private / self-hosted registry (Artifactory, JFrog, or any service that implements the [Registry HTTP API](../reference/registry-http-api/)).
+A **registry** is a REST endpoint that hosts APM packages. Install from a public registry with zero auth, or point at a private / self-hosted registry (Artifactory, JFrog, or any service that implements the [Registry HTTP API](../../reference/registry-http-api/)).
 
 ```bash
 apm experimental enable registries
@@ -28,7 +28,7 @@ apm experimental reset registries      # revert
 
 | Backend | Status | Notes |
 |---|---|---|
-| Any server implementing the [Registry HTTP API](../reference/registry-http-api/) | Supported | Base URL like `https://registry.example.com/api/<name>`; must expose section 3 endpoints and section 6 publish validation |
+| Any server implementing the [Registry HTTP API](../../reference/registry-http-api/) | Supported | Base URL like `https://registry.example.com/api/<name>`; must expose section 3 endpoints and section 6 publish validation |
 | GitHub / Git remotes | Not a registry | Default resolver; use `- git:` when a default registry is active |
 | APM marketplace | Different surface | Git-hosted index via `apm pack` -- not `apm publish` |
 
@@ -133,7 +133,7 @@ export APM_REGISTRY_USER_CORP_MAIN=alice@corp.example.com
 export APM_REGISTRY_PASS_CORP_MAIN=secret
 ```
 
-The `APM_REGISTRY_*` prefix is distinct from `GITHUB_APM_PAT_*`, `PROXY_REGISTRY_*`, and `ARTIFACTORY_APM_TOKEN` -- there is no collision. For the broader auth model, see [Authentication](../getting-started/authentication/).
+The `APM_REGISTRY_*` prefix is distinct from `GITHUB_APM_PAT_*`, `PROXY_REGISTRY_*`, and `ARTIFACTORY_APM_TOKEN` -- there is no collision. For the broader auth model, see [Authentication](../../getting-started/authentication/).
 
 :::caution
 Never put credentials in `apm.yml` or `apm-policy.yml`. Use `APM_REGISTRY_TOKEN_<NAME>` env vars or `apm config set registry.<name>.token` instead.
@@ -266,7 +266,7 @@ Registry-routed deps are byte-for-byte reproducible via `resolved_hash`; Git-rou
 A shorthand entry without any ref (`acme/foo`) is rejected at `apm install` time and at parse time -- a version selector is always required for registry-routed dependencies.
 
 :::caution[Behavior change -- not a warning at install time]
-There is no one-time migration prompt. Existing Git shorthand deps begin routing to the registry as soon as a default is configured. Plan the audit before enabling the default; see [Pitfalls -- default registry rerouting](#default-registry-silently-reroutes-git-shorthand) and [Migration paths](../troubleshooting/migration/#6-default-registry-adoption-git--registry-routing).
+There is no one-time migration prompt. Existing Git shorthand deps begin routing to the registry as soon as a default is configured. Plan the audit before enabling the default; see [Pitfalls -- default registry rerouting](#default-registry-silently-reroutes-git-shorthand) and [Migration paths](../../troubleshooting/migration/#6-default-registry-adoption-git--registry-routing).
 :::
 
 ## 4. What gets recorded in the lockfile
@@ -286,7 +286,7 @@ dependencies:
       - .github/skills/foo/SKILL.md
 ```
 
-`resolved_url` is the trust anchor for re-installs -- APM re-fetches from the URL stored in the lockfile, not from the registry name, and re-verifies bytes against `resolved_hash`. A hash mismatch aborts the install before extraction. See [Lockfile spec](../reference/lockfile-spec/) for full field semantics.
+`resolved_url` is the trust anchor for re-installs -- APM re-fetches from the URL stored in the lockfile, not from the registry name, and re-verifies bytes against `resolved_hash`. A hash mismatch aborts the install before extraction. See [Lockfile spec](../../reference/lockfile-spec/) for full field semantics.
 
 ## 5. Publish a package (producer summary)
 
@@ -299,9 +299,9 @@ apm publish --package acme/my-skill
 apm install acme/internal-tools#^1.0.0
 ```
 
-[`apm publish`](../reference/cli/publish/) reads `apm.yml`, builds a **flat registry archive** (`.zip` with `apm.yml`, `.apm/`, and standard documentation files at the archive root), and uploads via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Consumers with a default registry configured install with the same `owner/repo#version` shorthand they would use for GitHub.
+[`apm publish`](../../reference/cli/publish/) reads `apm.yml`, builds a **flat registry archive** (`.zip` with `apm.yml`, `.apm/`, and standard documentation files at the archive root), and uploads via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Consumers with a default registry configured install with the same `owner/repo#version` shorthand they would use for GitHub.
 
-Registry archives use the **APM source layout** that `apm install` and the [Registry HTTP API section 6](../reference/registry-http-api/#6-server-validation-rules-publish) expect -- not the plugin bundle wrapper from `apm pack --archive` (`{name}-{version}/plugin.json`). If you already ship marketplace plugin bundles, either repack as a flat archive or pass `--zip`.
+Registry archives use the **APM source layout** that `apm install` and the [Registry HTTP API section 6](../../reference/registry-http-api/#6-server-validation-rules-publish) expect -- not the plugin bundle wrapper from `apm pack --archive` (`{name}-{version}/plugin.json`). If you already ship marketplace plugin bundles, either repack as a flat archive or pass `--zip`.
 
 **Auto-pack requirements:**
 
@@ -346,7 +346,7 @@ apm publish --package acme/my-skill --dry-run
 `apm.yml` must declare a `version:` field. Publishing the same version twice returns `409 Conflict` -- bump the version to publish again.
 
 :::note[`apm pack` vs `apm publish`]
-[`apm pack`](../reference/cli/pack/) produces distributable **plugin bundles** (and marketplace artifacts) for Git/marketplace flows. [`apm publish`](../reference/cli/publish/) produces **flat registry archives** for REST registries. The two commands serve different distribution surfaces.
+[`apm pack`](../../reference/cli/pack/) produces distributable **plugin bundles** (and marketplace artifacts) for Git/marketplace flows. [`apm publish`](../../reference/cli/publish/) produces **flat registry archives** for REST registries. The two commands serve different distribution surfaces.
 :::
 
 :::note[Planned]
@@ -370,7 +370,7 @@ registry_source:
 
 With `allow_non_registry: false`, git-sourced dependencies (including shorthand `owner/repo` entries without a registry route) are blocked at install time. The policy check applies transitively -- transitive deps pulled in by registry packages are also validated. APM **fails-closed** if a listed registry has no URL in the merged registry map (from `apm.yml`, `~/.apm/apm.yml`, or `~/.apm/config.json`).
 
-For the full governance narrative -- rollout sequencing, audit, drift, and CI gating -- see the [Governance guide](../enterprise/governance-guide/). Field-level reference for `registry_source` lives in [Policy schema](../reference/policy-schema/#registry_source).
+For the full governance narrative -- rollout sequencing, audit, drift, and CI gating -- see the [Governance guide](../../enterprise/governance-guide/). Field-level reference for `registry_source` lives in [Policy schema](../../reference/policy-schema/#registry_source).
 
 ## 7. Known limitations and threat model
 
@@ -422,7 +422,7 @@ Enabling a default registry (`registries.default` or `registry.<name>.default tr
 
 3. Run `apm install --dry-run` or a trial install in a branch and confirm lockfile `source:` fields.
 
-See [Migration paths -- default registry adoption](../troubleshooting/migration/#6-default-registry-adoption-git--registry-routing).
+See [Migration paths -- default registry adoption](../../troubleshooting/migration/#6-default-registry-adoption-git--registry-routing).
 
 ### Registry names that sanitize to the same env var
 
@@ -484,11 +484,11 @@ apm install
 
 ## See also
 
-- [Manifest schema](../reference/manifest-schema/) -- formal grammar for the `registries:` block and `- id:` object form.
-- [Lockfile spec](../reference/lockfile-spec/) -- lockfile schema and registry-specific fields.
-- [Authentication](../getting-started/authentication/) -- full token-resolution chain.
-- [apm config](../reference/cli/config/) -- full config key reference.
-- [Policy schema](../reference/policy-schema/#registry_source) -- `registry_source` field reference.
-- [Governance guide](../enterprise/governance-guide/) -- enterprise rollout, audit, and CI gating.
-- [Security model](../enterprise/security/) -- threat model and known limitations.
-- [Registry HTTP API](../reference/registry-http-api/) -- wire contract for registry servers.
+- [Manifest schema](../../reference/manifest-schema/) -- formal grammar for the `registries:` block and `- id:` object form.
+- [Lockfile spec](../../reference/lockfile-spec/) -- lockfile schema and registry-specific fields.
+- [Authentication](../../getting-started/authentication/) -- full token-resolution chain.
+- [apm config](../../reference/cli/config/) -- full config key reference.
+- [Policy schema](../../reference/policy-schema/#registry_source) -- `registry_source` field reference.
+- [Governance guide](../../enterprise/governance-guide/) -- enterprise rollout, audit, and CI gating.
+- [Security model](../../enterprise/security/) -- threat model and known limitations.
+- [Registry HTTP API](../../reference/registry-http-api/) -- wire contract for registry servers.

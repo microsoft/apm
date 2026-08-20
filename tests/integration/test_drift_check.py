@@ -411,6 +411,64 @@ class TestSectionBRegressions:
         combined = (result.stdout or "") + (result.stderr or "")
         assert "Drift detected" not in combined
 
+    def test_b5_install_legacy_all_targets_uses_explicit_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: `targets: [all]` no longer blocks install (#2271)."""
+        from apm_cli.core.apm_yml import _reset_legacy_all_warning
+
+        project = _make_apm_project(tmp_path, target=None)
+        manifest = {"name": "legacy-all-fixture", "version": "1.0.0", "targets": ["all"]}
+        (project / "apm.yml").write_bytes(yaml.safe_dump(manifest).encode("utf-8"))
+
+        _reset_legacy_all_warning()
+        monkeypatch.chdir(project)
+        result = CliRunner().invoke(
+            cli,
+            ["install", "--target", "copilot"],
+            catch_exceptions=False,
+        )
+
+        combined = (result.stdout or "") + (result.stderr or "")
+        assert result.exit_code == 0, combined
+        assert "deprecated" in combined
+        assert (project / ".github" / "instructions" / "rules.instructions.md").exists()
+
+    def test_b6_skill_subset_excludes_unselected_skills_from_drift(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: audit replay must honor a dependency's skill subset."""
+        project = _make_apm_project(tmp_path)
+        bundle = tmp_path / "skill-bundle"
+        for name in ("grill-me", "grilling", "unselected"):
+            skill_dir = bundle / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_bytes(
+                f"---\nname: {name}\ndescription: Test skill {name}.\n---\n".encode()
+            )
+        (bundle / "apm.yml").write_bytes(b"name: skill-bundle\nversion: 1.0.0\n")
+
+        monkeypatch.chdir(project)
+        install_result = CliRunner().invoke(
+            cli,
+            [
+                "install",
+                str(bundle),
+                "--skill",
+                "grill-me",
+                "--skill",
+                "grilling",
+            ],
+            catch_exceptions=False,
+        )
+        assert install_result.exit_code == 0, install_result.output
+        assert not (project / ".agents" / "skills" / "unselected").exists()
+
+        audit_result = _audit(project, monkeypatch, "--ci", "-f", "json")
+
+        assert audit_result.exit_code == 0, audit_result.output
+        assert _drift_paths(audit_result.stdout) == []
+
 
 # ---------------------------------------------------------------------------
 # Section C -- edge cases
@@ -449,19 +507,14 @@ class TestSectionCEdgeCases:
     def test_c3_corrupt_lockfile_yaml_skips_drift(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Bad YAML in lockfile -> ``LockFile.read`` returns ``None``.
-
-        The audit command then skips drift silently. Pinning this so a
-        future ``raise`` doesn't surprise users.
-        """
+        """Bad YAML fails closed with a stable audit diagnostic."""
         project = _make_apm_project(tmp_path)
         _install(project, monkeypatch)
         (project / "apm.lock.yaml").write_bytes(b"!!!{not valid yaml: [\n")
 
         result = _audit(project, monkeypatch)
-        # Either passes silently (no parseable lockfile -> nothing to
-        # scan) or emits a warning -- both acceptable, but no traceback.
-        assert result.exit_code in {0, 1}
+        assert result.exit_code == 1
+        assert "Cannot audit invalid apm.lock.yaml" in result.output
         assert "Traceback" not in result.stdout
         assert "Traceback" not in result.stderr
 

@@ -247,6 +247,9 @@ def test_unsupported_host_error_message():
     assert "export GITHUB_HOST=" in error_msg
     assert "$env:GITHUB_HOST" in error_msg
     assert "set GITHUB_HOST=" in error_msg
+    assert "export ADO_HOST=" in error_msg
+    assert "$env:ADO_HOST" in error_msg
+    assert "set ADO_HOST=" in error_msg
 
 
 def test_unsupported_host_error_shows_current_host(monkeypatch):
@@ -282,6 +285,24 @@ def test_build_ado_https_clone_url():
         "myorg", "myproject", "myrepo", host="ado.company.internal"
     )
     assert url == "https://ado.company.internal/myorg/myproject/_git/myrepo"
+
+    # With a custom host and explicit HTTPS port (ADO Server)
+    url = github_host.build_ado_https_clone_url(
+        "DefaultCollection",
+        "myproject",
+        "myrepo",
+        host="ado.company.internal",
+        port=8443,
+    )
+    assert url == ("https://ado.company.internal:8443/DefaultCollection/myproject/_git/myrepo")
+
+    legacy = github_host.build_ado_https_clone_url(
+        "contoso",
+        "Platform",
+        "standards",
+        host="contoso.visualstudio.com",
+    )
+    assert legacy == "https://contoso.visualstudio.com/Platform/_git/standards"
 
 
 def test_build_ado_ssh_url():
@@ -329,6 +350,19 @@ def test_build_ado_api_url():
         "contoso", "_apm", "_apm", "apm-policy.yml", host="ssh.dev.azure.com"
     )
     assert ssh_url.startswith("https://dev.azure.com/contoso/_apm/_apis/")
+
+    custom_url = github_host.build_ado_api_url(
+        "DefaultCollection",
+        "Platform",
+        "standards",
+        "SKILL.md",
+        host="ado.corp.example.com",
+        port=8443,
+    )
+    custom = urlparse(custom_url)
+    assert custom.hostname == "ado.corp.example.com"
+    assert custom.port == 8443
+    assert custom.path == ("/DefaultCollection/Platform/_apis/git/repositories/standards/items")
 
 
 def test_parse_ado_repo_url_dev_azure():
@@ -435,6 +469,146 @@ def test_build_ado_bearer_git_env_does_not_url_encode():
     token = "abc/def+ghi=jkl"
     env = github_host.build_ado_bearer_git_env(token)
     assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {token}"
+
+
+def test_set_authorization_header_preserves_existing_git_config_entries():
+    """#2368: setting the header must not reset GIT_CONFIG_COUNT or clobber index 0."""
+    env = {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+        "GIT_CONFIG_KEY_1": "credential.interactive",
+        "GIT_CONFIG_VALUE_1": "never",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "tok")
+    assert env["GIT_CONFIG_COUNT"] == "3"
+    assert env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert env["GIT_CONFIG_VALUE_0"] == "explicit"
+    assert env["GIT_CONFIG_KEY_1"] == "credential.interactive"
+    assert env["GIT_CONFIG_VALUE_1"] == "never"
+    assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_2"] == "Authorization: Bearer tok"
+
+
+def test_set_authorization_header_on_empty_base_matches_build_helper():
+    """Without prior entries, the in-place set degenerates to the build overlay."""
+    env = {"OTHER": "1"}
+    github_host.set_authorization_header_git_env(env, "Basic", "dXNlcjpwYXNz")
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Basic dXNlcjpwYXNz"
+    assert env["OTHER"] == "1"
+
+
+def test_set_authorization_header_tolerates_blank_or_invalid_count():
+    """Empty or non-numeric GIT_CONFIG_COUNT is treated as zero entries."""
+    for bad_count in ("", "not-a-number", "-3"):
+        env = {"GIT_CONFIG_COUNT": bad_count}
+        github_host.set_authorization_header_git_env(env, "Bearer", "tok")
+        assert env["GIT_CONFIG_COUNT"] == "1"
+        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+
+
+def test_set_authorization_header_replaces_inherited_auth_header():
+    """An inherited Authorization entry is replaced, never duplicated.
+
+    Sending two Authorization headers (stale + fresh) breaks auth; the
+    helper applies the same auth-channel policy as _clear_git_auth_env.
+    """
+    env = {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_VALUE_0": "Authorization: Bearer stale",
+        "GIT_CONFIG_KEY_1": "http.sslCAInfo",
+        "GIT_CONFIG_VALUE_1": "/corporate/ca.pem",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "fresh")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+    assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer fresh"
+    assert not any("stale" in v for v in env.values())
+
+
+def test_set_authorization_header_is_idempotent_under_layering():
+    """Two layered calls (e.g. _build_git_env then a retry wrapper) keep one header."""
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "jwt")
+    github_host.set_authorization_header_git_env(env, "Bearer", "jwt")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+    assert "GIT_CONFIG_KEY_2" not in env
+
+
+def test_set_authorization_header_drops_orphaned_indexed_entries():
+    """Stale KEY_/VALUE_ orphans beyond the count must not linger in the env."""
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+        "GIT_CONFIG_KEY_5": "http.extraheader",
+        "GIT_CONFIG_VALUE_5": "Authorization: Bearer orphaned-secret",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "fresh")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert "GIT_CONFIG_KEY_5" not in env
+    assert "GIT_CONFIG_VALUE_5" not in env
+    assert not any("orphaned-secret" in v for v in env.values())
+
+
+def test_set_ado_bearer_git_env_delegates_with_bearer_scheme():
+    """ADO in-place wrapper mirrors build_ado_bearer_git_env semantics."""
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
+    }
+    github_host.set_ado_bearer_git_env(env, "aad-jwt")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
+    assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer aad-jwt"
+
+
+@pytest.mark.parametrize(
+    ("scheme", "credential"),
+    [
+        ("Bearer", "tok\r\nGIT_CONFIG_KEY_9: injected"),
+        ("Bearer\r\nEvil", "tok"),
+        ("Bearer", "tok\ninjected"),
+    ],
+)
+def test_set_authorization_header_rejects_crlf_in_scheme_or_credential(scheme, credential):
+    """Defense-in-depth: a CR/LF in scheme or credential could smuggle a second
+    git-config entry into the appended value; reject it before it is written.
+    """
+    env = {"GIT_CONFIG_COUNT": "0"}
+    with pytest.raises(ValueError, match="CR or LF"):
+        github_host.set_authorization_header_git_env(env, scheme, credential)
+    # Reject-before-mutate: no partial write on the rejected call.
+    assert env == {"GIT_CONFIG_COUNT": "0"}
+
+
+def test_set_authorization_header_does_not_false_positive_on_substring_authorization():
+    """A retained non-auth value that merely CONTAINS 'authorization' as a
+    substring (not an actual Authorization: header) must survive the filter.
+    """
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.proxy",
+        "GIT_CONFIG_VALUE_0": "http://authorization-proxy.corp.example:3128",
+    }
+    github_host.set_authorization_header_git_env(env, "Bearer", "tok")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "http.proxy"
+    assert env["GIT_CONFIG_VALUE_0"] == "http://authorization-proxy.corp.example:3128"
+    assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
 
 
 def test_unsupported_host_error_with_context():
@@ -575,3 +749,65 @@ class TestIsGitHubHostnameGHES:
     def test_ghes_rejects_invalid_fqdn(self, monkeypatch):
         monkeypatch.setenv("GITHUB_HOST", "not-a-fqdn")
         assert github_host.is_github_hostname("not-a-fqdn") is False
+
+    def test_ghes_host_does_not_claim_custom_ado_host(self, monkeypatch):
+        """GITHUB_HOST set to an on-prem ADO Server host must not be treated as GHES."""
+        monkeypatch.setenv("GITHUB_HOST", "ado.corp.example.com")
+        monkeypatch.setenv("ADO_HOST", "ado.corp.example.com")
+        assert github_host.is_github_hostname("ado.corp.example.com") is False
+
+
+class TestIsAzureDevOpsHostnameEnvVars:
+    """Env-var driven ADO Server host recognition -- regression for #2338."""
+
+    def test_ado_host_single_host(self, monkeypatch):
+        monkeypatch.setenv("ADO_HOST", "ado.corp.example.com")
+        assert github_host.is_azure_devops_hostname("ado.corp.example.com") is True
+
+    def test_ado_host_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("ADO_HOST", "ADO.corp.Example.COM")
+        assert github_host.is_azure_devops_hostname("ado.corp.example.com") is True
+
+    def test_ado_host_does_not_match_other_hosts(self, monkeypatch):
+        monkeypatch.setenv("ADO_HOST", "ado.corp.example.com")
+        assert github_host.is_azure_devops_hostname("other.corp.example.com") is False
+
+    def test_ado_host_invalid_fqdn_rejected(self, monkeypatch):
+        monkeypatch.setenv("ADO_HOST", "localhost")
+        assert github_host.is_azure_devops_hostname("localhost") is False
+
+    @pytest.mark.parametrize("hostname", ("127.0.0.1", "10.0.0.1"))
+    def test_ado_host_ip_literal_rejected(self, monkeypatch, hostname):
+        monkeypatch.setenv("ADO_HOST", hostname)
+        assert github_host.is_azure_devops_hostname(hostname) is False
+
+    def test_ado_host_with_port_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("ADO_HOST", "ado.corp.example.com:8443")
+        assert github_host.is_azure_devops_hostname("ado.corp.example.com") is False
+
+    def test_ado_host_with_collection_path_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("ADO_HOST", "ado.corp.example.com/tfs/DefaultCollection")
+        assert github_host.is_azure_devops_hostname("ado.corp.example.com") is False
+
+    def test_apm_ado_hosts_comma_separated(self, monkeypatch):
+        monkeypatch.setenv("APM_ADO_HOSTS", "ado1.corp.example.com, ado2.corp.example.com")
+        assert github_host.is_azure_devops_hostname("ado1.corp.example.com") is True
+        assert github_host.is_azure_devops_hostname("ado2.corp.example.com") is True
+        assert github_host.is_azure_devops_hostname("ado3.corp.example.com") is False
+
+    def test_apm_ado_hosts_unknown_host_not_matched(self, monkeypatch):
+        monkeypatch.setenv("APM_ADO_HOSTS", "ado.corp.example.com")
+        assert github_host.is_azure_devops_hostname("evil.corp.example.com") is False
+
+    def test_cloud_ado_hosts_still_work_without_env(self):
+        assert github_host.is_azure_devops_hostname("dev.azure.com") is True
+        assert github_host.is_azure_devops_hostname("ssh.dev.azure.com") is True
+        assert github_host.is_azure_devops_hostname("myorg.visualstudio.com") is True
+
+    def test_parse_ado_repo_url_custom_host(self, monkeypatch):
+        """parse_ado_repo_url works for on-prem ADO Server URLs once host is recognised."""
+        monkeypatch.setenv("ADO_HOST", "ado.corp.example.com")
+        result = github_host.parse_ado_repo_url(
+            "https://ado.corp.example.com/myorg/myproject/_git/myrepo"
+        )
+        assert result == ("myorg", "myproject", "myrepo")

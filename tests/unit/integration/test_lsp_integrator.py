@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.integration.lsp_integrator import LSPIntegrator
 from apm_cli.models.dependency.lsp import LSPDependency
 
@@ -335,6 +337,18 @@ class TestRemoveStale:
         # Should not raise even if .lsp.json does not exist
         LSPIntegrator.remove_stale({"nonexistent"}, project_root=tmp_path)
 
+    def test_strict_cleanup_raises_on_unwritable_config_shape(self, tmp_path):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        (tmp_path / ".lsp.json").mkdir()
+
+        with pytest.raises(RequiredIntegrationError, match="LSP cleanup failed"):
+            LSPIntegrator.remove_stale(
+                {"stale"},
+                project_root=tmp_path,
+                fail_on_write_error=True,
+            )
+
     def test_multiple_stale_removed(self, tmp_path):
         lsp_json = tmp_path / ".lsp.json"
         lsp_json.write_text(
@@ -403,11 +417,15 @@ class TestUpdateLockfile:
         assert lock is not None
         assert lock.lsp_servers == []
 
-    def test_no_lockfile_is_noop(self, tmp_path):
+    def test_missing_lockfile_is_created(self, tmp_path):
         lock_path = tmp_path / "apm.lock.yaml"
-        # Should not raise if lockfile does not exist
         LSPIntegrator.update_lockfile({"pyright"}, lock_path)
-        assert not lock_path.exists()
+
+        from apm_cli.deps.lockfile import LockFile
+
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        assert lock.lsp_servers == ["pyright"]
 
 
 # ===========================================================================

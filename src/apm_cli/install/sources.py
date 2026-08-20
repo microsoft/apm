@@ -26,19 +26,19 @@ substantially different shape (no PackageInfo, dedicated tracking on
 
 from __future__ import annotations
 
-import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.registry_wiring import (
     get_registry_resolver,
     registry_resolution_for_cached_registry_dep,
     resolver_last_registry_resolution,
 )
-from apm_cli.utils.console import _rich_error, _rich_success
+from apm_cli.utils.console import _rich_success
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
@@ -413,9 +413,10 @@ class CachedDependencySource(DependencySource):
             APMPackage,
             GitReferenceType,
             PackageInfo,
+            PackageType,
             ResolvedReference,
         )
-        from apm_cli.models.validation import detect_package_type
+        from apm_cli.models.validation import detect_package_type, validate_apm_package
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
@@ -479,12 +480,20 @@ class CachedDependencySource(DependencySource):
         # so transitive ``local_path`` deps inside this remote package resolve
         # from there (#857).
         apm_yml_path = install_path / APM_YML_FILENAME
+        pkg_type, _ = detect_package_type(install_path)
         if apm_yml_path.exists():
             cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
             # TODO(#940): see note in _materialize_local for the same caveat
             # about post-construction mutation of .source.
             if not cached_package.source:
                 cached_package.source = dep_ref.repo_url
+        elif pkg_type == PackageType.CLAUDE_SKILL:
+            validation_result = validate_apm_package(install_path)
+            if not validation_result.is_valid or validation_result.package is None:
+                details = "; ".join(validation_result.errors) or "validator returned no package"
+                raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
+            cached_package = validation_result.package
+            cached_package.source = dep_ref.repo_url
         else:
             cached_package = APMPackage(
                 name=dep_ref.repo_url.split("/")[-1],
@@ -512,7 +521,6 @@ class CachedDependencySource(DependencySource):
             dependency_ref=dep_ref,
         )
 
-        pkg_type, _ = detect_package_type(install_path)
         cached_package_info.package_type = pkg_type
 
         # Collect for lockfile
@@ -599,10 +607,8 @@ class CachedDependencySource(DependencySource):
 class FreshDependencySource(DependencySource):
     """Fresh dependency: needs a network download.
 
-    Performs supply-chain hash verification (#763) and, on mismatch,
-    aborts the entire process via ``sys.exit(1)`` -- this matches the
-    legacy behaviour because content drift from the lockfile is treated
-    as a possible tampering event.
+    Performs supply-chain hash verification (#763) and raises on mismatch
+    because content drift from the lockfile is treated as possible tampering.
     """
 
     # Inherits the default "Failed to integrate primitives" prefix.
@@ -844,18 +850,13 @@ class FreshDependencySource(DependencySource):
                 _fresh_hash = ctx.package_hashes[dep_key]
                 if _fresh_hash != dep_locked_chk.content_hash:
                     safe_rmtree(install_path, ctx.apm_modules_dir)
-                    _rich_error(
-                        f"Content hash mismatch for "
-                        f"{dep_key}: "
-                        f"expected {dep_locked_chk.content_hash}, "
-                        f"got {_fresh_hash}. "
-                        "The downloaded content differs from the "
-                        "lockfile record. This may indicate a "
-                        "supply-chain attack. Use 'apm install "
-                        "--update' to accept new content and "
-                        "update the lockfile."
+                    raise DirectDependencyError(
+                        f"Content hash mismatch for {dep_key}: "
+                        f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
+                        "The downloaded content differs from the lockfile record. "
+                        "This may indicate a supply-chain attack. Use "
+                        "'apm install --update' to accept new content and update the lockfile."
                     )
-                    sys.exit(1)
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
@@ -883,6 +884,8 @@ class FreshDependencySource(DependencySource):
                 deltas=deltas,
             )
 
+        except DirectDependencyError:
+            raise
         except Exception as e:
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             # task_id may not exist if progress.add_task failed; guard it.

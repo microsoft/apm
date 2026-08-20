@@ -1,6 +1,6 @@
 ---
 title: "Install MCP servers"
-description: "Declare MCP servers in apm.yml and let apm install wire them into every detected harness."
+description: "Keep MCP target ownership portable across your team's machines with declarations in apm.yml."
 ---
 
 `apm install` is the same driver for two artifact kinds: APM packages
@@ -14,10 +14,18 @@ each runtime, and how tokens get injected.
 apm install --mcp io.github.github/github-mcp-server
 ```
 
-This adds one entry under `dependencies.mcp:` in `apm.yml` and writes
-a runtime-specific MCP config file for every detected harness.
+This adds one entry under `dependencies.mcp:` in `apm.yml`. APM then attempts
+runtime-specific MCP config writes for targets that pass selection, scope, and
+adapter prerequisites.
 
 ## The `mcp:` section in apm.yml
+
+The two sections have different propagation rules. In the root project,
+`apm install` activates both sections for the author's environment. A
+direct or transitive dependency package contributes only
+`dependencies.mcp`; its `devDependencies.mcp` entries never enter the
+consumer's target config, lockfile provenance, or audit baseline.
+This keeps package-author debug servers out of consumer tool lists.
 
 MCP servers live under `dependencies.mcp:` (or
 `devDependencies.mcp:`). Three forms are valid -- pick the one that
@@ -88,9 +96,9 @@ for discovery -- see the [CLI reference](../../reference/cli/install/).
 
 ## What `apm install` writes to disk
 
-For every harness APM detects in your environment, `apm install`
-writes a runtime-specific MCP config file. The schemas differ; the
-`apm.yml` source of truth does not.
+For every selected target that passes its scope and adapter prerequisites,
+`apm install` writes a runtime-specific MCP config file. The schemas differ;
+the `apm.yml` source of truth does not.
 
 Registry-declared environment variables honor the registry's
 `required` flag. Servers with optional auth install without token
@@ -98,11 +106,38 @@ prompts until you choose to configure one. See the
 [manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
 for the full required-vs-optional runtime config rule.
 
+MCP Registry v0.1 container packages use `registryType: oci`. APM
+selects Docker automatically, keeps Docker run options before the image,
+and places package arguments after the image. Copilot, Codex, Gemini,
+and related adapters prefer packages in `npm`, OCI, then PyPI order.
+VS Code prefers `npm`, PyPI, then OCI. OCI packages require Docker to be
+available when the harness starts the server; no per-target launcher
+configuration is needed.
+
+When a required registry runtime variable has a default, APM prompts once
+per variable and displays that default as the suggested answer. Press Enter
+to accept it or provide an override. Secret defaults remain accepted on
+Enter but are never displayed. For OCI/Docker launchers, non-secret selected
+values replace every `{variable}` reference across the package's runtime and
+package arguments before the native config is written. VS Code renders secret
+variables as target-native secret-input references instead, so secret bytes
+never enter `mcp.json`. A required variable without a collected value or
+default declines that target configuration; VS Code treats `workspaceFolder`
+as its built-in `${workspaceFolder}` token.
+
+For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
+and generic packages preserve typed v0.1 `runtimeArguments` and
+`packageArguments` in authored order, with exactly one semantic package
+identity. Legacy `value_hint` arguments remain supported. Registry
+defaults resolve normally, secret variables use target-native references,
+unresolved optional groups are omitted atomically, and malformed or
+unresolved required entries fail closed.
+
 | Harness | File | Scope | Format |
 |---|---|---|---|
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
-| Claude Code | `.mcp.json` (project) or `~/.claude.json` (`-g`) | both | JSON `mcpServers` |
+| Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
@@ -110,15 +145,37 @@ for the full required-vs-optional runtime config rule.
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
-| JetBrains Copilot | OS-specific `mcp.json` under the GitHub Copilot user config directory | global | JSON `servers` |
+| JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
 
 ## How `targets:` gates which configs get written
 
-MCP install honors the same target resolution chain as `apm install`
-for any other dependency: see
-[Where files land](../install-packages/#where-files-land).
-In short: `--target` wins, then `apm.yml`'s `targets:`, then
-auto-detect from harness directories.
+MCP install resolves targets in this order:
+
+1. Explicit CLI selection: `--runtime` (legacy, one runtime) or `--target`
+   (one or more targets).
+2. Canonical `targets:` / `target:` values declared in `apm.yml`.
+3. The saved `apm config set target ...` default.
+4. Machine discovery, only when the manifest and saved config do not
+   restrict targets.
+
+`--exclude` narrows whichever set wins. Progress output names that
+post-exclusion selection; project, scope, and adapter gates can still skip a
+write.
+
+The same effective decision drives package, MCP, and LSP phases; APM does
+not re-resolve each phase independently.
+
+At project scope, the canonical `copilot` target writes MCP state to VS Code's
+`.vscode/mcp.json`. At global scope it writes Copilot CLI's
+`~/.copilot/mcp-config.json`. Use the legacy `--runtime copilot` override only
+when a project-scoped command must address the Copilot CLI adapter directly.
+
+**Portability boundary:** A committed target list makes lockfile MCP ownership
+deterministic across machines with different installed harnesses. If `targets:`
+is omitted (or a legacy `all` declaration is folded to omission), machine
+discovery is intentional and ownership can follow each machine's installed
+harnesses. Declare targets when teammates or CI must produce the same MCP
+ownership.
 
 When a runtime is outside the active target set, APM does NOT write
 its MCP config -- and announces the drop on stdout so you can confirm
@@ -127,6 +184,10 @@ the gate took effect:
 ```text
 [i] Skipped MCP config for claude, codex  (active targets: copilot)
 ```
+
+On reinstall, removing a previously configured target also removes the
+APM-managed server entries from that target's native config. User-authored
+servers and unrelated JSON or TOML settings remain unchanged.
 
 This single rule replaces two older ones that used to coexist:
 
@@ -137,17 +198,23 @@ This single rule replaces two older ones that used to coexist:
   without telling you.
 
 A malformed `targets:` field (both `target:` and `targets:` set,
-`targets: []`, or an unknown target name) fails closed: no MCP files
-are written and an `[x]` error names the field to fix. A greenfield
-project with no `targets:`, no `--target` flag, AND no detected
-signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also
-fails closed with the same `[x]` voice -- consistent with how
-`apm install` treats the same input. Pin a target with `--target` or
-declare one in `apm.yml`. (#1335)
+`targets: []`, or an unknown target name) fails closed before machine discovery:
+no MCP files are written and an `[x]` error names the field to fix. A greenfield
+project with no `targets:`, no `--target` flag, no saved target, AND no detected
+signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also fails closed
+with the same `[x]` voice -- consistent with how `apm install` treats the same
+input. The command exits non-zero before adding a direct `--mcp` entry to
+`apm.yml` or deploying package files. Pin a target with `--target`, declare one
+in `apm.yml`, or save one with `apm config set target <value>`. A native MCP
+config write failure also exits non-zero and names the target path or
+permissions to check. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to
-`~/.copilot/mcp-config.json`, Claude Code to `~/.claude.json`, Codex CLI to
+`~/.copilot/mcp-config.json`, Claude Code to
+`$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
+non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
+relative values are rejected. Codex CLI writes to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or `~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
 and JetBrains Copilot to its OS-specific user config). When the

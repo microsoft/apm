@@ -1,8 +1,8 @@
 """Semver-aware version constraint resolution for marketplace dependencies.
 
 Resolves a semver range (e.g. ``~2.1.0``, ``^2.0``, ``>=1.4``) against
-git tags on a marketplace repository using the ``{name}--v{version}``
-naming convention from the Claude Code plugin dependency spec.
+git tags on a marketplace repository using the supplied ``tag_pattern``.
+Metadata created before pattern propagation uses ``{name}--v{version}``.
 
 Reuses the existing infrastructure:
 
@@ -21,7 +21,7 @@ from ._shared import iter_semver_tags
 from .errors import NoMatchingVersionError
 from .ref_resolver import RefResolver
 from .semver import satisfies_range
-from .tag_pattern import build_tag_regex
+from .tag_pattern import build_tag_regex, validate_tag_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,10 @@ def resolve_version_constraint(
     tag_pattern: str = DEFAULT_TAG_PATTERN,
     host: str | None = None,
     token: str | None = None,
+    auth_scheme: str = "basic",
+    auth_resolver=None,
+    git_env: dict[str, str] | None = None,
+    port: int | None = None,
 ) -> tuple[str, str]:
     """Resolve a semver range to the highest matching git tag.
 
@@ -70,6 +74,7 @@ def resolve_version_constraint(
             ``"{name}--v{version}"``.
         host: Git host for ``git ls-remote``. Defaults to github.com.
         token: Optional auth token for private repos.
+        auth_scheme: Authentication scheme from ``AuthContext``.
 
     Returns:
         ``(tag_name, commit_sha)`` of the highest matching version.
@@ -77,10 +82,25 @@ def resolve_version_constraint(
     Raises:
         NoMatchingVersionError: No tag satisfies the range.
     """
+    tag_pattern = validate_tag_pattern(tag_pattern)
     pinned_pattern = tag_pattern.replace("{name}", plugin_name)
     tag_rx = build_tag_regex(pinned_pattern)
 
-    resolver = RefResolver(host=host, token=token)
+    resolver_kwargs = {
+        "host": host,
+        "token": token,
+        "auth_scheme": auth_scheme,
+    }
+    if git_env is not None:
+        resolver_kwargs["git_env"] = git_env
+    if port is not None:
+        resolver_kwargs["port"] = port
+    if auth_resolver is not None:
+        resolver_kwargs.update(
+            auth_resolver=auth_resolver,
+            auth_target=host,
+        )
+    resolver = RefResolver(**resolver_kwargs)
     try:
         refs = resolver.list_remote_refs(owner_repo)
     finally:
@@ -97,7 +117,11 @@ def resolve_version_constraint(
         raise NoMatchingVersionError(
             plugin_name,
             version_range,
-            detail=f"pattern='{tag_pattern}', remote='{owner_repo}'",
+            detail=(
+                f"pattern='{tag_pattern}', remote='{owner_repo}'. "
+                "Verify the published tags or set version to an explicit tag "
+                "such as 'v1.0.0'"
+            ),
         )
 
     candidates.sort(key=lambda c: c[0], reverse=True)

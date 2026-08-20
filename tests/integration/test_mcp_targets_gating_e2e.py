@@ -78,6 +78,31 @@ def _codex_mcp_path(project: Path) -> Path:
 
 
 class TestMCPTargetsGatingE2E:
+    def test_user_scope_claude_install_honors_claude_config_dir(self, tmp_path, monkeypatch):
+        project = tmp_path / "project"
+        project.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        config_dir = tmp_path / "relocated-claude"
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+        installed = MCPIntegrator.install(
+            [_make_stdio_dep("relocated-claude-mcp")],
+            runtime="claude",
+            project_root=project,
+            user_scope=True,
+            explicit_target="claude",
+        )
+
+        relocated_config = config_dir / ".claude.json"
+        default_config = fake_home / ".claude.json"
+        assert installed == 1
+        assert relocated_config.is_file()
+        data = json.loads(relocated_config.read_text(encoding="utf-8"))
+        assert data["mcpServers"]["relocated-claude-mcp"]["command"] == "echo"
+        assert not default_config.exists()
+
     def test_targets_whitelist_copilot_suppresses_foreign_writes(
         self, tmp_path, capsys, monkeypatch
     ):
@@ -93,7 +118,7 @@ class TestMCPTargetsGatingE2E:
 
         * ``.cursor/mcp.json`` is NOT written
         * ``.codex/config.toml`` is NOT written
-        * the gate emits a ``[i] Skipped MCP config for ...`` drop line
+        * output names the manifest target that made foreign signals irrelevant
         """
         project = tmp_path / "proj-whitelist-copilot"
         project.mkdir()
@@ -114,15 +139,7 @@ class TestMCPTargetsGatingE2E:
         )
 
         captured = capsys.readouterr()
-        assert "Skipped MCP config" in captured.out, (
-            "Gate must announce the dropped runtimes via the drop line "
-            "so users can see why their foreign-signal directories did "
-            "not receive writes."
-        )
-        # Honor the cli-log N1 lead-with-outcome contract: outcome FIRST.
-        assert "Skipped MCP config" in captured.out.split("\n")[0] or any(
-            line.lstrip().startswith("[i] Skipped MCP config") for line in captured.out.splitlines()
-        )
+        assert "Targeting declared target from apm.yml: vscode" in captured.out
 
         assert not _cursor_mcp_path(project).exists(), (
             "cursor MCP config MUST NOT be written when cursor is absent "

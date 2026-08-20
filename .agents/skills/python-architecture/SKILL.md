@@ -23,3 +23,5 @@ description: >
 - Follow existing patterns (BaseIntegrator, CommandLogger, AuthResolver) before inventing new ones
 - Prefer composition over deep inheritance
 - Push shared logic into base classes, not duplicated across siblings
+- One canonical owner per decision: route through the existing authority (target_catalog, AuthResolver/host_providers, runtime registry, CommandLogger, CompiledOutputWriter, deployment_ledger, install-outcome, neutral hook IR, BaseIntegrator); extend it, never fork it. Full rule: `.apm/instructions/architecture.instructions.md`
+- Lock every centralization with a dual guardrail: a regression test plus a static check in `scripts/lint-architecture-boundaries.sh`

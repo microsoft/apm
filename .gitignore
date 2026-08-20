@@ -53,6 +53,7 @@ ENV/
 .coverage_*.json
 coverage*.json
 htmlcov/
+mutants/
 .tox/
 .pytest_cache/
 .mypy_cache/
@@ -62,6 +63,7 @@ coverage.xml
 # Documentation
 docs/_build/
 docs/wip/
+docs/superpowers/
 
 # Local development
 *.log
