@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import traceback
 from pathlib import Path
 
 import pytest
@@ -1830,6 +1831,51 @@ class TestRootDeclaredComponents:
         }
 
         assert second_tree == first_tree
+
+    @staticmethod
+    def _resolve_raises_in_staging_guards(real_resolve):
+        """Return a resolver that fails only for staging containment checks."""
+
+        def flaky_resolve(path: Path, *args, **kwargs):
+            stack = [frame.name for frame in traceback.extract_stack()]
+            if (
+                "ignore_non_content_and_staging" in stack
+                or "is_staging_content" in stack
+            ):
+                raise OSError(63, "File name too long")
+            return real_resolve(path, *args, **kwargs)
+
+        return flaky_resolve
+
+    def test_root_copy_fails_closed_when_staging_parent_cannot_resolve(self, tmp_path) -> None:
+        """An unresolvable staging parent must still be excluded from a copy."""
+        plugin_dir, _ = self._plugin(tmp_path, "skills")
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+
+        with patch.object(
+            Path,
+            "resolve",
+            self._resolve_raises_in_staging_guards(Path.resolve),
+        ):
+            _map_plugin_artifacts(plugin_dir, apm_dir, {"name": "plug", "skills": ["./"]})
+
+        assert not list((apm_dir / "skills").rglob(".apm"))
+
+    def test_root_commands_fail_closed_when_staging_content_cannot_resolve(self, tmp_path) -> None:
+        """An unresolvable path in the command walk must not restart self-copying."""
+        plugin_dir, _ = self._plugin(tmp_path, "commands")
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+
+        with patch.object(
+            Path,
+            "resolve",
+            self._resolve_raises_in_staging_guards(Path.resolve),
+        ):
+            _map_plugin_artifacts(plugin_dir, apm_dir, {"name": "plug", "commands": ["./"]})
+
+        assert not list((apm_dir / "prompts").rglob(".apm"))
 
 
 @pytest.mark.windows_compat

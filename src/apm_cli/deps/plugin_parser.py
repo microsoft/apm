@@ -992,7 +992,7 @@ def _map_plugin_artifacts(
         try:
             copying_from_plugin_root = Path(directory).resolve() == staging_parent
         except OSError:
-            copying_from_plugin_root = False
+            copying_from_plugin_root = True
         if copying_from_plugin_root and staging_name in contents:
             ignored.add(staging_name)
         return ignored
@@ -1002,7 +1002,7 @@ def _map_plugin_artifacts(
         try:
             return path.resolve().is_relative_to(staging_root)
         except OSError:
-            return False
+            return True
 
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
