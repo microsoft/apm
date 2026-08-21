@@ -15,8 +15,8 @@ Pick the layout that matches the author's intent -- APM preserves it.
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
-| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Validate standard skills and MCP, then restore recognized APM extensions |
-| `.claude-plugin/` or Claude `plugin.json` | Claude plugin collection | Dissect via historical plugin artifact mapping |
+| `plugin.json` with the exact Agent Plugins 1.0 `$schema` | Portable Agent Plugin | Validate as one native plugin; deployment is blocked in this release |
+| `.claude-plugin/` or schema-less `plugin.json` | Claude plugin collection | Dissect via historical plugin artifact mapping |
 
 ## APM package (`.apm/` directory)
 
@@ -193,12 +193,12 @@ primitives. If you also ship skills or instructions, prefer the `.apm/`
 layout and put your hooks under `.apm/hooks/` so they install alongside
 the rest.
 
-## Agent Plugin (`plugin.json`)
+## Agent Plugin (`plugin.json` with Agent Plugins 1.0 `$schema`)
 
-The default portable artifact produced by `apm pack`. `plugin.json` identifies
-the pinned Agent Plugins v1 schema, standard skills live under `skills/`, and
-optional MCP configuration lives at `mcp.json`. APM-only primitives use the
-versioned `com.microsoft.apm/` extension namespace.
+An explicit portable artifact produced by `apm pack --plugin`. A root
+`plugin.json` whose `$schema` is exactly
+`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json` routes the whole
+plugin through native validation and admission.
 
 ```text
 my-plugin/
@@ -216,20 +216,20 @@ my-plugin/
 +-- apm.lock.yaml
 ```
 
-**What gets installed:** valid standard skills and MCP servers are loaded
-independently. Recognized `com.microsoft.apm` content is routed through APM's
-existing policy, collision, and deployment machinery. `apm.yml` remains the
-recommended authoring manifest and is intentionally not distributed in the
-packed artifact.
+**What gets installed:** nothing in this release. APM fails closed before
+deployment because no selected target has a machine-verifiable,
+non-deprecated native Agent Plugin lifecycle. It does not fall back to
+projecting the plugin into legacy primitives. Unsupported Agent Plugins
+versions and malformed schemas fail validation.
 
-For the compatibility decision table and warning schedule, see
+For the compatibility decision table, see
 [Agent Plugins v1 migration](../../getting-started/agent-plugins-v1-migration/).
 For the install-time trust boundary, see [Security Model](../../enterprise/security/).
 
-## Claude plugin collection (`.claude-plugin/` or `plugin.json`)
+## Claude plugin collection (`.claude-plugin/` or schema-less `plugin.json`)
 
-A historical Claude-native plugin layout. APM dissects its artifacts and maps
-them into runtime directories.
+This legacy Claude/APM layout is the current default produced by `apm pack`.
+APM dissects its artifacts and maps them into runtime directories.
 
 ```
 my-plugin/

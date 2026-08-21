@@ -30,6 +30,7 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     )
     detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
     legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
+    local_bundle = (root / "src/apm_cli/bundle/local_bundle.py").read_text(encoding="utf-8")
     guard = (root / "scripts/check_bundle_format_authority.sh").read_text(encoding="utf-8")
     boundary_guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
@@ -58,6 +59,8 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "read_json_document" not in projection
     assert "detect_agent_plugin(package_path)" in detection
     assert "admit_legacy_plugin_manifest(plugin_path)" in legacy
+    assert "native_detection = detect_agent_plugin(bundle_dir)" in local_bundle
+    assert 'plugin_json.get("$schema")' not in local_bundle
     assert "Agent Plugin classification must route through its loader" in guard
     assert loader.count("def _discover_skills(") == 1
     assert loader.count("def _discover_mcp_servers(") == 1
@@ -349,8 +352,8 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/install/template.py",
-            "    diagnostics.error(f",
-            "    diagnostics.warn(f",
+            "    diagnostics.error(str(error), package=package_key)",
+            "    diagnostics.warn(str(error), package=package_key)",
             "native deployment failure must remain a recorded non-success outcome",
         ),
         (
@@ -379,11 +382,11 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/install/template.py",
-            "            except AgentPluginDeploymentBoundaryError as exc:\n"
-            "                package_key = (",
-            "            except AgentPluginDeploymentBoundaryError as exc:\n"
-            "                raise exc\n"
-            "                package_key = (",
+            "        except AgentPluginDeploymentBoundaryError as exc:\n"
+            "            _record_agent_plugin_boundary_diagnostic(",
+            "        except AgentPluginDeploymentBoundaryError as exc:\n"
+            "            raise exc\n"
+            "            _record_agent_plugin_boundary_diagnostic(",
             "dry-run must collect every native deployment failure",
         ),
         (
@@ -468,6 +471,8 @@ def test_agent_plugin_projection_guard_rejects_bypass(
     root = Path(__file__).parents[2]
     sandbox = tmp_path / "repo"
     paths = (
+        "src/apm_cli/bundle/formats.py",
+        "src/apm_cli/bundle/local_bundle.py",
         "src/apm_cli/agent_plugins/ir.py",
         "src/apm_cli/agent_plugins/errors.py",
         "src/apm_cli/agent_plugins/loader.py",

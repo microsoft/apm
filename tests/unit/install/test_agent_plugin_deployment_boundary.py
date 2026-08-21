@@ -183,7 +183,7 @@ def test_services_gate_precedes_all_target_and_integrator_mutation(
 
     with pytest.raises(
         AgentPluginDeploymentBoundaryError,
-        match="Native Agent Plugin components are not enabled yet",
+        match="machine-verifiable, non-deprecated native Agent Plugin lifecycle",
     ):
         integrate_package_primitives(
             package_info,
@@ -350,8 +350,10 @@ def test_every_materialization_shape_fails_without_committing_state(
     assert ctx.package_deployed_files == {f"blocked/{shape}": []}
     assert diagnostics.error_count == 1
     assert (
-        "Native Agent Plugin components are not enabled yet" in diagnostics._diagnostics[0].message
+        "machine-verifiable, non-deprecated native Agent Plugin lifecycle"
+        in diagnostics._diagnostics[0].message
     )
+    assert "did not fall back to legacy primitive projection" in diagnostics._diagnostics[0].message
     result = finalize_install_result(
         InstallResult(installed_count=deltas["installed"], diagnostics=diagnostics),
         force=True,
@@ -483,8 +485,8 @@ def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
     assert native_integrator_calls == []
     output = " ".join(result.output.split())
     assert "Installed 1 APM" not in output
-    assert "Native Agent Plugin components are not enabled yet" in output
-    assert "apm plugin init --claude-plugin" in output
+    assert "machine-verifiable, non-deprecated native Agent Plugin lifecycle" in output
+    assert "did not fall back to legacy primitive projection" in output
     assert "apm pack --claude-plugin" in output
     assert "ask the publisher for a legacy-compatible package" in output
 
@@ -569,8 +571,8 @@ def test_dry_run_collects_every_native_failure_with_real_install_parity(
 
     assert native_integrator_calls == []
     for phrase in (
-        "Native Agent Plugin components are not enabled yet",
-        "apm plugin init --claude-plugin",
+        "machine-verifiable, non-deprecated native Agent Plugin lifecycle",
+        "did not fall back to legacy primitive projection",
         "apm pack --claude-plugin",
         "ask the publisher for a legacy-compatible package",
     ):
@@ -607,7 +609,7 @@ def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(
 
     assert result.exit_code == 0, result.output
     assert _tree_snapshot(project) == before
-    assert "Native Agent Plugin components are not enabled yet" not in result.output
+    assert "machine-verifiable, non-deprecated native Agent Plugin lifecycle" not in result.output
 
 
 def test_dry_run_native_detection_does_not_normalize_legacy_plugin_source(
@@ -778,7 +780,9 @@ def test_uninstall_cli_blocks_native_survivor_before_scripts_or_writes(
     assert result.exit_code == 1
     assert _tree_snapshot(project) == before
     assert fire_scripts.mock_calls == []
-    assert "Native Agent Plugin components are not enabled yet" in " ".join(result.output.split())
+    assert "machine-verifiable, non-deprecated native Agent Plugin lifecycle" in " ".join(
+        result.output.split()
+    )
 
 
 def test_uninstall_allows_native_transitive_orphan_removal(
@@ -871,7 +875,9 @@ def test_prune_blocks_native_survivor_before_removal_or_reconciliation(
     assert remove.mock_calls == []
     assert sync.mock_calls == []
     assert integrate.mock_calls == []
-    assert "Native Agent Plugin components are not enabled yet" in " ".join(result.output.split())
+    assert "machine-verifiable, non-deprecated native Agent Plugin lifecycle" in " ".join(
+        result.output.split()
+    )
 
 
 def test_prune_dry_run_does_not_reintegrate_native_survivors(
@@ -894,7 +900,7 @@ def test_prune_dry_run_does_not_reintegrate_native_survivors(
     assert _tree_snapshot(project) == before
     assert sync.mock_calls == []
     assert integrate.mock_calls == []
-    assert "Native Agent Plugin components are not enabled yet" not in result.output
+    assert "machine-verifiable, non-deprecated native Agent Plugin lifecycle" not in result.output
 
 
 def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(

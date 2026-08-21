@@ -1,20 +1,37 @@
 ---
 title: Agent Plugins v1 migration
-description: Repack Claude or legacy APM bundles to the Agent Plugins v1 default, or keep the old layout only when you need it.
+description: Choose Claude-compatible or explicit Agent Plugins 1.0 output and understand the current deployment boundary.
 sidebar:
   order: 5
 ---
 
-APM now defaults to Agent Plugins v1 for `apm pack` and `apm plugin init`.
-Use the historical layouts only when a downstream consumer still requires them.
+`apm pack` and `apm plugin init` currently default to schema-less,
+Claude-compatible output. Pass `--plugin` to produce or scaffold an Agent
+Plugins 1.0 artifact.
 
 ## Pick the output
 
 | Situation | Command | Result |
 |---|---|---|
-| New authoring or CI | `apm pack` / `apm plugin init` | Agent Plugins v1 default |
-| Claude host still needs the old layout | `apm pack --claude-plugin` / `apm plugin init --claude-plugin` | Historical Claude layout |
+| Current deployable default | `apm pack` / `apm plugin init` | Schema-less Claude-compatible plugin |
+| Explicit Agent Plugins 1.0 artifact | `apm pack --plugin` / `apm plugin init --plugin` | Native whole-plugin artifact |
 | Legacy APM bundle pipeline | `apm pack --format apm` | Legacy bundle for `apm unpack` only |
+
+## How `plugin.json` routes
+
+| Package-root state | Behavior |
+|---|---|
+| Exact `$schema`: `https://agent-plugins.org/schemas/1.0.0/plugin.schema.json` | Validate and admit the whole native plugin |
+| Another Agent Plugins schema version | Fail as unsupported |
+| Malformed JSON, `$schema`, or Agent Plugin manifest | Fail validation |
+| Schema-less `plugin.json` | Use legacy Claude/APM plugin behavior |
+| No root `plugin.json` | Continue through normal package-layout detection |
+
+:::caution[Current deployment boundary]
+Agent Plugins 1.0 artifacts fail closed at deployment because no selected
+target has a machine-verifiable, non-deprecated native Agent Plugin lifecycle.
+APM does not fall back to primitive projection.
+:::
 
 ## Repack, then install
 
@@ -38,22 +55,17 @@ apm install ./build/<name>.zip
 - run: apm audit --ci
 ```
 
-## Warning schedule
-
-| Release | Behavior |
-|---|---|
-| 0.29.0-0.33.x | Successful legacy-compatible builds print the migration warning. |
-| 0.34.0 | The warning is removed. |
-
 ## Compatibility FAQ
 
-### Agent
+### Agent Plugins 1.0
 
-Use the default. `plugin.json` at the bundle root is the canonical Agent Plugins v1 output.
+Use `--plugin` to produce or scaffold the native format. APM validates the
+artifact as one plugin but cannot deploy it in this release.
 
-### Claude
+### Claude/APM plugin
 
-Use `--claude-plugin` only when the consumer still expects the historical Claude layout. If the consumer accepts `plugin.json`, stay on the default.
+Use the current default. Its schema-less root `plugin.json` remains on the
+legacy deployment path.
 
 ### APM
 

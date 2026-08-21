@@ -25,9 +25,7 @@ from apm_cli.install.services import (
     integrate_package_primitives,
 )
 from apm_cli.install.sources import (
-    CachedDependencySource,
     DependencySource,
-    LocalDependencySource,
     Materialization,
 )
 
@@ -143,13 +141,10 @@ def preflight_agent_plugin_materializations(
 
 def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> bool:
     """Collect native boundary failures for a non-materializing plan."""
+    from apm_cli.agent_plugins.loader import detect_agent_plugin
     from apm_cli.core.scope import get_modules_dir
     from apm_cli.models.apm_package import PackageInfo
-    from apm_cli.models.validation import (
-        PackageType,
-        detect_package_type,
-        validate_apm_package,
-    )
+    from apm_cli.models.validation import validate_apm_package
 
     source_root = ctx.project_root
     modules_dir = get_modules_dir(ctx.scope)
@@ -162,41 +157,46 @@ def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> b
                 package_path = (source_root / package_path).resolve()
         else:
             package_path = dependency.get_install_path(modules_dir)
-        package_type, _ = detect_package_type(package_path)
-        if package_type is not PackageType.AGENT_PLUGIN:
+        native_detection = detect_agent_plugin(package_path)
+        if native_detection is None:
             continue
         if dependency.is_local:
-            validation = validate_apm_package(package_path, source_path=package_path)
+            validation = validate_apm_package(
+                package_path,
+                source_path=package_path,
+                agent_plugin_detection=native_detection,
+            )
         else:
-            validation = validate_apm_package(package_path)
-        if validation.is_valid and validation.package is not None:
-            try:
-                enforce_agent_plugin_deployment_boundary(
-                    PackageInfo(
-                        package=validation.package,
-                        install_path=package_path,
-                        dependency_ref=dependency,
-                        package_type=validation.package_type,
-                    )
+            validation = validate_apm_package(
+                package_path,
+                agent_plugin_detection=native_detection,
+            )
+        package_key = (
+            dependency.local_path
+            if dependency.is_local and dependency.local_path
+            else dependency.get_unique_key()
+        )
+        if not validation.is_valid or validation.package is None:
+            details = "; ".join(validation.errors) or "validator returned no package"
+            diagnostics.error(details, package=package_key)
+            blocked = True
+            continue
+        try:
+            enforce_agent_plugin_deployment_boundary(
+                PackageInfo(
+                    package=validation.package,
+                    install_path=package_path,
+                    dependency_ref=dependency,
+                    package_type=validation.package_type,
                 )
-            except AgentPluginDeploymentBoundaryError as exc:
-                package_key = (
-                    dependency.local_path
-                    if dependency.is_local and dependency.local_path
-                    else dependency.get_unique_key()
-                )
-                prefix = (
-                    LocalDependencySource.INTEGRATE_ERROR_PREFIX
-                    if dependency.is_local
-                    else CachedDependencySource.INTEGRATE_ERROR_PREFIX
-                )
-                _record_agent_plugin_boundary_diagnostic(
-                    diagnostics,
-                    package_key=package_key,
-                    prefix=prefix,
-                    error=exc,
-                )
-                blocked = True
+            )
+        except AgentPluginDeploymentBoundaryError as exc:
+            _record_agent_plugin_boundary_diagnostic(
+                diagnostics,
+                package_key=package_key,
+                error=exc,
+            )
+            blocked = True
     return not blocked
 
 
@@ -204,11 +204,10 @@ def _record_agent_plugin_boundary_diagnostic(
     diagnostics,
     *,
     package_key: str,
-    prefix: str,
     error: AgentPluginDeploymentBoundaryError,
 ) -> None:
     """Record one package-attributed native deployment failure."""
-    diagnostics.error(f"{prefix}: {error}", package=package_key)
+    diagnostics.error(str(error), package=package_key)
 
 
 def _record_agent_plugin_boundary_failure(
@@ -227,7 +226,6 @@ def _record_agent_plugin_boundary_failure(
     _record_agent_plugin_boundary_diagnostic(
         ctx.diagnostics,
         package_key=package_key,
-        prefix=source.INTEGRATE_ERROR_PREFIX,
         error=error,
     )
     return deltas

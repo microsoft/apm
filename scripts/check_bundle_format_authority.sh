@@ -80,6 +80,7 @@ if [ -f "$agent_plugin_owner" ]; then
     model_validation="$repo_root/src/apm_cli/models/validation.py"
     format_detection="$repo_root/src/apm_cli/models/format_detection.py"
     legacy_parser="$repo_root/src/apm_cli/deps/plugin_parser.py"
+    local_bundle="$repo_root/src/apm_cli/bundle/local_bundle.py"
     package_owner="$repo_root/src/apm_cli/models/apm_package.py"
     projection_owner="$repo_root/src/apm_cli/agent_plugins/projection.py"
     agent_validation_body=$(
@@ -95,6 +96,16 @@ if [ -f "$agent_plugin_owner" ]; then
         || ! grep -q 'admit_legacy_plugin_manifest(package_path)' "$format_detection" \
         || ! grep -q 'admit_legacy_plugin_manifest(plugin_path)' "$legacy_parser"; then
         echo "[x] Agent Plugin classification must route through its loader, not Claude normalization"
+        exit 1
+    fi
+    if [ -f "$local_bundle" ] \
+        && { ! grep -q 'native_detection = detect_agent_plugin(bundle_dir)' "$local_bundle" \
+            || ! grep -q '^        if agent_plugin is not None$' "$local_bundle" \
+            || ! grep -q '^        agent_plugin=agent_plugin,$' "$local_bundle" \
+            || grep -Eq \
+                'is_agent_plugin_schema_id|supports_plugin_schema_id|validate_plugin_manifest_document|plugin_json\.get\("\$schema"\)' \
+                "$local_bundle"; }; then
+        echo "[x] Local bundle schema routing must use canonical Agent Plugin admission"
         exit 1
     fi
 

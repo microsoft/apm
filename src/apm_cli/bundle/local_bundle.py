@@ -30,17 +30,13 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..agent_plugins.io import read_json_document
-from ..agent_plugins.validation import (
-    is_agent_plugin_schema_id,
-    supports_plugin_schema_id,
-    validate_plugin_manifest_document,
-)
+from ..agent_plugins.loader import detect_agent_plugin
 from ..utils.archive import (
     MAX_ZIP_ENTRIES,
     MAX_ZIP_UNCOMPRESSED,
@@ -55,6 +51,9 @@ from ..utils.path_security import (
 )
 from ..utils.yaml_io import load_yaml_str
 from .formats import BundleFormat
+
+if TYPE_CHECKING:
+    from ..agent_plugins.ir import AgentPlugin
 
 _MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
 _MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
@@ -76,6 +75,8 @@ class LocalBundleInfo:
         pack_targets: Targets the bundle was packed for, derived from
             ``lockfile["pack"]["target"]``.  Empty list when unknown.
         format: Bundle format family for the bundle root.
+        agent_plugin: Canonical whole-plugin IR when the root schema selects
+            Agent Plugins 1.0, else ``None``.
         retained_root: Stable materialization root when the bundle has been
             copied into a retained install cache, else ``None``.
         data_root: Stable bundle data directory when materialized, else
@@ -93,6 +94,7 @@ class LocalBundleInfo:
     lockfile: dict[str, Any] | None
     pack_targets: list[str] = field(default_factory=list)
     format: str = BundleFormat.CLAUDE_PLUGIN.value
+    agent_plugin: AgentPlugin | None = None
     retained_root: Path | None = None
     data_root: Path | None = None
     source_identity: str = ""
@@ -180,6 +182,10 @@ def _build_info(
     source_identity: str,
 ) -> LocalBundleInfo:
     _reject_metadata_collisions(bundle_dir)
+    native_detection = detect_agent_plugin(bundle_dir)
+    if native_detection is not None and native_detection.error is not None:
+        raise native_detection.error
+    agent_plugin = native_detection.plugin if native_detection is not None else None
     plugin_json = read_bundle_plugin_json(bundle_dir)
     if not plugin_json:
         raise ValueError("Bundle plugin.json is missing or invalid")
@@ -187,23 +193,11 @@ def _build_info(
     package_id = (
         str(plugin_json.get("id") or plugin_json.get("name") or "").strip() or bundle_dir.name
     )
-    schema_id = plugin_json.get("$schema")
-    if (
-        isinstance(schema_id, str)
-        and is_agent_plugin_schema_id(schema_id)
-        and not supports_plugin_schema_id(schema_id)
-    ):
-        raise ValueError(f"Unsupported Agent Plugin schema id: {schema_id}")
     bundle_format = (
         BundleFormat.AGENT_PLUGIN.value
-        if isinstance(schema_id, str) and is_agent_plugin_schema_id(schema_id)
+        if agent_plugin is not None
         else BundleFormat.CLAUDE_PLUGIN.value
     )
-    if bundle_format == BundleFormat.AGENT_PLUGIN.value:
-        validation = validate_plugin_manifest_document(plugin_json)
-        if not validation.is_valid or validation.normalized is None:
-            raise ValueError("Invalid Agent Plugin manifest: " + "; ".join(validation.errors))
-        plugin_json = validation.normalized
     return LocalBundleInfo(
         source_dir=bundle_dir,
         plugin_json=plugin_json,
@@ -211,6 +205,7 @@ def _build_info(
         lockfile=lockfile,
         pack_targets=_extract_pack_targets(lockfile),
         format=bundle_format,
+        agent_plugin=agent_plugin,
         source_identity=source_identity,
         is_archive=is_archive,
         temp_dir=temp_dir,

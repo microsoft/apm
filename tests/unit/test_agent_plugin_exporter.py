@@ -12,6 +12,8 @@ from jsonschema import Draft202012Validator
 
 from apm_cli.agent_plugins import load_agent_plugin
 from apm_cli.bundle.agent_plugin_exporter import export_agent_plugin_bundle
+from apm_cli.bundle.formats import BundleFormat
+from apm_cli.bundle.local_bundle import detect_local_bundle
 from apm_cli.bundle.packer import pack_bundle
 
 _SCHEMA_DIR = Path(__file__).parent.parent / "fixtures" / "schemas"
@@ -325,8 +327,13 @@ def test_public_packer_explicit_agent_plugin_round_trips(tmp_path: Path) -> None
     result = pack_bundle(project, tmp_path / "build", fmt="agent-plugin")
 
     loaded = load_agent_plugin(result.bundle_path)
+    routed = detect_local_bundle(result.bundle_path)
+
     assert loaded.identity.name == "agent-pack"
     assert {server.name for server in loaded.components.mcp_servers} == {"safe"}
+    assert routed is not None
+    assert routed.format == BundleFormat.AGENT_PLUGIN.value
+    assert routed.agent_plugin == loaded
 
 
 def test_agent_bundle_rejects_unrepresentable_resolved_mcp(tmp_path: Path) -> None:

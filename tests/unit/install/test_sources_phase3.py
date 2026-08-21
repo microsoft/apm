@@ -39,6 +39,7 @@ yet reached by test_sources_classification.py:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -585,6 +586,37 @@ class TestCachedDependencySourceAcquire:
         assert plugin_json.read_text(encoding="utf-8") == "{bad json"
         assert not (install_path / "apm.yml").exists()
 
+    def test_no_targets_preserves_supported_native_metadata_for_preflight(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A supported schema cannot disappear through the no-target shortcut."""
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.models.validation import PackageType
+
+        ctx = _make_ctx(targets=[])
+        dep_ref = _make_dep_ref(is_virtual=False)
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+        (install_path / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "cached.native",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        source = self._make_source(ctx, dep_ref, install_path)
+        result = source.acquire()
+
+        assert result is not None
+        assert result.package_info is not None
+        assert result.package_info.package_type is PackageType.AGENT_PLUGIN
+        assert result.package_info.package.agent_plugin is not None
+
     def test_with_targets_and_apm_yml(self, tmp_path: Path) -> None:
         """Happy path: apm.yml present → full Materialization returned."""
         ctx = _make_ctx(targets=["copilot"])
@@ -929,6 +961,49 @@ class TestFreshDependencySourceAcquire:
 
         assert result is not None
         assert result.package_info is None
+
+    def test_no_targets_preserves_downloaded_native_metadata_for_preflight(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Fresh native packages remain visible to the batch deployment gate."""
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.models.validation import PackageType, validate_apm_package
+
+        ctx = _make_ctx(targets=[], logger=None, tui=None)
+        dep_ref = _make_dep_ref(is_virtual=False, reference="main")
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+        (install_path / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "fresh.native",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        validation = validate_apm_package(install_path)
+        assert validation.is_valid
+        assert validation.package is not None
+        pkg_info = self._mock_download_success(install_path)
+        pkg_info.package = validation.package
+        pkg_info.package_type = validation.package_type
+
+        with (
+            patch("apm_cli.drift.build_download_ref", return_value=MagicMock()),
+            patch.object(ctx.downloader, "download_package", return_value=pkg_info),
+            patch("apm_cli.utils.content_hash.compute_package_hash", return_value="h"),
+            patch("apm_cli.utils.console._rich_success"),
+        ):
+            source = self._make_source(ctx, dep_ref, install_path)
+            result = source.acquire()
+
+        assert result is not None
+        assert result.package_info is pkg_info
+        assert result.package_info.package_type is PackageType.AGENT_PLUGIN
+        assert result.package_info.package.agent_plugin is not None
 
     def test_pre_download_results_used_when_present(self, tmp_path: Path) -> None:
         """When dep_key in ctx.pre_download_results, skip downloader call."""

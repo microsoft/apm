@@ -158,6 +158,63 @@ def test_agent_plugin_guard_requires_admissibility_before_legacy_fallback(
 
 
 @pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "native_detection = detect_agent_plugin(bundle_dir)",
+            "native_detection = None",
+        ),
+        (
+            "        if agent_plugin is not None\n",
+            "        if lockfile and lockfile.get('pack', {}).get('format') == "
+            "BundleFormat.AGENT_PLUGIN.value\n",
+        ),
+    ],
+)
+def test_local_bundle_route_guard_kills_admission_and_precedence_mutations(
+    tmp_path: Path,
+    old: str,
+    new: str,
+) -> None:
+    """The checker must preserve loader admission and root-schema precedence."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "scripts/check_bundle_format_authority.sh",
+        "scripts/check_agent_plugin_projection_boundary.py",
+        "src/apm_cli/bundle/formats.py",
+        "src/apm_cli/bundle/local_bundle.py",
+        "src/apm_cli/agent_plugins/loader.py",
+        "src/apm_cli/agent_plugins/ir.py",
+        "src/apm_cli/models/validation.py",
+        "src/apm_cli/models/format_detection.py",
+        "src/apm_cli/models/apm_package.py",
+        "src/apm_cli/deps/plugin_parser.py",
+    )
+    for relative in paths:
+        source = root / relative
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+    local_bundle = sandbox / "src/apm_cli/bundle/local_bundle.py"
+    source = local_bundle.read_text(encoding="utf-8")
+    assert old in source
+    local_bundle.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", str(sandbox / "scripts/check_bundle_format_authority.sh"), str(sandbox)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert "Local bundle schema routing must use canonical Agent Plugin admission" in result.stdout
+
+
+@pytest.mark.parametrize(
     ("relative_path", "old", "new", "message"),
     [
         (

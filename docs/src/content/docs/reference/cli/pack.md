@@ -35,9 +35,9 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 
 | Flag | Default | Description |
 |---|---|---|
-| `--plugin` | off | Explicitly request Agent Plugin v1 output (the default when no `--format` selector is provided). |
-| `--claude-plugin` | off | Select the historical Claude plugin exporter and enable target-driven `.claude-plugin/plugin.json` generation. |
-| `--format plugin\|agent-plugin\|claude-plugin\|apm` | `plugin` | `plugin` and `agent-plugin` emit Agent Plugin v1. `claude-plugin` selects the historical Claude layout. `apm` emits the legacy APM bundle. |
+| `--plugin` | off | Explicitly request Agent Plugin v1 output. |
+| `--claude-plugin` | off | Explicitly select the Claude-compatible output, which is also the current no-flag default. |
+| `--format plugin\|agent-plugin\|claude-plugin\|apm` | `claude-plugin` | `plugin` and `agent-plugin` emit Agent Plugin v1. `claude-plugin` selects the Claude-compatible layout. `apm` emits the legacy APM bundle. |
 | `--archive` | off | Produce a `.zip` archive instead of a directory (previous default: `.tar.gz`; use `--archive-format tar.gz` for legacy CI pipelines). Bundle only. |
 | `--archive-format zip\|tar.gz` | `zip` | Archive format when `--archive` is set. `zip` is natively extractable on Windows and matches the format expected by Claude Code and plugin hosts. `tar.gz` is typically smaller for text-heavy bundles and preserves the previous default for pipelines that depend on it. |
 | `-o`, `--output PATH` | `./build` | Bundle output directory. Does not affect the `marketplace.json` path. |
@@ -113,9 +113,9 @@ apm pack --archive --dry-run -v
 
 ## Output format
 
-### Agent Plugin bundle (`--format plugin`, default)
+### Agent Plugin bundle (`--plugin` or `--format plugin`)
 
-By default `apm pack` emits an Agent Plugin v1 bundle (the canonical Agent Plugin layout). `--plugin` and `--format plugin` both select this output. The Agent Plugin bundle is a converged, schema-validated artifact intended as the canonical distributable for plugin hosts and APM consumers.
+`--plugin` and `--format plugin` emit an Agent Plugin v1 bundle. Its exact root schema selects canonical whole-plugin admission. APM currently blocks deployment because no selected target has a machine-verifiable, non-deprecated native lifecycle; it does not fall back to legacy primitive projection. The no-flag default remains the Claude-compatible bundle.
 
 Contents (typical):
 
@@ -245,6 +245,6 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 - [`apm unpack`](../unpack/) -- inverse, deprecated; prefer `apm install <bundle>`.
 - [`apm install`](../install/) -- consumer side; installs a packed bundle directory, `.zip`, or `.tar.gz`.
 - [Pack a bundle (producer guide)](../../../producer/pack-a-bundle/) -- task-oriented walkthrough.
-- [Agent Plugins v1 migration](../../../getting-started/agent-plugins-v1-migration/) -- compatibility table and warning schedule.
+- [Agent Plugins v1 migration](../../../getting-started/agent-plugins-v1-migration/) -- compatibility table and migration guidance.
 - [Publish to a marketplace](../../../producer/publish-to-a-marketplace/) -- end-to-end marketplace flow.
 - [Lockfile spec](../../lockfile-spec/) -- `pack:` metadata and `bundle_files` schema.

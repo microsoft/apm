@@ -17,6 +17,13 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.agent_plugins import (
+    PLUGIN_SCHEMA_ID,
+    AgentPluginManifestError,
+    UnsupportedAgentPluginVersionError,
+)
+from apm_cli.bundle.formats import BundleFormat
+
 # ---------------------------------------------------------------------------
 # The import below WILL fail until production code lands.  That is intentional
 # -- TDD: tests are written before the module exists.
@@ -154,6 +161,117 @@ class TestDetectLocalBundle:
         assert isinstance(result, LocalBundleInfo)
         assert result.package_id == "test-plugin"
         assert result.is_archive is False
+        assert result.format == BundleFormat.CLAUDE_PLUGIN.value
+        assert result.agent_plugin is None
+
+    @pytest.mark.parametrize("ingress", ("directory", "zip", "tar"))
+    def test_supported_schema_routes_every_bundle_ingress_through_native_ir(
+        self,
+        tmp_path: Path,
+        ingress: str,
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "source")
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.bundle",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        source = {
+            "directory": bundle,
+            "zip": _make_plugin_zip(tmp_path / "zip", bundle),
+            "tar": _make_plugin_tarball(tmp_path / "tar", bundle),
+        }[ingress]
+
+        result = detect_local_bundle(source)
+
+        assert result is not None
+        assert result.format == BundleFormat.AGENT_PLUGIN.value
+        assert result.agent_plugin is not None
+        assert result.agent_plugin.identity.name == "native.bundle"
+
+    @pytest.mark.parametrize(
+        ("manifest", "error_type", "message"),
+        [
+            (
+                {
+                    "$schema": "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+                    "name": "future-plugin",
+                },
+                UnsupportedAgentPluginVersionError,
+                "Unsupported Agent Plugins manifest schema",
+            ),
+            (
+                {"$schema": 1, "name": "non-string"},
+                AgentPluginManifestError,
+                r"\$schema must be a string",
+            ),
+        ],
+    )
+    def test_schema_route_rejects_unsupported_and_malformed_values_without_fallback(
+        self,
+        tmp_path: Path,
+        manifest: dict[str, object],
+        error_type: type[ValueError],
+        message: str,
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        with pytest.raises(error_type, match=message):
+            detect_local_bundle(bundle)
+
+    @pytest.mark.parametrize(
+        ("content", "message"),
+        [
+            ('{"name":"malformed"', "Invalid JSON"),
+            (
+                f'{{"$schema":"{PLUGIN_SCHEMA_ID}","$schema":"{PLUGIN_SCHEMA_ID}",'
+                '"name":"duplicate"}}',
+                r"duplicate \$schema",
+            ),
+        ],
+    )
+    def test_schema_route_rejects_malformed_json_without_fallback(
+        self,
+        tmp_path: Path,
+        content: str,
+        message: str,
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(content, encoding="utf-8")
+
+        with pytest.raises(AgentPluginManifestError, match=message):
+            detect_local_bundle(bundle)
+
+    def test_root_schema_precedes_conflicting_pack_format(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "schema-wins",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        lockfile["pack"]["format"] = BundleFormat.CLAUDE_PLUGIN.value
+        (bundle / "apm.lock.yaml").write_text(
+            yaml.dump(lockfile, default_flow_style=False),
+            encoding="utf-8",
+        )
+
+        result = detect_local_bundle(bundle)
+
+        assert result is not None
+        assert result.format == BundleFormat.AGENT_PLUGIN.value
+        assert result.agent_plugin is not None
 
     def test_detect_plugin_tarball(self, tmp_path: Path) -> None:
         bundle = _make_plugin_bundle(tmp_path)
@@ -199,7 +317,10 @@ class TestDetectLocalBundle:
             encoding="utf-8",
         )
 
-        with pytest.raises(ValueError, match="Unsupported Agent Plugin schema"):
+        with pytest.raises(
+            UnsupportedAgentPluginVersionError,
+            match="Unsupported Agent Plugins manifest schema",
+        ):
             detect_local_bundle(bundle)
 
     def test_detect_rejects_symlinked_plugin_manifest(self, tmp_path: Path) -> None:
@@ -209,7 +330,7 @@ class TestDetectLocalBundle:
         target.write_text('{"name":"outside"}', encoding="utf-8")
         (bundle / "plugin.json").symlink_to(target)
 
-        with pytest.raises(ValueError, match="missing or invalid"):
+        with pytest.raises(AgentPluginManifestError, match="must not be a symlink"):
             detect_local_bundle(bundle)
 
     def test_detect_rejects_case_colliding_metadata(self, tmp_path: Path) -> None:
@@ -236,7 +357,7 @@ class TestDetectLocalBundle:
             encoding="utf-8",
         )
 
-        with pytest.raises(ValueError, match="Invalid Agent Plugin manifest"):
+        with pytest.raises(AgentPluginManifestError, match="naming rules"):
             detect_local_bundle(bundle)
 
     def test_detect_reads_pack_targets(self, tmp_path: Path) -> None:

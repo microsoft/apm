@@ -6,8 +6,8 @@ sidebar:
 ---
 
 You have a bundle on disk -- a directory or `.zip` someone handed you (or a
-legacy `.tar.gz`), or the output of `apm pack --format plugin`. Drop it into a
-project with one command:
+legacy `.tar.gz`), or the output of `apm pack`. Drop it into a project with one
+command:
 
 ```bash
 apm install ./path/to/bundle
@@ -19,50 +19,35 @@ of declaring a dependency in `apm.yml` and resolving it from a registry, you
 deploy a self-contained bundle directly. `apm.yml` is **not modified** --
 the install is imperative, like `dpkg -i` next to `apt install`.
 
-If you still have the historical Claude layout or a legacy APM bundle,
-repack it first. See [Agent Plugins v1 migration](../../getting-started/agent-plugins-v1-migration/).
-
 ## What counts as a bundle
 
-An Agent Plugin v1 bundle is a directory, zip archive, or legacy gzipped tarball with a root `plugin.json` and a converged content tree. Typical layout:
+A directory or supported archive enters local-bundle mode when it contains
+`plugin.json` at its root. The manifest determines the route:
 
-```
-my-bundle/
-+-- plugin.json
-+-- skills/
-+-- com.microsoft.apm/
-|   +-- agents/
-|   +-- commands/
-|   +-- instructions/
-|   +-- hooks/
-|   +-- extensions/
-|   +-- lsp.json (optional)
-+-- mcp.json               # optional Agent Plugin MCP metadata
-+-- apm.lock.yaml          # recommended: bundle integrity manifest
-```
+| Root manifest | Behavior |
+|---|---|
+| Exact Agent Plugins 1.0 `$schema` | Validate and admit the whole native plugin, then fail closed at deployment in this release |
+| Another Agent Plugins schema version | Fail as unsupported |
+| Malformed JSON, `$schema`, or Agent Plugin manifest | Fail validation |
+| No `$schema` | Use the legacy Claude/APM deployment path |
 
-Notes:
+Native admission never falls back to primitive projection. A source directory
+without root `plugin.json` stays on the normal package resolver path. See
+[Agent Plugins v1 migration](../../getting-started/agent-plugins-v1-migration/)
+for the compatibility decision.
 
-- `plugin.json` is the Agent Plugins v1 manifest (only `name` is required). APM will also recognise `plugin.json` under `.github/plugin/`, `.claude-plugin/`, or `.cursor-plugin/` for legacy-compatible packages.
-- `apm.lock.yaml` is the preferred integrity manifest produced by `apm pack`. When present, APM verifies every listed file before deploying. Bundles without `apm.lock.yaml` still install (with a warning) unless org policy requires integrity hashes.
-- Root `mcp.json` is Agent Plugin metadata. Legacy Claude bundles may use `.mcp.json`. APM routes either form into each resolved target's native MCP configuration instead of deploying it verbatim.
+`apm.lock.yaml` is the preferred integrity manifest produced by `apm pack`.
+When present, APM verifies every listed file before deployment.
 
 Built-in protection blocks critical findings when you run `apm install`,
 `apm compile`, or `apm unpack`. `apm audit` is the explicit reporting,
 remediation, and standalone scan tool. See [Security Model](../../enterprise/security/#local-bundle-install-trust-model)
 and [`apm audit`](../../reference/cli/audit/).
 
-Placeholder and retained-layout semantics:
-
-- APM retains project installs under `apm_modules/.agent-plugins/<plugin-id>/` and global installs under `$APM_HOME/agent-plugins/<plugin-id>/`. Persistent data lives under the corresponding `.plugin-data/<plugin-id>/` or `$APM_HOME/plugin-data/<plugin-id>/` directory. The stable `<plugin-id>` combines the validated plugin name with source identity.
-  - `${PLUGIN_ROOT}` → path to the bundle root (the materialized plugin directory)
-  - `${PLUGIN_DATA}` → path to the persistent plugin data directory
-
-APM expands these placeholders exactly once in MCP arguments, environment values, and `cwd`. It validates `./`-relative commands and working directories against the retained plugin root. Invalid MCP servers are skipped without disabling valid siblings.
-
-These behaviors ensure bundle-origin paths and runtime files resolve consistently whether the bundle is installed from an archive, a checked-in release directory, or from a retained plugin root used by a long-lived host.
-
 ## How the install works
+
+The successful deployment flow below applies to schema-less legacy bundles.
+Agent Plugins 1.0 bundles stop at the native deployment boundary.
 
 :::note[Governed offline installs]
 When the policy cache is warm, offline bundles still apply target, MCP, and
@@ -78,16 +63,16 @@ $ apm install ./dist/my-pkg-1.0.0.zip --target copilot
 
 Steps APM runs:
 
-1. **Detect.** Path exists and contains `plugin.json` at the bundle root
-   (zip archives and legacy tarballs are extracted to a temp directory first).
+1. **Detect.** Confirm that `plugin.json` exists at the bundle root, then route
+   it by `$schema` (zip archives and legacy tarballs are extracted first).
 2. **Apply cached policy.** Resolve the actual targets, then apply any cached
    org policy to bundle MCP entries and targets before files are written.
    Bundle install never fetches policy from the network. `--no-policy` skips
    this local gate for one invocation.
 3. **Verify integrity.** Hash every file listed in `pack.bundle_files`;
    reject any symlink, hash mismatch, or unlisted file.
-4. **Deploy.** Map `agents/`, `skills/`, `commands/`, `hooks/` into the
-   harness layout for each `--target` you passed.
+4. **Deploy.** For a schema-less bundle, map `agents/`, `skills/`, `commands/`,
+   and `hooks/` into the harness layout for each selected target.
 5. **Record.** Write a lockfile entry under the project's `apm.lock.yaml`
    so [drift detection](../drift-and-secure-by-default/) can audit the
    deployed files later.

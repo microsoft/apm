@@ -207,7 +207,7 @@ class TestCIOutputFormats:
     ):
         _setup_clean_project(tmp_path)
         error = AgentPluginDeploymentBoundaryError(
-            "Native Agent Plugin components are not enabled yet"
+            "machine-verifiable, non-deprecated native Agent Plugin lifecycle"
         )
         with (
             patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path),

@@ -123,6 +123,26 @@ def _raise_name(node: ast.Raise) -> str:
     return _call_name(node.exc)
 
 
+def _raise_argument_name(node: ast.Raise) -> str:
+    if not isinstance(node.exc, ast.Call) or len(node.exc.args) != 1:
+        return ""
+    argument = node.exc.args[0]
+    return argument.id if isinstance(argument, ast.Name) else ""
+
+
+def _has_getattr_call(node: ast.AST, *, owner: str, attribute: str) -> bool:
+    return any(
+        isinstance(item, ast.Call)
+        and _call_name(item) == "getattr"
+        and len(item.args) >= 2
+        and isinstance(item.args[0], ast.Name)
+        and item.args[0].id == owner
+        and isinstance(item.args[1], ast.Constant)
+        and item.args[1].value == attribute
+        for item in ast.walk(node)
+    )
+
+
 def _assigns_subscript_value(
     node: ast.AST,
     *,
@@ -264,9 +284,15 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             for node in ast.walk(boundary_def)
             if isinstance(node, ast.If) and _is_native_package_predicate(node.test)
         ]
-        has_attached_ir_check = any(
-            isinstance(node, ast.Constant) and node.value == "agent_plugin"
-            for node in ast.walk(boundary_def)
+        has_attached_ir_check = _has_getattr_call(
+            boundary_def,
+            owner="package",
+            attribute="agent_plugin",
+        )
+        has_bundle_ir_check = _has_getattr_call(
+            boundary_def,
+            owner="bundle_info",
+            attribute="agent_plugin",
         )
         has_native_bundle_check = any(
             isinstance(node, ast.Attribute)
@@ -287,11 +313,20 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 for item in ast.walk(node.test)
             )
         ]
-        bundle_fails_closed = len(native_bundle_guards) == 1 and any(
-            isinstance(node, ast.Raise)
-            and _raise_name(node) == "AgentPluginDeploymentBoundaryError"
-            for node in ast.walk(native_bundle_guards[0])
+        native_bundle_raise_arguments = (
+            {
+                _raise_argument_name(node)
+                for node in ast.walk(native_bundle_guards[0])
+                if isinstance(node, ast.Raise)
+                and _raise_name(node) == "AgentPluginDeploymentBoundaryError"
+            }
+            if len(native_bundle_guards) == 1
+            else set()
         )
+        bundle_fails_closed = native_bundle_raise_arguments == {
+            "AGENT_PLUGIN_DEPLOYMENT_BLOCKED",
+            "AGENT_PLUGIN_IR_MISSING",
+        }
         package_fails_closed = (
             bool(boundary_def.body)
             and isinstance(boundary_def.body[-1], ast.Raise)
@@ -303,6 +338,7 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             or not isinstance(native_package_guards[0].body[0], ast.Return)
             or not typed_raises
             or not has_attached_ir_check
+            or not has_bundle_ir_check
             or not has_native_bundle_check
             or not bundle_fails_closed
             or not package_fails_closed
@@ -526,8 +562,7 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 typed_handler.lineno < min(handler.lineno for handler in generic_handlers)
                 and "logger.error" in _function_calls(typed_handler)
                 and any(
-                    isinstance(item, ast.Attribute)
-                    and item.attr == "FAILED"
+                    isinstance(item, ast.Attribute) and item.attr == "FAILED"
                     for item in ast.walk(typed_handler)
                 )
             )

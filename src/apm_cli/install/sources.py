@@ -478,7 +478,7 @@ class CachedDependencySource(DependencySource):
         # package_info=None.
         # In lockfile_only mode, skip this early return so installed_packages
         # is populated before we return without deploying any files.
-        if not ctx.targets and not ctx.lockfile_only:
+        if not ctx.targets and not ctx.lockfile_only and native_validation is None:
             return Materialization(
                 package_info=None,
                 install_path=install_path,
@@ -603,7 +603,7 @@ class CachedDependencySource(DependencySource):
         _record_declared_license(ctx, dep_key, install_path)
 
         # Return without deploying integration files when the target set is empty.
-        if not ctx.targets:
+        if not ctx.targets and cached_package_info.package_type is not PackageType.AGENT_PLUGIN:
             return Materialization(
                 package_info=None,
                 install_path=install_path,
@@ -648,6 +648,7 @@ class FreshDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.drift import build_download_ref
+        from apm_cli.models.validation import PackageType
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
         from apm_cli.utils.path_security import safe_rmtree
 
@@ -884,7 +885,10 @@ class FreshDependencySource(DependencySource):
                     logger.package_type_info(_type_label)
 
             # If no targets, skip integration but keep deltas
-            if not ctx.targets:
+            if (
+                not ctx.targets
+                and getattr(package_info, "package_type", None) is not PackageType.AGENT_PLUGIN
+            ):
                 return Materialization(
                     package_info=None,
                     install_path=install_path,

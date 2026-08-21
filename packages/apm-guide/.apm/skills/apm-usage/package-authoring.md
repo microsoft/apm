@@ -2,7 +2,7 @@
 
 ## Supported package layouts
 
-APM recognizes five layouts. The shape of the package root tells APM
+APM recognizes six layouts. The shape of the package root tells APM
 how to install it:
 
 | Root signal | Author intent | Install semantic |
@@ -11,16 +11,20 @@ how to install it:
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
-| `plugin.json` / `.claude-plugin/` | Claude plugin collection (Agent Plugin v1 is now the canonical bundle format) | Dissect via plugin artifact mapping |
+| `plugin.json` with the exact Agent Plugins 1.0 `$schema` | Portable Agent Plugin | Validate as one native plugin; deployment is blocked in this release |
+| Schema-less `plugin.json` or `.claude-plugin/` | Claude plugin collection | Dissect via legacy plugin artifact mapping |
 
 
 ### Agent Plugin v1 bundles
 
-Agent Plugin v1 bundles converge plugin-native paths into a small, predictable layout. A typical Agent Plugin pack contains a root `plugin.json` (the packed artifact synthesised from `apm.yml`), a `skills/` directory for named skill bundles, and a namespaced payload under `com.microsoft.apm/` with primitive categories (`agents`, `commands`, `instructions`, `hooks`, `extensions`) plus an optional `lsp.json` and a root `mcp.json` when the producer declares MCP servers. The bundle also carries an enriched `apm.lock.yaml` at the root that records per-file SHA-256 digests for install-time integrity verification.
+`apm pack --plugin` produces the native format. An exact
+`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json` `$schema` routes
+the root `plugin.json` through whole-plugin validation and admission.
 
-- Prefer `.apm/<type>/` for authoring so `apm pack` and `apm install` remain symmetric.
-- `plugin.json` is an emitted artifact; `apm.yml` remains the authoring source-of-truth. `apm pack` synthesises `plugin.json` when not authored explicitly.
-- Project installs retain the plugin under `apm_modules/.agent-plugins/<plugin-id>/` and persistent state under `apm_modules/.plugin-data/<plugin-id>/`; global installs use `$APM_HOME/agent-plugins/` and `$APM_HOME/plugin-data/`. APM expands `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` in MCP arguments, environment values, and `cwd`.
+Deployment fails closed in this release because no selected target has a
+machine-verifiable, non-deprecated native lifecycle. APM does not project the
+plugin into legacy primitives. Unsupported versions and malformed schemas
+fail; schema-less `plugin.json` remains on the legacy Claude/APM path.
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
 also uses APM dependency resolution. APM installs it as a skill -- it

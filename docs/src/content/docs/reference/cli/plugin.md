@@ -43,17 +43,18 @@ apm plugin init my-skill --target copilot,claude --yes
 
 ## Defaults and migration
 
-`apm plugin init` now scaffolds an Agent Plugins v1 manifest by default (the canonical Agent Plugin `plugin.json`). This is the recommended starting point for new plugin projects.
+`apm plugin init` currently scaffolds the schema-less, Claude-compatible layout by default. Use `--plugin` to scaffold a canonical Agent Plugins v1 manifest.
 
-For the 60-second migration path, warning schedule, and compatibility
-FAQ, see [Agent Plugins v1 migration](../../../getting-started/agent-plugins-v1-migration/).
+For the 60-second migration path and compatibility FAQ, see
+[Agent Plugins v1 migration](../../../getting-started/agent-plugins-v1-migration/).
 
 Flags and compatibility:
 
-- `--plugin` (explicit) selects the Agent Plugins v1 scaffold (the same output as the default).
-- `--claude-plugin` selects the legacy Claude-compatible scaffold and preserves the historical layout expected by older Claude Code hosts.
+- `--plugin` selects the Agent Plugins v1 scaffold. APM recognizes its root schema as a whole-plugin contract, but currently blocks deployment because no selected target has a verified native lifecycle.
+- `--claude-plugin` explicitly selects the Claude-compatible scaffold, which is also the current no-flag default.
 
-The legacy `apm init --plugin` invocation continues to work for now but emits a deprecation warning; prefer `apm plugin init` for new projects and use `--claude-plugin` only when you must remain compatible with the older Claude-only layout.
+The legacy `apm init --plugin` invocation continues to work for now but emits a deprecation warning; prefer `apm plugin init` for new projects.
+
 ## Examples
 
 ### Single-plugin repo

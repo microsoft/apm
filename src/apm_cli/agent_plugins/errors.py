@@ -10,13 +10,13 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import DependencyReference, PackageInfo
 
 _AGENT_PLUGIN_RECOVERY = (
-    "Package authors: use 'apm plugin init --claude-plugin' and "
-    "'apm pack --claude-plugin' for explicit legacy compatibility. "
+    "Package authors: use 'apm pack --claude-plugin' for explicit legacy compatibility. "
     "Consumers: ask the publisher for a legacy-compatible package."
 )
 AGENT_PLUGIN_DEPLOYMENT_BLOCKED = (
-    "Native Agent Plugin components are not enabled yet, so deployment was blocked. "
-    + _AGENT_PLUGIN_RECOVERY
+    "None of the selected targets has a machine-verifiable, non-deprecated native "
+    "Agent Plugin lifecycle, so whole-plugin deployment was blocked. "
+    "APM did not fall back to legacy primitive projection. " + _AGENT_PLUGIN_RECOVERY
 )
 AGENT_PLUGIN_IR_MISSING = (
     "Native Agent Plugin canonical IR is missing, so deployment was blocked. "
@@ -65,6 +65,8 @@ def enforce_agent_plugin_deployment_boundary(
         bundle_info is not None
         and getattr(bundle_info, "format", None) == BundleFormat.AGENT_PLUGIN.value
     ):
+        if getattr(bundle_info, "agent_plugin", None) is None:
+            raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_IR_MISSING)
         raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
     if package_info is None:
         return
