@@ -238,11 +238,14 @@ class AgentIntegrator(BaseIntegrator):
                     package_name=package_info.package.name,
                 )
                 links_resolved = 0
+            elif mapping.format_id == "opencode_agent":
+                links_resolved = self._write_opencode_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
             else:
-                if mapping.format_id == "opencode_agent":
-                    self._warn_opencode_frontmatter(
-                        source_file, diagnostics, package_info.package.name
-                    )
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
@@ -322,45 +325,60 @@ class AgentIntegrator(BaseIntegrator):
         return links_resolved
 
     # ------------------------------------------------------------------
-    # OpenCode validate-and-warn (Phase 1 of #581)
+    # OpenCode frontmatter transformer (Phase 2 of #581)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _warn_opencode_frontmatter(
+    def _write_opencode_agent(
+        self,
         source: Path,
-        diagnostics: DiagnosticCollector | None,
-        package_name: str,
-    ) -> None:
-        """Emit warnings for OpenCode-incompatible agent frontmatter.
+        target: Path,
+        *,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
+    ) -> int:
+        """Transform and deploy an OpenCode agent file.
 
-        Phase 1 only: surfaces Zod-fatal shapes (tools as list/string,
-        named colors outside the OpenCode theme enum) so users learn
-        why OpenCode will refuse to load the agent. The file is still
-        copied verbatim; Phase 2 (per-target frontmatter transformer)
-        is tracked separately.
+        Converts ``tools`` frontmatter from list or comma-separated string
+        form to the ``{tool-name: true}`` mapping OpenCode requires, then
+        writes the transformed file to ``target``. Any remaining
+        incompatibilities (e.g. invalid ``color``) are surfaced as warnings
+        via ``diagnostics`` after transformation.
+
+        Returns the number of resolved links (same contract as
+        :meth:`copy_agent`).
         """
-        if diagnostics is None:
-            return
         if source.is_symlink():
-            return
+            raise ValueError(f"Refusing to read symlink source: {source}")
         try:
             content = source.read_text(encoding="utf-8")
         except OSError:
-            return
+            return 0
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
-        if not fm_match:
-            return
-        try:
-            fm = load_yaml_str(fm_match.group(1)) or {}
-        except yaml.YAMLError:
-            return
-        if not isinstance(fm, dict):
-            return
-        for message in validate_opencode_frontmatter(fm, source, package_name=package_name):
-            diagnostics.warn(
-                message=message,
-                package=printable_ascii_text(package_name),
-            )
+        if fm_match:
+            try:
+                fm: dict = load_yaml_str(fm_match.group(1)) or {}
+            except yaml.YAMLError:
+                fm = {}
+            if isinstance(fm, dict) and "tools" in fm:
+                tools = fm["tools"]
+                if isinstance(tools, list):
+                    fm["tools"] = {str(t).strip(): True for t in tools if str(t).strip()}
+                elif isinstance(tools, str):
+                    fm["tools"] = {t.strip(): True for t in tools.split(",") if t.strip()}
+            if isinstance(fm, dict) and fm:
+                body = content[fm_match.end() :]
+                new_fm = yaml_to_str(fm)
+                content = f"---\n{new_fm}---\n{body}"
+            if diagnostics is not None and isinstance(fm, dict):
+                for message in validate_opencode_frontmatter(fm, source, package_name=package_name):
+                    diagnostics.warn(
+                        message=message,
+                        package=printable_ascii_text(package_name),
+                    )
+        content, links_resolved = self.resolve_links(content, source, target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_text_lf(target, content)
+        return links_resolved
 
     # ------------------------------------------------------------------
     # Codex agent transformer (MD -> TOML)
