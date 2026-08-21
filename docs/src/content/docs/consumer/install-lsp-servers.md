@@ -11,12 +11,6 @@ sidebar:
 This page covers LSP servers: how you declare them, what gets written,
 and how the install pipeline manages their lifecycle.
 
-LSP servers follow the same two-layer security model. Built-in
-protection blocks critical findings when you run `apm install`,
-`apm compile`, or `apm unpack`. `apm audit` is the explicit reporting,
-remediation, and standalone scan tool. See [Security Model](../../enterprise/security/#agent-plugin-retained-mcp-and-lsp-trust-lifecycle)
-and [`apm audit`](../../reference/cli/audit/).
-
 LSP integration targets supported agent runtimes. Today APM writes
 configuration for Claude Code and GitHub Copilot CLI, while keeping the
 manifest dependency model runtime-agnostic. See Claude Code's

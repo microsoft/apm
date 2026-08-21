@@ -1,8 +1,6 @@
 ---
 title: Install packages
 description: Add APM packages to your project as dependencies and let install resolve everything.
-sidebar:
-  order: 1
 ---
 
 To add an APM package to your project, declare it in `apm.yml` under
@@ -24,8 +22,6 @@ hash.
 This page covers APM packages. For MCP servers, see
 [Install MCP servers](../install-mcp-servers/). For local bundles, see
 [Deploy a bundle](../deploy-a-bundle/).
-For Agent Plugins v1 migration, see
-[Agent Plugins v1 migration](../../getting-started/agent-plugins-v1-migration/).
 
 ## Add a dependency
 
@@ -88,12 +84,6 @@ The pipeline is deterministic. Each phase must pass before the next runs.
    `.agents/skills/`.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
-
-Built-in protection blocks critical findings when you run `apm install`,
-`apm compile`, or `apm unpack`. `apm audit` is the explicit reporting,
-remediation, and standalone scan tool. See
-[Security Model](../../enterprise/security/) and
-[`apm audit`](../../reference/cli/audit/).
 
 For the deeper view of how compile fits in, see
 [Lifecycle](../../concepts/lifecycle/).

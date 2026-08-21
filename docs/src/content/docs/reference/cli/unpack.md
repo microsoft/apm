@@ -92,5 +92,4 @@ apm unpack bundle.zip --force
 - [`apm pack`](../pack/) -- produce the bundles that `apm unpack` extracts.
 - [`apm install`](../install/) -- the preferred deploy path for plugin-format bundles.
 - [`apm audit`](../audit/) -- inspect hidden-character findings flagged during extraction.
-- [Agent Plugins v1 migration](../../../getting-started/agent-plugins-v1-migration/) -- repack path and warning schedule.
 - [Pack a bundle](../../../producer/pack-a-bundle/) -- producer guide covering bundle formats and distribution.

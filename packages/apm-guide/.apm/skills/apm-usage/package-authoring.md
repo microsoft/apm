@@ -2,7 +2,7 @@
 
 ## Supported package layouts
 
-APM recognizes five layouts. The shape of the package root tells APM
+APM recognizes six layouts. The shape of the package root tells APM
 how to install it:
 
 | Root signal | Author intent | Install semantic |
@@ -11,16 +11,8 @@ how to install it:
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
-| `plugin.json` / `.claude-plugin/` | Claude plugin collection (Agent Plugin v1 is now the canonical bundle format) | Dissect via plugin artifact mapping |
-
-
-### Agent Plugin v1 bundles
-
-Agent Plugin v1 bundles converge plugin-native paths into a small, predictable layout. A typical Agent Plugin pack contains a root `plugin.json` (the packed artifact synthesised from `apm.yml`), a `skills/` directory for named skill bundles, and a namespaced payload under `com.microsoft.apm/` with primitive categories (`agents`, `commands`, `instructions`, `hooks`, `extensions`) plus an optional `lsp.json` and a root `mcp.json` when the producer declares MCP servers. The bundle also carries an enriched `apm.lock.yaml` at the root that records per-file SHA-256 digests for install-time integrity verification.
-
-- Prefer `.apm/<type>/` for authoring so `apm pack` and `apm install` remain symmetric.
-- `plugin.json` is an emitted artifact; `apm.yml` remains the authoring source-of-truth. `apm pack` synthesises `plugin.json` when not authored explicitly.
-- Project installs retain the plugin under `apm_modules/.agent-plugins/<plugin-id>/` and persistent state under `apm_modules/.plugin-data/<plugin-id>/`; global installs use `$APM_HOME/agent-plugins/` and `$APM_HOME/plugin-data/`. APM expands `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` in MCP arguments, environment values, and `cwd`.
+| `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Not yet installable -- fails closed |
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
 also uses APM dependency resolution. APM installs it as a skill -- it
@@ -515,7 +507,11 @@ my-skill/
 
 ### 7. Marketplace Plugin (`plugin.json`)
 
-Packaged distribution format created with `apm pack --format plugin`.
+Packaged distribution format created with `apm pack` (the default, no-flag
+Claude plugin bundle). This is the Claude-compatible `plugin.json` layout,
+distinct from the portable Agent Plugins v1 `plugin.json` produced by
+`apm pack --plugin` -- see [Package Types](../../../../../docs/src/content/docs/reference/package-types.md#agent-plugin-pluginjson-with-an-agent-plugins-schema)
+for the portable format.
 
 When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json` automatically -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the apm pack reference (reference/cli/pack/#plugin-manifests) for output paths, credential stripping, and per-ecosystem differences, or run `apm pack --help`.
 

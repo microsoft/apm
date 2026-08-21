@@ -1,20 +1,12 @@
 ---
 title: "Install MCP servers"
 description: "Keep MCP target ownership portable across your team's machines with declarations in apm.yml."
-sidebar:
-  order: 4
 ---
 
 `apm install` is the same driver for two artifact kinds: APM packages
 (see [Install Packages](../install-packages/)) and MCP servers. This
 page covers MCP servers: how you declare them, what gets written to
 each runtime, and how tokens get injected.
-
-MCP servers follow the same two-layer security model. Built-in
-protection blocks critical findings when you run `apm install`,
-`apm compile`, or `apm unpack`. `apm audit` is the explicit reporting,
-remediation, and standalone scan tool. See [Security Model](../../enterprise/security/#agent-plugin-retained-mcp-and-lsp-trust-lifecycle)
-and [`apm audit`](../../reference/cli/audit/).
 
 ## One-line answer
 

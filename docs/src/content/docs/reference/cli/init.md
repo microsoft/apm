@@ -139,9 +139,6 @@ to stderr pointing at the replacement command (`apm plugin init` or
 - [`apm marketplace init`](../marketplace/) -- replaces
   `apm init --marketplace`.
 
-For Agent Plugins v1 compatibility choices, see
-[Agent Plugins v1 migration](../../../getting-started/agent-plugins-v1-migration/).
-
 ## Related
 
 - [`apm plugin init`](../plugin/) -- scaffold a publishable plugin

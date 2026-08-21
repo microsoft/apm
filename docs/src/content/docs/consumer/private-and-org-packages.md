@@ -1,17 +1,11 @@
 ---
 title: Private and org packages
 description: Spec a private dependency in apm.yml so install can fetch it from GitHub, GHE, EMU, Azure DevOps, or GitLab.
-sidebar:
-  order: 3
 ---
 
 You declare a private dependency the same way you declare a public
 one. Only the host and the token change. For token setup, see
 [Authentication](../authentication/).
-
-For the install-time security model and audit boundary, see
-[Security Model](../../enterprise/security/) and
-[`apm audit`](../../reference/cli/audit/).
 
 ## The shapes of a dependency ref
 

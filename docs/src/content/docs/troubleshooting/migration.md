@@ -7,8 +7,6 @@ sidebar:
 
 This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../../getting-started/migration/) and come back here for upgrade-time issues.
 
-For plugin bundle format changes, see [Agent Plugins v1 migration](../../getting-started/agent-plugins-v1-migration/).
-
 [i] Throughout: replace `<your-version>` with the version you currently have installed (`apm --version`) and `<target>` with the version you are moving to.
 
 ## 1. From hand-managed `.github/copilot-instructions.md`

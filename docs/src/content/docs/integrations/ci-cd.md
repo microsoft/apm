@@ -198,16 +198,13 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 ### Pack as standalone plugin
 
 ```yaml
-# Export an Agent Plugin v1 directory (default format)
+# Export as a Claude Code plugin directory (default format)
 - run: apm pack
 - uses: actions/upload-artifact@v4
   with:
     name: plugin-bundle
     path: build/
 ```
-
-Use `apm pack --claude-plugin` when a downstream system requires the
-historical Claude plugin layout.
 
 ### Consume in another job (no APM needed)
 

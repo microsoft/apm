@@ -1,20 +1,14 @@
 ---
 title: Pack a bundle
 description: Build a plugin-format bundle from APM-native or plugin-native source so others can deploy it with one apm install command.
-sidebar:
-  order: 4
 ---
 
-`apm pack` is the producer-side build step. It emits the bundle a consumer
-installs with one command. For the exact option matrix and output contract,
-see [apm pack](../../reference/cli/pack/) and
-[Package types](../../reference/package-types/). If you are switching
-layouts, start with [Agent Plugins v1 migration](../../getting-started/agent-plugins-v1-migration/).
-
-A bundle is a directory (or archive -- `.zip` by default, `.tar.gz` via
-`--archive-format tar.gz`) containing `plugin.json`, primitive folders, and
-an embedded `apm.lock.yaml` that pins every file by SHA-256. Build it with
-one command from a project that has `apm.yml`:
+A bundle is the artifact you hand to a consumer when you do not want to publish
+to a registry. It is a directory (or archive -- `.zip` by default, `.tar.gz` via
+`--archive-format tar.gz`) containing a
+`plugin.json`, your primitive folders, and an embedded `apm.lock.yaml` that
+pins every file by SHA-256. Build it with one command from a project that has
+`apm.yml`:
 
 ```bash
 apm pack
@@ -29,43 +23,38 @@ This is the producer side of [Deploy a local bundle](../../consumer/deploy-a-bun
 Consumers who receive the artifact run `apm install ./your-bundle` and skip
 the registry resolver entirely.
 
-Built-in protection blocks critical findings when you run `apm install`,
-`apm compile`, or `apm unpack`. `apm audit` is the explicit reporting,
-remediation, and standalone scan tool. See [Security Model](../../enterprise/security/#local-bundle-install-trust-model)
-and [apm audit](../../reference/cli/audit/).
-
 ## What `apm pack` produces
 
-By default `apm pack` writes an Agent Plugin v1 directory under `./build/` (the new canonical plugin bundle):
+By default `apm pack` writes a Claude Code plugin directory under `./build/`:
 
 ```
 build/<your-package>/
-+-- plugin.json                         # Agent Plugins v1 manifest (artifact)
-+-- skills/                              # top-level skill bundles
-+-- com.microsoft.apm/
-|   +-- agents/
-|   +-- commands/
-|   +-- instructions/
-|   +-- hooks/
-|   +-- extensions/
-|   +-- lsp.json                         # optional
-+-- mcp.json                             # optional producer MCP metadata (not deployed verbatim)
-+-- apm.lock.yaml                        # embedded: enriched lockfile with per-file SHA-256
-+-- README.md, LICENSE, CHANGELOG.md     # optional root docs copied when present
++-- plugin.json
++-- agents/
++-- skills/
++-- commands/
++-- hooks/
++-- apm.lock.yaml      # embedded: pins every file by SHA-256
 ```
-
-This converged layout places runtime primitives under the `com.microsoft.apm/` namespace while keeping `skills/` at the bundle root for ease of consumption by hosts. The `plugin.json` is the packed artifact derived from `apm.yml`; `apm.lock.yaml` is the authoritative provenance and integrity record for the bundle contents.
 
 The success line tells you exactly what to share:
 
 ```
 $ apm pack
 [+] Packed 7 file(s) -> build/my-pkg
-[>] Agent Plugin bundle ready -- contains plugin.json plus skills/
-    and com.microsoft.apm/ primitives, with an embedded
+[>] Plugin bundle ready -- contains plugin.json plus plugin-native
+    directories (agents/, skills/, commands/, ...) and an embedded
     apm.lock.yaml for install-time integrity verification.
 [i] Share with: apm install build/my-pkg
 ```
+
+Pass `--plugin` instead to opt into a portable [Agent Plugins v1](../../reference/cli/pack/#agent-plugin-bundle---plugin)
+bundle (`plugin.json` + `skills/` + `mcp.json` only, no Claude-specific
+directories) for producers targeting Agent-Plugin-aware hosts beyond APM.
+That format is stricter -- it fails before writing anything if your source
+has agents, commands, instructions, extensions, hooks, or LSP config it
+cannot represent -- and `apm install` does not deploy it yet. Use the
+default Claude plugin bundle above for anything you need to install today.
 
 Add `--archive` to get a single archive (`.zip` by default; use `--archive-format tar.gz`
 for legacy CI pipelines) instead of a directory; use `-o` to change the output location
@@ -83,9 +72,40 @@ apm pack --archive -o ./dist
 
 ## The plugin.json contract
 
-See [Package types](../../reference/package-types/#agent-plugin-pluginjson)
-for the exact `plugin.json` fields, default values, and Claude
-compatibility rules.
+`plugin.json` is the bundle's identity card. Only `name` is required. APM
+synthesises one from `apm.yml` if you do not author it yourself, mapping these
+fields:
+
+| `apm.yml` field | `plugin.json` field |
+|---|---|
+| `name`         | `name` (required) |
+| `version`      | `version` |
+| `description`  | `description` |
+| `author`       | author |
+| `license`      | `license` |
+| `homepage`     | `homepage` |
+| `repository`   | `repository` |
+| `keywords`     | `keywords` |
+
+The `author` field accepts a plain string (`"Jane Doe"` maps to `{name: "Jane Doe"}`) or a
+structured object (`{name, email?, url?}` -- all keys optional except `name`):
+
+```yaml
+# String form (backward-compatible):
+author: Jane Doe
+
+# Structured form:
+author:
+  name: Jane Doe
+  email: jane@example.com
+  url: https://example.com/jane
+```
+
+Author your own `plugin.json` at the project root (or under `.github/plugin/`,
+`.claude-plugin/`, or `.cursor-plugin/`) when you need fields APM does not
+synthesise -- otherwise leave it to `apm pack` and keep `apm.yml` as the
+source of truth. See [Package anatomy](../../concepts/package-anatomy/) for
+the full schema.
 
 ## Integrity: how install verifies the bundle
 
@@ -138,8 +158,8 @@ it:
 ```
 
 When packing git dependencies, `apm pack` emits **only** what the
-lockfile attests, in every format (default Agent Plugin / `--format plugin`,
-legacy `--format apm`, and `--claude-plugin`). Dependency content is sourced exclusively from the
+lockfile attests, in every bundle format (the default Claude plugin format,
+the explicit Agent Plugin format, and the legacy APM format). Dependency content is sourced exclusively from the
 lockfile `deployed_files` list -- the `apm_modules` cache is never
 packed, because it carries no provenance or integrity guarantee (it can
 be stale, partial, or tampered). Each attested file is verified against
@@ -264,12 +284,18 @@ bundle. The root `apm pack` builds the marketplace index. See
 **Do not use `--format apm` for bundles you expect consumers to install.**
 The legacy APM bundle layout has no `plugin.json` and `apm install` rejects
 it with a targeted error. The flag exists for tooling that still consumes
-the older layout; new bundles should use the default `--format plugin`. If
-you only have a legacy artifact, repack it:
+the older layout; new bundles should use the default Claude plugin format
+(no format flag needed). If you only have a legacy artifact, repack it:
 
 ```bash
-apm pack --format plugin --archive
+apm pack --archive
 ```
+
+**`apm install` does not deploy Agent Plugin output yet.** `apm pack --plugin`
+produces a valid, portable Agent Plugins v1 bundle, but installing one with
+`apm install` fails closed today, pending native runtime integration. Use the
+default Claude plugin bundle (or `--format apm` for legacy tooling) for
+anything you need `apm install` to deploy.
 
 **Do not set `--target`.** The flag is deprecated. Bundles are
 target-agnostic: the consumer's project decides which harness layouts
@@ -287,7 +313,7 @@ after `apm install`, its bytes no longer match the `deployed_file_hashes`
 SHA-256 recorded in `apm.lock.yaml` and `apm pack` fails with
 `... does not match the hash recorded in apm.lock.yaml`. A deleted file
 raises a sibling error that also points at `apm install` (the exact
-wording differs between `--format apm` and `--format plugin`). Run
+wording differs between the legacy APM format and the plugin formats). Run
 `apm install` to restore the attested content, then pack again.
 
 **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the

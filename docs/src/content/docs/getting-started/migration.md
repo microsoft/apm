@@ -7,8 +7,6 @@ sidebar:
 
 APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` -- all stay exactly where they are, untouched.
 
-For plugin bundle format changes, see [Agent Plugins v1 migration](./agent-plugins-v1-migration/).
-
 ## Add APM in three steps
 
 ### 1. Initialize

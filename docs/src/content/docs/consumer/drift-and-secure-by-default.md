@@ -1,8 +1,6 @@
 ---
 title: Drift and secure by default
 description: What protects you when you run apm install, and what to do when something is off.
-sidebar:
-  order: 7
 ---
 
 You run `apm install`. APM fetches packages, writes files into your
@@ -14,18 +12,6 @@ The short version: your dependency graph is explicit, your lockfile is
 pinned, fetched content is hash-verified, and every install replay is
 reproducible from the cache. You do not opt in. You opt out, and only
 through named flags.
-
-## Security model
-
-1. Built-in protection: `apm install`, `apm compile`, and `apm unpack`
-   block critical findings automatically. No config.
-2. `apm audit`: reporting (`-f sarif|json|markdown`), remediation
-   (`--strip`), and standalone scans (`--file`).
-
-For the producer and bundle views, see [Pack a bundle](../../producer/pack-a-bundle/)
-and [Deploy a local bundle](../deploy-a-bundle/). For the enforcement
-boundary, see [Security Model](../../enterprise/security/) and
-[`apm audit`](../../reference/cli/audit/).
 
 ## What runs on every `apm install`
 

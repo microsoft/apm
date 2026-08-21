@@ -7,18 +7,6 @@ sidebar:
 
 This page documents APM's security posture for enterprise security reviews, compliance audits, and supply chain assessments.
 
-## Security model
-
-1. Built-in protection: `apm install`, `apm compile`, and `apm unpack`
-   block critical findings automatically. No config.
-2. `apm audit`: reporting (`-f sarif|json|markdown`), remediation
-   (`--strip`), and standalone scans (`--file`).
-
-Use this page as the source of truth for producer, consumer, and CLI
-trust boundaries. The consumer summary lives in
-[Drift and secure by default](../../consumer/drift-and-secure-by-default/).
-See [`apm audit`](../../reference/cli/audit/).
-
 ## Threat model
 
 APM defends the build-time supply chain for AI agent context: prompts, instructions, skills, hooks, and MCP server declarations flowing from a git source through `apm install` into your project tree and on into supported harnesses. The defended properties are reproducibility (same install everywhere), integrity (downloaded content matches the lockfile), provenance (every dep traces to a pinned commit at a named host), and pre-deploy content safety (no hidden Unicode reaches the agent). APM does NOT sandbox MCP servers at runtime, does not do malware analysis on dependency code, does not sign packages, and does not inspect what an agent does once it has read your context.
@@ -378,7 +366,7 @@ When APM deploys a file, it checks whether a file already exists at the target p
 APM separates production and development dependencies:
 
 - **Production dependencies** (`dependencies.apm`) are included in plugin bundles and shared packages.
-- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output (both plugin format -- the default -- and `--format apm`).
+- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output in every bundle format (the default Claude plugin format, the explicit Agent Plugin format, and the legacy `--format apm`).
 - **Development MCP servers** in the root project's `devDependencies.mcp` are active for authoring, but the same section in a direct or transitive dependency package never propagates into the consumer's target config or provenance.
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
@@ -480,21 +468,6 @@ To allow transitive MCP servers, you must either:
 
 - **Re-declare the dependency** in your own `apm.yml`, promoting it to a direct dependency.
 - **Pass `--trust-transitive-mcp`** to explicitly opt in to transitive MCP servers for that install.
-
-## Agent Plugin retained, MCP, and LSP trust/lifecycle
-
-Agent Plugin bundles are retained artifacts. `plugin.json` is metadata,
-not deployed verbatim. Use [Pack a bundle](../../producer/pack-a-bundle/)
-for the producer flow and [Deploy a local bundle](../../consumer/deploy-a-bundle/)
-for the consumer flow.
-
-MCP servers are explicit and depth-scoped. Direct dependencies are
-auto-trusted; transitive dependencies are blocked by default. See
-[Install MCP servers](../../consumer/install-mcp-servers/).
-
-LSP servers are config-only. APM writes runtime-specific config and does
-not launch the servers itself. See
-[Install LSP servers](../../consumer/install-lsp-servers/).
 
 ## Token handling
 
