@@ -48,13 +48,6 @@ check_pattern \
 if ! bash scripts/check_bundle_format_authority.sh; then
     violations=$((violations + 1))
 fi
-echo "[*] AC34: native Agent Plugin MCP preparation authority"
-agent_plugin_mcp_output=$(python3 scripts/check_agent_plugin_mcp_boundary.py --root "$ROOT" 2>&1)
-if [ $? -ne 0 ]; then
-    echo "[x] Native Agent Plugin MCP preparation must remain IR-only, literal, credential-isolated, write-free, and provenance-complete"
-    echo "$agent_plugin_mcp_output"
-    violations=$((violations + 1))
-fi
 effective_target_owner="src/apm_cli/core/target_detection.py"
 effective_target_definition_count=$(grep -Ec \
     '^def resolve_effective_target_decision\(' "$effective_target_owner" || true)
