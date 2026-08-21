@@ -69,6 +69,7 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "Agent Plugin component IR must remain canonical and inventory-backed" in boundary_guard
     assert "| Agent Plugins v1 contract interpretation and component discovery |" in architecture
     assert "| Agent Plugin portable manifest authority |" in architecture
+    assert "| Agent Plugin producer portable-surface admission |" in architecture
     assert "| APMPackage interpreted-manifest construction |" in architecture
     assert "| Agent Plugin compatibility package projection |" in architecture
     assert "| Neutral hook source grammar and shape -> per-target native |" in architecture

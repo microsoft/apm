@@ -577,10 +577,11 @@ def _plugin_rel_for_deployed_path(
 def _collect_explicit_local_components(
     project_root: Path,
     includes: list[str],
-) -> tuple[list[tuple[Path, str]], dict]:
+) -> tuple[list[tuple[Path, str]], dict, bool]:
     """Collect only explicitly listed local paths and validate each path."""
     components: list[tuple[Path, str]] = []
     hooks: dict = {}
+    hooks_present = False
     for declared_path in includes:
         parts = _deployed_path_parts(declared_path)
         candidate = project_root.joinpath(*parts)
@@ -623,6 +624,7 @@ def _collect_explicit_local_components(
                 or repo_relative.startswith(".apm/hooks/")
             )
             if is_hook:
+                hooks_present = True
                 try:
                     hook_data = json.loads(file_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError, RecursionError) as exc:
@@ -641,7 +643,7 @@ def _collect_explicit_local_components(
                     f"Explicit include path is not a packable primitive: {repo_relative}"
                 )
             components.append((file_path, plugin_relative))
-    return components, hooks
+    return components, hooks, hooks_present
 
 
 def _verify_attested_hash(
@@ -929,7 +931,7 @@ def export_plugin_bundle(
     # 6. Collect own components according to the local source authority.
     own_apm_dir = project_root / ".apm"
     if isinstance(package.includes, list):
-        own_components, root_hooks = _collect_explicit_local_components(
+        own_components, root_hooks, _hooks_present = _collect_explicit_local_components(
             project_root,
             package.includes,
         )

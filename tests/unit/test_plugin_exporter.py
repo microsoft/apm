@@ -1562,17 +1562,16 @@ class TestExportPluginBundleViaPackBundle:
     def test_fmt_plugin_delegates(self, tmp_path):
         from apm_cli.bundle.packer import pack_bundle
 
-        project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
+        project = _setup_plugin_project(tmp_path)
         out = tmp_path / "build"
 
-        with patch("apm_cli.bundle.agent_plugin_exporter._rich_warning"):
-            result = pack_bundle(project, out, fmt="plugin")
+        result = pack_bundle(project, out, fmt="plugin")
 
         # Delegation to the Agent Plugin exporter is proven by the canonical
         # ``$schema`` in plugin.json (the legacy Claude exporter omits it).
         plugin_json = json.loads((result.bundle_path / "plugin.json").read_text())
         assert "$schema" in plugin_json
-        # Non-portable primitives (agents) are dropped; no private bridge dir.
+        # The portable producer never creates private or client-native roots.
         assert not (result.bundle_path / "com.microsoft.apm").exists()
         assert not (result.bundle_path / "agents").exists()
 

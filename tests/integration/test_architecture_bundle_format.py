@@ -184,6 +184,12 @@ def test_agent_plugin_guard_requires_admissibility_before_legacy_fallback(
             "member.write(path.read_bytes())",
             "Reproducible archives must stream file payloads without full-file buffering",
         ),
+        (
+            "src/apm_cli/bundle/agent_plugin_exporter.py",
+            "    _require_portable_agent_plugin(dropped_surfaces)\n",
+            "    # Portable-surface admission bypassed.\n",
+            "Agent Plugin portable-surface admission must fail before output projection",
+        ),
     ],
 )
 def test_producer_projection_guard_kills_contract_mutations(

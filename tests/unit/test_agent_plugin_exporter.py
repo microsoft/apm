@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator
 from apm_cli.agent_plugins import load_agent_plugin
 from apm_cli.bundle.agent_plugin_exporter import export_agent_plugin_bundle
 from apm_cli.bundle.packer import pack_bundle
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 _SCHEMA_DIR = Path(__file__).parent.parent / "fixtures" / "schemas"
 _PLUGIN_SCHEMA_PATH = _SCHEMA_DIR / "agent-plugins-v1.0.0-plugin.schema.json"
@@ -79,57 +80,52 @@ keywords: [alpha, beta]
                 "args": ["--ok"],
             }
         },
-        lsp_configs={
-            "pyright": {
-                "command": "pyright-langserver",
-                "extensionToLanguage": {".py": "python"},
-            }
-        },
     )
-    (root / ".apm" / "agents").mkdir(parents=True, exist_ok=True)
-    (root / ".apm" / "agents" / "agent.md").write_text("agent", encoding="utf-8")
     (root / ".apm" / "skills" / "demo").mkdir(parents=True, exist_ok=True)
     (root / ".apm" / "skills" / "demo" / "SKILL.md").write_text(
         "---\nname: demo\ndescription: Demo skill\n---\n\nUse the demo skill.\n",
         encoding="utf-8",
     )
-    (root / ".apm" / "commands").mkdir(parents=True, exist_ok=True)
-    (root / ".apm" / "commands" / "hello.md").write_text("command", encoding="utf-8")
-    (root / ".apm" / "instructions").mkdir(parents=True, exist_ok=True)
-    (root / ".apm" / "instructions" / "note.md").write_text("note", encoding="utf-8")
-    (root / ".apm" / "extensions").mkdir(parents=True, exist_ok=True)
-    (root / ".apm" / "extensions" / "ext.json").write_text("{}", encoding="utf-8")
-    (root / ".apm" / "hooks").mkdir(parents=True, exist_ok=True)
-    (root / ".apm" / "hooks" / "hooks.json").write_text(
-        json.dumps({"preCommit": [{"command": "lint"}]}),
-        encoding="utf-8",
-    )
-    (root / ".mcp.json").write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "safe": {"type": "stdio", "command": "tool", "args": ["--ok"]},
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    (root / ".lsp.json").write_text(
-        json.dumps(
-            {
-                "lspServers": {
-                    "raw-file-must-not-win": {
-                        "command": "untrusted",
-                        "extensionToLanguage": {".raw": "raw"},
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
     for name in ("README.md", "LICENSE", "CHANGELOG.md"):
         (root / name).write_text(name, encoding="utf-8")
     return root
+
+
+def _add_nonportable_components(root: Path, *, include_lsp: bool = True) -> None:
+    for directory, name, content in (
+        ("agents", "agent.md", "agent"),
+        ("commands", "hello.md", "command"),
+        ("instructions", "note.md", "note"),
+        ("extensions", "ext.json", "{}"),
+    ):
+        component_dir = root / ".apm" / directory
+        component_dir.mkdir(parents=True, exist_ok=True)
+        (component_dir / name).write_text(content, encoding="utf-8")
+    hooks_dir = root / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps({"preCommit": [{"command": "lint"}]}),
+        encoding="utf-8",
+    )
+    if include_lsp:
+        _write_lockfile(
+            root,
+            mcp_configs={
+                "safe": {
+                    "name": "safe",
+                    "transport": "stdio",
+                    "registry": False,
+                    "command": "tool",
+                    "args": ["--ok"],
+                }
+            },
+            lsp_configs={
+                "pyright": {
+                    "command": "pyright-langserver",
+                    "extensionToLanguage": {".py": "python"},
+                }
+            },
+        )
 
 
 def test_agent_bundle_writes_portable_core_and_valid_docs(tmp_path: Path) -> None:
@@ -164,19 +160,7 @@ def test_agent_bundle_writes_portable_core_and_valid_docs(tmp_path: Path) -> Non
     _validate(_MCP_SCHEMA_PATH, mcp_json)
     assert "extensions" not in plugin_json
     assert lockfile["pack"]["format"] == "agent-plugin"
-    dropped_warnings = [w for w in result.warnings if "non-portable primitives" in w]
-    assert dropped_warnings
-    # The single dropped-surface warning must name every non-portable primitive
-    # dropped from the portable core, including hooks (collected on a separate
-    # channel from skills/agents/commands/instructions/extensions) and lsp
-    # (resolved LSP server configs, carried on the lockfile channel).
-    assert all(
-        surface in dropped_warnings[0]
-        for surface in ("agents", "commands", "instructions", "extensions", "hooks", "lsp")
-    )
-    # LSP is not representable in any pack format, so the warning must not steer
-    # the operator to --claude-plugin as if it could carry the full set.
-    assert "no pack format carries it" in dropped_warnings[0]
+    assert result.warnings == []
     loaded = load_agent_plugin(bundle)
     assert loaded.identity.name == "agent-pack"
     assert loaded.identity.version == "1.2.3"
@@ -190,8 +174,51 @@ def test_agent_bundle_writes_portable_core_and_valid_docs(tmp_path: Path) -> Non
     assert loaded.apm_extension is None
 
 
-def test_agent_bundle_explicit_includes_warns_when_dropping_hooks(tmp_path: Path) -> None:
-    """An explicit includes list that lists a hook must warn that hooks drop."""
+def test_agent_bundle_rejects_nonportable_components_before_output_commit(
+    tmp_path: Path,
+) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    _add_nonportable_components(project)
+    build = tmp_path / "build"
+
+    with pytest.raises(ValueError) as exc_info:
+        export_agent_plugin_bundle(project, build)
+
+    message = str(exc_info.value)
+    assert all(
+        surface in message
+        for surface in ("agents", "commands", "instructions", "extensions", "hooks", "lsp")
+    )
+    assert "apm pack --format claude-plugin" in message
+    assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in message
+    assert not build.exists()
+
+
+def test_agent_bundle_rejects_dependency_nonportable_component(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    deployed_agent = project / ".github" / "agents" / "dependency.agent.md"
+    deployed_agent.parent.mkdir(parents=True)
+    deployed_agent.write_text("dependency agent", encoding="utf-8")
+    lockfile_path = project / "apm.lock.yaml"
+    lockfile = LockFile.read(lockfile_path)
+    assert lockfile is not None
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="example/dependency",
+            deployed_files=[deployed_agent.relative_to(project).as_posix()],
+        )
+    )
+    lockfile.write(lockfile_path)
+
+    with pytest.raises(ValueError) as exc_info:
+        export_agent_plugin_bundle(project, tmp_path / "build")
+
+    assert "agents" in str(exc_info.value)
+    assert not (tmp_path / "build").exists()
+
+
+def test_agent_bundle_explicit_empty_hook_include_is_rejected(tmp_path: Path) -> None:
+    """An explicitly included empty hook document must not disappear silently."""
     project = tmp_path / "project"
     project.mkdir(parents=True, exist_ok=True)
     project.joinpath("apm.yml").write_text(
@@ -207,22 +234,20 @@ def test_agent_bundle_explicit_includes_warns_when_dropping_hooks(tmp_path: Path
     )
     (project / ".apm" / "hooks").mkdir(parents=True, exist_ok=True)
     (project / ".apm" / "hooks" / "hooks.json").write_text(
-        json.dumps({"preCommit": [{"command": "lint"}]}),
+        "{}",
         encoding="utf-8",
     )
+    build = tmp_path / "build"
 
-    result = export_agent_plugin_bundle(project, tmp_path / "build")
+    with pytest.raises(ValueError) as exc_info:
+        export_agent_plugin_bundle(project, build)
 
-    assert not (result.bundle_path / "hooks").exists()
-    dropped_warnings = [w for w in result.warnings if "non-portable primitives" in w]
-    assert dropped_warnings
-    assert "hooks" in dropped_warnings[0]
-    loaded = load_agent_plugin(result.bundle_path)
-    assert [skill.directory_name for skill in loaded.components.skills] == ["demo"]
+    assert "hooks" in str(exc_info.value)
+    assert not build.exists()
 
 
-def test_agent_bundle_root_layout_hooks_are_surfaced_as_dropped(tmp_path: Path) -> None:
-    """Root-layout hooks (no includes, no .apm/) must enter the dropped warning."""
+def test_agent_bundle_root_layout_hooks_are_rejected(tmp_path: Path) -> None:
+    """Root-layout hooks (no includes, no .apm/) must fail portable packing."""
     project = tmp_path / "project"
     project.mkdir(parents=True, exist_ok=True)
     project.joinpath("apm.yml").write_text(
@@ -241,16 +266,16 @@ def test_agent_bundle_root_layout_hooks_are_surfaced_as_dropped(tmp_path: Path) 
         encoding="utf-8",
     )
 
-    result = export_agent_plugin_bundle(project, tmp_path / "build")
+    build = tmp_path / "build"
+    with pytest.raises(ValueError) as exc_info:
+        export_agent_plugin_bundle(project, build)
 
-    assert not (result.bundle_path / "hooks").exists()
-    dropped_warnings = [w for w in result.warnings if "non-portable primitives" in w]
-    assert dropped_warnings
-    assert "hooks" in dropped_warnings[0]
+    assert "hooks" in str(exc_info.value)
+    assert not build.exists()
 
 
-def test_agent_bundle_lsp_only_drop_does_not_steer_to_claude(tmp_path: Path) -> None:
-    """When only LSP configs drop, the warning must not imply --claude-plugin carries them."""
+def test_agent_bundle_lsp_only_failure_does_not_steer_to_claude(tmp_path: Path) -> None:
+    """When only LSP drops, the error must not imply Claude carries it."""
     project = tmp_path / "project"
     project.mkdir(parents=True, exist_ok=True)
     project.joinpath("apm.yml").write_text(
@@ -272,14 +297,30 @@ def test_agent_bundle_lsp_only_drop_does_not_steer_to_claude(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    result = export_agent_plugin_bundle(project, tmp_path / "build")
+    build = tmp_path / "build"
+    with pytest.raises(ValueError) as exc_info:
+        export_agent_plugin_bundle(project, build)
 
-    dropped_warnings = [w for w in result.warnings if "non-portable primitives" in w]
-    assert dropped_warnings
-    warning = dropped_warnings[0]
-    assert "lsp" in warning
-    assert "no pack format carries it" in warning
-    assert "--claude-plugin" not in warning
+    message = str(exc_info.value)
+    assert "lsp" in message
+    assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in message
+    assert "Use 'apm pack --format claude-plugin'" not in message
+    assert not build.exists()
+
+
+def test_agent_bundle_rejects_lsp_inventory_without_resolved_config(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    lockfile_path = project / "apm.lock.yaml"
+    lockfile = yaml.safe_load(lockfile_path.read_text(encoding="utf-8"))
+    lockfile["lsp_servers"] = ["pyright"]
+    lockfile["lsp_configs"] = {}
+    lockfile_path.write_text(yaml.safe_dump(lockfile), encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        export_agent_plugin_bundle(project, tmp_path / "build")
+
+    assert "lsp" in str(exc_info.value)
+    assert not (tmp_path / "build").exists()
 
 
 def test_agent_bundle_round_trip_accepts_symlinked_output_ancestor(tmp_path: Path) -> None:
@@ -308,8 +349,20 @@ def test_agent_bundle_dry_run_does_not_claim_default_flip_before_t10(
     assert not any("defaults to Agent Plugin output" in warning for warning in result.warnings)
 
 
+def test_agent_bundle_dry_run_rejects_nonportable_components(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    _add_nonportable_components(project, include_lsp=False)
+    build = tmp_path / "build"
+
+    with pytest.raises(ValueError, match="non-portable primitives would be discarded"):
+        export_agent_plugin_bundle(project, build, dry_run=True)
+
+    assert not build.exists()
+
+
 def test_public_packer_defaults_to_legacy_claude_plugin(tmp_path: Path) -> None:
     project = _write_agent_project(tmp_path / "project")
+    _add_nonportable_components(project)
 
     result = pack_bundle(project, tmp_path / "build")
 
@@ -496,6 +549,32 @@ def test_agent_bundle_loader_failure_preserves_existing_output(
     monkeypatch.setattr("apm_cli.bundle.agent_plugin_exporter.load_agent_plugin", _reject)
 
     with pytest.raises(ValueError, match="canonical loader rejected"):
+        export_agent_plugin_bundle(project, build, archive=archive)
+
+    if archive:
+        assert existing.read_bytes() == b"preserved-archive"
+    else:
+        assert (existing / "sentinel").read_text(encoding="utf-8") == "preserved"
+
+
+@pytest.mark.parametrize("archive", [False, True])
+def test_agent_bundle_nonportable_preflight_preserves_existing_output(
+    tmp_path: Path,
+    archive: bool,
+) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    _add_nonportable_components(project, include_lsp=False)
+    build = tmp_path / "build"
+    if archive:
+        existing = build / "agent-pack-1.2.3.zip"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        existing.write_bytes(b"preserved-archive")
+    else:
+        existing = build / "agent-pack-1.2.3"
+        existing.mkdir(parents=True)
+        (existing / "sentinel").write_text("preserved", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-portable primitives would be discarded"):
         export_agent_plugin_bundle(project, build, archive=archive)
 
     if archive:

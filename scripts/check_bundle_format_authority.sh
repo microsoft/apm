@@ -33,6 +33,35 @@ if [ -f "$agent_plugin_exporter" ] \
     echo "[x] Agent Plugin producer must not duplicate canonical loader validation"
     exit 1
 fi
+if [ -f "$agent_plugin_exporter" ]; then
+    portable_gate_line=$(
+        grep -n '^    _require_portable_agent_plugin(dropped_surfaces)$' \
+            "$agent_plugin_exporter" \
+            | cut -d: -f1 \
+            || true
+    )
+    dry_run_line=$(
+        grep -n '^    if dry_run:$' "$agent_plugin_exporter" \
+            | head -n 1 \
+            | cut -d: -f1 \
+            || true
+    )
+    output_mutation_line=$(
+        grep -n '^    output_dir.mkdir(' "$agent_plugin_exporter" \
+            | head -n 1 \
+            | cut -d: -f1 \
+            || true
+    )
+    if [ "$(grep -Ec '^def _require_portable_agent_plugin\(' "$agent_plugin_exporter")" -ne 1 ] \
+        || [ -z "$portable_gate_line" ] \
+        || [ -z "$dry_run_line" ] \
+        || [ -z "$output_mutation_line" ] \
+        || [ "$portable_gate_line" -ge "$dry_run_line" ] \
+        || [ "$portable_gate_line" -ge "$output_mutation_line" ]; then
+        echo "[x] Agent Plugin portable-surface admission must fail before output projection"
+        exit 1
+    fi
+fi
 
 reproducible_archive="$repo_root/src/apm_cli/bundle/reproducible_archive.py"
 if [ -f "$reproducible_archive" ] \

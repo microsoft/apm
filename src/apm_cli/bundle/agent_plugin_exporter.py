@@ -71,6 +71,31 @@ def _portable_components(
     return retained, dropped
 
 
+def _require_portable_agent_plugin(dropped_surfaces: set[str]) -> None:
+    """Reject an Agent Plugin projection that would discard source primitives."""
+    if not dropped_surfaces:
+        return
+
+    surfaces = ", ".join(sorted(dropped_surfaces))
+    message = (
+        "Cannot pack Agent Plugin: non-portable primitives would be discarded "
+        f"({surfaces}). Agent Plugins v1 portable components are limited to root "
+        "plugin.json, skills/, and root mcp.json."
+    )
+    legacy_surfaces = sorted(dropped_surfaces - {"lsp"})
+    if legacy_surfaces:
+        message += (
+            " Use 'apm pack --format claude-plugin' to preserve "
+            f"{', '.join(legacy_surfaces)} in the legacy Claude client format."
+        )
+    if "lsp" in dropped_surfaces:
+        message += (
+            " LSP configuration is carried by neither 'agent-plugin' nor "
+            "'claude-plugin'; configure LSP in the target client instead."
+        )
+    raise ValueError(message)
+
+
 def _apm_hooks_present(apm_dir: Path) -> bool:
     """Report whether ``.apm/hooks/`` carries a hook document.
 
@@ -364,12 +389,12 @@ def export_agent_plugin_bundle(
 
     own_apm_dir = project_root / ".apm"
     if isinstance(package.includes, list):
-        own_components, root_hooks = _collect_explicit_local_components(
+        own_components, _root_hooks, root_hooks_present = _collect_explicit_local_components(
             project_root, package.includes
         )
         own_components, own_dropped = _portable_components(own_components)
         dropped_surfaces |= own_dropped
-        if root_hooks:
+        if root_hooks_present:
             dropped_surfaces.add("hooks")
     else:
         own_components, own_dropped = _portable_components(_collect_apm_components(own_apm_dir))
@@ -392,29 +417,10 @@ def export_agent_plugin_bundle(
 
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
 
-    if lockfile.lsp_configs:
+    if lockfile.lsp_servers or lockfile.lsp_configs:
         dropped_surfaces.add("lsp")
 
-    if dropped_surfaces:
-        claude_carriable = dropped_surfaces - {"lsp"}
-        _dropped = (
-            "Skipping non-portable primitives not representable by Agent Plugins v1 "
-            f"({', '.join(sorted(dropped_surfaces))}); only root skills/ and mcp.json are "
-            "packed."
-        )
-        if claude_carriable:
-            remainder = "the remaining primitives" if "lsp" in dropped_surfaces else "them"
-            _dropped += f" Use 'apm pack --claude-plugin' to carry {remainder}."
-        if "lsp" in dropped_surfaces:
-            _dropped += (
-                " LSP server configuration is not representable in either Agent Plugins v1 "
-                "or the Claude plugin bundle; no pack format carries it."
-            )
-        warnings.append(_dropped)
-        if logger:
-            logger.warning(_dropped)
-        else:
-            _rich_warning(_dropped, symbol="warning")
+    _require_portable_agent_plugin(dropped_surfaces)
 
     for msg in collisions:
         if logger:
