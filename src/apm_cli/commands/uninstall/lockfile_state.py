@@ -59,7 +59,7 @@ def reconcile_uninstall_deployment_state(
         DeploymentIntent(
             active_targets=frozenset(),
             declared_targets=None,
-            desired_owners=frozenset({".", *lockfile.dependencies}),
+            desired_owners=DeploymentLedgerCodec.valid_owner_keys(lockfile),
             authoritative_targets=False,
         ),
     )

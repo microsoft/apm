@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from apm_cli.commands.uninstall.lockfile_state import reconcile_uninstall_deployment_state
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import (
     DeploymentLedger,
@@ -32,6 +34,7 @@ from apm_cli.install.agent_plugin_state import (
     remove_installed_plugin_root,
     resolve_installed_plugin_record_roots,
 )
+from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.models.validation import validate_apm_package
 
 GIT_SHA = "a" * 40
@@ -219,6 +222,123 @@ def test_lockfile_round_trip_is_strict_and_preserves_legacy_entries() -> None:
 
     with pytest.raises(LockfileFormatError, match="installed_plugins must be a list"):
         LockFile.from_yaml("lockfile_version: '1'\ndependencies: []\ninstalled_plugins:\n")
+
+
+def _lockfile_with_opaque_plugin_rows() -> tuple[LockFile, set[str]]:
+    plugin = _record("stable-plugin")
+    path_row = _owned_record(plugin.owner_key, "plugin.md", "sha256:plugin")
+    mcp_locator = DeploymentLocator(LocatorKind.URI, "mcp", "plugin-server", "vscode", "project")
+    mcp_row = DeploymentRecord(mcp_locator, (plugin.owner_key,), plugin.owner_key, None)
+    lockfile = LockFile(
+        installed_plugins={plugin.identity: plugin},
+        dependencies={"owner/dependency": LockedDependency(repo_url="owner/dependency")},
+        local_deployed_files=["local.md"],
+        local_deployed_file_hashes={"local.md": "sha256:local"},
+        deployment_ledger=DeploymentLedger(
+            {path_row.locator.key: path_row, mcp_locator.key: mcp_row}
+        ),
+        _deployments_present=True,
+    )
+    return lockfile, {path_row.locator.key, mcp_locator.key}
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "legacy-rebuild",
+        "add-dependency",
+        "rename-local",
+        "mcp-reconcile",
+        "unrelated-install",
+        "unrelated-uninstall",
+        "round-trip",
+    ],
+)
+def test_opaque_plugin_rows_survive_generic_lockfile_paths(
+    operation: str,
+    tmp_path: Path,
+) -> None:
+    lockfile, opaque_keys = _lockfile_with_opaque_plugin_rows()
+
+    if operation == "legacy-rebuild":
+        DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+    elif operation == "add-dependency":
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/unrelated",
+                deployed_files=[".github/agents/unrelated.agent.md"],
+            )
+        )
+    elif operation == "rename-local":
+        lockfile.rename_local_deployed_path("local.md", "renamed.md")
+    elif operation == "mcp-reconcile":
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"vscode": ["legacy-server"]},
+        )
+    elif operation == "unrelated-install":
+        new = LockFile()
+        new.add_dependency(LockedDependency(repo_url="owner/unrelated"))
+        LockfileBuilder(
+            SimpleNamespace(
+                package_deployed_files={},
+                existing_lockfile=lockfile,
+                targets=[],
+                project_root=tmp_path,
+            )
+        )._attach_deployed_files(new)
+        lockfile = new
+    elif operation == "unrelated-uninstall":
+        stale = _owned_record("removed", ".github/agents/stale.agent.md", "sha256:stale")
+        lockfile.deployment_ledger = DeploymentLedger(
+            records={**lockfile.deployment_ledger.records, stale.locator.key: stale}
+        )
+        reconcile_uninstall_deployment_state(
+            lockfile,
+            deploy_root=tmp_path,
+            all_deployed_files=set(),
+            surviving_deployed_files={},
+        )
+    else:
+        lockfile = LockFile.from_yaml(lockfile.to_yaml())
+
+    assert opaque_keys <= set(lockfile.deployment_ledger.records)
+    assert "plugin.md" not in {*lockfile.local_deployed_files, *lockfile.local_deployed_file_hashes}
+    assert all(
+        "plugin.md" not in {*dep.deployed_files, *dep.deployed_file_hashes}
+        for dep in lockfile.dependencies.values()
+    )
+    assert "plugin-server" not in lockfile.mcp_target_servers.get("vscode", [])
+
+
+def test_opaque_carry_forward_requires_every_owner_to_be_valid() -> None:
+    lockfile, opaque_keys = _lockfile_with_opaque_plugin_rows()
+    valid = next(iter(lockfile.installed_plugins.values())).owner_key
+    mixed = _owned_record(valid, "mixed.md", "sha256:mixed")
+    mixed = DeploymentRecord(
+        locator=mixed.locator,
+        owners=(valid, "owner/dependency"),
+        active_owner=valid,
+        content_hash=mixed.content_hash,
+    )
+    dangling = _owned_record("agent-plugin:dangling", "dangling.md", "sha256:dangling")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            **lockfile.deployment_ledger.records,
+            mixed.locator.key: mixed,
+            dangling.locator.key: dangling,
+        }
+    )
+    DeploymentLedgerCodec.apply_to_lockfile(lockfile.deployment_ledger, lockfile)
+    assert lockfile.dependencies["owner/dependency"].deployed_files.pop() == "mixed.md"
+
+    DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+
+    assert mixed.locator.key not in lockfile.deployment_ledger.records
+    assert dangling.locator.key not in lockfile.deployment_ledger.records
+    lockfile.replace_installed_plugins({})
+    DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+    assert opaque_keys.isdisjoint(lockfile.deployment_ledger.records)
 
 
 def test_replace_only_ledger_transition_removes_stale_plugin_facts() -> None:

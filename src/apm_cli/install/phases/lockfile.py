@@ -212,15 +212,15 @@ class LockfileBuilder:
         committed lockfile and they stay covered by the audit gates (issue
         #1716). See :mod:`apm_cli.install.manifest_reconcile`.
         """
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block
         from apm_cli.install.phases.targets import declared_target_profiles
 
         existing = self.ctx.existing_lockfile
         prior_ledger = None
         if existing is not None:
-            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
             prior_ledger = DeploymentLedgerCodec.from_lockfile(existing)
+            lockfile.replace_installed_plugins(existing.installed_plugins)
         prior_files_by_package: dict[str, list[str]] = {}
         prior_hashes_by_package: dict[str, dict[str, str]] = {}
         for dep_key in lockfile.dependencies:
@@ -303,8 +303,15 @@ class LockfileBuilder:
                 # _merge_existing path can preserve it intact.
                 continue
             canonical_records.update(ledger.records)
-            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
+        if prior_ledger is not None:
+            canonical_records = dict(
+                DeploymentLedgerCodec.carry_forward_opaque_records(
+                    lockfile,
+                    prior_ledger,
+                    DeploymentLedger(records=canonical_records),
+                ).records
+            )
+        if canonical_records:
             DeploymentLedgerCodec.apply_to_lockfile(
                 DeploymentLedger(records=canonical_records),
                 lockfile,
