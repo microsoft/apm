@@ -1927,18 +1927,6 @@ def _load_diagnostic_ascii_owner_checker(root: Path) -> ModuleType:
     return module
 
 
-def _load_agent_plugin_exec_trust_checker(root: Path) -> ModuleType:
-    """Import the canonical Agent Plugin executable-trust checker."""
-    module_name = "check_agent_plugin_exec_trust_owner"
-    script_path = root / "scripts" / f"{module_name}.py"
-    spec = importlib.util.spec_from_file_location(module_name, script_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
     """The canonical manifest target list must control bundle packing."""
     from apm_cli.bundle.packer import pack_bundle
@@ -2707,17 +2695,6 @@ def test_agent_diagnostic_names_have_one_printable_ascii_owner() -> None:
     assert "check_diagnostic_ascii_owner.py" in guard
     assert "Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text" in guard
     assert checker.check(root) == []
-
-
-def test_agent_plugin_executable_trust_has_one_canonical_owner() -> None:
-    """Component trust assembly and decisions must stay behind exec_gate."""
-    root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
-    checker = _load_agent_plugin_exec_trust_checker(root)
-
-    assert "AC34: Agent Plugin executable-trust authority" in guard
-    assert "check_agent_plugin_exec_trust_owner.py" in guard
-    assert checker.check_root(root) == []
 
 
 def test_agent_diagnostic_ascii_guard_rejects_local_reimplementation(

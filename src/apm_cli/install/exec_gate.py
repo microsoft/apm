@@ -12,13 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from apm_cli.agent_plugins.ir import AgentPlugin
     from apm_cli.install.context import InstallContext
-    from apm_cli.security.executables import (
-        AgentPluginExecTrustEvaluation,
-        ExecSourceFacts,
-        ExecTrustContext,
-    )
 
 
 def check_executable_approval(
@@ -143,50 +137,6 @@ def resolve_package_key(package_info: Any, package_name: str) -> str:
         return build_approval_key(name, version)
 
     return package_name
-
-
-def evaluate_agent_plugin_executable_trust(
-    plugin: AgentPlugin,
-    *,
-    trust_context: ExecTrustContext,
-    source_facts: ExecSourceFacts,
-    explicit_consent: bool = False,
-) -> AgentPluginExecTrustEvaluation:
-    """Return side-effect-free component trust results for transaction wiring.
-
-    This is the later integration seam: it inventories only canonical Agent
-    Plugin IR facts, assembles every decision input through the security owner,
-    and performs no config, target, lockfile, or ledger mutation.
-    """
-    from apm_cli.security.executables import (
-        AgentPluginExecTrustEvaluation,
-        assemble_agent_plugin_exec_trust_context,
-        inventory_agent_plugin_executables,
-        resolve_agent_plugin_exec_decision,
-    )
-
-    inventory = inventory_agent_plugin_executables(plugin)
-    results = tuple(
-        resolve_agent_plugin_exec_decision(
-            assemble_agent_plugin_exec_trust_context(
-                trust_context,
-                plugin=plugin,
-                component=component,
-                source=source_facts,
-                explicit_consent=explicit_consent,
-            )
-        )
-        for component in inventory.components
-    )
-    failures = (
-        *inventory.failures,
-        *(result.failure for result in results if result.failure is not None),
-    )
-    return AgentPluginExecTrustEvaluation(
-        inventory=inventory,
-        results=results,
-        failures=failures,
-    )
 
 
 def log_bin_status(

@@ -1591,17 +1591,6 @@ if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
     violations=$((violations + 1))
 fi
 
-echo "[*] AC34: Agent Plugin executable-trust authority"
-agent_plugin_exec_trust_output=$(
-    python3 scripts/check_agent_plugin_exec_trust_owner.py --root "$ROOT" 2>&1
-)
-agent_plugin_exec_trust_status=$?
-if [ "$agent_plugin_exec_trust_status" -ne 0 ]; then
-    echo "[x] Agent Plugin executable trust must use one canonical component context"
-    echo "$agent_plugin_exec_trust_output"
-    violations=$((violations + 1))
-fi
-
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1
