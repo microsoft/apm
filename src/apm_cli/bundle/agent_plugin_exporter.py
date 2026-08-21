@@ -59,7 +59,7 @@ def _portable_components(
     Portable Agent Plugins v1 carries only root ``skills/``; every other
     collected top-level directory is a non-portable primitive that the
     portable core cannot represent. Return the retained skill components and
-    the set of dropped top-level directory names for a single surfaced warning.
+    the set of rejected top-level directory names for fail-closed admission.
     """
     retained: list[tuple[Path, str]] = []
     dropped: set[str] = set()
@@ -101,7 +101,7 @@ def _apm_hooks_present(apm_dir: Path) -> bool:
 
     Hooks are not representable by the portable Agent Plugins v1 core and are
     collected on a separate channel from :func:`_portable_components`, so this
-    probe lets the caller fold ``hooks`` into the single dropped-surface warning
+    probe lets the caller fold ``hooks`` into fail-closed portable admission
     without opening or parsing the files.
     """
     hooks_dir = apm_dir / "hooks"
@@ -120,7 +120,7 @@ def _root_hooks_present(project_root: Path) -> bool:
     ``.apm/``) carry hooks as a root ``hooks.json`` file or ``hooks/`` directory.
     :func:`_collect_root_plugin_components` deliberately skips hooks, so this
     bounded existence probe -- mirroring ``_collect_hooks_from_root`` discovery
-    -- lets the caller fold ``hooks`` into the single dropped-surface warning
+    -- lets the caller fold ``hooks`` into fail-closed portable admission
     without opening or parsing the files.
     """
     hooks_file = project_root / "hooks.json"
@@ -412,7 +412,12 @@ def export_agent_plugin_bundle(
             if _root_hooks_present(project_root):
                 dropped_surfaces.add("hooks")
 
-    if not isinstance(package.includes, list) and own_apm_dir.is_dir() and not own_components:
+    if (
+        not isinstance(package.includes, list)
+        and own_apm_dir.is_dir()
+        and not own_components
+        and not _apm_hooks_present(own_apm_dir)
+    ):
         _warn_no_local_primitives(logger)
 
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)

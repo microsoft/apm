@@ -246,6 +246,36 @@ def test_agent_bundle_explicit_empty_hook_include_is_rejected(tmp_path: Path) ->
     assert not build.exists()
 
 
+def test_agent_bundle_hooks_only_failure_has_no_missing_primitives_warning(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir(parents=True)
+    project.joinpath("apm.yml").write_text(
+        "name: agent-pack\nversion: 1.2.3\ndescription: Hooks-only failure test\n",
+        encoding="utf-8",
+    )
+    _write_lockfile(project)
+    hooks_dir = project / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    hooks_dir.joinpath("hooks.json").write_text(
+        json.dumps({"preCommit": [{"command": "lint"}]}),
+        encoding="utf-8",
+    )
+    warnings: list[str] = []
+
+    class _Logger:
+        def warning(self, message: str) -> None:
+            warnings.append(message)
+
+    with pytest.raises(ValueError) as exc_info:
+        export_agent_plugin_bundle(project, tmp_path / "build", logger=_Logger())
+
+    assert "hooks" in str(exc_info.value)
+    assert not any("No local primitives found" in warning for warning in warnings)
+    assert not (tmp_path / "build").exists()
+
+
 def test_agent_bundle_root_layout_hooks_are_rejected(tmp_path: Path) -> None:
     """Root-layout hooks (no includes, no .apm/) must fail portable packing."""
     project = tmp_path / "project"
