@@ -30,8 +30,9 @@ and can delay the operation until they finish or their timeout elapses.
 Scripts are defined in three tiers. The **project tier** uses the repository `apm.yml`
 manifest under a top-level `lifecycle:` key. The **user tier** uses
 `~/.apm/apm.yml` (or `$APM_HOME/apm.yml`) under the same `lifecycle:` key.
-The **admin** tier remains `/etc/apm/policy.d/*.json`, suited for machine-
-and fleet-managed deployment.
+The **admin** tier uses `/etc/apm/policy.d/*.json` on Linux/macOS and
+`C:\ProgramData\APM\policy.d\*.json` on Windows, suited for machine- and
+fleet-managed deployment.
 
 ## Supported events
 
@@ -48,8 +49,8 @@ and fleet-managed deployment.
 
 Project and user manifests embed lifecycle scripts under a top-level
 `lifecycle:` key in `apm.yml`. The admin tier keeps the versioned JSON
-`{version: 1, scripts: {...}}` wrapper in `/etc/apm/policy.d/*.json`. All
-entries share the same field names and `type` discriminator.
+`{version: 1, scripts: {...}}` wrapper in the platform-specific policy
+directory. All entries share the same field names and `type` discriminator.
 
 Each entry declares its kind via `type: command` (shell subprocess) or
 `type: http` (HTTPS webhook). An optional `description` field documents
@@ -165,7 +166,7 @@ every script from every file runs. Policy scripts cannot be disabled.
 
 | Priority     | Path                        | Who controls     | Format |
 |--------------|-----------------------------|------------------|--------|
-| 1 (highest)  | `/etc/apm/policy.d/*.json`  | Platform/IT team | JSON   |
+| 1 (highest)  | Linux/macOS: `/etc/apm/policy.d/*.json`<br>Windows: `C:\ProgramData\APM\policy.d\*.json` | Platform/IT team | JSON   |
 | 2            | `~/.apm/apm.yml`            | Individual user  | YAML   |
 | 3            | `apm.yml` `lifecycle:`      | Project          | YAML   |
 
@@ -195,9 +196,10 @@ POST body.
 
 Lifecycle scripts from different sources are subject to different trust rules:
 
-- **Policy scripts** (`/etc/apm/policy.d/*.json`) -- controlled by your
-  platform/IT team. Run without any consent gate; they cannot be disabled
-  by the developer.
+- **Policy scripts** (`/etc/apm/policy.d/*.json` on Linux/macOS or
+  `C:\ProgramData\APM\policy.d\*.json` on Windows) -- controlled by your
+  platform/IT team. Run without any consent gate; they cannot be disabled by
+  the developer.
 - **User scripts** (`~/.apm/apm.yml`) -- controlled by the developer.
   Run without a gate.
 - **Project scripts** (`apm.yml` `lifecycle:`) -- committed into the repo and
@@ -226,7 +228,8 @@ The canonical use case for lifecycle scripts is installation analytics.
 An enterprise platform team can deploy an org-wide webhook via the
 policy directory to track which packages are actively used:
 
-Create `/etc/apm/policy.d/analytics.json`:
+On Linux/macOS, create `/etc/apm/policy.d/analytics.json`; on Windows,
+create `C:\ProgramData\APM\policy.d\analytics.json`:
 
 ```json
 {
