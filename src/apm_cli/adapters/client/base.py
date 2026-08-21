@@ -367,11 +367,6 @@ class MCPClientAdapter(ABC):
             return self._project_root
         return Path(os.getcwd())
 
-    @property
-    def supports_runtime_env_substitution(self) -> bool:
-        """Return whether the client safely persists runtime env references."""
-        return self._supports_runtime_env_substitution
-
     def render_server_config(self, server_info: dict) -> dict:
         """Render one native server entry for exact baseline comparisons."""
         rendered = self._format_server_config(

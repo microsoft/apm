@@ -18,6 +18,6 @@ Layout:
     writer.py       Idempotent ``apm.yml`` MCP entry persistence
 """
 
-from .integration import prepare_attached_agent_plugin_mcp, run_mcp_integration
+from .integration import run_mcp_integration
 
-__all__ = ["prepare_attached_agent_plugin_mcp", "run_mcp_integration"]
+__all__ = ["run_mcp_integration"]

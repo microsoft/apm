@@ -12,9 +12,9 @@ I/O (proven by the air-gap E2E test).
 
 Legacy MCP wiring (#1207): Claude bundles MAY ship a ``.mcp.json`` describing
 MCP servers. After the per-target deploy loop, the handler routes those entries
-through :func:`MCPIntegrator.install`. Native Agent Plugins never enter this
-parser or writer; their canonical IR routes through the native MCP preparation
-boundary. The bundle's ``.mcp.json`` itself is metadata and is never deployed.
+through :func:`MCPIntegrator.install`. Native Agent Plugins fail before this
+legacy parser or writer. The bundle's ``.mcp.json`` itself is metadata and is
+never deployed.
 """
 
 from __future__ import annotations
@@ -284,7 +284,7 @@ def install_local_bundle(
             )
         ]
         # Issue #1207 D2.c: legacy Claude bundle MCP metadata is routed through
-        # MCPIntegrator.install. Native Agent Plugins use prepared IR instead.
+        # MCPIntegrator.install. Native Agent Plugins fail at the deployment boundary.
         bundle_mcp_present = bool(bundle_mcp_deps)
 
         if dry_run:
@@ -607,7 +607,7 @@ def _require_legacy_bundle_mcp_format(bundle_format: str) -> None:
         from apm_cli.agent_plugins.errors import AgentPluginLegacyBoundaryError
 
         raise AgentPluginLegacyBoundaryError(
-            "Native Agent Plugin MCP must route through canonical IR preparation"
+            "Native Agent Plugin MCP must not enter legacy MCP integration"
         )
     if bundle_format != BundleFormat.CLAUDE_PLUGIN.value:
         raise ValueError("Legacy MCP helpers require a Claude plugin bundle format")
