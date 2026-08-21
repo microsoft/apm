@@ -46,6 +46,7 @@ import time
 from functools import wraps
 from typing import TYPE_CHECKING
 
+from ..agent_plugins.errors import AgentPluginError
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -962,6 +963,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return _run_phase("finalize", _finalize_phase, ctx)
 
+    except AgentPluginError:
+        # Preserve schema-routing and native-boundary diagnostics verbatim.
+        raise
     except AuthenticationError:
         # #1015: surface auth failures cleanly to the user. Same
         # pattern as PolicyViolationError -- re-raise so the typed

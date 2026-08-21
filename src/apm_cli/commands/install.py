@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
+from apm_cli.agent_plugins.errors import (
+    AgentPluginError,
+    enforce_agent_plugin_deployment_boundary,
+)
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
@@ -1099,7 +1102,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.pass_context
-def install(  # noqa: PLR0913
+def install(  # noqa: C901, PLR0913
     ctx,
     packages,
     runtime,
@@ -1222,21 +1225,21 @@ def install(  # noqa: PLR0913
             legacy_skill_paths = should_use_legacy_skill_paths()
 
         # ----------------------------------------------------------------
-        # Local-bundle early-exit (issue #1098).  When the sole positional
-        # argument is a filesystem path that detect_local_bundle() recognises
-        # as an APM-pack bundle, we skip the dependency-resolution pipeline
-        # entirely and deploy the bundle's files directly.  Local bundles
-        # are imperative deploys -- they do NOT mutate apm.yml.
+        # Local bundles bypass dependency resolution and do not mutate apm.yml.
         # ----------------------------------------------------------------
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
-            from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
             try:
                 _bundle_info = _detect_lb(_probe)
+            except AgentPluginError:
+                raise
             except ValueError as exc:
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
+                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)
+                from ..install.local_bundle_handler import install_local_bundle as _install_lb
+
                 # allowExecutables for bundle install gate.
                 from ..security.executables import read_bundle_allow_executables as _rbae
 
@@ -1575,7 +1578,7 @@ def install(  # noqa: PLR0913
                     symbol="info",
                 )
 
-    except AgentPluginDeploymentBoundaryError as e:
+    except AgentPluginError as e:
         logger.error(str(e))
         command_result = (
             transaction.fail(e)
@@ -1756,10 +1759,8 @@ def _install_apm_packages(ctx, outcome):
     if ctx.dry_run:
         from apm_cli.install.template import preflight_agent_plugin_dry_run
 
-        if should_install_apm and not preflight_agent_plugin_dry_run(ctx, all_apm_deps):
-            ctx.install_result = InstallResult(diagnostics=ctx.logger.diagnostics)
-            ctx.install_result.disposition = InstallDisposition.FAILED
-            return 0, 0, 0, ctx.logger.diagnostics
+        if should_install_apm:
+            preflight_agent_plugin_dry_run(ctx, all_apm_deps)
         # -- W2-dry-run (#827): policy preflight in preview mode --
         # Runs discovery + checks against direct manifest deps, not transitives.
         # Block-severity violations render as "Would be blocked by

@@ -10,13 +10,11 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import DependencyReference, PackageInfo
 
 _AGENT_PLUGIN_RECOVERY = (
-    "Package authors: use 'apm plugin init --claude-plugin' and "
-    "'apm pack --claude-plugin' for explicit legacy compatibility. "
-    "Consumers: ask the publisher for a legacy-compatible package."
+    "Use 'apm pack --claude-plugin' or ask the publisher for a legacy-compatible package."
 )
 AGENT_PLUGIN_DEPLOYMENT_BLOCKED = (
-    "Native Agent Plugin components are not enabled yet, so deployment was blocked. "
-    + _AGENT_PLUGIN_RECOVERY
+    "Agent Plugins v1.0.0 deployment is blocked because no native harness "
+    "is binary-qualified. " + _AGENT_PLUGIN_RECOVERY
 )
 AGENT_PLUGIN_IR_MISSING = (
     "Native Agent Plugin canonical IR is missing, so deployment was blocked. "

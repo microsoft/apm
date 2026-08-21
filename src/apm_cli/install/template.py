@@ -25,9 +25,7 @@ from apm_cli.install.services import (
     integrate_package_primitives,
 )
 from apm_cli.install.sources import (
-    CachedDependencySource,
     DependencySource,
-    LocalDependencySource,
     Materialization,
 )
 
@@ -129,32 +127,21 @@ def prepare_integration_materialization(
 
 def preflight_agent_plugin_materializations(
     prepared: list[tuple[DependencySource, Materialization]],
-) -> bool:
-    """Record native deployment failures before the batch mutates any target."""
-    blocked = False
-    for source, materialization in prepared:
-        try:
-            enforce_agent_plugin_deployment_boundary(materialization.package_info)
-        except AgentPluginDeploymentBoundaryError as exc:
-            _record_agent_plugin_boundary_failure(source, materialization, exc)
-            blocked = True
-    return not blocked
+) -> None:
+    """Reject the batch once, before any package can mutate a target."""
+    for _, materialization in prepared:
+        enforce_agent_plugin_deployment_boundary(materialization.package_info)
 
 
-def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> bool:
-    """Collect native boundary failures for a non-materializing plan."""
+def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> None:
+    """Reject a cached or local native package without mutating its source."""
+    from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.core.scope import get_modules_dir
     from apm_cli.models.apm_package import PackageInfo
-    from apm_cli.models.validation import (
-        PackageType,
-        detect_package_type,
-        validate_apm_package,
-    )
+    from apm_cli.models.validation import validate_apm_package
 
     source_root = ctx.project_root
     modules_dir = get_modules_dir(ctx.scope)
-    diagnostics = ctx.logger.diagnostics
-    blocked = False
     for dependency in dependencies:
         if dependency.is_local and dependency.local_path:
             package_path = Path(dependency.local_path).expanduser()
@@ -162,42 +149,31 @@ def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> b
                 package_path = (source_root / package_path).resolve()
         else:
             package_path = dependency.get_install_path(modules_dir)
-        package_type, _ = detect_package_type(package_path)
-        if package_type is not PackageType.AGENT_PLUGIN:
+        if not package_path.is_dir():
+            continue
+        detection = route_agent_plugin_package(package_path)
+        if detection is None:
             continue
         if dependency.is_local:
-            validation = validate_apm_package(package_path, source_path=package_path)
+            validation = validate_apm_package(
+                package_path,
+                source_path=package_path,
+                agent_plugin_detection=detection,
+            )
         else:
-            validation = validate_apm_package(package_path)
+            validation = validate_apm_package(
+                package_path,
+                agent_plugin_detection=detection,
+            )
         if validation.is_valid and validation.package is not None:
-            try:
-                enforce_agent_plugin_deployment_boundary(
-                    PackageInfo(
-                        package=validation.package,
-                        install_path=package_path,
-                        dependency_ref=dependency,
-                        package_type=validation.package_type,
-                    )
+            enforce_agent_plugin_deployment_boundary(
+                PackageInfo(
+                    package=validation.package,
+                    install_path=package_path,
+                    dependency_ref=dependency,
+                    package_type=validation.package_type,
                 )
-            except AgentPluginDeploymentBoundaryError as exc:
-                package_key = (
-                    dependency.local_path
-                    if dependency.is_local and dependency.local_path
-                    else dependency.get_unique_key()
-                )
-                prefix = (
-                    LocalDependencySource.INTEGRATE_ERROR_PREFIX
-                    if dependency.is_local
-                    else CachedDependencySource.INTEGRATE_ERROR_PREFIX
-                )
-                _record_agent_plugin_boundary_diagnostic(
-                    diagnostics,
-                    package_key=package_key,
-                    prefix=prefix,
-                    error=exc,
-                )
-                blocked = True
-    return not blocked
+            )
 
 
 def _record_agent_plugin_boundary_diagnostic(

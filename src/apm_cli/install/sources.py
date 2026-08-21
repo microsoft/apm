@@ -177,7 +177,7 @@ class LocalDependencySource(DependencySource):
 
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
-        from apm_cli.agent_plugins.loader import detect_agent_plugin
+        from apm_cli.bundle.local_bundle import route_agent_plugin_package
         from apm_cli.core.scope import InstallScope
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.install.phases.local_content import _copy_local_package
@@ -232,7 +232,9 @@ class LocalDependencySource(DependencySource):
             original_src = original_src.resolve()
 
         try:
-            native_detection = detect_agent_plugin(original_src) if original_src.is_dir() else None
+            native_detection = (
+                route_agent_plugin_package(original_src) if original_src.is_dir() else None
+            )
         except AgentPluginError as exc:
             raise DirectDependencyError(f"Local Agent Plugin is invalid: {exc}") from exc
         if native_detection is not None:
@@ -401,7 +403,7 @@ class CachedDependencySource(DependencySource):
 
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
-        from apm_cli.agent_plugins.loader import detect_agent_plugin
+        from apm_cli.bundle.local_bundle import route_agent_plugin_package
         from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.models.apm_package import (
@@ -459,7 +461,7 @@ class CachedDependencySource(DependencySource):
 
         native_validation = None
         try:
-            native_detection = detect_agent_plugin(install_path)
+            native_detection = route_agent_plugin_package(install_path)
         except AgentPluginError as exc:
             raise DirectDependencyError(f"Cached Agent Plugin is invalid: {exc}") from exc
         if native_detection is not None:
@@ -478,7 +480,7 @@ class CachedDependencySource(DependencySource):
         # package_info=None.
         # In lockfile_only mode, skip this early return so installed_packages
         # is populated before we return without deploying any files.
-        if not ctx.targets and not ctx.lockfile_only:
+        if not ctx.targets and not ctx.lockfile_only and native_validation is None:
             return Materialization(
                 package_info=None,
                 install_path=install_path,
@@ -603,7 +605,7 @@ class CachedDependencySource(DependencySource):
         _record_declared_license(ctx, dep_key, install_path)
 
         # Return without deploying integration files when the target set is empty.
-        if not ctx.targets:
+        if not ctx.targets and native_validation is None:
             return Materialization(
                 package_info=None,
                 install_path=install_path,
@@ -883,8 +885,14 @@ class FreshDependencySource(DependencySource):
                 if _type_label and logger:
                     logger.package_type_info(_type_label)
 
-            # If no targets, skip integration but keep deltas
-            if not ctx.targets:
+            from apm_cli.models.validation import PackageType
+
+            # Native metadata must survive even with no targets so the
+            # unconditional deployment boundary cannot be bypassed.
+            if (
+                not ctx.targets
+                and getattr(package_info, "package_type", None) is not PackageType.AGENT_PLUGIN
+            ):
                 return Materialization(
                     package_info=None,
                     install_path=install_path,

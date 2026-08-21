@@ -183,7 +183,7 @@ def test_services_gate_precedes_all_target_and_integrator_mutation(
 
     with pytest.raises(
         AgentPluginDeploymentBoundaryError,
-        match="Native Agent Plugin components are not enabled yet",
+        match=r"no native harness is binary-qualified",
     ):
         integrate_package_primitives(
             package_info,
@@ -349,9 +349,7 @@ def test_every_materialization_shape_fails_without_committing_state(
     assert deltas["installed"] == 0
     assert ctx.package_deployed_files == {f"blocked/{shape}": []}
     assert diagnostics.error_count == 1
-    assert (
-        "Native Agent Plugin components are not enabled yet" in diagnostics._diagnostics[0].message
-    )
+    assert "no native harness is binary-qualified" in diagnostics._diagnostics[0].message
     result = finalize_install_result(
         InstallResult(installed_count=deltas["installed"], diagnostics=diagnostics),
         force=True,
@@ -483,14 +481,13 @@ def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
     assert native_integrator_calls == []
     output = " ".join(result.output.split())
     assert "Installed 1 APM" not in output
-    assert "Native Agent Plugin components are not enabled yet" in output
-    assert "apm plugin init --claude-plugin" in output
+    assert "no native harness is binary-qualified" in output
     assert "apm pack --claude-plugin" in output
     assert "ask the publisher for a legacy-compatible package" in output
 
 
 @pytest.mark.parametrize("include_ordinary", (False, True))
-def test_dry_run_collects_every_native_failure_with_real_install_parity(
+def test_dry_run_renders_one_native_failure_with_real_install_parity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     include_ordinary: bool,
@@ -559,22 +556,17 @@ def test_dry_run_collects_every_native_failure_with_real_install_parity(
         for source, snapshot in source_snapshots.items():
             assert _tree_snapshot(source) == snapshot
         output = " ".join(result.output.split())
-        assert "2 packages failed" in output
-        assert "Run with --verbose" not in output
         assert "Install complete" not in output
         assert "Dry run complete" not in output
-        for source in native_sources:
-            assert source.name in output
         outputs[mode] = output
 
     assert native_integrator_calls == []
     for phrase in (
-        "Native Agent Plugin components are not enabled yet",
-        "apm plugin init --claude-plugin",
+        "no native harness is binary-qualified",
         "apm pack --claude-plugin",
         "ask the publisher for a legacy-compatible package",
     ):
-        assert outputs["real"].count(phrase) == outputs["dry-run"].count(phrase) == 2
+        assert outputs["real"].count(phrase) == outputs["dry-run"].count(phrase) == 1
 
 
 def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(
@@ -607,7 +599,7 @@ def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(
 
     assert result.exit_code == 0, result.output
     assert _tree_snapshot(project) == before
-    assert "Native Agent Plugin components are not enabled yet" not in result.output
+    assert "no native harness is binary-qualified" not in result.output
 
 
 def test_dry_run_native_detection_does_not_normalize_legacy_plugin_source(
@@ -778,7 +770,7 @@ def test_uninstall_cli_blocks_native_survivor_before_scripts_or_writes(
     assert result.exit_code == 1
     assert _tree_snapshot(project) == before
     assert fire_scripts.mock_calls == []
-    assert "Native Agent Plugin components are not enabled yet" in " ".join(result.output.split())
+    assert "no native harness is binary-qualified" in " ".join(result.output.split())
 
 
 def test_uninstall_allows_native_transitive_orphan_removal(
@@ -871,7 +863,7 @@ def test_prune_blocks_native_survivor_before_removal_or_reconciliation(
     assert remove.mock_calls == []
     assert sync.mock_calls == []
     assert integrate.mock_calls == []
-    assert "Native Agent Plugin components are not enabled yet" in " ".join(result.output.split())
+    assert "no native harness is binary-qualified" in " ".join(result.output.split())
 
 
 def test_prune_dry_run_does_not_reintegrate_native_survivors(
@@ -894,7 +886,7 @@ def test_prune_dry_run_does_not_reintegrate_native_survivors(
     assert _tree_snapshot(project) == before
     assert sync.mock_calls == []
     assert integrate.mock_calls == []
-    assert "Native Agent Plugin components are not enabled yet" not in result.output
+    assert "no native harness is binary-qualified" not in result.output
 
 
 def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(

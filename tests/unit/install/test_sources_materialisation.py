@@ -39,6 +39,7 @@ yet reached by test_sources_classification.py:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -517,6 +518,38 @@ class TestCachedDependencySourceAcquire:
         assert result is not None
         assert result.package_info is None
 
+    def test_no_targets_preserves_native_package_info_for_boundary(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.models.validation import PackageType
+
+        ctx = _make_ctx(targets=[])
+        ctx.lockfile_only = False
+        ctx.git_semver_resolutions = {}
+        dep_ref = _make_dep_ref(is_virtual=False, reference="main")
+        dep_ref.source = "git"
+        install_path = tmp_path / "native"
+        install_path.mkdir()
+        (install_path / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch(
+            "apm_cli.install.sources.CachedDependencySource._resolve_cached_commit",
+            return_value="abc",
+        ):
+            result = self._make_source(ctx, dep_ref, install_path).acquire()
+
+        assert result is not None
+        assert result.package_info is not None
+        assert result.package_info.package_type is PackageType.AGENT_PLUGIN
+
     def test_with_targets_and_apm_yml(self, tmp_path: Path) -> None:
         """Happy path: apm.yml present → full Materialization returned."""
         ctx = _make_ctx(targets=["copilot"])
@@ -697,6 +730,29 @@ class TestFreshDependencySourceAcquire:
 
         assert result is not None
         assert result.dep_key == "owner/repo"
+
+    def test_no_targets_preserves_native_package_info_for_boundary(self, tmp_path: Path) -> None:
+        from apm_cli.models.validation import PackageType
+
+        ctx = _make_ctx(targets=[], logger=None, tui=None)
+        dep_ref = _make_dep_ref(is_virtual=False, reference="main")
+        dep_ref.source = "git"
+        install_path = tmp_path / "native"
+        install_path.mkdir()
+        pkg_info = self._mock_download_success(install_path)
+        pkg_info.package_type = PackageType.AGENT_PLUGIN
+        pkg_info.package = MagicMock(name="native.plugin", version="1.0.0")
+
+        with (
+            patch("apm_cli.drift.build_download_ref", return_value=MagicMock()),
+            patch.object(ctx.downloader, "download_package", return_value=pkg_info),
+            patch("apm_cli.utils.content_hash.compute_package_hash", return_value="hash"),
+            patch("apm_cli.utils.console._rich_success"),
+        ):
+            result = self._make_source(ctx, dep_ref, install_path).acquire()
+
+        assert result is not None
+        assert result.package_info is pkg_info
 
     def test_happy_path_with_logger(self, tmp_path: Path) -> None:
         """Fresh download with logger → download_complete called."""

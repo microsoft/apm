@@ -84,6 +84,28 @@ fi
 
 agent_plugin_owner="$repo_root/src/apm_cli/agent_plugins/loader.py"
 if [ -f "$agent_plugin_owner" ]; then
+    schema_router="$repo_root/src/apm_cli/bundle/local_bundle.py"
+    if [ -f "$schema_router" ]; then
+        if ! grep -q '^class PluginSchemaRoute(Enum):' "$schema_router" \
+            || ! grep -q '^def classify_plugin_manifest_schema(' "$schema_router" \
+            || ! grep -q '^def route_agent_plugin_package(' "$schema_router" \
+            || ! grep -q 'if schema_id == PLUGIN_SCHEMA_ID:' "$schema_router" \
+            || grep -Eq 'is_agent_plugin_schema_id|supports_plugin_schema_id|validate_plugin_manifest_document' \
+                "$schema_router"; then
+            echo "[x] Plugin schema routing must live in bundle/local_bundle.py and select exact IDs"
+            exit 1
+        fi
+        if grep -Eq 'agent_plugin_(runtime|state)|install\.mcp|security\.executables|lockfile.*v3' \
+            "$schema_router"; then
+            echo "[x] Plugin schema routing must not depend on deployment or runtime state"
+            exit 1
+        fi
+    fi
+    if [ "$(grep -c 'classify_plugin_manifest_schema' "$agent_plugin_owner")" -lt 4 ]; then
+        echo "[x] Agent Plugin loading and legacy admission must share the schema router"
+        exit 1
+    fi
+
     agent_plugin_duplicates=$(
         grep -rEn --include='*.py' \
             '^(class AgentPlugin:|def (detect|load)_agent_plugin\()' \
@@ -122,9 +144,57 @@ if [ -f "$agent_plugin_owner" ]; then
         | grep -Eq 'normalize_plugin_directory|synthesize_apm_yml_from_plugin' \
         || ! grep -q 'detect_agent_plugin(package_path)' "$format_detection" \
         || ! grep -q 'admit_legacy_plugin_manifest(package_path)' "$format_detection" \
-        || ! grep -q 'admit_legacy_plugin_manifest(plugin_path)' "$legacy_parser"; then
+        || ! grep -q 'admit_legacy_plugin_manifest(plugin_path)' "$legacy_parser" \
+        || ! grep -q 'classify_plugin_manifest_schema(manifest)' "$legacy_parser"; then
         echo "[x] Agent Plugin classification must route through its loader, not Claude normalization"
         exit 1
+    fi
+
+    for ingress_requirement in \
+        "$repo_root/src/apm_cli/install/sources.py:4" \
+        "$repo_root/src/apm_cli/install/template.py:2" \
+        "$repo_root/src/apm_cli/deps/apm_resolver.py:2" \
+        "$repo_root/src/apm_cli/deps/_shared.py:2" \
+        "$repo_root/src/apm_cli/deps/github_downloader.py:2" \
+        "$repo_root/src/apm_cli/deps/registry/resolver.py:3"; do
+        ingress="${ingress_requirement%:*}"
+        minimum="${ingress_requirement##*:}"
+        if [ -f "$ingress" ] \
+            && [ "$(grep -c 'route_agent_plugin_package' "$ingress")" -lt "$minimum" ]; then
+            echo "[x] Package ingress must converge through route_agent_plugin_package"
+            echo "$ingress"
+            exit 1
+        fi
+    done
+    marketplace_resolver="$repo_root/src/apm_cli/marketplace/resolver.py"
+    if [ -f "$marketplace_resolver" ] \
+        && grep -Eq 'route_agent_plugin_package|detect_agent_plugin|\$schema' \
+            "$marketplace_resolver"; then
+        echo "[x] Marketplace resolution must defer schema admission to materialized ingress"
+        exit 1
+    fi
+    install_command="$repo_root/src/apm_cli/commands/install.py"
+    if [ -f "$install_command" ]; then
+        local_bundle_gate_line=$(
+            grep -n 'enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)' \
+                "$install_command" | cut -d: -f1 || true
+        )
+        local_bundle_handler_line=$(
+            grep -n 'from \.\.install\.local_bundle_handler import install_local_bundle' \
+                "$install_command" | cut -d: -f1 || true
+        )
+        executable_trust_line=$(
+            grep -n 'from \.\.security\.executables import read_bundle_allow_executables' \
+                "$install_command" | cut -d: -f1 || true
+        )
+        if [ -z "$local_bundle_gate_line" ] \
+            || [ -z "$local_bundle_handler_line" ] \
+            || [ -z "$executable_trust_line" ] \
+            || [ "$local_bundle_gate_line" -ge "$local_bundle_handler_line" ] \
+            || [ "$local_bundle_gate_line" -ge "$executable_trust_line" ]; then
+            echo "[x] Local bundles must hit the native boundary before deployment preparation"
+            exit 1
+        fi
     fi
 
     projection_duplicates=$(

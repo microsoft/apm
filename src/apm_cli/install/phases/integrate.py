@@ -671,8 +671,7 @@ def run(ctx: InstallContext) -> None:
         for _, _, source, materialization, _ in prepared_integrations
         if materialization is not None
     ]
-    if not preflight_agent_plugin_materializations(materialized):
-        return
+    preflight_agent_plugin_materializations(materialized)
 
     for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
         if terminal_deltas is not None:

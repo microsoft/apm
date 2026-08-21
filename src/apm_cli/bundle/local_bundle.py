@@ -29,18 +29,22 @@ import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
-from ..agent_plugins.io import read_json_document
-from ..agent_plugins.validation import (
-    is_agent_plugin_schema_id,
-    supports_plugin_schema_id,
-    validate_plugin_manifest_document,
+from ..agent_plugins.constants import (
+    AGENT_PLUGINS_SCHEMA_PREFIX,
+    COM_MICROSOFT_APM_NAMESPACE,
+    PLUGIN_SCHEMA_ID,
 )
+from ..agent_plugins.errors import (
+    AgentPluginManifestError,
+    UnsupportedAgentPluginVersionError,
+)
+from ..agent_plugins.io import read_json_document
 from ..utils.archive import (
     MAX_ZIP_ENTRIES,
     MAX_ZIP_UNCOMPRESSED,
@@ -56,8 +60,51 @@ from ..utils.path_security import (
 from ..utils.yaml_io import load_yaml_str
 from .formats import BundleFormat
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from ..agent_plugins.ir import AgentPlugin, AgentPluginDetection
+
 _MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
 _MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
+
+
+class PluginSchemaRoute(Enum):
+    """Admission route selected exclusively by root plugin.json."""
+
+    LEGACY = "legacy"
+    AGENT_PLUGIN = "agent_plugin"
+
+
+def classify_plugin_manifest_schema(document: Mapping[str, Any]) -> PluginSchemaRoute:
+    """Select native admission only for the exact supported schema identifier."""
+    if "$schema" not in document:
+        return PluginSchemaRoute.LEGACY
+    schema_id = document["$schema"]
+    if not isinstance(schema_id, str):
+        raise AgentPluginManifestError("Invalid root plugin.json: $schema must be a string")
+    if schema_id == PLUGIN_SCHEMA_ID:
+        return PluginSchemaRoute.AGENT_PLUGIN
+    if schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
+        raise UnsupportedAgentPluginVersionError(
+            f"Unsupported Agent Plugins manifest schema: {schema_id}. "
+            f"This APM version supports only {PLUGIN_SCHEMA_ID}."
+        )
+    raise AgentPluginManifestError(
+        f"Unsupported schema-bearing plugin manifest: {schema_id}. "
+        f"APM accepts schema-bearing plugin.json only with {PLUGIN_SCHEMA_ID}; "
+        "remove $schema only for a schema-less legacy plugin."
+    )
+
+
+def route_agent_plugin_package(package_root: Path) -> AgentPluginDetection | None:
+    """Route one materialized package through canonical Agent Plugin admission."""
+    from ..agent_plugins.loader import detect_agent_plugin
+
+    detection = detect_agent_plugin(package_root)
+    if detection is not None and detection.error is not None:
+        raise detection.error
+    return detection
 
 
 @dataclass(frozen=True)
@@ -76,6 +123,7 @@ class LocalBundleInfo:
         pack_targets: Targets the bundle was packed for, derived from
             ``lockfile["pack"]["target"]``.  Empty list when unknown.
         format: Bundle format family for the bundle root.
+        agent_plugin: Canonical IR for an admitted Agent Plugin bundle.
         retained_root: Stable materialization root when the bundle has been
             copied into a retained install cache, else ``None``.
         data_root: Stable bundle data directory when materialized, else
@@ -93,6 +141,7 @@ class LocalBundleInfo:
     lockfile: dict[str, Any] | None
     pack_targets: list[str] = field(default_factory=list)
     format: str = BundleFormat.CLAUDE_PLUGIN.value
+    agent_plugin: AgentPlugin | None = None
     retained_root: Path | None = None
     data_root: Path | None = None
     source_identity: str = ""
@@ -180,30 +229,30 @@ def _build_info(
     source_identity: str,
 ) -> LocalBundleInfo:
     _reject_metadata_collisions(bundle_dir)
-    plugin_json = read_bundle_plugin_json(bundle_dir)
-    if not plugin_json:
-        raise ValueError("Bundle plugin.json is missing or invalid")
+    manifest_path = bundle_dir / "plugin.json"
+    try:
+        plugin_json = read_json_document(manifest_path, reject_duplicate_schema=True)
+    except (OSError, ValueError) as exc:
+        raise AgentPluginManifestError(f"Bundle plugin.json is missing or invalid: {exc}") from exc
+    if not isinstance(plugin_json, dict) or not plugin_json:
+        raise AgentPluginManifestError(
+            "Bundle plugin.json is missing or invalid: manifest must be a JSON object"
+        )
+    schema_route = classify_plugin_manifest_schema(plugin_json)
+    agent_plugin = None
+    if schema_route is PluginSchemaRoute.AGENT_PLUGIN:
+        from ..agent_plugins.loader import load_agent_plugin
+
+        agent_plugin = load_agent_plugin(bundle_dir)
     lockfile = _read_bundle_lockfile(bundle_dir)
     package_id = (
         str(plugin_json.get("id") or plugin_json.get("name") or "").strip() or bundle_dir.name
     )
-    schema_id = plugin_json.get("$schema")
-    if (
-        isinstance(schema_id, str)
-        and is_agent_plugin_schema_id(schema_id)
-        and not supports_plugin_schema_id(schema_id)
-    ):
-        raise ValueError(f"Unsupported Agent Plugin schema id: {schema_id}")
     bundle_format = (
         BundleFormat.AGENT_PLUGIN.value
-        if isinstance(schema_id, str) and is_agent_plugin_schema_id(schema_id)
+        if schema_route is PluginSchemaRoute.AGENT_PLUGIN
         else BundleFormat.CLAUDE_PLUGIN.value
     )
-    if bundle_format == BundleFormat.AGENT_PLUGIN.value:
-        validation = validate_plugin_manifest_document(plugin_json)
-        if not validation.is_valid or validation.normalized is None:
-            raise ValueError("Invalid Agent Plugin manifest: " + "; ".join(validation.errors))
-        plugin_json = validation.normalized
     return LocalBundleInfo(
         source_dir=bundle_dir,
         plugin_json=plugin_json,
@@ -211,6 +260,7 @@ def _build_info(
         lockfile=lockfile,
         pack_targets=_extract_pack_targets(lockfile),
         format=bundle_format,
+        agent_plugin=agent_plugin,
         source_identity=source_identity,
         is_archive=is_archive,
         temp_dir=temp_dir,
@@ -293,12 +343,16 @@ def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
     if bundle_root is None:
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
-    return _build_info(
-        bundle_root,
-        is_archive=True,
-        temp_dir=temp_dir,
-        source_identity=str(path.resolve()),
-    )
+    try:
+        return _build_info(
+            bundle_root,
+            is_archive=True,
+            temp_dir=temp_dir,
+            source_identity=str(path.resolve()),
+        )
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
@@ -342,12 +396,16 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         if bundle_root is None:
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
-        return _build_info(
-            bundle_root,
-            is_archive=True,
-            temp_dir=temp_dir,
-            source_identity=str(path.resolve()),
-        )
+        try:
+            return _build_info(
+                bundle_root,
+                is_archive=True,
+                temp_dir=temp_dir,
+                source_identity=str(path.resolve()),
+            )
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
 
     return None
 

@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ...bundle.local_bundle import route_agent_plugin_package
 from ...models.apm_package import PackageInfo, validate_apm_package
 from ...models.dependency.reference import DependencyReference
 from ...models.dependency.types import GitReferenceType, ResolvedReference
@@ -91,7 +92,11 @@ def _package_info_from_extracted_registry_tree(
                 f"package {dep_ref.repo_url!r} at version {chosen.version}"
             )
 
-    validation_result = validate_apm_package(target_path)
+    native_detection = route_agent_plugin_package(target_path)
+    validation_result = validate_apm_package(
+        target_path,
+        agent_plugin_detection=native_detection,
+    )
     if not validation_result.is_valid:
         errs = "\n  - ".join(validation_result.errors)
         raise RegistryResolutionError(
@@ -370,7 +375,11 @@ class RegistryPackageResolver:
                     f"package {dep_ref.repo_url!r} at version {version}"
                 )
 
-        validation_result = validate_apm_package(target_path)
+        native_detection = route_agent_plugin_package(target_path)
+        validation_result = validate_apm_package(
+            target_path,
+            agent_plugin_detection=native_detection,
+        )
         if not validation_result.is_valid:
             errs = "\n  - ".join(validation_result.errors)
             raise RegistryResolutionError(

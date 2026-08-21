@@ -14,13 +14,17 @@ import pytest
 from apm_cli.agent_plugins import (
     MCP_SCHEMA_ID,
     PLUGIN_SCHEMA_ID,
+    AgentPluginError,
     AgentPluginLegacyBoundaryError,
     AgentPluginManifestAuthorityError,
+    AgentPluginManifestError,
     AssetInventoryError,
     FrozenJsonArray,
     FrozenJsonObject,
     FrozenJsonValue,
     NotAgentPluginError,
+    UnsupportedAgentPluginVersionError,
+    detect_agent_plugin,
     load_agent_plugin,
     open_verified_asset,
     thaw_frozen_json,
@@ -804,6 +808,68 @@ def test_claude_normalizer_preserves_explicit_legacy_plugin_behavior(tmp_path: P
 
     assert apm_yml == tmp_path / "apm.yml"
     assert apm_yml.is_file()
+
+
+@pytest.mark.parametrize(
+    ("schema_id", "error_type", "message"),
+    [
+        (
+            "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+            UnsupportedAgentPluginVersionError,
+            "supports only",
+        ),
+        (
+            f"{PLUGIN_SCHEMA_ID}/",
+            UnsupportedAgentPluginVersionError,
+            "supports only",
+        ),
+        (
+            "https://example.com/plugin.schema.json",
+            AgentPluginManifestError,
+            "Unsupported schema-bearing plugin manifest",
+        ),
+    ],
+)
+def test_schema_bearing_manifest_never_falls_back_to_legacy_normalization(
+    tmp_path: Path,
+    schema_id: str,
+    error_type: type[AgentPluginError],
+    message: str,
+) -> None:
+    _write_manifest(tmp_path, **{"$schema": schema_id})
+
+    detection = detect_agent_plugin(tmp_path)
+
+    assert detection is not None
+    assert isinstance(detection.error, error_type)
+    assert message in str(detection.error)
+    with pytest.raises(AgentPluginLegacyBoundaryError, match=message):
+        normalize_plugin_directory(tmp_path, tmp_path / "plugin.json")
+    assert not (tmp_path / "apm.yml").exists()
+
+
+@pytest.mark.parametrize(
+    "schema_id",
+    [
+        PLUGIN_SCHEMA_ID,
+        "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+        "https://example.com/plugin.schema.json",
+    ],
+)
+def test_nested_marketplace_manifest_cannot_bypass_root_schema_admission(
+    tmp_path: Path,
+    schema_id: str,
+) -> None:
+    manifest = tmp_path / ".claude-plugin" / "plugin.json"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        json.dumps({"$schema": schema_id, "name": "nested"}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AgentPluginError):
+        normalize_plugin_directory(tmp_path, manifest)
+    assert not (tmp_path / "apm.yml").exists()
 
 
 def test_unknown_placeholder_shaped_values_remain_literal_in_stdio_ir(

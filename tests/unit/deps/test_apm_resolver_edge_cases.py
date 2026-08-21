@@ -650,7 +650,7 @@ class TestTryLoadDependencyPackage:
         ref = _make_dep_ref("org/malformed")
         ref.get_install_path.return_value = pkg_dir
 
-        with pytest.raises(ValueError, match="Failed to process Agent Plugin"):
+        with pytest.raises(ValueError, match=r"Invalid root plugin.json"):
             APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
 
         assert not (pkg_dir / "apm.yml").exists()

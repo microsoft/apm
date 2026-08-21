@@ -194,6 +194,14 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
         and plugin_json_path.exists()
     ):
         manifest = parse_plugin_manifest(plugin_json_path)
+        from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
+        from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+
+        if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:
+            raise AgentPluginLegacyBoundaryError(
+                "Schema-bearing plugin.json must be admitted from the package root, "
+                "not Claude plugin normalization"
+            )
 
     # Derive name from directory if not in manifest
     if "name" not in manifest or not manifest["name"]:

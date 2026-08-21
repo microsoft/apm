@@ -14,7 +14,6 @@ import yaml
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .assets import AssetInventory, AssetInventoryError, normalized_path_key
 from .constants import (
-    AGENT_PLUGINS_SCHEMA_PREFIX,
     AGENT_PLUGINS_VERSION,
     COM_MICROSOFT_APM_NAMESPACE,
     PLUGIN_SCHEMA_ID,
@@ -25,7 +24,6 @@ from .errors import (
     AgentPluginManifestAuthorityError,
     AgentPluginManifestError,
     NotAgentPluginError,
-    UnsupportedAgentPluginVersionError,
 )
 from .io import read_json_document
 from .ir import (
@@ -112,6 +110,8 @@ class _CandidateResolution:
 
 def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
     """Classify and interpret a native Agent Plugin from its exact root manifest."""
+    from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+
     manifest_path = package_root / "plugin.json"
     try:
         evidence = _read_admissible_root_manifest(package_root)
@@ -123,27 +123,17 @@ def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
     if evidence is None:
         return None
     document = dict(evidence.document)
-    if "$schema" not in document:
-        return None
-    schema_id = document["$schema"]
-    if not isinstance(schema_id, str):
-        return _rejected_manifest_detection(
-            manifest_path,
-            "Invalid root plugin.json: $schema must be a string",
-        )
-    if not schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
-        return None
     try:
-        loader = _VERSION_LOADERS.get(schema_id)
-        if loader is None:
-            raise UnsupportedAgentPluginVersionError(
-                f"Unsupported Agent Plugins manifest schema: {schema_id}"
-            )
+        route = classify_plugin_manifest_schema(document)
+        if route is PluginSchemaRoute.LEGACY:
+            return None
+        schema_id = document["$schema"]
+        loader = _VERSION_LOADERS[schema_id]
         plugin = loader(package_root, manifest_path, document)
     except AgentPluginError as exc:
         return AgentPluginDetection(
             manifest_path=manifest_path,
-            schema_id=schema_id,
+            schema_id=str(document.get("$schema", _REJECTED_MANIFEST_SCHEMA_ID)),
             error=exc,
         )
     return AgentPluginDetection(
@@ -185,6 +175,8 @@ def reject_agent_plugin_legacy_normalization(package_root: Path) -> None:
 
 def admit_legacy_plugin_manifest(package_root: Path) -> dict[str, Any] | None:
     """Return one admissible schema-less legacy manifest or reject fallback."""
+    from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+
     try:
         evidence = _read_admissible_root_manifest(package_root)
     except AgentPluginManifestError as exc:
@@ -193,8 +185,13 @@ def admit_legacy_plugin_manifest(package_root: Path) -> dict[str, Any] | None:
         ) from exc
     if evidence is None:
         return None
-    schema_id = evidence.document.get("$schema")
-    if isinstance(schema_id, str) and schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
+    try:
+        route = classify_plugin_manifest_schema(evidence.document)
+    except AgentPluginError as exc:
+        raise AgentPluginLegacyBoundaryError(
+            f"Schema-bearing plugin.json cannot enter Claude plugin normalization: {exc}"
+        ) from exc
+    if route is PluginSchemaRoute.AGENT_PLUGIN:
         raise AgentPluginLegacyBoundaryError(
             "Agent Plugin input must be interpreted by load_agent_plugin(), "
             "not Claude plugin normalization"

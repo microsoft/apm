@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import stat
 import tarfile
 import zipfile
@@ -16,6 +17,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+from apm_cli.bundle.formats import BundleFormat
 
 # ---------------------------------------------------------------------------
 # The import below WILL fail until production code lands.  That is intentional
@@ -154,6 +158,8 @@ class TestDetectLocalBundle:
         assert isinstance(result, LocalBundleInfo)
         assert result.package_id == "test-plugin"
         assert result.is_archive is False
+        assert result.format == BundleFormat.CLAUDE_PLUGIN.value
+        assert result.agent_plugin is None
 
     def test_detect_plugin_tarball(self, tmp_path: Path) -> None:
         bundle = _make_plugin_bundle(tmp_path)
@@ -199,8 +205,88 @@ class TestDetectLocalBundle:
             encoding="utf-8",
         )
 
-        with pytest.raises(ValueError, match="Unsupported Agent Plugin schema"):
+        with pytest.raises(ValueError, match="Unsupported Agent Plugins manifest schema"):
             detect_local_bundle(bundle)
+
+    def test_detect_rejects_foreign_schema_bearing_manifest(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://example.com/plugin.schema.json",
+                    "name": "foreign-plugin",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="Unsupported schema-bearing plugin manifest"):
+            detect_local_bundle(bundle)
+
+    @pytest.mark.parametrize("container", ("zip", "tar"))
+    def test_rejected_schema_archive_cleans_temporary_extraction(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        container: str,
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "source")
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+                    "name": "future.plugin",
+                }
+            ),
+            encoding="utf-8",
+        )
+        archive = (
+            _make_plugin_zip(tmp_path / "archives", bundle)
+            if container == "zip"
+            else _make_plugin_tarball(tmp_path / "archives", bundle)
+        )
+        extraction = tmp_path / "controlled-extraction"
+        monkeypatch.setattr(
+            "apm_cli.bundle.local_bundle.tempfile.mkdtemp",
+            lambda **_kwargs: str(extraction),
+        )
+
+        with pytest.raises(ValueError, match="Unsupported Agent Plugins manifest schema"):
+            detect_local_bundle(archive)
+
+        assert not extraction.exists()
+
+    @pytest.mark.parametrize("container", ("directory", "zip", "tar"))
+    def test_exact_schema_routes_every_local_bundle_container_through_canonical_ir(
+        self,
+        tmp_path: Path,
+        container: str,
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        source = bundle
+        if container == "zip":
+            source = _make_plugin_zip(tmp_path / "archives", bundle)
+        elif container == "tar":
+            source = _make_plugin_tarball(tmp_path / "archives", bundle)
+
+        result = detect_local_bundle(source)
+
+        assert result is not None
+        assert result.format == BundleFormat.AGENT_PLUGIN.value
+        assert result.agent_plugin is not None
+        assert result.agent_plugin.identity.name == "native.plugin"
+        if result.temp_dir is not None:
+            shutil.rmtree(result.temp_dir)
 
     def test_detect_rejects_symlinked_plugin_manifest(self, tmp_path: Path) -> None:
         bundle = tmp_path / "bundle"
@@ -236,7 +322,7 @@ class TestDetectLocalBundle:
             encoding="utf-8",
         )
 
-        with pytest.raises(ValueError, match="Invalid Agent Plugin manifest"):
+        with pytest.raises(ValueError, match="naming rules"):
             detect_local_bundle(bundle)
 
     def test_detect_reads_pack_targets(self, tmp_path: Path) -> None:

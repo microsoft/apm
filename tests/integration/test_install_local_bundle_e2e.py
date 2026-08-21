@@ -324,7 +324,10 @@ class TestInstallLocalBundleE2E:
         LockFile().write(source / "apm.lock.yaml")
         skill_path = source / ".apm" / "skills" / "coding" / "SKILL.md"
         skill_path.parent.mkdir(parents=True)
-        skill_path.write_text("# Coding Skill\n", encoding="utf-8")
+        skill_path.write_text(
+            "---\nname: coding\ndescription: Coding support\n---\n\nUse this skill.\n",
+            encoding="utf-8",
+        )
         archive = pack_bundle(
             source,
             tmp_path / "archives",
@@ -346,8 +349,7 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 1
         output = " ".join(result.output.split())
-        assert "Native Agent Plugin components are not enabled yet" in output
-        assert "deployment was blocked" in output
+        assert "no native harness is binary-qualified" in output
         assert "apm pack --claude-plugin" in output
         assert sorted(path.relative_to(project) for path in project.rglob("*")) == before_paths
         assert {
@@ -610,8 +612,7 @@ def test_native_local_bundle_boundary_renders_typed_cli_failure(
     source_after = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
     assert source_after == source_before
     output = " ".join(result.output.split())
-    assert "Native Agent Plugin components are not enabled yet" in output
-    assert "apm plugin init --claude-plugin" in output
+    assert "no native harness is binary-qualified" in output
     assert "apm pack --claude-plugin" in output
     assert "ask the publisher for a legacy-compatible package" in output
     assert "Error installing dependencies" not in output

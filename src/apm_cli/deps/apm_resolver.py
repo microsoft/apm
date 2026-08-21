@@ -11,8 +11,9 @@ from dataclasses import replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Optional, Protocol
 
+from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
-from ..models.validation import PackageType, detect_package_type, validate_apm_package
+from ..models.validation import validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from ..utils.paths import portable_relpath
 from .dependency_graph import (
@@ -1132,11 +1133,13 @@ class APMDependencyResolver:
         # so recursive resolution can see APM-only dependencies without requiring
         # or synthesizing an apm.yml compatibility manifest.
         dep_source_path = self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
-        package_type, plugin_json_path = detect_package_type(install_path)
-        if package_type == PackageType.AGENT_PLUGIN or (
-            package_type == PackageType.INVALID and plugin_json_path is not None
-        ):
-            validation = validate_apm_package(install_path, source_path=dep_source_path)
+        native_detection = route_agent_plugin_package(install_path)
+        if native_detection is not None:
+            validation = validate_apm_package(
+                install_path,
+                source_path=dep_source_path,
+                agent_plugin_detection=native_detection,
+            )
             if not validation.is_valid:
                 raise ValueError("; ".join(validation.errors))
             if validation.package is None:

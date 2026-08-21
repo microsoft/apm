@@ -30,8 +30,10 @@ def _validate_and_load_package(
     Raises:
         RuntimeError: If the package is invalid or metadata is missing.
     """
+    from ..bundle.local_bundle import route_agent_plugin_package
     from ..utils.file_ops import robust_rmtree
 
+    route_agent_plugin_package(target_path)
     if not validation_result.is_valid:
         if target_path.exists():
             robust_rmtree(target_path, ignore_errors=True)

@@ -1560,6 +1560,52 @@ class TestRegistryPackageResolverDownloadPackage:
         assert result.package.agent_plugin is not None
         assert not (target / "apm.yml").exists()
 
+    def test_unsupported_agent_plugin_archive_fails_before_legacy_projection(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import UnsupportedAgentPluginVersionError
+        from apm_cli.deps.registry.resolver import RegistryPackageResolver
+
+        archive_data = _make_tar_gz(
+            {
+                "plugin.json": json.dumps(
+                    {
+                        "$schema": ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"),
+                        "name": "future.plugin",
+                    }
+                ).encode("utf-8")
+            }
+        )
+        archive_digest = _sha256(archive_data)
+        fake_client = MagicMock()
+        fake_client.list_versions.return_value = [
+            VersionEntry(
+                version="2.0.0",
+                digest=f"sha256:{archive_digest}",
+                published_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        fake_client.download_archive.return_value = (archive_data, "application/gzip")
+        dep_ref = DependencyReference(
+            repo_url="acme/future",
+            source="registry",
+            registry_name="myregistry",
+            reference="2.0.0",
+        )
+        resolver = RegistryPackageResolver(
+            {"myregistry": "https://registry.example.com"},
+            client_factory=lambda url, auth: fake_client,
+        )
+        target = tmp_path / "acme" / "future"
+
+        with (
+            patch("apm_cli.config.get_registry_config", return_value=None),
+            pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"),
+        ):
+            resolver.download_package(dep_ref, target)
+
+        assert not (target / "apm.yml").exists()
+
     def test_download_package_no_versions_raises(self, tmp_path: Path) -> None:
         """download_package raises RegistryResolutionError when no versions exist."""
         from apm_cli.deps.registry.resolver import RegistryPackageResolver

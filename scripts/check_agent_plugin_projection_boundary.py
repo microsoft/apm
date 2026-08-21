@@ -373,6 +373,17 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 f"{template_path}: native deployment gate must precede selective and "
                 "generic integration"
             )
+    batch_preflight_defs = _named_functions(
+        template_tree,
+        "preflight_agent_plugin_materializations",
+    )
+    if len(batch_preflight_defs) != 1 or (
+        "enforce_agent_plugin_deployment_boundary"
+        not in _function_calls(batch_preflight_defs[0])
+    ):
+        violations.append(
+            f"{template_path}: native batch preflight must use the deployment boundary owner"
+        )
     diagnostic_recorders = _named_functions(
         template_tree,
         "_record_agent_plugin_boundary_diagnostic",
@@ -412,27 +423,20 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 "non-success outcome"
             )
     dry_run_preflights = _named_functions(template_tree, "preflight_agent_plugin_dry_run")
-    dry_run_collects = False
+    dry_run_fails_closed = False
     if len(dry_run_preflights) == 1:
         dry_run_preflight = dry_run_preflights[0]
         calls = _function_calls(dry_run_preflight)
-        typed_handlers = [
-            node
-            for node in ast.walk(dry_run_preflight)
-            if isinstance(node, ast.ExceptHandler)
-            and isinstance(node.type, ast.Name)
-            and node.type.id == "AgentPluginDeploymentBoundaryError"
-        ]
-        dry_run_collects = (
-            "enforce_agent_plugin_deployment_boundary" in calls
-            and "_record_agent_plugin_boundary_diagnostic" in calls
-            and len(typed_handlers) == 1
-            and not any(isinstance(node, ast.Raise) for node in ast.walk(dry_run_preflight))
+        dry_run_fails_closed = (
+            "route_agent_plugin_package" in calls
+            and "validate_apm_package" in calls
+            and "enforce_agent_plugin_deployment_boundary" in calls
+            and "normalize_plugin_directory" not in calls
         )
-    if not dry_run_collects:
+    if not dry_run_fails_closed:
         violations.append(
-            f"{template_path}: dry-run must collect every native deployment failure "
-            "through the package diagnostic owner"
+            f"{template_path}: dry-run must route schema admission and fail at "
+            "the native deployment boundary"
         )
 
     integrate_runs = _named_functions(integrate_phase_tree, "run")
@@ -469,37 +473,18 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             for node in ast.walk(install_helpers[0])
             if isinstance(node, ast.Call)
         ]
-        dry_run_gate_ifs = [
-            node
-            for node in ast.walk(install_helpers[0])
-            if isinstance(node, ast.If)
-            and "preflight_agent_plugin_dry_run" in _function_calls(node.test)
+        dry_run_gates = [
+            line for name, line in calls if name == "preflight_agent_plugin_dry_run"
         ]
-        dry_run_gates = [node.lineno for node in dry_run_gate_ifs]
         dry_run_exits = [line for name, line in calls if name == "render_and_exit"]
-        assigns_failed = bool(dry_run_gate_ifs) and any(
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Attribute)
-            and node.targets[0].attr == "disposition"
-            and isinstance(node.value, ast.Attribute)
-            and node.value.attr == "FAILED"
-            for node in ast.walk(dry_run_gate_ifs[0])
-        )
-        failed_return = bool(dry_run_gate_ifs) and (
-            "InstallResult" in _function_calls(dry_run_gate_ifs[0])
-            and any(isinstance(node, ast.Return) for node in ast.walk(dry_run_gate_ifs[0]))
-            and assigns_failed
-        )
         if (
             len(dry_run_gates) != 1
             or not dry_run_exits
             or dry_run_gates[0] >= min(dry_run_exits)
-            or not failed_return
         ):
             violations.append(
-                f"{install_command_path}: dry-run must return a structured failed result "
-                "before rendering success"
+                f"{install_command_path}: dry-run native preflight must run before "
+                "rendering success"
             )
 
     install_commands = _named_functions(install_command_tree, "install")
@@ -512,7 +497,7 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
                 handler
                 for handler in node.handlers
                 if isinstance(handler.type, ast.Name)
-                and handler.type.id == "AgentPluginDeploymentBoundaryError"
+                and handler.type.id == "AgentPluginError"
             ]
             generic_handlers = [
                 handler
@@ -882,13 +867,9 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             node
             for node in ast.walk(resolver_defs[0])
             if isinstance(node, ast.If)
-            and any(
-                isinstance(item, ast.Attribute)
-                and item.attr == "AGENT_PLUGIN"
-                and isinstance(item.value, ast.Name)
-                and item.value.id == "PackageType"
-                for item in ast.walk(node.test)
-            )
+            and isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "native_detection"
         ]
         native_branch_preserves_package = (
             len(native_branches) == 1
@@ -896,7 +877,10 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             and isinstance(native_branches[0].body[-1], ast.Return)
             and _is_validation_package(native_branches[0].body[-1].value)
         )
-        if not native_branch_preserves_package:
+        if (
+            "route_agent_plugin_package" not in resolver_calls
+            or not native_branch_preserves_package
+        ):
             violations.append(
                 f"{resolver_path}: Agent Plugin dependency loading must preserve "
                 "the projected package"

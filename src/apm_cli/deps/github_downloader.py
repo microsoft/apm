@@ -1793,6 +1793,9 @@ class GitHubPackageDownloader:
         # files directly into target_path and skip the network clone.
         _persistent_cache = self.persistent_git_cache
         if _persistent_cache is not None:
+            from ..agent_plugins.errors import AgentPluginError
+            from ..bundle.local_bundle import route_agent_plugin_package
+
             try:
                 _cached = _persistent_cache.get_checkout(
                     dep_ref.to_github_url(),
@@ -1813,6 +1816,7 @@ class GitHubPackageDownloader:
                         robust_copy2(src, dst)
 
                 # Validate, then return without cloning.
+                route_agent_plugin_package(target_path)
                 validation_result = validate_apm_package(target_path)
                 if validation_result.is_valid and validation_result.package:
                     package = validation_result.package
@@ -1839,6 +1843,8 @@ class GitHubPackageDownloader:
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)
                     target_path.mkdir(parents=True, exist_ok=True)
+            except AgentPluginError:
+                raise
             except Exception:
                 # Any cache failure -> fall back to network clone.
                 if target_path.exists() and any(target_path.iterdir()):
