@@ -500,6 +500,7 @@ class TestSectionBRegressions:
             "hooks": [{"type": "command", "command": "echo user-owned"}],
         }
         entries.append(user_hook)
+        settings["hooks"]["PostToolUse"] = [user_hook]
         settings_path.write_bytes(json.dumps(settings).encode("utf-8"))
 
         clean_audit = _audit(project, monkeypatch, "--ci", "-f", "json")

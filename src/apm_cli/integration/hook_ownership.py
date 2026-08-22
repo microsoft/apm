@@ -91,15 +91,15 @@ def project_apm_owned_hook_entries(
     )
     reinject_apm_source_from_sidecar(container, sidecar)
 
-    owned = {
-        event_name: [
+    owned: dict[str, list[dict[str, Any]]] = {}
+    for event_name, entries in container.items():
+        owned_entries = [
             entry
             for entry in entries
             if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
         ]
-        for event_name, entries in container.items()
-        if isinstance(entries, list)
-    }
+        if owned_entries:
+            owned[event_name] = owned_entries
     return json.dumps(owned, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
