@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apm install` / `apm audit`. Override the project name with
   `APM_GITLAB_POLICY_REPO`. (#2605)
 - GitLab (gitlab.com and self-managed) org-policy auto-discovery now uses the valid `apm-policy` project convention instead of the GitHub/ADO candidate names (`.github-private`, `.github`, `.apm`, `_apm`), all of which are invalid GitLab project paths. A missing policy project is now a clean "no policy" outcome instead of surfacing a fetch-failure warning on every `apm install` / `apm audit`. Override the project name with `APM_GITLAB_POLICY_REPO`. (#2605)
+
+### Fixed
+
+- GitLab (gitlab.com and self-managed) org-policy auto-discovery now uses the valid `apm-policy` project convention instead of GitHub/ADO candidate names; missing policy projects are clean no-policy outcomes, and `APM_GITLAB_POLICY_REPO` overrides the project name. (#2605)
 - Windows binary is now Authenticode-signed in the release workflow, eliminating
   the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
   PyInstaller bundles. (#2435)

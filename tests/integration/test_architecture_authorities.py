@@ -968,6 +968,59 @@ def test_user_root_scoped_instruction_eligibility_has_single_owner(tmp_path: Pat
         in result.stdout
     )
 
+def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
+    """GitLab policy transport must not bypass the discovery facade's adapter."""
+    root = Path(__file__).parents[2]
+    facade = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
+    adapter = (root / "src/apm_cli/policy/_gitlab.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert facade.count("_gitlab._fetch_from_gitlab_repo(") == 2
+    assert adapter.count("def _fetch_from_gitlab_repo(") == 1
+    assert adapter.count("def _fetch_gitlab_contents(") == 1
+    assert adapter.count("def _gitlab_project_state_via_git(") == 1
+    assert "GitLab policy discovery must route through policy/_gitlab.py" in guard
+
+
+def test_gitlab_policy_adapter_guard_rejects_facade_bypass(tmp_path: Path) -> None:
+    """The boundary guard rejects removing the GitLab inheritance adapter call."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    facade_path.write_text(
+        facade_path.read_text(encoding="utf-8").replace(
+            "_gitlab._fetch_from_gitlab_repo(",
+            "_fetch_from_repo(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "GitLab policy discovery must route through policy/_gitlab.py" in result.stdout
+
 
 @pytest.mark.parametrize(
     ("guard", "replacement"),

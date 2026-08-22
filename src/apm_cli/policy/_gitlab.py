@@ -8,8 +8,10 @@ default candidate repo names are valid there; GitLab uses its own
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 from typing import TYPE_CHECKING
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -25,31 +27,81 @@ if TYPE_CHECKING:
 # default GitLab policy-repo name; override via APM_GITLAB_POLICY_REPO for
 # orgs that already use a different name.
 _GITLAB_DEFAULT_POLICY_REPO = "apm-policy"
+_GITLAB_PROJECT_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+
+
+def _validate_gitlab_project_segment(value: str, setting: str) -> str:
+    """Return one valid GitLab project-name segment or raise ValueError."""
+    candidate = value.strip()
+    if candidate.startswith((".", "_")) or not _GITLAB_PROJECT_SEGMENT_RE.fullmatch(candidate):
+        raise ValueError(
+            f"{setting} must be one GitLab project-name segment "
+            "(letters, digits, '.', '_' or '-', no slash, and no leading '.' or '_')"
+        )
+    return candidate
 
 
 def _gitlab_policy_repo_candidates() -> tuple[str, ...]:
     """Return the (single) GitLab policy repo candidate, env-overridable."""
-    return (os.environ.get("APM_GITLAB_POLICY_REPO", "").strip() or _GITLAB_DEFAULT_POLICY_REPO,)
+    candidate = os.environ.get("APM_GITLAB_POLICY_REPO", "") or _GITLAB_DEFAULT_POLICY_REPO
+    return (_validate_gitlab_project_segment(candidate, "APM_GITLAB_POLICY_REPO"),)
 
 
-def _gitlab_policy_root_group(host: str, org: str) -> str:
-    """Return the effective GitLab root group for policy discovery.
+def _gitlab_project_state_via_git(
+    *,
+    org: str,
+    repo: str,
+    host: str,
+    port: int | None,
+) -> bool | None:
+    """Return whether authenticated Git confirms a GitLab project exists.
 
-    Self-managed GitLab instances often host many independent root groups
-    (departments, teams) under one company-owned instance -- unlike
-    gitlab.com, where each root namespace is an independent tenant and no
-    cross-tenant override would make sense. ``APM_GITLAB_POLICY_ROOT_GROUP``
-    lets a self-managed instance centralize org policy under one designated
-    root group instead of requiring an ``apm-policy`` project per root
-    group. Distinguished from gitlab.com by exact hostname match, per
-    ``is_gitlab_hostname``'s own cloud/self-managed split: ignored on
-    gitlab.com, where *org* (the project's own root namespace, extracted
-    from its git remote) is always used unchanged.
+    ``None`` deliberately means that Git could not establish the project's
+    state. It must not be treated as a missing policy because a disabled REST
+    API, an unavailable network, and an auth failure are all governance
+    failures rather than permission to skip policy enforcement.
     """
-    if host == "gitlab.com":
-        return org
-    override = os.environ.get("APM_GITLAB_POLICY_ROOT_GROUP", "").strip()
-    return override or org
+    from ..core.auth import AuthResolver
+    from ..core.host_providers import HOST_PROVIDERS
+
+    provider = HOST_PROVIDERS["gitlab"]
+    api_base = urlsplit(provider.build_api_base(host, port))
+    project_url = f"{api_base.scheme}://{api_base.netloc}/{org}/{repo}.git"
+    resolver = AuthResolver()
+    project_path = f"{org}/{repo}"
+
+    def _probe(_token: str | None, git_env: dict[str, str]) -> bool | None:
+        try:
+            # auth-delegated: AuthResolver supplies the resolved Git credential environment.
+            result = subprocess.run(
+                ["git", "ls-remote", "--exit-code", project_url, "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env={**os.environ, **git_env, "GIT_TERMINAL_PROMPT": "0"},
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode == 0:
+            return True
+        stderr = result.stderr.lower()
+        if "repository not found" in stderr or "project not found" in stderr:
+            return False
+        return None
+
+    try:
+        return resolver.try_with_fallback(
+            host,
+            _probe,
+            org=org,
+            port=port,
+            path=project_path,
+            host_type="gitlab",
+            unauth_first=False,
+        )
+    except RuntimeError:
+        return None
 
 
 def _fetch_from_gitlab_repo(
@@ -81,6 +133,14 @@ def _fetch_from_gitlab_repo(
         _write_cache,
     )
 
+    try:
+        repo = _validate_gitlab_project_segment(repo, "GitLab policy project")
+    except ValueError as exc:
+        return PolicyFetchResult(
+            source=f"org:{host}/{org}/{repo}",
+            error=str(exc),
+            outcome="cache_miss_fetch_fail",
+        )
     host_label = f"{host}:{port}" if port is not None else host
     project_path = f"{org}/{repo}"
     repo_ref = f"{host_label}/{project_path}"
@@ -122,12 +182,15 @@ def _fetch_from_gitlab_repo(
     )
 
     if error:
-        # 404 = no policy, not an error. Self-managed GitLab instances have
-        # also been observed returning 410 Gone for a missing project path
-        # (see #2566); treat that the same as a clean "no policy" outcome
-        # rather than surfacing a fetch-failure warning on every invocation.
-        if "404" in error or "410" in error:
+        # A typed 404 is GitLab's clean policy-absence signal. A 410 is
+        # ambiguous: self-managed GitLab can return it for both a missing
+        # project and a disabled Files API. Only authenticated Git can
+        # disambiguate that case without silently bypassing governance.
+        if error.startswith("gitlab-status:404:"):
             return PolicyFetchResult(source=source_label, outcome="absent")
+        if error.startswith("gitlab-status:410:"):
+            if _gitlab_project_state_via_git(org=org, repo=repo, host=host, port=port) is False:
+                return PolicyFetchResult(source=source_label, outcome="absent")
         return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
     if content is None:
@@ -224,7 +287,7 @@ def _fetch_gitlab_contents(
             unauth_first=False,
         )
         if resp.status_code in (404, 410):
-            return None, f"{resp.status_code}: Policy file not found"
+            return None, f"gitlab-status:{resp.status_code}: Policy file not found"
         if 300 <= resp.status_code < 400:
             location = resp.headers.get("Location", "<no Location header>")
             return None, (

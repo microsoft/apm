@@ -17,7 +17,6 @@ from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy._gitlab import (
     _fetch_from_gitlab_repo,
     _fetch_gitlab_contents,
-    _gitlab_policy_root_group,
 )
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
@@ -30,6 +29,7 @@ from apm_cli.policy.discovery import (
     _extract_org_host_port_from_git_remote,
     _fetch_ado_contents,
     _fetch_ado_org_policy,
+    _fetch_chain_parent,
     _fetch_from_ado_repo,
     _fetch_from_repo,
     _fetch_from_url,
@@ -1037,7 +1037,10 @@ class TestAutoDiscover(unittest.TestCase):
             policy=ApmPolicy(), source="org:gitlab.com/contoso/apm-policy", outcome="found"
         )
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with (
+            patch.dict(os.environ, {"APM_GITLAB_POLICY_REPO": ""}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
             result = _auto_discover(Path(tmpdir), no_cache=True)
             mock_gitlab_fetch.assert_called_once()
             call_kwargs = mock_gitlab_fetch.call_args.kwargs
@@ -1061,53 +1064,6 @@ class TestAutoDiscover(unittest.TestCase):
         # Absent (no policy published) must be a clean no-op, not an error.
         self.assertEqual(result.outcome, "absent")
         self.assertIsNone(result.error)
-
-    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
-    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
-    def test_gitlab_self_managed_root_group_override_reaches_fetch(
-        self, mock_extract, mock_gitlab_fetch
-    ):
-        """A project under team-a's own remote still resolves to the
-        instance-wide policy root group when APM_GITLAB_POLICY_ROOT_GROUP is
-        set, so many independent root groups can share one apm-policy
-        project instead of needing one apiece."""
-        mock_extract.return_value = ("team-a", "gitlab.example.test", None)
-        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
-
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "GITLAB_HOST": "gitlab.example.test",
-                    "APM_GITLAB_POLICY_ROOT_GROUP": "platform-governance",
-                },
-                clear=False,
-            ),
-            tempfile.TemporaryDirectory() as tmpdir,
-        ):
-            _auto_discover(Path(tmpdir), no_cache=True)
-
-        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "platform-governance")
-
-    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
-    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
-    def test_gitlab_cloud_ignores_root_group_override(self, mock_extract, mock_gitlab_fetch):
-        """gitlab.com is multi-tenant -- the self-managed override must not
-        leak into cloud discovery even if the env var happens to be set."""
-        mock_extract.return_value = ("team-a", "gitlab.com", None)
-        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
-
-        with (
-            patch.dict(
-                os.environ,
-                {"APM_GITLAB_POLICY_ROOT_GROUP": "platform-governance"},
-                clear=False,
-            ),
-            tempfile.TemporaryDirectory() as tmpdir,
-        ):
-            _auto_discover(Path(tmpdir), no_cache=True)
-
-        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "team-a")
 
     @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
     @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
@@ -1152,11 +1108,16 @@ class TestPolicyRepoCandidates(unittest.TestCase):
 
     def test_gitlab_com_only_tries_apm_policy(self):
         """GitLab rejects a leading '.' or '_' in project paths (#2566)."""
-        result = _policy_repo_candidates("gitlab.com")
+        with patch.dict(os.environ, {"APM_GITLAB_POLICY_REPO": ""}, clear=False):
+            result = _policy_repo_candidates("gitlab.com")
         self.assertEqual(result, ("apm-policy",))
 
     def test_gitlab_self_managed_via_env_only_tries_apm_policy(self):
-        with patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.com"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"GITLAB_HOST": "gitlab.example.com", "APM_GITLAB_POLICY_REPO": ""},
+            clear=False,
+        ):
             result = _policy_repo_candidates("gitlab.example.com")
         self.assertEqual(result, ("apm-policy",))
 
@@ -1165,40 +1126,38 @@ class TestPolicyRepoCandidates(unittest.TestCase):
             result = _policy_repo_candidates("gitlab.com")
         self.assertEqual(result, ("org-policy",))
 
+    def test_gitlab_policy_repo_rejects_path_like_override(self):
+        with patch.dict(os.environ, {"APM_GITLAB_POLICY_REPO": "other/project"}, clear=False):
+            with self.assertRaisesRegex(ValueError, "one GitLab project-name segment"):
+                _policy_repo_candidates("gitlab.com")
 
-class TestGitlabPolicyRootGroup(unittest.TestCase):
-    """Test _gitlab_policy_root_group: cloud vs self-managed root-group override."""
+    def test_gitlab_policy_repo_rejects_leading_underscore(self):
+        with patch.dict(os.environ, {"APM_GITLAB_POLICY_REPO": "_apm"}, clear=False):
+            with self.assertRaisesRegex(ValueError, "no leading"):
+                _policy_repo_candidates("gitlab.com")
 
-    def test_gitlab_com_ignores_override(self):
-        """Cloud gitlab.com is a multi-tenant host -- no cross-tenant override."""
-        with patch.dict(os.environ, {"APM_GITLAB_POLICY_ROOT_GROUP": "central"}, clear=False):
-            result = _gitlab_policy_root_group("gitlab.com", "team-a")
-        self.assertEqual(result, "team-a")
 
-    def test_gitlab_com_without_override_returns_org_unchanged(self):
-        result = _gitlab_policy_root_group("gitlab.com", "team-a")
-        self.assertEqual(result, "team-a")
+class TestGitlabPolicyInheritance(unittest.TestCase):
+    """GitLab policy parents must remain within the private GitLab adapter."""
 
-    def test_self_managed_without_override_returns_org_unchanged(self):
-        env = {}
-        with patch.dict(os.environ, env, clear=True):
-            result = _gitlab_policy_root_group("gitlab.example.com", "team-a")
-        self.assertEqual(result, "team-a")
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_uses_gitlab_adapter(self, mock_fetch):
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
 
-    def test_self_managed_with_override_centralizes_on_configured_group(self):
-        """Self-managed instances often host many independent root groups
-        (departments/teams); the override lets them all share one policy
-        root group instead of requiring an apm-policy project per group."""
-        env = {"APM_GITLAB_POLICY_ROOT_GROUP": "platform-governance"}
-        with patch.dict(os.environ, env, clear=False):
-            result = _gitlab_policy_root_group("gitlab.example.com", "team-a")
-        self.assertEqual(result, "platform-governance")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_chain_parent(
+                "platform/baseline",
+                current_source="org:gitlab.com/contoso/apm-policy",
+                leaf_host="gitlab.com",
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
 
-    def test_self_managed_blank_override_returns_org_unchanged(self):
-        env = {"APM_GITLAB_POLICY_ROOT_GROUP": "   "}
-        with patch.dict(os.environ, env, clear=False):
-            result = _gitlab_policy_root_group("gitlab.example.com", "team-a")
-        self.assertEqual(result, "team-a")
+        self.assertEqual(result.outcome, "absent")
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "platform")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "baseline")
+        self.assertEqual(mock_fetch.call_args.kwargs["host"], "gitlab.com")
 
 
 class TestFetchAdoContents(unittest.TestCase):
@@ -1815,36 +1774,81 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
 
     @patch("apm_cli.policy._gitlab._fetch_gitlab_contents")
     def test_404_no_error(self, mock_fetch):
-        mock_fetch.return_value = (None, "404: Policy file not found")
+        mock_fetch.return_value = (None, "gitlab-status:404: Policy file not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
             result = _fetch_from_gitlab_repo(
                 org="contoso",
                 repo="apm-policy",
                 host="gitlab.com",
-                project_root=Path(tmpdir),
+                project_root=root,
                 no_cache=True,
             )
             self.assertFalse(result.found)
             self.assertEqual(result.outcome, "absent")
             self.assertIsNone(result.error)
+            self.assertFalse((root / ".apm").exists())
 
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git", return_value=False)
     @patch("apm_cli.policy._gitlab._fetch_gitlab_contents")
-    def test_410_is_treated_as_absent_no_op(self, mock_fetch):
-        """410 on self-managed GitLab must be a clean no-op, not a warning (#2566)."""
-        mock_fetch.return_value = (None, "410: Policy file not found")
+    def test_confirmed_missing_project_410_is_absent(self, mock_fetch, mock_project_state):
+        """A 410 is clean absence only after Git confirms the project is missing."""
+        mock_fetch.return_value = (None, "gitlab-status:410: Policy file not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
             result = _fetch_from_gitlab_repo(
                 org="contoso",
                 repo="apm-policy",
                 host="gitlab.example.test",
-                project_root=Path(tmpdir),
+                project_root=root,
                 no_cache=True,
             )
             self.assertFalse(result.found)
             self.assertEqual(result.outcome, "absent")
             self.assertIsNone(result.error)
+            self.assertFalse((root / ".apm").exists())
+        mock_project_state.assert_called_once()
+
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git", return_value=True)
+    @patch("apm_cli.policy._gitlab._fetch_gitlab_contents")
+    def test_api_disabled_410_fails_closed(self, mock_fetch, mock_project_state):
+        """A reachable project with a 410 Files API must not skip policy."""
+        mock_fetch.return_value = (None, "gitlab-status:410: Policy file not found")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            result = _fetch_from_gitlab_repo(
+                org="contoso",
+                repo="apm-policy",
+                host="gitlab.example.test",
+                project_root=root,
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIsNotNone(result.error)
+        self.assertFalse((root / ".apm").exists())
+        mock_project_state.assert_called_once()
+
+    @patch("apm_cli.policy._gitlab._fetch_gitlab_contents")
+    def test_auth_failure_fails_closed(self, mock_fetch):
+        mock_fetch.return_value = (None, "401: unauthorized")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            result = _fetch_from_gitlab_repo(
+                org="contoso",
+                repo="apm-policy",
+                host="gitlab.com",
+                project_root=root,
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIsNotNone(result.error)
+        self.assertFalse((root / ".apm").exists())
 
     @patch("apm_cli.policy._gitlab._fetch_gitlab_contents")
     def test_api_error_uses_stale_cache(self, mock_fetch):

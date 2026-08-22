@@ -531,6 +531,32 @@ def _resolve_ado_parent_ref(
     return resolved if all(resolved[:3]) else None
 
 
+def _resolve_gitlab_parent_ref(
+    parent_ref: str,
+    current_source: str,
+    leaf_host: str,
+) -> tuple[str, str, str] | None:
+    """Normalize a GitLab parent ref to ``(org, repo, host)``."""
+    current_parts = _strip_source_prefix(current_source).split("/")
+    current_org = current_parts[1] if len(current_parts) >= 3 else ""
+    if parent_ref == "org":
+        try:
+            repo = _gitlab._gitlab_policy_repo_candidates()[0]
+        except ValueError:
+            return None
+        resolved = (current_org, repo, leaf_host)
+    else:
+        parts = parent_ref.strip("/").split("/")
+        explicit_host = _extract_extends_host(parent_ref)
+        if explicit_host is None and len(parts) == 2:
+            resolved = (parts[0], parts[1], leaf_host)
+        elif explicit_host == leaf_host and len(parts) == 3:
+            resolved = (parts[1], parts[2], leaf_host)
+        else:
+            return None
+    return resolved if all(resolved) else None
+
+
 def _fetch_chain_parent(
     parent_ref: str,
     *,
@@ -577,6 +603,24 @@ def _fetch_chain_parent(
         return _fetch_from_ado_repo(
             org=org,
             project=project,
+            repo=repo,
+            host=host,
+            project_root=project_root,
+            no_cache=no_cache,
+            **cache_kwargs,
+        )
+
+    if leaf_host and is_gitlab_hostname(leaf_host):
+        resolved = _resolve_gitlab_parent_ref(parent_ref, current_source, leaf_host)
+        if resolved is None:
+            return PolicyFetchResult(
+                source=f"org:{parent_ref}",
+                error=f"Invalid GitLab policy reference: {parent_ref}",
+                outcome="cache_miss_fetch_fail",
+            )
+        org, repo, host = resolved
+        return _gitlab._fetch_from_gitlab_repo(
+            org=org,
             repo=repo,
             host=host,
             project_root=project_root,
@@ -891,7 +935,10 @@ def _auto_discover(
         )
 
     org, host, port = identity
-    candidates = _policy_repo_candidates(host)
+    try:
+        candidates = _policy_repo_candidates(host)
+    except ValueError as exc:
+        return PolicyFetchResult(error=str(exc), outcome="cache_miss_fetch_fail")
     is_ado = is_azure_devops_hostname(host)
 
     for candidate_repo in candidates:
@@ -908,7 +955,7 @@ def _auto_discover(
             )
         elif is_gitlab_hostname(host):
             result = _gitlab._fetch_from_gitlab_repo(
-                org=_gitlab._gitlab_policy_root_group(host, org),
+                org=org,
                 repo=candidate_repo,
                 host=host,
                 port=port,

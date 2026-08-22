@@ -84,10 +84,6 @@ Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already
 An arbitrary FQDN is never auto-classified as GitLab -- the same domain shape could be Bitbucket, Gitea, or a plain git server. `gitlab.com` is recognised automatically, but a self-managed instance (e.g. `gitlab.example.com`) is only recognised once you set `GITLAB_HOST=gitlab.example.com` (or `APM_GITLAB_HOSTS` for more than one instance). Without it, APM falls through to the GitHub-style cascade above, which is invalid on GitLab and behaves exactly like the unfixed discovery this section describes. This mirrors `GITHUB_HOST` for GitHub Enterprise Server and `ADO_HOST` for on-prem Azure DevOps Server -- see [Environment Variables](../../reference/environment-variables/).
 :::
 
-By default, GitLab discovery is scoped per **root group**: APM resolves the org from the first path segment of the project's git remote (e.g. a project at `team-a/subteam/project` resolves to root group `team-a`), independent of how deeply the project is nested in subgroups. A self-managed instance with many independent root groups (one per team or department) would otherwise need an `apm-policy` project under every root group.
-
-Set `APM_GITLAB_POLICY_ROOT_GROUP` on a self-managed instance to centralize policy under one designated root group instead -- every project on that instance then resolves org policy there, regardless of its own root group. Ignored on `gitlab.com`: cloud root namespaces are independent tenants, so no cross-tenant override applies there.
-
 When `apm install` or `apm audit --ci --policy org` runs in a project, APM resolves the org from the project's git remote and searches the candidate repos above (cached locally, default 1 hour TTL).
 
 Alternative sources, useful for testing or non-GitHub setups:
