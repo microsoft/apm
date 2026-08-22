@@ -26,6 +26,7 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -162,6 +163,7 @@ def union_preserving(
     current_run_trusted: bool = True,
     owner: str = "legacy",
     include_ledger: bool = False,
+    user_scope: bool = False,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Union the current install's manifest with preserved other-target entries.
 
@@ -202,6 +204,11 @@ def union_preserving(
     from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
+    scoped_known_targets = {
+        name: scoped_target
+        for name, target in KNOWN_TARGETS.items()
+        if (scoped_target := target.for_scope(user_scope=user_scope)) is not None
+    }
     active_by_name = {target.name: target for target in targets}
     declared_by_name = (
         {target.name: target for target in declared_targets}
@@ -215,7 +222,7 @@ def union_preserving(
         ordered = [
             *targets,
             *(declared_targets or []),
-            *KNOWN_TARGETS.values(),
+            *scoped_known_targets.values(),
         ]
         seen_names: set[str] = set()
         for profile in ordered:
@@ -237,11 +244,13 @@ def union_preserving(
         )
 
     prior_values = set(prior_files or ())
-    prior_records = {
-        key: record
-        for key, record in (prior_ledger.records.items() if prior_ledger is not None else ())
-        if record.locator.value in prior_values
-    }
+    prior_records = {}
+    for key, record in prior_ledger.records.items() if prior_ledger is not None else ():
+        if record.locator.value not in prior_values:
+            continue
+        if record.locator.target == "legacy":
+            record = replace(record, locator=_locator(record.locator.value))
+        prior_records[key] = record
     prior_record_values = {record.locator.value for record in prior_records.values()}
     for path in prior_files or ():
         if path in prior_record_values:
@@ -278,7 +287,7 @@ def union_preserving(
     )
     reconciled = DeploymentReconciler(
         Path.cwd(),
-        KNOWN_TARGETS,
+        scoped_known_targets,
         diagnostics=DiagnosticCollector(),
     ).reconcile(
         DeploymentLedger(records=prior_records),
@@ -465,6 +474,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         current_run_trusted=current_run_trusted,
         owner=owner,
         include_ledger=True,
+        user_scope=user_scope,
     )
     dropped = set(prior_files) - set(files)
     # Ledger-authoritative orphan detection. A prior value that HELD a ledger
@@ -567,6 +577,7 @@ def reconcile_target_deployed_files(
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    dependency_keys: set[str] | None = None,
     user_scope: bool = False,
     logger: InstallLogger | None = None,
 ) -> bool:
@@ -586,7 +597,12 @@ def reconcile_target_deployed_files(
 
     allowed_targets = [*active_targets, *(declared_targets or [])]
     allowed_prefixes, allowed_schemes = install_governance(allowed_targets)
-    known_prefixes, known_schemes = install_governance(list(KNOWN_TARGETS.values()))
+    known_targets = [
+        scoped_target
+        for target in KNOWN_TARGETS.values()
+        if (scoped_target := target.for_scope(user_scope=user_scope)) is not None
+    ]
+    known_prefixes, known_schemes = install_governance(known_targets)
 
     def _retained(files: list[str]) -> list[str]:
         if declared_targets is None:
@@ -603,7 +619,7 @@ def reconcile_target_deployed_files(
     changed = False
     prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
     for dep_key, dependency in lockfile.dependencies.items():
-        if dep_key == _SELF_KEY:
+        if dep_key == _SELF_KEY or (dependency_keys is not None and dep_key not in dependency_keys):
             continue
         prior_files = list(dependency.deployed_files)
         prior_hashes = dict(dependency.deployed_file_hashes)

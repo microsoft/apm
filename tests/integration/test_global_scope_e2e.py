@@ -67,6 +67,26 @@ def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60):
     )
 
 
+def _write_targeted_package(
+    root: Path,
+    name: str,
+    primitive_path: str,
+    filename: str,
+    content: str,
+) -> Path:
+    """Create one local package with a primitive for a selected global target."""
+    package = root / name
+    package.mkdir()
+    (package / "apm.yml").write_text(
+        yaml.dump({"name": name, "version": "1.0.0", "description": f"{name} fixture"}),
+        encoding="utf-8",
+    )
+    primitive_dir = package / primitive_path
+    primitive_dir.mkdir(parents=True)
+    (primitive_dir / filename).write_text(content, encoding="utf-8")
+    return package
+
+
 @pytest.fixture
 def local_package(tmp_path):
     """Create a minimal local APM package for testing global install.
@@ -496,6 +516,70 @@ class TestGlobalUninstallLifecycle:
         assert "not found" in combined.lower() or "not in apm.yml" in combined.lower(), (
             f"Expected 'not found' warning: {combined}"
         )
+
+    def test_uninstall_global_cleans_removed_only_target_before_state_removal(
+        self,
+        apm_binary_path,
+        fake_home,
+        tmp_path,
+    ):
+        """A removed OpenCode agent cannot survive a manifest with agent-skills only."""
+        survivor = _write_targeted_package(
+            tmp_path,
+            "survivor-target-cleanup",
+            ".apm/skills/survivor",
+            "SKILL.md",
+            "---\nname: survivor\ndescription: Survives removal.\n---\n# Survivor\n",
+        )
+        removed = _write_targeted_package(
+            tmp_path,
+            "removed-target-cleanup",
+            ".apm/agents",
+            "orphan.agent.md",
+            "---\nname: orphan\ndescription: Must be cleaned.\n---\n# Orphan\n",
+        )
+
+        survivor_install = _run_apm(
+            apm_binary_path,
+            ["install", "--global", str(survivor), "--target", "agent-skills"],
+            fake_home,
+            fake_home,
+        )
+        assert survivor_install.returncode == 0, survivor_install.stdout + survivor_install.stderr
+        removed_install = _run_apm(
+            apm_binary_path,
+            ["install", "--global", str(removed), "--target", "opencode"],
+            fake_home,
+            fake_home,
+        )
+        assert removed_install.returncode == 0, removed_install.stdout + removed_install.stderr
+
+        apm_dir = fake_home / ".apm"
+        survivor_file = fake_home / ".agents" / "skills" / "survivor" / "SKILL.md"
+        removed_file = fake_home / ".config" / "opencode" / "agents" / "orphan.md"
+        assert survivor_file.exists()
+        assert removed_file.exists()
+
+        uninstall_result = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(removed)],
+            fake_home,
+            fake_home,
+        )
+        assert uninstall_result.returncode == 0, uninstall_result.stdout + uninstall_result.stderr
+
+        assert not removed_file.exists()
+        assert survivor_file.exists()
+        manifest = yaml.safe_load((apm_dir / "apm.yml").read_text(encoding="utf-8"))
+        assert isinstance(manifest, dict)
+        manifest_text = yaml.safe_dump(manifest)
+        assert "removed-target-cleanup" not in manifest_text
+        assert "survivor-target-cleanup" in manifest_text
+        lockfile_text = (apm_dir / "apm.lock.yaml").read_text(encoding="utf-8")
+        assert "removed-target-cleanup" not in lockfile_text
+        assert "survivor-target-cleanup" in lockfile_text
+        assert not (apm_dir / "apm_modules" / "_local" / "removed-target-cleanup").exists()
+        assert (apm_dir / "apm_modules" / "_local" / "survivor-target-cleanup").exists()
 
 
 # ---------------------------------------------------------------------------

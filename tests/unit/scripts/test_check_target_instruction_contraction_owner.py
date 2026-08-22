@@ -109,3 +109,37 @@ def run():
         "post-deps local must not delete target files directly",
         "post-deps local must route target contraction through reconcile_deployed_block",
     ]
+
+
+def test_checker_rejects_uninstall_cleanup_outside_manifest_owner() -> None:
+    """Removed target files must use the same contraction owner as install."""
+    checker = _load_checker()
+    manifest_source = """
+def reconcile_deployed_block():
+    remove_stale_deployed_files()
+
+def reconcile_target_deployed_files():
+    reconcile_deployed_block()
+
+def reconcile_deployed_state():
+    reconcile_target_deployed_files()
+"""
+    lockfile_source = """
+def _reconcile_target_deployed_files():
+    reconcile_target_deployed_files()
+"""
+    post_local_source = """
+def run():
+    reconcile_deployed_block()
+"""
+    uninstall_source = """
+def uninstall():
+    remove_stale_deployed_files()
+"""
+
+    assert checker.analyze_sources(
+        manifest_source,
+        lockfile_source,
+        post_local_source,
+        uninstall_source,
+    ) == ["uninstall must route removed target files through manifest_reconcile"]

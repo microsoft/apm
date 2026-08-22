@@ -258,7 +258,41 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             return
 
-        # Step 3: Remove from apm.yml
+        # Step 3: Remove target-scoped files while their lockfile ownership is
+        # still recoverable. The post-removal manifest can omit a removed
+        # package's target, so its target must not be reconstructed from it.
+        if lockfile and removed_keys:
+            from ...install.manifest_reconcile import reconcile_target_deployed_files
+            from ...integration.targets import resolve_targets
+            from ...utils.diagnostics import DiagnosticCollector
+
+            cleanup_target_names = list(APMPackage.from_apm_yml(manifest_path).canonical_targets)
+            cleanup_targets = resolve_targets(
+                deploy_root,
+                user_scope=scope is InstallScope.USER,
+                explicit_target=cleanup_target_names or None,
+            )
+            reconcile_target_deployed_files(
+                project_root=deploy_root,
+                lockfile=lockfile,
+                active_targets=cleanup_targets,
+                declared_targets=cleanup_targets,
+                diagnostics=DiagnosticCollector(verbose=verbose),
+                dependency_keys=removed_keys,
+                user_scope=scope is InstallScope.USER,
+            )
+            retained_removed_files = {
+                dep_key: dep.deployed_files
+                for dep_key, dep in lockfile.dependencies.items()
+                if dep_key in removed_keys and dep.deployed_files
+            }
+            if retained_removed_files:
+                raise RuntimeError(
+                    "Uninstall could not remove all tracked target files; "
+                    "package state was preserved. Resolve the retained files and retry."
+                )
+
+        # Step 4: Remove from apm.yml
         for package in packages_to_remove:
             package_label = _dependency_public_label(package)
             if package in dev_deps:
@@ -283,12 +317,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger.error(f"Failed to write {apm_yml_path}: {e}")
             sys.exit(1)
 
-        # Step 4: Capture pre-uninstall MCP state (lockfile already read above)
+        # Step 5: Capture pre-uninstall MCP state (lockfile already read above)
         _pre_uninstall_mcp_servers = (
             builtins.set(lockfile.mcp_servers) if lockfile else builtins.set()
         )
 
-        # Step 5: Remove packages from disk
+        # Step 6: Remove packages from disk
         refreshed_survivor_keys = builtins.set()
         removed_from_modules = _remove_packages_from_disk(
             packages_to_remove,
@@ -298,13 +332,13 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             refreshed_survivor_keys=refreshed_survivor_keys,
         )
 
-        # Step 6: Cleanup transitive orphans
+        # Step 7: Cleanup transitive orphans
         orphan_removed, actual_orphans = _cleanup_transitive_orphans(
             lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
         )
         removed_from_modules += orphan_removed
 
-        # Step 7: Collect deployed files for removed packages (before lockfile mutation)
+        # Step 8: Collect deployed files for removed packages (before lockfile mutation)
         from ...integration.base_integrator import BaseIntegrator
 
         removed_keys.update(actual_orphans)
@@ -317,7 +351,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
         )
 
-        # Step 8: Mutate dependency state in memory. Persistence happens once
+        # Step 9: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.
         lockfile_updated = False
         if lockfile:
@@ -335,7 +369,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     del lockfile.dependencies[orphan_key]
                     lockfile_updated = True
 
-        # Step 9: Sync integrations
+        # Step 10: Sync integrations
         cleaned = {
             "prompts": 0,
             "agents": 0,
@@ -397,7 +431,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger.progress(f"Cleaned up {count} integrated {label}", symbol="check")
                 logger.verbose_detail(f"    Removed {count} deployed {label} file(s)")
 
-        # Step 10: MCP cleanup
+        # Step 11: MCP cleanup
         from ...adapters.client.intellij import IntelliJConfigError
         from ...utils.path_security import PathTraversalError
 
