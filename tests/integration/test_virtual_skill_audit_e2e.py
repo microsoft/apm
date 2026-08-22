@@ -312,7 +312,7 @@ def test_manifestless_local_skill_installs_and_audits_without_state_drift(
         cwd=project.root,
         env=environment,
     )[0]
-    assert _config_check(normal_audit)["passed"] is True
+    assert _audit_payload(normal_audit)["passed"] is True
     ci_audit = runner.run_sequence(
         (_AUDIT_ARGS,),
         expected_returncodes=(0,),
