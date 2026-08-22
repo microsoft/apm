@@ -408,6 +408,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | `ref-consistency` | Every dependency's manifest ref matches the lockfile's resolved ref |
 | `deployed-files-present` | All files listed in lockfile `deployed_files` exist on disk |
 | `no-orphaned-packages` | No lockfile packages are absent from the manifest |
+| `agent-subset-consistency` | `agents:` selections in `apm.yml` match `agent_subset` in the lockfile |
 | `skill-subset-consistency` | `skills:` selections in `apm.yml` match `skill_subset` in the lockfile |
 | `config-consistency` | MCP server configs match lockfile baseline |
 | `content-integrity` | Deployed files contain no critical hidden Unicode characters and their SHA-256 hashes match the lockfile |

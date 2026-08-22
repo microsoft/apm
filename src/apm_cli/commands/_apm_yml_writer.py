@@ -7,6 +7,7 @@ The helpers promote entries to dict form and set/clear the ``skills:`` or
 from pathlib import Path
 
 from ..models.dependency.reference import DependencyReference
+from ..models.dependency.subsets import parse_agent_subset
 from ..utils.yaml_io import dump_yaml, load_yaml
 
 
@@ -23,6 +24,15 @@ def set_skill_subset_for_entry(
     Returns True if file was modified.
     """
     return _set_subset_for_entry(manifest_path, repo_url, "skills", subset)
+
+
+def set_agent_subset_for_entry(
+    manifest_path: Path,
+    repo_url: str,
+    subset: list[str] | None,
+) -> bool:
+    """Promote entry to dict form and set/clear agents: field."""
+    return _set_subset_for_entry(manifest_path, repo_url, "agents", subset)
 
 
 def set_target_subset_for_entry(
@@ -112,7 +122,9 @@ def _apply_subset(entry, field: str | list[str] | None, subset: list[str] | None
         return entry
 
     # Determine if we should set or clear
-    if field == "skills":
+    if field == "agents":
+        ref.agent_subset = parse_agent_subset(subset) if subset else None
+    elif field == "skills":
         ref.skill_subset = sorted(set(subset)) if subset else None
     elif field == "targets":
         ref.target_subset = sorted({name.strip().lower() for name in subset}) if subset else None

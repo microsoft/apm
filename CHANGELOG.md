@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-dependency agent subsetting: object-form dependencies accept a non-empty
+  `agents:` list, and repeatable `apm install --agent NAME` selections persist
+  to `apm.yml` and `apm.lock.yaml` for deterministic bare installs and audit
+  replay. `--agent '*'` resets the dependency to all agents. (closes #2491)
 - `apm install` now accepts `--trust-bin` / `--no-trust-bin` for per-invocation
   consent over marketplace-plugin `bin/` executable deployment. `--trust-bin`
   approves deployment silently; `--no-trust-bin` skips `bin/` even when policy

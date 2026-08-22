@@ -45,6 +45,7 @@ _LOCKED_DEPENDENCY_VALUES = {
     "source_digest": f"sha256:{'d' * 64}",
     "is_insecure": True,
     "allow_insecure": True,
+    "agent_subset": ["planner", "reviewer"],
     "skill_subset": ["alpha", "beta"],
     "target_subset": ["copilot"],
     "resolved_url": "https://registry.example.invalid/consume-contract.tgz",
@@ -75,6 +76,7 @@ _RECONSTRUCTED_LOCK_FIELDS = {
     "anchored_local_path",
     "is_insecure",
     "allow_insecure",
+    "agent_subset",
     "skill_subset",
     "target_subset",
 }

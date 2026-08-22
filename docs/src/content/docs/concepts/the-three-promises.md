@@ -113,10 +113,11 @@ apm install --dry-run <package>
   `resolve_policy_chain()` implement the tighten-only enterprise
   -> org -> repo flow with `_escalate()` enforcement.
 - `src/apm_cli/policy/ci_checks.py` -- `run_baseline_checks()` is
-  the CI surface used by `apm audit --ci`. It runs 8 baseline
-  checks: lockfile-exists, ref-consistency, deployed-files-present,
-  no-orphans, skill-subset-consistency, config-consistency,
-  content-integrity, and includes-consent.
+  the CI surface used by `apm audit --ci`. It runs 10 baseline
+  checks: lockfile-exists, ref-consistency, deployment-ledger-owners,
+  deployed-files-present, no-orphans, agent-subset-consistency,
+  skill-subset-consistency, config-consistency, content-integrity, and
+  includes-consent.
 
 ### Read more
 
@@ -147,6 +148,6 @@ right now -- including hand-edits to files inside `apm_modules/`.
 At install time: dependencies from disallowed sources or scopes,
 primitives outside the allow-list, and transitive MCP servers that
 fail any of the configured trust rules -- evaluated before any
-download. In CI via `apm audit --ci`: the 8 baseline checks above,
+download. In CI via `apm audit --ci`: the 10 baseline checks above,
 which catch lockfile drift, missing deployed files, orphaned
 packages, and content-hash mismatches before a PR can merge.

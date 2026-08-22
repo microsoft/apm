@@ -36,6 +36,7 @@ first failure to skip expensive I/O.
 | `deployment-ledger-owners` | block | `ci_checks.py` | yes |
 | `deployed-files-present` | block | `ci_checks.py` | yes |
 | `no-orphaned-packages` | block | `ci_checks.py` | yes |
+| `agent-subset-consistency` | block | `ci_checks.py` | yes |
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `content-integrity` | block | `ci_checks.py` | yes |
@@ -116,9 +117,15 @@ the [policy schema](../policy-schema/).
 - **Fails when.** The lockfile holds a package that the manifest no longer lists.
 - **Remediation.** Run `apm install` to prune the orphan, then commit `apm.lock.yaml`.
 
+### `agent-subset-consistency`
+
+- **What it verifies.** That every dependency's `agents:` selection in `apm.yml` matches `agent_subset` in the lockfile.
+- **Fails when.** The sorted manifest and lockfile agent selections differ.
+- **Remediation.** Run `apm install` to regenerate the lockfile against the current selection.
+
 ### `skill-subset-consistency`
 
-- **What it verifies.** That the `skills:` selection in `apm.yml` for each `skill_bundle` dependency matches the `skill_subset` recorded in the lockfile.
+- **What it verifies.** That each skill bundle's `skills:` selection in `apm.yml` matches `skill_subset` in the lockfile.
 - **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset` for any skill bundle.
 - **Remediation.** Run `apm install` to regenerate the lockfile against the current selection.
 
@@ -153,7 +160,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `agent-subset-consistency`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 

@@ -87,6 +87,23 @@ def test_lockfile_v1_remains_parseable_under_v2_reader():
     validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V1))
 
 
+@pytest.mark.req("req-mf-025")
+def test_lockfile_agent_subset_uses_flat_non_blank_names():
+    valid = {
+        "lockfile_version": "1",
+        "dependencies": [{"repo_url": "owner/repo", "agent_subset": ["planner"]}],
+    }
+    validate_against("lockfile-v0.1.schema.json", valid)
+
+    for invalid_name in ("", " ", ".", "..", "team/planner", r"team\planner"):
+        invalid = {
+            "lockfile_version": "1",
+            "dependencies": [{"repo_url": "owner/repo", "agent_subset": [invalid_name]}],
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against("lockfile-v0.1.schema.json", invalid)
+
+
 @pytest.mark.req("req-lk-005")
 def test_lockfile_dependency_carries_resolved_field():
     schema = load_schema("lockfile-v0.1.schema.json")

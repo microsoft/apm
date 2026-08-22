@@ -14,7 +14,10 @@ This is the Template Method companion to the Strategy pattern in
 from __future__ import annotations
 
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import (
+    effective_deploy_agent_subset,
+    effective_deploy_skill_subset,
+)
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization
 
@@ -116,6 +119,24 @@ def _integrate_materialization(
     diagnostics = ctx.diagnostics
     logger = ctx.logger
 
+    agent_subset_from_cli = dep_key in ctx.agent_subset_cli_dep_keys
+    if agent_subset_from_cli and ctx.agent_subset:
+        from apm_cli.install.outcome import require_requested_components
+        from apm_cli.integration.agent_integrator import AgentIntegrator
+
+        available_agents = AgentIntegrator.available_agent_names(m.package_info)
+        if not require_requested_components(
+            diagnostics,
+            option="--agent",
+            component="agent",
+            requested=ctx.agent_subset,
+            available=available_agents,
+            package=dep_key,
+            match_leaf=False,
+        ):
+            ctx.package_deployed_files[dep_key] = []
+            return deltas
+
     if ctx.skill_subset_from_cli and ctx.skill_subset:
         from apm_cli.install.outcome import require_requested_components
         from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -150,6 +171,12 @@ def _integrate_materialization(
         ):
             ctx.package_deployed_files[dep_key] = []
             return deltas
+
+        effective_agent_subset = effective_deploy_agent_subset(
+            agent_subset_from_cli=agent_subset_from_cli,
+            cli_subset=ctx.agent_subset if agent_subset_from_cli else None,
+            persisted_subset=dep_ref.agent_subset,
+        )
 
         # Per-package effective subset: ``--skill`` is additive (issue
         # #1786), so deploy the UNION of the persisted apm.yml ``skills:``
@@ -190,6 +217,7 @@ def _integrate_materialization(
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
+            agent_subset=effective_agent_subset,
             skill_subset=effective_skill_subset,
             dep_target_subset=dep_ref.target_subset,
             ctx=ctx,

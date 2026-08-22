@@ -36,12 +36,15 @@ def require_requested_components(
     requested: Iterable[str],
     available: Collection[str],
     package: str,
+    match_leaf: bool = True,
 ) -> bool:
     """Record one canonical failure when requested components are unavailable."""
     requested_values = tuple(str(value) for value in requested)
     available_names = frozenset(str(value) for value in available)
     missing = tuple(
-        value for value in requested_values if _component_name(value) not in available_names
+        value
+        for value in requested_values
+        if (value if not match_leaf else _component_name(value)) not in available_names
     )
     if not missing:
         return True

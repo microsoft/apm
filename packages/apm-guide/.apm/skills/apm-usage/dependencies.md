@@ -164,6 +164,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 | `allow_insecure` | OPTIONAL | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
+| `agents` | OPTIONAL | Install only named agents from the dependency. Non-empty list of flat agent names. |
 | `skills` | OPTIONAL | Install only named skills from a skill bundle. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
@@ -194,6 +195,7 @@ and `alias`.
 |-------|----------|-------------|
 | `path` | REQUIRED | Filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `agents` | OPTIONAL | Consumer-side agent subset for that dependency. Non-empty list of flat names. |
 | `skills` | OPTIONAL | Consumer-side skill subset for that dependency. Non-empty list of skill names. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
@@ -205,6 +207,7 @@ package's directory, not the project root.
 
 - path: ./packages/local-review-kit
   alias: local-review-kit
+  agents: [planner]
   skills: [reviewer]
   targets: [claude]
 ```

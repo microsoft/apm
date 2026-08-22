@@ -68,7 +68,7 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
         run: apm audit --ci
 ```
 
-This single command runs the nine baseline lockfile checks PLUS integration
+This single command runs the ten baseline lockfile checks PLUS integration
 drift detection (default-on) AND replays
 the install pipeline into a scratch tree to detect missed `apm install`
 runs, hand-edited deployed files, and orphaned files. See the

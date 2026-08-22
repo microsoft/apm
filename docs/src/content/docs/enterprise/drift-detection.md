@@ -29,14 +29,14 @@ happens; see [security model](../security/).
 
 ### `apm audit --ci`
 
-The lockfile-consistency gate. Runs nine baseline checks in order and
+The lockfile-consistency gate. Runs ten baseline checks in order and
 exits non-zero on the first failure (or on any failure with
 `--no-fail-fast`):
 
 ```
 lockfile-exists -> ref-consistency -> deployment-ledger-owners
 -> deployed-files-present -> no-orphaned-packages
--> skill-subset-consistency -> config-consistency
+-> agent-subset-consistency -> skill-subset-consistency -> config-consistency
 -> content-integrity -> includes-consent
 ```
 

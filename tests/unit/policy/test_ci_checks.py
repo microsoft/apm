@@ -1015,7 +1015,7 @@ class TestRunBaselineChecks:
         )
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 9
+        assert len(result.checks) == 10
 
     def test_mixed_pass_fail(self, tmp_path):
         # Ref mismatch (fail) + missing file (fail) + clean otherwise

@@ -6,12 +6,13 @@ import re
 from collections.abc import Collection
 from typing import Any
 
-from .subsets import parse_skill_subset, parse_target_subset
+from .subsets import parse_agent_subset, parse_skill_subset, parse_target_subset
 
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 _REMOTE_GIT_DEPENDENCY_FIELDS = frozenset(
     {
         "alias",
+        "agents",
         "allow_insecure",
         "git",
         "path",
@@ -64,10 +65,13 @@ def reject_unknown_git_fields(entry: dict, *, parent: bool) -> None:
 
 
 def apply_optional_dependency_fields(dep: Any, entry: dict) -> None:
-    """Apply common alias, skills, and targets fields to a dependency."""
+    """Apply common alias, agent, skill, and target fields to a dependency."""
     alias = parse_alias_override(entry.get("alias"))
     if alias is not None:
         dep.alias = alias
+    agents_raw = entry.get("agents")
+    if agents_raw is not None:
+        dep.agent_subset = parse_agent_subset(agents_raw)
     skills_raw = entry.get("skills")
     if skills_raw is not None:
         dep.skill_subset = parse_skill_subset(skills_raw)
@@ -79,6 +83,7 @@ def apply_optional_dependency_fields(dep: Any, entry: dict) -> None:
 def local_path_apm_yml_entry(
     local_path: str,
     alias: str | None,
+    agent_subset: list[str] | None,
     skill_subset: list[str] | None,
     target_subset: list[str] | None,
 ) -> dict[str, object]:
@@ -86,6 +91,8 @@ def local_path_apm_yml_entry(
     entry: dict[str, object] = {"path": local_path}
     if alias:
         entry["alias"] = alias
+    if agent_subset:
+        entry["agents"] = sorted(agent_subset)
     if skill_subset:
         entry["skills"] = sorted(skill_subset)
     if target_subset:

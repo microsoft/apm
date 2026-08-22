@@ -20,7 +20,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import (
+    effective_deploy_agent_subset,
+    effective_deploy_skill_subset,
+)
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -132,6 +135,8 @@ class LockfileBuilder:
             self._attach_exec_status(lockfile)
             # Apply CLI --skill override to lockfile entries (skill_bundle only)
             self._attach_skill_subset_override(lockfile)
+            # Apply CLI --agent override only to explicitly selected dependencies.
+            self._attach_agent_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
             # Attach declared-license provenance captured at acquire time (U6)
@@ -361,6 +366,21 @@ class LockfileBuilder:
                 # --skill '*' (empty ctx.skill_subset), so a real named
                 # subset always survives the union.
                 locked_dep.skill_subset = list(merged) if merged else []
+
+    def _attach_agent_subset_override(self, lockfile: LockFile) -> None:
+        """Union CLI ``--agent`` values into selected direct dependency entries."""
+        if not self.ctx.agent_subset:
+            return
+        for dep_key in self.ctx.agent_subset_cli_dep_keys:
+            locked_dep = lockfile.dependencies.get(dep_key)
+            if locked_dep is None:
+                continue
+            merged = effective_deploy_agent_subset(
+                agent_subset_from_cli=self.ctx.agent_subset_from_cli,
+                cli_subset=self.ctx.agent_subset,
+                persisted_subset=locked_dep.agent_subset,
+            )
+            locked_dep.agent_subset = list(merged) if merged else []
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():

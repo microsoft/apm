@@ -82,10 +82,11 @@ auto-detection only when `apm.yml` declares no targets.
 
 Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`.
 
-### Skill subset
+### Agent and skill subsets
 
 | Flag | Default | Description |
 |---|---|---|
+| `--agent NAME` | all | Install only named agents from an explicitly named dependency (at least one package argument is required). Agent names are flat filename stems (for example, `reviewer` selects `reviewer.agent.md`). Repeatable and additive across installs. The sorted selection is persisted as `agents:` in `apm.yml` and `agent_subset` in `apm.lock.yaml`, so a bare reinstall or audit replay deploys the same agents. Use `--agent '*'` to reset to all agents. |
 | `--skill NAME` | all | Install only named skills from a dependency that exposes selectable skills. Applies to both git-longhand and registry-longhand (`id:`/`registry:`) dependencies. Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. A CLI name that matches no declared skill is an install error; the diagnostic lists the available names. If a previously persisted `skills:` pin later matches no available source skill, install stays successful but warns with the package, requested names, and available names instead of silently doing nothing. The selection is persisted to `apm.yml` and `apm.lock.yaml` only after a successful CLI match. `--skill` is additive across separate installs: a later `apm install <bundle> --skill X` adds `X` to the existing pin (union) rather than replacing it -- previously deployed skills are never silently removed. Use `--skill '*'` to reset to the full bundle; to drop a single skill, edit the `skills:` list in `apm.yml` and re-run `apm install`. |
 | `--as ALIAS` | bundle id | Override the log/display label for a local-bundle install. Only valid with a single local-bundle `PACKAGE_REF`. |
 
@@ -203,12 +204,15 @@ apm install ./my-bundle.zip --as custom-name
 apm install ./my-bundle --target opencode
 ```
 
-### Install only a subset of skills from a bundle
+### Install only a subset of agents or skills
 
 ```bash
 apm install owner/skill-bundle --skill review
 apm install owner/skill-bundle --skill refactor   # adds refactor; review is kept (union)
 apm install owner/skill-bundle --skill '*'         # reset to all skills
+
+apm install owner/agent-pack --agent planner --agent reviewer
+apm install owner/agent-pack --agent '*'            # reset to all agents
 ```
 
 ## Exit codes

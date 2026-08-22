@@ -47,6 +47,8 @@ class InstallRequest:
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
     no_policy: bool = False  # W2-escape-hatch: skip org policy enforcement
     audit_override: str | None = None  # --audit/--no-audit override (off|warn|block)
+    agent_subset: tuple[str, ...] | None = None  # --agent filter for package agents
+    agent_subset_from_cli: bool = False  # True when user passed --agent (even '*')
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS

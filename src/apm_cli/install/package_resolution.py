@@ -210,6 +210,39 @@ def get_existing_skill_subset(
     return list(subset) if subset else None
 
 
+def get_existing_agent_subset(
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str] | None:
+    """Return the persisted ``agents:`` list for *identity*, or None."""
+    existing_ref = get_existing_dep_ref_for_identity(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    if existing_ref is None:
+        return None
+    subset = getattr(existing_ref, "agent_subset", None)
+    return list(subset) if subset else None
+
+
+def normalize_and_merge_agent_subset(
+    cli_subset: builtins.tuple[str, ...],
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str]:
+    """Normalize CLI ``--agent`` names and merge persisted manifest agents."""
+    seen = {name.strip() for name in cli_subset if name.strip()}
+    existing = get_existing_agent_subset(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    if existing:
+        seen.update(existing)
+    return sorted(seen)
+
+
 def normalize_and_merge_skill_subset(
     cli_subset: builtins.tuple[str, ...],
     current_deps: builtins.list,
@@ -267,6 +300,23 @@ def effective_deploy_skill_subset(
     return builtins.tuple(sorted(merged)) or None
 
 
+def effective_deploy_agent_subset(
+    *,
+    agent_subset_from_cli: bool,
+    cli_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+    persisted_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+) -> builtins.tuple[str, ...] | None:
+    """Resolve the additive agent subset to deploy, or None for all agents."""
+    if agent_subset_from_cli and not cli_subset:
+        return None
+    merged: builtins.set[str] = builtins.set()
+    if persisted_subset:
+        merged.update(persisted_subset)
+    if cli_subset:
+        merged.update(cli_subset)
+    return builtins.tuple(sorted(merged)) or None
+
+
 def cli_skill_subset(
     skill_names: builtins.tuple[str, ...],
 ) -> builtins.tuple[str, ...] | None:
@@ -279,6 +329,20 @@ def cli_skill_subset(
     if skill_names and not any(s == "*" for s in skill_names):
         return builtins.tuple(skill_names)
     return None
+
+
+def cli_agent_subset(
+    agent_names: builtins.tuple[str, ...],
+) -> builtins.tuple[str, ...] | None:
+    """Resolve raw CLI ``--agent`` names to a subset, or None for all agents."""
+    if not agent_names:
+        return None
+
+    from apm_cli.models.dependency.subsets import parse_agent_subset
+
+    named_agents = [name for name in agent_names if name != "*"]
+    normalized = parse_agent_subset(named_agents) if named_agents else []
+    return None if len(named_agents) != len(agent_names) else builtins.tuple(normalized)
 
 
 def apply_cli_skill_pin(
@@ -316,6 +380,36 @@ def apply_cli_skill_pin(
             logger.verbose_detail(
                 f"    [i] {identity}: skill pin reset to full bundle "
                 "(--skill '*'); a later bare 'apm install' deploys all skills"
+            )
+
+
+def apply_cli_agent_pin(
+    dep_ref: Any,
+    cli_subset: builtins.tuple[str, ...] | None,
+    agent_subset_from_cli: bool,
+    current_deps: builtins.list,
+    apm_yml_entries: dict,
+    *,
+    dependency_reference_cls: Any,
+    logger: Any | None = None,
+) -> None:
+    """Attach, merge, or reset a CLI ``--agent`` pin on ``dep_ref``."""
+    identity = dep_ref.get_identity()
+    if cli_subset:
+        dep_ref.agent_subset = normalize_and_merge_agent_subset(
+            cli_subset,
+            current_deps,
+            identity,
+            dependency_reference_cls=dependency_reference_cls,
+        )
+        return
+    if agent_subset_from_cli:
+        dep_ref.agent_subset = None
+        apm_yml_entries[dep_ref.to_canonical()] = dep_ref.to_apm_yml_entry()
+        if logger:
+            logger.verbose_detail(
+                f"    [i] {identity}: agent pin reset to full package "
+                "(--agent '*'); a later bare 'apm install' deploys all agents"
             )
 
 
