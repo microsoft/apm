@@ -476,7 +476,8 @@ def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
     else:
         text = str(fd)
 
-    if not text.lstrip().startswith("---"):
+    first_line = text.splitlines()[0] if text else ""
+    if first_line.strip() != "---":
         return frontmatter.Post(text)
 
     return frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)

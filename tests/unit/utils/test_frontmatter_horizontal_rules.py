@@ -1,7 +1,5 @@
 """Unit tests for load_frontmatter handling of Markdown horizontal rules."""
 
-from pathlib import Path
-import pytest
 from apm_cli.utils.yaml_io import load_frontmatter
 
 
