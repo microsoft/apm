@@ -960,7 +960,7 @@ def diff_scratch_against_project(
                     path=rel,
                     kind="modified",
                     package=tracked.get(rel, ""),
-                    inline_diff=f"(read error: {exc})",
+                    inline_diff=f"(comparison error: {exc})",
                 )
             )
             continue
