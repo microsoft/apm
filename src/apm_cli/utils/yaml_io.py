@@ -466,7 +466,20 @@ def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
     """
     import frontmatter
 
-    return frontmatter.load(fd, encoding=encoding, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    text = ""
+    if isinstance(fd, (str, Path)):
+        text = Path(fd).read_text(encoding=encoding)
+    elif hasattr(fd, "read"):
+        text = fd.read()
+        if isinstance(text, bytes):
+            text = text.decode(encoding)
+    else:
+        text = str(fd)
+
+    if not text.lstrip().startswith("---"):
+        return frontmatter.Post(text)
+
+    return frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
 
 
 def dump_yaml(
