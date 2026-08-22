@@ -148,20 +148,58 @@ def test_contraction_removes_only_selected_removed_target_ownership(tmp_path):
     )
     lockfile.add_dependency(removed)
 
-    changed = reconcile_target_deployed_files(
+    reconcile_target_deployed_files(
         project_root=tmp_path,
         lockfile=lockfile,
         active_targets=[KNOWN_TARGETS["agent-skills"]],
         declared_targets=[KNOWN_TARGETS["agent-skills"]],
         diagnostics=DiagnosticCollector(),
         dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
         user_scope=True,
     )
 
-    assert changed is True
     assert survivor_abs.exists()
     assert not removed_abs.exists()
-    assert lockfile.get_dependency(removed.get_unique_key()).deployed_files == []
+
+
+def test_selected_ownership_cleanup_removes_unique_active_target_file(tmp_path):
+    """Removing one owner deletes its file even when the target remains active."""
+    survivor_rel = ".config/opencode/agents/survivor.md"
+    removed_rel = ".config/opencode/agents/orphan.md"
+    survivor_abs = tmp_path / survivor_rel
+    removed_abs = tmp_path / removed_rel
+    for path, body in ((survivor_abs, "# survivor\n"), (removed_abs, "# orphan\n")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    lockfile = LockFile()
+    survivor = LockedDependency(
+        repo_url="https://github.com/acme/survivor",
+        deployed_files=[survivor_rel],
+        deployed_file_hashes={survivor_rel: compute_file_hash(survivor_abs)},
+    )
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[removed_rel],
+        deployed_file_hashes={removed_rel: compute_file_hash(removed_abs)},
+    )
+    lockfile.add_dependency(survivor)
+    lockfile.add_dependency(removed)
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[KNOWN_TARGETS["opencode"]],
+        declared_targets=[KNOWN_TARGETS["opencode"]],
+        diagnostics=DiagnosticCollector(),
+        dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
+        user_scope=True,
+    )
+
+    assert survivor_abs.exists()
+    assert not removed_abs.exists()
 
 
 if __name__ == "__main__":

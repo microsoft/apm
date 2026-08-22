@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm uninstall --global` now cleans removed-only target files before deleting their ownership state, while preserving files owned by surviving packages. (#2658)
 - Windows binary is now Authenticode-signed in the release workflow, eliminating
   the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
   PyInstaller bundles. (#2435)

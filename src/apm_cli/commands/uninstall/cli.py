@@ -272,25 +272,28 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 user_scope=scope is InstallScope.USER,
                 explicit_target=cleanup_target_names or None,
             )
+            cleanup_keys = removed_keys | builtins.set(projected_orphans)
+            retained_cleanup_paths = builtins.set()
             reconcile_target_deployed_files(
                 project_root=deploy_root,
                 lockfile=lockfile,
                 active_targets=cleanup_targets,
                 declared_targets=cleanup_targets,
                 diagnostics=DiagnosticCollector(verbose=verbose),
-                dependency_keys=removed_keys,
+                dependency_keys=cleanup_keys,
+                remove_selected_ownership=True,
+                retained_selected_paths=retained_cleanup_paths,
                 user_scope=scope is InstallScope.USER,
+                logger=logger,
             )
-            retained_removed_files = {
-                dep_key: dep.deployed_files
-                for dep_key, dep in lockfile.dependencies.items()
-                if dep_key in removed_keys and dep.deployed_files
-            }
-            if retained_removed_files:
-                raise RuntimeError(
-                    "Uninstall could not remove all tracked target files; "
-                    "package state was preserved. Resolve the retained files and retry."
+            if retained_cleanup_paths:
+                logger.error(
+                    "Uninstall could not remove tracked target files; package state was preserved."
                 )
+                for path in sorted(retained_cleanup_paths):
+                    logger.error(f"  - {path}")
+                logger.error("Resolve or remove the listed files, then retry uninstall.")
+                sys.exit(1)
 
         # Step 4: Remove from apm.yml
         for package in packages_to_remove:
