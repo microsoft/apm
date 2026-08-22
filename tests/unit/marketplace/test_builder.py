@@ -1560,7 +1560,9 @@ class TestDuplicateNameWarnings:
             "acme/pkg-beta": _make_refs("v1.0.0"),
         }
         report = _build_with_mock(tmp_path, yml, refs)
-        assert report.warnings == ()
+        assert all("Duplicate marketplace package name" not in warning for warning in report.warnings)
+        assert len(report.warnings) == 2
+        assert all("metadata enrichment skipped by --offline" in warning for warning in report.warnings)
 
     def test_duplicate_names_produce_warning(self, tmp_path: Path) -> None:
         """Bypass yml_schema by feeding resolved packages directly."""
@@ -1667,7 +1669,7 @@ class TestDuplicateNameWarnings:
         assert "acme/tool-b" in warnings[0]
 
     def test_build_report_carries_warnings(self, tmp_path: Path) -> None:
-        """BuildReport.warnings is empty for a clean build."""
+        """BuildReport carries offline metadata warnings from its canonical result."""
         yml = """\
         name: test-mkt
         description: Test
@@ -1682,7 +1684,8 @@ class TestDuplicateNameWarnings:
         refs = {"acme/solo": _make_refs("v1.0.0")}
         report = _build_with_mock(tmp_path, yml, refs)
         assert isinstance(report.warnings, tuple)
-        assert len(report.warnings) == 0
+        assert len(report.warnings) == 1
+        assert "metadata enrichment skipped by --offline" in report.warnings[0]
 
     def test_empty_build_report_primary_output_is_safe(self) -> None:
         report = BuildReport(outputs=())

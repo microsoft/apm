@@ -53,8 +53,9 @@ class DriftOutputReport:
 
     format: str
     path: str
-    status: str  # "unchanged" | "missing" | "drift"
+    status: str  # "unchanged" | "missing" | "drift" | "uncertifiable"
     differences: tuple[DriftDifference, ...] = ()
+    metadata_warnings: tuple[str, ...] = ()
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +63,7 @@ class DriftOutputReport:
             "path": self.path,
             "status": self.status,
             "differences": [d.to_json_dict() for d in self.differences],
+            "metadata_warnings": list(self.metadata_warnings),
         }
 
 
@@ -86,6 +88,8 @@ class DriftReport:
             elif out.status == "drift":
                 count = len(out.differences)
                 msgs.append(f"{out.path}: {count} differences vs. regenerated output")
+            elif out.status == "uncertifiable":
+                msgs.extend(out.metadata_warnings)
         return msgs
 
 
@@ -181,6 +185,18 @@ def check_marketplace_drift(
         )
 
         remote_metadata = builder.remote_metadata_for_profile(profile, resolve_result.entries)
+        if remote_metadata is not None and not remote_metadata.certifiable:
+            # Do not compare two equally degraded documents. The builder owns
+            # whether the regenerated metadata may certify this output.
+            output_reports.append(
+                DriftOutputReport(
+                    format=profile.name,
+                    path=rel_display,
+                    status="uncertifiable",
+                    metadata_warnings=remote_metadata.warnings,
+                )
+            )
+            continue
         new_doc, _warnings, _diagnostics = builder.compose_output(
             profile, resolve_result.entries, remote_metadata=remote_metadata
         )

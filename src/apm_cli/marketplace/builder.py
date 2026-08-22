@@ -23,6 +23,7 @@ import re
 import threading
 import urllib.error
 import urllib.request
+from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +94,8 @@ __all__ = [
     "BuildDiagnostic",
     "BuildOptions",
     "BuildReport",
+    "MetadataEnrichmentOutcome",
+    "MetadataEnrichmentResult",
     "MarketplaceBuilder",
     "ResolveResult",
     "ResolvedPackage",
@@ -120,6 +123,85 @@ class ResolvedPackage:
     # Propagated to marketplace.json so consumer range resolution and
     # diagnostics use the producer's convention without re-reading apm.yml.
     effective_tag_pattern: str = ""
+
+
+@dataclass(frozen=True)
+class MetadataEnrichmentOutcome:
+    """The metadata-fetch result for one resolved marketplace package."""
+
+    package: str
+    status: str  # "fetched" | "empty" | "failed" | "offline" | "local"
+    values: tuple[tuple[str, str], ...] = ()
+    cause: str | None = None
+
+    @property
+    def metadata(self) -> dict[str, str]:
+        """Return this outcome's mapper-ready description/version values."""
+        return dict(self.values)
+
+    def to_json_dict(self) -> dict[str, Any]:
+        """Serialize the durable outcome without exposing source document contents."""
+        payload: dict[str, Any] = {"package": self.package, "status": self.status}
+        if self.cause is not None:
+            payload["cause"] = self.cause
+        return payload
+
+
+@dataclass(frozen=True)
+class MetadataEnrichmentResult(Mapping[str, dict[str, str]]):
+    """Canonical metadata enrichment state for one marketplace build.
+
+    The mapping interface preserves mapper compatibility while this object owns
+    the distinction between an empty source manifest and an unavailable source.
+    Consumers must use ``certifiable`` rather than inferring it from omitted
+    mapped fields.
+    """
+
+    outcomes: tuple[MetadataEnrichmentOutcome, ...] = ()
+
+    def __getitem__(self, package: str) -> dict[str, str]:
+        for outcome in self.outcomes:
+            if outcome.package == package and outcome.values:
+                return outcome.metadata
+        raise KeyError(package)
+
+    def __iter__(self) -> Iterator[str]:
+        return (outcome.package for outcome in self.outcomes if outcome.values)
+
+    def __len__(self) -> int:
+        return sum(bool(outcome.values) for outcome in self.outcomes)
+
+    @property
+    def certifiable(self) -> bool:
+        """Whether output based on this enrichment may certify clean drift."""
+        return all(outcome.status not in {"failed", "offline"} for outcome in self.outcomes)
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Return user-actionable warnings for incomplete remote enrichment."""
+        warnings: list[str] = []
+        for outcome in self.outcomes:
+            if outcome.status == "offline":
+                warnings.append(
+                    f"[!] Package '{outcome.package}': metadata enrichment skipped by "
+                    "--offline. Add description/version to the marketplace entry or "
+                    "rerun without --offline."
+                )
+            elif outcome.status == "failed":
+                cause = outcome.cause or "unknown failure"
+                warnings.append(
+                    f"[!] Package '{outcome.package}': metadata enrichment failed "
+                    f"({cause}). Add description/version to the marketplace entry or "
+                    "retry with network access."
+                )
+        return tuple(warnings)
+
+    def to_json_dict(self) -> dict[str, Any]:
+        """Serialize metadata completeness for machine-readable pack output."""
+        return {
+            "certifiable": self.certifiable,
+            "outcomes": [outcome.to_json_dict() for outcome in self.outcomes],
+        }
 
 
 @dataclass(frozen=True)
@@ -164,6 +246,7 @@ class MarketplaceOutputReport:
     removed_count: int = 0
     output_path: Path = field(default_factory=lambda: Path("."))
     dry_run: bool = False
+    metadata_enrichment: MetadataEnrichmentResult | None = None
 
 
 @dataclass(frozen=True)
@@ -194,7 +277,17 @@ class BuildReport:
 
     @property
     def warnings(self) -> tuple[str, ...]:
-        return tuple(warn for output in self.outputs for warn in output.warnings)
+        warnings = [warn for output in self.outputs for warn in output.warnings]
+        warnings.extend(self.metadata_enrichment.warnings)
+        return tuple(dict.fromkeys(warnings))
+
+    @property
+    def metadata_enrichment(self) -> MetadataEnrichmentResult:
+        """Return the canonical result shared by metadata-aware outputs."""
+        for output in self.outputs:
+            if output.metadata_enrichment is not None:
+                return output.metadata_enrichment
+        return MetadataEnrichmentResult()
 
     @property
     def diagnostics(self) -> tuple[BuildDiagnostic, ...]:
@@ -255,6 +348,7 @@ class BuildReport:
             "dry_run": self.dry_run,
             "warnings": all_warnings,
             "errors": all_errors,
+            "metadata_enrichment": self.metadata_enrichment.to_json_dict(),
             "marketplace": {
                 "outputs": output_entries,
             },
@@ -268,6 +362,7 @@ class BuildReport:
         errors: list[dict[str, str]],
         warnings: list[str] | None = None,
         dry_run: bool = False,
+        metadata_enrichment: MetadataEnrichmentResult | None = None,
     ) -> dict[str, Any]:
         """Produce the Section 4 JSON shape for a pre-build failure.
 
@@ -279,6 +374,11 @@ class BuildReport:
             "dry_run": dry_run,
             "warnings": warnings or [],
             "errors": errors,
+            "metadata_enrichment": (
+                metadata_enrichment
+                if metadata_enrichment is not None
+                else MetadataEnrichmentResult()
+            ).to_json_dict(),
             "marketplace": {
                 "outputs": [],
             },
@@ -358,6 +458,9 @@ class MarketplaceBuilder:
         self._host_resolvers_lock = threading.Lock()
         self._source_base_parts: _SourceBaseCoords | None = None
         self._source_base_parts_loaded = False
+        self._metadata_enrichment: MetadataEnrichmentResult | None = None
+        self._metadata_fetch_outcomes: dict[str, MetadataEnrichmentOutcome] = {}
+        self._metadata_fetch_outcomes_lock = threading.Lock()
 
     @classmethod
     def from_config(
@@ -556,18 +659,32 @@ class MarketplaceBuilder:
         self,
         profile: MarketplaceOutputProfile,
         resolved: tuple[ResolvedPackage, ...],
-    ) -> dict[str, dict[str, Any]] | None:
-        """Return remote metadata needed to compose this output, if any."""
+    ) -> MetadataEnrichmentResult | None:
+        """Return the canonical enrichment result needed to compose *profile*."""
         mapper = self._mapper_for_profile(profile)
         if not mapper.uses_remote_metadata:
             return None
-        return self._prefetch_metadata(resolved)
+        result = self._prefetch_metadata(resolved)
+        if isinstance(result, MetadataEnrichmentResult):
+            return result
+        # Compatibility for tests and third-party callers that substituted the
+        # old mapping return value while the builder remained the owner.
+        return MetadataEnrichmentResult(
+            outcomes=tuple(
+                MetadataEnrichmentOutcome(
+                    package=pkg.name,
+                    status="fetched" if pkg.name in result else "empty",
+                    values=tuple(sorted(result.get(pkg.name, {}).items())),
+                )
+                for pkg in resolved
+            )
+        )
 
     def _map_output(
         self,
         profile: MarketplaceOutputProfile,
         resolved: tuple[ResolvedPackage, ...],
-        remote_metadata: dict[str, dict[str, Any]] | None = None,
+        remote_metadata: Mapping[str, dict[str, str]] | None = None,
     ) -> MapperResult:
         """Map resolved packages into one marketplace output format."""
         mapper = self._mapper_for_profile(profile)
@@ -977,13 +1094,11 @@ class MarketplaceBuilder:
             )
         return None
 
-    def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
-        """Best-effort: fetch ``description`` and ``version`` from the
-        package's remote ``apm.yml``.
-
-        Returns a dict with ``description`` and/or ``version`` keys, or
-        ``None`` on any error.  This is purely cosmetic enrichment --
-        failures are silently logged at debug level and never propagate.
+    def _fetch_remote_metadata_outcome(
+        self,
+        pkg: ResolvedPackage,
+    ) -> MetadataEnrichmentOutcome:
+        """Fetch remote metadata while preserving complete failure state.
 
         When a token is available for the package's host, it is included
         as an ``Authorization`` header so private repos can be accessed.
@@ -1026,14 +1141,22 @@ class MarketplaceBuilder:
                     pkg.name,
                     effective_host,
                 )
-                return None
+                return MetadataEnrichmentOutcome(
+                    pkg.name,
+                    "failed",
+                    cause=f"metadata fetch is unsupported for host '{effective_host}'",
+                )
 
             if host_kind == "ghe_cloud" and not token:
                 logger.debug(
                     "Skipping metadata fetch for %s (GHE Cloud requires auth)",
                     pkg.name,
                 )
-                return None
+                return MetadataEnrichmentOutcome(
+                    pkg.name,
+                    "failed",
+                    cause="GitHub Enterprise Cloud metadata requires authentication",
+                )
 
             if effective_host == "github.com":
                 raw_url = (
@@ -1074,7 +1197,7 @@ class MarketplaceBuilder:
                     raw = _read_capped_text(resp)
             data = load_yaml_str(raw)
             if not isinstance(data, dict):
-                return None
+                return MetadataEnrichmentOutcome(pkg.name, "empty")
             result: dict[str, str] = {}
             desc = data.get("description")
             if isinstance(desc, str) and desc:
@@ -1090,14 +1213,41 @@ class MarketplaceBuilder:
                     pkg.name,
                     ", ".join(result.keys()),
                 )
-                return result
-        except Exception:
+                return MetadataEnrichmentOutcome(
+                    pkg.name,
+                    "fetched",
+                    values=tuple(sorted(result.items())),
+                )
+            return MetadataEnrichmentOutcome(pkg.name, "empty")
+        except Exception as exc:
             logger.debug(
                 "Could not fetch remote metadata for %s",
                 pkg.name,
                 exc_info=True,
             )
-        return None
+            cause = str(exc).strip() or type(exc).__name__
+            return MetadataEnrichmentOutcome(pkg.name, "failed", cause=cause)
+
+    def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
+        """Return remote metadata for legacy direct callers.
+
+        The full outcome remains owned by
+        :meth:`_fetch_remote_metadata_outcome`; this compatibility adapter must
+        not be used to decide whether an output is certifiable.
+        """
+        outcome = self._fetch_remote_metadata_outcome(pkg)
+        with self._metadata_fetch_outcomes_lock:
+            self._metadata_fetch_outcomes[pkg.name] = outcome
+        return outcome.metadata or None
+
+    def _fetch_local_metadata_outcome(self, pkg: ResolvedPackage) -> MetadataEnrichmentOutcome:
+        """Return local metadata as an intentional, certifiable enrichment state."""
+        metadata = self._fetch_local_metadata(pkg)
+        return MetadataEnrichmentOutcome(
+            pkg.name,
+            "local",
+            values=tuple(sorted((metadata or {}).items())),
+        )
 
     def _resolve_github_token(self) -> str | None:
         """Resolve a GitHub token using ``AuthResolver``.
@@ -1125,54 +1275,73 @@ class MarketplaceBuilder:
             logger.debug("Could not resolve GitHub token for metadata fetch", exc_info=True)
         return None
 
-    def _prefetch_metadata(self, resolved: list[ResolvedPackage]) -> dict[str, dict[str, str]]:
-        """Fetch ``description``/``version`` metadata for resolved packages.
+    def _prefetch_metadata(
+        self,
+        resolved: tuple[ResolvedPackage, ...],
+    ) -> MetadataEnrichmentResult:
+        """Fetch package metadata and retain every per-package outcome.
 
-        Returns a mapping of ``{package_name: {"description": ..., "version": ...}}``
-        for successful fetches.  Both local-path and remote packages are
-        read from each package's own ``apm.yml`` so the output mapper can
-        apply one fallback rule regardless of source kind.
-
-        Local reads always run (filesystem only).  Remote fetches are
-        skipped when ``--offline`` is set.  A GitHub token is resolved
-        once before spawning worker threads and stored on
-        ``self._github_token`` for the workers to read.
+        This is the single authority for deciding whether metadata-dependent
+        output is certifiable.  A reachable manifest without description or
+        version is ``empty``; an unavailable remote source is ``failed`` or
+        intentionally ``offline`` and cannot certify a clean regeneration.
         """
-        results: dict[str, dict[str, str]] = {}
+        if self._metadata_enrichment is not None:
+            return self._metadata_enrichment
 
-        # Local-path packages: read each apm.yml directly from disk.
-        # Cheap and serial -- no network, no thread pool needed.
+        outcomes_by_package: dict[str, MetadataEnrichmentOutcome] = {}
+        remote: list[ResolvedPackage] = []
         for pkg in resolved:
             if pkg.source_repo:
-                continue
-            meta = self._fetch_local_metadata(pkg)
-            if meta:
-                results[pkg.name] = meta
+                remote.append(pkg)
+            else:
+                outcomes_by_package[pkg.name] = self._fetch_local_metadata_outcome(pkg)
 
         if self._options.offline:
-            return results
+            for pkg in remote:
+                outcomes_by_package[pkg.name] = MetadataEnrichmentOutcome(
+                    pkg.name,
+                    "offline",
+                    cause="metadata fetch skipped by --offline",
+                )
+        elif remote:
+            # Resolve token once -- threads read self._github_token (immutable).
+            self._ensure_auth()
+            workers = min(self._options.concurrency, len(remote))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                future_to_package = {
+                    pool.submit(self._fetch_remote_metadata, pkg): pkg for pkg in remote
+                }
+                for future in as_completed(future_to_package):
+                    pkg = future_to_package[future]
+                    try:
+                        metadata = future.result()
+                        with self._metadata_fetch_outcomes_lock:
+                            outcome = self._metadata_fetch_outcomes.pop(pkg.name, None)
+                        if isinstance(outcome, MetadataEnrichmentOutcome) and outcome.package == pkg.name:
+                            outcomes_by_package[pkg.name] = outcome
+                        else:
+                            # Preserve the legacy extension seam: callers that
+                            # override _fetch_remote_metadata still feed the
+                            # canonical outcome owner without reimplementing
+                            # certifiability logic.
+                            outcomes_by_package[pkg.name] = MetadataEnrichmentOutcome(
+                                pkg.name,
+                                "fetched" if metadata else "empty",
+                                values=tuple(sorted((metadata or {}).items())),
+                            )
+                    except Exception as exc:
+                        cause = str(exc).strip() or type(exc).__name__
+                        outcomes_by_package[pkg.name] = MetadataEnrichmentOutcome(
+                            pkg.name,
+                            "failed",
+                            cause=cause,
+                        )
 
-        remote = [pkg for pkg in resolved if pkg.source_repo]
-        if not remote:
-            return results
-
-        # Resolve token once -- threads read self._github_token (immutable).
-        self._ensure_auth()
-
-        workers = min(self._options.concurrency, len(remote))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_to_name = {
-                pool.submit(self._fetch_remote_metadata, pkg): pkg.name for pkg in remote
-            }
-            for future in as_completed(future_to_name):
-                name = future_to_name[future]
-                try:
-                    meta = future.result()
-                    if meta:
-                        results[name] = meta
-                except Exception:
-                    pass
-        return results
+        self._metadata_enrichment = MetadataEnrichmentResult(
+            outcomes=tuple(outcomes_by_package[pkg.name] for pkg in resolved)
+        )
+        return self._metadata_enrichment
 
     # -- composition --------------------------------------------------------
 
@@ -1228,7 +1397,7 @@ class MarketplaceBuilder:
         self,
         profile: MarketplaceOutputProfile,
         resolved: tuple[ResolvedPackage, ...],
-        remote_metadata: dict[str, dict[str, Any]] | None = None,
+        remote_metadata: Mapping[str, dict[str, str]] | None = None,
     ) -> tuple[dict[str, Any], tuple[str, ...], tuple[BuildDiagnostic, ...]]:
         """Compose the JSON document for a marketplace output profile."""
         mapper_result = self._map_output(profile, resolved, remote_metadata=remote_metadata)
@@ -1241,7 +1410,7 @@ class MarketplaceBuilder:
         output_path: Path,
         *,
         include_diff: bool = False,
-        remote_metadata: dict[str, dict[str, Any]] | None = None,
+        remote_metadata: MetadataEnrichmentResult | None = None,
         errors: tuple[tuple[str, str], ...] = (),
     ) -> BuildReport:
         """Write one marketplace output profile using already resolved packages."""
@@ -1273,6 +1442,7 @@ class MarketplaceBuilder:
             removed_count=removed,
             output_path=output_path,
             dry_run=self._options.dry_run,
+            metadata_enrichment=remote_metadata,
         )
         return BuildReport(outputs=(output_report,))
 

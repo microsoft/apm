@@ -231,6 +231,7 @@ apm pack --offline              # cached refs only
 apm pack --include-prerelease   # allow pre-release tags
 apm pack -v                     # per-entry resolution detail
 apm pack --marketplace=claude --json   # JSON output for CI pipelines
+apm pack --strict-metadata      # require remote Claude package metadata fetches
 ```
 
 For the release-gate flags (`--check-versions`, `--check-clean`),

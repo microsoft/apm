@@ -23,6 +23,13 @@
       "guards": ["marketplace-integrations-output-path"]
     },
     {
+      "id": "marketplace-metadata-enrichment",
+      "decision": "Marketplace metadata-enrichment outcome and certifiability",
+      "owner": "marketplace/builder.py (MetadataEnrichmentResult)",
+      "selectors": ["src/apm_cli/marketplace/builder.py"],
+      "guards": ["marketplace-integrations-metadata-enrichment"]
+    },
+    {
       "id": "marketplace-raw-structure-diagnostics",
       "decision": "Marketplace raw-structure diagnostics",
       "owner": "marketplace/models.py parser; validator.py consumes them",

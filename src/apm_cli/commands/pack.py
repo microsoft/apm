@@ -13,6 +13,7 @@ from ..core.build_orchestrator import (
     BuildError,
     BuildOptions,
     BuildOrchestrator,
+    MetadataEnrichmentError,
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
@@ -63,6 +64,7 @@ Exit codes:
   2  Manifest schema validation error
   3  Version alignment check failed (--check-versions)
   4  Marketplace working-tree drift detected (--check-clean)
+  5  Strict marketplace metadata check failed (--strict-metadata)
 """
 
 
@@ -255,6 +257,16 @@ def _parse_marketplace_filter(
     ),
 )
 @click.option(
+    "--strict-metadata",
+    is_flag=True,
+    default=False,
+    help=(
+        "Marketplace: fail before writing when remote description/version metadata "
+        "cannot be fetched. Exits 5; --check-clean always rejects uncertifiable "
+        "metadata with exit 4."
+    ),
+)
+@click.option(
     "-m",
     "--marketplace",
     "marketplace_filter",
@@ -314,6 +326,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     legacy_skill_paths,
     check_versions,
     check_clean,
+    strict_metadata,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
     effective_dry_run = dry_run or check_clean
@@ -386,6 +399,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         bundle_force=force,
         marketplace_offline=offline,
         marketplace_include_prerelease=include_prerelease,
+        marketplace_strict_metadata=strict_metadata,
         marketplace_formats=marketplace_formats,
         marketplace_path_overrides=path_overrides if path_overrides else None,
         dry_run=effective_dry_run,
@@ -394,6 +408,23 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
 
     try:
         result = BuildOrchestrator().run(options, logger=logger)
+    except MetadataEnrichmentError as exc:
+        if json_output:
+            from ..marketplace.builder import BuildReport
+
+            click.echo(
+                json_mod.dumps(
+                    BuildReport.failure_to_json_dict(
+                        errors=[{"code": "metadata_incomplete", "message": str(exc)}],
+                        warnings=list(exc.metadata_enrichment.warnings),
+                        dry_run=dry_run,
+                        metadata_enrichment=exc.metadata_enrichment,
+                    )
+                )
+            )
+        else:
+            logger.error(str(exc))
+        ctx.exit(5)
     except BuildError as exc:
         _emit_json_error_or_raise(ctx, json_output, "build_error", str(exc))
         return
@@ -514,6 +545,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                                     out.format,
                                     (options.marketplace_path_overrides or {}).get(out.format),
                                 )
+                            elif out.status == "uncertifiable":
+                                logger.error(
+                                    f"    {out.path}  [cannot certify regenerated metadata]"
+                                )
+                                for warning in out.metadata_warnings:
+                                    logger.warning(f"    {warning}")
                             else:
                                 count = len(out.differences)
                                 logger.info(f"    {out.path}  [drift: {count} differences]")
@@ -525,8 +562,20 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                                     out.format,
                                     (options.marketplace_path_overrides or {}).get(out.format),
                                 )
-                    for msg in d_report.error_messages():
-                        gate_errors.append({"code": "marketplace_drift", "message": msg})
+                    for out in d_report.outputs:
+                        if out.status == "unchanged":
+                            continue
+                        code = (
+                            "marketplace_metadata_uncertifiable"
+                            if out.status == "uncertifiable"
+                            else "marketplace_drift"
+                        )
+                        messages = (
+                            out.metadata_warnings
+                            if out.status == "uncertifiable"
+                            else (next(msg for msg in d_report.error_messages() if msg.startswith(out.path)),)
+                        )
+                        gate_errors.extend({"code": code, "message": message} for message in messages)
 
     # -- JSON output mode: consistent envelope --
     if json_output:
@@ -535,6 +584,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             "dry_run": effective_dry_run,
             "warnings": list(result.warnings),
             "errors": [],
+            "metadata_enrichment": {"certifiable": True, "outcomes": []},
             "marketplace": {"outputs": []},
             "bundle": None,
             "plugin_manifests": {"written": [], "skipped": [], "dry_run": []},
@@ -545,6 +595,10 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             if sub.kind is OutputKind.MARKETPLACE and sub.payload is not None:
                 payload = sub.payload.to_json_dict()
                 envelope["marketplace"] = payload.get("marketplace", {"outputs": []})
+                envelope["metadata_enrichment"] = payload.get(
+                    "metadata_enrichment",
+                    envelope["metadata_enrichment"],
+                )
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
         if gate_errors:

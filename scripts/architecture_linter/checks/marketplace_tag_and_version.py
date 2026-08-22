@@ -1,7 +1,6 @@
-"""Tag-pattern, version-precedence, output-path, and raw-diagnostics
-marketplace analyzers.
+"""Tag-pattern, version, output-path, metadata, and diagnostics analyzers.
 
-Ports four of the twelve canonical owner decisions recorded in
+Ports five canonical owner decisions recorded in
 ``.apm/architecture/owners/marketplace-plugins.json``. RULES assembly lives
 in the thin catalog module :mod:`marketplace_integration_analyzers`, which
 imports each check function below.
@@ -20,6 +19,7 @@ from scripts.architecture_linter.checks.marketplace_integration_shared import (
     _load,
     _require_res,
     _require_subs,
+    _src_python,
     _subdir_python,
 )
 from scripts.architecture_linter.checks.python_semantics import direct_definitions
@@ -286,6 +286,60 @@ def _check_output_path(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+_RID_METADATA = "marketplace-integrations-metadata-enrichment"
+_METADATA_OWNER = "src/apm_cli/marketplace/builder.py"
+_METADATA_DRIFT = "src/apm_cli/marketplace/drift_check.py"
+_METADATA_PARALLEL = re.compile(
+    r"^class MetadataEnrichment(?:Outcome|Result)(?:\(|:)"
+    r"|^\s*def _prefetch_metadata\("
+)
+
+
+def _check_metadata_enrichment(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_METADATA,
+            _METADATA_OWNER,
+            (
+                ("re", r"^class MetadataEnrichmentOutcome(?:\(|:)", 1, "eq"),
+                ("re", r"^class MetadataEnrichmentResult\(", 1, "eq"),
+                ("re", r"^\s+def _prefetch_metadata\(", 1, "eq"),
+                ("re", r"^\s+def remote_metadata_for_profile\(", 1, "eq"),
+            ),
+            "marketplace/builder.py must own metadata enrichment and certification",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_METADATA,
+            _METADATA_DRIFT,
+            ("not remote_metadata.certifiable",),
+            "drift checks must consume builder-owned metadata certification",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_METADATA,
+            _src_python(provider, exclude=(_METADATA_OWNER,)),
+            _METADATA_PARALLEL,
+            "Marketplace metadata certifiability must remain owned by marketplace/builder.py",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 _RID_RAW = "marketplace-integrations-raw-diagnostics"
 
 
@@ -370,6 +424,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_OUTPUT,),
         description="Effective marketplace output path stays owned by marketplace/output_profiles.py.",
         check=_check_output_path,
+    ),
+    Rule(
+        id=_RID_METADATA,
+        group=GROUP,
+        guard_ids=(_RID_METADATA,),
+        description="Marketplace metadata certifiability stays owned by marketplace/builder.py.",
+        check=_check_metadata_enrichment,
     ),
     Rule(
         id=_RID_RAW,

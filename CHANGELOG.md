@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm pack` now reports unavailable remote package metadata, exposes
+  certifiability in JSON, prevents `--check-clean` from certifying degraded
+  regeneration, and lets `--strict-metadata` fail before writes. (closes #2524)
 - `apm pack --check-clean` is now read-only and detects marketplace drift
   without overwriting artifacts. Release pipelines that also produce artifacts
   must run `apm pack` separately; see

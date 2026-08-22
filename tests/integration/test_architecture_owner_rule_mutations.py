@@ -348,6 +348,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Legacy plugin skill membership loses its normalization owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-metadata-enrichment",
+        rule_id="marketplace-integrations-metadata-enrichment",
+        path="src/apm_cli/marketplace/builder.py",
+        old="class MetadataEnrichmentResult(",
+        new="class MetadataEnrichmentResultX(",
+        intent="Marketplace metadata enrichment loses its canonical certification result.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-native-registration",
         rule_id="marketplace-integrations-native-registration",
         path="src/apm_cli/copilot_plugins/capability.py",

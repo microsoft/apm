@@ -50,6 +50,7 @@ class BuildOptions:
     # Marketplace-only options
     marketplace_offline: bool = False
     marketplace_include_prerelease: bool = False
+    marketplace_strict_metadata: bool = False
     marketplace_formats: tuple[str, ...] | None = None
     marketplace_path_overrides: dict[str, str] | None = None
     # Common options
@@ -78,6 +79,18 @@ class BuildResult:
 
 class BuildError(Exception):
     """User-facing build error. The CLI maps this to exit code 1."""
+
+
+class MetadataEnrichmentError(BuildError):
+    """Raised when strict marketplace metadata cannot be certified."""
+
+    def __init__(self, metadata_enrichment: Any) -> None:
+        """Preserve the canonical result for the CLI's error envelope."""
+        self.metadata_enrichment = metadata_enrichment
+        super().__init__(
+            "Marketplace metadata is incomplete: "
+            + " ".join(metadata_enrichment.warnings)
+        )
 
 
 class ArtifactProducer(Protocol):
@@ -216,13 +229,17 @@ class MarketplaceProducer:
                     project_root,
                     options.marketplace_path_overrides,
                 )
+                profile_metadata = builder.remote_metadata_for_profile(profile, resolved)
+                if profile_metadata is not None:
+                    if options.marketplace_strict_metadata and not profile_metadata.certifiable:
+                        raise MetadataEnrichmentError(profile_metadata)
 
                 output_report = builder.write_output(
                     profile,
                     resolved,
                     output_path,
                     include_diff=True,
-                    remote_metadata=builder.remote_metadata_for_profile(profile, resolved),
+                    remote_metadata=profile_metadata,
                     errors=resolve_result.errors,
                 )
                 output_reports.extend(output_report.outputs)

@@ -40,10 +40,11 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
 | `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
 | `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
-| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
+| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, metadata_enrichment: {certifiable, outcomes: [...]}, marketplace: {outputs: [...]}}`. |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
-| `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output to a temporary representation and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. It never writes pack outputs and exits `4` for drift. |
+| `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output to a temporary representation and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. It never writes pack outputs and exits `4` for drift or uncertifiable remote Claude metadata. |
+| `--strict-metadata` | off | Claude marketplace: fail before writing when remote package metadata cannot be fetched. Use it in publishing CI to require those fetches to succeed. Exits `5`. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
 :::caution[Migrating automation from `.tar.gz`?]
@@ -170,6 +171,13 @@ dependencies:
 
 Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time.
 
+Remote Claude entries can inherit `description` and `version` from their own
+`apm.yml`. If APM cannot fetch that metadata, normal packing writes the artifact
+with an actionable warning so authors can add those fields to the marketplace
+entry or retry with network access. Use `--strict-metadata` in publishing CI to
+fail before writing with uncertifiable remote metadata. `--check-clean` also fails with exit
+`4` rather than certifying a regeneration whose metadata could not be fetched.
+
 ### Plugin manifests
 
 Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
@@ -244,7 +252,8 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 | `1` | Build or runtime error: network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
 | `2` | `apm.yml` schema validation error. |
 | `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
-| `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file). |
+| `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file), or remote Claude metadata could not be fetched to certify the comparison. |
+| `5` | `--strict-metadata` failed: remote marketplace metadata was unavailable, so APM did not write the artifact. |
 
 ## Related
 
