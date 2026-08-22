@@ -324,12 +324,14 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
     import os
     from datetime import datetime, timezone
 
-    if explicit:
+    if explicit is not None:
         try:
-            datetime.fromisoformat(explicit)
+            dt = datetime.fromisoformat(explicit)
+            if dt.tzinfo is None:
+                raise ValueError("Missing timezone offset")
         except (ValueError, TypeError):
             raise click.BadParameter(
-                f"Invalid timestamp {explicit!r}. Expected ISO 8601 format, e.g. 2024-06-01T00:00:00+00:00.",
+                f"Invalid timestamp {explicit!r}. Expected ISO 8601 format with timezone, e.g. 2024-06-01T00:00:00+00:00.",
                 param_hint="'--timestamp'",
             )
         return explicit
