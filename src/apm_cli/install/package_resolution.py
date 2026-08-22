@@ -335,9 +335,14 @@ def cli_agent_subset(
     agent_names: builtins.tuple[str, ...],
 ) -> builtins.tuple[str, ...] | None:
     """Resolve raw CLI ``--agent`` names to a subset, or None for all agents."""
-    if agent_names and not any(name == "*" for name in agent_names):
-        return builtins.tuple(agent_names)
-    return None
+    if not agent_names:
+        return None
+
+    from apm_cli.models.dependency.subsets import parse_agent_subset
+
+    named_agents = [name for name in agent_names if name != "*"]
+    normalized = parse_agent_subset(named_agents) if named_agents else []
+    return None if len(named_agents) != len(agent_names) else builtins.tuple(normalized)
 
 
 def apply_cli_skill_pin(

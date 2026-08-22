@@ -848,6 +848,7 @@ def run_baseline_checks(
 
     # Check 6: Agent subset consistency (manifest vs lockfile)
     agent_subset_failed = _run(_check_agent_subset_consistency(manifest, lock))
+    # Check 7: Skill subset consistency (manifest vs lockfile)
     skill_subset_failed = False
     if not agent_subset_failed:
         skill_subset_failed = _run(_check_skill_subset_consistency(manifest, lock))
@@ -865,11 +866,11 @@ def run_baseline_checks(
     ):
         return result
 
-    # Check 8: Content integrity
+    # Check 9: Content integrity
     if _run(_check_content_integrity(project_root, lock)):
         return result
 
-    # Check 9: Includes consent (advisory; never hard-fails)
+    # Check 10: Includes consent (advisory; never hard-fails)
     _run(_check_includes_consent(manifest, lock))
 
     return result

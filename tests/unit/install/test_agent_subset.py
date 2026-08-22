@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -14,8 +15,14 @@ from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.policy.ci_checks import _check_agent_subset_consistency
 
 
-def _make_agent_package(base: Path, names: tuple[str, ...]) -> Path:
-    package = base / "agent-package"
+def _make_agent_package(
+    base: Path,
+    names: tuple[str, ...],
+    *,
+    package_name: str = "agent-package",
+    dependencies: list[dict[str, str]] | None = None,
+) -> Path:
+    package = base / package_name
     agents_dir = package / ".apm" / "agents"
     agents_dir.mkdir(parents=True)
     for name in names:
@@ -23,10 +30,10 @@ def _make_agent_package(base: Path, names: tuple[str, ...]) -> Path:
             f"---\nname: {name}\ndescription: {name} agent\n---\n# {name}\n",
             encoding="utf-8",
         )
-    (package / "apm.yml").write_text(
-        yaml.safe_dump({"name": "agent-package", "version": "1.0.0"}),
-        encoding="utf-8",
-    )
+    manifest: dict[str, object] = {"name": package_name, "version": "1.0.0"}
+    if dependencies:
+        manifest["dependencies"] = {"apm": dependencies}
+    (package / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
     return package
 
 
@@ -75,7 +82,10 @@ class TestAgentSubsetModel:
         assert ref.agent_subset == ["planner", "reviewer"]
         assert ref.to_apm_yml_entry()["agents"] == ["planner", "reviewer"]
 
-    @pytest.mark.parametrize("value", [[], "planner", [""], ["team/planner"]])
+    @pytest.mark.parametrize(
+        "value",
+        [[], "planner", [""], [" "], ["."], [".."], ["team/planner"], [r"team\planner"]],
+    )
     def test_invalid_agent_subset_is_rejected(self, value):
         with pytest.raises(ValueError, match=r"agents|agent"):
             DependencyReference.parse_from_dict({"git": "owner/repo", "agents": value})
@@ -114,8 +124,112 @@ class TestAgentSubsetModel:
         assert result.name == "agent-subset-consistency"
         assert "manifest agents ['planner']" in result.details[0]
 
+    def test_cli_agent_subset_normalizes_with_manifest_parser(self):
+        from apm_cli.install.package_resolution import cli_agent_subset
+
+        assert cli_agent_subset((" reviewer ", "planner", "planner")) == (
+            "planner",
+            "reviewer",
+        )
+        with pytest.raises(ValueError, match="flat agent name"):
+            cli_agent_subset(("team/planner",))
+        with pytest.raises(ValueError, match="flat agent name"):
+            cli_agent_subset(("*", "team/planner"))
+
+    def test_manifest_writeback_reuses_agent_subset_parser(self):
+        from apm_cli.commands._apm_yml_writer import _apply_subset
+
+        with pytest.raises(ValueError, match="flat agent name"):
+            _apply_subset("owner/repo", "agents", ["team/planner"])
+
+    def test_resolve_records_only_selected_direct_dependency_keys(self):
+        from apm_cli.install.package_selection import cli_agent_subset_dep_keys
+
+        direct = DependencyReference(repo_url="owner/direct")
+        unrelated = DependencyReference(repo_url="owner/unrelated")
+        selected_keys = cli_agent_subset_dep_keys(
+            [direct, unrelated],
+            ["owner/direct"],
+            agent_subset_from_cli=True,
+        )
+
+        assert selected_keys == {direct.get_unique_key()}
+
+    def test_lockfile_override_does_not_touch_unselected_or_transitive_dependencies(self):
+        from apm_cli.install.phases.lockfile import LockfileBuilder
+
+        selected_key = "owner/direct"
+        unselected_key = "owner/transitive"
+        lock = LockFile(
+            dependencies={
+                selected_key: LockedDependency(repo_url=selected_key, agent_subset=["reviewer"]),
+                unselected_key: LockedDependency(repo_url=unselected_key, agent_subset=["writer"]),
+            }
+        )
+        ctx = SimpleNamespace(
+            agent_subset=("planner",),
+            agent_subset_from_cli=True,
+            agent_subset_cli_dep_keys={selected_key},
+        )
+
+        LockfileBuilder(ctx)._attach_agent_subset_override(lock)
+
+        assert lock.dependencies[selected_key].agent_subset == ["planner", "reviewer"]
+        assert lock.dependencies[unselected_key].agent_subset == ["writer"]
+
 
 class TestAgentSubsetInstall:
+    def test_cli_agent_name_must_be_flat_and_does_not_mutate_manifest(self, tmp_path, monkeypatch):
+        package = _make_agent_package(tmp_path / "source", ("planner",))
+        project = _make_project(tmp_path / "consumer")
+        original_manifest = (project / "apm.yml").read_text(encoding="utf-8")
+
+        result = _install(
+            project,
+            monkeypatch,
+            str(package),
+            "--agent",
+            "team/planner",
+            "--target",
+            "copilot",
+        )
+
+        assert result.exit_code == 2
+        assert "flat agent name" in result.output
+        assert (project / "apm.yml").read_text(encoding="utf-8") == original_manifest
+
+    def test_cli_agent_requires_an_explicit_dependency(self, tmp_path, monkeypatch):
+        project = _make_project(tmp_path / "consumer")
+
+        result = _install(project, monkeypatch, "--agent", "planner", "--target", "copilot")
+
+        assert result.exit_code == 2
+        assert "requires at least one package argument" in result.output
+
+    def test_cli_subset_does_not_leak_to_transitive_dependency(self, tmp_path, monkeypatch):
+        source = tmp_path / "source"
+        _make_agent_package(source, ("writer",), package_name="transitive")
+        direct = _make_agent_package(
+            source,
+            ("planner",),
+            package_name="direct",
+            dependencies=[{"path": "../transitive"}],
+        )
+        project = _make_project(tmp_path / "consumer")
+
+        result = _install(
+            project,
+            monkeypatch,
+            str(direct),
+            "--agent",
+            "planner",
+            "--target",
+            "copilot",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert _deployed_agents(project) == {"planner", "writer"}
+
     def test_unknown_cli_agent_fails_without_persisting_pin(self, tmp_path, monkeypatch):
         package = _make_agent_package(tmp_path / "source", ("planner", "reviewer"))
         project = _make_project(tmp_path / "consumer")

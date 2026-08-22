@@ -135,7 +135,7 @@ class LockfileBuilder:
             self._attach_exec_status(lockfile)
             # Apply CLI --skill override to lockfile entries (skill_bundle only)
             self._attach_skill_subset_override(lockfile)
-            # Apply CLI --agent override to every selected dependency.
+            # Apply CLI --agent override only to explicitly selected dependencies.
             self._attach_agent_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
@@ -368,10 +368,13 @@ class LockfileBuilder:
                 locked_dep.skill_subset = list(merged) if merged else []
 
     def _attach_agent_subset_override(self, lockfile: LockFile) -> None:
-        """Union CLI ``--agent`` values into dependency lockfile entries."""
+        """Union CLI ``--agent`` values into selected direct dependency entries."""
         if not self.ctx.agent_subset:
             return
-        for locked_dep in lockfile.dependencies.values():
+        for dep_key in self.ctx.agent_subset_cli_dep_keys:
+            locked_dep = lockfile.dependencies.get(dep_key)
+            if locked_dep is None:
+                continue
             merged = effective_deploy_agent_subset(
                 agent_subset_from_cli=self.ctx.agent_subset_from_cli,
                 cli_subset=self.ctx.agent_subset,

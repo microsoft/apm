@@ -287,4 +287,4 @@ class TestCiWithoutPolicy:
         # not corrupt JSON parsing.
         data = json.loads(result.stdout)
         # Only the ten baseline checks, including deployment ownership.
-        assert data["summary"]["total"] == 9
+        assert data["summary"]["total"] == 10

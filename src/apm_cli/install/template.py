@@ -119,7 +119,8 @@ def _integrate_materialization(
     diagnostics = ctx.diagnostics
     logger = ctx.logger
 
-    if ctx.agent_subset_from_cli and ctx.agent_subset:
+    agent_subset_from_cli = dep_key in ctx.agent_subset_cli_dep_keys
+    if agent_subset_from_cli and ctx.agent_subset:
         from apm_cli.install.outcome import require_requested_components
         from apm_cli.integration.agent_integrator import AgentIntegrator
 
@@ -131,6 +132,7 @@ def _integrate_materialization(
             requested=ctx.agent_subset,
             available=available_agents,
             package=dep_key,
+            match_leaf=False,
         ):
             ctx.package_deployed_files[dep_key] = []
             return deltas
@@ -171,8 +173,8 @@ def _integrate_materialization(
             return deltas
 
         effective_agent_subset = effective_deploy_agent_subset(
-            agent_subset_from_cli=ctx.agent_subset_from_cli,
-            cli_subset=ctx.agent_subset,
+            agent_subset_from_cli=agent_subset_from_cli,
+            cli_subset=ctx.agent_subset if agent_subset_from_cli else None,
             persisted_subset=dep_ref.agent_subset,
         )
 

@@ -856,6 +856,22 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
 
 
+def _validate_cli_agent_subset(
+    agent_names: builtins.tuple[str, ...],
+    packages: builtins.tuple[str, ...],
+) -> builtins.tuple[str, ...] | None:
+    """Validate CLI agent names and require dependency-scoped persistence."""
+    if agent_names and not packages:
+        raise click.UsageError(
+            "--agent requires at least one package argument so the selection "
+            "can be persisted for that dependency."
+        )
+    try:
+        return cli_agent_subset(agent_names)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--agent") from exc
+
+
 @click.command(
     help="Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
@@ -1390,7 +1406,7 @@ def install(  # noqa: PLR0913
         # Normalize primitive subsets: '*' means all. Reject with --mcp.
         if (agent_names or skill_names) and mcp_name is not None:
             raise click.UsageError("--agent/--skill cannot be combined with --mcp.")
-        _agent_subset = cli_agent_subset(agent_names)
+        _agent_subset = _validate_cli_agent_subset(agent_names, packages)
         _skill_subset = cli_skill_subset(skill_names)
 
         if mcp_name is not None:

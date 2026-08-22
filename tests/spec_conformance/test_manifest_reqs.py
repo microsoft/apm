@@ -389,6 +389,25 @@ def test_consumer_persists_and_deploys_only_selected_agents(tmp_path: Path):
     with pytest.raises(ValueError, match="flat agent name"):
         DependencyReference.parse_from_dict({"git": "acme/agent-pack", "agents": ["team/planner"]})
 
+    validate_against(
+        "manifest-v0.1.schema.json",
+        {
+            "name": "agent-consumer",
+            "version": "1.0.0",
+            "dependencies": {"apm": [{"git": "acme/agent-pack", "agents": ["planner"]}]},
+        },
+    )
+    for invalid_name in ("", " ", ".", "..", "team/planner", r"team\planner"):
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against(
+                "manifest-v0.1.schema.json",
+                {
+                    "name": "agent-consumer",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": [{"git": "acme/agent-pack", "agents": [invalid_name]}]},
+                },
+            )
+
     assert_spec_contains(
         "`agents:` field",
         "sorted selection as `agent_subset`",
