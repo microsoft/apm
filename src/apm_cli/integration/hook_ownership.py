@@ -62,6 +62,47 @@ def extract_apm_source_sidecar(hooks: dict) -> dict[str, list[dict[str, Any]]]:
     return sidecar
 
 
+def project_apm_owned_hook_entries(
+    config_bytes: bytes,
+    sidecar_bytes: bytes,
+    event_container_key: str,
+) -> bytes:
+    """Return a canonical structural projection of the APM-owned hook entries.
+
+    Merged hook configs are shared with users, so comparing their whole JSON
+    documents makes unrelated user hooks look like deployment drift. The
+    sidecar is APM-owned and maps matching native entries back to their
+    ``_apm_source`` markers; retain only that marked slice for comparison.
+    """
+    config = json.loads(config_bytes)
+    sidecar = json.loads(sidecar_bytes)
+    if not isinstance(config, dict) or not isinstance(sidecar, dict):
+        raise ValueError("merged hook config and ownership sidecar must be JSON objects")
+
+    raw_container = config.get(event_container_key)
+    container = (
+        {
+            event_name: list(entries)
+            for event_name, entries in raw_container.items()
+            if isinstance(entries, list)
+        }
+        if isinstance(raw_container, dict)
+        else {}
+    )
+    reinject_apm_source_from_sidecar(container, sidecar)
+
+    owned = {
+        event_name: [
+            entry
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+        ]
+        for event_name, entries in container.items()
+        if isinstance(entries, list)
+    }
+    return json.dumps(owned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def dependency_hook_source_marker(dependency_ref) -> str:
     """Project dependency identity into a collision-resistant sidecar marker."""
     if dependency_ref.is_local:
