@@ -456,6 +456,23 @@ def test_manifestless_local_package_without_skill_shape_records_problem(
     assert "manifest not found" in view.problems[0].message
 
 
+def test_manifestless_missing_local_claude_skill_records_problem(tmp_path: Path) -> None:
+    """A missing local directory cannot use the virtual cold-cache waiver."""
+    root = _write_manifest(tmp_path, name="root")
+    locked = LockedDependency(
+        repo_url="_local/missing-skill",
+        source="local",
+        local_path="./packages/missing-skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
 def test_manifestless_virtual_package_without_skill_shape_records_problem(
     tmp_path: Path,
 ) -> None:
