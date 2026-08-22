@@ -531,32 +531,6 @@ def _resolve_ado_parent_ref(
     return resolved if all(resolved[:3]) else None
 
 
-def _resolve_gitlab_parent_ref(
-    parent_ref: str,
-    current_source: str,
-    leaf_host: str,
-) -> tuple[str, str, str] | None:
-    """Normalize a GitLab parent ref to ``(org, repo, host)``."""
-    current_parts = _strip_source_prefix(current_source).split("/")
-    current_org = current_parts[1] if len(current_parts) >= 3 else ""
-    if parent_ref == "org":
-        try:
-            repo = _gitlab._gitlab_policy_repo_candidates()[0]
-        except ValueError:
-            return None
-        resolved = (current_org, repo, leaf_host)
-    else:
-        parts = parent_ref.strip("/").split("/")
-        explicit_host = _extract_extends_host(parent_ref)
-        if explicit_host is None and len(parts) == 2:
-            resolved = (parts[0], parts[1], leaf_host)
-        elif explicit_host == leaf_host and len(parts) == 3:
-            resolved = (parts[1], parts[2], leaf_host)
-        else:
-            return None
-    return resolved if all(resolved) else None
-
-
 def _fetch_chain_parent(
     parent_ref: str,
     *,
@@ -566,14 +540,7 @@ def _fetch_chain_parent(
     no_cache: bool,
     cache_only: bool = False,
 ) -> PolicyFetchResult:
-    """Fetch one parent without losing the leaf's host or backend.
-
-    GitHub-style ``owner/repo`` refs are qualified with a non-default leaf
-    host. On ADO, ``project/repo`` means a repo in the current ancestor's org,
-    while explicit refs use ``host/org/project/repo`` on ``dev.azure.com`` or
-    ``host/project/repo`` on legacy ``*.visualstudio.com`` hosts. URLs and
-    local-file refs continue through the public single-policy owner.
-    """
+    """Fetch one parent through the leaf host's policy backend."""
     cache_kwargs = {"cache_only": True} if cache_only else {}
     if parent_ref.startswith(("http://", "https://")) or Path(parent_ref).is_file():
         return discover_policy(
@@ -582,7 +549,6 @@ def _fetch_chain_parent(
             no_cache=no_cache,
             **cache_kwargs,
         )
-
     if leaf_host and is_azure_devops_hostname(leaf_host):
         resolved = _resolve_ado_parent_ref(parent_ref, current_source, leaf_host)
         if resolved is None:
@@ -609,23 +575,14 @@ def _fetch_chain_parent(
             no_cache=no_cache,
             **cache_kwargs,
         )
-
     if leaf_host and is_gitlab_hostname(leaf_host):
-        resolved = _resolve_gitlab_parent_ref(parent_ref, current_source, leaf_host)
-        if resolved is None:
-            return PolicyFetchResult(
-                source=f"org:{parent_ref}",
-                error=f"Invalid GitLab policy reference: {parent_ref}",
-                outcome="cache_miss_fetch_fail",
-            )
-        org, repo, host = resolved
-        return _gitlab._fetch_from_gitlab_repo(
-            org=org,
-            repo=repo,
-            host=host,
+        return _gitlab._fetch_gitlab_chain_parent(
+            parent_ref,
+            current_source=current_source,
+            leaf_host=leaf_host,
             project_root=project_root,
             no_cache=no_cache,
-            **cache_kwargs,
+            cache_only=cache_only,
         )
 
     normalized_ref = parent_ref
@@ -668,9 +625,6 @@ def _resolve_and_persist_chain(
     leaf_source = fetch_result.source
     leaf_cache_ref = fetch_result.cache_ref or _strip_source_prefix(leaf_source)
 
-    # Host pin: extends: refs may only resolve against the leaf's origin
-    # host. Prevents credential leakage to attacker-controlled hosts via
-    # cross-host extends chains (Security Finding F1).
     leaf_host = _derive_leaf_host(leaf_source, project_root)
 
     # Ordered ancestors collected as we walk parents.  Built leaf-first

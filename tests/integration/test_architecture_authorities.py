@@ -975,10 +975,12 @@ def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
     adapter = (root / "src/apm_cli/policy/_gitlab.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
-    assert facade.count("_gitlab._fetch_from_gitlab_repo(") == 2
+    assert facade.count("_gitlab._fetch_from_gitlab_repo(") == 1
+    assert facade.count("_gitlab._fetch_gitlab_chain_parent(") == 1
     assert adapter.count("def _fetch_from_gitlab_repo(") == 1
     assert adapter.count("def _fetch_gitlab_contents(") == 1
     assert adapter.count("def _gitlab_project_state_via_git(") == 1
+    assert adapter.count("def _fetch_gitlab_chain_parent(") == 1
     assert "GitLab policy discovery must route through policy/_gitlab.py" in guard
 
 

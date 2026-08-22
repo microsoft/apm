@@ -104,6 +104,49 @@ def _gitlab_project_state_via_git(
         return None
 
 
+def _fetch_gitlab_chain_parent(
+    parent_ref: str,
+    *,
+    current_source: str,
+    leaf_host: str,
+    project_root: Path,
+    no_cache: bool,
+    cache_only: bool,
+) -> PolicyFetchResult:
+    """Fetch one GitLab policy parent through this adapter."""
+    from .discovery import PolicyFetchResult
+
+    current_parts = current_source.removeprefix("org:").split("/")
+    current_org = current_parts[1] if len(current_parts) >= 3 else ""
+    if parent_ref == "org":
+        try:
+            repo = _gitlab_policy_repo_candidates()[0]
+        except ValueError:
+            return PolicyFetchResult(
+                source=f"org:{parent_ref}",
+                error=f"Invalid GitLab policy reference: {parent_ref}",
+                outcome="cache_miss_fetch_fail",
+            )
+        org = current_org
+    else:
+        parts = parent_ref.strip("/").split("/")
+        if len(parts) != 2:
+            return PolicyFetchResult(
+                source=f"org:{parent_ref}",
+                error=f"Invalid GitLab policy reference: {parent_ref}",
+                outcome="cache_miss_fetch_fail",
+            )
+        org, repo = parts
+    return _fetch_from_gitlab_repo(
+        org=org,
+        repo=repo,
+        host=leaf_host,
+        project_root=project_root,
+        no_cache=no_cache,
+        cache_only=cache_only,
+    )
+
+
 def _fetch_from_gitlab_repo(
     *,
     org: str,

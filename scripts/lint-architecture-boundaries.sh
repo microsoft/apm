@@ -447,20 +447,20 @@ if [ "$policy_named_defs" -ne 2 ] \
 fi
 gitlab_policy_adapter="src/apm_cli/policy/_gitlab.py"
 gitlab_adapter_definition_count=$(grep -Ec \
-    '^def (_fetch_from_gitlab_repo|_fetch_gitlab_contents|_gitlab_project_state_via_git)\(' \
+    '^def (_fetch_from_gitlab_repo|_fetch_gitlab_contents|_gitlab_project_state_via_git|_fetch_gitlab_chain_parent)\(' \
     "$gitlab_policy_adapter" || true)
 gitlab_adapter_duplicate_hits=$(
     grep -rEn --include='*.py' \
-        '^def (_fetch_from_gitlab_repo|_fetch_gitlab_contents|_gitlab_project_state_via_git)\(' \
+        '^def (_fetch_from_gitlab_repo|_fetch_gitlab_contents|_gitlab_project_state_via_git|_fetch_gitlab_chain_parent)\(' \
         src/apm_cli/policy \
         | grep -v "^${gitlab_policy_adapter}:" \
         | grep -v 'architecture-authority-exempt:' \
         || true
 )
 gitlab_facade_call_count=$(grep -Ec \
-    '_gitlab\._fetch_from_gitlab_repo\(' \
+    '_gitlab\._fetch_(from_gitlab_repo|gitlab_chain_parent)\(' \
     "$policy_file" || true)
-if [ "$gitlab_adapter_definition_count" -ne 3 ] \
+if [ "$gitlab_adapter_definition_count" -ne 4 ] \
     || [ -n "$gitlab_adapter_duplicate_hits" ] \
     || [ "$gitlab_facade_call_count" -ne 2 ]; then
     echo "[x] GitLab policy discovery must route through policy/_gitlab.py"
