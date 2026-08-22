@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
-from ...models.dependency.mcp import _RESERVED_EXTRA_KEYS
+from ...models.dependency.mcp import _RESERVED_EXTRA_KEYS, TrustedEnvLiteral
 from ...utils.console import _rich_error, _rich_warning
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -1087,7 +1087,9 @@ class MCPClientAdapter(ABC):
                 if not isinstance(raw_value, str):
                     translated[name] = raw_value
                     continue
-                if _has_env_placeholder(raw_value):
+                if isinstance(raw_value, TrustedEnvLiteral):
+                    translated[name] = raw_value
+                elif _has_env_placeholder(raw_value):
                     self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(raw_value))
                     translated[name] = self._translate_env_placeholder_for_runtime(raw_value)
                     placeholder_keys.extend(

@@ -24,7 +24,6 @@ from ..models.apm_package import (
     DependencyReference,
     GitReferenceType,
     PackageInfo,
-    PackageType,
     RemoteRef,
     ResolvedReference,
     validate_apm_package,
@@ -1623,12 +1622,10 @@ class GitHubPackageDownloader:
                 _rmtree(temp_dir)
 
         # Validate the extracted package (after temp dir is cleaned up)
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            error_msgs = "; ".join(validation_result.errors)
-            raise RuntimeError(
-                f"Subdirectory is not a valid APM package or Claude Skill: {error_msgs}"
-            )
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
 
         # Get the resolved reference for metadata
         resolved_ref = ResolvedReference(
@@ -1639,7 +1636,6 @@ class GitHubPackageDownloader:
         )
 
         # For plugins without an explicit version, stamp with the short commit SHA.
-        package = validation_result.package
         from .package_validator import stamp_plugin_version
 
         stamp_plugin_version(
@@ -1797,6 +1793,9 @@ class GitHubPackageDownloader:
         # files directly into target_path and skip the network clone.
         _persistent_cache = self.persistent_git_cache
         if _persistent_cache is not None:
+            from ..agent_plugins.errors import AgentPluginError
+            from ..bundle.local_bundle import route_agent_plugin_package
+
             try:
                 _cached = _persistent_cache.get_checkout(
                     dep_ref.to_github_url(),
@@ -1817,25 +1816,20 @@ class GitHubPackageDownloader:
                         robust_copy2(src, dst)
 
                 # Validate, then return without cloning.
+                route_agent_plugin_package(target_path)
                 validation_result = validate_apm_package(target_path)
                 if validation_result.is_valid and validation_result.package:
                     package = validation_result.package
                     package.source = dep_ref.to_github_url()
                     package.resolved_commit = resolved_ref.resolved_commit
-                    if (
-                        validation_result.package_type == PackageType.MARKETPLACE_PLUGIN
-                        and package.version == "0.0.0"
-                        and resolved_ref.resolved_commit
-                    ):
-                        short_sha = resolved_ref.resolved_commit[:7]
-                        package.version = short_sha
-                        apm_yml_path = target_path / "apm.yml"
-                        if apm_yml_path.exists():
-                            from ..utils.yaml_io import dump_yaml, load_yaml
+                    from .package_validator import stamp_plugin_version
 
-                            _data = load_yaml(apm_yml_path) or {}
-                            _data["version"] = short_sha
-                            dump_yaml(_data, apm_yml_path)
+                    stamp_plugin_version(
+                        package,
+                        validation_result.package_type,
+                        resolved_ref.resolved_commit,
+                        target_path,
+                    )
                     return PackageInfo(
                         package=package,
                         install_path=target_path,
@@ -1849,6 +1843,10 @@ class GitHubPackageDownloader:
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)
                     target_path.mkdir(parents=True, exist_ok=True)
+            except AgentPluginError:
+                if target_path.exists():
+                    _rmtree(target_path)
+                raise
             except Exception:
                 # Any cache failure -> fall back to network clone.
                 if target_path.exists() and any(target_path.iterdir()):

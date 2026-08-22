@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-APM supports five package layouts, each with distinct install semantics.
+APM supports six package layouts, each with distinct install semantics.
 Pick the layout that matches the author's intent -- APM preserves it.
 
 ## Layout summary
@@ -15,7 +15,8 @@ Pick the layout that matches the author's intent -- APM preserves it.
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
-| `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Not yet installable -- fails closed (see below) |
 
 ## APM package (`.apm/` directory)
 
@@ -194,8 +195,10 @@ the rest.
 
 ## Plugin collection (`plugin.json`)
 
-A Claude-native plugin layout. APM dissects the plugin artifacts and maps
-them into runtime directories.
+A Claude-native plugin layout. A `plugin.json` with no `$schema` field is
+detected as this layout. APM dissects the plugin artifacts and maps them into
+runtime directories. A schema-bearing manifest never falls through to this
+legacy route.
 
 ```
 my-plugin/
@@ -224,7 +227,39 @@ Omit an optional field or use an empty list when the plugin has no component
 of that type.
 
 **When to choose:** you already have a Claude plugin and want APM to
-consume it without restructuring.
+consume it without restructuring. This is still the no-flag default output
+of `apm pack` and `apm plugin init`.
+
+## Agent Plugin (`plugin.json` with an Agent Plugins schema)
+
+A `plugin.json` that declares `"$schema"` under the Agent Plugins v1 schema
+prefix is a distinct package type from the Claude plugin collection above.
+Only the exact `1.0.0` schema is recognized. Another Agent Plugins version is
+a typed unsupported-version error. A foreign or non-string `$schema` is a
+typed manifest error. Only a `plugin.json` with no `$schema` falls through to
+the Claude plugin collection above.
+
+```
+my-plugin/
++-- plugin.json          # "$schema": ".../1.0.0/plugin.schema.json"
++-- skills/
+|   +-- search/SKILL.md
++-- mcp.json
+```
+
+:::note[Planned]
+`apm install` does not yet deploy Agent Plugin packages. Recognizing the
+schema fails the install closed with an explicit message rather than
+falling back to the Claude plugin artifact mapping above -- APM never
+partially dissects a recognized Agent Plugin through its normal primitive
+integrators. Ask the publisher for a Claude-compatible package
+(`apm pack --claude-plugin`) if you need to install it today.
+:::
+
+**When to choose:** you are producing a portable package with
+`apm pack --format agent-plugin` for other Agent-Plugin-aware hosts that read the
+Agent Plugins v1 schema directly -- not for installing through
+`apm install` yet. See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
 
 ## See also
 

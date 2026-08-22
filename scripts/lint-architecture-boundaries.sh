@@ -45,6 +45,35 @@ check_pattern \
     src/apm_cli/bundle/packer.py \
     src/apm_cli/install/mcp/integration.py \
     src/apm_cli/commands/uninstall/engine.py
+if ! bash scripts/check_bundle_format_authority.sh; then
+    violations=$((violations + 1))
+fi
+if ! python3 scripts/check_removed_agent_plugin_lifecycle.py --root "$ROOT"; then
+    violations=$((violations + 1))
+fi
+install_wrapper_defaults=$(python3 - <<'PY'
+import ast
+from pathlib import Path
+
+tree = ast.parse(Path("src/apm_cli/commands/install.py").read_text(encoding="utf-8"))
+wrapper = next(
+    node
+    for node in tree.body
+    if isinstance(node, ast.FunctionDef) and node.name == "_install_apm_dependencies"
+)
+positional = wrapper.args.args[-len(wrapper.args.defaults):]
+allowed = {"update_refs", "verbose", "only_packages"}
+print(",".join(arg.arg for arg in positional if arg.arg not in allowed))
+PY
+)
+if [ -n "$install_wrapper_defaults" ] \
+    || ! grep -q 'request = InstallRequest(' src/apm_cli/commands/install.py \
+    || ! grep -q '^[[:space:]]*trust_bin: bool | None = None$' \
+        src/apm_cli/install/request.py; then
+    echo "[x] Install invocation defaults must remain owned by InstallRequest"
+    [ -n "$install_wrapper_defaults" ] && echo "$install_wrapper_defaults"
+    violations=$((violations + 1))
+fi
 effective_target_owner="src/apm_cli/core/target_detection.py"
 effective_target_definition_count=$(grep -Ec \
     '^def resolve_effective_target_decision\(' "$effective_target_owner" || true)
@@ -91,6 +120,14 @@ if [ "$experimental_hint_definition_count" -ne 1 ] \
     || [ -n "$experimental_hint_duplicate_hits" ]; then
     echo "[x] Experimental target hints must route through install/target_hints.py"
     [ -n "$experimental_hint_duplicate_hits" ] && echo "$experimental_hint_duplicate_hits"
+    violations=$((violations + 1))
+fi
+agent_plugin_loader="src/apm_cli/agent_plugins/loader.py"
+agent_plugin_component_output=$(python3 scripts/check_agent_plugin_component_ir.py 2>&1)
+agent_plugin_component_status=$?
+if [ "$agent_plugin_component_status" -ne 0 ]; then
+    echo "[x] Agent Plugin component IR must remain canonical and inventory-backed"
+    echo "$agent_plugin_component_output"
     violations=$((violations + 1))
 fi
 
@@ -456,8 +493,11 @@ claude_skill_cached_body=$(awk '
     flag {print}
 ' "$claude_skill_metadata_consumer")
 claude_skill_cached_branch=$(printf '%s\n' "$claude_skill_cached_body" | awk '
-    /elif pkg_type == PackageType.CLAUDE_SKILL:/ {flag=1}
-    flag && /^        else:/ {exit}
+    /elif pkg_type == PackageType.CLAUDE_SKILL:/ {
+        flag=1
+        branch_indent=match($0, /[^ ]/)
+    }
+    flag && /^[[:space:]]*else:/ && match($0, /[^ ]/) == branch_indent {exit}
     flag {print}
 ')
 if ! printf '%s\n' "$claude_skill_owner_body" | grep -q 'load_frontmatter' \
@@ -652,9 +692,16 @@ check_pattern \
 
 echo "[*] AC6: neutral IR and schema contracts"
 check_pattern \
-    "Neutral hook IR must not contain native harness vocabulary" \
-    'copilot|gemini|antigravity|timeoutSec|powershell|_apm_source|["'\'']hooks["'\'']' \
-    src/apm_cli/integration/hook_ir.py
+    "Neutral hook IR must not contain target-renderer vocabulary" \
+    'copilot|gemini|antigravity' \
+    src/apm_cli/hook_contract.py
+hook_command_key_owners=$(grep -rEl '^HOOK_COMMAND_KEYS: tuple' src/apm_cli --include='*.py' | wc -l | tr -d ' ')
+if [ "$hook_command_key_owners" -ne 1 ] \
+    || ! grep -q '^HOOK_COMMAND_KEYS: tuple' src/apm_cli/hook_contract.py \
+    || grep -q 'integration.hook_integrator' src/apm_cli/agent_plugins/loader.py; then
+    echo "[x] Neutral hook source grammar must route through hook_contract.py"
+    violations=$((violations + 1))
+fi
 hook_routing_gate_hits=$(python3 scripts/check_hook_file_routing_owner.py 2>&1)
 hook_routing_gate_status=$?
 if [ "$hook_routing_gate_status" -ne 0 ]; then

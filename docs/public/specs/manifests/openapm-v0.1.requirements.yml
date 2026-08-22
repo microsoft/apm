@@ -412,6 +412,11 @@ requirements:
     section: "8.5.4"
     conformance_class: consumer
     notes: "project-scoped native hooks use a portable project-directory environment anchor and reject shell-expansion path syntax"
+  - id: req-tg-011
+    keyword: MUST
+    section: "8.5.5"
+    conformance_class: consumer
+    notes: "a schema-bearing Agent Plugins v1 dependency is undeployable until a native lifecycle is machine-verifiable; the consumer fails closed with one diagnostic and an unchanged tree, uniformly across solo, mixed-batch, and dry-run installs"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"

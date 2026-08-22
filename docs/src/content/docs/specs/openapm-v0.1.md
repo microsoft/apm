@@ -2469,6 +2469,30 @@ cause the target shell to reinterpret a path component.
 > PowerShell commands. This requirement permits target-specific command syntax;
 > it does not prescribe a shell for other targets.
 
+#### 8.5.5 Agent Plugins v1 native-lifecycle deployment boundary
+
+<a id="req-tg-011"></a>
+**[req-tg-011]** A conforming **consumer** implementation MUST treat a
+schema-bearing Agent Plugins v1 dependency as undeployable until that
+consumer exposes a machine-verifiable native lifecycle for it. Before
+any target handler or primitive integrator runs for such a dependency,
+the consumer MUST refuse deployment with one actionable diagnostic and
+MUST leave the project tree byte-identical to its pre-install state --
+no partial target file, lockfile, or managed-file mutation. This rule
+applies uniformly to a schema-bearing dependency materialized alone, to
+one mixed into the same install alongside ordinary (schema-less)
+dependencies, and to a `--dry-run` invocation, so a dry run and a real
+install reach the identical single-diagnostic outcome for the same
+dependency set. A schema-bearing dependency MUST NOT fall back to
+legacy primitive projection to satisfy this rule; the boundary fails
+closed rather than partially projecting the package.
+
+> **Editorial note.** This requirement governs the deployment boundary
+> only. It does not define a native Agent Plugin lifecycle; a native
+> lifecycle (and any preferred-default change) is reserved for a
+> future revision once a consumer implementation demonstrates a
+> qualified, machine-verifiable binary lifecycle.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2483,7 +2507,8 @@ without a spec revision. The current matrix is in the companion
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
-  [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009).
+  [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
+  [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011).
 
 ---
 
@@ -3478,6 +3503,7 @@ renumbering of conformance classes.
 | [req-tg-008](#req-tg-008)                | MUST    | 8.5.3   | consumer    |
 | [req-tg-009](#req-tg-009)                | MUST    | 8.5.1   | consumer    |
 | [req-tg-010](#req-tg-010)                | MUST    | 8.5.4   | consumer    |
+| [req-tg-011](#req-tg-011)                | MUST    | 8.5.5   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3496,7 +3522,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 112** (107 MUST, 5 SHOULD).
+**Total normative statements: 113** (108 MUST, 5 SHOULD).
 
 ---
 
@@ -3534,6 +3560,7 @@ renumbering of conformance classes.
 | 0.1.26  | 2026-08-03 | Spec-citation fold for VS Code OCI/Docker MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and package-scoped secret metadata uses VS Code secret-input references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 109 -> 110 (105 MUST, 5 SHOULD). |
 | 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
 | 0.1.28  | 2026-08-06 | Spec-citation fold for per-invocation executable consent in non-interactive contexts (closes #1620 Mode-B silent-extension gate). Added [req-sc-014] (Section 10.15, consumer MUST): a consumer that supports a per-invocation consent flag for bin/ executable deployment MUST deny deployment by default when stdout is not a TTY, unless the operator has explicitly opted in for that invocation; an explicit opt-in overrides the non-interactive default and permits deployment; an explicit opt-out overrides the default and denies deployment even in a terminal; the allowExecutables policy gate [req-sc-009] is evaluated first and always takes precedence. Added row 19 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 111 -> 112 (107 MUST, 5 SHOULD). |
+| 0.1.29  | 2026-08-22 | Spec-citation fold for the Agent Plugins v1 native-lifecycle deployment boundary (closes #2522 Mode-B silent-extension gate). Added [req-tg-011] (Section 8.5.5, consumer MUST): a consumer MUST treat a schema-bearing Agent Plugins v1 dependency as undeployable until it exposes a machine-verifiable native lifecycle for that dependency; before any target handler or primitive integrator runs, the consumer MUST refuse deployment with one actionable diagnostic, MUST leave the project tree unchanged, MUST NOT fall back to legacy primitive projection, and MUST reach the identical single-diagnostic outcome whether the dependency is materialized alone, mixed with ordinary dependencies in the same install, or under `--dry-run`. Section 8.7 and Appendix C updated. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

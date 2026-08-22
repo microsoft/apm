@@ -431,18 +431,18 @@ class TestAsAliasDerivation:
         assert result.exit_code == 0, f"output={result.output!r}"
         assert "from-plugin-json" in result.output
 
-    def test_alias_falls_back_to_dirname_when_no_id(
+    def test_alias_uses_manifest_name_when_no_id(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # plugin_id=None -> plugin.json has no "id"; loader falls back to
-        # the bundle directory name (which our helper names "bundle").
+        # plugin_id=None -> plugin.json has no "id"; Agent Plugin identity
+        # comes from its required manifest name.
         bundle = _make_bundle(tmp_path / "src", plugin_id=None)
         project = _make_project(tmp_path / "dst")
 
         result = _invoke(project, monkeypatch, str(bundle), "--verbose", "--target", "copilot")
         assert result.exit_code == 0, f"output={result.output!r}"
-        assert "'bundle'" in result.output, (
-            f"Dirname-derived slug missing. output={result.output!r}"
+        assert "'Test Plugin'" in result.output, (
+            f"Manifest-name alias missing. output={result.output!r}"
         )
 
 
@@ -698,7 +698,7 @@ class TestPathExistsButNotBundle:
     ) -> None:
         """A tarball packed with --format apm (has apm.lock.yaml, no
         plugin.json) must produce a specific error guiding the user to
-        repack with --format plugin or use apm unpack."""
+        repack with --claude-plugin or use apm unpack."""
         # Build a legacy apm-format bundle (mirrors packer.py fmt="apm" output)
         bundle = tmp_path / "test-pkg-0.1.0"
         bundle.mkdir(parents=True)
@@ -735,7 +735,11 @@ class TestPathExistsButNotBundle:
         assert result.exit_code != 0
         # Must mention the legacy format and offer actionable guidance
         assert "--format apm" in result.output or "legacy format" in result.output
-        assert "apm unpack" in result.output or "--format plugin" in result.output
+        assert "apm unpack" in result.output
+        # The suggested repack command must actually produce an installable
+        # Keep recovery advice explicit even though the legacy ``plugin`` alias
+        # is Claude-compatible.
+        assert "apm pack --claude-plugin" in result.output
 
 
 # ---------------------------------------------------------------------------

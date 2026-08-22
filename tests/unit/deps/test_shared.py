@@ -127,3 +127,30 @@ class TestValidateAndLoadPackage:
             _validate_and_load_package(validation_result, tmp_path, dep_ref)
 
         assert "github.com/owner/repo" in str(exc_info.value)
+
+    def test_removes_target_path_on_rejected_agent_plugin(self, tmp_path: Path) -> None:
+        """A rejected Agent Plugin (e.g. unsupported schema) cleans up target_path.
+
+        Regression test for the fail-open gap where route_agent_plugin_package()
+        raising an AgentPluginError skipped cleanup entirely, even though the
+        docstring promises target_path is removed on failure.
+        """
+        from apm_cli.agent_plugins.errors import AgentPluginManifestError
+
+        target = tmp_path / "pkg"
+        target.mkdir()
+        (target / "plugin.json").write_text("{}", encoding="utf-8")
+        dep_ref = _make_dep_ref("github.com/owner/rejected-plugin")
+        validation_result = _make_valid_result(MagicMock())
+
+        with (
+            patch(
+                "apm_cli.bundle.local_bundle.route_agent_plugin_package",
+                side_effect=AgentPluginManifestError("unsupported schema"),
+            ),
+            patch("apm_cli.utils.file_ops.robust_rmtree") as mock_rmtree,
+        ):
+            with pytest.raises(AgentPluginManifestError):
+                _validate_and_load_package(validation_result, target, dep_ref)
+
+        mock_rmtree.assert_called_once_with(target, ignore_errors=True)

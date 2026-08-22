@@ -26,6 +26,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.bundle.packer import pack_bundle
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
@@ -93,6 +94,35 @@ def _make_plugin_bundle(
         )
 
     return bundle
+
+
+def _make_native_agent_plugin_bundle(tmp_path: Path) -> Path:
+    """Create native Agent Plugin input that must stop at the G2 boundary."""
+    bundle = _make_plugin_bundle(tmp_path)
+    (bundle / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": PLUGIN_SCHEMA_ID,
+                "name": "native-bundle",
+                "description": "Native components are not deployable at G2",
+            }
+        ),
+        encoding="ascii",
+    )
+    return bundle
+
+
+def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes | None]]:
+    snapshot = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            snapshot[relative] = ("symlink", str(path.readlink()).encode())
+        elif path.is_dir():
+            snapshot[relative] = ("dir", None)
+        else:
+            snapshot[relative] = ("file", path.read_bytes())
+    return snapshot
 
 
 def _make_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
@@ -250,7 +280,7 @@ class TestInstallLocalBundleE2E:
     def test_install_local_bundle_from_pack_tar_gz(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Pack tar.gz escape hatch -> local install deploys files without network."""
+        """Explicit legacy pack tar.gz installs files without network."""
         source = tmp_path / "source-project"
         source.mkdir()
         (source / "apm.yml").write_text(
@@ -264,7 +294,7 @@ class TestInstallLocalBundleE2E:
         archive = pack_bundle(
             source,
             tmp_path / "archives",
-            fmt="plugin",
+            fmt="claude-plugin",
             archive=True,
             archive_format="tar.gz",
         ).bundle_path
@@ -280,6 +310,53 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+
+    def test_install_native_pack_is_blocked_before_project_mutation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Native packed input reaches the local-bundle fail-closed gate."""
+        source = tmp_path / "source-project"
+        source.mkdir()
+        (source / "apm.yml").write_text(
+            yaml.dump({"name": "native-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        LockFile().write(source / "apm.lock.yaml")
+        skill_path = source / ".apm" / "skills" / "coding" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\nname: coding\ndescription: Coding support\n---\n\nUse this skill.\n",
+            encoding="utf-8",
+        )
+        archive = pack_bundle(
+            source,
+            tmp_path / "archives",
+            fmt="agent-plugin",
+            archive=True,
+            archive_format="tar.gz",
+        ).bundle_path
+        project = _make_project(tmp_path / "dst")
+        before_paths = sorted(path.relative_to(project) for path in project.rglob("*"))
+        before_files = {
+            path.relative_to(project): path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        }
+
+        result = _invoke_install(
+            project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+        )
+
+        assert result.exit_code == 1
+        output = " ".join(result.output.split())
+        assert "no native harness is binary-qualified" in output
+        assert "apm pack --claude-plugin" in output
+        assert sorted(path.relative_to(project) for path in project.rglob("*")) == before_paths
+        assert {
+            path.relative_to(project): path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        } == before_files
 
     def test_install_local_bundle_multi_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -506,6 +583,42 @@ class TestInstallLocalBundleDryRun:
                 assert files == [], f"dry-run wrote files: {files}"
         # Lockfile must not be created on dry-run.
         assert not (project / "apm.lock.yaml").exists()
+
+
+@pytest.mark.parametrize("archive", (False, True), ids=("directory", "archive"))
+@pytest.mark.parametrize("dry_run", (False, True), ids=("real", "dry-run"))
+def test_native_local_bundle_boundary_renders_typed_cli_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    archive: bool,
+    dry_run: bool,
+) -> None:
+    bundle = _make_native_agent_plugin_bundle(tmp_path / "src")
+    bundle_arg = _make_zip(tmp_path / "archive", bundle) if archive else bundle
+    project = _make_project(tmp_path / "dst", targets=["copilot"])
+    project_before = _tree_snapshot(project)
+    source_before = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
+    args = ("--dry-run",) if dry_run else ()
+
+    result = _invoke_install(
+        project,
+        str(bundle_arg),
+        *args,
+        monkeypatch=monkeypatch,
+    )
+
+    assert result.exit_code == 1
+    assert _tree_snapshot(project) == project_before
+    source_after = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
+    assert source_after == source_before
+    output = " ".join(result.output.split())
+    assert "no native harness is binary-qualified" in output
+    assert "apm pack --claude-plugin" in output
+    assert "ask the publisher for a legacy-compatible package" in output
+    assert "Error installing dependencies" not in output
+    assert "Run with --verbose" not in output
+    assert "Install complete" not in output
+    assert "Dry run complete" not in output
 
 
 # ---------------------------------------------------------------------------
@@ -861,7 +974,7 @@ class TestLocalInstallAirGap:
 
 class TestInstallLegacyApmFormatBundle:
     """``apm install <legacy-bundle>`` must reject legacy --format apm tarballs
-    with an actionable error pointing at ``apm unpack`` or ``--format plugin``."""
+    with an actionable error pointing at ``apm unpack`` or ``apm pack --claude-plugin``."""
 
     def test_legacy_apm_tarball_rejected_with_actionable_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -869,7 +982,8 @@ class TestInstallLegacyApmFormatBundle:
         """A tarball produced by ``apm pack --format apm --archive`` has
         ``apm.lock.yaml`` at the root but no ``plugin.json``.  The install
         command must reject it with a message that names the legacy format
-        and suggests either repacking or using ``apm unpack``."""
+        and suggests either repacking with the installable Claude-plugin
+        format or using ``apm unpack``."""
         # Build a legacy apm-format bundle directory
         bundle = tmp_path / "test-pkg-0.1.0"
         bundle.mkdir(parents=True)
@@ -911,7 +1025,11 @@ class TestInstallLegacyApmFormatBundle:
         # The error must mention the legacy format
         assert "--format apm" in result.output or "legacy format" in result.output
         # The error must offer actionable guidance
-        assert "apm unpack" in result.output or "--format plugin" in result.output
+        assert "apm unpack" in result.output
+        # The suggested repack command must actually produce an installable
+        # Keep recovery advice explicit even though the legacy ``plugin`` alias
+        # is Claude-compatible.
+        assert "apm pack --claude-plugin" in result.output
         # No files should be deployed
         assert not (project / ".github" / "copilot-instructions.md").exists()
 
@@ -1204,6 +1322,11 @@ class TestBundleMcpWiringE2E:
 
         # ``project_root`` is the consumer project, not the bundle.
         assert Path(captured["kwargs"]["project_root"]).resolve() == project.resolve()
+        persisted = LockFile.from_yaml((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+        assert persisted.mcp_config_provenance == {
+            "filesystem": "bundle:test-plugin",
+            "github": "bundle:test-plugin",
+        }
 
     def test_bundle_without_mcp_does_not_call_integrator(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1223,12 +1346,10 @@ class TestBundleMcpWiringE2E:
         assert result.exit_code == 0, result.output
         mock_install.assert_not_called()
 
-    def test_bundle_mcp_integrator_failure_does_not_break_install(
+    def test_bundle_mcp_integrator_failure_fails_install(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """If the integrator raises, the install still succeeds with
-        a warning -- file deploys must not be undone by an MCP wiring
-        hiccup."""
+        """MCP wiring failures must fail rather than report partial success."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         bundle = self._make_mcp_bundle(tmp_path)
@@ -1241,10 +1362,9 @@ class TestBundleMcpWiringE2E:
         ):
             result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        # Warning should mention MCP wiring.
-        assert "MCP" in result.output or "mcp" in result.output
+        assert "integrator blew up" in result.output
 
     def test_bundle_mcp_dry_run_does_not_call_integrator(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1262,6 +1382,22 @@ class TestBundleMcpWiringE2E:
 
         assert result.exit_code == 0, result.output
         mock_install.assert_not_called()
+
+    def test_bundle_v3_lockfile_fails_before_project_mutation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "src", pack_target="all")
+        lock_path = bundle / "apm.lock.yaml"
+        lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        lock["lockfile_version"] = "3"
+        lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+
+        assert result.exit_code == 2
+        assert "Unsupported lockfile version '3'; supported versions: 1, 2" in result.output
+        assert not (project / "apm.lock.yaml").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
+
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
@@ -131,7 +133,7 @@ def _check_executable_approval(
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
     *,
     ctx: InstallContext | None = None,
-) -> tuple[bool, bool, bool, bool]:
+) -> tuple[bool, bool, bool, bool, bool]:
     """Delegate to ``exec_gate.check_executable_approval``."""
     from apm_cli.install.exec_gate import check_executable_approval
 
@@ -287,7 +289,12 @@ def integrate_package_primitives(  # noqa: PLR0913
     deploys but a prominent warning is emitted.
 
     Returns a dict with integration counters and the list of deployed file paths.
+
+    Raises:
+        AgentPluginDeploymentBoundaryError: If native Agent Plugin content reaches deployment.
     """
+    enforce_agent_plugin_deployment_boundary(package_info)
+
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope
@@ -356,9 +363,13 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     # Executable approval gate (npm v12-style default-deny). hooks/bin gate
     # below (~424, ~585); mcp/canvas unused (mcp filtered upstream, canvas re-derived ~433).
-    _hooks_approved, _bin_approved, _mcp_approved, _canvas_approved = _check_executable_approval(
-        package_name, package_info, allow_executables, ctx=ctx
-    )
+    (
+        _hooks_approved,
+        _bin_approved,
+        _mcp_approved,
+        _canvas_approved,
+        _lsp_approved,
+    ) = _check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
@@ -824,6 +835,8 @@ def integrate_local_bundle(
         ``deployed_file_hashes`` (dict[str, str]), ``skipped`` (int), and
         per-primitive counters (``skills``, ``agents``, ``commands``, ...).
     """
+    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
+
     import hashlib
     import shutil
 
@@ -838,6 +851,15 @@ def integrate_local_bundle(
     )
 
     bundle_dir: Path = bundle_info.source_dir
+    bundle_metadata_files = {
+        "plugin.json",
+        ".mcp.json",
+        "mcp.json",
+        ".lsp.json",
+        "lsp.json",
+        "com.microsoft.apm/mcp.json",
+        "com.microsoft.apm/lsp.json",
+    }
     pack_files = _bundle_pack_files(bundle_info)
 
     if not pack_files:
@@ -853,7 +875,7 @@ def integrate_local_bundle(
             # consumer projects.  Match the deploy-loop semantics so
             # case-folding filesystems do not let a renamed file slip
             # into pack_files unnecessarily.
-            if rel == "apm.lock.yaml" or rel.lower() == "plugin.json" or rel.lower() == ".mcp.json":
+            if rel.lower() == "apm.lock.yaml" or rel.lower() in bundle_metadata_files:
                 continue
             pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
 
@@ -879,7 +901,7 @@ def integrate_local_bundle(
     # the previously-inline guards in the deploy loop.
     _filtered_pack_files: dict[str, str] = {}
     for _rel, _hash in pack_files.items():
-        if _rel.lower() in {"plugin.json", ".mcp.json"}:
+        if _rel.lower() in bundle_metadata_files:
             continue
         _filtered_pack_files[_rel] = _hash
     pack_files = _filtered_pack_files

@@ -182,16 +182,31 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     Returns:
         Path: Path to the generated apm.yml.
     """
-    manifest: dict[str, Any] = {}
+    from ..agent_plugins.loader import admit_legacy_plugin_manifest
 
-    if plugin_json_path is not None and plugin_json_path.exists():
-        try:  # noqa: SIM105
-            manifest = parse_plugin_manifest(plugin_json_path)
-        except (ValueError, FileNotFoundError, RecursionError, MemoryError):
-            pass  # Treat as empty manifest; fall back to dir-name defaults
+    admitted_manifest = admit_legacy_plugin_manifest(plugin_path)
+    manifest: dict[str, Any] = admitted_manifest or {}
+    root_manifest = plugin_path / "plugin.json"
+    if (
+        admitted_manifest is None
+        and plugin_json_path is not None
+        and plugin_json_path != root_manifest
+        and plugin_json_path.exists()
+    ):
+        manifest = parse_plugin_manifest(plugin_json_path)
+        from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
+        from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+
+        if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:
+            raise AgentPluginLegacyBoundaryError(
+                "Schema-bearing plugin.json must be admitted from the package root, "
+                "not Claude plugin normalization"
+            )
 
     # Derive name from directory if not in manifest
     if "name" not in manifest or not manifest["name"]:
+        if admitted_manifest is not None:
+            raise ValueError("Present root plugin.json must declare a non-empty name")
         manifest["name"] = plugin_path.name
 
     return synthesize_apm_yml_from_plugin(plugin_path, manifest)
@@ -319,7 +334,8 @@ def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
     - ``list`` -> read each file path, merge (last-wins on name conflict).
     - ``dict`` -> use directly as inline server definitions.
 
-    When ``mcpServers`` is absent and ``.mcp.json`` (or ``.github/.mcp.json``)
+    When ``mcpServers`` is absent and ``mcp.json`` (or ``.mcp.json`` /
+    ``.github/.mcp.json``)
     exists at plugin root, read it as the default (matches Claude Code
     auto-discovery).
 
@@ -355,9 +371,9 @@ def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
             logger.warning("Unsupported mcpServers type %s; ignoring", type(mcp_value).__name__)
             return {}
     else:
-        # Fall back to auto-discovery: .mcp.json then .github/.mcp.json
+        # Fall back to auto-discovery: mcp.json then .mcp.json then .github/.mcp.json
         servers = {}
-        for fallback in (".mcp.json", ".github/.mcp.json"):
+        for fallback in ("mcp.json", ".mcp.json", ".github/.mcp.json"):
             candidate = plugin_path / fallback
             if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
                 servers = _read_mcp_json(candidate, logger)
@@ -516,8 +532,8 @@ def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
     - ``str``  -> read that file path relative to plugin root, parse JSON.
     - ``dict`` -> use directly as inline server definitions.
 
-    When ``lspServers`` is absent and ``.lsp.json`` exists at plugin root,
-    read it as the default (matches Claude Code auto-discovery).
+    When ``lspServers`` is absent and ``lsp.json`` / ``.lsp.json`` exists at
+    plugin root, read it as the default (matches Claude Code auto-discovery).
 
     Security: symlinks are skipped, JSON parse errors are logged as warnings.
 
@@ -543,11 +559,14 @@ def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
             logger.warning("Unsupported lspServers type %s; ignoring", type(lsp_value).__name__)
             return {}
     else:
-        # Fall back to auto-discovery: .lsp.json
+        # Fall back to auto-discovery: com.microsoft.apm/lsp.json, lsp.json, then .lsp.json
         servers = {}
-        candidate = plugin_path / ".lsp.json"
-        if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
-            servers = _read_lsp_json(candidate, logger)
+        for fallback in ("com.microsoft.apm/lsp.json", "lsp.json", ".lsp.json"):
+            candidate = plugin_path / fallback
+            if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
+                servers = _read_lsp_json(candidate, logger)
+                if servers:
+                    break
 
     # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
     if servers:

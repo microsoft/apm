@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from apm_cli.core.deployment_state import MaterializationResult
+from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
@@ -204,7 +205,7 @@ def get_effective_type(package_info) -> "PackageContentType":
 
     Determines type by:
     1. Package has SKILL.md (PackageType.CLAUDE_SKILL or HYBRID) -> SKILL
-    2. Package is a SKILL_BUNDLE or MARKETPLACE_PLUGIN (has skills/) -> SKILL
+    2. Package is a SKILL_BUNDLE or legacy marketplace plugin with skills/ -> SKILL
     3. Otherwise -> INSTRUCTIONS (compile to AGENTS.md only)
 
     Args:
@@ -219,10 +220,7 @@ def get_effective_type(package_info) -> "PackageContentType":
     # PackageType.CLAUDE_SKILL = has root SKILL.md only
     # PackageType.HYBRID = has both apm.yml AND root SKILL.md
     # PackageType.SKILL_BUNDLE = has skills/<name>/SKILL.md (nested bundle)
-    # PackageType.MARKETPLACE_PLUGIN = has plugin manifest (plugin.json or
-    #   .claude-plugin/); may or may not include skills/. The integrator
-    #   path gates on actual skills/ presence, so plugins without skills
-    #   are inert in the SKILL branch.
+    # PackageType.MARKETPLACE_PLUGIN = explicit legacy Claude plugin input.
     if package_info.package_type in (
         PackageType.CLAUDE_SKILL,
         PackageType.HYBRID,
@@ -618,6 +616,8 @@ class SkillIntegrator(BaseIntegrator):
     @staticmethod
     def available_skill_names(package_info) -> frozenset[str] | None:
         """Return names selectable through ``--skill`` for one package."""
+        enforce_agent_plugin_deployment_boundary(package_info)
+
         package_path = package_info.install_path
         if (package_path / "SKILL.md").is_file():
             return None
@@ -1370,6 +1370,8 @@ class SkillIntegrator(BaseIntegrator):
         Returns:
             SkillIntegrationResult: Results of the integration operation
         """
+        enforce_agent_plugin_deployment_boundary(package_info)
+
         # Check if package type allows skill installation (T4 routing)
         # SKILL and HYBRID -> install as skill
         # INSTRUCTIONS and PROMPTS -> skip skill installation
@@ -1423,7 +1425,7 @@ class SkillIntegrator(BaseIntegrator):
         bin_skip_reason: str | None = None
         from apm_cli.models.apm_package import PackageType as _PackageType
 
-        if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
+        if package_info.package_type is _PackageType.MARKETPLACE_PLUGIN:
             if skip_bin:
                 bin_skip_reason = bin_skip_reason_override or "not_approved"
             else:

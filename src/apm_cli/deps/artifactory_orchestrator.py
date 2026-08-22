@@ -292,11 +292,10 @@ class ArtifactoryOrchestrator:
                     robust_copy2(src, dst)
 
         self._progress(progress_obj, progress_task_id, completed=80)
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            raise RuntimeError(
-                f"Subdirectory is not a valid APM package: {'; '.join(validation_result.errors)}"
-            )
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
         resolved_ref = ResolvedReference(
             original_ref=ref,
             ref_name=ref,
@@ -305,7 +304,7 @@ class ArtifactoryOrchestrator:
         )
         self._progress(progress_obj, progress_task_id, completed=100)
         return PackageInfo(
-            package=validation_result.package,
+            package=package,
             install_path=target_path,
             resolved_reference=resolved_ref,
             installed_at=datetime.now().isoformat(),

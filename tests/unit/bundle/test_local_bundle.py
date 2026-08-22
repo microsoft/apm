@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import stat
 import tarfile
 import zipfile
@@ -16,6 +17,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+from apm_cli.bundle.formats import BundleFormat
+from apm_cli.deps.lockfile import UnsupportedLockfileVersionError
 
 # ---------------------------------------------------------------------------
 # The import below WILL fail until production code lands.  That is intentional
@@ -154,6 +159,8 @@ class TestDetectLocalBundle:
         assert isinstance(result, LocalBundleInfo)
         assert result.package_id == "test-plugin"
         assert result.is_archive is False
+        assert result.format == BundleFormat.CLAUDE_PLUGIN.value
+        assert result.agent_plugin is None
 
     def test_detect_plugin_tarball(self, tmp_path: Path) -> None:
         bundle = _make_plugin_bundle(tmp_path)
@@ -161,6 +168,51 @@ class TestDetectLocalBundle:
         result = detect_local_bundle(tarball)
         assert result is not None
         assert result.is_archive is True
+
+    @pytest.mark.parametrize("version", ["1", "2"])
+    @pytest.mark.parametrize("source_kind", ["directory", "tar", "zip"])
+    def test_detect_accepts_supported_lockfile_versions(
+        self, tmp_path: Path, version: str, source_kind: str
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "source")
+        lock_path = bundle / "apm.lock.yaml"
+        lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        lock["lockfile_version"] = version
+        lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
+        source = {
+            "directory": bundle,
+            "tar": _make_plugin_tarball(tmp_path / "tar", bundle),
+            "zip": _make_plugin_zip(tmp_path / "zip", bundle),
+        }[source_kind]
+
+        result = detect_local_bundle(source)
+
+        assert result is not None
+        assert result.lockfile is not None
+        assert result.lockfile["lockfile_version"] == version
+        if result.temp_dir is not None:
+            shutil.rmtree(result.temp_dir)
+
+    @pytest.mark.parametrize("source_kind", ["directory", "tar", "zip"])
+    def test_detect_rejects_unsupported_lockfile_version(
+        self, tmp_path: Path, source_kind: str
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "source")
+        lock_path = bundle / "apm.lock.yaml"
+        lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        lock["lockfile_version"] = "3"
+        lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
+        source = {
+            "directory": bundle,
+            "tar": _make_plugin_tarball(tmp_path / "tar", bundle),
+            "zip": _make_plugin_zip(tmp_path / "zip", bundle),
+        }[source_kind]
+
+        with pytest.raises(
+            UnsupportedLockfileVersionError,
+            match=r"Unsupported lockfile version '3'; supported versions: 1, 2",
+        ):
+            detect_local_bundle(source)
 
     def test_detect_returns_none_for_non_bundle(self, tmp_path: Path) -> None:
         """A directory without plugin.json is not a bundle."""
@@ -178,14 +230,146 @@ class TestDetectLocalBundle:
         assert result is not None
         assert result.package_id == "my-custom-id"
 
-    def test_detect_falls_back_to_dirname_when_no_id(self, tmp_path: Path) -> None:
+    def test_detect_uses_manifest_name_when_no_id(self, tmp_path: Path) -> None:
         bundle = _make_plugin_bundle(tmp_path, plugin_id="")
         # Rewrite plugin.json without id
         pj = {"name": "Test Plugin"}
         (bundle / "plugin.json").write_text(json.dumps(pj), encoding="utf-8")
         result = detect_local_bundle(bundle)
         assert result is not None
-        assert result.package_id == bundle.name
+        assert result.package_id == "Test Plugin"
+
+    def test_detect_rejects_unsupported_agent_plugin_schema(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+                    "name": "future-plugin",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="Unsupported Agent Plugins manifest schema"):
+            detect_local_bundle(bundle)
+
+    def test_detect_rejects_foreign_schema_bearing_manifest(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://example.com/plugin.schema.json",
+                    "name": "foreign-plugin",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="Unsupported schema-bearing plugin manifest"):
+            detect_local_bundle(bundle)
+
+    @pytest.mark.parametrize("container", ("zip", "tar"))
+    def test_rejected_schema_archive_cleans_temporary_extraction(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        container: str,
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "source")
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+                    "name": "future.plugin",
+                }
+            ),
+            encoding="utf-8",
+        )
+        archive = (
+            _make_plugin_zip(tmp_path / "archives", bundle)
+            if container == "zip"
+            else _make_plugin_tarball(tmp_path / "archives", bundle)
+        )
+        extraction = tmp_path / "controlled-extraction"
+        monkeypatch.setattr(
+            "apm_cli.bundle.local_bundle.tempfile.mkdtemp",
+            lambda **_kwargs: str(extraction),
+        )
+
+        with pytest.raises(ValueError, match="Unsupported Agent Plugins manifest schema"):
+            detect_local_bundle(archive)
+
+        assert not extraction.exists()
+
+    @pytest.mark.parametrize("container", ("directory", "zip", "tar"))
+    def test_exact_schema_routes_every_local_bundle_container_through_canonical_ir(
+        self,
+        tmp_path: Path,
+        container: str,
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        source = bundle
+        if container == "zip":
+            source = _make_plugin_zip(tmp_path / "archives", bundle)
+        elif container == "tar":
+            source = _make_plugin_tarball(tmp_path / "archives", bundle)
+
+        result = detect_local_bundle(source)
+
+        assert result is not None
+        assert result.format == BundleFormat.AGENT_PLUGIN.value
+        assert result.agent_plugin is not None
+        assert result.agent_plugin.identity.name == "native.plugin"
+        if result.temp_dir is not None:
+            shutil.rmtree(result.temp_dir)
+
+    def test_detect_rejects_symlinked_plugin_manifest(self, tmp_path: Path) -> None:
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        target = tmp_path / "plugin.json"
+        target.write_text('{"name":"outside"}', encoding="utf-8")
+        (bundle / "plugin.json").symlink_to(target)
+
+        with pytest.raises(ValueError, match="missing or invalid"):
+            detect_local_bundle(bundle)
+
+    def test_detect_rejects_case_colliding_metadata(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "Plugin.json").write_text("{}", encoding="utf-8")
+        matching = [
+            entry.name for entry in bundle.iterdir() if entry.name.casefold() == "plugin.json"
+        ]
+        if len(matching) < 2:
+            pytest.skip("case-insensitive filesystem cannot create a metadata collision")
+
+        with pytest.raises(ValueError, match="ambiguous metadata paths"):
+            detect_local_bundle(bundle)
+
+    def test_detect_rejects_invalid_agent_manifest_before_install(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+                    "name": "Invalid Name",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="naming rules"):
+            detect_local_bundle(bundle)
 
     def test_detect_reads_pack_targets(self, tmp_path: Path) -> None:
         bundle = _make_plugin_bundle(tmp_path, pack_target="copilot,claude")
@@ -512,6 +696,13 @@ class TestCheckTargetMismatch:
         warning = check_target_mismatch(
             bundle_targets=["copilot", "claude"],
             install_targets=["copilot", "claude"],
+        )
+        assert warning is None
+
+    def test_target_alias_match_no_warning(self) -> None:
+        warning = check_target_mismatch(
+            bundle_targets=["vscode"],
+            install_targets=["copilot"],
         )
         assert warning is None
 

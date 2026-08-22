@@ -4,7 +4,7 @@ description: Install a plugin-format bundle from a directory or archive without 
 ---
 
 You have a bundle on disk -- a directory or `.zip` someone handed you (or a
-legacy `.tar.gz`), or the output of `apm pack --format plugin`. Drop it into a
+legacy `.tar.gz`), or the output of `apm pack`. Drop it into a
 project with one command:
 
 ```bash
@@ -36,8 +36,14 @@ my-bundle/
 under `.github/plugin/`, `.claude-plugin/`, or `.cursor-plugin/`. For the
 full schema see [Package anatomy](../../concepts/package-anatomy/).
 
+:::note[Planned]
+This flow deploys Claude plugin bundles (the default `apm pack` output).
+Portable Agent Plugin bundles built with `apm pack --format agent-plugin` are not yet
+deployable through `apm install` -- see [Package Types](../../reference/package-types/#agent-plugin-pluginjson-with-an-agent-plugins-schema).
+:::
+
 The optional `apm.lock.yaml` carries `pack.bundle_files` -- a SHA-256
-manifest written by `apm pack --format plugin`. When present, APM verifies
+manifest written by `apm pack`. When present, APM verifies
 every listed file before deploying. When absent, older bundles still install
 with a warning unless policy requires hashes. With
 `security.integrity.require_hashes: true`, APM fails closed before deploy.
@@ -119,14 +125,15 @@ rejects these with a targeted error:
 ```
 './dist/my-pkg-0.1.0.tar.gz' was packed with '--format apm' (legacy
 format). 'apm install <bundle>' requires the plugin format. Repack with
-'apm pack --format plugin --archive', or use 'apm unpack' to deploy the
+'apm pack --claude-plugin --archive', or use 'apm unpack' to deploy the
 legacy bundle.
 ```
 
 Two ways forward:
 
 - **Repack.** If you own the bundle, run
-  `apm pack --format plugin --archive` and install the new artifact.
+  `apm pack --archive` (no format flag -- the default Claude plugin bundle)
+  and install the new artifact.
 - **Unpack.** If you only have the legacy artifact, use `apm unpack
   <bundle>` to extract it. `apm unpack` is deprecated and will be removed
   in a future release; prefer repacking when you can.

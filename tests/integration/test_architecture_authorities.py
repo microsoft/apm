@@ -14,6 +14,649 @@ from types import ModuleType
 import pytest
 
 
+def test_removed_agent_plugin_lifecycle_tombstone_passes() -> None:
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        (sys.executable, "scripts/check_removed_agent_plugin_lifecycle.py", "--root", str(root)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_install_request_defaults_have_single_owner() -> None:
+    """The Click compatibility wrapper must not redeclare request defaults."""
+    root = Path(__file__).parents[2]
+    command_source = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
+    request_source = (root / "src/apm_cli/install/request.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(command_source)
+    wrapper = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_install_apm_dependencies"
+    )
+    positional = wrapper.args.args[-len(wrapper.args.defaults) :]
+
+    assert {arg.arg for arg in positional} == {"update_refs", "verbose", "only_packages"}
+    assert "request = InstallRequest(" in command_source
+    assert "trust_bin: bool | None = None" in request_source
+    assert "Install invocation defaults must remain owned by InstallRequest" in guard
+    assert "| Install invocation option defaults | install/request.py (InstallRequest) |" in (
+        architecture
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source", "expected"),
+    [
+        (
+            "src/apm_cli/install/agent_plugin_state.py",
+            '"""Restored state module."""\n',
+            "removed lifecycle module exists",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "installed_plugins = []\n",
+            "removed lifecycle symbol 'installed_plugins'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "def commit_agent_plugin_bundle():\n    pass\n",
+            "removed lifecycle symbol 'commit_agent_plugin_bundle'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "class PreparedInstalledPluginState:\n    pass\n",
+            "removed lifecycle symbol 'PreparedInstalledPluginState'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "class InstalledPluginRecordCodec:\n    pass\n",
+            "removed lifecycle symbol 'InstalledPluginRecordCodec'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "def replace_installed_plugins():\n    pass\n",
+            "removed lifecycle symbol 'replace_installed_plugins'",
+        ),
+    ],
+)
+def test_removed_agent_plugin_lifecycle_tombstone_rejects_mutation(
+    tmp_path: Path, relative_path: str, source: str, expected: str
+) -> None:
+    root = Path(__file__).parents[2]
+    destination = tmp_path / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(source, encoding="utf-8")
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/check_removed_agent_plugin_lifecycle.py"),
+            "--root",
+            str(tmp_path),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert expected in result.stdout
+
+
+def test_agent_plugin_contract_has_single_owner() -> None:
+    """Native Agent Plugin interpretation must route through its loader."""
+    root = Path(__file__).parents[2]
+    loader = (root / "src/apm_cli/agent_plugins/loader.py").read_text(encoding="utf-8")
+    projection = (root / "src/apm_cli/agent_plugins/projection.py").read_text(encoding="utf-8")
+    package_owner = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
+    validation = (root / "src/apm_cli/models/validation.py").read_text(encoding="utf-8")
+    resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text(encoding="utf-8")
+    errors = (root / "src/apm_cli/agent_plugins/errors.py").read_text(encoding="utf-8")
+    assets = (root / "src/apm_cli/agent_plugins/assets.py").read_text(encoding="utf-8")
+    ir = (root / "src/apm_cli/agent_plugins/ir.py").read_text(encoding="utf-8")
+    skill_integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text(
+        encoding="utf-8"
+    )
+    detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
+    legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/check_bundle_format_authority.sh").read_text(encoding="utf-8")
+    boundary_guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+    validation_tree = ast.parse(validation)
+    agent_validation = next(
+        node
+        for node in validation_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_validate_agent_plugin"
+    )
+    agent_validation_source = ast.get_source_segment(validation, agent_validation) or ""
+
+    assert loader.count("def load_agent_plugin(") == 1
+    assert loader.count("def detect_agent_plugin(") == 1
+    assert projection.count("def project_agent_plugin_package(") == 1
+    assert package_owner.count("def from_mapping(") == 1
+    assert "normalize_plugin_directory" not in agent_validation_source
+    assert "package = project_agent_plugin_package(plugin)" in agent_validation_source
+    assert "result.package = package" in agent_validation_source
+    assert "return validation.package" in resolver
+    assert errors.count("class AgentPluginDeploymentBoundaryError(") == 1
+    assert errors.count("def enforce_agent_plugin_deployment_boundary(") == 1
+    assert "PackageType.AGENT_PLUGIN" not in skill_integrator
+    assert "APMPackage(" not in projection
+    assert "read_json_document" not in projection
+    assert "detect_agent_plugin(package_path)" in detection
+    assert "admit_legacy_plugin_manifest(plugin_path)" in legacy
+    assert "Agent Plugin classification must route through its loader" in guard
+    assert loader.count("def _discover_skills(") == 1
+    assert loader.count("def _discover_mcp_servers(") == 1
+    assert loader.count("AssetInventory(root)") == 1
+    assert "class AgentPluginAsset:" in ir
+    assert "sha256: str" in ir
+    assert "hashlib.sha256()" in assets
+    assert "if stat.S_ISLNK" in assets
+    assert "Agent Plugin component IR must remain canonical and inventory-backed" in boundary_guard
+    assert (
+        "| Agent Plugins v1 contract interpretation, component discovery, "
+        "and portable manifest authority |"
+    ) in architecture
+    assert "| Agent Plugin producer portable-surface admission |" in architecture
+    assert "| APMPackage interpreted-manifest construction |" in architecture
+    assert "| Agent Plugin compatibility package projection |" in architecture
+    assert "| Neutral hook source grammar and shape -> per-target native |" in architecture
+    assert "src/apm_cli/hook_contract.py" in architecture
+    assert architecture == (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new"),
+    [
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            '    list(plugin.root.rglob("*"))\n    data = _project_apm_configuration(plugin)',
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "stat.S_ISLNK",
+            "False and stat.S_ISLNK",
+        ),
+        (
+            "src/apm_cli/agent_plugins/ir.py",
+            "    sha256: str",
+            "    digest: str",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "                    self._reserve_bytes(len(chunk))",
+            "                    pass",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "        return self._collect(component_root)\n\n    def list_component_candidates",
+            "        entry_count = self._entry_count\n"
+            "        try:\n"
+            "            return self._collect(component_root)\n"
+            "        finally:\n"
+            "            self._entry_count = entry_count\n\n"
+            "    def list_component_candidates",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "ensure_path_within_resolved(path, self._root)",
+            "ensure_path_within(path, self._root)",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "ensure_path_within_resolved(path, root)",
+            "ensure_path_within(path, root)",
+        ),
+        (
+            "src/apm_cli/agent_plugins/loader.py",
+            "    return any(entry.name == name for entry in entries)",
+            '    return any(entry.name == name for entry in Path(".").iterdir())',
+        ),
+        (
+            "src/apm_cli/agent_plugins/loader.py",
+            "primary.disposition is _CandidateDisposition.ABSENT",
+            "primary.disposition is _CandidateDisposition.REJECTED",
+        ),
+        (
+            "src/apm_cli/integration/hook_ir.py",
+            "from apm_cli.hook_contract import HookBinding, HookDocument, HookHandler\n",
+            "from apm_cli.hook_contract import HookBinding, HookDocument, HookHandler\n\n"
+            'HOOK_COMMAND_KEYS: tuple[str, ...] = ("command",)\n',
+        ),
+        (
+            "src/apm_cli/install/sources.py",
+            "                agent_plugin_detection=native_detection,\n",
+            "",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "agent_plugin_detection.manifest_path.parent.resolve() != package_root",
+            "False",
+        ),
+    ],
+)
+def test_agent_plugin_component_ir_mutations_are_killed(
+    tmp_path: Path,
+    relative_path: str,
+    old: str,
+    new: str,
+) -> None:
+    """Static owner guard kills every load-bearing component-IR mutation."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "src/apm_cli/agent_plugins/assets.py",
+        "src/apm_cli/agent_plugins/ir.py",
+        "src/apm_cli/agent_plugins/loader.py",
+        "src/apm_cli/agent_plugins/projection.py",
+        "src/apm_cli/hook_contract.py",
+        "src/apm_cli/integration/hook_ir.py",
+        "src/apm_cli/models/validation.py",
+        "src/apm_cli/install/sources.py",
+    )
+    for relative in paths:
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, destination)
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    assert old in source
+    mutation_path.write_text(source.replace(old, new), encoding="utf-8")
+
+    result = subprocess.run(
+        ("python3", "scripts/check_agent_plugin_component_ir.py", str(sandbox)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new", "message"),
+    [
+        (
+            "src/apm_cli/models/validation.py",
+            "package = project_agent_plugin_package(plugin)",
+            "package = None",
+            "Agent Plugin compatibility packages must route through the projection owner",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "package = project_agent_plugin_package(plugin)",
+            "package = project_agent_plugin_package(plugin)\n        package = None",
+            "native validation bypasses projection or enters normalization",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "    result.agent_plugin = plugin",
+            "    normalize_plugin_directory(package_path, plugin_json_path)\n"
+            "    result.agent_plugin = plugin",
+            "Agent Plugin classification must route through its loader, not Claude normalization",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "APMPackage.from_mapping(",
+            "APMPackage(",
+            "Agent Plugin compatibility packages must route through the projection owner",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            "    plugin.manifest.path.read_text()\n    data = _project_apm_configuration(plugin)",
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            "    plugin.manifest.path.chmod(0o600)\n    data = _project_apm_configuration(plugin)",
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            '    json.JSONDecoder().decode("{}")\n    data = _project_apm_configuration(plugin)',
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "from .ir import AgentPlugin, thaw_frozen_json",
+            "from .ir import AgentPlugin, thaw_frozen_json\n"
+            "from json import loads as thaw_frozen_json",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "from .ir import AgentPlugin, thaw_frozen_json",
+            "from .ir import AgentPlugin, thaw_frozen_json\n"
+            '__import__("json").JSONDecoder().decode("{}")',
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    projected = thaw_frozen_json(configuration.values)",
+            "    projected = thaw(configuration.values)",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    projected = thaw_frozen_json(configuration.values)",
+            "    thaw_frozen_json(configuration.values)\n    projected = {}",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "            return validation.package",
+            "            return None",
+            "Agent Plugin dependency loading must preserve the projected package",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "            return validation.package",
+            "            if False:\n"
+            "                return validation.package\n"
+            "            return None",
+            "Agent Plugin dependency loading must preserve the projected package",
+        ),
+        (
+            "src/apm_cli/models/apm_package.py",
+            "        result = cls.from_mapping(",
+            "        result = cls(",
+            "APMPackage file loading must route through from_mapping owner",
+        ),
+        (
+            "src/apm_cli/models/apm_package.py",
+            "        _apm_yml_cache[cache_key] = result",
+            "        result = None\n        _apm_yml_cache[cache_key] = result",
+            "APMPackage file loading must route through from_mapping owner",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "    enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "    from apm_cli.integration.dispatch import get_dispatch_table",
+            "    from apm_cli.integration.dispatch import get_dispatch_table\n\n"
+            "    enforce_agent_plugin_deployment_boundary(package_info)",
+            "native deployment gate must be the first integration action",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "package_info.package_type is not PackageType.AGENT_PLUGIN",
+            "package_info.package_type is PackageType.AGENT_PLUGIN",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "        return AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "    raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "    return None  # native package accepted",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            'getattr(package, "agent_plugin", None)',
+            'getattr(package, "legacy_plugin", None)',
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        PackageType.SKILL_BUNDLE,\n        PackageType.MARKETPLACE_PLUGIN,",
+            "        PackageType.SKILL_BUNDLE,\n"
+            "        PackageType.AGENT_PLUGIN,\n"
+            "        PackageType.MARKETPLACE_PLUGIN,",
+            "SkillIntegrator must not route AGENT_PLUGIN content",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "        # Check if package type allows skill installation",
+            "        # Check if package type allows skill installation",
+            "integrate_package_skill must reject native packages",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "        package_path = package_info.install_path",
+            "        package_path = package_info.install_path",
+            "available_skill_names must reject native packages",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "        enforce_agent_plugin_deployment_boundary(materialization.package_info)",
+            "        pass  # native materialization accepted",
+            "native batch preflight must use the deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "    diagnostics.error(f",
+            "    diagnostics.warn(f",
+            "native deployment failure must remain a recorded non-success outcome",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            '    deltas["installed"] = 0',
+            '    deltas["installed"] = 1',
+            "native deployment failure must remain a recorded non-success outcome",
+        ),
+        (
+            "src/apm_cli/install/phases/integrate.py",
+            "    preflight_agent_plugin_materializations(materialized)",
+            "    pass  # native batch preflight removed",
+            "native batch preflight must run before the first package integration",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "            preflight_agent_plugin_dry_run(ctx, all_apm_deps)",
+            "            pass  # native dry-run preflight removed",
+            "dry-run native preflight must run before rendering success",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)",
+            "                pass  # native local bundle accepted",
+            "Local bundles must hit the native boundary before deployment preparation",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "        detection = route_agent_plugin_package(package_path)",
+            "        detection = None  # schema routing bypassed",
+            "Package ingress must converge through route_agent_plugin_package",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "    except AgentPluginError as e:",
+            "    except RuntimeError as e:",
+            "typed native bundle failures must render through logger.error",
+        ),
+        (
+            "src/apm_cli/bundle/local_bundle.py",
+            "    if schema_id == PLUGIN_SCHEMA_ID:",
+            "    if schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):",
+            "Plugin schema routing must live in bundle/local_bundle.py and select exact IDs",
+        ),
+        (
+            "src/apm_cli/agent_plugins/loader.py",
+            "        route = classify_plugin_manifest_schema(document)",
+            "        route = PluginSchemaRoute.LEGACY",
+            "Agent Plugin loading and legacy admission must share the schema router",
+        ),
+        (
+            "src/apm_cli/install/sources.py",
+            "                route_agent_plugin_package(original_src) if original_src.is_dir() else None",
+            "                None",
+            "Package ingress must converge through route_agent_plugin_package",
+        ),
+        (
+            "src/apm_cli/deps/github_downloader.py",
+            "                route_agent_plugin_package(target_path)",
+            "                pass  # persistent cache schema routing bypassed",
+            "Package ingress must converge through route_agent_plugin_package",
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "    source_kind = source.kind",
+            "    route_agent_plugin_package(Path('.'))\n    source_kind = source.kind",
+            "Marketplace resolution must defer schema admission to materialized ingress",
+        ),
+        (
+            "src/apm_cli/deps/plugin_parser.py",
+            "        if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:",
+            "        if False:",
+            "Agent Plugin classification must route through its loader, not Claude normalization",
+        ),
+        (
+            "src/apm_cli/policy/ci_checks.py",
+            "        except AgentPluginDeploymentBoundaryError as exc:",
+            "        except RuntimeError as exc:",
+            "drift must translate native deployment failures into a failed CheckResult",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/cli.py",
+            "        _preflight_uninstall_survivors(\n"
+            "            surviving_deps,\n"
+            "            modules_dir,\n"
+            "            lockfile=lockfile,\n"
+            "            excluded_keys=removed_keys | builtins.set(projected_orphans),\n"
+            "            source_root=manifest_path.parent,\n"
+            "        )",
+            "        pass  # native preflight removed",
+            "uninstall survivor preflight must run before scripts, staging, "
+            "or destructive reconciliation",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/engine.py",
+            "    return preflight_reintegration_survivors(\n        installed_refs,",
+            "    return disabled_survivor_preflight(\n        installed_refs,",
+            "uninstall survivor preflight must use the native deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/engine.py",
+            "            validation = validate_apm_package(source_path, source_path=source_path)",
+            "            continue  # declared local source accepted without validation",
+            "uninstall survivor preflight must use the native deployment boundary owner "
+            "against declared local sources",
+        ),
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "    pass  # native local bundle accepted",
+            "native local bundles must fail before resolution or deployment",
+        ),
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "        enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "        if bundle_info.format == BundleFormat.AGENT_PLUGIN.value:\n"
+            "            enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "native local bundles must fail before resolution or deployment",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "    pass  # native opaque bundle accepted",
+            "opaque local bundle deployment must start at the native boundary",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n"
+            "        plan.append((dependency, package_info))",
+            "        plan.append((dependency, package_info))",
+            "survivor reintegration preflight must use the native deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/commands/prune.py",
+            "        _preflight_prune_survivors(\n",
+            "        disabled_prune_survivor_preflight(\n",
+            "prune must preflight survivors through the native deployment boundary",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "        survivor_plan = preflight_reintegration_survivors(\n",
+            "        survivor_plan = list(\n",
+            "direct hook survivor reconciliation must preflight before mutation",
+        ),
+    ],
+)
+def test_agent_plugin_projection_guard_rejects_bypass(
+    tmp_path: Path,
+    relative_path: str,
+    old: str,
+    new: str,
+    message: str,
+) -> None:
+    """The boundary guard must reject projection and normalization bypasses."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "src/apm_cli/agent_plugins/ir.py",
+        "src/apm_cli/agent_plugins/errors.py",
+        "src/apm_cli/agent_plugins/loader.py",
+        "src/apm_cli/agent_plugins/projection.py",
+        "src/apm_cli/bundle/formats.py",
+        "src/apm_cli/bundle/local_bundle.py",
+        "src/apm_cli/deps/plugin_parser.py",
+        "src/apm_cli/deps/_shared.py",
+        "src/apm_cli/deps/apm_resolver.py",
+        "src/apm_cli/deps/github_downloader.py",
+        "src/apm_cli/deps/registry/resolver.py",
+        "src/apm_cli/install/services.py",
+        "src/apm_cli/install/sources.py",
+        "src/apm_cli/install/template.py",
+        "src/apm_cli/install/phases/integrate.py",
+        "src/apm_cli/install/local_bundle_handler.py",
+        "src/apm_cli/integration/skill_integrator.py",
+        "src/apm_cli/marketplace/resolver.py",
+        "src/apm_cli/policy/ci_checks.py",
+        "src/apm_cli/commands/uninstall/cli.py",
+        "src/apm_cli/commands/uninstall/engine.py",
+        "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/prune.py",
+        "src/apm_cli/integration/hook_integrator.py",
+        "src/apm_cli/models/apm_package.py",
+        "src/apm_cli/models/format_detection.py",
+        "src/apm_cli/models/validation.py",
+    )
+    for relative in paths:
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, destination)
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    assert old in source
+    mutation_path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/check_bundle_format_authority.sh", str(sandbox)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert message in result.stdout + result.stderr
+
+
 def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     """Policy cache refs must be sanitized by the canonical writer."""
     root = Path(__file__).parents[2]
@@ -1455,7 +2098,7 @@ def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
     )
     (tmp_path / "apm.lock.yaml").write_text(lockfile.to_yaml(), encoding="utf-8")
 
-    result = pack_bundle(tmp_path, tmp_path / "out", dry_run=True)
+    result = pack_bundle(tmp_path, tmp_path / "out", fmt="apm", dry_run=True)
 
     assert result.files == [claude_file]
 
@@ -1521,6 +2164,10 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     integration_source = (root / "src/apm_cli/install/mcp/integration.py").read_text(
         encoding="utf-8"
     )
+    manifest_integration_source = integration_source.split(
+        "def run_mcp_integration(",
+        maxsplit=1,
+    )[1]
     ownership_source = (root / "src/apm_cli/install/mcp/ownership.py").read_text(encoding="utf-8")
 
     assert "parse_targets_field" in adapter_calls
@@ -1530,8 +2177,8 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     assert manifest_selection_calls[0].lineno < discovery_calls[0].lineno
     assert all(node.func.id != "parse_targets_field" for node in resolver_calls)
     assert 'return {"target": singular, "targets": list(plural)}' in target_projection
-    assert integration_source.index("parse_targets_field(mcp_apm_config)") < (
-        integration_source.index("MCPIntegrator.install(")
+    assert manifest_integration_source.index("parse_targets_field(mcp_apm_config)") < (
+        manifest_integration_source.index("MCPIntegrator.install(")
     )
     assert "AC21: MCP manifest target precedence authority" in guard
     assert (

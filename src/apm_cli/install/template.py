@@ -13,10 +13,26 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
+from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.package_resolution import effective_deploy_skill_subset
-from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
-from apm_cli.install.sources import DependencySource, Materialization
+from apm_cli.install.services import (
+    IntegratorBundle,
+    enforce_agent_plugin_deployment_boundary,
+    integrate_package_primitives,
+)
+from apm_cli.install.sources import (
+    DependencySource,
+    Materialization,
+)
+
+if TYPE_CHECKING:
+    from apm_cli.install.context import InstallContext
+
+_MATERIALIZATION_UNSET = object()
 
 
 def _effective_allow(ctx) -> dict | None:
@@ -78,23 +94,119 @@ def _effective_allow(ctx) -> dict | None:
 
 def run_integration_template(
     source: DependencySource,
+    *,
+    materialization: Materialization | None | object = _MATERIALIZATION_UNSET,
 ) -> dict[str, int] | None:
     """Run the shared post-acquire integration flow for one dependency.
 
     Returns a counter-delta dict for accumulation by the caller, or
     ``None`` if the source declined to acquire (skipped, failed).
     """
-    from apm_cli.deps.plugin_parser import DeclaredPluginComponentError
-
-    try:
-        materialization = source.acquire()
-    except DeclaredPluginComponentError as exc:
-        source.ctx.diagnostics.error(str(exc), package=source.dep_key)
-        return {}
+    if materialization is _MATERIALIZATION_UNSET:
+        materialization, terminal_deltas = prepare_integration_materialization(source)
+        if terminal_deltas is not None:
+            return terminal_deltas
     if materialization is None:
         return None
 
-    return _integrate_materialization(source, materialization)
+    return _integrate_materialization(source, cast(Materialization, materialization))
+
+
+def prepare_integration_materialization(
+    source: DependencySource,
+) -> tuple[Materialization | None, dict[str, int] | None]:
+    """Acquire one package without deploying it."""
+    from apm_cli.deps.plugin_parser import DeclaredPluginComponentError
+
+    try:
+        return source.acquire(), None
+    except DeclaredPluginComponentError as exc:
+        source.ctx.diagnostics.error(str(exc), package=source.dep_key)
+        return None, {}
+
+
+def preflight_agent_plugin_materializations(
+    prepared: list[tuple[DependencySource, Materialization]],
+) -> None:
+    """Reject the batch once, before any package can mutate a target."""
+    for _, materialization in prepared:
+        enforce_agent_plugin_deployment_boundary(materialization.package_info)
+
+
+def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> None:
+    """Reject a cached or local native package without mutating its source."""
+    from apm_cli.bundle.local_bundle import route_agent_plugin_package
+    from apm_cli.core.scope import get_modules_dir
+    from apm_cli.models.apm_package import PackageInfo
+    from apm_cli.models.validation import validate_apm_package
+
+    source_root = ctx.project_root
+    modules_dir = get_modules_dir(ctx.scope)
+    for dependency in dependencies:
+        if dependency.is_local and dependency.local_path:
+            package_path = Path(dependency.local_path).expanduser()
+            if not package_path.is_absolute():
+                package_path = (source_root / package_path).resolve()
+        else:
+            package_path = dependency.get_install_path(modules_dir)
+        if not package_path.is_dir():
+            continue
+        detection = route_agent_plugin_package(package_path)
+        if detection is None:
+            continue
+        if dependency.is_local:
+            validation = validate_apm_package(
+                package_path,
+                source_path=package_path,
+                agent_plugin_detection=detection,
+            )
+        else:
+            validation = validate_apm_package(
+                package_path,
+                agent_plugin_detection=detection,
+            )
+        if validation.is_valid and validation.package is not None:
+            enforce_agent_plugin_deployment_boundary(
+                PackageInfo(
+                    package=validation.package,
+                    install_path=package_path,
+                    dependency_ref=dependency,
+                    package_type=validation.package_type,
+                )
+            )
+
+
+def _record_agent_plugin_boundary_diagnostic(
+    diagnostics,
+    *,
+    package_key: str,
+    prefix: str,
+    error: AgentPluginDeploymentBoundaryError,
+) -> None:
+    """Record one package-attributed native deployment failure."""
+    diagnostics.error(f"{prefix}: {error}", package=package_key)
+
+
+def _record_agent_plugin_boundary_failure(
+    source: DependencySource,
+    materialization: Materialization,
+    error: AgentPluginDeploymentBoundaryError,
+) -> dict[str, int]:
+    """Record one typed boundary failure as a canonical install diagnostic."""
+    ctx = source.ctx
+    deltas = materialization.deltas
+    dep_ref = source.dep_ref
+    dep_key = materialization.dep_key
+    deltas["installed"] = 0
+    ctx.package_deployed_files[dep_key] = []
+    package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
+    _record_agent_plugin_boundary_diagnostic(
+        ctx.diagnostics,
+        package_key=package_key,
+        prefix=source.INTEGRATE_ERROR_PREFIX,
+        error=error,
+    )
+    return deltas
 
 
 def _integrate_materialization(
@@ -115,6 +227,11 @@ def _integrate_materialization(
     dep_key = m.dep_key
     diagnostics = ctx.diagnostics
     logger = ctx.logger
+
+    try:
+        enforce_agent_plugin_deployment_boundary(m.package_info)
+    except AgentPluginDeploymentBoundaryError as exc:
+        return _record_agent_plugin_boundary_failure(source, m, exc)
 
     if ctx.skill_subset_from_cli and ctx.skill_subset:
         from apm_cli.install.outcome import require_requested_components

@@ -103,6 +103,7 @@ class InstallService:
             plan_callback=request.plan_callback,
             refresh=request.refresh,
             lockfile_only=request.lockfile_only,
+            trust_bin=request.trust_bin,
             transaction=request.transaction,
         )
 

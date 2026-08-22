@@ -216,6 +216,8 @@ class CodexClientAdapter(MCPClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
+            if raw.get("cwd") is not None:
+                config["cwd"] = raw["cwd"]
             resolved_env_for_args: dict = {}
             if raw.get("env"):
                 resolved_env_for_args = self._resolve_environment_variables(

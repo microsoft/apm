@@ -523,7 +523,7 @@ class TestPluginBinDeployPermissionsE2E:
         env["HOME"] = str(fake_home)
 
         result = subprocess.run(
-            [str(apm_binary_path), "install", str(plugin_dir), "-g"],
+            [str(apm_binary_path), "install", str(plugin_dir), "-g", "--trust-bin"],
             capture_output=True,
             text=True,
             cwd=str(tmp_path),

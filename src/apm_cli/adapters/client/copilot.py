@@ -13,6 +13,7 @@ from typing import ClassVar
 import click
 
 from ...core.token_manager import GitHubTokenManager
+from ...models.dependency.mcp import TrustedEnvLiteral
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
@@ -423,6 +424,8 @@ class CopilotClientAdapter(MCPClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
+            if raw.get("cwd") is not None:
+                config["cwd"] = raw["cwd"]
             resolved_env_for_args = {}
             if raw.get("env"):
                 resolved_env_for_args = self._resolve_environment_variables(
@@ -723,7 +726,9 @@ class CopilotClientAdapter(MCPClientAdapter):
                 if not isinstance(raw_value, str):
                     translated[name] = _stringify_env_literal(raw_value)
                     continue
-                if _has_env_placeholder(raw_value):
+                if isinstance(raw_value, TrustedEnvLiteral):
+                    translated[name] = raw_value
+                elif _has_env_placeholder(raw_value):
                     self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(raw_value))
                     translated[name] = self._translate_env_placeholder_for_runtime(raw_value)
                     for match in _ENV_VAR_RE.finditer(translated[name]):

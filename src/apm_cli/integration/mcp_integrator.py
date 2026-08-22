@@ -293,6 +293,8 @@ class MCPIntegrator:
                 "args": list(dep.args) if dep.args else [],
                 "env": dict(dep.env) if dep.env else {},
             }
+            if dep.cwd is not None:
+                info["_raw_stdio"]["cwd"] = dep.cwd
 
         if dep.transport in ("http", "sse", "streamable-http"):
             # Build as a remote endpoint

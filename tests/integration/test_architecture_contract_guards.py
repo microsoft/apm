@@ -129,6 +129,65 @@ def test_neutral_hook_ir_snapshots_metadata() -> None:
         handler.metadata["new"] = "value"
 
 
+def test_neutral_hook_source_owner_validates_and_locates_commands() -> None:
+    """One neutral parser owns wrapped/naked shape and exact command pointers."""
+    from apm_cli.hook_contract import HOOK_COMMAND_KEYS, parse_hook_source
+
+    wrapped = parse_hook_source(
+        {
+            "hooks": {
+                "Pre/Tool": [
+                    {
+                        "hooks": [
+                            {"bash": "./run.sh"},
+                            {"powershell": "./run.ps1"},
+                        ]
+                    }
+                ]
+            }
+        }
+    )
+    naked = parse_hook_source({"Stop": [{"command": "echo stop"}]})
+
+    assert HOOK_COMMAND_KEYS == (
+        "command",
+        "bash",
+        "powershell",
+        "windows",
+        "linux",
+        "osx",
+    )
+    assert tuple(command.json_pointer for command in wrapped.commands) == (
+        "/hooks/Pre~1Tool/0/hooks/0/bash",
+        "/hooks/Pre~1Tool/0/hooks/1/powershell",
+    )
+    assert naked.commands[0].json_pointer == "/Stop/0/command"
+
+
+def test_neutral_hook_walker_preserves_tolerant_integrator_inspection() -> None:
+    """Malformed legacy entries do not hide valid sibling transparency facts."""
+    from apm_cli.hook_contract import walk_hook_commands
+
+    commands = walk_hook_commands(
+        {
+            "hooks": {
+                "PreToolUse": [
+                    "invalid",
+                    {"command": 7},
+                    {"bash": "./valid.sh"},
+                    {"hooks": "invalid"},
+                    {"hooks": [None, {"powershell": "./also-valid.ps1"}]},
+                ]
+            }
+        }
+    )
+
+    assert tuple((item.key, item.command) for item in commands) == (
+        ("bash", "./valid.sh"),
+        ("powershell", "./also-valid.ps1"),
+    )
+
+
 def test_manifest_schema_negotiates_normative_v01_registry_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

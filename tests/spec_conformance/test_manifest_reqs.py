@@ -925,6 +925,33 @@ def test_project_scoped_native_hook_command_is_portably_anchored() -> None:
     )
 
 
+@pytest.mark.req("req-tg-011")
+def test_agent_plugin_undeployable_without_native_lifecycle() -> None:
+    """A schema-bearing Agent Plugin dependency fails closed, tree unchanged."""
+    assert_spec_contains(
+        "MUST treat a\nschema-bearing Agent Plugins v1 dependency as undeployable",
+        "MUST refuse deployment with one actionable diagnostic",
+        "MUST leave the project tree byte-identical to its pre-install state",
+        "MUST NOT fall back to\nlegacy primitive projection",
+    )
+
+
+@pytest.mark.req("req-tg-011")
+def test_agent_plugin_deployment_boundary_precedes_all_mutation(tmp_path) -> None:
+    """Bind the real install-boundary contract: no target/integrator mutation runs."""
+    from tests.unit.install.test_agent_plugin_deployment_boundary import (
+        test_services_gate_precedes_all_target_and_integrator_mutation as _run_boundary_contract,
+    )
+
+    _run_boundary_contract(
+        tmp_path,
+        force=False,
+        trust_bin=None,
+        skill_subset=None,
+        dry_run=False,
+    )
+
+
 @pytest.mark.req("req-sc-014")
 def test_bin_deployment_defaults_to_deny_in_non_interactive_context() -> None:
     """Per-invocation consent: non-TTY defaults to deny; explicit opt-in overrides."""

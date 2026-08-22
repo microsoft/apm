@@ -104,8 +104,16 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     This is intentionally strict: symlinks are resolved so that a link
     pointing outside the base is caught as well.
     """
+    return ensure_path_within_resolved(
+        path,
+        _strip_extended_prefix(base_dir.resolve()),
+    )
+
+
+def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
+    """Resolve *path* and assert containment against a pre-resolved base."""
     resolved = _strip_extended_prefix(path.resolve())
-    resolved_base = _strip_extended_prefix(base_dir.resolve())
+    resolved_base = _strip_extended_prefix(resolved_base)
     try:
         if not resolved.is_relative_to(resolved_base):
             raise PathTraversalError(
@@ -114,7 +122,7 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
             )
     except (TypeError, ValueError) as exc:
         raise PathTraversalError(
-            f"Cannot verify containment of '{path}' within '{base_dir}': {exc}"
+            f"Cannot verify containment of '{path}' within '{resolved_base}': {exc}"
         ) from exc
     return resolved
 

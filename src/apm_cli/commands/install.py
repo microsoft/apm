@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.agent_plugins.errors import (
+    AgentPluginError,
+    enforce_agent_plugin_deployment_boundary,
+)
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
@@ -1098,7 +1102,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.pass_context
-def install(  # noqa: PLR0913
+def install(  # noqa: C901, PLR0913
     ctx,
     packages,
     runtime,
@@ -1190,15 +1194,7 @@ def install(  # noqa: PLR0913
             "--frozen and --update are mutually exclusive. "
             "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
         )
-    # --root: see apm_cli.install.root_redirect.install_root_redirect.
-    # Conflicts with --global (user scope writes are anchored at $HOME
-    # and have no concept of an arbitrary deploy root). ``--dry-run`` is
-    # threaded through so the context manager skips the ``mkdir``
-    # side-effect on previews. Entered manually (rather than via
-    # ``with``) so the existing top-level try/except/finally below does
-    # not need a full-body re-indent; the matching ``__exit__`` in that
-    # ``finally`` restores cwd + clears the source-root override on every
-    # exit path (return, sys.exit -> SystemExit, exception).
+    # The root redirect restores cwd in the command's existing finally block.
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
     from ..core.install_audit import resolve_audit_override_from_cli
@@ -1229,21 +1225,21 @@ def install(  # noqa: PLR0913
             legacy_skill_paths = should_use_legacy_skill_paths()
 
         # ----------------------------------------------------------------
-        # Local-bundle early-exit (issue #1098).  When the sole positional
-        # argument is a filesystem path that detect_local_bundle() recognises
-        # as an APM-pack bundle, we skip the dependency-resolution pipeline
-        # entirely and deploy the bundle's files directly.  Local bundles
-        # are imperative deploys -- they do NOT mutate apm.yml.
+        # Local bundles bypass dependency resolution and do not mutate apm.yml.
         # ----------------------------------------------------------------
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
-            from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
             try:
                 _bundle_info = _detect_lb(_probe)
+            except AgentPluginError:
+                raise
             except ValueError as exc:
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
+                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)
+                from ..install.local_bundle_handler import install_local_bundle as _install_lb
+
                 # allowExecutables for bundle install gate.
                 from ..security.executables import read_bundle_allow_executables as _rbae
 
@@ -1279,10 +1275,7 @@ def install(  # noqa: PLR0913
                         "--allow-insecure-host": bool(allow_insecure_hosts),
                     },
                 )
-                # Local bundle install renders its own summary; mark
-                # ``summary_rendered = True`` so the finally-block (line ~1423)
-                # does not emit a misleading "install interrupted" line on the
-                # success path.  See issue #1207 D3.
+                # The local-bundle handler renders its own success summary.
                 summary_rendered = True
                 return
             # IM7: path exists but isn't a recognised bundle.  For archive
@@ -1302,7 +1295,7 @@ def install(  # noqa: PLR0913
                     raise click.UsageError(
                         f"'{packages[0]}' was packed with '--format apm' (legacy format). "
                         "'apm install <bundle>' requires the plugin format. "
-                        "Repack with 'apm pack --format plugin --archive', "
+                        "Repack with 'apm pack --claude-plugin --archive', "
                         "or use 'apm unpack' to deploy the legacy bundle."
                     )
                 raise click.UsageError(
@@ -1558,7 +1551,7 @@ def install(  # noqa: PLR0913
             )
             command_result.installed_count = apm_count
             command_result.diagnostics = apm_diagnostics
-            if dry_run:
+            if dry_run and command_result.disposition is not InstallDisposition.FAILED:
                 command_result.disposition = InstallDisposition.DRY_RUN
             command_result = finalize_install_result(
                 command_result,
@@ -1585,6 +1578,13 @@ def install(  # noqa: PLR0913
                     symbol="info",
                 )
 
+    except AgentPluginError as e:
+        logger.error(str(e))
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
     except InsecureDependencyPolicyError as e:
         command_result = (
             transaction.fail(e)
@@ -1757,9 +1757,12 @@ def _install_apm_packages(ctx, outcome):
 
     # Show what will be installed if dry run
     if ctx.dry_run:
+        from apm_cli.install.template import preflight_agent_plugin_dry_run
+
+        if should_install_apm:
+            preflight_agent_plugin_dry_run(ctx, all_apm_deps)
         # -- W2-dry-run (#827): policy preflight in preview mode --
-        # Runs discovery + checks against direct manifest deps (not
-        # resolved/transitive -- dry-run does not run the resolver).
+        # Runs discovery + checks against direct manifest deps, not transitives.
         # Block-severity violations render as "Would be blocked by
         # policy" without raising.  Documented limitation: transitive
         # deps are NOT evaluated since the resolver does not run.
@@ -1869,6 +1872,7 @@ def _install_apm_packages(ctx, outcome):
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
                 refresh=ctx.refresh,
+                trust_bin=ctx.trust_bin,
                 transaction=ctx.transaction,
             )
             if not isinstance(install_result, InstallResult):
@@ -2020,35 +2024,13 @@ def _post_install_summary(
 #
 # The real implementation lives in ``apm_cli.install.pipeline`` (F2).
 # ---------------------------------------------------------------------------
-def _install_apm_dependencies(  # noqa: PLR0913
+def _install_apm_dependencies(
     apm_package: "APMPackage",
     update_refs: bool = False,
     verbose: bool = False,
     only_packages: "builtins.list | None" = None,
-    force: bool = False,
-    parallel_downloads: int = 4,
-    logger: "InstallLogger" = None,
-    scope=None,
-    auth_resolver: "AuthResolver" = None,
-    target: str | None = None,
-    target_decision: "EffectiveTargetDecision | None" = None,
-    allow_insecure: bool = False,
-    allow_insecure_hosts=(),
-    marketplace_provenance: dict = None,
-    protocol_pref=None,
-    allow_protocol_fallback: "bool | None" = None,
-    no_policy: bool = False,
-    audit_override: "str | None" = None,
-    skill_subset: "builtins.tuple | None" = None,
-    skill_subset_from_cli: bool = False,
-    legacy_skill_paths: bool = False,
-    trust_transitive_mcp: bool = False,
-    frozen: bool = False,
-    plan_callback=None,
-    refresh: bool = False,
-    lockfile_only: bool = False,
-    transaction: "InstallTransaction | None" = None,
-):
+    **options: Any,
+) -> InstallResult:
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
 
@@ -2068,28 +2050,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
         update_refs=update_refs,
         verbose=verbose,
         only_packages=only_packages,
-        force=force,
-        parallel_downloads=parallel_downloads,
-        logger=logger,
-        scope=scope,
-        auth_resolver=auth_resolver,
-        target=target,
-        target_decision=target_decision,
-        allow_insecure=allow_insecure,
-        allow_insecure_hosts=allow_insecure_hosts,
-        marketplace_provenance=marketplace_provenance,
-        protocol_pref=protocol_pref,
-        allow_protocol_fallback=allow_protocol_fallback,
-        no_policy=no_policy,
-        audit_override=audit_override,
-        skill_subset=skill_subset,
-        skill_subset_from_cli=skill_subset_from_cli,
-        legacy_skill_paths=legacy_skill_paths,
-        trust_transitive_mcp=trust_transitive_mcp,
-        frozen=frozen,
-        plan_callback=plan_callback,
-        refresh=refresh,
-        lockfile_only=lockfile_only,
-        transaction=transaction,
+        **options,
     )
     return InstallService().run(request)

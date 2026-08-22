@@ -468,7 +468,7 @@ def _run_govern_contract(root: Path, binary: Path) -> _GovernReceipt:
     )
     _run_expected(
         runner,
-        ("pack", "--format", "plugin", "--offline"),
+        ("pack", "--format", "claude-plugin", "--offline"),
         expected_returncode=0,
         scenario_id="govern-pack",
         cwd=producer.root,

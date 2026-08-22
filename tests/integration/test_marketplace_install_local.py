@@ -19,6 +19,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.agent_plugins import (
+    PLUGIN_SCHEMA_ID,
+    UnsupportedAgentPluginVersionError,
+)
+from apm_cli.bundle.local_bundle import route_agent_plugin_package
 from apm_cli.commands.marketplace import marketplace as marketplace_group
 from apm_cli.marketplace import registry
 from apm_cli.marketplace.resolver import resolve_marketplace_plugin
@@ -51,7 +56,12 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registry, "_registry_cache", None)
 
 
-def _seed_marketplace(repo: Path) -> None:
+def _seed_marketplace(
+    repo: Path,
+    *,
+    manifest: dict | None = None,
+    plugin_manifest: dict | None = None,
+) -> None:
     """Create a working-dir git repo + a skill dir + commit everything."""
     env = {
         "GIT_AUTHOR_NAME": "t",
@@ -63,10 +73,15 @@ def _seed_marketplace(repo: Path) -> None:
     subprocess.run(
         ["git", "init", "-b", "main", str(repo)], check=True, capture_output=True, env=env
     )
-    (repo / "marketplace.json").write_text(json.dumps(MANIFEST))
-    skill_dir = repo / "skills" / "skill-a"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# skill-a\n")
+    (repo / "marketplace.json").write_text(json.dumps(manifest or MANIFEST))
+    if plugin_manifest is None:
+        skill_dir = repo / "skills" / "skill-a"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# skill-a\n")
+    else:
+        plugin_dir = repo / "plugins" / "schema-plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(json.dumps(plugin_manifest))
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
     subprocess.run(
         ["git", "-C", str(repo), "commit", "-m", "seed"],
@@ -122,3 +137,56 @@ def test_install_rejects_local_marketplace_symlink_escape(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="outside"):
         resolve_marketplace_plugin("skill-a", "local-mkt")
+
+
+@pytest.mark.parametrize(
+    ("schema_id", "expected"),
+    [
+        (PLUGIN_SCHEMA_ID, "native"),
+        ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json", "unsupported"),
+        (None, "legacy"),
+    ],
+)
+def test_local_marketplace_source_reaches_canonical_schema_router(
+    tmp_path: Path,
+    schema_id: str | None,
+    expected: str,
+) -> None:
+    repo = tmp_path / "mkt"
+    manifest = {
+        "name": "local-mkt",
+        "owner": "test",
+        "plugins": [
+            {
+                "name": "schema-plugin",
+                "source": "./plugins/schema-plugin",
+                "version": "1.0.0",
+            }
+        ],
+    }
+    plugin_manifest = {"name": "schema.plugin", "version": "1.0.0"}
+    if schema_id is not None:
+        plugin_manifest["$schema"] = schema_id
+    _seed_marketplace(
+        repo,
+        manifest=manifest,
+        plugin_manifest=plugin_manifest,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(marketplace_group, ["add", str(repo), "--name", "local-mkt"])
+    assert result.exit_code == 0, result.output
+    resolved = resolve_marketplace_plugin("schema-plugin", "local-mkt")
+    package_root = Path(resolved.canonical)
+
+    if expected == "unsupported":
+        with pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"):
+            route_agent_plugin_package(package_root)
+        return
+    detection = route_agent_plugin_package(package_root)
+    if expected == "native":
+        assert detection is not None
+        assert detection.plugin is not None
+        assert detection.plugin.identity.name == "schema.plugin"
+    else:
+        assert detection is None

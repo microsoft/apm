@@ -1776,7 +1776,7 @@ class TestBundlePacker:
 
         self._make_minimal_project(tmp_path)
         out_dir = tmp_path / "out"
-        result = pack_bundle(tmp_path, out_dir, dry_run=True)
+        result = pack_bundle(tmp_path, out_dir, fmt="apm", dry_run=True)
         assert ".agents/skills/dep/run.py" in result.files
         assert result.lockfile_enriched is True
         # Output dir should NOT be created in dry run
@@ -1788,7 +1788,7 @@ class TestBundlePacker:
 
         (tmp_path / "apm.yml").write_text("name: test-pkg\nversion: 1.0.0\n")
         with pytest.raises(FileNotFoundError, match=r"apm\.lock\.yaml"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_missing_deployed_file_raises(self, tmp_path: Path) -> None:
         """Raises ValueError when deployed files are missing on disk."""
@@ -1797,7 +1797,7 @@ class TestBundlePacker:
         # Create lockfile but NOT the deployed file
         self._make_minimal_project(tmp_path, with_file=False)
         with pytest.raises(ValueError, match="missing on disk"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_unsafe_path_raises(self, tmp_path: Path) -> None:
         """Raises ValueError for path traversal in deployed_files."""
@@ -1813,7 +1813,7 @@ class TestBundlePacker:
         lf = LockFile(dependencies={"evil-dep": dep})
         (tmp_path / "apm.lock.yaml").write_text(lf.to_yaml())
         with pytest.raises(ValueError, match="unsafe path"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_no_apm_yml_still_works(self, tmp_path: Path) -> None:
         """pack_bundle works even when apm.yml is missing (uses dir name)."""
@@ -1823,7 +1823,7 @@ class TestBundlePacker:
         # No apm.yml, but we have a lockfile (no deps = no files to collect)
         lf = LockFile()
         (tmp_path / "apm.lock.yaml").write_text(lf.to_yaml())
-        result = pack_bundle(tmp_path, tmp_path / "out", dry_run=True)
+        result = pack_bundle(tmp_path, tmp_path / "out", fmt="apm", dry_run=True)
         assert result.files == []
 
     def test_pack_bundle_local_dep_raises(self, tmp_path: Path) -> None:
@@ -1837,7 +1837,7 @@ class TestBundlePacker:
         lf = LockFile()
         (tmp_path / "apm.lock.yaml").write_text(lf.to_yaml())
         with pytest.raises(ValueError, match="local path dependency"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_writes_output_dir(self, tmp_path: Path) -> None:
         """Non-dry-run pack creates the output bundle directory."""

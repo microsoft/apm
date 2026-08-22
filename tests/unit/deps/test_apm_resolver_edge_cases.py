@@ -20,6 +20,7 @@ Covers error/edge branches not exercised by the parallel-BFS test suite:
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -581,6 +582,90 @@ class TestTryLoadDependencyPackage:
         pkg = resolver._try_load_dependency_package(ref)
         assert pkg is not None
         assert pkg.get_apm_dependencies() == []
+
+    def test_native_agent_plugin_without_apm_yml_returns_projected_package(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "native"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "2.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        ref = _make_dep_ref("org/native")
+        ref.get_install_path.return_value = pkg_dir
+
+        pkg = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert pkg is not None
+        assert pkg.name == "native.plugin"
+        assert pkg.version == "2.0.0"
+        assert pkg.agent_plugin is not None
+        assert not (pkg_dir / "apm.yml").exists()
+
+    def test_native_agent_plugin_retains_projected_transitive_apm_dependencies(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "native"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "2.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (pkg_dir / "apm.yml").write_text(
+            yaml.safe_dump({"dependencies": {"apm": ["org/child#v1.0.0"]}}),
+            encoding="utf-8",
+        )
+        ref = _make_dep_ref("org/native")
+        ref.get_install_path.return_value = pkg_dir
+
+        pkg = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert pkg is not None
+        assert [dep.repo_url for dep in pkg.get_apm_dependencies()] == ["org/child"]
+
+    def test_malformed_root_plugin_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "malformed"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "plugin.json").write_text("{bad json", encoding="utf-8")
+        ref = _make_dep_ref("org/malformed")
+        ref.get_install_path.return_value = pkg_dir
+
+        with pytest.raises(ValueError, match=r"Invalid root plugin.json"):
+            APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert not (pkg_dir / "apm.yml").exists()
+
+    def test_nonregular_root_plugin_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "nonregular"
+        (pkg_dir / "plugin.json").mkdir(parents=True)
+        ref = _make_dep_ref("org/nonregular")
+        ref.get_install_path.return_value = pkg_dir
+
+        with pytest.raises(ValueError, match=r"plugin.json must be a regular file"):
+            APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert not (pkg_dir / "apm.yml").exists()
 
     def test_missing_package_and_no_callback_returns_none(self, tmp_path: Path) -> None:
         mods = tmp_path / "apm_modules"

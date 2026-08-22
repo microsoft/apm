@@ -1326,7 +1326,7 @@ class TestGateProjectScopedRuntimes:
         scsec R2: the previous catch only handled ConflictingTargets and
         EmptyTargets; UnknownTargetError leaked uncaught past the gate
         on entry paths that bypass the upstream manifest validator
-        (mcp_integrator_install.py, _wire_bundle_mcp_servers).
+        (mcp_integrator_install.py, _wire_legacy_bundle_mcp_servers).
         """
         result = self._gate(
             ["copilot", "claude"],
@@ -1341,7 +1341,7 @@ class TestGateProjectScopedRuntimes:
         assert "apm.yml 'targets' field is invalid" in out
 
     def test_explicit_target_csv_string_normalized(self, tmp_path):
-        """Legacy `_wire_bundle_mcp_servers` CSV input must normalize first.
+        """Legacy `_wire_legacy_bundle_mcp_servers` CSV input must normalize first.
 
         The canonical-name validator inside resolve_targets would reject
         the whole CSV "claude,copilot" as one unknown token -- the gate

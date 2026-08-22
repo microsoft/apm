@@ -22,6 +22,7 @@ from typing import Any, Protocol
 
 import yaml
 
+from ..bundle.formats import BundleFormat
 from ..utils.yaml_io import load_yaml
 
 
@@ -40,7 +41,7 @@ class BuildOptions:
     project_root: Path
     apm_yml_path: Path
     # Bundle-only options
-    bundle_format: str = "plugin"
+    bundle_format: BundleFormat | str | None = None
     bundle_target: Any = None
     bundle_archive: bool = False
     bundle_archive_format: str = "zip"
@@ -122,6 +123,7 @@ class BundleProducer:
         return ProducerResult(
             kind=OutputKind.BUNDLE,
             outputs=outputs,
+            warnings=list(getattr(pack_result, "warnings", ()) or ()),
             payload=pack_result,
         )
 
@@ -251,6 +253,7 @@ class PluginManifestProducer:
     kind = OutputKind.PLUGIN_MANIFEST
 
     def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
+        from ..bundle.formats import BundleFormat, coerce_bundle_format
         from .apm_yml import parse_targets_field
         from .errors import (
             ConflictingTargetsError,
@@ -290,11 +293,32 @@ class PluginManifestProducer:
         seen_paths: set[str] = set()
         ecosystems: list[str] = []
         for target in targets:
+            if (
+                target == "claude"
+                and coerce_bundle_format(options.bundle_format) is not BundleFormat.CLAUDE_PLUGIN
+            ):
+                continue
             if target in PLUGIN_MANIFEST_ECOSYSTEMS:
                 path = PLUGIN_ECOSYSTEM_PATHS.get(target, "")
                 if path and path not in seen_paths:
                     seen_paths.add(path)
                     ecosystems.append(target)
+        has_agent_sources = any(
+            (options.project_root / relative).exists()
+            for relative in (".apm", "skills", "mcp.json", ".mcp.json", ".lsp.json")
+        )
+        if (
+            coerce_bundle_format(options.bundle_format) is BundleFormat.AGENT_PLUGIN
+            and targets
+            and set(targets) <= {"claude"}
+            and not ecosystems
+            and not has_agent_sources
+        ):
+            raise BuildError(
+                "The selected targets only request Claude plugin metadata, but Agent Plugin "
+                "output is active. Run 'apm pack --claude-plugin' for the historical Claude "
+                "layout, or add dependencies to produce an Agent Plugin bundle."
+            )
 
         outputs: list[Path] = []
         warnings: list[str] = []
