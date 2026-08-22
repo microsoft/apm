@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -149,6 +149,43 @@ def _has_symlink_component(candidate: Path, plugin_root: Path) -> bool:
         if current.is_symlink():
             return True
     return False
+
+
+def _iter_command_source_files(
+    source: Path,
+    target_root: Path,
+    staging_root: Path,
+    staging_parent: Path,
+    ignore_non_content: Callable[[str, list[str]], set[str]],
+) -> Iterator[tuple[Path, Path]]:
+    """Yield regular command files while pruning generated staging output."""
+    try:
+        source_root = source.resolve()
+    except OSError:
+        _logger.warning("Skipping command source with an unresolvable staging boundary")
+        return
+
+    if source_root == target_root:
+        return
+    if source_root == staging_parent:
+        excluded_root = staging_root
+    else:
+        try:
+            target_root.relative_to(source_root)
+        except ValueError:
+            excluded_root = None
+        else:
+            excluded_root = target_root
+
+    for directory, directories, files in os.walk(source_root, topdown=True, followlinks=False):
+        directory_path = Path(directory)
+        if excluded_root is not None and directory_path == excluded_root.parent:
+            directories[:] = [name for name in directories if name != excluded_root.name]
+        ignored = ignore_non_content(directory, files)
+        for name in files:
+            source_file = directory_path / name
+            if name not in ignored and not source_file.is_symlink() and source_file.is_file():
+                yield source_file, source_root
 
 
 def _holds_skill_dirs(candidate: Path) -> bool:
@@ -997,13 +1034,6 @@ def _map_plugin_artifacts(
             ignored.add(staging_name)
         return ignored
 
-    def is_staging_content(path: Path) -> bool:
-        """Return whether a command source path belongs to the staging tree."""
-        try:
-            return path.resolve().is_relative_to(staging_root)
-        except OSError:
-            return True
-
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
     #
@@ -1103,6 +1133,7 @@ def _map_plugin_artifacts(
         target_prompts = apm_dir / "prompts"
         _assert_no_symlink_descendants(target_prompts)
         target_prompts.mkdir(parents=True, exist_ok=True)
+        target_prompts_root = target_prompts.resolve()
 
         def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):  # noqa: RUF013
             """Copy a command file, normalizing .md -> .prompt.md."""
@@ -1122,14 +1153,14 @@ def _map_plugin_artifacts(
             if source.is_file() and not source.is_symlink():
                 _copy_command_file(source, target_prompts)
             elif source.is_dir():
-                for source_file in source.rglob("*"):
-                    if not source_file.is_file() or source_file.is_symlink():
-                        continue
-                    if is_staging_content(source_file) or source_file.name in ignore_non_content(
-                        str(source_file.parent), [source_file.name]
-                    ):
-                        continue
-                    _copy_command_file(source_file, target_prompts, rel_to=source)
+                for source_file, source_root in _iter_command_source_files(
+                    source,
+                    target_prompts_root,
+                    staging_root,
+                    staging_parent,
+                    ignore_non_content,
+                ):
+                    _copy_command_file(source_file, target_prompts, rel_to=source_root)
 
     # Map hooks/  -- the spec allows a directory path, a config file path,
     # or an inline object.  Handle all three forms.

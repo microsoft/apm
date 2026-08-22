@@ -363,6 +363,40 @@ class TestMapPluginArtifacts:
         # Already .prompt.md stays unchanged
         assert (prompts / "already.prompt.md").exists()
 
+    def test_prepositioned_apm_command_source_is_preserved(self, tmp_path):
+        """A declared command source under .apm is input, not generated output."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        apm_dir = plugin_dir / ".apm"
+        source = apm_dir / "custom-commands"
+        source.mkdir(parents=True)
+        (source / "run.md").write_text("# Run")
+
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest={"commands": [".apm/custom-commands"]},
+        )
+
+        assert (apm_dir / "prompts" / "run.prompt.md").read_text() == "# Run"
+
+    def test_command_source_skips_fifo(self, tmp_path):
+        """Command mapping must not block while opening a named pipe."""
+        plugin_dir = tmp_path / "plugin"
+        command_dir = plugin_dir / "commands"
+        command_dir.mkdir(parents=True)
+        fifo = command_dir / "wait"
+        try:
+            os.mkfifo(fifo)
+        except (AttributeError, OSError):
+            pytest.skip("Named pipes are not supported on this platform")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"commands": "commands"})
+
+        assert not (apm_dir / "prompts" / "wait").exists()
+
     def test_map_hooks_directory(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()

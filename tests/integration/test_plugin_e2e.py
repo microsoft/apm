@@ -473,6 +473,63 @@ class TestPluginHeroScenarios:
         assert "Cleaned up 1 integrated agents" in combined
         assert all(not path.exists() for path in deployed_paths)
 
+    @pytest.mark.requires_apm_binary
+    def test_root_declared_skill_lifecycle_is_bounded(self, apm_binary_path, tmp_path):
+        """A root-declared plugin skill installs, reinstalls, and uninstalls cleanly."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        plugin_dir = workspace / "root-skill-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / "SKILL.md").write_text(
+            "---\nname: root-frontmatter-skill\ndescription: Root skill.\n---\n\n# Root skill\n"
+        )
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "root-skill-plugin",
+                    "version": "1.0.0",
+                    "skills": ["./"],
+                }
+            )
+        )
+
+        project = workspace / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: root-declared-skill-test\nversion: 1.0.0\ndependencies:\n  apm: []\n"
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text("# test\n")
+
+        first_install = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
+        assert first_install.returncode == 0, (
+            f"Root skill install failed:\n{first_install.stdout}\n{first_install.stderr}"
+        )
+
+        deployed_skills = list((project / ".agents" / "skills").rglob("SKILL.md"))
+        assert len(deployed_skills) == 1
+        deployed_skill = deployed_skills[0]
+        assert "name: root-frontmatter-skill" in deployed_skill.read_text()
+        assert not list(deployed_skill.parent.rglob(".apm"))
+        tree_after_install = {
+            path.relative_to(deployed_skill.parent): path.read_text()
+            for path in deployed_skill.parent.rglob("*")
+            if path.is_file()
+        }
+
+        reinstall = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
+        assert reinstall.returncode == 0, f"Root skill reinstall failed:\n{reinstall.stderr}"
+        tree_after_reinstall = {
+            path.relative_to(deployed_skill.parent): path.read_text()
+            for path in deployed_skill.parent.rglob("*")
+            if path.is_file()
+        }
+        assert tree_after_reinstall == tree_after_install
+
+        uninstall = _run_apm_command(apm_binary_path, ["uninstall", str(plugin_dir)], project)
+        assert uninstall.returncode == 0, f"Root skill uninstall failed:\n{uninstall.stderr}"
+        assert not deployed_skill.exists()
+
 
 # ===========================================================================
 # Class 1b - LOCAL user-scope bin/ permission E2E (no network, sandboxed HOME)
