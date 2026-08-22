@@ -257,9 +257,9 @@ integrators. Ask the publisher for a Claude-compatible package
 :::
 
 **When to choose:** you are producing a portable package with
-`apm pack --plugin` for other Agent-Plugin-aware hosts that read the
+`apm pack --format agent-plugin` for other Agent-Plugin-aware hosts that read the
 Agent Plugins v1 schema directly -- not for installing through
-`apm install` yet. See [apm pack](../cli/pack/#agent-plugin-bundle---plugin).
+`apm install` yet. See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
 
 ## See also
 

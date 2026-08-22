@@ -246,7 +246,9 @@ class TestInitPlugin:
             try:
                 result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
                 assert result.exit_code == 0, result.output
-                assert "apm pack" in result.output
+                assert "apm pack --format agent-plugin" in result.output
+                assert "apm pack --format claude-plugin" in result.output
+                assert "apm pack --plugin" not in result.output
             finally:
                 os.chdir(self.original_dir)
 

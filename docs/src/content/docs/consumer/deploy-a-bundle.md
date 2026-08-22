@@ -38,7 +38,7 @@ full schema see [Package anatomy](../../concepts/package-anatomy/).
 
 :::note[Planned]
 This flow deploys Claude plugin bundles (the default `apm pack` output).
-Portable Agent Plugin bundles built with `apm pack --plugin` are not yet
+Portable Agent Plugin bundles built with `apm pack --format agent-plugin` are not yet
 deployable through `apm install` -- see [Package Types](../../reference/package-types/#agent-plugin-pluginjson-with-an-agent-plugins-schema).
 :::
 
@@ -125,14 +125,9 @@ rejects these with a targeted error:
 ```
 './dist/my-pkg-0.1.0.tar.gz' was packed with '--format apm' (legacy
 format). 'apm install <bundle>' requires the plugin format. Repack with
-'apm pack --format plugin --archive', or use 'apm unpack' to deploy the
+'apm pack --claude-plugin --archive', or use 'apm unpack' to deploy the
 legacy bundle.
 ```
-
-Note that `--format plugin` in that message now selects the portable Agent
-Plugin format (see above), which is not installable yet and fails outright
-if your source has agents, commands, instructions, or hooks -- use the
-default Claude plugin bundle instead:
 
 Two ways forward:
 

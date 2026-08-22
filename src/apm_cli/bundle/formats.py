@@ -37,7 +37,7 @@ PREFERRED_PLUGIN_FORMAT = BundleFormat.CLAUDE_PLUGIN
 
 _CLI_CHOICES = ("plugin", "agent-plugin", "claude", "claude-plugin", "apm")
 _SELECTOR_ALIASES: dict[str, BundleFormat] = {
-    "plugin": BundleFormat.AGENT_PLUGIN,
+    "plugin": BundleFormat.CLAUDE_PLUGIN,
     "agent-plugin": BundleFormat.AGENT_PLUGIN,
     "agent_plugin": BundleFormat.AGENT_PLUGIN,
     "claude": BundleFormat.CLAUDE_PLUGIN,
@@ -51,6 +51,11 @@ _VERSION_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)")
 def cli_format_choices() -> tuple[str, ...]:
     """Return accepted ``--format`` selector tokens."""
     return _CLI_CHOICES
+
+
+def cli_plugin_format_choices() -> tuple[str, ...]:
+    """Return plugin-authoring ``--format`` selector tokens."""
+    return tuple(choice for choice in _CLI_CHOICES if choice != BundleFormat.APM.value)
 
 
 def coerce_bundle_format(value: str | BundleFormat | None) -> BundleFormat:
@@ -72,26 +77,24 @@ def coerce_bundle_format(value: str | BundleFormat | None) -> BundleFormat:
 def resolve_bundle_format(
     fmt: str | None,
     *,
-    plugin: bool = False,
     claude_plugin: bool = False,
 ) -> BundleFormat:
     """Resolve CLI selectors to a canonical bundle format.
 
-    ``--plugin`` and ``--format plugin`` both map to Agent Plugin output.
-    ``--claude-plugin`` preserves the historical Claude exporter behavior.
+    ``--format plugin`` preserves its historical Claude exporter behavior.
+    ``--format agent-plugin`` explicitly selects portable Agent Plugins output.
+    ``--claude-plugin`` is an explicit shortcut for the current default.
     Multiple explicit selectors raise ``ValueError`` so the caller can surface
     a Click usage error, including when two selectors resolve to the same format.
     """
     selections: list[BundleFormat] = []
     if fmt is not None:
         selections.append(coerce_bundle_format(fmt))
-    if plugin:
-        selections.append(BundleFormat.AGENT_PLUGIN)
     if claude_plugin:
         selections.append(BundleFormat.CLAUDE_PLUGIN)
 
     if len(selections) > 1:
-        selector_text = ", ".join(format_selection_text(fmt, plugin, claude_plugin))
+        selector_text = ", ".join(format_selection_text(fmt, claude_plugin))
         raise ValueError(f"Choose one bundle format selector; received: {selector_text}")
     if selections:
         return selections[0]
@@ -100,15 +103,12 @@ def resolve_bundle_format(
 
 def format_selection_text(
     fmt: str | None,
-    plugin: bool,
     claude_plugin: bool,
 ) -> tuple[str, ...]:
     """Return the explicit selectors used by the caller."""
     selected: list[str] = []
     if fmt is not None:
         selected.append(f"--format {fmt}")
-    if plugin:
-        selected.append("--plugin")
     if claude_plugin:
         selected.append("--claude-plugin")
     return tuple(selected)
@@ -129,7 +129,7 @@ def agent_plugin_warning(version: str | None = None) -> str | None:
     minor = int(match.group("minor"))
     if major == 0 and 29 <= minor <= 33:
         return (
-            "apm pack now defaults to Agent Plugin output; use --claude-plugin "
+            "apm pack now defaults to Agent Plugin output; use --format claude-plugin "
             "for the legacy Claude plugin bundle."
         )
     return None
@@ -140,6 +140,7 @@ __all__ = [
     "BundleFormat",
     "agent_plugin_warning",
     "cli_format_choices",
+    "cli_plugin_format_choices",
     "coerce_bundle_format",
     "format_selection_text",
     "resolve_bundle_format",

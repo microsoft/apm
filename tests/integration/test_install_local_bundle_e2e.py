@@ -331,7 +331,7 @@ class TestInstallLocalBundleE2E:
         archive = pack_bundle(
             source,
             tmp_path / "archives",
-            fmt="plugin",
+            fmt="agent-plugin",
             archive=True,
             archive_format="tar.gz",
         ).bundle_path
@@ -1027,9 +1027,8 @@ class TestInstallLegacyApmFormatBundle:
         # The error must offer actionable guidance
         assert "apm unpack" in result.output
         # The suggested repack command must actually produce an installable
-        # bundle: '--format plugin' now selects the (non-installable) Agent
-        # Plugins v1 format, so the recovery advice must be the explicit
-        # Claude-plugin alias instead.
+        # Keep recovery advice explicit even though the legacy ``plugin`` alias
+        # is Claude-compatible.
         assert "apm pack --claude-plugin" in result.output
         # No files should be deployed
         assert not (project / ".github" / "copilot-instructions.md").exists()

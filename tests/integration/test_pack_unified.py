@@ -189,7 +189,7 @@ class TestPackUnified:
         monkeypatch.chdir(tmp_path)
         _write_agent_block_yml(tmp_path, nonportable=False)
 
-        result = runner.invoke(pack_cmd, ["--plugin"])
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin"])
 
         assert result.exit_code == 0, result.output
         bundle = next((tmp_path / "build").iterdir())
@@ -215,7 +215,7 @@ class TestPackUnified:
         monkeypatch.chdir(tmp_path)
         _write_agent_block_yml(tmp_path)
 
-        result = runner.invoke(pack_cmd, ["--plugin"])
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin"])
 
         assert result.exit_code == 1
         assert "non-portable primitives would be discarded" in result.output
@@ -228,7 +228,7 @@ class TestPackUnified:
         monkeypatch.setattr("apm_cli.version.get_version", lambda: "0.30.0")
         _write_agent_block_yml(tmp_path, nonportable=False)
 
-        result = runner.invoke(pack_cmd, ["--plugin", "--json"])
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin", "--json"])
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
@@ -267,11 +267,23 @@ class TestPackUnified:
         assert validation.is_valid is True
         assert validation.package_type is PackageType.MARKETPLACE_PLUGIN
 
+    def test_pack_plugin_alias_preserves_legacy_layout(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--format", "plugin"])
+
+        assert result.exit_code == 0, result.output
+        bundle = next((tmp_path / "build").iterdir())
+        manifest = json.loads((bundle / "plugin.json").read_text(encoding="utf-8"))
+        assert "$schema" not in manifest
+        assert (bundle / "agents" / "agent.md").exists()
+
     def test_pack_conflicting_format_selectors_error(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_agent_block_yml(tmp_path)
 
-        result = runner.invoke(pack_cmd, ["--plugin", "--claude-plugin"])
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin", "--claude-plugin"])
 
         assert result.exit_code == 2
         assert "Choose one bundle format selector" in result.output

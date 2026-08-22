@@ -168,6 +168,18 @@ def test_agent_plugin_guard_requires_admissibility_before_legacy_fallback(
         ),
         (
             "src/apm_cli/bundle/formats.py",
+            '"plugin": BundleFormat.CLAUDE_PLUGIN',
+            '"plugin": BundleFormat.AGENT_PLUGIN',
+            "plugin format token must remain Claude-compatible for apm-action@v1",
+        ),
+        (
+            "src/apm_cli/commands/plugin/init.py",
+            '    "--format",',
+            '    "--plugin",',
+            "Portable Agent Plugins must use --format agent-plugin, not --plugin",
+        ),
+        (
+            "src/apm_cli/bundle/formats.py",
             "if len(selections) > 1:",
             "if len(selections) > 2:",
             "Bundle selectors and no-flag behavior must route through the canonical format seam",

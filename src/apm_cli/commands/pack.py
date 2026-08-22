@@ -37,19 +37,23 @@ is embedded in each bundle.
 
 Examples:
 
+\b
   # Bundle only (most common -- just dependencies: in apm.yml):
   apm pack                              # Legacy Claude plugin bundle (current default)
-  apm pack --plugin --archive           # Portable Agent Plugins v1 bundle
+  apm pack --format agent-plugin        # Portable Agent Plugins v1 bundle
   apm pack --format apm -o ./dist       # Legacy APM bundle layout
 
+\b
   # Marketplace only (marketplace: in apm.yml, no dependencies:):
   apm pack
   apm pack --offline --dry-run
 
+\b
   # Both (apm.yml has dependencies: AND marketplace: blocks):
   apm pack
   apm pack --archive --offline
 
+\b
   # Marketplace output paths are normally configured in apm.yml:
   # marketplace.claude.output / marketplace.codex.output
 
@@ -152,13 +156,6 @@ def _parse_marketplace_filter(
 
 @click.command(name="pack", help=_PACK_HELP)
 @click.option(
-    "--plugin",
-    "select_plugin",
-    is_flag=True,
-    default=False,
-    help="Select portable Agent Plugins v1 bundle output.",
-)
-@click.option(
     "--claude-plugin",
     "select_claude_plugin",
     is_flag=True,
@@ -171,10 +168,10 @@ def _parse_marketplace_filter(
     type=click.Choice(cli_format_choices(), case_sensitive=False),
     default=None,
     help=(
-        "Bundle format selector. 'plugin' / 'agent-plugin' emit the Agent Plugin "
-        "bundle, 'claude' / 'claude-plugin' emit the legacy Claude plugin bundle, "
-        "and 'apm' emits the legacy APM bundle layout. The current no-flag default "
-        "is 'claude-plugin'."
+        "Bundle format selector. 'agent-plugin' emits portable Agent Plugins v1; "
+        "'plugin' is the compatibility alias for the legacy Claude plugin bundle; "
+        "'claude' / 'claude-plugin' also emit that bundle; and 'apm' emits the "
+        "legacy APM bundle layout. The current no-flag default is 'claude-plugin'."
     ),
 )
 @click.option(
@@ -300,7 +297,6 @@ def _parse_marketplace_filter(
 @click.pass_context
 def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     ctx,
-    select_plugin,
     select_claude_plugin,
     fmt,
     target,
@@ -325,7 +321,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     try:
         bundle_format = resolve_bundle_format(
             fmt,
-            plugin=select_plugin,
             claude_plugin=select_claude_plugin,
         )
     except ValueError as exc:

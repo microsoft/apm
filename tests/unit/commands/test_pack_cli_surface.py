@@ -473,7 +473,6 @@ class TestPackCmdFlags:
         result = CliRunner().invoke(pack_cmd, ["--help"])
         assert result.exit_code == 0
         for flag in [
-            "--plugin",
             "--claude-plugin",
             "--archive",
             "--format",
@@ -484,11 +483,18 @@ class TestPackCmdFlags:
         ]:
             assert flag in result.output
         assert "current no-flag default" in result.output
+        assert "agent-plugin" in result.output
+        assert not any(line.strip().startswith("--plugin ") for line in result.output.splitlines())
 
     def test_redundant_format_selectors_are_usage_error(self) -> None:
-        result = CliRunner().invoke(pack_cmd, ["--plugin", "--format", "plugin"])
+        result = CliRunner().invoke(pack_cmd, ["--claude-plugin", "--format", "plugin"])
         assert result.exit_code == 2
         assert "Choose one bundle format selector" in result.output
+
+    def test_removed_plugin_shortcut_is_rejected(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--plugin"])
+        assert result.exit_code == 2
+        assert "No such option: --plugin" in result.output
 
     def test_archive_help_includes_migration_and_size_cues(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--help"])

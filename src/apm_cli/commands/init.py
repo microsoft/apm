@@ -323,8 +323,8 @@ def _perform_init(
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
-                "Pack as plugin (Agent Plugins v1):   apm pack --plugin",
-                "Legacy Claude plugin format:         apm pack --claude-plugin",
+                "Pack as Agent Plugins v1:             apm pack --format agent-plugin",
+                "Pack as Claude plugin:                apm pack --format claude-plugin",
             ]
         elif source == "init":
             next_steps = [
@@ -338,7 +338,7 @@ def _perform_init(
                 "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
                 "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
                 "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
-                "Author your own plugin:         apm pack --plugin",
+                "Author your own plugin:         apm pack --format agent-plugin",
             ]
 
         # Agentrc integration (#518): suggest agentrc when no instructions exist.

@@ -510,7 +510,7 @@ my-skill/
 Packaged distribution format created with `apm pack` (the default, no-flag
 Claude plugin bundle). This is the Claude-compatible `plugin.json` layout,
 distinct from the portable Agent Plugins v1 `plugin.json` produced by
-`apm pack --plugin` -- see [Package Types](../../../../../docs/src/content/docs/reference/package-types.md#agent-plugin-pluginjson-with-an-agent-plugins-schema)
+`apm pack --format agent-plugin` -- see [Package Types](../../../../../docs/src/content/docs/reference/package-types.md#agent-plugin-pluginjson-with-an-agent-plugins-schema)
 for the portable format.
 
 When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json` automatically -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the apm pack reference (reference/cli/pack/#plugin-manifests) for output paths, credential stripping, and per-ecosystem differences, or run `apm pack --help`.

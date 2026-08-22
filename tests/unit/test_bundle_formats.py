@@ -19,7 +19,7 @@ class TestBundleFormatSelection:
         ("value", "expected"),
         [
             (None, BundleFormat.CLAUDE_PLUGIN),
-            ("plugin", BundleFormat.AGENT_PLUGIN),
+            ("plugin", BundleFormat.CLAUDE_PLUGIN),
             ("agent-plugin", BundleFormat.AGENT_PLUGIN),
             ("claude", BundleFormat.CLAUDE_PLUGIN),
             ("claude-plugin", BundleFormat.CLAUDE_PLUGIN),
@@ -35,18 +35,18 @@ class TestBundleFormatSelection:
 
     def test_conflicting_selectors_raise(self):
         with pytest.raises(ValueError, match="Choose one bundle format selector"):
-            resolve_bundle_format("apm", plugin=True)
+            resolve_bundle_format("apm", claude_plugin=True)
 
     @pytest.mark.parametrize(
-        ("fmt", "plugin", "claude_plugin"),
+        "fmt",
         [
-            ("plugin", True, False),
-            ("claude-plugin", False, True),
+            "plugin",
+            "claude-plugin",
         ],
     )
-    def test_redundant_selectors_are_rejected(self, fmt, plugin, claude_plugin):
+    def test_redundant_selectors_are_rejected(self, fmt):
         with pytest.raises(ValueError, match="Choose one bundle format selector"):
-            resolve_bundle_format(fmt, plugin=plugin, claude_plugin=claude_plugin)
+            resolve_bundle_format(fmt, claude_plugin=True)
 
 
 class TestAgentPluginWarningWindow:

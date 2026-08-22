@@ -20,11 +20,25 @@ if ! grep -q '^PREFERRED_PLUGIN_FORMAT = BundleFormat.CLAUDE_PLUGIN$' "$format_o
     echo "[x] Agent Plugin preferred-default flip is reserved for T10 after G3"
     exit 1
 fi
+if ! grep -q '^    "plugin": BundleFormat.CLAUDE_PLUGIN,$' "$format_owner"; then
+    echo "[x] The plugin format token must remain Claude-compatible for apm-action@v1"
+    exit 1
+fi
 if ! grep -q '^    if len(selections) > 1:$' "$format_owner" \
     || ! grep -q '^    return PREFERRED_PLUGIN_FORMAT$' "$format_owner"; then
     echo "[x] Bundle selectors and no-flag behavior must route through the canonical format seam"
     exit 1
 fi
+for command in \
+    "$repo_root/src/apm_cli/commands/pack.py" \
+    "$repo_root/src/apm_cli/commands/plugin/init.py"; do
+    if grep -Eq "^[[:space:]]*([\"']--plugin[\"'],|@click\\.option\\([\"']--plugin[\"'])" \
+        "$command"; then
+        echo "[x] Portable Agent Plugins must use --format agent-plugin, not --plugin"
+        echo "$command"
+        exit 1
+    fi
+done
 
 agent_plugin_exporter="$repo_root/src/apm_cli/bundle/agent_plugin_exporter.py"
 if [ -f "$agent_plugin_exporter" ] \

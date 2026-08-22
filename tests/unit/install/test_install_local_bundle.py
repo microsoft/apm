@@ -737,9 +737,8 @@ class TestPathExistsButNotBundle:
         assert "--format apm" in result.output or "legacy format" in result.output
         assert "apm unpack" in result.output
         # The suggested repack command must actually produce an installable
-        # bundle: '--format plugin' now selects the (non-installable) Agent
-        # Plugins v1 format, so the recovery advice must be the explicit
-        # Claude-plugin alias instead.
+        # Keep recovery advice explicit even though the legacy ``plugin`` alias
+        # is Claude-compatible.
         assert "apm pack --claude-plugin" in result.output
 
 

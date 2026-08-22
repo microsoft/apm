@@ -1557,15 +1557,15 @@ def _write_deployed_skill_at(project: Path, target: str, skill_name: str, body: 
 
 
 class TestExportPluginBundleViaPackBundle:
-    """Verify pack_bundle(fmt='plugin') delegates to the Agent Plugin exporter."""
+    """Verify ``agent-plugin`` delegates to the Agent Plugin exporter."""
 
-    def test_fmt_plugin_delegates(self, tmp_path):
+    def test_fmt_agent_plugin_delegates(self, tmp_path):
         from apm_cli.bundle.packer import pack_bundle
 
         project = _setup_plugin_project(tmp_path)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, fmt="plugin")
+        result = pack_bundle(project, out, fmt="agent-plugin")
 
         # Delegation to the Agent Plugin exporter is proven by the canonical
         # ``$schema`` in plugin.json (the legacy Claude exporter omits it).
@@ -1587,7 +1587,7 @@ class TestExportPluginBundleViaPackBundle:
 
         out = tmp_path / "build"
         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
-            result = pack_bundle(project, out, fmt="plugin", force=True)
+            result = pack_bundle(project, out, fmt="agent-plugin", force=True)
 
         content = (result.bundle_path / "skills" / "shared" / "SKILL.md").read_text()
         assert "from-second" in content

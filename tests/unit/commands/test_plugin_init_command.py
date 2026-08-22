@@ -44,7 +44,9 @@ class TestPluginInitCommand:
                 assert Path("plugin.json").exists()
                 # Plugin-author next-steps surface
                 assert "apm install --dev" in result.output
-                assert "apm pack" in result.output
+                assert "apm pack --format agent-plugin" in result.output
+                assert "apm pack --format claude-plugin" in result.output
+                assert "apm pack --plugin" not in result.output
                 # Consumer-only hints absent in plugin mode
                 assert "apm marketplace init" not in result.output
             finally:
@@ -89,11 +91,14 @@ class TestPluginInitCommand:
             finally:
                 os.chdir(self.original_dir)
 
-    def test_plugin_init_explicit_plugin_flag_creates_complete_native_scaffold(self):
+    def test_plugin_init_explicit_agent_plugin_format_creates_complete_native_scaffold(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                result = self.runner.invoke(cli, ["plugin", "init", "demo", "--plugin", "--yes"])
+                result = self.runner.invoke(
+                    cli,
+                    ["plugin", "init", "demo", "--format", "agent-plugin", "--yes"],
+                )
                 assert result.exit_code == 0, result.output
                 import json
 
@@ -132,18 +137,65 @@ class TestPluginInitCommand:
             finally:
                 os.chdir(self.original_dir)
 
+    def test_plugin_init_plugin_format_alias_preserves_legacy_scaffold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                result = self.runner.invoke(
+                    cli,
+                    ["plugin", "init", "demo", "--format", "plugin", "--yes"],
+                )
+                assert result.exit_code == 0, result.output
+                import json
+
+                pj = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
+                assert "$schema" not in pj
+                assert not Path("mcp.json").exists()
+            finally:
+                os.chdir(self.original_dir)
+
     def test_plugin_init_conflicting_selectors_is_usage_error(self):
         """Multiple plugin format selectors produce a clear usage error."""
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
                 result = self.runner.invoke(
-                    cli, ["plugin", "init", "demo", "--plugin", "--claude-plugin", "--yes"]
+                    cli,
+                    [
+                        "plugin",
+                        "init",
+                        "demo",
+                        "--format",
+                        "agent-plugin",
+                        "--claude-plugin",
+                        "--yes",
+                    ],
                 )
                 assert result.exit_code == 2
-                assert "choose one plugin format selector" in result.output.lower()
+                assert "choose one bundle format selector" in result.output.lower()
             finally:
                 os.chdir(self.original_dir)
+
+    def test_plugin_init_redundant_claude_selectors_is_usage_error(self):
+        result = self.runner.invoke(
+            cli,
+            [
+                "plugin",
+                "init",
+                "demo",
+                "--format",
+                "plugin",
+                "--claude-plugin",
+                "--yes",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "Choose one bundle format selector" in result.output
+
+    def test_plugin_init_removed_plugin_shortcut_is_rejected(self):
+        result = self.runner.invoke(cli, ["plugin", "init", "demo", "--plugin", "--yes"])
+        assert result.exit_code == 2
+        assert "No such option: --plugin" in result.output
 
     def test_plugin_init_native_loader_failure_prevents_success(self, monkeypatch):
         """Explicit native scaffold cannot report success when canonical reload fails."""
@@ -157,7 +209,7 @@ class TestPluginInitCommand:
             try:
                 result = self.runner.invoke(
                     cli,
-                    ["plugin", "init", "demo", "--plugin", "--yes"],
+                    ["plugin", "init", "demo", "--format", "agent-plugin", "--yes"],
                 )
                 assert result.exit_code == 1
                 assert "canonical scaffold rejection" in result.output
@@ -191,7 +243,7 @@ class TestPluginInitCommand:
                     (project / filename).write_bytes(payload)
                 result = self.runner.invoke(
                     cli,
-                    ["plugin", "init", "demo", "--plugin", "--yes"],
+                    ["plugin", "init", "demo", "--format", "agent-plugin", "--yes"],
                 )
                 assert result.exit_code == 1
                 assert "canonical scaffold rejection" in result.output
@@ -212,7 +264,7 @@ class TestPluginInitCommand:
                 (project / "mcp.json").write_text("sentinel\n", encoding="utf-8")
                 result = self.runner.invoke(
                     cli,
-                    ["plugin", "init", "demo", "--plugin"],
+                    ["plugin", "init", "demo", "--format", "agent-plugin"],
                     input="n\n",
                 )
                 assert result.exit_code == 0, result.output

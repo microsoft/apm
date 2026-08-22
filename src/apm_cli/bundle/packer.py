@@ -46,9 +46,11 @@ def pack_bundle(
     Args:
         project_root: Root of the project containing ``apm.lock.yaml`` and ``apm.yml``.
         output_dir: Directory where the bundle will be created.
-        fmt: Bundle format -- ``"agent-plugin"`` (CLI compatibility alias: ``"plugin"``),
-            ``"claude-plugin"`` (legacy Claude bundle), or ``"apm"`` (legacy APM bundle).
-            ``None`` routes through the preferred-format seam in ``bundle.formats``.
+        fmt: Bundle format -- ``"claude-plugin"`` (legacy Claude bundle;
+            ``"plugin"`` and ``"claude"`` are compatibility aliases),
+            ``"agent-plugin"`` (portable Agent Plugins v1), or ``"apm"``
+            (legacy APM bundle). ``None`` routes through the preferred-format
+            seam in ``bundle.formats``.
         target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, a list of
             target strings (e.g. ``["claude", "vscode"]``), or *None*
             (auto-detect from apm.yml / project structure).

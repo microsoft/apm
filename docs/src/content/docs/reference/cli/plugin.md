@@ -40,7 +40,7 @@ apm plugin init my-skill --target copilot,claude --yes
 | `--yes`, `-y` | Skip interactive prompts and use auto-detected defaults. |
 | `--target` | Comma-separated target list (e.g. `copilot,claude,codex`). Skips the target prompt and writes selections directly. |
 | `--claude-plugin` | Scaffold the Claude-compatible layout. This is what `apm plugin init` writes with zero flags. |
-| `--plugin` | Explicitly scaffold a portable [Agent Plugins v1](../pack/#agent-plugin-bundle---plugin) manifest instead. Mutually exclusive with `--claude-plugin`. |
+| `--format [plugin\|agent-plugin\|claude\|claude-plugin]` | `agent-plugin` scaffolds a portable [Agent Plugins v1](../pack/#agent-plugin-bundle---format-agent-plugin) manifest instead; `plugin`, `claude`, and `claude-plugin` all select the current Claude-compatible default. Mutually exclusive with `--claude-plugin`. |
 | `--verbose`, `-v` | Show detailed output. |
 
 ## Migration from `apm init --plugin`

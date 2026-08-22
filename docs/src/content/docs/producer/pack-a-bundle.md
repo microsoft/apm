@@ -48,7 +48,7 @@ $ apm pack
 [i] Share with: apm install build/my-pkg
 ```
 
-Pass `--plugin` instead to opt into a portable [Agent Plugins v1](../../reference/cli/pack/#agent-plugin-bundle---plugin)
+Pass `--format agent-plugin` instead to opt into a portable [Agent Plugins v1](../../reference/cli/pack/#agent-plugin-bundle---format-agent-plugin)
 bundle (`plugin.json` + `skills/` + `mcp.json` only, no Claude-specific
 directories) for producers targeting Agent-Plugin-aware hosts beyond APM.
 That format is stricter -- it fails before writing anything if your source
@@ -291,7 +291,7 @@ the older layout; new bundles should use the default Claude plugin format
 apm pack --archive
 ```
 
-**`apm install` does not deploy Agent Plugin output yet.** `apm pack --plugin`
+**`apm install` does not deploy Agent Plugin output yet.** `apm pack --format agent-plugin`
 produces a valid, portable Agent Plugins v1 bundle, but installing one with
 `apm install` fails closed today, pending native runtime integration. Use the
 default Claude plugin bundle (or `--format apm` for legacy tooling) for
