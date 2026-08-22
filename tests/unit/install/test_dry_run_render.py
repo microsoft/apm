@@ -9,7 +9,27 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from apm_cli.install.presentation.dry_run import render_and_exit
+from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
+from apm_cli.install.presentation.dry_run import render_and_exit as _render_and_exit
+
+
+def render_and_exit(**kwargs) -> None:
+    """Adapt legacy test fixtures to the frozen dry-run plan input."""
+    if "plan" not in kwargs:
+        kwargs["plan"] = ProspectiveInstallPlan(
+            apm_dependencies=tuple(kwargs.pop("apm_deps")),
+            dev_apm_dependencies=tuple(kwargs.pop("dev_apm_deps")),
+            mcp_dependencies=tuple(kwargs.pop("mcp_deps")),
+            should_install_apm=kwargs.pop("should_install_apm"),
+            should_install_mcp=kwargs.pop("should_install_mcp"),
+            only_packages=(
+                tuple(only_packages)
+                if (only_packages := kwargs.pop("only_packages", None)) is not None
+                else None
+            ),
+        )
+    _render_and_exit(**kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,6 +64,20 @@ def _make_mcp_dep(name: str = "my-server") -> MagicMock:
 
 
 class TestRenderApmDeps:
+    def test_plan_counts_only_selected_dependency_types(self) -> None:
+        """Preview counts exclude dependency types filtered from the install."""
+        plan = ProspectiveInstallPlan(
+            apm_dependencies=(_make_apm_dep(),),
+            dev_apm_dependencies=(),
+            mcp_dependencies=(_make_mcp_dep(),),
+            should_install_apm=False,
+            should_install_mcp=True,
+            only_packages=None,
+        )
+
+        assert plan.apm_dependency_count == 0
+        assert plan.mcp_dependency_count == 1
+
     def test_apm_deps_install_action_shown(self, tmp_path: Path) -> None:
         """APM deps rendered with 'install' when update=False (lines 42-45)."""
         logger = _make_logger()

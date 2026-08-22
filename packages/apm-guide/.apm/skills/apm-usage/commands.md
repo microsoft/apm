@@ -366,3 +366,7 @@ The project `apm.yml` must carry an `executables:` block (even empty `{}`) to en
 `apm deny [OPTIONS] PACKAGES...` runs from an APM project with `apm.yml` and writes a block to the project `executables.deny` (or `~/.apm/config.json` with `--user`); deny always wins. When no installed executable declaration is found, APM records all supported executable types, so denying a not-yet-installed package is allowed as a pre-emptive block. `apm policy explain <PACKAGE_REF>` (a subcommand of the `apm policy` group, sibling to `apm policy status`) prints the effective decision for a package: allowed or blocked per type, the deciding policy layer, and any shadowed (overridden) layers. `apm doctor` adds a fleet-level executable-trust drift check that flags packages allowed locally but denied by org policy.
 
 The legacy top-level `allowExecutables:` block is a deprecated alias for `executables.allow`, read for one minor cycle and migrated on the next approve/deny write; the standalone `~/.apm/approvals.yml` is removed and migrated into `~/.apm/config.json` on first read. Grant keys are package-scoped in v1: `owner/repo` and `owner/repo#version` both match the package regardless of installed version. In CI, pre-approve packages by committing them to `executables.allow`; untrusted required executables fail `apm audit` with `required-executable-untrusted`.
+
+`apm install PACKAGE --dry-run` validates and previews a positional package without
+persisting it to an existing `apm.yml`; a newly bootstrapped manifest remains for the
+next run.

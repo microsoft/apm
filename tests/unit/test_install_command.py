@@ -464,6 +464,30 @@ class TestInstallCommandAutoBootstrap:
             # Dry-run preserves the bootstrap configuration for the next run.
             assert Path("apm.yml").exists()
 
+    def test_positional_local_package_dry_run_previews_validated_addition(self):
+        """Dry-run renders a validated local addition without changing the project."""
+        with self._chdir_tmp():
+            init_result = self.runner.invoke(cli, ["init", "--yes"])
+            assert init_result.exit_code == 0, init_result.output
+
+            local_package = Path("local-package")
+            local_package.mkdir()
+            (local_package / "apm.yml").write_text(
+                "name: local-package\nversion: 1.0.0\n",
+                encoding="utf-8",
+            )
+            manifest_before = Path("apm.yml").read_bytes()
+
+            result = self.runner.invoke(cli, ["install", "./local-package", "--dry-run"])
+
+            assert result.exit_code == 0, result.output
+            assert "APM dependencies (1):" in result.output
+            assert "./local-package" in result.output
+            assert Path("apm.yml").read_bytes() == manifest_before
+            assert not Path("apm.lock.yaml").exists()
+            assert not Path("apm_modules").exists()
+            assert not Path(".github").exists()
+
 
 class TestValidationFailureReasonMessages:
     """Test that validation failure reasons include actionable auth guidance."""

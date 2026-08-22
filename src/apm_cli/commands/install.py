@@ -22,6 +22,7 @@ from apm_cli.install.argv import (
     _split_argv_at_double_dash,
 )
 from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -189,6 +190,7 @@ class InstallContext:
     legacy_skill_paths: bool = False
     frozen: bool = False
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
+    validated_additions: builtins.tuple[str, ...] = ()
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
     audit_override: str | None = None
@@ -1535,6 +1537,7 @@ def install(  # noqa: C901, PLR0913
                 transaction=transaction,
                 refresh=refresh,
                 only_packages=only_packages_from_validation(packages, outcome),
+                validated_additions=tuple(_validated_packages),
                 legacy_skill_paths=legacy_skill_paths,
                 frozen=frozen,
                 plan_callback=None,
@@ -1741,7 +1744,6 @@ def _install_apm_packages(ctx, outcome):
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
 
     all_apm_deps = list(apm_deps) + list(dev_apm_deps)
-    _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
 
     if ctx.frozen is True:
         from apm_cli.install.request import InstallRequest
@@ -1762,12 +1764,27 @@ def _install_apm_packages(ctx, outcome):
 
     # Show what will be installed if dry run
     if ctx.dry_run:
+        prospective_plan = ProspectiveInstallPlan.from_manifest_and_validated_additions(
+            apm_dependencies=apm_deps,
+            dev_apm_dependencies=dev_apm_deps,
+            mcp_dependencies=mcp_deps,
+            validated_additions=ctx.validated_additions,
+            additions_are_dev=ctx.dev,
+            should_install_apm=should_install_apm,
+            should_install_mcp=should_install_mcp,
+            only_packages=ctx.only_packages,
+        )
+        _check_insecure_dependencies(
+            prospective_plan.all_apm_dependencies,
+            ctx.allow_insecure,
+            logger,
+        )
         from apm_cli.install.template import preflight_agent_plugin_dry_run
 
         if should_install_apm:
             preflight_agent_plugin_dry_run(
                 ctx,
-                all_apm_deps,
+                list(prospective_plan.all_apm_dependencies),
                 apm_package=apm_package,
             )
         # -- W2-dry-run (#827): policy preflight in preview mode --
@@ -1777,10 +1794,9 @@ def _install_apm_packages(ctx, outcome):
         # deps are NOT evaluated since the resolver does not run.
         from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
 
-        _dr_apm_deps = builtins.list(apm_deps) + builtins.list(dev_apm_deps)
         _dr_preflight(
             project_root=ctx.project_root,
-            apm_deps=_dr_apm_deps,
+            apm_deps=list(prospective_plan.all_apm_dependencies),
             mcp_deps=mcp_deps if should_install_mcp else None,
             no_policy=ctx.no_policy,
             logger=logger,
@@ -1791,16 +1807,18 @@ def _install_apm_packages(ctx, outcome):
 
         render_and_exit(
             logger=logger,
-            should_install_apm=should_install_apm,
-            apm_deps=apm_deps,
-            mcp_deps=mcp_deps,
-            dev_apm_deps=dev_apm_deps,
-            should_install_mcp=should_install_mcp,
+            plan=prospective_plan,
             update=ctx.update,
-            only_packages=ctx.only_packages,
             apm_dir=ctx.apm_dir,
         )
-        return 0, 0, 0, None  # render_and_exit exits; this line is defensive
+        return (
+            prospective_plan.apm_dependency_count,
+            prospective_plan.mcp_dependency_count,
+            0,
+            None,
+        )
+
+    _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
 
     # Install APM dependencies first (if requested)
     apm_count = 0
