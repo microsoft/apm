@@ -922,8 +922,17 @@ class LockFile:
         may mutate ``self.generated_at`` to preserve or refresh that metadata.
         """
         from ..utils.atomic_io import atomic_write_text
+        from ..utils.yaml_io import load_yaml_str
 
-        existing = type(self).read(path) if path.exists() else None
+        existing = None
+        if path.exists():
+            existing_text = path.read_text(encoding="utf-8")
+            try:
+                existing_data = load_yaml_str(existing_text)
+            except (yaml.YAMLError, ValueError):
+                existing_data = None
+            if isinstance(existing_data, dict) and existing_data.get("generated_at") is not None:
+                existing = type(self).from_yaml(existing_text)
         if existing is not None and existing.generated_at is not None:
             if self.is_semantically_equivalent(existing):
                 if self.generated_at is None:

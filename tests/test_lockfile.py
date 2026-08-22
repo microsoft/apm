@@ -289,6 +289,19 @@ class TestLockFile:
         assert written["generated_at"] == original_timestamp
         assert lock.generated_at == original_timestamp
 
+    def test_write_overwrites_timestamp_free_file_without_schema_validation(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ndependencies: {}\n",
+            encoding="utf-8",
+        )
+
+        LockFile().write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["dependencies"] == []
+        assert "generated_at" not in written
+
     def test_mcp_servers_round_trip(self, tmp_path):
         """mcp_servers must survive a write → read cycle."""
         lock = LockFile(apm_version="1.0.0")
