@@ -647,6 +647,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     package_name=dep_key,
                     logger=None,
                     scope=None,
+                    agent_subset=tuple(package_info.dependency_ref.agent_subset or ()) or None,
                     skill_subset=tuple(package_info.dependency_ref.skill_subset or ()) or None,
                     ctx=None,
                     scratch_root=scratch_root,

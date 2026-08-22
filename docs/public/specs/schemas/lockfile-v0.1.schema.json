@@ -54,6 +54,7 @@
         "depth": { "type": "integer", "minimum": 0 },
         "resolved_by": { "type": "string" },
         "package_type": { "type": "string" },
+        "agent_subset": { "type": "array", "items": { "type": "string" } },
         "skill_subset": { "type": "array", "items": { "type": "string" } },
         "deployed_files": { "type": "array", "items": { "type": "string" } },
         "deployed_file_hashes": {

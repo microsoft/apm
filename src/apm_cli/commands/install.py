@@ -54,7 +54,9 @@ from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
 from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
+    apply_cli_agent_pin,
     apply_cli_skill_pin,
+    cli_agent_subset,
     cli_skill_subset,
     dependency_reference_to_yaml_entry,
     persist_dependency_list_if_changed,
@@ -183,6 +185,8 @@ class InstallContext:
     legacy_skill_paths: bool = False
     frozen: bool = False
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
+    agent_subset: "builtins.tuple[str, ...] | None" = None
+    agent_subset_from_cli: bool = False
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
     audit_override: str | None = None
@@ -260,6 +264,8 @@ def _resolve_package_references(
     logger=None,
     scope=None,
     allow_insecure=False,
+    agent_subset=None,
+    agent_subset_from_cli=False,
     skill_subset=None,
     skill_subset_from_cli=False,
     default_registry=None,
@@ -394,6 +400,15 @@ def _resolve_package_references(
                 dependency_reference_cls=DependencyReference,
                 logger=logger,
             )
+            apply_cli_agent_pin(
+                dep_ref,
+                agent_subset,
+                agent_subset_from_cli,
+                current_deps,
+                _apm_yml_entries,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
+            )
             apply_cli_skill_pin(
                 dep_ref,
                 skill_subset,
@@ -434,7 +449,7 @@ def _resolve_package_references(
                 logger.validation_fail(package, scope_reject)
             continue
 
-        if skill_subset and canonical not in _apm_yml_entries:
+        if (agent_subset or skill_subset) and canonical not in _apm_yml_entries:
             _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
         _apm_yml_entries.setdefault(canonical, dep_ref.to_apm_yml_entry())
 
@@ -574,6 +589,8 @@ def _validate_and_add_packages_to_apm_yml(
     auth_resolver=None,
     scope=None,
     allow_insecure=False,
+    agent_subset=None,
+    agent_subset_from_cli=False,
     skill_subset=None,
     skill_subset_from_cli=False,
 ):
@@ -640,6 +657,8 @@ def _validate_and_add_packages_to_apm_yml(
         logger=logger,
         scope=scope,
         allow_insecure=allow_insecure,
+        agent_subset=agent_subset,
+        agent_subset_from_cli=agent_subset_from_cli,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         default_registry=_default_registry_for_cli,
@@ -1012,6 +1031,13 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.option(
+    "--agent",
+    "agent_names",
+    multiple=True,
+    metavar="NAME",
+    help="Install only named agent(s) from a package. Repeatable and persisted in apm.yml and apm.lock. Additive across installs; use --agent '*' to reset to all agents.",
+)
+@click.option(
     "--skill",
     "skill_names",
     multiple=True,
@@ -1126,6 +1152,7 @@ def install(  # noqa: PLR0913
     header_pairs,
     mcp_version,
     registry_url,
+    agent_names,
     skill_names,
     no_policy,
     audit_mode,
@@ -1273,6 +1300,7 @@ def install(  # noqa: PLR0913
                         "--allow-protocol-fallback": allow_protocol_fallback,
                         "--mcp": mcp_name,
                         "--registry": registry_url,
+                        "--agent": bool(agent_names),
                         "--skill": bool(skill_names),
                         "--parallel-downloads": parallel_downloads != 4,
                         "--allow-insecure": allow_insecure,
@@ -1359,9 +1387,10 @@ def install(  # noqa: PLR0913
             any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
             registry_url=validated_registry_url,
         )
-        # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
-        if skill_names and mcp_name is not None:
-            raise click.UsageError("--skill cannot be combined with --mcp.")
+        # Normalize primitive subsets: '*' means all. Reject with --mcp.
+        if (agent_names or skill_names) and mcp_name is not None:
+            raise click.UsageError("--agent/--skill cannot be combined with --mcp.")
+        _agent_subset = cli_agent_subset(agent_names)
         _skill_subset = cli_skill_subset(skill_names)
 
         if mcp_name is not None:
@@ -1497,6 +1526,8 @@ def install(  # noqa: PLR0913
                 auth_resolver=auth_resolver,
                 scope=scope,
                 allow_insecure=allow_insecure,
+                agent_subset=_agent_subset,
+                agent_subset_from_cli=bool(agent_names),
                 skill_subset=_skill_subset,
                 skill_subset_from_cli=bool(skill_names),
             )
@@ -1540,6 +1571,8 @@ def install(  # noqa: PLR0913
                 legacy_skill_paths=legacy_skill_paths,
                 frozen=frozen,
                 plan_callback=None,
+                agent_subset=_agent_subset,
+                agent_subset_from_cli=bool(agent_names),
                 skill_subset=_skill_subset,
                 skill_subset_from_cli=bool(skill_names),
                 trust_bin=trust_bin,
@@ -1866,6 +1899,8 @@ def _install_apm_packages(ctx, outcome):
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 frozen=ctx.frozen,
                 plan_callback=ctx.plan_callback,
+                agent_subset=ctx.agent_subset,
+                agent_subset_from_cli=ctx.agent_subset_from_cli,
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
                 refresh=ctx.refresh,
@@ -2000,96 +2035,11 @@ def _post_install_summary(
     )
 
 
-# ---------------------------------------------------------------------------
-# Install engine
-# ---------------------------------------------------------------------------
-
-
-# Re-exports for backward compatibility -- the real implementations live
-# in apm_cli.install.services (P1 -- DI seam).  Tests that
-# @patch("apm_cli.commands.install._integrate_package_primitives") still
-# work because patching this module-level alias rebinds the name where
-# call-sites in this module would look it up.  Tests inside this codebase
-# now patch the canonical apm_cli.install.services._integrate_package_primitives
-# directly to avoid relying on transitive aliasing.
-
-
-# ---------------------------------------------------------------------------
-# Pipeline entry point -- thin re-export preserving the patch path
-# ``apm_cli.commands.install._install_apm_dependencies`` used by tests.
-#
-# The real implementation lives in ``apm_cli.install.pipeline`` (F2).
-# ---------------------------------------------------------------------------
-def _install_apm_dependencies(  # noqa: PLR0913
-    apm_package: "APMPackage",
-    update_refs: bool = False,
-    verbose: bool = False,
-    only_packages: "builtins.list | None" = None,
-    force: bool = False,
-    parallel_downloads: int = 4,
-    logger: "InstallLogger" = None,
-    scope=None,
-    auth_resolver: "AuthResolver" = None,
-    target: str | None = None,
-    target_decision: "EffectiveTargetDecision | None" = None,
-    allow_insecure: bool = False,
-    allow_insecure_hosts=(),
-    marketplace_provenance: dict = None,
-    protocol_pref=None,
-    allow_protocol_fallback: "bool | None" = None,
-    no_policy: bool = False,
-    audit_override: "str | None" = None,
-    skill_subset: "builtins.tuple | None" = None,
-    skill_subset_from_cli: bool = False,
-    legacy_skill_paths: bool = False,
-    trust_transitive_mcp: bool = False,
-    frozen: bool = False,
-    plan_callback=None,
-    refresh: bool = False,
-    lockfile_only: bool = False,
-    transaction: "InstallTransaction | None" = None,
-):
-    """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
-    :class:`apm_cli.install.service.InstallService`.
-
-    Kept here so that ``@patch("apm_cli.commands.install._install_apm_dependencies")``
-    continues to intercept calls from the Click handler.  The service
-    itself is the typed Application Service entry point for any future
-    programmatic callers.
-    """
+def _install_apm_dependencies(*args, **kwargs):
+    """Preserve the historical command-module patch seam."""
     if not APM_DEPS_AVAILABLE:
         raise RuntimeError("APM dependency system not available")
 
-    from apm_cli.install.request import InstallRequest
-    from apm_cli.install.service import InstallService
+    from apm_cli.install.entrypoint import install_apm_dependencies
 
-    request = InstallRequest(
-        apm_package=apm_package,
-        update_refs=update_refs,
-        verbose=verbose,
-        only_packages=only_packages,
-        force=force,
-        parallel_downloads=parallel_downloads,
-        logger=logger,
-        scope=scope,
-        auth_resolver=auth_resolver,
-        target=target,
-        target_decision=target_decision,
-        allow_insecure=allow_insecure,
-        allow_insecure_hosts=allow_insecure_hosts,
-        marketplace_provenance=marketplace_provenance,
-        protocol_pref=protocol_pref,
-        allow_protocol_fallback=allow_protocol_fallback,
-        no_policy=no_policy,
-        audit_override=audit_override,
-        skill_subset=skill_subset,
-        skill_subset_from_cli=skill_subset_from_cli,
-        legacy_skill_paths=legacy_skill_paths,
-        trust_transitive_mcp=trust_transitive_mcp,
-        frozen=frozen,
-        plan_callback=plan_callback,
-        refresh=refresh,
-        lockfile_only=lockfile_only,
-        transaction=transaction,
-    )
-    return InstallService().run(request)
+    return install_apm_dependencies(*args, **kwargs)

@@ -197,6 +197,7 @@ class LockedDependency:
     source_digest: str | None = None  # sha256 digest of the marketplace manifest
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
+    agent_subset: list[str] = field(default_factory=list)  # Sorted flat agent names
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
     target_subset: list[str] = field(default_factory=list)  # Audit-only consumer target subset
 
@@ -357,6 +358,8 @@ class LockedDependency:
             result["is_insecure"] = True
         if self.allow_insecure:
             result["allow_insecure"] = True
+        if self.agent_subset:
+            result["agent_subset"] = sorted(self.agent_subset)
         if self.skill_subset:
             result["skill_subset"] = sorted(self.skill_subset)
         if self.target_subset:
@@ -445,6 +448,7 @@ class LockedDependency:
             "source_digest",
             "is_insecure",
             "allow_insecure",
+            "agent_subset",
             "skill_subset",
             "target_subset",
             "resolved_url",
@@ -493,6 +497,7 @@ class LockedDependency:
             source_digest=data.get("source_digest"),
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
+            agent_subset=list(data.get("agent_subset") or []),
             skill_subset=list(data.get("skill_subset") or []),
             target_subset=list(data.get("target_subset") or []),
             resolved_url=data.get("resolved_url"),
@@ -633,6 +638,9 @@ class LockedDependency:
             is_dev=is_dev,
             is_insecure=dep_ref.is_insecure,
             allow_insecure=dep_ref.allow_insecure,
+            agent_subset=sorted(dep_ref.agent_subset)
+            if isinstance(getattr(dep_ref, "agent_subset", None), list)
+            else [],
             skill_subset=sorted(dep_ref.skill_subset)
             if isinstance(getattr(dep_ref, "skill_subset", None), list)
             else [],
@@ -687,6 +695,7 @@ class LockedDependency:
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
             source=self.source,
+            agent_subset=sorted(self.agent_subset) if self.agent_subset else None,
             skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
         ).with_derived_provider_coordinates()

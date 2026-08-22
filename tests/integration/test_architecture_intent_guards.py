@@ -69,7 +69,7 @@ def test_locked_dependency_reconstructs_persisted_skill_subset() -> None:
     that ``self.skill_subset`` is the value threaded into the reconstructed
     ``DependencyReference(...)`` call. It does not exercise runtime
     behavior -- ``tests/unit/install/test_drift.py::
-    test_run_replay_threads_locked_skill_subset`` owns the runtime symptom
+    test_run_replay_threads_locked_primitive_subsets`` owns the runtime symptom
     coverage (an actual replay producing the correctly filtered primitives).
 
     The lockfile is the sole persisted record of a consumer's ``--skill``
@@ -97,7 +97,7 @@ def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> 
 
     Like the guard above, this is a structural *routing* guard operating on
     the AST, not a runtime behavior test: ``tests/unit/install/
-    test_drift.py::test_run_replay_threads_locked_skill_subset`` owns the
+    test_drift.py::test_run_replay_threads_locked_primitive_subsets`` owns the
     runtime symptom coverage for an actual replay run.
 
     ``integrate_package_primitives`` is the canonical owner of skill-subset

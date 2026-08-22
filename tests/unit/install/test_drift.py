@@ -697,11 +697,11 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     )
 
 
-def test_run_replay_threads_locked_skill_subset(
+def test_run_replay_threads_locked_primitive_subsets(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Replay must preserve the locked skill subset through dependency reconstruction."""
+    """Replay must preserve locked agent and skill subsets through reconstruction."""
     from apm_cli.install.drift import run_replay
 
     project_root = tmp_path / "proj"
@@ -718,6 +718,7 @@ def test_run_replay_threads_locked_skill_subset(
             source="local",
             local_path="./skill-bundle",
             resolved_commit=None,
+            agent_subset=["planner", "reviewer"],
             skill_subset=[
                 "productivity/grill-me",
                 "productivity/grilling",
@@ -734,6 +735,8 @@ def test_run_replay_threads_locked_skill_subset(
         package_info = args[0]
         captured.append(
             {
+                "dependency_ref_agent_subset": package_info.dependency_ref.agent_subset,
+                "agent_subset": kwargs.get("agent_subset"),
                 "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
                 "skill_subset": kwargs.get("skill_subset"),
             }
@@ -757,6 +760,8 @@ def test_run_replay_threads_locked_skill_subset(
 
     assert captured == [
         {
+            "dependency_ref_agent_subset": ["planner", "reviewer"],
+            "agent_subset": ("planner", "reviewer"),
             "dependency_ref_skill_subset": [
                 "productivity/grill-me",
                 "productivity/grilling",

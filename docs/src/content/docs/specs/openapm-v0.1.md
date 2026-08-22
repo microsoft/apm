@@ -543,6 +543,7 @@ and MUST NOT use both on the same entry.
 | `ref`    | no                                      | Branch, tag, semver range, or commit SHA (git form).                  |
 | `path`   | no / yes (local form)                   | Subpath within repo, or local filesystem path.                        |
 | `alias`  | no                                      | Local alias.                                                          |
+| `agents` | no                                      | Non-empty list selecting flat agent primitive names from this dependency. |
 | `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
 
 <a id="req-mf-011"></a>
@@ -584,6 +585,16 @@ serializing the updated entry. If an update would otherwise replace a
 registry-sourced entry with a non-registry-shaped entry, the
 implementation MUST reject the update with a diagnostic naming the
 identity, rather than silently converting it.
+
+<a id="req-mf-025"></a>
+**[req-mf-025]** A conforming **consumer** implementation that supports
+agent primitives MUST treat an object-form dependency's `agents:` field
+as a non-empty inclusion list of flat agent names: only matching agents
+from that dependency are deployed to active targets. The consumer MUST
+reject an empty list or a name containing a path separator, MUST record
+the sorted selection as `agent_subset` in the lockfile, and MUST replay
+that recorded selection on a subsequent install. When `agents:` is
+absent, all agents in the dependency remain eligible for deployment.
 
 #### 4.3.3 Virtual packages
 
@@ -788,6 +799,7 @@ This section's normative statements are:
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
+  [req-mf-025](#req-mf-025),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
@@ -3019,6 +3031,7 @@ conformance statement identifying:
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
+[req-mf-025](#req-mf-025),
 [req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -3407,6 +3420,7 @@ renumbering of conformance classes.
 | [req-mf-022](#req-mf-022)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-023](#req-mf-023)                | MUST    | 4.5     | consumer    |
 | [req-mf-024](#req-mf-024)                | MUST    | 4.3.2   | consumer    |
+| [req-mf-025](#req-mf-025)                | MUST    | 4.3.2   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-lk-001](#req-lk-001)                | MUST    | 5.1     | consumer    |
@@ -3496,7 +3510,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 112** (107 MUST, 5 SHOULD).
+**Total normative statements: 113** (108 MUST, 5 SHOULD).
 
 ---
 
@@ -3534,6 +3548,7 @@ renumbering of conformance classes.
 | 0.1.26  | 2026-08-03 | Spec-citation fold for VS Code OCI/Docker MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and package-scoped secret metadata uses VS Code secret-input references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 109 -> 110 (105 MUST, 5 SHOULD). |
 | 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
 | 0.1.28  | 2026-08-06 | Spec-citation fold for per-invocation executable consent in non-interactive contexts (closes #1620 Mode-B silent-extension gate). Added [req-sc-014] (Section 10.15, consumer MUST): a consumer that supports a per-invocation consent flag for bin/ executable deployment MUST deny deployment by default when stdout is not a TTY, unless the operator has explicitly opted in for that invocation; an explicit opt-in overrides the non-interactive default and permits deployment; an explicit opt-out overrides the default and denies deployment even in a terminal; the allowExecutables policy gate [req-sc-009] is evaluated first and always takes precedence. Added row 19 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 111 -> 112 (107 MUST, 5 SHOULD). |
+| 0.1.29  | 2026-08-22 | Spec-citation fold for per-dependency agent subsetting (closes #2491). Added [req-mf-025] (Section 4.3.2, consumer MUST): `agents:` is a non-empty flat-name inclusion list, deploys only matching agent primitives, persists as sorted `agent_subset`, and replays deterministically; absence means all agents. Added the manifest and lockfile schema fields, Section 11.3.2 enumeration, and Appendix C row. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

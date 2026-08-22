@@ -341,6 +341,40 @@ def _check_skill_subset_consistency(
     )
 
 
+def _check_agent_subset_consistency(
+    manifest: APMPackage,
+    lock: LockFile,
+) -> CheckResult:
+    """Verify lockfile agent_subset matches manifest agents: for each entry."""
+    mismatches: list[str] = []
+    for dep_ref in manifest.get_all_apm_dependencies():
+        key = dep_ref.get_unique_key()
+        locked_dep = lock.get_dependency(key)
+        if locked_dep is None:
+            continue
+        manifest_subset = sorted(dep_ref.agent_subset) if dep_ref.agent_subset else []
+        lock_subset = sorted(locked_dep.agent_subset) if locked_dep.agent_subset else []
+        if manifest_subset != lock_subset:
+            mismatches.append(
+                f"{key}: manifest agents {manifest_subset} != lockfile agent_subset {lock_subset}"
+            )
+
+    if not mismatches:
+        return CheckResult(
+            name="agent-subset-consistency",
+            passed=True,
+            message="Agent subset selections match lockfile",
+        )
+    return CheckResult(
+        name="agent-subset-consistency",
+        passed=False,
+        message=(
+            f"{len(mismatches)} agent subset mismatch(es) -- regenerate lockfile (apm install)"
+        ),
+        details=mismatches,
+    )
+
+
 def _check_config_consistency(
     manifest: APMPackage,
     lock: LockFile,
@@ -812,11 +846,15 @@ def run_baseline_checks(
     if _run(_check_no_orphans(manifest, lock)):
         return result
 
-    # Check 6: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock)):
+    # Check 6: Agent subset consistency (manifest vs lockfile)
+    agent_subset_failed = _run(_check_agent_subset_consistency(manifest, lock))
+    skill_subset_failed = False
+    if not agent_subset_failed:
+        skill_subset_failed = _run(_check_skill_subset_consistency(manifest, lock))
+    if agent_subset_failed or skill_subset_failed:
         return result
 
-    # Check 7: Config consistency (MCP)
+    # Check 8: Config consistency (MCP)
     if _run(
         _check_config_consistency(
             manifest,

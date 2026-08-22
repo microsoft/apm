@@ -1,6 +1,6 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
+Covers req-mf-001..025, req-ext-001..002, req-sc-001..010,
 req-tg-001..008, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
@@ -337,6 +337,62 @@ def test_consumer_preserves_registry_identity_on_structured_rewrite(monkeypatch)
     assert_spec_contains(
         "silently rewrite an existing",
         "implementation MUST reject the update with a diagnostic naming the",
+    )
+
+
+@pytest.mark.req("req-mf-025")
+def test_consumer_persists_and_deploys_only_selected_agents(tmp_path: Path):
+    """req-mf-025: agents: is a durable flat-name inclusion filter."""
+    from apm_cli.deps.lockfile import LockedDependency
+    from apm_cli.integration.agent_integrator import AgentIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import APMPackage, PackageInfo
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    ref = DependencyReference.parse_from_dict(
+        {"git": "acme/agent-pack", "agents": ["reviewer", "planner"]}
+    )
+    locked = LockedDependency.from_dependency_ref(
+        ref,
+        resolved_commit="a" * 40,
+        depth=1,
+        resolved_by=None,
+    )
+    replay_ref = LockedDependency.from_dict(locked.to_dict()).to_dependency_ref()
+    assert replay_ref.agent_subset == ["planner", "reviewer"]
+
+    package_root = tmp_path / "package"
+    agents_dir = package_root / ".apm" / "agents"
+    agents_dir.mkdir(parents=True)
+    for name in ("planner", "reviewer", "writer"):
+        (agents_dir / f"{name}.agent.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    project_root = tmp_path / "project"
+    (project_root / ".github").mkdir(parents=True)
+    package_info = PackageInfo(
+        package=APMPackage(name="agent-pack", version="1.0.0", package_path=package_root),
+        install_path=package_root,
+        dependency_ref=replay_ref,
+    )
+    AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["copilot"],
+        package_info,
+        project_root,
+        agent_subset=replay_ref.agent_subset,
+    )
+
+    deployed = {path.name for path in (project_root / ".github" / "agents").iterdir()}
+    assert deployed == {"planner.agent.md", "reviewer.agent.md"}
+
+    with pytest.raises(ValueError, match="at least one"):
+        DependencyReference.parse_from_dict({"git": "acme/agent-pack", "agents": []})
+    with pytest.raises(ValueError, match="flat agent name"):
+        DependencyReference.parse_from_dict({"git": "acme/agent-pack", "agents": ["team/planner"]})
+
+    assert_spec_contains(
+        "`agents:` field",
+        "sorted selection as `agent_subset`",
+        "absent, all agents in the dependency",
     )
 
 

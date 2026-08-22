@@ -250,6 +250,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     package_name: str = "",
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
+    agent_subset: tuple | None = None,
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
@@ -479,6 +480,8 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
+            if _prim_name == "agents":
+                _call_kwargs["agent_subset"] = agent_subset
             # Canvas integration: always pass is_first_party.  Approval
             # is enforced by the gate above (canvas already skipped if
             # not approved and not is_first_party), so here we always

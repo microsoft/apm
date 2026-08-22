@@ -88,7 +88,8 @@ class DependencyReference(ProviderCoordinateMixin):
     is_insecure: bool = False  # True when the dependency URL uses http://
     allow_insecure: bool = False  # True if this HTTP dep is explicitly allowed
 
-    # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
+    # Primitive subset selection persisted in apm.yml.
+    agent_subset: list[str] | None = None  # Sorted flat agent names, or None = all
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
     target_subset: list[str] | None = None  # Sorted lowercase target names, or None = all
 
@@ -783,7 +784,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
-            reject_unknown_fields(entry, {"path", "alias", "skills", "targets"}, "path")
+            reject_unknown_fields(entry, {"path", "alias", "agents", "skills", "targets"}, "path")
             local = entry["path"]
             if not isinstance(local, str) or not local.strip():
                 raise ValueError("'path' field must be a non-empty string")
@@ -1849,7 +1850,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         - Local path deps with optional fields: returns a dict with 'path'.
         - HTTP (insecure) git deps: returns a dict with 'git' and 'allow_insecure' keys.
-        - Git deps with skill_subset or target_subset: returns a dict with 'git' plus
+        - Git deps with primitive or target subsets: returns a dict with 'git' plus
           the applicable optional keys.
         - Registry deps (object-form ``id:``/``registry:``): always returns a dict
           with 'id', 'version', plus the applicable optional keys.
@@ -1876,16 +1877,19 @@ class DependencyReference(ProviderCoordinateMixin):
             entry["version"] = self.reference
             if self.alias:
                 entry["alias"] = self.alias
+            if self.agent_subset:
+                entry["agents"] = sorted(self.agent_subset)
             if self.skill_subset:
                 entry["skills"] = sorted(self.skill_subset)
             if self.target_subset:
                 entry["targets"] = sorted(self.target_subset)
             return entry
         if self.is_local and self.local_path:
-            if self.skill_subset or self.target_subset or self.alias:
+            if self.agent_subset or self.skill_subset or self.target_subset or self.alias:
                 return local_path_apm_yml_entry(
                     self.local_path,
                     self.alias,
+                    self.agent_subset,
                     self.skill_subset,
                     self.target_subset,
                 )
@@ -1899,17 +1903,21 @@ class DependencyReference(ProviderCoordinateMixin):
             if self.alias:
                 entry["alias"] = self.alias
             entry["allow_insecure"] = self.allow_insecure
+            if self.agent_subset:
+                entry["agents"] = sorted(self.agent_subset)
             if self.skill_subset:
                 entry["skills"] = sorted(self.skill_subset)
             if self.target_subset:
                 entry["targets"] = sorted(self.target_subset)
             return entry
-        if self.skill_subset or self.target_subset:
+        if self.agent_subset or self.skill_subset or self.target_subset:
             entry = {"git": self._format_reference(self.repo_url).split("#", 1)[0]}
             if self.reference:
                 entry["ref"] = self.reference
             if self.alias:
                 entry["alias"] = self.alias
+            if self.agent_subset:
+                entry["agents"] = sorted(self.agent_subset)
             if self.skill_subset:
                 entry["skills"] = sorted(self.skill_subset)
             if self.target_subset:

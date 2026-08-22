@@ -13,7 +13,7 @@ from typing import Any
 
 from ...utils.github_host import default_host
 from ...utils.path_security import validate_path_segments
-from .subsets import parse_skill_subset, parse_target_subset
+from .subsets import parse_agent_subset, parse_skill_subset, parse_target_subset
 
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 _ID_SEGMENT_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
@@ -30,6 +30,7 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
         registry: <name>           # routes to named registry; omit to use default
         path:     prompts/foo.md   # virtual sub-path; omit to install the whole package
         alias:    <name>           # same meaning as in other object forms
+        agents:   [x, y, z]        # same meaning as in other object forms
         skills:   [x, y, z]        # same meaning as in other object forms
         targets:  [x, y, z]        # same meaning as in other object forms
     """
@@ -84,6 +85,9 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
                 f"letters, numbers, dots, underscores, and hyphens"
             )
 
+    agents_raw = entry.get("agents")
+    agent_subset = parse_agent_subset(agents_raw) if agents_raw is not None else None
+
     skills_raw = entry.get("skills")
     skill_subset = parse_skill_subset(skills_raw) if skills_raw is not None else None
 
@@ -91,7 +95,7 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
     target_subset = parse_target_subset(targets_raw) if targets_raw is not None else None
 
     # Reject any unknown keys to catch typos early.
-    known = {"registry", "id", "path", "version", "alias", "skills", "targets"}
+    known = {"registry", "id", "path", "version", "alias", "agents", "skills", "targets"}
     unknown = set(entry.keys()) - known
     if unknown:
         raise ValueError(
@@ -114,6 +118,7 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
         alias=alias,
         source="registry",
         registry_name=registry_name,
+        agent_subset=agent_subset,
         skill_subset=skill_subset,
         target_subset=target_subset,
     )

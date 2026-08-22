@@ -25,6 +25,15 @@ def set_skill_subset_for_entry(
     return _set_subset_for_entry(manifest_path, repo_url, "skills", subset)
 
 
+def set_agent_subset_for_entry(
+    manifest_path: Path,
+    repo_url: str,
+    subset: list[str] | None,
+) -> bool:
+    """Promote entry to dict form and set/clear agents: field."""
+    return _set_subset_for_entry(manifest_path, repo_url, "agents", subset)
+
+
 def set_target_subset_for_entry(
     manifest_path: Path,
     repo_url: str,
@@ -112,7 +121,9 @@ def _apply_subset(entry, field: str | list[str] | None, subset: list[str] | None
         return entry
 
     # Determine if we should set or clear
-    if field == "skills":
+    if field == "agents":
+        ref.agent_subset = sorted(set(subset)) if subset else None
+    elif field == "skills":
         ref.skill_subset = sorted(set(subset)) if subset else None
     elif field == "targets":
         ref.target_subset = sorted({name.strip().lower() for name in subset}) if subset else None

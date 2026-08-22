@@ -97,6 +97,8 @@ class InstallService:
             allow_protocol_fallback=request.allow_protocol_fallback,
             no_policy=request.no_policy,
             audit_override=request.audit_override,
+            agent_subset=request.agent_subset,
+            agent_subset_from_cli=request.agent_subset_from_cli,
             skill_subset=request.skill_subset,
             skill_subset_from_cli=request.skill_subset_from_cli,
             legacy_skill_paths=request.legacy_skill_paths,

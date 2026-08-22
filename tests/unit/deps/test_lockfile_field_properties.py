@@ -89,7 +89,7 @@ def _repo_url(draw: st.DrawFn) -> str:
 def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
     """Generate a valid, field-complete kwargs dict for ``LockedDependency``.
 
-    Order-sensitive fields (``deployed_files``, ``skill_subset``,
+    Order-sensitive fields (``deployed_files``, ``agent_subset``, ``skill_subset``,
     ``target_subset``) are generated already deduped and sorted, matching
     what ``to_dict()``/``from_dict()`` always converge to -- see the
     dedicated permutation-invariance property for the order-determinism
@@ -149,6 +149,12 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
     kwargs["source_digest"] = maybe(None, _SHA.map(lambda s: f"sha256:{s}"))
     kwargs["is_insecure"] = draw(st.booleans())
     kwargs["allow_insecure"] = draw(st.booleans())
+    kwargs["agent_subset"] = draw(
+        st.one_of(
+            st.just([]),
+            st.permutations(["planner", "reviewer", "writer"]).map(lambda p: sorted(p[:2])),
+        )
+    )
     kwargs["skill_subset"] = draw(
         st.one_of(
             st.just([]), st.permutations(["alpha", "beta", "gamma"]).map(lambda p: sorted(p[:2]))

@@ -56,6 +56,31 @@ def parse_skill_subset(skills_raw: object) -> list[str]:
     return sorted(validated)
 
 
+def parse_agent_subset(agents_raw: object) -> list[str]:
+    """Validate and normalize object-form dependency ``agents:``."""
+    if not isinstance(agents_raw, list):
+        raise ValueError("'agents' field must be a list of agent names")
+    if not agents_raw:
+        raise ValueError(
+            "agents: must contain at least one name; "
+            "remove the field to install all agents in the package."
+        )
+
+    seen: set[str] = set()
+    validated: list[str] = []
+    for name in agents_raw:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Each entry in 'agents' must be a non-empty string")
+        name = name.strip()
+        validate_path_segments(name, context="agents/<name>")
+        if "/" in name or "\\" in name:
+            raise ValueError("Each entry in 'agents' must be a flat agent name")
+        if name not in seen:
+            seen.add(name)
+            validated.append(name)
+    return sorted(validated)
+
+
 def parse_target_subset(targets_raw: object) -> list[str]:
     """Validate and normalize object-form dependency ``targets:``."""
     from apm_cli.integration.targets import KNOWN_TARGETS

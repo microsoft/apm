@@ -433,6 +433,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
+| `agents` | `list<string>` | OPTIONAL | Non-empty flat agent names | Installs only the selected agent primitives from this dependency. Omitted means all agents. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
 | `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`. Experimental: `grok-cloud`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
 
@@ -543,10 +544,11 @@ Registry dependency (whole package or virtual sub-path):
   version: 1.4.0
   alias: review                    # OPTIONAL
 
-# Skill and target subset install from a registry package
+# Agent, skill, and target subset install from a registry package
 - id: acme/toolkit
   registry: jf-skills
   version: ^2.0.0
+  agents: [planner, reviewer]       # OPTIONAL - install only named agents
   skills: [deploy, lint]           # OPTIONAL - install only named skills (same as git-longhand)
   targets: [docker]                # OPTIONAL - restrict deployment targets
 ```

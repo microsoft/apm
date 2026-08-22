@@ -77,6 +77,20 @@ class AgentIntegrator(BaseIntegrator):
                     files.append(f)
         return files
 
+    @staticmethod
+    def agent_name(source_file: Path) -> str:
+        """Return the flat name used by ``agents:`` and ``--agent`` selection."""
+        if source_file.name.endswith(".agent.md"):
+            return source_file.name[: -len(".agent.md")]
+        return source_file.stem
+
+    @classmethod
+    def available_agent_names(cls, package_info) -> frozenset[str]:
+        """Return the selectable flat agent names in one materialized package."""
+        return frozenset(
+            cls.agent_name(path) for path in cls().find_agent_files(package_info.install_path)
+        )
+
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
     # have been REMOVED as part of T5 (skill-strategy.md).
     #
@@ -98,7 +112,7 @@ class AgentIntegrator(BaseIntegrator):
         """Generate target filename using the extension from *target*'s agents mapping."""
         mapping = target.primitives.get("agents")
         ext = mapping.extension if mapping else ".agent.md"
-        stem = source_file.name[:-9] if source_file.name.endswith(".agent.md") else source_file.stem
+        stem = self.agent_name(source_file)
         return f"{stem}{ext}"
 
     def integrate_agents_for_target(
@@ -111,6 +125,7 @@ class AgentIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         scope=None,
+        agent_subset=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 
@@ -143,7 +158,10 @@ class AgentIntegrator(BaseIntegrator):
         target_paths: list[Path] = []
         total_links_resolved = 0
 
+        selected_agents = set(agent_subset) if agent_subset else None
         for source_file in agent_files:
+            if selected_agents is not None and self.agent_name(source_file) not in selected_agents:
+                continue
             # kiro_agent uses relative path from .apm/agents/ for identity.
             if mapping.format_id == "kiro_agent":
                 target_relpath = self._kiro_agent_relpath(source_file, package_info.install_path)

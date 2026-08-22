@@ -106,6 +106,7 @@
             "prerelease": { "type": "boolean" },
             "path": { "type": "string" },
             "alias": { "type": "string" },
+            "agents": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[^/\\\\]+$" } },
             "skills": { "type": "array", "items": { "type": "string" } }
           },
           "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },

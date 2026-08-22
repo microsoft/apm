@@ -115,7 +115,7 @@ apm install --dry-run <package>
 - `src/apm_cli/policy/ci_checks.py` -- `run_baseline_checks()` is
   the CI surface used by `apm audit --ci`. It runs 8 baseline
   checks: lockfile-exists, ref-consistency, deployed-files-present,
-  no-orphans, skill-subset-consistency, config-consistency,
+  no-orphans, agent-subset-consistency, skill-subset-consistency, config-consistency,
   content-integrity, and includes-consent.
 
 ### Read more

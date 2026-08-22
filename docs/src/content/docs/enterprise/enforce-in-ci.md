@@ -20,9 +20,9 @@ playbook, see [Governance deep-dive](../governance-guide/) and
 apm audit --ci
 ```
 
-One command. It runs the nine baseline lockfile checks
+One command. It runs the ten baseline lockfile checks
 (`lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`,
-`deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`,
+`deployed-files-present`, `no-orphaned-packages`, `agent-subset-consistency`, `skill-subset-consistency`,
 `config-consistency`, `content-integrity`, `includes-consent`), the
 install-replay drift check, and -- if an `apm-policy.yml` is discovered --
 the org policy checks. Exit code is `0` clean, `1` on any violation.
@@ -134,7 +134,7 @@ The two patterns serve different goals:
 | Full install then audit | Catching developers who skipped `apm install` after editing `apm.yml`; ensuring gitignored deployed files are present on a fresh runner |
 | Audit-only (`setup-only: true`) | Zero-install CI gate for repos that commit deployed files: compare the checked-out commit against a lock-pinned scratch replay without rewriting the checkout |
 
-Both patterns enforce policy and the nine baseline lockfile checks. The
+Both patterns enforce policy and the ten baseline lockfile checks. The
 difference is only in whether content-integrity can see tampered bytes.
 
 ## Recipe: SARIF for GitHub Code Scanning
