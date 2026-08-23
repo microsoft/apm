@@ -191,11 +191,13 @@ def test_resolve_export_timestamp_valid_iso():
 
     valid_ts = "2024-06-01T00:00:00+00:00"
     assert _resolve_export_timestamp(valid_ts, None) == valid_ts
+    assert _resolve_export_timestamp("2024-06-01T00:00:00Z", None) == valid_ts
 
 
 def test_resolve_export_timestamp_invalid_iso_raises_bad_parameter():
     import click
     import pytest
+
     from apm_cli.commands.lock import _resolve_export_timestamp
 
     for invalid in [
@@ -211,4 +213,5 @@ def test_resolve_export_timestamp_invalid_iso_raises_bad_parameter():
             _resolve_export_timestamp(invalid, None)
         assert "Expected ISO 8601 format" in str(exc_info.value)
 
-
+    with pytest.raises(click.BadParameter, match="Invalid timestamp ''"):
+        _resolve_export_timestamp("   ", None)

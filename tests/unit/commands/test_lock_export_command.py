@@ -137,6 +137,14 @@ def test_export_timestamp_is_reproducible(runner, tmp_path):
         assert "2030-01-01T00:00:00+00:00" in first.output
 
 
+def test_export_invalid_timestamp_exits_2(runner, tmp_path):
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _seed(Path.cwd())
+        result = runner.invoke(cli, ["lock", "export", "--timestamp", "not-a-date"])
+        assert result.exit_code == 2
+        assert "Expected ISO 8601 format with timezone" in result.stderr
+
+
 def test_export_undeclared_omits_licenses(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         _seed(Path.cwd())

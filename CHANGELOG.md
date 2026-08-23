@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm lock export --timestamp` now rejects malformed or timezone-naive values
+  before they enter CycloneDX or SPDX metadata. (by @manideep-malyala; fixes
+  #2659) (#2660)
 - Windows binary is now Authenticode-signed in the release workflow, eliminating
   the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
   PyInstaller bundles. (#2435)

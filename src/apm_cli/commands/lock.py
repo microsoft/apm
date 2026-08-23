@@ -275,9 +275,9 @@ def _run_lock(
     "timestamp",
     default=None,
     help=(
-        "Pin the SBOM timestamp (ISO 8601, e.g. 2024-06-01T00:00:00+00:00) for "
-        "reproducible output. Defaults to SOURCE_DATE_EPOCH, then the lockfile's "
-        "generated_at."
+        "Pin the SBOM timestamp (ISO 8601 with timezone required, e.g. "
+        "2024-06-01T00:00:00+00:00) for reproducible output. Defaults to "
+        "SOURCE_DATE_EPOCH, then the lockfile's generated_at."
     ),
 )
 def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | None) -> None:
@@ -327,14 +327,16 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
     if explicit is not None:
         try:
             dt = datetime.fromisoformat(explicit)
-            if dt.tzinfo is None:
-                raise ValueError("Missing timezone offset")
         except (ValueError, TypeError):
+            dt = None
+        if dt is None or dt.tzinfo is None:
+            display_value = explicit if explicit.strip() else ""
             raise click.BadParameter(
-                f"Invalid timestamp {explicit!r}. Expected ISO 8601 format with timezone, e.g. 2024-06-01T00:00:00+00:00.",
+                f"Invalid timestamp {display_value!r}. Expected ISO 8601 format with "
+                "timezone, e.g. 2024-06-01T00:00:00+00:00.",
                 param_hint="'--timestamp'",
             )
-        return explicit
+        return dt.isoformat()
     epoch = os.environ.get("SOURCE_DATE_EPOCH")
     if epoch:
         try:
