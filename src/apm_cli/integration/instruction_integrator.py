@@ -20,6 +20,7 @@ from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.patterns import normalize_apply_to, parse_apply_to, yaml_double_quote
+from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -50,15 +51,14 @@ class InstructionIntegrator(BaseIntegrator):
     }
 
     @staticmethod
-    def _normalize_frontmatter_apply_to(frontmatter: str) -> str:
-        """Return canonical applyTo text from a bounded YAML frontmatter block."""
-        from apm_cli.utils.yaml_io import load_yaml_str
-
+    def _parse_frontmatter(content: str) -> tuple[dict, str]:
+        """Return bounded frontmatter metadata and body for instruction text."""
         try:
-            metadata = load_yaml_str(frontmatter) or {}
+            post = loads_frontmatter(content, preserve_body=True)
         except Exception:
-            return ""
-        return normalize_apply_to(metadata.get("applyTo"), default="")
+            return {}, content
+        metadata = post.metadata if isinstance(post.metadata, dict) else {}
+        return metadata, post.content
 
     def find_instruction_files(self, package_path: Path, source_plan=None) -> list[Path]:
         """Find all .instructions.md files in a package.
@@ -328,10 +328,8 @@ class InstructionIntegrator(BaseIntegrator):
         If no frontmatter is present, returns the content unchanged.
         Handles both LF and CRLF line endings.
         """
-        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
-        if fm_match:
-            return content[fm_match.end() :]
-        return content
+        _, body = InstructionIntegrator._parse_frontmatter(content)
+        return body
 
     @classmethod
     def _is_apm_managed_copilot(cls, content: str) -> bool:
@@ -494,21 +492,9 @@ class InstructionIntegrator(BaseIntegrator):
         extracts or generates a ``description``, and rewrites the
         frontmatter in Cursor's expected format.
         """
-        body = content
-        apply_to = ""
-        description = ""
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            fm_block = fm_match.group(1)
-            body = content[fm_match.end() :]
-            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("description:"):
-                    description = line_stripped[len("description:") :].strip().strip("'\"")
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
+        description = str(metadata.get("description", "")).strip()
 
         # Generate description from first content sentence if missing
         if not description:
@@ -588,21 +574,14 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_windsurf_rules(content: str) -> str:
         """Convert APM instruction content to Windsurf rules ``.md`` format.
 
-        Parses existing YAML frontmatter via ``yaml.safe_load``, maps
+        Parses existing YAML frontmatter through the canonical bounded loader, maps
         ``applyTo`` to Windsurf's ``trigger: glob`` + ``globs`` frontmatter.
         Instructions without ``applyTo`` become ``trigger: always_on`` rules.
 
         Ref: https://docs.windsurf.com/windsurf/cascade/memories
         """
-        body = content
-        apply_to = ""
-
-        # Parse existing frontmatter with the bounded loader so a hostile
-        # frontmatter block in an untrusted package cannot hang the parser.
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            body = content[fm_match.end() :]
-            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_match.group(1))
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
 
         # Build Windsurf rules frontmatter
         parts = ["---"]
@@ -646,28 +625,10 @@ class InstructionIntegrator(BaseIntegrator):
         path-scoped guidance. APM's ``applyTo`` frontmatter is the source of
         truth for that scoping.
         """
-        from ..utils.yaml_io import load_yaml_str
-
-        body = content
-        globs = []
-
-        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
-        if fm_match:
-            body = content[fm_match.end() :]
-            try:
-                fm = load_yaml_str(fm_match.group(1)) or {}
-            except Exception:
-                fm = {}
-            raw_apply_to = fm.get("applyTo", "")
-            if isinstance(raw_apply_to, list):
-                globs = [
-                    s
-                    for item in raw_apply_to
-                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
-                ]
-            else:
-                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
-                globs = parse_apply_to(safe_apply_to)
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
 
         parts = ["---"]
         if globs:
@@ -698,15 +659,8 @@ class InstructionIntegrator(BaseIntegrator):
 
         Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
         """
-        body = content
-        apply_to = ""
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            fm_block = fm_match.group(1)
-            body = content[fm_match.end() :]
-            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
 
         # Build Claude rules frontmatter (only when path-scoped)
         globs = parse_apply_to(apply_to)
@@ -726,34 +680,21 @@ class InstructionIntegrator(BaseIntegrator):
         Parses existing YAML frontmatter, maps ``applyTo`` to Antigravity's
         ``trigger: glob`` + ``globs`` frontmatter.
         """
-        from ..utils.yaml_io import load_yaml_str
+        try:
+            post = loads_frontmatter(content, preserve_body=True)
+            metadata = post.metadata if isinstance(post.metadata, dict) else {}
+            body = post.content
+        except Exception as e:
+            import logging
 
-        body = content
-        globs = []
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
-        if fm_match:
-            body = content[fm_match.end() :]
-            try:
-                fm = load_yaml_str(fm_match.group(1)) or {}
-            except Exception as e:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Failed to parse instruction frontmatter YAML: %s", e
-                )
-                fm = {}
-            raw_apply_to = fm.get("applyTo", "")
-            if isinstance(raw_apply_to, list):
-                globs = [
-                    s
-                    for item in raw_apply_to
-                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
-                ]
-            else:
-                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
-                globs = parse_apply_to(safe_apply_to)
+            logging.getLogger(__name__).warning(
+                "Failed to parse instruction frontmatter YAML: %s", e
+            )
+            metadata = {}
+            body = content
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
 
         # Build Antigravity rules frontmatter
         parts = ["---"]

@@ -8,6 +8,7 @@ import ast
 from pathlib import Path
 
 OWNER = Path("src/apm_cli/utils/yaml_io.py")
+INSTRUCTION_INTEGRATOR = Path("src/apm_cli/integration/instruction_integrator.py")
 PARSER_METHODS = {"load", "loads", "parse"}
 
 
@@ -80,20 +81,55 @@ def _is_post_text_return(node: ast.stmt) -> bool:
     )
 
 
-def _is_bounded_loads_return(
+def _is_bounded_loads_statement(
     node: ast.stmt,
     modules: set[str],
     functions: dict[str, str],
 ) -> bool:
-    if not isinstance(node, ast.Return) or not isinstance(node.value, ast.Call):
+    value = node.value if isinstance(node, (ast.Assign, ast.Return)) else None
+    if not isinstance(value, ast.Call):
         return False
-    call = node.value
+    call = value
     if _frontmatter_call_name(call, modules, functions) != "loads":
         return False
     if len(call.args) != 1 or not isinstance(call.args[0], ast.Name) or call.args[0].id != "text":
         return False
     handler = next((item.value for item in call.keywords if item.arg == "handler"), None)
     return isinstance(handler, ast.Name) and handler.id == "_BOUNDED_FRONTMATTER_HANDLER"
+
+
+def _is_load_delegate(node: ast.stmt) -> bool:
+    return (
+        isinstance(node, ast.Return)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "loads_frontmatter"
+        and len(node.value.args) == 1
+        and isinstance(node.value.args[0], ast.Name)
+        and node.value.args[0].id == "text"
+    )
+
+
+def _is_manual_frontmatter_detector(node: ast.Call) -> bool:
+    if (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "re"
+        and node.func.attr in {"compile", "match"}
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and node.args[0].value.startswith("^---")
+    ):
+        return True
+    return (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"startswith", "split"}
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and node.args[0].value.startswith("---")
+    )
 
 
 def check(root: Path) -> list[str]:
@@ -103,7 +139,7 @@ def check(root: Path) -> list[str]:
         return [f"missing canonical frontmatter owner: {OWNER.as_posix()}"]
 
     owner_tree = ast.parse(owner_path.read_text(encoding="utf-8"), filename=str(OWNER))
-    owner = next(
+    loader = next(
         (
             node
             for node in owner_tree.body
@@ -112,36 +148,45 @@ def check(root: Path) -> list[str]:
         ),
         None,
     )
-    if owner is None:
+    text_loader = next(
+        (
+            node
+            for node in owner_tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "loads_frontmatter"
+        ),
+        None,
+    )
+    if loader is None or text_loader is None:
         return ["missing canonical load_frontmatter function"]
 
     violations: list[str] = []
-    owner_modules, owner_functions = _frontmatter_aliases(owner)
+    owner_modules, owner_functions = _frontmatter_aliases(text_loader)
     parser_calls = [
         (node, _frontmatter_call_name(node, owner_modules, owner_functions))
-        for node in ast.walk(owner)
+        for node in ast.walk(text_loader)
         if isinstance(node, ast.Call)
     ]
     loads_calls = [node for node, name in parser_calls if name == "loads"]
     bypass_calls = [node for node, name in parser_calls if name in {"load", "parse"}]
     gates = [
         (index, node)
-        for index, node in enumerate(owner.body)
+        for index, node in enumerate(text_loader.body)
         if isinstance(node, ast.If)
         and _is_negated_handler_detect(node.test)
         and len(node.body) == 1
         and _is_post_text_return(node.body[0])
         and not node.orelse
     ]
-    bounded_returns = [
+    bounded_statements = [
         (index, node)
-        for index, node in enumerate(owner.body)
-        if _is_bounded_loads_return(node, owner_modules, owner_functions)
+        for index, node in enumerate(text_loader.body)
+        if _is_bounded_loads_statement(node, owner_modules, owner_functions)
     ]
     valid_control_flow = (
         len(gates) == 1
-        and len(bounded_returns) == 1
-        and gates[0][0] < bounded_returns[0][0]
+        and len(bounded_statements) == 1
+        and gates[0][0] < bounded_statements[0][0]
         and len(loads_calls) == 1
     )
     if not valid_control_flow:
@@ -150,14 +195,18 @@ def check(root: Path) -> list[str]:
             "behind a negated bounded-handler detect return"
         )
     if bypass_calls:
-        violations.append("load_frontmatter must not bypass its line-1 gate with load or parse")
+        violations.append("loads_frontmatter must not bypass its line-1 gate with load or parse")
+    delegates = [node for node in loader.body if _is_load_delegate(node)]
+    if len(delegates) != 1:
+        violations.append("load_frontmatter must delegate parsed text to loads_frontmatter")
 
     source_root = root / "src/apm_cli"
     for path in sorted(source_root.rglob("*.py")):
         if path == owner_path:
             continue
         source = path.read_text(encoding="utf-8")
-        if "frontmatter" not in source:
+        relative_path = path.relative_to(root)
+        if "frontmatter" not in source and relative_path != INSTRUCTION_INTEGRATOR:
             continue
         tree = ast.parse(source, filename=str(path))
         modules, functions = _frontmatter_aliases(tree)
@@ -168,6 +217,12 @@ def check(root: Path) -> list[str]:
                 relative = path.relative_to(root).as_posix()
                 violations.append(
                     f"{relative}:{node.lineno}: direct frontmatter parsing must route through load_frontmatter"
+                )
+            if relative_path == INSTRUCTION_INTEGRATOR and _is_manual_frontmatter_detector(node):
+                relative = path.relative_to(root).as_posix()
+                violations.append(
+                    f"{relative}:{node.lineno}: instruction frontmatter detection "
+                    "must route through loads_frontmatter"
                 )
     return violations
 

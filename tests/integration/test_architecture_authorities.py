@@ -124,6 +124,7 @@ def test_frontmatter_detection_has_single_owner() -> None:
         ("from-import-bypass", "direct frontmatter parsing must route through load_frontmatter"),
         ("ignored-detect", "must gate one bounded frontmatter.loads return"),
         ("unbounded-loads", "must gate one bounded frontmatter.loads return"),
+        ("manual-detector", "instruction frontmatter detection must route through"),
     ],
 )
 def test_frontmatter_authority_mutations_are_killed(
@@ -172,13 +173,20 @@ def test_frontmatter_authority_mutations_are_killed(
             ),
             encoding="utf-8",
         )
-    else:
+    elif mutation == "unbounded-loads":
         source = owner.read_text(encoding="utf-8")
         owner.write_text(
             source.replace(
                 "frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)",
                 "frontmatter.loads(text)",
             ),
+            encoding="utf-8",
+        )
+    else:
+        integrator = tmp_path / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.parent.mkdir(parents=True)
+        integrator.write_text(
+            'import re\n\n\ndef parse(text):\n    return re.match(r"^---", text)\n',
             encoding="utf-8",
         )
 

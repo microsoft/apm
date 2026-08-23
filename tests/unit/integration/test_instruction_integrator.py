@@ -1307,7 +1307,31 @@ class TestConvertToWindsurfRules:
 
 
 class TestApplyToCommaSplitting:
-    """Verify all three converters split comma-separated applyTo globs."""
+    """Verify target converters preserve canonical applyTo semantics."""
+
+    @pytest.mark.parametrize(
+        ("converter", "scope_marker"),
+        [
+            ("_convert_to_claude_rules", '  - "src/**"'),
+            ("_convert_to_cursor_rules", 'globs: "src/**"'),
+            ("_convert_to_windsurf_rules", 'globs: "src/**"'),
+            ("_convert_to_kiro_steering", 'fileMatchPattern: "src/**"'),
+            ("_convert_to_antigravity_rules", 'globs: "src/**"'),
+        ],
+    )
+    def test_four_hyphen_frontmatter_uses_canonical_parser(self, converter, scope_marker):
+        content = "----\napplyTo: src/**\n----\n# Scoped rule\n"
+
+        result = getattr(InstructionIntegrator, converter)(content)
+
+        assert scope_marker in result
+        assert "----" not in result
+        assert "# Scoped rule" in result
+
+    def test_strip_frontmatter_supports_four_hyphen_fence(self):
+        content = "----\napplyTo: src/**\n----\n# Scoped rule\n"
+
+        assert InstructionIntegrator._strip_frontmatter(content) == "# Scoped rule\n"
 
     # ---- Claude ----
 
