@@ -1,5 +1,4 @@
 """Auto-discover and fetch org-level apm-policy.yml files.
-
 Discovery flow:
 1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
 2. Determine host profile (default or ado) to select candidate repos
@@ -8,20 +7,17 @@ Discovery flow:
 5. Resolve inheritance chain via resolve_policy_chain
 6. Cache the **merged effective policy** with chain metadata
 7. Parse and return ApmPolicy
-
 Candidate repo precedence:
 - .github-private -- private org-wide config (preferred; skipped on ADO)
 - .github  -- GitHub convention (skipped on ADO)
 - .apm     -- cross-platform convention (skipped on ADO)
 - _apm     -- universal fallback (valid on every git host)
-
 Supports:
 - GitHub.com and GitHub Enterprise (*.ghe.com)
 - Azure DevOps (dev.azure.com, *.visualstudio.com)
 - Manual override via --policy <path|url>
 - Cache with TTL (default 1 hour), stale fallback up to MAX_STALE_TTL
 - Atomic cache writes (temp file + os.replace)
-- Garbage-response detection (200 OK with non-YAML body)
 """
 
 from __future__ import annotations
@@ -73,16 +69,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
 
 # Azure DevOps project and repository names cannot begin with ``_``.
-# ADO requires repositories to live inside projects, so this pair is the
-# canonical primary coordinate for organization policy discovery.
 ADO_POLICY_PROJECT = "apm"
 ADO_POLICY_REPOSITORY = "apm-policy"
 _ADO_POLICY_REPOS: tuple[str, ...] = (ADO_POLICY_REPOSITORY,)
 _LEGACY_ADO_POLICY_PROJECT = "_apm"
 _LEGACY_ADO_POLICY_REPOSITORY = "_apm"
 _LEGACY_ADO_POLICY_WARNING = (
-    "Azure DevOps policy was discovered at legacy _apm/_apm. Move it to "
-    "apm/apm-policy; the legacy coordinate is a temporary compatibility fallback."
+    "Azure DevOps policy was discovered at legacy _apm/_apm. Move it to apm/apm-policy; "
+    "the legacy coordinate is a temporary compatibility fallback."
 )
 
 
@@ -1441,41 +1435,14 @@ def _fetch_from_ado_repo(
     )
 
 
-def _fetch_ado_org_policy(
-    *,
-    org: str,
-    host: str,
-    project_root: Path,
-    port: int | None = None,
-    no_cache: bool = False,
-    expected_hash: str | None = None,
-    cache_only: bool = False,
-) -> PolicyFetchResult:
-    """Fetch the canonical ADO policy, using legacy coordinates only after 404."""
+def _fetch_ado_org_policy(**fetch_kwargs) -> PolicyFetchResult:
     primary = _fetch_from_ado_repo(
-        org=org,
-        project=ADO_POLICY_PROJECT,
-        repo=ADO_POLICY_REPOSITORY,
-        host=host,
-        port=port,
-        project_root=project_root,
-        no_cache=no_cache,
-        expected_hash=expected_hash,
-        cache_only=cache_only,
+        project=ADO_POLICY_PROJECT, repo=ADO_POLICY_REPOSITORY, **fetch_kwargs
     )
     if not primary.not_found:
         return primary
-
     legacy = _fetch_from_ado_repo(
-        org=org,
-        project=_LEGACY_ADO_POLICY_PROJECT,
-        repo=_LEGACY_ADO_POLICY_REPOSITORY,
-        host=host,
-        port=port,
-        project_root=project_root,
-        no_cache=no_cache,
-        expected_hash=expected_hash,
-        cache_only=cache_only,
+        project=_LEGACY_ADO_POLICY_PROJECT, repo=_LEGACY_ADO_POLICY_REPOSITORY, **fetch_kwargs
     )
     if legacy.found:
         legacy.warnings.append(_LEGACY_ADO_POLICY_WARNING)
