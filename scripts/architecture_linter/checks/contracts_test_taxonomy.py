@@ -72,6 +72,9 @@ _GUARD_LOCKFILE_READ = "contracts-tooling-lockfile-read"
 _GUARD_LOCKFILE_TIMESTAMP = "contracts-tooling-lockfile-timestamp"
 
 
+_GUARD_LOCKFILE_TIMESTAMP_FALLBACK = "contracts-tooling-lockfile-timestamp-fallback"
+
+
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
 
@@ -287,10 +290,53 @@ def check_lockfile_timestamp_authority(provider: FactsProvider) -> tuple[Violati
                     violation(
                         rule_id,
                         path,
-                        "Lockfile timestamp writes must route through deps/lockfile.py",
+                        "Lockfile timestamp writes and fallback policy must route through "
+                        "deps/lockfile.py",
                         line=node.lineno,
                     )
                 )
+    return tuple(findings)
+
+
+def _owns_reproducible_fallback(node: ast.AST) -> bool:
+    """Return whether a node reimplements the reproducible timestamp fallback."""
+    if isinstance(node, ast.Constant):
+        return node.value == "1970-01-01T00:00:00+00:00"
+    if isinstance(node, ast.Call) and node.args:
+        first_arg = node.args[0]
+        return (
+            isinstance(first_arg, ast.Constant)
+            and first_arg.value == "SOURCE_DATE_EPOCH"
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"get", "getenv"}
+        )
+    if isinstance(node, ast.Subscript):
+        return isinstance(node.slice, ast.Constant) and node.slice.value == "SOURCE_DATE_EPOCH"
+    return False
+
+
+def check_lockfile_timestamp_fallback(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Reproducible timestamp fallback policy must stay inside its owner."""
+    rule_id = _GUARD_LOCKFILE_TIMESTAMP_FALLBACK
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == _LOCKFILE_OWNER:
+            continue
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures or facts.tree_index is None:
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "Lockfile timestamp writes and fallback policy must route through "
+                "deps/lockfile.py",
+                line=node.lineno,
+            )
+            for node in facts.tree_index.nodes
+            if _owns_reproducible_fallback(node)
+        )
     return tuple(findings)
 
 
@@ -774,6 +820,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LOCKFILE_TIMESTAMP,
         "Lockfile timestamp emission stays owned by deps/lockfile.py.",
         check_lockfile_timestamp_authority,
+    ),
+    _owner_rule(
+        _GUARD_LOCKFILE_TIMESTAMP_FALLBACK,
+        "Reproducible timestamp fallback stays owned by deps/lockfile.py.",
+        check_lockfile_timestamp_fallback,
     ),
     _owner_rule(
         _GUARD_GENERATION_FOOTER,

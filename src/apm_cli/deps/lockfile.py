@@ -32,6 +32,13 @@ SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
 _REPRODUCIBLE_EPOCH = "1970-01-01T00:00:00+00:00"
 
 
+class _ExistingLockfileUnset:
+    """Sentinel for callers that have not already read the destination."""
+
+
+_EXISTING_LOCKFILE_UNSET = _ExistingLockfileUnset()
+
+
 def installed_apm_version() -> str:
     """Return the running APM distribution version for lockfile metadata."""
     try:
@@ -937,7 +944,12 @@ class LockFile:
             lock.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lock)
         return lock
 
-    def write(self, path: Path) -> None:
+    def write(
+        self,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
+    ) -> None:
         """Write lock file to disk, preserving legacy timestamp behavior.
 
         New lockfiles omit ``generated_at``.  When the on-disk lockfile already
@@ -946,21 +958,28 @@ class LockFile:
         timestamp in a future APM version, but for now it preserves backward
         compatibility with older APM builds that expect the field. This method
         may mutate ``self.generated_at`` to preserve or refresh that metadata.
+        Callers that already loaded the destination can pass ``existing_lockfile``
+        to avoid parsing the same bytes again.
         """
         from ..utils.atomic_io import atomic_write_text
         from ..utils.yaml_io import load_yaml_str
 
-        existing = None
-        if path.exists():
+        existing: LockFile | None
+        if isinstance(existing_lockfile, _ExistingLockfileUnset) and path.exists():
             existing_text = path.read_text(encoding="utf-8")
             try:
                 existing_data = load_yaml_str(existing_text)
             except (yaml.YAMLError, ValueError):
                 existing_data = None
+            existing = None
             if isinstance(existing_data, dict) and existing_data.get("generated_at") is not None:
                 existing = type(self)._from_validated_data(
                     _validate_lockfile_container(existing_data)
                 )
+        elif isinstance(existing_lockfile, _ExistingLockfileUnset):
+            existing = None
+        else:
+            existing = existing_lockfile
         if existing is not None and existing.generated_at is not None:
             if self.is_semantically_equivalent(existing):
                 self.generated_at = existing.generated_at
@@ -1074,9 +1093,14 @@ class LockFile:
                 paths.append(rel_path)
         return paths
 
-    def save(self, path: Path) -> None:
+    def save(
+        self,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
+    ) -> None:
         """Save lock file to disk (alias for write)."""
-        self.write(path)
+        self.write(path, existing_lockfile=existing_lockfile)
 
     def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP/LSP servers, and configs.

@@ -819,7 +819,6 @@ Example (informative, minimal):
 
 ```yaml
 lockfile_version: "1"
-generated_at: "2026-05-10T20:14:00+00:00"
 apm_version: "0.6.4"
 dependencies:
   - repo_url: github.com/octocat/example
@@ -2214,7 +2213,6 @@ resolves to the lockfile:
 
 ```yaml
 lockfile_version: "2"
-generated_at: "2026-05-10T20:14:00+00:00"
 apm_version: "0.7.0"
 dependencies:
   - repo_url: github.com/contoso/security-baseline
@@ -3405,7 +3403,6 @@ A Consumer reading the manifest above produces the lockfile:
 
 ```yaml
 lockfile_version: "2"
-generated_at: "2026-05-10T20:14:00+00:00"
 apm_version: "0.7.0"
 dependencies:
   - repo_url: github.com/contoso/common-prompts

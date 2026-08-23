@@ -6,7 +6,7 @@ runner already proves the registry and the rule catalog agree *by name* and that
 every guard executes exactly once per run.  Names prove nothing about teeth: a
 rule whose body was gutted still registers its guard ID and still runs.
 
-This file supplies the missing half of that contract.  For each of the 56
+This file supplies the missing half of that contract.  For each of the 57
 registered owner guards it pins one minimal, meaningful source mutation -- a
 surgical edit that kills a load-bearing sub-condition of the owning decision --
 and asserts the one rule that owns that guard reports a real `Violation`.
@@ -154,6 +154,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="_log = logging.getLogger(__name__)",
         new="_log = logging.getLogger(__name__)\nMCPIntegrator.generated_at = None",
         intent="An MCP consumer writes lockfile timestamp metadata outside its owner.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-lockfile-timestamp-fallback",
+        rule_id="contracts-tooling-lockfile-timestamp-fallback",
+        path="src/apm_cli/bundle/agent_plugin_exporter.py",
+        old="import os",
+        new='import os\n\nos.environ.get("SOURCE_DATE_EPOCH")',
+        intent="An Agent Plugin consumer reimplements the reproducible timestamp fallback.",
     ),
     MutationCase(
         guard_id="hooks-integrations-copilot-cli-mcp-paths",

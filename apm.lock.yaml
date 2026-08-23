@@ -1,5 +1,4 @@
 lockfile_version: '1'
-generated_at: '2026-08-31T13:08:37.404349+00:00'
 apm_version: 0.29.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot

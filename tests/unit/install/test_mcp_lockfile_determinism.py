@@ -332,9 +332,14 @@ def test_real_mcp_target_change_writes_once_then_converges(tmp_path: Path) -> No
     real_save = LockFile.save
     changed_writes: list[Path] = []
 
-    def track_changed_write(lockfile: LockFile, path: Path) -> None:
+    def track_changed_write(
+        lockfile: LockFile,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None = None,
+    ) -> None:
         changed_writes.append(path)
-        real_save(lockfile, path)
+        real_save(lockfile, path, existing_lockfile=existing_lockfile)
 
     with patch.object(LockFile, "save", track_changed_write):
         _run_lockfile_phase_and_mcp_persist(
@@ -352,9 +357,14 @@ def test_real_mcp_target_change_writes_once_then_converges(tmp_path: Path) -> No
 
     converged_writes: list[Path] = []
 
-    def track_converged_write(lockfile: LockFile, path: Path) -> None:
+    def track_converged_write(
+        lockfile: LockFile,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None = None,
+    ) -> None:
         converged_writes.append(path)
-        real_save(lockfile, path)
+        real_save(lockfile, path, existing_lockfile=existing_lockfile)
 
     with patch.object(LockFile, "save", track_converged_write):
         _run_lockfile_phase_and_mcp_persist(
@@ -398,9 +408,14 @@ def test_legacy_lock_preserves_scalar_or_list_provenance_without_write(
     writes: list[Path] = []
     real_save = LockFile.save
 
-    def track_write(lockfile: LockFile, path: Path) -> None:
+    def track_write(
+        lockfile: LockFile,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None = None,
+    ) -> None:
         writes.append(path)
-        real_save(lockfile, path)
+        real_save(lockfile, path, existing_lockfile=existing_lockfile)
 
     with patch.object(LockFile, "save", track_write):
         _run_lockfile_phase_and_mcp_persist(
@@ -437,9 +452,14 @@ def test_stale_partial_provenance_repairs_once_then_converges(tmp_path: Path) ->
     real_save = LockFile.save
     repair_writes: list[Path] = []
 
-    def track_repair(lockfile: LockFile, path: Path) -> None:
+    def track_repair(
+        lockfile: LockFile,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None = None,
+    ) -> None:
         repair_writes.append(path)
-        real_save(lockfile, path)
+        real_save(lockfile, path, existing_lockfile=existing_lockfile)
 
     with patch.object(LockFile, "save", track_repair):
         _run_lockfile_phase_and_mcp_persist(
@@ -457,9 +477,14 @@ def test_stale_partial_provenance_repairs_once_then_converges(tmp_path: Path) ->
 
     converged_writes: list[Path] = []
 
-    def track_converged(lockfile: LockFile, path: Path) -> None:
+    def track_converged(
+        lockfile: LockFile,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None = None,
+    ) -> None:
         converged_writes.append(path)
-        real_save(lockfile, path)
+        real_save(lockfile, path, existing_lockfile=existing_lockfile)
 
     with patch.object(LockFile, "save", track_converged):
         _run_lockfile_phase_and_mcp_persist(

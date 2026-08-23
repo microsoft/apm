@@ -324,6 +324,31 @@ class TestLockFile:
 
         assert load_calls == 1
 
+    def test_write_reuses_preloaded_destination(self, tmp_path, monkeypatch):
+        from apm_cli.utils import yaml_io
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        existing = LockFile.read(lock_path)
+        assert existing is not None
+        candidate = LockFile()
+        candidate.add_dependency(LockedDependency(repo_url="owner/repo"))
+
+        def unexpected_parse(_text):
+            raise AssertionError("preloaded lockfile must avoid a second YAML parse")
+
+        with monkeypatch.context() as scoped_patch:
+            scoped_patch.setattr(yaml_io, "load_yaml_str", unexpected_parse)
+            candidate.write(lock_path, existing_lockfile=existing)
+
+        assert candidate.generated_at is not None
+        written = LockFile.read(lock_path)
+        assert written is not None
+        assert written.has_dependency("owner/repo")
+
     def test_timestamp_free_destination_discards_in_memory_legacy_timestamp(self, tmp_path):
         lock_path = tmp_path / "apm.lock.yaml"
         lock_path.write_text(

@@ -48,7 +48,10 @@
       "decision": "Lockfile timestamp emission and reproducible fallback",
       "owner": "deps/lockfile.py (LockFile.write, resolve_reproducible_timestamp)",
       "selectors": ["src/apm_cli/deps/lockfile.py"],
-      "guards": ["contracts-tooling-lockfile-timestamp"]
+      "guards": [
+        "contracts-tooling-lockfile-timestamp-fallback",
+        "contracts-tooling-lockfile-timestamp"
+      ]
     },
     {
       "id": "generated-content-footer-wording",
