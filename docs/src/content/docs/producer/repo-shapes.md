@@ -159,15 +159,19 @@ apm plugin init plugin-a --yes
 apm plugin init plugin-b --yes
 cd ..
 apm marketplace init --owner acme-org --name acme-monorepo
-apm marketplace package add ./plugins/plugin-a --name plugin-a
-apm marketplace package add ./plugins/plugin-b --name plugin-b
+apm marketplace package add ./plugins/plugin-a --name plugin-a --version 0.1.0 --no-verify
+apm marketplace package add ./plugins/plugin-b --name plugin-b --version 0.1.0 --no-verify
 ```
+
+`--version` avoids resolving a Git ref, while `--no-verify` skips remote
+reachability checks for the local sources. The scaffold starts every manifest
+at `0.1.0`, satisfying the lockstep strategy below.
 
 Resulting root `apm.yml`:
 
 ```yaml
 name: acme-monorepo
-version: 1.0.0
+version: 0.1.0
 description: Acme plugins shipped together
 
 marketplace:
@@ -181,10 +185,10 @@ marketplace:
   packages:
     - name: plugin-a
       source: ./plugins/plugin-a
-      version: 1.0.0
+      version: 0.1.0
     - name: plugin-b
       source: ./plugins/plugin-b
-      version: 1.0.0
+      version: 0.1.0
 ```
 
 Local-path entries skip remote resolution. Each plugin's own
