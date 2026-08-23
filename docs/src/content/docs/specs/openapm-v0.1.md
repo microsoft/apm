@@ -1655,11 +1655,13 @@ departed owners, then re-audit).
 **[req-pl-017]** A conforming **governance** implementation discovering
 an organization policy from Azure DevOps MUST request
 `apm/apm-policy` as its primary project and repository coordinate. It
-MAY request the legacy `_apm/_apm` coordinate only when the primary
-request received an HTTP 404 response. It MUST NOT try that legacy
-coordinate after authentication, authorization, network, timeout,
-rate-limit, malformed-response, or other non-404 failures. When the
-legacy coordinate supplies a policy, the implementation MUST emit one
+MAY use a fresh cache entry for that primary coordinate; primary and
+legacy cache entries MUST remain distinct. It MAY request or use the
+legacy `_apm/_apm` coordinate only when the primary request received
+an HTTP 404 response. It MUST NOT try that legacy coordinate after
+authentication, authorization, network, timeout, rate-limit,
+malformed-response, or other non-404 failures. When the legacy
+coordinate supplies a policy, the implementation MUST emit one
 actionable migration warning naming `apm/apm-policy`.
 
 ### 6.9 Conformance requirements (governance)

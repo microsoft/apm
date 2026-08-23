@@ -283,8 +283,8 @@ def test_ado_policy_coordinate_fallback_is_404_only():
     assert (ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY) == ("apm", "apm-policy")
     assert_spec_contains(
         "`apm/apm-policy`",
-        "only when the primary\nrequest received an HTTP 404 response",
-        "MUST NOT try that legacy\ncoordinate",
+        "only when the primary request received\nan HTTP 404 response",
+        "MUST NOT try that legacy coordinate after",
         "actionable migration warning",
     )
 

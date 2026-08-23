@@ -21,7 +21,7 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 | Producer | 12 | 0 | 0 | 0 |
 | Consumer | 84 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
-| Governance | 16 | 0 | 0 | 0 |
+| Governance | 17 | 0 | 0 | 0 |
 
 ## Per-requirement coverage
 
@@ -93,6 +93,7 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 | [req-pl-014](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-014) | MUST | 6.8 | governance | active | 1 |
 | [req-pl-015](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-015) | MUST | 6.3.5 | governance | active | 1 |
 | [req-pl-016](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-016) | MUST | 6.8 | governance | active | 1 |
+| [req-pl-017](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-017) | MUST | 6.8 | governance | active | 1 |
 | [req-pr-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-001) | MUST | 8.2 | consumer | active | 1 |
 | [req-pr-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-002) | MUST | 8.3 | consumer | active | 1 |
 | [req-pr-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-003) | MUST | 8.3 | consumer | active | 1 |
