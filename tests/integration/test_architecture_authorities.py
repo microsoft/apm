@@ -118,8 +118,12 @@ def test_frontmatter_detection_has_single_owner() -> None:
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
-        ("local-grammar", "must delegate fence detection"),
+        ("local-grammar", "must gate one bounded frontmatter.loads return"),
         ("direct-bypass", "direct frontmatter parsing must route through load_frontmatter"),
+        ("alias-bypass", "direct frontmatter parsing must route through load_frontmatter"),
+        ("from-import-bypass", "direct frontmatter parsing must route through load_frontmatter"),
+        ("ignored-detect", "must gate one bounded frontmatter.loads return"),
+        ("unbounded-loads", "must gate one bounded frontmatter.loads return"),
     ],
 )
 def test_frontmatter_authority_mutations_are_killed(
@@ -140,10 +144,41 @@ def test_frontmatter_authority_mutations_are_killed(
             ),
             encoding="utf-8",
         )
-    else:
+    elif mutation == "direct-bypass":
         bypass = tmp_path / "src/apm_cli/probe.py"
         bypass.write_text(
             "import frontmatter\n\n\ndef parse(path):\n    return frontmatter.load(path)\n",
+            encoding="utf-8",
+        )
+    elif mutation == "alias-bypass":
+        bypass = tmp_path / "src/apm_cli/probe.py"
+        bypass.write_text(
+            "import frontmatter as fm\n\n\ndef parse(path):\n    return fm.parse(path)\n",
+            encoding="utf-8",
+        )
+    elif mutation == "from-import-bypass":
+        bypass = tmp_path / "src/apm_cli/probe.py"
+        bypass.write_text(
+            "from frontmatter import loads as parse\n\n\ndef read(text):\n    return parse(text)\n",
+            encoding="utf-8",
+        )
+    elif mutation == "ignored-detect":
+        source = owner.read_text(encoding="utf-8")
+        owner.write_text(
+            source.replace(
+                "if not _BOUNDED_FRONTMATTER_HANDLER.detect(text):\n"
+                "        return frontmatter.Post(text)",
+                "_BOUNDED_FRONTMATTER_HANDLER.detect(text)",
+            ),
+            encoding="utf-8",
+        )
+    else:
+        source = owner.read_text(encoding="utf-8")
+        owner.write_text(
+            source.replace(
+                "frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)",
+                "frontmatter.loads(text)",
+            ),
             encoding="utf-8",
         )
 
@@ -161,6 +196,30 @@ def test_frontmatter_authority_mutations_are_killed(
 
     assert result.returncode == 1
     assert expected in result.stdout
+
+
+def test_frontmatter_authority_skips_unrelated_python(tmp_path: Path) -> None:
+    """The repository scan avoids parsing files that cannot call frontmatter."""
+    root = Path(__file__).parents[2]
+    owner = tmp_path / "src/apm_cli/utils/yaml_io.py"
+    owner.parent.mkdir(parents=True)
+    shutil.copy(root / "src/apm_cli/utils/yaml_io.py", owner)
+    unrelated = tmp_path / "src/apm_cli/unrelated.py"
+    unrelated.write_text("this is intentionally invalid Python\n", encoding="utf-8")
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/check_frontmatter_authority.py"),
+            "--root",
+            str(tmp_path),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(

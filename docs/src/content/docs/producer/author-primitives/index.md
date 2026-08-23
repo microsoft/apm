@@ -43,10 +43,10 @@ See the [targets matrix](../../reference/targets-matrix/) for the full map.
 
 Commands ship as prompts (`.apm/prompts/*.prompt.md`); there is no separate `.apm/commands/` directory. See [Hooks and commands](./hooks-and-commands/).
 
-Every primitive type follows the same pattern: a markdown file (or directory containing a primary markdown file) with frontmatter declaring its name and its trigger conditions. `apm compile` reads `.apm/`, applies any policy, and writes per-target output to the right directories on the target's filesystem.
+Markdown-based primitive types use a markdown file (or directory containing a primary markdown file). Frontmatter requirements vary by primitive type and declare metadata such as the primitive's name and trigger conditions. `apm compile` reads `.apm/`, applies any policy, and writes per-target output to the right directories on the target's filesystem.
 
 :::note
-The opening `---` fence must start at the first character of line 1; otherwise APM treats the document as body content and later `---` lines remain Markdown horizontal rules.
+When a Markdown primitive has frontmatter, its opening `---` fence must start at the first character of line 1. Without that opening fence, APM treats the document as body content and later `---` lines remain Markdown horizontal rules.
 :::
 
 ## Recommended reading order

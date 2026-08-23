@@ -44,6 +44,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Behavioral test taxonomy classification | module-level pytestmark (taxonomy inventory verifies) | `tests/quality/taxonomy_inventory_plugin.py`; `tests/quality/test_test_taxonomy.py` |
 | Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
 | Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
+| Markdown frontmatter detection and bounded parsing | utils/yaml_io.py (load_frontmatter) | `src/apm_cli/utils/yaml_io.py` |
 | User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
 | Compiled-output writes (atomic) | CompiledOutputWriter | `src/apm_cli/compilation/output_writer.py` |
 | Deployment provenance / state | deployment_ledger.py | `src/apm_cli/core/deployment_ledger.py` |
