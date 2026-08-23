@@ -855,14 +855,14 @@ class TestHelperFunctions:
         with patch("os.walk", side_effect=_raise):
             assert _dir_size(root) == 0
 
-    def test_sanitize_url_strips_password_and_preserves_port(self) -> None:
+    def test_sanitize_url_strips_userinfo_and_preserves_port(self) -> None:
         sanitized = _sanitize_url("https://alice:secret@example.com:8443/repo.git")
-        assert sanitized == "https://alice:***@example.com:8443/repo.git"
+        assert sanitized == "https://example.com:8443/repo.git"
 
-    def test_sanitize_url_leaves_username_only_url_unchanged(self) -> None:
+    def test_sanitize_url_strips_username_only_url(self) -> None:
         url = "https://alice@example.com/repo.git"
-        assert _sanitize_url(url) == url
+        assert _sanitize_url(url) == "https://example.com/repo.git"
 
-    def test_sanitize_url_returns_original_on_parser_error(self) -> None:
+    def test_sanitize_url_redacts_parser_errors(self) -> None:
         with patch("urllib.parse.urlparse", side_effect=ValueError("bad url")):
-            assert _sanitize_url("https://example.com/repo.git") == "https://example.com/repo.git"
+            assert _sanitize_url("https://example.com/repo.git") == "<redacted git URL>"

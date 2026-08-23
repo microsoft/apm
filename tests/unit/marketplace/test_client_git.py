@@ -212,6 +212,20 @@ def test_ssh_git_environment_masks_http_credentials_and_forces_batch_mode() -> N
     assert env["GIT_SSH_COMMAND"] == "ssh -i /tmp/test-key -o BatchMode=yes -o ConnectTimeout=30"
 
 
+def test_ssh_git_environment_preserves_shell_expansions_in_command() -> None:
+    resolver = AuthResolver(token_manager=MagicMock())
+    with patch.object(
+        resolver,
+        "hardened_git_base_env",
+        return_value={"GIT_SSH_COMMAND": 'ssh -i "$HOME/.ssh/id_rsa" -o BatchMode=no'},
+    ):
+        env = resolver.build_ssh_git_env()
+
+    assert (
+        env["GIT_SSH_COMMAND"] == 'ssh -i "$HOME/.ssh/id_rsa" -o BatchMode=yes -o ConnectTimeout=30'
+    )
+
+
 def test_fetch_git_ado_url_routes_via_subprocess(
     tmp_path: Path, fake_host_info, fake_auth_resolver
 ) -> None:

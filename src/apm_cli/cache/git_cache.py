@@ -163,7 +163,7 @@ class GitCache:
         # Cache hit path (skip if refresh requested)
         if not self._refresh and checkout_dir.is_dir():
             if verify_checkout_sha(checkout_dir, sha):
-                _log.debug("Cache HIT: %s @ %s [%s]", url, sha[:12], variant)
+                _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 return checkout_dir
             else:
                 # Integrity failure -- evict

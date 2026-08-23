@@ -467,6 +467,24 @@ class TestMarketplaceAdd:
         assert registered_url.hostname == "gitea.example.com"
         assert registered_url.port == 2222
 
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_unpinned_ssh_url_warns_about_mutable_ref(
+        self, mock_detect, mock_fetch, mock_add, runner
+    ):
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(name="m", plugins=())
+        result = runner.invoke(
+            marketplace,
+            ["add", "ssh://git@gitea.example.com:2222/org/repo.git"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Pin this git marketplace" in result.output
+
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
     def test_add_strips_dot_git_suffix(self, mock_detect, mock_fetch, runner):

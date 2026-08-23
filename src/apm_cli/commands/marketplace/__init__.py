@@ -256,37 +256,6 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
 _parse_marketplace_repo = _parse_marketplace_source
 
 
-def _looks_like_local_marketplace_source(raw: str) -> bool:
-    """Heuristic match for local-path marketplace sources.
-
-    Matches: absolute paths (``/...``), explicit relative (``./...``,
-    ``../...``), home (``~``, ``~/...``), ``file://`` URIs, and Windows
-    drive letters (``C:\\`` or ``C:/``). The leading-slash check is
-    POSIX-only; on Windows, absolute paths arrive as drive-letter form.
-    """
-    if not raw:
-        return False
-    if raw.lower().startswith("file://"):
-        return True
-    if raw.startswith(("/", "./", "../", "~/", ".\\", "..\\", "~\\")) or raw == "~":
-        return True
-    # Windows drive letter: C:\foo or C:/foo
-    return len(raw) >= 3 and raw[0].isalpha() and raw[1] == ":" and raw[2] in ("\\", "/")
-
-
-def _expand_local_path(raw: str) -> str:
-    """Expand ``~`` and normalise to an absolute filesystem path string.
-
-    Used when synthesising the ``file://`` URL stored in ``marketplaces.json``
-    for local-kind entries. The result is *not* resolved (no symlink follow)
-    because the fetcher does its own ``ensure_path_within`` guard against
-    the post-``resolve`` location.
-    """
-    import os.path as _osp
-
-    return _osp.abspath(_osp.expanduser(raw))
-
-
 def _marketplace_add_unsupported_host_error(
     resolved_host: str,
     quoted_repo: str,
@@ -597,7 +566,11 @@ def _should_warn_unpinned_git_url(
     """Return True when a git URL source uses the implicit mutable default ref."""
     if is_direct_url or fragment_ref or explicit_ref:
         return False
-    return source.lower().startswith("https://") and kind in {"github", "gitlab", "git"}
+    if kind not in {"github", "gitlab", "git", "ado"}:
+        return False
+    from ...marketplace.source_identity import parse_marketplace_source
+
+    return parse_marketplace_source(source).transport in {"https", "ssh", "scp"}
 
 
 def _local_source_points_to_file(source: MarketplaceSource) -> bool:

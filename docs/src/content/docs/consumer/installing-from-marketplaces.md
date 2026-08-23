@@ -92,8 +92,8 @@ browse / install / update workflow works against:
   Gitea, Bitbucket Server, and self-hosted git servers.
 - **SSH URLs** -- `git@gitea.example.com:org/repo.git`, or
   `ssh://git@gitea.example.com:2222/org/repo.git` when the server uses a
-  non-default port. The fully qualified form is passed unchanged to subprocess
-  `git`, retaining its username and port. SSH uses the local key or agent
+  non-default port. The fully qualified form retains its username and port
+  when passed to subprocess `git`. SSH uses the local key or agent
   without forwarding HTTP credentials; passwords, query parameters, and `#ref`
   fragments are rejected (use `--ref` instead).
   For in-repository plugins from GitLab and generic git marketplaces, APM
