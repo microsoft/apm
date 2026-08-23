@@ -279,20 +279,32 @@ if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
 fi
 policy_file="src/apm_cli/policy/discovery.py"
 ado_policy_project_owner_count=$(grep -Ec '^ADO_POLICY_PROJECT = "apm"$' "$policy_file" || true)
-ado_policy_project_consumers=$(grep -Ec \
-    'project=ADO_POLICY_PROJECT|ADO_POLICY_PROJECT, "_apm"' "$policy_file" || true)
-ado_policy_project_duplicates=$(
-    grep -rEn --include='*.py' '^[[:space:]]*ADO_POLICY_PROJECT[[:space:]]*=' \
+ado_policy_repository_owner_count=$(grep -Ec '^ADO_POLICY_REPOSITORY = "apm-policy"$' "$policy_file" || true)
+ado_policy_coordinate_consumers=$(grep -Ec \
+    'project=ADO_POLICY_PROJECT|ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY' "$policy_file" || true)
+ado_policy_coordinate_duplicates=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*ADO_POLICY_(PROJECT|REPOSITORY)[[:space:]]*=' \
         src/apm_cli \
-        | grep -v "^${policy_file}:" \
+        | grep -Fv "${policy_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+ado_policy_coordinate_literal_consumers=$(
+    grep -En \
+        'project[[:space:]]*=[[:space:]]*["'\'']apm["'\'']|repo[[:space:]]*=[[:space:]]*["'\'']apm-policy["'\'']' \
+        "$policy_file" \
         | grep -v 'architecture-authority-exempt:' \
         || true
 )
 if [ "$ado_policy_project_owner_count" -ne 1 ] \
-    || [ "$ado_policy_project_consumers" -ne 2 ] \
-    || [ -n "$ado_policy_project_duplicates" ]; then
-    echo "[x] ADO policy project coordinate must come from discovery.py::ADO_POLICY_PROJECT"
-    [ -n "$ado_policy_project_duplicates" ] && echo "$ado_policy_project_duplicates"
+    || [ "$ado_policy_repository_owner_count" -ne 1 ] \
+    || [ "$ado_policy_coordinate_consumers" -ne 2 ] \
+    || [ -n "$ado_policy_coordinate_duplicates" ] \
+    || [ -n "$ado_policy_coordinate_literal_consumers" ]; then
+    echo "[x] ADO policy coordinate must come from discovery.py constants"
+    [ -n "$ado_policy_coordinate_duplicates" ] && echo "$ado_policy_coordinate_duplicates"
+    [ -n "$ado_policy_coordinate_literal_consumers" ] && echo "$ado_policy_coordinate_literal_consumers"
     violations=$((violations + 1))
 fi
 policy_named_defs=$(grep -Ec \

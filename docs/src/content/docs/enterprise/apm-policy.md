@@ -47,14 +47,14 @@ APM discovers your org-level policy by checking candidate repos in this order --
 | 1 | `.github-private` | GitHub and GitHub API-compatible hosts |
 | 2 | `.github` | GitHub and GitHub API-compatible hosts |
 | 3 | `.apm` | GitHub and GitHub API-compatible hosts |
-| 4 | `_apm` | GitHub API-compatible hosts and Azure DevOps |
+| 4 | `_apm` | GitHub API-compatible hosts |
 
-Azure DevOps does not allow repository names starting or ending with a period, so only `_apm` is tried on ADO hosts. ADO requires repositories to live inside projects, and project names cannot start with an underscore; use `apm` as the project and `_apm` as the repository:
+Azure DevOps does not allow project or repository names starting with an underscore, and repositories must live inside projects. Use `apm` as the project and `apm-policy` as the repository. APM temporarily falls back to legacy `_apm/_apm` only after the primary location returns 404, and reports a migration warning.
 
 ```
 <org>/
   apm/               # ADO project
-    _apm/            # repo inside the project
+    apm-policy/      # repo inside the project
       apm-policy.yml
 ```
 

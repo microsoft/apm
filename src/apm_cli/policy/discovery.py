@@ -71,18 +71,26 @@ logger = logging.getLogger(__name__)
 # Candidate repo names in precedence order (first valid policy wins).
 # Host profiles select which candidates are valid for a given git host.
 _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
-_ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
 
-# ADO project name for the policy repo (ADO requires a project container).
-# The repository remains ``_apm``; ADO project names cannot begin with ``_``.
+# Azure DevOps project and repository names cannot begin with ``_``.
+# ADO requires repositories to live inside projects, so this pair is the
+# canonical primary coordinate for organization policy discovery.
 ADO_POLICY_PROJECT = "apm"
+ADO_POLICY_REPOSITORY = "apm-policy"
+_ADO_POLICY_REPOS: tuple[str, ...] = (ADO_POLICY_REPOSITORY,)
+_LEGACY_ADO_POLICY_PROJECT = "_apm"
+_LEGACY_ADO_POLICY_REPOSITORY = "_apm"
+_LEGACY_ADO_POLICY_WARNING = (
+    "Azure DevOps policy was discovered at legacy _apm/_apm. Move it to "
+    "apm/apm-policy; the legacy coordinate is a temporary compatibility fallback."
+)
 
 
 def _policy_repo_candidates(host: str) -> tuple[str, ...]:
     """Return candidate policy repo names for *host* in precedence order.
 
-    ADO hosts cannot have repo names starting/ending with ``.``, so only
-    ``_apm`` is valid.  All other hosts try the full cascade.
+    ADO hosts cannot have repo names starting with ``.`` or ``_``, so only
+    ``apm-policy`` is valid. All other hosts try the full cascade.
     """
     if is_azure_devops_hostname(host):
         return _ADO_POLICY_REPOS
@@ -234,6 +242,7 @@ class PolicyFetchResult:
     fetch_error: str | None = None  # Network/parse error on refresh attempt
     outcome: str = ""  # See docstring for valid values
     warnings: list[str] = field(default_factory=list)
+    not_found: bool = field(default=False, repr=False)
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
@@ -494,7 +503,7 @@ def _resolve_ado_parent_ref(
         current_org = ""
 
     if parent_ref == "org":
-        resolved = (current_org, ADO_POLICY_PROJECT, "_apm", leaf_host)
+        resolved = (current_org, ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY, leaf_host)
     else:
         parts = parent_ref.strip("/").split("/")
         explicit_host = _extract_extends_host(parent_ref)
@@ -555,6 +564,14 @@ def _fetch_chain_parent(
                 outcome="cache_miss_fetch_fail",
             )
         org, project, repo, host = resolved
+        if parent_ref == "org":
+            return _fetch_ado_org_policy(
+                org=org,
+                host=host,
+                project_root=project_root,
+                no_cache=no_cache,
+                cache_only=cache_only,
+            )
         return _fetch_from_ado_repo(
             org=org,
             project=project,
@@ -878,10 +895,8 @@ def _auto_discover(
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
         if is_ado:
-            result = _fetch_from_ado_repo(
+            result = _fetch_ado_org_policy(
                 org=org,
-                project=ADO_POLICY_PROJECT,
-                repo=candidate_repo,
                 host=host,
                 port=port,
                 project_root=project_root,
@@ -1204,8 +1219,8 @@ def _fetch_from_repo(
 
     if error:
         # 404 = no policy, not an error
-        if "404" in error:
-            return PolicyFetchResult(source=source_label, outcome="absent")
+        if error.startswith("404:"):
+            return PolicyFetchResult(source=source_label, outcome="absent", not_found=True)
         # Fetch failed -- try stale cache fallback
         return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
@@ -1379,8 +1394,8 @@ def _fetch_from_ado_repo(
     )
 
     if error:
-        if "404" in error:
-            return PolicyFetchResult(source=source_label, outcome="absent")
+        if error.startswith("404:"):
+            return PolicyFetchResult(source=source_label, outcome="absent", not_found=True)
         return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
     if content is None:
@@ -1424,6 +1439,47 @@ def _fetch_from_ado_repo(
         expected_hash=expected_hash,
         warnings=warnings,
     )
+
+
+def _fetch_ado_org_policy(
+    *,
+    org: str,
+    host: str,
+    project_root: Path,
+    port: int | None = None,
+    no_cache: bool = False,
+    expected_hash: str | None = None,
+    cache_only: bool = False,
+) -> PolicyFetchResult:
+    """Fetch the canonical ADO policy, using legacy coordinates only after 404."""
+    primary = _fetch_from_ado_repo(
+        org=org,
+        project=ADO_POLICY_PROJECT,
+        repo=ADO_POLICY_REPOSITORY,
+        host=host,
+        port=port,
+        project_root=project_root,
+        no_cache=no_cache,
+        expected_hash=expected_hash,
+        cache_only=cache_only,
+    )
+    if not primary.not_found:
+        return primary
+
+    legacy = _fetch_from_ado_repo(
+        org=org,
+        project=_LEGACY_ADO_POLICY_PROJECT,
+        repo=_LEGACY_ADO_POLICY_REPOSITORY,
+        host=host,
+        port=port,
+        project_root=project_root,
+        no_cache=no_cache,
+        expected_hash=expected_hash,
+        cache_only=cache_only,
+    )
+    if legacy.found:
+        legacy.warnings.append(_LEGACY_ADO_POLICY_WARNING)
+    return legacy
 
 
 def _fetch_ado_contents(
