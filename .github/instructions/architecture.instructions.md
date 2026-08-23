@@ -66,6 +66,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | MCP package launcher selection and argv shape (container and non-container) | adapters/client/base.py (MCPClientAdapter) | `src/apm_cli/adapters/client/base.py` |
 | Dependency CLI identifier parsing + uninstall selection | models/dependency/selection.py (via DependencyReference) | `src/apm_cli/models/dependency/selection.py` |
 | JetBrains Copilot MCP config path | adapters/client/intellij.py | `src/apm_cli/adapters/client/intellij.py` |
+| Copilot CLI MCP config paths | adapters/client/copilot.py | `src/apm_cli/adapters/client/copilot.py` |
 | Marketplace tag-pattern validation and expansion | marketplace/tag_pattern.py | `src/apm_cli/marketplace/tag_pattern.py` |
 | Local marketplace package-version manifest precedence | marketplace/version_check.py (_read_local_version) | `src/apm_cli/marketplace/version_check.py` |
 | applyTo normalization and hidden-tool placement | utils/patterns.py (normalize_apply_to); compilation/context_optimizer.py (ContextOptimizer) | `src/apm_cli/utils/patterns.py`; `src/apm_cli/compilation/context_optimizer.py` |

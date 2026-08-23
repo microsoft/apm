@@ -784,6 +784,56 @@ def test_intellij_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path
     assert "JetBrains Copilot MCP paths must come from the IntelliJ adapter" in result.stdout
 
 
+def test_copilot_mcp_config_paths_have_single_owner() -> None:
+    """Copilot cleanup must use the adapter's project or user config path."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/adapters/client/copilot.py").read_text(encoding="utf-8")
+    integrator = (root / "src/apm_cli/integration/mcp_integrator.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("def get_config_path(") == 1
+    assert "COPILOT_HOME" in owner
+    assert 'ClientFactory.create_client(\n                "copilot",' in integrator
+    assert "Copilot CLI MCP paths must come from the Copilot adapter" in guard
+
+
+def test_copilot_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The boundary lint rejects direct Copilot cleanup path selection."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    integrator = sandbox / "src/apm_cli/integration/mcp_integrator.py"
+    integrator.write_text(
+        integrator.read_text(encoding="utf-8")
+        + '\n_PARALLEL_COPILOT_MCP_PATH = ".github/mcp.json"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Copilot CLI MCP paths must come from the Copilot adapter" in result.stdout
+
+
 def test_local_marketplace_version_source_has_single_owner() -> None:
     """The release gate owns local apm.yml and plugin.json version precedence."""
     root = Path(__file__).parents[2]

@@ -101,6 +101,20 @@ if [ "$effective_target_definition_count" -ne 1 ] \
     [ -n "$effective_target_context_hits" ] && echo "$effective_target_context_hits"
     violations=$((violations + 1))
 fi
+copilot_mcp_path_owner="src/apm_cli/adapters/client/copilot.py"
+copilot_mcp_path_duplicate_hits=$(
+    grep -En '(\.github/mcp\.json|mcp-config\.json)' \
+        src/apm_cli/integration/mcp_integrator.py \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'COPILOT_HOME' "$copilot_mcp_path_owner" \
+    || ! grep -q 'ClientFactory.create_client(' src/apm_cli/integration/mcp_integrator.py \
+    || [ -n "$copilot_mcp_path_duplicate_hits" ]; then
+    echo "[x] Copilot CLI MCP paths must come from the Copilot adapter"
+    [ -n "$copilot_mcp_path_duplicate_hits" ] && echo "$copilot_mcp_path_duplicate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Install orchestration must not branch on native locator target names" \
     'name == "copilot-(app|cowork)"|name in \{.*copilot-(app|cowork)' \

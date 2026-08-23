@@ -818,7 +818,7 @@ class TestInstallProjectRootDetection:
 
         `.vscode/` exists on disk (as it would on one developer's machine
         but not another's). The declared Copilot target intentionally projects
-        to the VS Code project runtime; no additional runtime may be inferred.
+        to the Copilot CLI project runtime; no additional runtime may be inferred.
         """
         nested = tmp_path / "nested-project"
         (nested / ".vscode").mkdir(parents=True)
@@ -843,7 +843,7 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"vscode", "cursor", "opencode"}
+        assert called_runtimes == {"copilot", "cursor", "opencode"}
 
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
@@ -907,8 +907,8 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"vscode"}
-        logger.progress.assert_any_call("Targeting declared target from apm.yml: vscode")
+        assert called_runtimes == {"copilot"}
+        logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
 
     @pytest.mark.parametrize(
         "apm_config",

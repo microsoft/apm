@@ -622,24 +622,21 @@ class MCPIntegrator:
             )
 
         if "copilot" in target_runtimes:
-            if scope is InstallScope.PROJECT and project_root is not None:
-                _clean_json_mcp_config(
-                    project_root_path / ".github" / "mcp.json",
-                    expanded_stale,
-                    logger,
-                    ".github/mcp.json",
-                    use_rich=True,
-                    fail_on_write_error=fail_on_write_error,
-                )
-            else:
-                _clean_json_mcp_config(
-                    Path.home() / ".copilot" / "mcp-config.json",
-                    expanded_stale,
-                    logger,
-                    "Copilot CLI config (~/.copilot/mcp-config.json)",
-                    use_rich=True,
-                    fail_on_write_error=fail_on_write_error,
-                )
+            from apm_cli.factory import ClientFactory
+
+            copilot_client = ClientFactory.create_client(
+                "copilot",
+                project_root=project_root_path,
+                user_scope=scope is not InstallScope.PROJECT,
+            )
+            _clean_json_mcp_config(
+                Path(copilot_client.get_config_path()),
+                expanded_stale,
+                logger,
+                "Copilot CLI config",
+                use_rich=True,
+                fail_on_write_error=fail_on_write_error,
+            )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:

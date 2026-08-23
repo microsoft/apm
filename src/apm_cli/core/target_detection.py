@@ -859,10 +859,10 @@ class EffectiveTargetDecision:
         seen: set[str] = set()
         for target, capability in _target_capabilities(self.value):
             runtime = (
-                capability.compile_family
-                if capability.compile_family in capability.runtimes
-                else target
+                target
                 if target in capability.runtimes
+                else capability.compile_family
+                if capability.compile_family in capability.runtimes
                 else capability.runtimes[0]
                 if capability.runtimes
                 else capability.name
@@ -874,83 +874,8 @@ class EffectiveTargetDecision:
 
     def runtime_targets_for_scope(self, *, user_scope: bool) -> tuple[str, ...] | None:
         """Return MCP runtime identifiers adjusted for project or user scope."""
-        runtimes = self.runtime_targets
-        if (
-            not user_scope
-            or runtimes is None
-            or self.canonical_targets is None
-            or "copilot" not in self.canonical_targets
-        ):
-            return runtimes
-        return tuple("copilot" if target == "vscode" else target for target in runtimes)
-
-    def runtime_targets_for_subtarget(
-        self, subtarget: str | None, *, user_scope: bool
-    ) -> tuple[str, ...] | None:
-        """Return MCP runtime identifiers for a subtarget selection (or all).
-
-        For targets that define subtargets (currently only ``copilot``), the
-        caller may narrow the set of config destinations via ``subtarget``:
-
-        - ``None`` / ``"all"``: expand to all runtimes in the capability
-          (default -- writes to every sub-tool in the target ecosystem).
-        - Named subtarget (e.g. ``"cli"``, ``"vscode"``): restrict to the
-          runtimes mapped by that subtarget name.
-
-        Targets without subtargets fall back to the same single-runtime
-        selection used by :meth:`runtime_targets_for_scope`.
-
-        User-scope vscode->copilot translation is applied after filtering,
-        with deduplication so ``all`` at user scope does not write twice to
-        the copilot runtime.
-        """
-        if self.value is None:
-            return None
-
-        runtimes: list[str] = []
-        seen: set[str] = set()
-        for _target, capability in _target_capabilities(self.value):
-            if capability.subtargets:
-                if subtarget is None or subtarget == "all":
-                    candidates: tuple[str, ...] = capability.runtimes
-                else:
-                    candidates = capability.subtargets.get(subtarget, ())
-            else:
-                single = (
-                    capability.compile_family
-                    if capability.compile_family in capability.runtimes
-                    else _target
-                    if _target in capability.runtimes
-                    else capability.runtimes[0]
-                    if capability.runtimes
-                    else capability.name
-                )
-                candidates = (single,)
-            for rt in candidates:
-                if rt not in seen:
-                    seen.add(rt)
-                    runtimes.append(rt)
-
-        if not runtimes:
-            return None
-
-        result: tuple[str, ...] = tuple(runtimes)
-
-        if (
-            user_scope
-            and self.canonical_targets is not None
-            and "copilot" in self.canonical_targets
-        ):
-            translated: list[str] = []
-            seen_t: set[str] = set()
-            for t in result:
-                mapped = "copilot" if t == "vscode" else t
-                if mapped not in seen_t:
-                    seen_t.add(mapped)
-                    translated.append(mapped)
-            result = tuple(translated)
-
-        return result
+        del user_scope
+        return self.runtime_targets
 
     @cached_property
     def runtime_equivalents(self) -> tuple[str, ...] | None:

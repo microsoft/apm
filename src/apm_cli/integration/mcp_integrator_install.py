@@ -497,7 +497,7 @@ def _resolve_target_runtimes(
         selection_source = _TargetSelectionSource.RUNTIME
     elif target_decision is not None and target_decision.runtime_targets is not None:
         target_runtimes = list(
-            target_decision.runtime_targets_for_subtarget(None, user_scope=user_scope) or ()
+            target_decision.runtime_targets_for_scope(user_scope=user_scope) or ()
         )
         if target_decision.source == "apm.yml":
             selection_source = _TargetSelectionSource.MANIFEST

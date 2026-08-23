@@ -202,6 +202,7 @@ def _capture_portable_mcp_state(
         project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".github/mcp.json"),
             PurePosixPath(".vscode/mcp.json"),
         ),
         external_roots=external_roots,
@@ -287,7 +288,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
     assert seed_lock is not None
     assert seed_lock.mcp_target_servers == {
         "codex": ["portable-server"],
-        "vscode": ["portable-server"],
+        "copilot": ["portable-server"],
     }
     seed_ledger = DeploymentLedgerCodec.from_lockfile(seed_lock)
     seed_rows = tuple(
@@ -295,7 +296,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
         for _key, record in sorted(seed_ledger.records.items())
         if record.locator.target == "mcp"
     )
-    assert {record.locator.runtime for record in seed_rows} == {"codex", "vscode"}
+    assert {record.locator.runtime for record in seed_rows} == {"codex", "copilot"}
 
     seed_codex_config = project.root / ".codex" / "config.toml"
     seed_codex_config.unlink()
@@ -400,7 +401,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
         assert lockfile is not None
         assert lockfile.mcp_target_servers == {
             "codex": ["portable-server"],
-            "vscode": ["portable-server"],
+            "copilot": ["portable-server"],
         }
         ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         rows = tuple(
@@ -752,15 +753,15 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
-    assert broad.file(".vscode/mcp.json").kind == "file"
+    assert broad.file(".github/mcp.json").kind == "file"
     assert b"managed-contract-server" in broad.file(".codex/config.toml").content
     assert b"user-authored" in broad.file(".codex/config.toml").content
     assert b"trust_level" in broad.file(".codex/config.toml").content
     assert (
-        b'"target_servers":{"codex":["managed-contract-server"],"vscode":["managed-contract-server"]}'
+        b'"target_servers":{"codex":["managed-contract-server"],"copilot":["managed-contract-server"]}'
         in (broad.mcp_state_bytes)
     )
 
@@ -779,7 +780,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     codex_bytes = narrow.file(".codex/config.toml").content
@@ -787,7 +788,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     assert b"managed-contract-server" not in codex_bytes
     assert b"user-authored" in codex_bytes
     assert b"trust_level" in codex_bytes
-    assert b'"target_servers":{"vscode":["managed-contract-server"]}' in narrow.mcp_state_bytes
+    assert b'"target_servers":{"copilot":["managed-contract-server"]}' in narrow.mcp_state_bytes
     assert unrelated_codex_file.read_bytes() == unrelated_codex_bytes
 
     runner.run_sequence(
@@ -801,7 +802,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     _assert_semantic_lifecycle_state(narrow, converged)
@@ -811,7 +812,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     assert (
@@ -827,7 +828,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     _assert_exact_lifecycle_state(before_audit, after_audit)
@@ -1039,7 +1040,7 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
         cwd=fixture.project_root,
         env=environment,
     )
-    assert (fixture.project_root / ".vscode" / "mcp.json").is_file()
+    assert (fixture.project_root / ".github" / "mcp.json").is_file()
     assert (fixture.project_root / ".github" / "lsp.json").is_file()
     assert (
         fixture.project_root
@@ -1228,11 +1229,11 @@ def test_saved_target_drives_declared_mcp_and_lsp_without_package(
     )
 
 
-def test_saved_copilot_target_projects_to_vscode_for_direct_mcp(
+def test_saved_copilot_target_projects_to_copilot_for_direct_mcp(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """A saved Copilot profile must use the project-scoped VS Code MCP runtime."""
+    """A saved Copilot profile must use the project-scoped Copilot MCP runtime."""
     isolated = IsolatedApmEnvironment.create(
         tmp_path / "saved-copilot-direct-mcp",
         base_env=dict(os.environ),
@@ -1256,7 +1257,7 @@ def test_saved_copilot_target_projects_to_vscode_for_direct_mcp(
         env=environment,
     )
 
-    assert (project / ".vscode" / "mcp.json").is_file()
+    assert (project / ".github" / "mcp.json").is_file()
     assert not (isolated.home / ".copilot" / "mcp-config.json").exists()
 
 
@@ -1487,7 +1488,7 @@ def test_manifest_and_explicit_target_precedence_for_mcp_and_lsp(
         cwd=project.root,
         env=environment,
     )
-    assert (project.root / ".vscode" / "mcp.json").is_file()
+    assert (project.root / ".github" / "mcp.json").is_file()
     assert (project.root / ".github" / "lsp.json").is_file()
     assert not (project.root / ".mcp.json").exists()
     assert not (project.root / ".lsp.json").exists()
