@@ -210,6 +210,105 @@ print("ordinary Markdown")
         assert deployed.read_text(encoding="utf-8") == unfenced_markdown
         assert parse_primitive_file(deployed).content == unfenced_markdown
 
+    @pytest.mark.parametrize(
+        ("target", "deployed_path", "scope_marker"),
+        [
+            ("claude", ".claude/rules/test-skill.md", '  - "src/**"'),
+            ("cursor", ".cursor/rules/test-skill.mdc", 'globs: "src/**"'),
+            ("windsurf", ".windsurf/rules/test-skill.md", 'globs: "src/**"'),
+            ("kiro", ".kiro/steering/test-skill.md", 'fileMatchPattern: "src/**"'),
+            ("antigravity", ".agents/rules/test-skill.md", 'globs: "src/**"'),
+        ],
+    )
+    def test_install_four_hyphen_frontmatter_preserves_scope_across_targets(
+        self,
+        temp_workspace,
+        apm_binary_path,
+        target,
+        deployed_path,
+        scope_marker,
+    ):
+        """Converted targets consume the canonical three-or-more-hyphen grammar."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        source.write_text(
+            "----\napplyTo: src/**\n----\n# Scoped rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                target,
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        deployed = consumer / deployed_path
+        assert deployed.exists()
+        rendered = deployed.read_text(encoding="utf-8")
+        assert scope_marker in rendered
+        assert "# Scoped rule" in rendered
+        assert "----" not in rendered
+
+    def test_install_rejects_bounded_frontmatter_bomb(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Rejected YAML must not be copied into an agent-readable target."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        lines = ["a0: &a0 {k: v}"]
+        previous = "a0"
+        for index in range(1, 40):
+            current = f"a{index}"
+            lines.append(f"{current}: &{current}")
+            lines.append(f"  <<: [*{previous}, *{previous}]")
+            previous = current
+        source.write_text(
+            "---\n" + "\n".join(lines) + "\n---\n# Hostile rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "claude",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not (consumer / ".claude/rules/test-skill.md").exists()
+
     def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_binary_path):
         """Installing a path with no apm.yml or SKILL.md should fail gracefully."""
         consumer = temp_workspace / "consumer"

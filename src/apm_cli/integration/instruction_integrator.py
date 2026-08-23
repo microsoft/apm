@@ -53,10 +53,7 @@ class InstructionIntegrator(BaseIntegrator):
     @staticmethod
     def _parse_frontmatter(content: str) -> tuple[dict, str]:
         """Return bounded frontmatter metadata and body for instruction text."""
-        try:
-            post = loads_frontmatter(content, preserve_body=True)
-        except Exception:
-            return {}, content
+        post = loads_frontmatter(content, preserve_body=True)
         metadata = post.metadata if isinstance(post.metadata, dict) else {}
         return metadata, post.content
 
@@ -507,7 +504,7 @@ class InstructionIntegrator(BaseIntegrator):
         # Build Cursor Rules frontmatter
         parts = ["---"]
         if description:
-            parts.append(f"description: {description}")
+            parts.append(f"description: {yaml_double_quote(description)}")
         globs = parse_apply_to(apply_to)
         if len(globs) == 1:
             parts.append(f"globs: {yaml_double_quote(globs[0])}")
@@ -680,18 +677,7 @@ class InstructionIntegrator(BaseIntegrator):
         Parses existing YAML frontmatter, maps ``applyTo`` to Antigravity's
         ``trigger: glob`` + ``globs`` frontmatter.
         """
-        try:
-            post = loads_frontmatter(content, preserve_body=True)
-            metadata = post.metadata if isinstance(post.metadata, dict) else {}
-            body = post.content
-        except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Failed to parse instruction frontmatter YAML: %s", e
-            )
-            metadata = {}
-            body = content
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
         apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
         safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
         globs = parse_apply_to(safe_apply_to)

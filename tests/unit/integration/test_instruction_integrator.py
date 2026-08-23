@@ -7,10 +7,12 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import yaml
 
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.utils.yaml_io import loads_frontmatter
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -522,24 +524,24 @@ class TestConvertToCursorRules:
     def test_preserves_description(self):
         content = "---\napplyTo: '**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "description: TypeScript guidelines" in result
+        assert 'description: "TypeScript guidelines"' in result
         assert 'globs: "**/*.ts"' in result
 
     def test_generates_description_from_heading(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# Python coding standards\n\nUse type hints."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "description: Python coding standards" in result
+        assert 'description: "Python coding standards"' in result
 
     def test_generates_description_from_first_sentence(self):
         content = "---\napplyTo: '**'\n---\n\nAlways use descriptive names. Follow PEP8."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "description: Always use descriptive names" in result
+        assert 'description: "Always use descriptive names"' in result
 
     def test_no_frontmatter(self):
         content = "# Simple rules\n\nJust some guidelines."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert result.startswith("---\n")
-        assert "description: Simple rules" in result
+        assert 'description: "Simple rules"' in result
         # No globs when no applyTo
         assert "globs" not in result
 
@@ -553,7 +555,7 @@ class TestConvertToCursorRules:
         content = "---\ndescription: General rules\n---\n\n# Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert "globs" not in result
-        assert "description: General rules" in result
+        assert 'description: "General rules"' in result
 
 
 class TestCursorRulesIntegration:
@@ -768,7 +770,7 @@ class TestCursorRulesIntegration:
 
         deployed = (self.project_root / ".cursor" / "rules" / "ts.mdc").read_text()
         assert 'globs: "src/**/*.ts"' in deployed
-        assert "description: TypeScript rules" in deployed
+        assert 'description: "TypeScript rules"' in deployed
         assert "applyTo" not in deployed
         assert "# TypeScript" in deployed
         assert "Use strict mode." in deployed
@@ -1333,6 +1335,16 @@ class TestApplyToCommaSplitting:
 
         assert InstructionIntegrator._strip_frontmatter(content) == "# Scoped rule\n"
 
+    def test_cursor_quotes_multiline_description(self):
+        content = '---\napplyTo: src/**\ndescription: "safe\\n---\\n"\n---\n# Scoped rule\n'
+
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        post = loads_frontmatter(result)
+
+        assert post.metadata["globs"] == "src/**"
+        assert post.metadata["description"] == "safe\n---"
+        assert post.content == "# Scoped rule"
+
     # ---- Claude ----
 
     @pytest.mark.parametrize(
@@ -1540,15 +1552,10 @@ class TestApplyToCommaSplitting:
         assert '  - "src/foo,bar/*.py"' in result
         assert '  - "tests/**/*.py"' in result
 
-    def test_antigravity_malformed_yaml_fallback(self, caplog):
-        import logging
-
+    def test_antigravity_malformed_yaml_fails_closed(self):
         content = "---\napplyTo: [\n---\n\n# Body"
-        with caplog.at_level(logging.WARNING):
-            result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "Failed to parse instruction frontmatter YAML" in caplog.text
-        assert "trigger: glob" not in result
-        assert "# Body" in result
+        with pytest.raises(yaml.YAMLError):
+            InstructionIntegrator._convert_to_antigravity_rules(content)
 
 
 class TestWindsurfRulesIntegration:
