@@ -544,9 +544,10 @@
       "keyword": "MUST",
       "section": "4.3.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_names_skills_a_plugin_collection_exposes"
       ]
     },
     {

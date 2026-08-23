@@ -134,6 +134,78 @@ def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> 
     return True
 
 
+def _holds_skill_dirs(candidate: Path) -> bool:
+    """Return True iff *candidate* is a container of skills, not a skill itself.
+
+    A directory carrying its own ``SKILL.md`` is the skill, however deep it
+    sits in the plugin (``skills/engineering/tdd``). Anything else that has at
+    least one immediate child carrying ``SKILL.md`` is a container holding
+    them (the conventional ``skills/``). Directories matching neither shape
+    are not containers, so a declared entry keeps its own name rather than
+    spilling unrecognized contents into the shared skills root.
+    """
+    if (candidate / "SKILL.md").is_file():
+        return False
+    try:
+        return any(
+            (child / "SKILL.md").is_file() for child in candidate.iterdir() if child.is_dir()
+        )
+    except OSError:
+        return False
+
+
+def _warn_skills_entry_holds_no_skill(entry: Path, plugin_path: Path) -> None:
+    """Warn that a declared ``skills`` entry can never yield a skill.
+
+    An entry with no ``SKILL.md`` at its root and none in any immediate child
+    is neither a skill nor a container of them: it is copied under its own
+    name, but nothing inside reaches ``.apm/skills/<name>/SKILL.md``, so it
+    stays invisible to deployment and to ``--skill``. Silence here is what
+    made #2530 expensive to diagnose -- the manifest looked wrong when only
+    the directory depth was -- so say it once, at normalization time.
+    """
+    try:
+        declared = entry.relative_to(plugin_path).as_posix()
+    except ValueError:  # pragma: no cover - entries are verified inside the plugin
+        declared = entry.name
+    _surface_warning(
+        f"Plugin skills entry '{declared}' has no SKILL.md at its root or in "
+        f"any immediate subdirectory; nothing under it will deploy or be "
+        f"selectable with --skill. Declare each skill directory, or place "
+        f"skills one level below the declared container.",
+        _logger,
+    )
+
+
+def _declared_entry_label(entry: Path, plugin_path: Path) -> str:
+    """Render a declared entry as the plugin-relative path the author wrote."""
+    try:
+        return entry.relative_to(plugin_path).as_posix()
+    except ValueError:  # pragma: no cover - entries are verified inside the plugin
+        return entry.name
+
+
+def _warn_skills_name_collision(
+    name: str, prev_entry: Path, entry: Path, plugin_path: Path
+) -> None:
+    """Warn that two declared ``skills`` entries provide the same skill name.
+
+    Both land on ``.apm/skills/<name>/`` -- the one depth deployment and
+    ``--skill`` read -- and ``shutil.copytree(..., dirs_exist_ok=True)``
+    settles the collision by overwriting, so the later declared entry wins
+    and the earlier copy is silently gone. Issue #2629: a manifest ambiguous
+    about its own skill names deserves one line naming the skill and both
+    entries, not a clean-looking install missing a skill.
+    """
+    _surface_warning(
+        f"Plugin skills entries '{_declared_entry_label(prev_entry, plugin_path)}' "
+        f"and '{_declared_entry_label(entry, plugin_path)}' both provide skill "
+        f"'{name}'; only the copy from the last declared entry survives. "
+        f"Rename one skill or remove the duplicate entry.",
+        _logger,
+    )
+
+
 def parse_plugin_manifest(plugin_json_path: Path) -> dict[str, Any]:
     """Parse a plugin.json manifest file.
 
@@ -802,24 +874,59 @@ def _map_plugin_artifacts(
         skill_dirs = [s for s in skill_sources if s.is_dir()]
         skill_files = [s for s in skill_sources if s.is_file()]
 
-        is_custom_list = isinstance(manifest.get("skills"), list)
-        if is_custom_list and skill_dirs:
+        # A declared ``skills`` entry is either the skill itself (``SKILL.md``
+        # at its root, e.g. ``./skills/engineering/tdd``) or a container
+        # holding one skill per child (the conventional ``./skills/``).
+        # Classify per entry rather than per manifest shape: naming a
+        # container after itself buries every skill one level too deep, while
+        # merging a lone skill spills a bare ``SKILL.md`` into the shared root
+        # under no name at all. Either way ``--skill`` sees nothing, because
+        # ``.apm/skills/<name>/SKILL.md`` is the exact depth that deployment,
+        # ``--skill`` enumeration, the bin/ security scan and primitive
+        # counting all read. See issue #2530.
+        #
+        # Undeclared discovery keeps merging unconditionally: the default
+        # ``skills/`` is the convention container by definition.
+        declared = isinstance(manifest.get("skills"), (list, str))
+        if skill_dirs:
             target_skills.mkdir(parents=True, exist_ok=True)
+            # skill name -> (declared entry, source skill dir) for names this
+            # manifest already provided. Two entries landing the same name on
+            # ``.apm/skills/<name>/`` collide and the copytree below settles
+            # it by overwriting -- surface that instead of losing a skill
+            # silently (#2629). Overlapping entries that resolve to the same
+            # source directory (``./skills/`` plus ``./skills/tdd``) are not
+            # collisions: both copies are the same skill.
+            provided: dict[str, tuple[Path, Path]] = {}
             for d in skill_dirs:
-                nested = target_skills / d.name
-                if _is_same_path(d, nested):
+                if declared and not _holds_skill_dirs(d):
+                    dest = target_skills / d.name
+                    if (d / "SKILL.md").is_file():
+                        entry_skills = {d.name: d}
+                    else:
+                        # Neither shape: keep the contents isolated under the
+                        # entry's own name, but do not let the dead end pass
+                        # silently -- that silence is the #2530 symptom.
+                        _warn_skills_entry_holds_no_skill(d, plugin_path)
+                        entry_skills = {}
+                else:
+                    dest = target_skills
+                    try:
+                        entry_skills = {
+                            child.name: child
+                            for child in d.iterdir()
+                            if child.is_dir() and (child / "SKILL.md").is_file()
+                        }
+                    except OSError:
+                        entry_skills = {}
+                for name, src in entry_skills.items():
+                    prev = provided.get(name)
+                    if prev is not None and not _is_same_path(prev[1], src):
+                        _warn_skills_name_collision(name, prev[0], d, plugin_path)
+                    provided[name] = (d, src)
+                if _is_same_path(d, dest):
                     continue
-                shutil.copytree(
-                    d,
-                    nested,
-                    ignore=ignore_non_content,
-                    dirs_exist_ok=True,
-                )
-        elif skill_dirs:
-            for d in skill_dirs:
-                if _is_same_path(d, target_skills):
-                    continue
-                shutil.copytree(d, target_skills, dirs_exist_ok=True, ignore=ignore_non_content)
+                shutil.copytree(d, dest, dirs_exist_ok=True, ignore=ignore_non_content)
         if skill_files:
             target_skills.mkdir(parents=True, exist_ok=True)
             for f in skill_files:

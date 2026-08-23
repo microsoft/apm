@@ -19,6 +19,7 @@ import jsonschema
 import pytest
 
 from apm_cli.adapters.client.base import MCPClientAdapter
+from apm_cli.deps.plugin_parser import normalize_plugin_directory
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
@@ -298,6 +299,57 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
         "MUST emit a default-visible diagnostic",
         "requested skill names, and the available skill names",
     )
+
+
+@pytest.mark.req("req-mf-022")
+def test_consumer_names_skills_a_plugin_collection_exposes(tmp_path: Path) -> None:
+    """The available-names half of req-mf-022 must answer with the real set.
+
+    Section 8.1 counts a plugin collection with a named-skills container
+    among the layouts that expose selectable skills. Such a container,
+    declared in the plugin manifest, was normalized under its own name --
+    one level below the depth enumeration reads -- so a subset that matched
+    nothing reported `(none)` as available for a dependency exposing two.
+    The diagnostic fired as required and named the wrong set (#2530).
+    """
+    from apm_cli.models.validation import PackageType
+
+    plugin = tmp_path / "dotnet-advanced"
+    plugin_json = plugin / ".claude-plugin" / "plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text(
+        '{"name": "dotnet-advanced", "version": "1.0.0", "skills": ["./skills/"]}',
+        encoding="utf-8",
+    )
+    for name in ("csharp-scripts", "dotnet-pinvoke"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    normalize_plugin_directory(plugin, plugin_json)
+
+    # The declared container names the skills; it is not itself one.
+    normalized = plugin / ".apm" / "skills"
+    assert not (normalized / "skills").exists()
+    assert (normalized / "csharp-scripts" / "SKILL.md").is_file()
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(install_path=plugin, package_type=PackageType.MARKETPLACE_PLUGIN)
+    )
+    assert available == frozenset({"csharp-scripts", "dotnet-pinvoke"})
+
+    diagnostics = DiagnosticCollector()
+    SkillIntegrator._warn_no_skill_filter_match(
+        available,
+        ("missing",),
+        "acme/dotnet-advanced",
+        diagnostics=diagnostics,
+    )
+    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
+    assert "Available: csharp-scripts, dotnet-pinvoke" in warning.message
+    assert "Available: (none)" not in warning.message
+
+    assert_spec_contains("with a named-skills container")
 
 
 @pytest.mark.req("req-mf-024")

@@ -122,6 +122,106 @@ def test_requested_plugin_skill_with_no_match_fails_closed(
     assert not (consumer / ".claude" / "skills" / "resolving-merge-conflicts").exists()
 
 
+def test_declared_skills_container_is_selectable_by_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--skill`` must subset a plugin that declares its skills container.
+
+    Regression for #2530: ``"skills": ["./skills/"]`` names the conventional
+    container. Normalizing it under its own name left the enumerator backing
+    ``--skill`` with nothing to match, so every requested name was rejected
+    with ``Available: (none)`` even though a bare install deployed them all.
+    """
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {
+            "name": "container-skills",
+            "version": "1.0.0",
+            "skills": ["./skills/"],
+        },
+    )
+    for name in ("csharp-scripts", "dotnet-pinvoke"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install", "--skill", "csharp-scripts"])
+
+    assert result.exit_code == 0, result.output
+    assert "Available: (none)" not in result.output
+    deployed = consumer / ".claude" / "skills"
+    assert (deployed / "csharp-scripts" / "SKILL.md").is_file()
+    # Subsetting is the point: the sibling must stay out.
+    assert not (deployed / "dotnet-pinvoke").exists()
+
+
+def test_skill_enumeration_matches_the_directory_that_deploys(
+    tmp_path: Path,
+) -> None:
+    """``--skill`` validation and deployment must read one routing rule.
+
+    Regression for #2530: the enumerator carried a plugin-only branch that
+    read ``.apm/skills/`` while the deploy path preferred a root ``skills/``
+    bundle, so a selectable name and a deployable name could disagree.
+    """
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.models.validation import PackageType
+
+    package = tmp_path / "pkg"
+    for name in ("alpha", "beta"):
+        skill = package / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    info = MagicMock(install_path=package, package_type=PackageType.MARKETPLACE_PLUGIN)
+
+    assert SkillIntegrator.skill_source_dir(package) == package / "skills"
+    assert SkillIntegrator.available_skill_names(info) == frozenset({"alpha", "beta"})
+
+
+def test_skill_enumeration_falls_back_to_the_normalized_container(
+    tmp_path: Path,
+) -> None:
+    """The ``.apm/skills/`` fallback is the route every plugin package takes.
+
+    A root ``skills/`` bundle wins only while it actually holds a skill. With
+    no such bundle -- or with one carrying no ``SKILL.md`` at all -- routing
+    must fall back to the normalized container ``_map_plugin_artifacts``
+    writes, or ``--skill`` is back to enumerating nothing (#2530).
+    """
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.models.validation import PackageType
+
+    package = tmp_path / "pkg"
+    normalized = package / ".apm" / "skills"
+    for name in ("csharp-scripts", "dotnet-pinvoke"):
+        skill = normalized / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    info = MagicMock(install_path=package, package_type=PackageType.MARKETPLACE_PLUGIN)
+    expected = frozenset({"csharp-scripts", "dotnet-pinvoke"})
+
+    assert SkillIntegrator.skill_source_dir(package) == normalized
+    assert SkillIntegrator.available_skill_names(info) == expected
+
+    # Existing is not the test -- holding a skill is. A root ``skills/`` with
+    # nothing selectable in it must not shadow the normalized container.
+    root_bundle = package / "skills"
+    (root_bundle / "docs").mkdir(parents=True)
+    (root_bundle / "README.md").write_text("# not a skill\n", encoding="utf-8")
+
+    assert SkillIntegrator.skill_source_dir(package) == normalized
+    assert SkillIntegrator.available_skill_names(info) == expected
+
+
 def test_stale_persisted_skill_pin_warns_instead_of_silent_noop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
