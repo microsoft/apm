@@ -310,6 +310,37 @@ class TestLspServersToApmDeps:
         assert len(deps) == 1
         assert deps[0]["extensionToLanguage"] == {".py": "python"}
 
+    def test_alias_replaces_null_canonical_value(self, tmp_path):
+        """A null canonical value falls back to the Copilot-dialect alias."""
+        servers = {
+            "null-canonical": {
+                "command": "lsp",
+                "extensionToLanguage": None,
+                "fileExtensions": {".py": "python"},
+            }
+        }
+
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+
+        assert len(deps) == 1
+        assert deps[0]["extensionToLanguage"] == {".py": "python"}
+
+    def test_conflicting_alias_and_canonical_warns(self, tmp_path, caplog):
+        """A plugin author can see that the canonical field takes precedence."""
+        servers = {
+            "dual": {
+                "command": "lsp",
+                "extensionToLanguage": {".py": "python"},
+                "fileExtensions": {".rb": "ruby"},
+            }
+        }
+
+        with caplog.at_level(logging.WARNING, logger="apm"):
+            deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+
+        assert len(deps) == 1
+        assert "defines both 'extensionToLanguage' and 'fileExtensions'" in caplog.text
+
     def test_warmup_timeout_ms_alias_accepted(self, tmp_path):
         servers = {
             "slow": {
@@ -365,6 +396,21 @@ class TestLspServersToApmDeps:
         assert "fileExtensions" not in d
         assert "warmupTimeoutMs" not in d
         assert "cwd" not in d
+
+    def test_invalid_copilot_alias_keeps_default_warning(self, tmp_path, caplog):
+        """Invalid alias values remain visible through the normal warning path."""
+        servers = {
+            "invalid": {
+                "command": "lsp",
+                "fileExtensions": [".cs"],
+            }
+        }
+
+        with caplog.at_level(logging.WARNING, logger="apm"):
+            deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+
+        assert deps == []
+        assert "Skipping invalid LSP server 'invalid'" in caplog.text
 
     def test_wrapped_lsp_json_produces_valid_deps(self, tmp_path):
         """End-to-end: .lsp.json with lspServers wrapper yields valid deps."""

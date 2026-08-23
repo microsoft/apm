@@ -567,7 +567,10 @@ Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
 uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
 uses `fileExtensions` on disk; manifests continue to use
 `extensionToLanguage`. Plugin `.lsp.json` files may use either a flat
-server map or a `{ "lspServers": { ... } }` envelope.
+server map or a `{ "lspServers": { ... } }` envelope. For Copilot-dialect
+plugin input, APM accepts `fileExtensions` as an alias for
+`extensionToLanguage` and `warmupTimeoutMs` as an alias for
+`startupTimeout`; the canonical key wins when both are supplied.
 
 ## Version pinning
 

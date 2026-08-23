@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
@@ -472,6 +473,100 @@ class TestPluginHeroScenarios:
         combined = uninstall.stdout + uninstall.stderr
         assert "Uninstall complete" in combined
         assert all(not path.exists() for path in deployed_paths)
+
+    @pytest.mark.requires_apm_binary
+    def test_copilot_dialect_plugin_lsp_survives_install_reinstall_and_audit(
+        self,
+        apm_binary_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        """A plugin's Copilot-dialect LSP config reaches canonical lock and runtime state."""
+        plugin_dir = tmp_path / "copilot-lsp-plugin"
+        plugin_dir.mkdir()
+        manifest_dir = plugin_dir / ".github" / "plugin"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "plugin.json").write_text(
+            json.dumps({"name": "copilot-lsp-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        (plugin_dir / ".lsp.json").write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "csharp": {
+                            "command": "dnx",
+                            "args": ["roslyn-language-server", "--stdio"],
+                            "fileExtensions": {".cs": "csharp"},
+                            "warmupTimeoutMs": 120000,
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        normalized = validate_apm_package(plugin_dir)
+        assert normalized.is_valid, normalized.errors
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: copilot-lsp-lifecycle\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+            encoding="utf-8",
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text(
+            "# Test project\n",
+            encoding="utf-8",
+        )
+
+        initial_install = _run_apm_command(
+            str(apm_binary_path),
+            ["install", str(plugin_dir), "--target", "copilot", "--no-policy"],
+            project,
+        )
+        assert initial_install.returncode == 0, initial_install.stdout + initial_install.stderr
+
+        lock = LockFile.read(project / "apm.lock.yaml")
+        assert lock is not None
+        assert lock.lsp_servers == ["csharp"]
+        assert lock.lsp_configs["csharp"] == {
+            "args": ["roslyn-language-server", "--stdio"],
+            "command": "dnx",
+            "extensionToLanguage": {".cs": "csharp"},
+            "name": "csharp",
+            "startupTimeout": 120000,
+        }
+
+        runtime_path = project / ".github" / "lsp.json"
+        runtime_config = json.loads(runtime_path.read_text(encoding="utf-8"))
+        assert runtime_config["lspServers"]["csharp"] == {
+            "args": ["roslyn-language-server", "--stdio"],
+            "command": "dnx",
+            "fileExtensions": {".cs": "csharp"},
+            "startupTimeout": 120000,
+        }
+        initial_lock_bytes = (project / "apm.lock.yaml").read_bytes()
+        initial_runtime_bytes = runtime_path.read_bytes()
+
+        reinstall = _run_apm_command(
+            str(apm_binary_path),
+            ["install", "--target", "copilot", "--no-policy"],
+            project,
+        )
+        assert reinstall.returncode == 0, reinstall.stdout + reinstall.stderr
+        assert (project / "apm.lock.yaml").read_bytes() == initial_lock_bytes
+        assert runtime_path.read_bytes() == initial_runtime_bytes
+
+        audit = _run_apm_command(
+            str(apm_binary_path),
+            ["audit", "--ci", "--no-policy", "--format", "json"],
+            project,
+        )
+        assert audit.returncode == 0, audit.stdout + audit.stderr
+        assert json.loads(audit.stdout)["passed"] is True
+        assert (project / "apm.lock.yaml").read_bytes() == initial_lock_bytes
+        assert runtime_path.read_bytes() == initial_runtime_bytes
+
 
     @pytest.mark.requires_apm_binary
     def test_root_declared_skill_lifecycle_is_bounded(self, apm_binary_path, tmp_path):

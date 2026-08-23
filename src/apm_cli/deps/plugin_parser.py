@@ -36,6 +36,10 @@ _logger = logging.getLogger(__name__)
 # Cap the file size first, then funnel every parse failure into a single
 # ``ValueError`` so callers fail closed with one except type.
 _MAX_PLUGIN_JSON_BYTES = 5 * 1024 * 1024
+_LSP_FIELD_ALIASES = (
+    ("extensionToLanguage", "fileExtensions"),
+    ("startupTimeout", "warmupTimeoutMs"),
+)
 _PLUGIN_SKILL_SOURCES_FILE = ".plugin-skill-sources.json"
 
 
@@ -1032,12 +1036,22 @@ def _lsp_servers_to_apm_deps(
                 dep[key] = cfg[key]
 
         # Copilot-dialect aliases; canonical spelling wins when both exist.
-        for canonical, alias in (
-            ("extensionToLanguage", "fileExtensions"),
-            ("startupTimeout", "warmupTimeoutMs"),
-        ):
-            if canonical not in dep and alias in cfg:
+        for canonical, alias in _LSP_FIELD_ALIASES:
+            if dep.get(canonical) is None and alias in cfg:
                 dep[canonical] = cfg[alias]
+                logger.debug(
+                    "Normalizing LSP server '%s' from plugin '%s': '%s' to '%s'",
+                    name,
+                    plugin_path.name,
+                    alias,
+                    canonical,
+                )
+            elif canonical in dep and alias in cfg:
+                _surface_warning(
+                    f"LSP server '{name}' from plugin '{plugin_path.name}' defines both "
+                    f"'{canonical}' and '{alias}'; using '{canonical}'.",
+                    logger,
+                )
 
         # ``cwd`` has no LSPDependency equivalent: APM-managed servers are
         # started by the consumer runtime in its own working directory.

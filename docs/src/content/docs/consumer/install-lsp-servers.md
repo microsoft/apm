@@ -169,6 +169,10 @@ wired into the install pipeline. Plugin `.lsp.json` files may use either
 a flat server map or a `{ "lspServers": { ... } }` envelope. The
 `${CLAUDE_PLUGIN_ROOT}` placeholder in server configs is replaced with
 the absolute plugin path for legacy Claude Code plugin compatibility.
+Plugins authored for Copilot CLI may use `fileExtensions` instead of
+`extensionToLanguage` and `warmupTimeoutMs` instead of `startupTimeout`;
+APM normalizes those aliases before validation, while canonical names win
+when both are present.
 
 ## Runtime support
 
