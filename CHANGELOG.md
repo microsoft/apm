@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - Retired the credential-dependent roadmap project sync. Release commitments
-  now live solely in the active milestone.
+  now live solely in the active milestone. (#2672)
 
 ## [0.28.0] - 2026-08-04
 
