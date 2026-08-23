@@ -171,8 +171,8 @@ a flat server map or a `{ "lspServers": { ... } }` envelope. The
 the absolute plugin path for legacy Claude Code plugin compatibility.
 Plugins authored for Copilot CLI may use `fileExtensions` instead of
 `extensionToLanguage` and `warmupTimeoutMs` instead of `startupTimeout`;
-APM normalizes those aliases before validation, while canonical names win
-when both are present.
+APM normalizes those aliases before validation. A non-null canonical value
+wins when both are present; a null canonical value falls back to its alias.
 
 ## Runtime support
 

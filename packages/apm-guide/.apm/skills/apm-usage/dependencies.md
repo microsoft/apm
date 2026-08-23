@@ -570,7 +570,8 @@ uses `fileExtensions` on disk; manifests continue to use
 server map or a `{ "lspServers": { ... } }` envelope. For Copilot-dialect
 plugin input, APM accepts `fileExtensions` as an alias for
 `extensionToLanguage` and `warmupTimeoutMs` as an alias for
-`startupTimeout`; the canonical key wins when both are supplied.
+`startupTimeout`; a non-null canonical value wins when both are supplied,
+while a null canonical value falls back to its alias.
 
 ## Version pinning
 
