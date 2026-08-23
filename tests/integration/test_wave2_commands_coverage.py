@@ -29,6 +29,9 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.deps.revision_pins import RevisionPinResolutionResult
+
+_EMPTY_REVISION_PIN_RESOLUTION = RevisionPinResolutionResult()
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -643,7 +646,7 @@ class TestUpdateCommand:
             )
             with patch(
                 "apm_cli.commands.update.resolve_revision_pin_updates",
-                return_value=[],
+                return_value=_EMPTY_REVISION_PIN_RESOLUTION,
             ):
                 result = runner.invoke(cli, ["update", "--yes"], catch_exceptions=False)
         assert result.exit_code == 0
@@ -658,7 +661,7 @@ class TestUpdateCommand:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[],
+                    return_value=_EMPTY_REVISION_PIN_RESOLUTION,
                 ),
                 patch(
                     "apm_cli.commands.install._install_apm_dependencies",
@@ -693,7 +696,7 @@ class TestUpdateCommand:
             )
             with patch(
                 "apm_cli.commands.update.resolve_revision_pin_updates",
-                return_value=[],
+                return_value=_EMPTY_REVISION_PIN_RESOLUTION,
             ):
                 result = runner.invoke(cli, ["update", "org/unknown"], catch_exceptions=False)
         # Either exits non-zero (UnknownPackageError) or 0 -- no unhandled exception
@@ -711,7 +714,7 @@ class TestUpdateCommand:
             )
             with patch(
                 "apm_cli.commands.update.resolve_revision_pin_updates",
-                return_value=[],
+                return_value=_EMPTY_REVISION_PIN_RESOLUTION,
             ):
                 result = runner.invoke(cli, ["update", "--yes"], catch_exceptions=False)
         # Banner should mention apm update vs apm self-update distinction

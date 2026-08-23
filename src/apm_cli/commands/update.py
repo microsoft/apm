@@ -69,6 +69,7 @@ from ..deps.github_downloader import GitHubPackageDownloader
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
+    RevisionPinResolutionResult,
     RevisionPinUpdate,
     apply_revision_pin_updates,
     render_revision_pin_update_plan,
@@ -146,7 +147,7 @@ def _resolve_and_stage_revision_pin_updates(
     logger: InstallLogger,
     downloader: RemoteRefDownloader | None = None,
     max_workers: int = 4,
-) -> list[RevisionPinUpdate]:
+) -> RevisionPinResolutionResult:
     """Resolve SHA pins and stage their in-memory references for the plan.
 
     The passed dependency references belong to a staged APMPackage copy, not to
@@ -164,7 +165,7 @@ def _resolve_and_stage_revision_pin_updates(
         # independently re-resolves the freshly-written pin against upstream
         # before downloading. Threading the SHA resolved here into install
         # would collapse the authoritative-upstream fence.
-        updates = resolve_revision_pin_updates(
+        resolution = resolve_revision_pin_updates(
             all_declared_deps,
             downloader or _build_revision_pin_downloader(),
             only_packages=only_set,
@@ -179,12 +180,18 @@ def _resolve_and_stage_revision_pin_updates(
             logger.info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
-    updates_by_key = {update.dep_key: update for update in updates}
+    for skipped in resolution.skips:
+        logger.warning(
+            f"Skipped revision pin for {skipped.display_name}: no annotated semver tag exists "
+            "upstream. Keeping the current SHA; publish an annotated release tag to refresh it."
+        )
+
+    updates_by_key = {update.dep_key: update for update in resolution.updates}
     for dep_ref in all_declared_deps:
         update = updates_by_key.get(dep_ref.get_unique_key())
         if update is not None:
             dep_ref.reference = update.new_sha
-    return updates
+    return resolution
 
 
 def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionPinUpdate]) -> None:
@@ -629,12 +636,13 @@ def _run_dep_update(
         _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
         sys.exit(1)
 
-    revision_pin_updates = _resolve_and_stage_revision_pin_updates(
+    revision_pin_resolution = _resolve_and_stage_revision_pin_updates(
         all_declared_deps=all_declared_deps,
         only_packages=only_packages,
         logger=logger,
         max_workers=parallel_downloads if parallel_downloads > 0 else 1,
     )
+    revision_pin_updates = revision_pin_resolution.updates
 
     plan_state = _UpdateRunState()
 

@@ -24,6 +24,10 @@ class RevisionPinResolutionError(RuntimeError):
     """Raised when a SHA pin cannot be safely mapped to an annotated tag."""
 
 
+class NoAnnotatedRevisionPinTagError(RevisionPinResolutionError):
+    """Raised when an upstream has no eligible annotated semver tag."""
+
+
 class RemoteRefDownloader(Protocol):
     """Downloader surface needed for authoritative remote tag checks."""
 
@@ -49,6 +53,23 @@ class RevisionPinUpdate:
     new_sha: str
     tag: str
     display_name: str
+
+
+@dataclass(frozen=True)
+class RevisionPinSkip:
+    """A SHA pin retained because upstream has no eligible replacement tag."""
+
+    dep_key: str
+    old_sha: str
+    display_name: str
+
+
+@dataclass(frozen=True)
+class RevisionPinResolutionResult:
+    """Typed outcome of resolving every eligible revision pin."""
+
+    updates: tuple[RevisionPinUpdate, ...] = ()
+    skips: tuple[RevisionPinSkip, ...] = ()
 
 
 def is_full_revision_pin(ref: str | None) -> bool:
@@ -107,7 +128,7 @@ def find_latest_annotated_tag(
             break
 
     if not candidates:
-        raise RevisionPinResolutionError(
+        raise NoAnnotatedRevisionPinTagError(
             "No annotated tag found for revision-pinned dependency. "
             "APM will not replace a SHA pin with a branch or lightweight tag."
         )
@@ -122,8 +143,13 @@ def resolve_revision_pin_updates(
     *,
     only_packages: set[str] | None = None,
     max_workers: int = 4,
-) -> list[RevisionPinUpdate]:
-    """Resolve direct SHA-pinned dependencies to latest annotated tag SHAs."""
+) -> RevisionPinResolutionResult:
+    """Resolve SHA pins, retaining pins that lack an eligible upstream tag.
+
+    A missing annotated semver tag is a nonfatal outcome: the current SHA stays
+    intact while unrelated dependencies can still update. Transport, malformed
+    remote data, and integrity failures remain fatal and are propagated.
+    """
     eligible: list[DependencyReference] = []
     for dep_ref in dependencies:
         dep_key = dep_ref.get_unique_key()
@@ -135,13 +161,22 @@ def resolve_revision_pin_updates(
             eligible.append(dep_ref)
 
     if not eligible:
-        return []
+        return RevisionPinResolutionResult()
 
-    def _resolve_one(dep_ref: DependencyReference) -> RevisionPinUpdate | None:
+    def _resolve_one(
+        dep_ref: DependencyReference,
+    ) -> RevisionPinUpdate | RevisionPinSkip | None:
         dep_key = dep_ref.get_unique_key()
         old_sha = (dep_ref.reference or "").strip().lower()
         remote_refs = downloader.list_remote_tag_refs(dep_ref)
-        latest = find_latest_annotated_tag(remote_refs, package_name=package_name(dep_ref))
+        try:
+            latest = find_latest_annotated_tag(remote_refs, package_name=package_name(dep_ref))
+        except NoAnnotatedRevisionPinTagError:
+            return RevisionPinSkip(
+                dep_key=dep_key,
+                old_sha=old_sha,
+                display_name=dep_key,
+            )
         latest_sha = latest.commit_sha.strip().lower()
         if not is_full_revision_pin(latest_sha):
             raise RevisionPinResolutionError(
@@ -163,7 +198,10 @@ def resolve_revision_pin_updates(
     else:
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             resolved = list(executor.map(_resolve_one, eligible))
-    return [update for update in resolved if update is not None]
+    return RevisionPinResolutionResult(
+        updates=tuple(item for item in resolved if isinstance(item, RevisionPinUpdate)),
+        skips=tuple(item for item in resolved if isinstance(item, RevisionPinSkip)),
+    )
 
 
 def render_revision_pin_update_plan(updates: Iterable[RevisionPinUpdate]) -> str:

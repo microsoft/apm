@@ -10,6 +10,46 @@ import re
 from ..models.apm_package import GitReferenceType, RemoteRef
 
 
+class RemoteRefParseError(RuntimeError):
+    """Raised when git ls-remote output cannot be safely interpreted."""
+
+
+_REMOTE_SHA_RE = re.compile(r"^[a-fA-F0-9]{40}$")
+
+
+def validate_ls_remote_tag_output(output: str) -> None:
+    """Reject malformed output from ``git ls-remote --tags``.
+
+    An empty response is valid for a repository without tags. Any nonempty
+    response must use the documented SHA-and-tag-ref wire format; otherwise a
+    revision-pin refresh must fail rather than treating transport corruption as
+    a missing release tag.
+    """
+    plain_tags: set[str] = set()
+    peeled_tags: set[str] = set()
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t", 1)
+        if len(parts) != 2:
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+        sha, refname = (part.strip() for part in parts)
+        if not _REMOTE_SHA_RE.fullmatch(sha) or not refname.startswith("refs/tags/"):
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+        raw_tag_name = refname.removeprefix("refs/tags/")
+        is_peeled = raw_tag_name.endswith("^{}")
+        tag_name = raw_tag_name[:-3] if is_peeled else raw_tag_name
+        if not tag_name or "^{}" in tag_name:
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+        if is_peeled:
+            peeled_tags.add(tag_name)
+        else:
+            plain_tags.add(tag_name)
+    if peeled_tags - plain_tags:
+        raise RemoteRefParseError("Malformed git ls-remote tag output.")
+
+
 def parse_ls_remote_output(output: str) -> list[RemoteRef]:
     """Parse ``git ls-remote --tags --heads`` output into RemoteRef objects.
 

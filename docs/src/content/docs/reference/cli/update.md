@@ -110,6 +110,13 @@ apm update
 - **No-op and service-only repair.** An accepted update with no dependency ref changes still reconciles missing MCP/LSP config. A manifest with only MCP/LSP dependencies also uses `apm update` as a configuration repair pass; `--dry-run` previews this without writing.
 - **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update restores the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
 
+### Missing annotated revision-pin tags
+
+When a revision-pinned dependency has no eligible annotated tag, APM warns and
+retains its current SHA while continuing with unrelated updates. Transport
+failures and malformed or invalid remote SHAs still fail the update before
+writes.
+
 ## Back-compat: `apm update` used to be the self-updater
 
 In earlier releases, `apm update` self-updated the **APM CLI binary**. That behavior moved to [`apm self-update`](../self-update/) and `apm update` was repurposed as the dependency updater described above.

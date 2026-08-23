@@ -61,6 +61,13 @@
       "guards": ["transport-platform-ref-freshness"]
     },
     {
+      "id": "revision-pin-update-outcome",
+      "decision": "Revision-pin update outcome (updates vs retained SHA pins)",
+      "owner": "deps/revision_pins.py (RevisionPinResolutionResult)",
+      "selectors": ["src/apm_cli/deps/revision_pins.py"],
+      "guards": ["transport-platform-revision-pin-outcome"]
+    },
+    {
       "id": "git-semver-preflight-resolution",
       "decision": "Git semver preflight eligibility and resolution",
       "owner": "install/helpers/ref_reuse.py (is_git_semver_resolution_eligible / maybe_resolve_git_semver)",

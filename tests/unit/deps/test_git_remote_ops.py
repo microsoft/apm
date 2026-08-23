@@ -10,10 +10,14 @@ No I/O or network calls; all input is plain strings / data objects.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.git_remote_ops import (
+    RemoteRefParseError,
     parse_ls_remote_output,
     semver_sort_key,
     sort_remote_refs,
+    validate_ls_remote_tag_output,
 )
 from apm_cli.models.apm_package import GitReferenceType, RemoteRef
 
@@ -119,6 +123,31 @@ class TestParseLsRemoteOutput:
         assert len(refs) == 1
         assert refs[0].commit_sha == "abc123"
         assert refs[0].name == "main"
+
+
+class TestValidateLsRemoteTagOutput:
+    def test_empty_output_is_a_valid_no_tag_result(self) -> None:
+        validate_ls_remote_tag_output("")
+
+    def test_malformed_line_is_rejected(self) -> None:
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            validate_ls_remote_tag_output("not a git ref")
+
+    def test_branch_ref_is_rejected_for_tag_only_response(self) -> None:
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            validate_ls_remote_tag_output(f"{'a' * 40}\trefs/heads/main")
+
+    def test_peeled_tag_without_base_record_is_rejected(self) -> None:
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            validate_ls_remote_tag_output(f"{'a' * 40}\trefs/tags/v1.0.0^{{}}")
+
+    def test_malformed_peeled_tag_suffix_is_rejected(self) -> None:
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            validate_ls_remote_tag_output(f"{'a' * 40}\trefs/tags/v1.0.0^{{}}garbage")
+
+    def test_unsupported_sha_width_is_rejected(self) -> None:
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            validate_ls_remote_tag_output(f"{'a' * 64}\trefs/tags/v1.0.0")
 
 
 # ---------------------------------------------------------------------------
