@@ -137,12 +137,13 @@ def test_export_timestamp_is_reproducible(runner, tmp_path):
         assert "2030-01-01T00:00:00+00:00" in first.output
 
 
-def test_export_invalid_timestamp_exits_2(runner, tmp_path):
+@pytest.mark.parametrize("timestamp", ["not-a-date", "2024-06-01T12:00:00"])
+def test_export_invalid_timestamp_exits_2(runner, tmp_path, timestamp):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         _seed(Path.cwd())
-        result = runner.invoke(cli, ["lock", "export", "--timestamp", "not-a-date"])
+        result = runner.invoke(cli, ["lock", "export", "--timestamp", timestamp])
         assert result.exit_code == 2
-        assert "Expected ISO 8601 format with timezone" in result.stderr
+        assert "Expected timezone-aware ISO 8601 format" in result.stderr
 
 
 def test_export_undeclared_omits_licenses(runner, tmp_path):

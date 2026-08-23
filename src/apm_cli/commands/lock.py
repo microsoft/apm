@@ -330,10 +330,10 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
         except (ValueError, TypeError):
             dt = None
         if dt is None or dt.tzinfo is None:
-            display_value = explicit if explicit.strip() else ""
+            display_value = explicit.strip()
             raise click.BadParameter(
-                f"Invalid timestamp {display_value!r}. Expected ISO 8601 format with "
-                "timezone, e.g. 2024-06-01T00:00:00+00:00.",
+                f"Invalid timestamp {display_value!r}. Expected timezone-aware ISO "
+                "8601 format, e.g. 2024-06-01T00:00:00+00:00.",
                 param_hint="'--timestamp'",
             )
         return dt.isoformat()

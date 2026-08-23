@@ -211,7 +211,7 @@ def test_resolve_export_timestamp_invalid_iso_raises_bad_parameter():
     ]:
         with pytest.raises(click.BadParameter) as exc_info:
             _resolve_export_timestamp(invalid, None)
-        assert "Expected ISO 8601 format" in str(exc_info.value)
+        assert "Expected timezone-aware ISO 8601 format" in str(exc_info.value)
 
     with pytest.raises(click.BadParameter, match="Invalid timestamp ''"):
         _resolve_export_timestamp("   ", None)
